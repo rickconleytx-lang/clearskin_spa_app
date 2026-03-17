@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Client History Detail</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Client History Detail</h1>
+
+        <div class="nav-links">
+            <a href="{{ url_for('home') }}">Home</a>
+            <a href="{{ url_for('client_history') }}">Back to Client History</a>
+        </div>
+
+        {% if rows %}
+            <div class="info-box">
+                <h2>{{ rows[0][1] }} {{ rows[0][2] }}</h2>
+                <p><strong>Client ID:</strong> {{ rows[0][0] }}</p>
+            </div>
+
+            <table>
+                <tr>
+                    <th>Date</th>
+                    <th>Time</th>
+                    <th>Service</th>
+                    <th>Status</th>
+                    <th>Skin Condition</th>
+                    <th>Treatment</th>
+                    <th>Total Paid</th>
+                </tr>
+
+                {% for row in rows %}
+                <tr>
+                    <td>{{ row[4] or "" }}</td>
+                    <td>{{ row[5] or "" }}</td>
+                    <td>{{ row[9] or "" }}</td>
+                    <td>{{ row[6] or "" }}</td>
+                    <td>{{ row[23] or "" }}</td>
+                    <td>{{ row[24] or "" }}</td>
+                    <td>{{ row[19] or "" }}</td>
+                </tr>
+                {% endfor %}
+            </table>
+        {% else %}
+            <div class="no-data">
+                No history found for this client.
+            </div>
+        {% endif %}
+    </div>
+</body>
+</html>
