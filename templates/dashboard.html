@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Dashboard</h1>
+
+
+{% if birthday_alert_count > 0 %}
+<div class="next-appointment" style="background-color: #ffe5e5; border-left: 5px solid #cc0000;">
+    <strong>Birthday offers need attention:</strong> {{ birthday_alert_count }}
+</div>
+<br>
+{% endif %}
+
+
+
+{% if next_appt %}
+<div class="next-appointment">
+    <strong>Next Appointment:</strong>
+    {{ next_appt[0] }} {{ next_appt[1] }}
+    on {{ next_appt[2].strftime('%B %d, %Y') }}
+    at {{ next_appt[3].strftime('%I:%M %p') }}
+    ({{ next_appt[4] or 'Service' }})
+</div>
+<br>
+{% endif %}
+<br>
+<br>
+<div class="dashboard-cards">
+    <div class="dashboard-card">
+        <h3>Today's Appointments</h3>
+        <p>{{ today_count }}</p>
+    </div>
+
+    <div class="dashboard-card">
+        <h3>Upcoming Appointments</h3>
+        <p>{{ upcoming_count }}</p>
+    </div>
+
+    <div class="dashboard-card">
+        <h3>Completed Appointments</h3>
+        <p>{{ completed_count }}</p>
+    </div>
+
+    <div class="dashboard-card">
+        <h3>Total Clients</h3>
+        <p>{{ total_clients }}</p>
+    </div>
+
+    <div class="dashboard-card">
+        <h3>Revenue Today</h3>
+        <p>${{ '%.2f' |format(revenue_today) }}</p>
+    </div>
+
+
+</div>
+
+<br>
+
+<div class="dashboard-section">
+    <h2>Today's Appointments</h2>
+    {% if todays_appointments %}
+    <table>
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Client</th>
+                <th>Service</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in todays_appointments %}
+            <tr>
+                <td>{{ row[5].strftime('%I:%M %p') }}</td>
+                <td>{{ row[1] }} {{ row[2] }}</td>
+                <td>{{ row[3] or 'N/A' }}</td>
+                <td>
+                    <span class="status {{ row[6] }}">
+                        {{ row[6] }}
+                    </span>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+        <p>No appointments scheduled for today.</p>
+    {% endif %}
+</div>
+
+<br>
+
+
+<div class="dashboard-section">
+    <h2>Upcoming Appointments</h2>
+    {% if upcoming_appointments %}
+    <table>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Time</th>
+                <th>Client</th>
+                <th>Service</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in upcoming_appointments %}
+            <tr>
+                <td>{{ row[4].strftime('%B %d, %Y') }}</td>
+                <td>{{ row[5].strftime('%I:%M %p') }}</td>
+                <td>{{ row[1] }} {{ row[2] }}</td>
+                <td>{{ row[3] or 'N/A' }}</td>
+                <td>
+                    <span class="status {{ row[6] }}">
+                        {{ row[6] }}
+                    </span>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+        <p>No upcoming appointments found.</p>
+    {% endif %}
+</div>
+
+<br>
+
+<div class="dashboard-section">
+    <h2>Top Services</h2>
+    {% if top_services %}
+    <table>
+        <thead>
+            <tr>
+                <th>Service</th>
+                <th>Times Booked</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for service in top_services %}
+            <tr>
+                <td>{{ service[0] }}</td>
+                <td>{{ service[1] }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+        <p>No service data available yet.</p>
+    {% endif %}
+</div>
+{% endblock %}

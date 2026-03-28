@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}Admin{% endblock %}
+
+{% block content %}
+
+<h1>Admin / Setup</h1>
+
+<p>Select a table to manage:</p>
+
+<h2>Client / Profile Dropdowns</h2>
+<div class="admin-links">
+    <a class="btn" href="{{ url_for('skin_types') }}">Skin Types</a>
+    <a class="btn" href="{{ url_for('fitzpatrick_types') }}">Fitzpatrick Types</a>
+    <a class="btn" href="{{ url_for('manage_dropdown', dropdown_key='sex') }}">Sex</a>
+    <a class="btn" href="{{ url_for('manage_dropdown', dropdown_key='referral_sources') }}">Referral Sources</a>
+    <a class="btn" href="{{ url_for('manage_dropdown', dropdown_key='client_form_names') }}">Client Form Names</a>
+</div>
+
+<br>
+
+<h2>Appointment / Service Setup</h2>
+<div class="admin-links">
+    <a class="btn" href="{{ url_for('manage_dropdown', dropdown_key='appointment_status') }}">Appointment Status</a>
+    <a class="btn" href="{{ url_for('manage_dropdown', dropdown_key='service_name_types') }}">Service Name Types</a>
+    <a class="btn" href="{{ url_for('manage_dropdown', dropdown_key='treatment_rooms') }}">Treatment Rooms</a>
+</div>
+
+<br>
+
+<h2>Financial Setup</h2>
+<div class="admin-links">
+    <a class="btn" href="{{ url_for('manage_dropdown', dropdown_key='expense_categories') }}">Expense Categories</a>
+    <a class="btn" href="{{ url_for('manage_dropdown', dropdown_key='income_types') }}">Income Types</a>
+    <a class="btn" href="{{ url_for('manage_dropdown', dropdown_key='payment_methods') }}">Payment Methods</a>
+    <a class="btn" href="{{ url_for('manage_dropdown', dropdown_key='vendor_name') }}">Vendor Name</a>
+</div>
+
+{% endblock %}

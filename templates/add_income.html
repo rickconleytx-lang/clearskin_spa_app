@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Add Income</h1>
+
+<p><strong>Client:</strong> {{ appt[4] }} {{ appt[5] }}</p>
+<p><strong>Appointment Date:</strong> {{ appt[2].strftime('%Y-%m-%d') }}</p>
+<p><strong>Appointment Time:</strong> {{ appt[3].strftime('%I:%M %p') }}</p>
+
+<form method="POST">
+    <label for="income_date">Income Date</label>
+    <input type="date" id="income_date" name="income_date"
+           value="{{ appt[2].strftime('%Y-%m-%d') }}" required>
+
+    <label for="income_type">Income Type</label>
+    <select id="income_type" name="income_type" required>
+        <option value="Service">Service</option>
+        <option value="Retail">Retail</option>
+        <option value="Service + Retail">Service + Retail</option>
+    </select>
+
+    <label for="description">Description</label>
+    <input type="text" id="description" name="description"
+           placeholder="Signature Facial, Product Sale, etc.">
+
+    <label for="service_amount">Service Amount</label>
+    <input type="number" step="0.01" id="service_amount" name="service_amount" value="0.00">
+
+    <label for="retail_amount">Retail Amount</label>
+    <input type="number" step="0.01" id="retail_amount" name="retail_amount" value="0.00">
+
+    <label for="tax_amount">Tax Amount</label>
+    <input type="number" step="0.01" id="tax_amount" name="tax_amount" value="0.00">
+
+    <label for="tip_amount">Tip Amount</label>
+    <input type="number" step="0.01" id="tip_amount" name="tip_amount" value="0.00">
+
+    <label for="total_amount">Total Amount</label>
+    <input type="number" step="0.01" id="total_amount" name="total_amount" value="0.00" readonly required>
+
+    <label for="payment_method">Payment Method</label>
+    <select id="payment_method" name="payment_method">
+        <option value="Cash">Cash</option>
+        <option value="Card">Card</option>
+        <option value="Apple Pay">Apple Pay</option>
+        <option value="Google Pay">Google Pay</option>
+        <option value="Square">Square</option>
+        <option value="Other">Other</option>
+    </select>
+
+    <label for="square_payment_id">Square Payment ID</label>
+    <input type="text" id="square_payment_id" name="square_payment_id">
+
+    <label for="notes">Notes</label>
+    <textarea id="notes" name="notes" rows="4"></textarea>
+
+    <br><br>
+    <button type="submit" class="btn">Save Income</button>
+    <a href="{{ url_for('daily_schedule', date=appt[2].strftime('%Y-%m-%d')) }}" class="btn">Cancel</a>
+</form>
+
+<script>
+function calculateTotal() {
+    const service = parseFloat(document.getElementById("service_amount").value) || 0;
+    const retail = parseFloat(document.getElementById("retail_amount").value) || 0;
+    const tax = parseFloat(document.getElementById("tax_amount").value) || 0;
+    const tip = parseFloat(document.getElementById("tip_amount").value) || 0;
+
+    const total = service + retail + tax + tip;
+    document.getElementById("total_amount").value = total.toFixed(2);
+}
+
+document.getElementById("service_amount").addEventListener("input", calculateTotal);
+document.getElementById("retail_amount").addEventListener("input", calculateTotal);
+document.getElementById("tax_amount").addEventListener("input", calculateTotal);
+document.getElementById("tip_amount").addEventListener("input", calculateTotal);
+
+window.addEventListener("load", calculateTotal);
+</script>
+
+
+{% endblock %}

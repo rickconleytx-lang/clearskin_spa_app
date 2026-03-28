@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block title %}Add Gift Certificate{% endblock %}
+
+{% block content %}
+
+<h1>Add Gift Certificate</h1>
+
+<form method="POST">
+    <label for="certificate_number">Certificate Number</label>
+    <input type="text" id="certificate_number" name="certificate_number" required>
+
+    <label for="gift_certificate_status_id">Status</label>
+    <select name="gift_certificate_status_id" id="gift_certificate_status_id">
+        {% for status in statuses %}
+            <option value="{{ status[0] }}" {% if status[0] == cert[17] %}selected{% endif %}>
+                {{ status[1] }}
+            </option>
+        {% endfor %}
+    </select>
+
+
+    <label for="date_issued">Date Issued</label>
+    <input type="date" id="date_issued" name="date_issued">
+
+    <label for="expires_date">Expires Date</label>
+    <input type="date" id="expires_date" name="expires_date">
+
+    <label for="original_value">Original Value</label>
+    <input type="number" step="0.01" id="original_value" name="original_value">
+
+    <label for="amount_paid">Amount Paid</label>
+    <input type="number" step="0.01" id="amount_paid" name="amount_paid">
+
+    <label for="remaining_balance">Remaining Balance</label>
+    <input type="number" step="0.01" id="remaining_balance" name="remaining_balance">
+
+    <label for="purchased_by_first_name">Purchased By First Name</label>
+    <input type="text" id="purchased_by_first_name" name="purchased_by_first_name">
+
+    <label for="purchased_by_last_name">Purchased By Last Name</label>
+    <input type="text" id="purchased_by_last_name" name="purchased_by_last_name">
+
+    <label for="purchaser_phone">Purchaser Phone</label>
+    <input type="text" id="purchaser_phone" name="purchaser_phone">
+
+    <label for="purchaser_email">Purchaser Email</label>
+    <input type="email" id="purchaser_email" name="purchaser_email">
+
+    <label for="recipient_name">Recipient Name</label>
+    <input type="text" id="recipient_name" name="recipient_name">
+
+    <label for="notes">Notes</label>
+    <textarea id="notes" name="notes" rows="4"></textarea>
+
+    <br><br>
+    <button type="submit" class="btn">Save Certificate</button>
+    <a href="{{ url_for('gift_certificates_home') }}" class="btn">Cancel</a>
+</form>
+
+{% endblock %}

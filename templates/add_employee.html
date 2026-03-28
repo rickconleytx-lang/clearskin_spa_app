@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+
+{% block title %}Add Employee{% endblock %}
+
+{% block content %}
+<h1>Add Employee</h1>
+
+<form method="POST" action="{{ url_for('add_employee') }}">
+    <div class="form-group">
+        <label for="first_name">First Name</label>
+        <input type="text" id="first_name" name="first_name" required>
+    </div>
+
+    <div class="form-group">
+        <label for="last_name">Last Name</label>
+        <input type="text" id="last_name" name="last_name" required>
+    </div>
+
+    <div class="form-group">
+        <label for="address_line1">Address Line 1</label>
+        <input type="text" id="address_line1" name="address_line1">
+    </div>
+
+    <div class="form-group">
+        <label for="address_line2">Address Line 2</label>
+        <input type="text" id="address_line2" name="address_line2">
+    </div>
+
+    <div class="form-group">
+        <label for="city">City</label>
+        <input type="text" id="city" name="city">
+    </div>
+
+    <div class="form-group">
+        <label for="state">State</label>
+        <input type="text" id="state" name="state">
+    </div>
+
+    <div class="form-group">
+        <label for="zip_code">Zip Code</label>
+        <input type="text" id="zip_code" name="zip_code">
+    </div>
+
+    <div class="form-group">
+        <label for="phone">Phone</label>
+        <input type="text" id="phone" name="phone">
+    </div>
+
+    <div class="form-group">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email">
+    </div>
+
+    <div class="form-group">
+        <label for="job_title">Job Title</label>
+        <input type="text" id="job_title" name="job_title">
+    </div>
+
+    <div class="form-group">
+        <label for="hire_date">Hire Date</label>
+        <input type="date" id="hire_date" name="hire_date">
+    </div>
+
+    <div class="form-group">
+        <label for="termination_date">Termination Date</label>
+        <input type="date" id="termination_date" name="termination_date">
+    </div>
+
+    <div class="form-group">
+        <label for="status">Status</label>
+        <select id="status" name="status">
+            <option value="">Select Status</option>
+            {% for row in statuses %}
+            <option value="{{ row[0] }}">{{ row[0] }}</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label for="birthday">Birthday</label>
+        <input type="date" id="birthday" name="birthday">
+    </div>
+
+    <div class="form-group">
+        <label>
+            <input type="checkbox" name="ssn_on_file">
+            SSN On File
+        </label>
+    </div>
+
+    <div class="form-group">
+        <label for="esthetician_license_number">Esthetician License Number</label>
+        <input type="text" id="esthetician_license_number" name="esthetician_license_number">
+    </div>
+
+    <div class="form-group">
+        <label for="license_expiration_date">License Expiration Date</label>
+        <input type="date" id="license_expiration_date" name="license_expiration_date">
+    </div>
+
+    <div class="form-group">
+        <label for="year_graduated">Year Graduated</label>
+        <input type="number" id="year_graduated" name="year_graduated">
+    </div>
+
+    <div class="form-group">
+        <label for="certifications">Certifications</label>
+        <input type="text" id="certifications" name="certifications">
+    </div>
+
+    <div class="form-group">
+        <label for="pay_type">Pay Type</label>
+        <input type="text" id="pay_type" name="pay_type">
+    </div>
+
+    <div class="form-group">
+        <label for="pay_rate">Pay Rate</label>
+        <input type="number" step="0.01" id="pay_rate" name="pay_rate">
+    </div>
+
+    <div class="form-group">
+        <label for="notes">Notes</label>
+        <textarea id="notes" name="notes" rows="4"></textarea>
+    </div>
+
+    <br>
+    <button type="submit" class="btn">Save Employee</button>
+    <a class="btn" href="{{ url_for('employees_home') }}">Cancel</a>
+</form>
+{% endblock %}

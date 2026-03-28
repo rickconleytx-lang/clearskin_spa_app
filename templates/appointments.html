@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Appointments</h1>
+
+<div style="margin-bottom: 20px;">
+    <a href="{{ url_for('add_appointment') }}" class="btn">Add Appointment</a>
+</div>
+
+<div class="table-container">
+    <table class="appointments-table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Date</th>
+                <th>Time</th>
+                <th>Client</th>
+                <th>Service</th>
+                <th>Duration</th>
+                <th>Room</th>
+                <th>Status</th>
+                <th>Price</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+
+        <tbody>
+            {% for row in appointments %}
+            <tr>
+                <td>{{ row[0] }}</td>
+                <td>{{ row[1] }}</td>
+                <td>{{ row[2] }}</td>
+                <td>{{ row[9] }} {{ row[10] }}</td>
+                <td>{{ row[12] if row[12] else '' }}</td>
+                <td>{{ row[3] if row[3] else '' }}</td>
+                <td>{{ row[4] if row[4] else '' }}</td>
+                <td>{{ row[5] }}</td>
+                <td>{{ row[6] if row[6] else '' }}</td>
+
+                <!-- ACTIONS COLUMN -->
+                <td>
+                    {% if row[7] %}
+                        <!-- View Note -->
+                        <div class="action-row">
+                            <button type="button" class="btn note-btn"
+                                    onclick="toggleNote('note-{{ row[0] }}')">
+                                View Note
+                            </button>
+                        </div>
+
+                        <!-- Popup -->
+                        <div id="note-{{ row[0] }}" class="note-popup-box">
+                            <div class="note-popup-content">
+                                <strong>Notes</strong><br>
+                                {{ row[7] }}
+                                <br><br>
+                                <button type="button" class="btn"
+                                        onclick="toggleNote('note-{{ row[0] }}')">
+                                    Close
+                                </button>
+                            </div>
+                        </div>
+                    {% endif %}
+
+                    <!-- Edit + Cancel -->
+                    <div class="action-row">
+                        <a href="{{ url_for('edit_appointment', appointment_id=row[0]) }}"
+                           class="btn">Edit</a>
+
+                        <a class="btn" href="{{ url_for('add_income', appointment_id=row[0]) }}">
+                            Add Income
+                        </a>                        
+
+
+                        {% if row[5] != 'cancelled' %}
+                        <form method="POST"
+                              action="{{ url_for('cancel_appointment', appointment_id=row[0]) }}"
+                              style="display:inline;"
+                              onsubmit="return confirm('Cancel this appointment?');">
+                            <button type="submit" class="btn btn-danger">Cancel</button>
+                        </form>
+                        {% endif %}
+                    </div>
+                </td>
+
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- JS for popup -->
+<script>
+function toggleNote(noteId) {
+    const noteBox = document.getElementById(noteId);
+    if (noteBox.style.display === "block") {
+        noteBox.style.display = "none";
+    } else {
+        noteBox.style.display = "block";
+    }
+}
+</script>
+
+<!-- Styles -->
+<style>
+.table-container {
+    width: 100%;
+    overflow-x: auto;
+    margin-top: 15px;
+}
+
+.appointments-table {
+    width: 100%;
+    min-width: 1300px;
+    border-collapse: collapse;
+}
+
+.appointments-table th,
+.appointments-table td {
+    padding: 10px 12px;
+    text-align: left;
+    border-bottom: 1px solid #ddd;
+    vertical-align: top;
+}
+
+.appointments-table th {
+    background-color: #125e65;
+    color: white;
+}
+
+.appointments-table tr:nth-child(even) {
+    background-color: #f9f9f9;
+}
+
+.appointments-table tr:hover {
+    background-color: #f1f7f8;
+}
+
+.action-row {
+    margin-bottom: 5px;
+}
+
+.note-popup-box {
+    display: none;
+    position: fixed;
+    top: 25%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: white;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    z-index: 5000;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+    width: 350px;
+    max-width: 90%;
+}
+
+.note-popup-content {
+    padding: 18px;
+    white-space: normal;
+    word-wrap: break-word;
+}
+
+.btn {
+    padding: 6px 10px;
+    margin: 2px;
+    border-radius: 4px;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.btn-danger {
+    background-color: #c0392b;
+    color: white;
+}
+</style>
+
+{% endblock %}

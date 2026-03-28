@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Weekly Calendar</h1>
+
+
+<div class="calendar-nav" style="margin-bottom: 20px;">
+    <a class="btn" href="{{ url_for('calendar', week=week-1) }}">Previous</a>
+    <a class="btn" href="{{ url_for('calendar', week=0) }}">Current Week</a>
+    <a class="btn" href="{{ url_for('calendar', week=week+1) }}">Next</a>
+
+<br>
+    <a class="btn btn-today" href="{{ url_for('calendar', week=0) }}">Today</a>
+</div>
+
+{% if next_appt %}
+<div class="next-appointment">
+    <strong>Next Appointment:</strong>
+    {{ next_appt[0] }} {{ next_appt[1] }}
+    on {{ next_appt[2].strftime('%B %d, %Y') }}
+    at {{ next_appt[3].strftime('%I:%M %p') }}
+    ({{ next_appt[4] or 'Service' }})
+</div>
+<br>
+{% endif %}
+
+<h3>
+    {{ week_days[0].strftime('%B %d, %Y') }} -
+    {{ week_days[6].strftime('%B %d, %Y') }}
+</h3>
+
+<br> 
+
+<div class="calendar-grid">
+    {% for day in week_days %}
+        {% set ns = namespace(has_appt=false) %}
+        {% for appt in appointments %}
+            {% if appt[0] == day.date() %}
+                {% set ns.has_appt = true %}
+            {% endif %}
+        {% endfor %}
+
+    <a href="{{ url_for('daily_schedule', selected_date=day.strftime('%Y-%m-%d')) }}" class="calendar-day-link">
+
+
+
+
+
+
+        <div class="calendar-day{% if day.date() == today_date %} today{% endif %}{% if ns.has_appt %} has-appt{% endif %}">
+            <h3>{{ day.strftime('%A') }}</h3>
+            <p>{{ day.strftime('%B %d') }}</p>
+        
+            {% for appt in appointments %}
+                {% if appt[0] == day.date() %}
+
+     <a href="{{ url_for('edit_appointment', appointment_id=appt[6]) }}" class="calendar-event-link">
+         <div class="calendar-event {{ appt[5] }}">
+             <strong>{{ appt[1].strftime('%I:%M %p') }}</strong><br>
+             {{ appt[2] }} {{ appt[3] }}<br>
+             <small>{{ appt[4] or 'Service' }}</small>
+         </div>
+      </a>           
+
+                {% endif %}
+            {% endfor %}   
+        </div>
+    </a>
+    {% endfor %}
+</div>
+
+{% endblock %}

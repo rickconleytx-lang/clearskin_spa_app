@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Edit Gift Certificate</h1>
+
+<form method="POST">
+    <label for="certificate_number">Certificate Number</label>
+    <input type="text" id="certificate_number" name="certificate_number" value="{{ gift_certificate[1] or '' }}" required>
+
+    <label for="date_issued">Date Issued</label>
+    <input type="date" id="date_issued" name="date_issued" value="{{ gift_certificate[2].strftime('%Y-%m-%d') if gift_certificate[2] else '' }}">
+
+    <label for="expires_date">Expires Date</label>
+    <input type="date" id="expires_date" name="expires_date" value="{{ gift_certificate[3].strftime('%Y-%m-%d') if gift_certificate[3] else '' }}">
+
+    <label for="original_value">Original Value</label>
+    <input type="number" step="0.01" id="original_value" name="original_value" value="{{ gift_certificate[4] if gift_certificate[4] is not none else '' }}">
+
+    <label for="amount_paid">Amount Paid</label>
+    <input type="number" step="0.01" id="amount_paid" name="amount_paid" value="{{ gift_certificate[5] if gift_certificate[5] is not none else '' }}">
+
+    <label for="remaining_balance">Remaining Balance</label>
+    <input type="number" step="0.01" id="remaining_balance" name="remaining_balance" value="{{ gift_certificate[6] if gift_certificate[6] is not none else '' }}">
+
+    <label for="purchased_by_first_name">Purchased By First Name</label>
+    <input type="text" id="purchased_by_first_name" name="purchased_by_first_name" value="{{ gift_certificate[7] or '' }}">
+
+    <label for="purchased_by_last_name">Purchased By Last Name</label>
+    <input type="text" id="purchased_by_last_name" name="purchased_by_last_name" value="{{ gift_certificate[8] or '' }}">
+
+    <label for="recipient_name">Recipient Name</label>
+    <input type="text" id="recipient_name" name="recipient_name" value="{{ gift_certificate[9] or '' }}">
+
+    <label for="gift_certificate_status_id">Status</label>
+    <select id="gift_certificate_status_id" name="gift_certificate_status_id">
+        {% for status in statuses %}
+            <option value="{{ status[0] }}" {% if status[0] == gift_certificate[10] %}selected{% endif %}>
+                {{ status[1] }}
+            </option>
+        {% endfor %}
+    </select>
+
+    <label for="notes">Notes</label>
+    <textarea id="notes" name="notes" rows="4">{{ gift_certificate[11] or '' }}</textarea>
+
+    <br><br>
+    <button type="submit" class="btn">Save Changes</button>
+    <a href="{{ url_for('gift_certificates_home') }}" class="btn">Cancel</a>
+</form>
+{% endblock %}

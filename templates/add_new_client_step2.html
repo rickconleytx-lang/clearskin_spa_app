@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block title %}Add New Client - Page 2{% endblock %}
+
+{% block content %}
+<h1>Add New Client - Page 2</h1>
+
+<form method="POST">
+
+    <div class="form-buttons">
+        <button type="submit" name="action" value="back">Back to Page 1</button>
+
+        <button type="submit" name="action" value="save">Save</button>
+
+        <button type="button" class="btn cancel-btn"
+            onclick="if(confirm('Are you sure you want to cancel? Any unsaved information will be lost.')) { window.location.href='{{ url_for('cancel_new_client') }}'; }">
+            Cancel
+        </button>
+    </div>
+
+    <p>
+        <label>Emergency Contact Name:</label><br>
+        <input type="text" name="emergency_contact_name" value="{{ step2_data.get('emergency_contact_name', '') }}">
+    </p>
+
+    <p>
+        <label>Emergency Contact Phone:</label><br>
+        <input type="text" name="emergency_contact_phone" value="{{ step2_data.get('emergency_contact_phone', '') }}">
+    </p>
+
+    <p>
+        <label>Referred By:</label><br>
+        <input type="text" name="referred_by" value="{{ step2_data.get('referred_by', '') }}">
+    </p>
+
+    <p>
+        <label>Notes One:</label><br>
+        <textarea name="notes_one" rows="4" cols="50">{{ step2_data.get('notes_one', '') }}</textarea>
+    </p>
+
+    <p>
+        <label>Notes Two:</label><br>
+        <textarea name="notes_two" rows="4" cols="50">{{ step2_data.get('notes_two', '') }}</textarea>
+    </p>
+
+    <p>
+        <label>Notes Three:</label><br>
+        <textarea name="notes_three" rows="4" cols="50">{{ step2_data.get('notes_three', '') }}</textarea>
+    </p>
+
+    <p>
+        <label>Active Client:</label><br>
+        <select name="active_client">
+            <option value="true" {% if step2_data.get('active_client', 'true') == 'true' %}selected{% endif %}>Yes</option>
+            <option value="false" {% if step2_data.get('active_client') == 'false' %}selected{% endif %}>No</option>
+        </select>
+    </p>
+
+</form>
+{% endblock %}

@@ -1,0 +1,261 @@
+body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    background-color: #f9f6f4;
+    color: #333;
+}
+
+/* Main container */
+.container {
+    width: 90%;
+    max-width: 1100px;
+    margin: 40px auto;
+    background: #ffffff;
+    padding: 30px;
+    border-radius: 12px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+}
+
+/* Headings */
+h1 {
+    color: #7a5c61;
+    margin-top: 0;
+}
+
+h2 {
+    color: #7a5c61;
+}
+
+/* Navigation buttons */
+.nav-links {
+    margin-bottom: 20px;
+}
+
+.nav-links a {
+    display: inline-block;
+    text-decoration: none;
+    background-color: #b88c94;
+    color: white;
+    padding: 10px 16px;
+    border-radius: 8px;
+    margin-right: 10px;
+    font-weight: bold;
+}
+
+.nav-links a:hover {
+    background-color: #9f747c;
+}
+
+.nav-links {
+    margin-bottom: 20px;
+}
+
+
+/* Tables */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 15px;
+}
+
+th, td {
+    padding: 12px 10px;
+    border-bottom: 1px solid #ddd;
+    text-align: left;
+}
+
+th {
+    background-color: #f1e7e9;
+    color: #5d4348;
+}
+
+tr:nth-child(even) {
+    background-color: #fafafa;
+}
+
+tr:hover {
+    background-color: #f6eef0;
+}
+
+/* Buttons */
+.btn {
+    display: inline-block;
+    text-decoration: none;
+    background-color: #6f9b7d;
+    color: white;
+    padding: 8px 12px;
+    border-radius: 6px;
+}
+
+.btn:hover {
+    background-color: #5b8468;
+}
+
+/* Info box */
+.info-box {
+    background-color: #f8f1f2;
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+}
+
+/* No data message */
+.no-data {
+    padding: 15px;
+    background-color: #fff8e1;
+    border: 1px solid #f0d98c;
+    border-radius: 8px;
+}
+
+/* MAIN NAV */
+.nav-links {
+    margin-bottom: 15px;
+}
+
+.page-nav {
+    margin-top: 40px;
+    display: flex;
+    gap: 15px;
+    justify-content: center;
+}
+
+.page-nav .btn,
+.page-nav a.btn {
+    display: inline-block;
+    padding: 10px 16px;
+    border-radius: 8px;
+    text-decoration: none;
+    font-weight: bold;
+    border: none;
+    cursor: pointer;
+}
+
+.page-nav .btn {
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+}
+
+/* BUTTON BASE */
+.nav-btn {
+    padding: 8px 16px;
+    border-radius: 6px;
+    text-decoration: none;
+    font-weight: bold;
+    color: white;
+}
+
+/* NEXT BUTTON */
+.nav-btn.primary {
+    background-color: #125e65; /* your spa color */
+}
+
+/* PREVIOUS BUTTON */
+.nav-btn.secondary {
+    background-color: #888; /* softer gray */
+}
+
+/* Secondary (less important actions) */
+.nav-links a.secondary {
+    background-color: #e5d6d9;
+    color: #7a5c61;
+}
+
+/* Danger (delete buttons later) */
+.nav-links a.danger {
+    background-color: #c94c4c;
+}
+
+/* Success (save/confirm later) */
+.nav-links a.success {
+    background-color: #6f9b7d;
+}
+
+.page-nav {
+    margin-top: 35px;
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    background-color: #f3eadf;
+    color: #f3ead;
+}
+
+#  -----------------
+#  background  colors for above 
+#
+#   soft beige       #f3eadf
+#   warmer geige     #efe4d6
+#   light brown/beige #e8dccb
+#
+#  ------------------
+
+body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    background-color: #f3eadf; /* soft beige */
+    color: #333;
+}
+
+/* Banner */
+.banner {
+    text-align: center;
+    background-color: #e6d6c3;
+    padding: 10px 0;
+}
+
+.banner img {
+    max-width: 100%;
+    max-height: 160px;
+}
+
+/* Main container (you already use this) */
+.container {
+    max-width: 1000px;
+    margin: 30px auto;
+    background: #fffaf5;
+    padding: 25px;
+    border-radius: 10px;
+}
+
+/* Navigation links (styled like buttons) */
+.nav-links {
+    margin-bottom: 20px;
+}
+
+.nav-links a {
+    display: inline-block;
+    margin-right: 10px;
+    padding: 8px 14px;
+    background-color: #b8a28a;
+    color: white;
+    text-decoration: none;
+    border-radius: 6px;
+    font-weight: bold;
+}
+
+.nav-links a:hover {
+    background-color: #9e8871;
+}
+
+/* Buttons */
+.btn {
+    background-color: #8b6b4a;
+    color: white;
+    padding: 8px 14px;
+    text-decoration: none;
+    border-radius: 6px;
+    display: inline-block;
+}
+
+.btn:hover {
+    background-color: #73563b;
+}
+
+
+

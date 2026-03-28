@@ -1,0 +1,294 @@
+{% extends "base.html" %}
+
+{% block title %}Client Full Record{% endblock %}
+
+{% block content %}
+
+<h1>Client Full Record</h1>
+
+{% if client %}
+    <h3>{{ client[1] }} {{ client[2] }}</h3>
+{% endif %}
+
+<div style="margin-bottom: 20px;">
+    <a class="btn" href="{{ url_for('clients_home') }}">Back to Clients</a>
+    <button type="submit" class="btn btn-primary">Save Changes</button>
+</div>
+
+
+<form method="POST">
+
+    <!-- BASIC INFORMATION -->
+    <div style="border:1px solid #ccc; padding:15px; margin-bottom:20px; border-radius:8px;">
+        <h2>Basic Information</h2>
+
+        <label>First Name</label><br>
+        <input type="text" name="first_name" value="{{ client[1] if client else '' }}" required><br><br>
+
+        <label>Last Name</label><br>
+        <input type="text" name="last_name" value="{{ client[2] if client else '' }}" required><br><br>
+
+        <label>Birth Date</label><br>
+        <input type="date" name="birth_date" value="{{ client[5].strftime('%Y-%m-%d') if client and client[5] else '' }}"><br><br>
+
+        <label>
+            <input type="checkbox" name="active_client" {% if client and client[16] %}checked{% endif %}>
+            Active Client
+        </label>
+    </div>
+
+    <!-- CONTACT INFORMATION -->
+    <div style="border:1px solid #ccc; padding:15px; margin-bottom:20px; border-radius:8px;">
+        <h2>Contact Information</h2>
+
+        <label>Phone</label><br>
+        <input type="text" name="phone" value="{{ client[3] if client else '' }}"><br><br>
+
+        <label>Email</label><br>
+        <input type="email" name="email" value="{{ client[4] if client else '' }}"><br><br>
+    </div>
+
+    <!-- ADDRESS -->
+
+    <div style="text-align:center; margin: 20px 0;">
+    <button type="submit" class="btn btn-primary">Save Changes</button>
+    </div>
+
+
+    <div style="border:1px solid #ccc; padding:15px; margin-bottom:20px; border-radius:8px;">
+        <h2>Address</h2>
+
+        <label>Address</label><br>
+        <input type="text" name="address" value="{{ client[6] if client else '' }}"><br><br>
+
+        <label>City</label><br>
+        <input type="text" name="city" value="{{ client[7] if client else '' }}"><br><br>
+
+        <label>State</label><br>
+        <input type="text" name="state" value="{{ client[8] if client else '' }}"><br><br>
+
+        <label>Zip</label><br>
+        <input type="text" name="zip" value="{{ client[9] if client else '' }}"><br><br>
+    </div>
+
+    <!-- EMERGENCY CONTACT -->
+    <div style="border:1px solid #ccc; padding:15px; margin-bottom:20px; border-radius:8px;">
+        <h2>Emergency Contact</h2>
+
+        <label>Emergency Contact Name</label><br>
+        <input type="text" name="emergency_contact_name" value="{{ client[10] if client else '' }}"><br><br>
+
+        <label>Emergency Contact Phone</label><br>
+        <input type="text" name="emergency_contact_phone" value="{{ client[11] if client else '' }}"><br><br>
+    </div>
+
+
+    <!-- REFERRAL / CLIENT NOTES -->
+
+    <div style="text-align:center; margin: 20px 0;">
+    <button type="submit" class="btn btn-primary">Save Changes</button>
+    </div>
+
+    <div style="border:1px solid #ccc; padding:15px; margin-bottom:20px; border-radius:8px;">
+        <h2>Referral / Client Notes</h2>
+
+        <label>Referred By</label><br>
+        <select name="referred_by">
+            <option value="">Select Referral Source</option>
+            {% for ref in referral_sources %}
+                <option value="{{ ref[1] }}"
+                {% if client and client[12] == ref[1] %}selected{% endif %}>
+                {{ ref[1] }}
+             </option>
+            {% endfor %}
+        </select><br><br>
+
+        <label>Notes One</label><br>
+        <textarea name="notes_one" rows="3">{{ client[13] if client else '' }}</textarea><br><br>
+
+        <label>Notes Two</label><br>
+        <textarea name="notes_two" rows="3">{{ client[14] if client else '' }}</textarea><br><br>
+
+        <label>Notes Three</label><br>
+        <textarea name="notes_three" rows="3">{{ client[15] if client else '' }}</textarea>
+    </div>
+
+    <!-- HEALTH PROFILE -->
+    <div style="border:1px solid #ccc; padding:15px; margin-bottom:20px; border-radius:8px;">
+        <h2>Health Profile</h2>
+
+        <label>Sex</label><br>
+        <select name="sex">
+            <option value="">Select Sex</option>
+            {% for sx in sex_options %}
+                <option value="{{ sx[1] }}"
+                {% if health and health[2] == sx[1] %}selected{% endif %}>
+                {{ sx[1] }}
+             </option>
+            {% endfor %}
+        </select><br><br>
+
+        <label>Skin Type</label><br>
+        <select name="skin_type_id">
+            <option value="">Select Skin Type</option>
+            {% for st in skin_types %}
+                <option value="{{ st[0] }}"
+                    {% if health and health[3] == st[0] %}selected{% endif %}>
+                    {{ st[1] }}
+                </option>
+            {% endfor %}
+        </select><br><br>
+
+        <label>Fitzpatrick Type</label><br>
+        <select name="fitzpatrick_id">
+            <option value="">Select Fitzpatrick Type</option>
+            {% for ft in fitzpatrick_types %}
+                <option value="{{ ft[0] }}"
+                    {% if health and health[4] == ft[0] %}selected{% endif %}>
+                    {{ ft[1] }}
+                </option>
+            {% endfor %}
+        </select><br><br>
+
+        <label>Sun Exposure Level</label><br>
+        <input type="text" name="sun_exposure_level" value="{{ health[17] if health else '' }}"><br><br>
+
+        <label>Last Facial Date</label><br>
+        <input type="date" name="last_facial_date" value="{{ health[18].strftime('%Y-%m-%d') if health and health[18] else '' }}"><br><br>
+    </div>
+
+    <!-- SKIN DETAILS -->
+
+    <div style="text-align:center; margin: 20px 0;">
+    <button type="submit" class="btn btn-primary">Save Changes</button>
+    </div>
+
+    <div style="border:1px solid #ccc; padding:15px; margin-bottom:20px; border-radius:8px;">
+        <h2>Skin Details</h2>
+
+        <label>Skin Concerns</label><br>
+        <textarea name="skin_concerns" rows="3">{{ health[5] if health else '' }}</textarea><br><br>
+
+        <label>Skin Conditions</label><br>
+        <textarea name="skin_conditions" rows="3">{{ health[6] if health else '' }}</textarea>
+    </div>
+
+    <!-- MEDICAL DETAILS -->
+    <div style="border:1px solid #ccc; padding:15px; margin-bottom:20px; border-radius:8px;">
+        <h2>Medical Details</h2>
+
+        <label>Allergies</label><br>
+        <textarea name="allergies" rows="3">{{ health[7] if health else '' }}</textarea><br><br>
+
+        <label>Medications</label><br>
+        <textarea name="medications" rows="3">{{ health[8] if health else '' }}</textarea><br><br>
+
+        <label>Current Medical Conditions</label><br>
+        <textarea name="current_medical_conditions" rows="3">{{ health[9] if health else '' }}</textarea><br><br>
+
+        <label>Past Medical Treatments</label><br>
+        <textarea name="past_medical_treatments" rows="3">{{ health[10] if health else '' }}</textarea><br><br>
+
+        <label>Recent Injections</label><br>
+        <select name="recent_injections">
+            <option value="" {% if health and health[11] is none %}selected{% endif %}>-- Select --</option>
+            <option value="true" {% if health and health[11] == True %}selected{% endif %}>Yes</option>
+            <option value="false" {% if health and health[11] == False %}selected{% endif %}>No</option>
+        </select><br><br>
+
+        <label>If yes, details</label><br>
+        <textarea name="recent_injections_notes" rows="2"></textarea><br><br>
+
+        <label>Recent Laser</label><br>
+        <select name="recent_laser">
+            <option value="" {% if health and health[12] is none %}selected{% endif %}>-- Select --</option>
+            <option value="true" {% if health and health[12] == True %}selected{% endif %}>Yes</option>
+            <option value="false" {% if health and health[12] == False %}selected{% endif %}>No</option>
+        </select><br><br>
+
+    </div>
+
+    <!-- TREATMENT FLAGS -->
+
+    <div style="text-align:center; margin: 20px 0;">
+    <button type="submit" class="btn btn-primary">Save Changes</button>
+    </div>
+
+    <div style="border:1px solid #ccc; padding:15px; margin-bottom:20px; border-radius:8px;">
+        <h2>Treatment Flags</h2>
+
+        <label>Pregnant</label><br>
+        <select name="pregnant">
+            <option value="" {% if health and health[13] is none %}selected{% endif %}>-- Select --</option>
+            <option value="true" {% if health and health[13] == True %}selected{% endif %}>Yes</option>
+            <option value="false" {% if health and health[13] == False %}selected{% endif %}>No</option>
+        </select><br><br>        
+
+        <label>Nursing</label><br>
+        <select name="nursing">
+            <option value="" {% if health and health[14] is none %}selected{% endif %}>-- Select --</option>
+            <option value="true" {% if health and health[14] == True %}selected{% endif %}>Yes</option>
+            <option value="false" {% if health and health[14] == False %}selected{% endif %}>No</option>
+        </select><br><br>
+
+        <label style="{% if health and health[16] == True %}color:red; font-weight:bold;{% endif %}">
+            Using Accutane
+        </label><br>
+        <select name="using_retinol">
+            <option value="" {% if health and health[15] is none %}selected{% endif %}>-- Select --</option>
+            <option value="true" {% if health and health[15] == True %}selected{% endif %}>Yes</option>
+            <option value="false" {% if health and health[15] == False %}selected{% endif %}>No</option>
+        </select><br><br>
+
+        <label>Using Accutane</label><br>
+        <select name="using_accutane">
+            <option value="" {% if health and health[16] is none %}selected{% endif %}>-- Select --</option>
+            <option value="true" {% if health and health[16] == True %}selected{% endif %}>Yes</option>
+            <option value="false" {% if health and health[16] == False %}selected{% endif %}>No</option>
+        </select><br><br>
+
+    </div>
+
+    <!-- HEALTH NOTES -->
+    <div style="border:1px solid #ccc; padding:15px; margin-bottom:20px; border-radius:8px;">
+        <h2>Health Notes</h2>
+
+        <label>Health Notes 1</label><br>
+        <textarea name="health_notes1" rows="3">{{ health[19] if health else '' }}</textarea><br><br>
+
+        <label>Health Notes 2</label><br>
+        <textarea name="health_notes2" rows="3">{{ health[20] if health else '' }}</textarea><br><br>
+
+        <label>Health Notes 3</label><br>
+        <textarea name="health_notes3" rows="3">{{ health[21] if health else '' }}</textarea>
+    </div>
+
+    <!-- RECORD INFO -->
+    <div style="border:1px solid #ccc; padding:15px; margin-bottom:20px; border-radius:8px; background:#f9f9f9;">
+        <h2>Record Info</h2>
+
+        <p><strong>Client Created At:</strong>
+            {{ client[17].strftime('%m/%d/%Y %I:%M %p') if client and client[17] else '-' }}
+        </p>
+
+        <p><strong>Client Updated At:</strong>
+            {{ client[18].strftime('%m/%d/%Y %I:%M %p') if client and client[18] else '-' }}
+        </p>
+
+        <p><strong>Health Profile Last Updated:</strong>
+            {{ health[22].strftime('%m/%d/%Y') if health and health[22] else '-' }}
+        </p>
+
+        <p><strong>Health Profile Created At:</strong>
+            {{ health[23].strftime('%m/%d/%Y %I:%M %p') if health and health[23] else '-' }}
+        </p>
+    </div>
+
+    <div style="margin-top: 20px;">
+        <button type="submit" class="btn">Save Changes</button>
+        <a class="btn" href="{{ url_for('clients_home') }}">Cancel</a>
+    </div>
+
+</form>
+
+{% endblock %}

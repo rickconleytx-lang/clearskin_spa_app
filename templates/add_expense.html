@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block title %}Add Expense{% endblock %}
+
+{% block content %}
+<h1>Add Expense</h1>
+
+<form method="POST" action="{{ url_for('add_expense') }}">
+    <div class="form-group">
+        <label for="expense_date">Expense Date</label>
+        <input type="date" id="expense_date" name="expense_date" value="{{ today }}" required>
+    </div>
+
+    <div class="form-group">
+        <label for="vendor_name">Vendor Name</label>
+        <select id="vendor_name" name="vendor_name" required>
+            <option value="">Select Vendor</option>
+            {% for row in vendors %}
+            <option value="{{ row[0] }}">{{ row[0] }}</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label for="category">Category</label>
+        <select id="category" name="category">
+            <option value="">Select Category</option>
+            {% for row in categories %}
+            <option value="{{ row[0] }}">{{ row[0] }}</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label for="description">Description</label>
+        <input type="text" id="description" name="description">
+    </div>
+
+    <div class="form-group">
+        <label for="amount">Amount</label>
+        <input type="number" step="0.01" id="amount" name="amount" required>
+    </div>
+
+    <div class="form-group">
+        <label for="payment_method">Payment Method</label>
+        <select id="payment_method" name="payment_method">
+            <option value="">Select Payment Method</option>
+            {% for row in payment_methods %}
+            <option value="{{ row[0] }}">{{ row[0] }}</option>
+            {% endfor %}
+        </select>
+    </div>
+
+
+    <div class="form-group">
+        <label for="receipt_file">Receipt File</label>
+        <input type="text" id="receipt_file" name="receipt_file">
+    </div>
+
+    <div class="form-group">
+        <label for="notes">Notes</label>
+        <textarea id="notes" name="notes" rows="4"></textarea>
+    </div>
+
+    <br>
+    <button type="submit" class="btn">Save Expense</button>
+    <a class="btn" href="{{ url_for('expenses_home') }}">Cancel</a>
+</form>
+{% endblock %}

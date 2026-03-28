@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Custom Date Range Reports</h1>
+
+<div style="margin-bottom: 20px;">
+    <a class="btn" href="{{ url_for('reports') }}">Standard Reports</a>
+    <a class="btn" href="{{ url_for('reports_range') }}">Custom Date Range</a>
+    <button type="button" class="btn" onclick="window.print()">Print Report</button>
+</div>
+
+<form method="POST" style="margin-bottom: 20px;">
+    <label for="start_date"><strong>Start Date:</strong></label>
+    <input type="date" id="start_date" name="start_date" value="{{ start_date or '' }}" required>
+
+    <label for="end_date" style="margin-left: 15px;"><strong>End Date:</strong></label>
+    <input type="date" id="end_date" name="end_date" value="{{ end_date or '' }}" required>
+
+    <button type="submit" class="btn">Run Report</button>
+</form>
+
+<div style="margin-bottom: 25px;">
+    <form method="POST" style="display:inline;">
+        <input type="hidden" name="preset" value="today">
+        <button type="submit" class="btn">Today</button>
+    </form>
+
+    <form method="POST" style="display:inline;">
+        <input type="hidden" name="preset" value="this_week">
+        <button type="submit" class="btn">This Week</button>
+    </form>
+
+    <form method="POST" style="display:inline;">
+        <input type="hidden" name="preset" value="this_month">
+        <button type="submit" class="btn">This Month</button>
+    </form>
+
+    <form method="POST" style="display:inline;">
+        <input type="hidden" name="preset" value="last_30">
+        <button type="submit" class="btn">Last 30 Days</button>
+    </form>
+</div>
+
+{% if report_data %}
+<div class="report-print-area">
+    <h3>{{ formatted_start }} to {{ formatted_end }}</h3>
+
+    <p>
+        <strong>Summary:</strong>
+        {{ report_data.totals[2] }} completed,
+        {{ report_data.totals[3] }} cancelled,
+        ${{ '%.2f'|format(report_data.total_revenue) }} revenue,
+        ${{ '%.2f'|format(report_data.average_ticket) }} average ticket
+    </p>
+
+    <div class="dashboard-cards">
+        <div class="dashboard-card">
+            <h3>Total Appointments</h3>
+            <p>{{ report_data.totals[0] }}</p>
+        </div>
+
+        <div class="dashboard-card">
+            <h3>Booked</h3>
+            <p>{{ report_data.totals[1] }}</p>
+        </div>
+
+        <div class="dashboard-card">
+            <h3>Completed</h3>
+            <p>{{ report_data.totals[2] }}</p>
+        </div>
+
+        <div class="dashboard-card">
+            <h3>Cancelled</h3>
+            <p>{{ report_data.totals[3] }}</p>
+        </div>
+
+        <div class="dashboard-card">
+            <h3>Total Revenue</h3>
+            <p>${{ '%.2f'|format(report_data.total_revenue) }}</p>
+        </div>
+
+        <div class="dashboard-card">
+            <h3>Average Ticket</h3>
+            <p>${{ '%.2f'|format(report_data.average_ticket) }}</p>
+        </div>
+    </div>
+
+    <br>
+
+    <h2>Most Booked Services</h2>
+
+    {% if report_data.most_booked_services %}
+    <table>
+        <thead>
+            <tr>
+                <th>Service</th>
+                <th>Total Bookings</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in report_data.most_booked_services %}
+            <tr>
+                <td>{{ row[0] }}</td>
+                <td>{{ row[1] }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>No service booking data for this date range.</p>
+    {% endif %}
+
+    <br>
+
+    <h2>Revenue by Service</h2>
+
+    {% if report_data.revenue_by_service %}
+    <table>
+        <thead>
+            <tr>
+                <th>Service</th>
+                <th>Completed Appointments</th>
+                <th>Total Revenue</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in report_data.revenue_by_service %}
+            <tr>
+                <td>{{ row[0] }}</td>
+                <td>{{ row[1] }}</td>
+                <td>${{ '%.2f'|format(row[2] or 0) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>No completed revenue data for this date range.</p>
+    {% endif %}
+</div>
+
+{% else %}
+<p>Select a start date and end date, or use one of the quick buttons above.</p>
+{% endif %}
+
+{% endblock %}

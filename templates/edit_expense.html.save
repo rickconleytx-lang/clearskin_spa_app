@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Expense{% endblock %}
+
+{% block content %}
+<h1>Edit Expense</h1>
+
+<form method="POST" action="{{ url_for('edit_expense', expense_id=expense[0]) }}">
+    <div class="form-group">
+        <label for="expense_date">Expense Date</label>
+        <input type="date" id="expense_date" name="expense_date"
+               value="{{ expense[1].isoformat() if expense[1] else '' }}" required>
+    </div>
+
+    <div class="form-group">
+        <label for="vendor_name">Vendor Name</label>
+        <input type="text" id="vendor_name" name="vendor_name" value="{{ expense[2] or '' }}" required>
+    </div>
+
+    <div class="form-group">
+        <label for="category">Category</label>
+        <input type="text" id="category" name="category" value="{{ expense[3] or '' }}">
+    </div>
+
+    <div class="form-group">
+        <label for="description">Description</label>
+        <input type="text" id="description" name="description" value="{{ expense[4] or '' }}">
+    </div>
+
+    <div class="form-group">
+        <label for="amount">Amount</label>
+        <input type="number" step="0.01" id="amount" name="amount" value="{{ expense[5] or '' }}" required>
+    </div>
+
+    <div class="form-group">
+        <label for="payment_method">Payment Method</label>
+        <input type="text" id="payment_method" name="payment_method" value="{{ expense[6] or '' }}">
+    </div>
+
+    <div class="form-group">
+        <label for="receipt_file">Receipt File</label>
+        <input type="text" id="receipt_file" name="receipt_file" value="{{ expense[7] or '' }}">
+    </div>
+
+    <div class="form-group">
+        <label for="notes">Notes</label>
+        <textarea id="notes" name="notes" rows="4">{{ expense[8] or '' }}</textarea>
+    </div>
+
+    <br>
+    <button type="submit" class="btn">Update Expense</button>
+    <a class="btn" href="{{ url_for('expenses_home') }}">Cancel</a>
+</form>
+{% endblock %}

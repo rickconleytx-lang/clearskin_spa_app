@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+
+{% block title %}Income Report{% endblock %}
+
+{% block content %}
+<div class="report-page">
+
+    <div class="report-header">
+        <div>
+            <h1>Income Report</h1>
+            <p class="report-subtitle">Financial summary and detailed income transactions</p>
+        </div>
+
+        <div class="report-actions no-print">
+            <button class="btn btn-print" onclick="window.print()">Print Report</button>
+        </div>
+    </div>
+
+    <div class="report-filter-card no-print">
+        <form method="GET" action="{{ url_for('income_report') }}" class="report-filter-form">
+            <div class="filter-group">
+                <label for="start_date">Start Date</label>
+                <input type="date" id="start_date" name="start_date" value="{{ start_date }}">
+            </div>
+
+            <div class="filter-group">
+                <label for="end_date">End Date</label>
+                <input type="date" id="end_date" name="end_date" value="{{ end_date }}">
+            </div>
+
+            <div class="filter-buttons">
+                <button type="submit" class="btn">Run Report</button>
+                <a class="btn btn-secondary" href="{{ url_for('income_report') }}">Reset</a>
+            </div>
+        </form>
+    </div>
+
+    <div class="report-period">
+        <strong>Reporting Period:</strong>
+        {{ start_date }} through {{ end_date }}
+    </div>
+
+    <div class="summary-cards">
+        <div class="summary-card">
+            <h3>Grand Total</h3>
+            <p>${{ '%.2f'|format(summary[4]) }}</p>
+        </div>
+
+        <div class="summary-card">
+            <h3>Service Income</h3>
+            <p>${{ '%.2f'|format(summary[1]) }}</p>
+        </div>
+
+        <div class="summary-card">
+            <h3>Retail Income</h3>
+            <p>${{ '%.2f'|format(summary[2]) }}</p>
+        </div>
+
+        <div class="summary-card">
+            <h3>Tax Collected</h3>
+            <p>${{ '%.2f'|format(summary[3]) }}</p>
+        </div>
+
+        <div class="summary-card">
+            <h3>Total Entries</h3>
+            <p>{{ summary[0] }}</p>
+        </div>
+    </div>
+
+    <div class="report-grid">
+        <div class="report-section">
+            <h2>Income Type Breakdown</h2>
+            <div class="table-wrap">
+                <table class="styled-report-table compact-table">
+                    <thead>
+                        <tr>
+                            <th>Income Type</th>
+                            <th>Entries</th>
+                            <th>Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% if income_type_breakdown %}
+                            {% for row in income_type_breakdown %}
+                            <tr>
+                                <td>{{ row[0] }}</td>
+                                <td>{{ row[1] }}</td>
+                                <td>${{ '%.2f'|format(row[2]) }}</td>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr>
+                                <td colspan="3" class="no-data">No data found for this date range.</td>
+                            </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="report-section">
+            <h2>Payment Method Breakdown</h2>
+            <div class="table-wrap">
+                <table class="styled-report-table compact-table">
+                    <thead>
+                        <tr>
+                            <th>Payment Method</th>
+                            <th>Entries</th>
+                            <th>Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% if payment_breakdown %}
+                            {% for row in payment_breakdown %}
+                            <tr>
+                                <td>{{ row[0] }}</td>
+                                <td>{{ row[1] }}</td>
+                                <td>${{ '%.2f'|format(row[2]) }}</td>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr>
+                                <td colspan="3" class="no-data">No payment data found for this date range.</td>
+                            </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="report-section detail-section">
+        <h2>Detailed Income Transactions</h2>
+
+        <div class="table-wrap">
+            <table class="styled-report-table wide-report-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Client</th>
+                        <th>Income Type</th>
+                        <th>Description / Services</th>
+                        <th>Payment Method</th>
+                        <th>Service</th>
+                        <th>Retail</th>
+                        <th>Tax</th>
+                        <th>Total</th>
+                        <th>Notes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% if income_rows %}
+                        {% for row in income_rows %}
+                        <tr>
+                            <td>{{ row[1].strftime('%Y-%m-%d') if row[1] else '' }}</td>
+                            <td>{{ row[2] }}</td>
+                            <td>{{ row[3] or '—' }}</td>
+                            <td>{{ row[4] or '—' }}</td>
+                            <td>{{ row[5] or '—' }}</td>
+                            <td class="amount-cell">${{ '%.2f'|format(row[6]) }}</td>
+                            <td class="amount-cell">${{ '%.2f'|format(row[7]) }}</td>
+                            <td class="amount-cell">${{ '%.2f'|format(row[8]) }}</td>
+                            <td class="amount-cell total-highlight">${{ '%.2f'|format(row[9]) }}</td>
+                            <td>
+                                {% if row[10] %}
+                                    {{ row[10] }}
+                                {% else %}
+                                    <span class="muted-text">—</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="10" class="no-data">No income records found for the selected date range.</td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+{% endblock %}

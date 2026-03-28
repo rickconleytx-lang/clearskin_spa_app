@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Fitzpatrick Type{% endblock %}
+
+{% block content %}
+
+<h1>Edit Fitzpatrick Type</h1>
+
+<form method="POST" class="admin-form">
+    <input type="text" name="fitzpatrick_level" value="{{ fitzpatrick[1] }}" required>
+    <input type="text" name="description" value="{{ fitzpatrick[2] }}" required>
+
+    <div class="admin-actions">
+        <button type="submit">Save Changes</button>
+        <a class="btn cancel-btn" href="{{ url_for('fitzpatrick_types') }}">Cancel</a>
+    </div>
+</form>
+
+{% endblock %}

@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Client History Detail</title>
+    <title>Client History Detail Page Two</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
     <div class="container">
-        <h1>Client History Detail</h1>
+        <h1>Client History Detail Page Two</h1>
 
 <!-- MAIN NAV -->
 <div class="nav-links">
@@ -17,12 +17,12 @@
 </div>
 
 <!-- PAGE NAV (NEW SECTION) -->
-<!-- PAGE NAV -->
 <div class="page-nav">
     <a class="nav-btn secondary" href="{{ url_for('client_history_detail', client_id=client_id) }}">Previous</a>
-    <a class="nav-btn secondary" href="{{ url_for('client_health_profile', client_id=client_id) }}">Health Profile</a>
     <a class="nav-btn primary" href="{{ url_for('client_history_detail_two', client_id=client_id) }}">Next</a>
 </div>
+
+
         {% if rows %}
             <div class="info-box">
                 <h2>{{ rows[0][1] }} {{ rows[0][2] }}</h2>
@@ -31,25 +31,23 @@
 
             <table>
                 <tr>
-                    <th>Date</th>
-                    <th>Time</th>
-                    <th>Service</th>
-                    <th>Status</th>
-                    <th>Skin Condition</th>
-                    <th>Treatment Performed</th>
-                    <th>Total Paid</th>
+                    <th>Products Used</th>
+                    <th>Products Recommended</th>
+                    <th>Follow-up Recommended</th>
+                    <th>Esthetician Notes One</th>
+                    <th>Esthetician Notes Two</th>
+                    <th>Esthetician Notes Three</th>
                 </tr>
 
                 {% for row in rows %}
                 <tr>
-                    <td>{{ row[4] or "" }}</td>
-                    <td>{{ row[5] or "" }}</td>
-                    <td>{{ row[9] or "" }}</td>
-                    <td>{{ row[6] or "" }}</td>
-                    <td>{{ row[23] or "" }}</td>
-                    <td>{{ row[24] or "" }}</td>
-                    <td>{{ row[19] or "" }}</td>
-                </tr>
+                    <td>{{ row[25] or "" }}</td>
+                    <td>{{ row[26] or "" }}</td>
+                    <td>{{ row[29] or "" }}</td>
+                    <td>{{ row[30] or "" }}</td>
+                    <td>{{ row[31] or "" }}</td>
+                    <td>{{ row[32] or "" }}</td>
+                 </tr>
                 {% endfor %}
             </table>
         {% else %}

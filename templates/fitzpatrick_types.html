@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}Fitzpatrick Types{% endblock %}
+
+{% block content %}
+
+<h1>Fitzpatrick Types</h1>
+
+<form method="POST" class="admin-form">
+    <input type="text" name="fitzpatrick_level" placeholder="Type (I–VI)" required>
+    <input type="text" name="description" placeholder="Enter description" required>
+
+    <div class="admin-actions">
+        <button type="submit">Add Fitzpatrick Type</button>
+        <a class="btn cancel-btn" href="{{ url_for('admin') }}">Back to Admin</a>
+    </div>
+</form>
+
+<table>
+    <tr>
+        <th>ID</th>
+        <th>Fitzpatrick Type</th>
+        <th>Description</th>
+        <th>Edit</th>       
+        <th>Delete</th>
+    </tr>
+
+    {% for row in fitzpatrick_types %}
+    <tr>
+        <td>{{ row[0] }}</td>
+        <td>{{ row[1] }}</td>
+        <td>{{ row[2] }}</td>
+        <td>
+            <a class="btn edit-btn" href="{{ url_for('edit_fitzpatrick_types', fitzpatrick_id=row[0]) }}">Edit</a>
+        </td>
+        <td>
+            <form method="POST"
+                  action="{{ url_for('delete_fitzpatrick_types', fitzpatrick_id=row[0]) }}"
+                  onsubmit="return confirm('Are you sure you want to delete this Fitzpatrick type?');"
+                  style="display:inline;">
+                <button type="submit" class="delete-btn">Delete</button>
+            </form>
+
+        </td>
+    </tr>
+    {% endfor %}
+</table>
+
+{% endblock %}
+
+
+
+

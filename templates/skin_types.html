@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}jSkin Types{% endblock %}
+
+{% block content %}
+
+<h1>Skin Types</h1>
+
+
+<form method="POST" class="admin-form">
+    <input type="text" name="skin_type_name" placeholder="Enter skin type" required>
+
+    <div class="admin-actions">
+        <button type="submit">Add Skin Type</button>
+        <a class="btn cancel-btn" href="{{ url_for('admin') }}">Back to Admin</a>
+    </div>
+</form>
+
+
+<table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Skin Type</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in skin_types %}
+        <tr>
+            <td>{{ row[0] }}</td>
+            <td>{{ row[1] }}</td>
+            <td>
+                <form method="POST" action="{{ url_for('delete_skin_type', skin_type_id=row[0]) }}" style="display:inline;">
+                    <button type="submit" class="btn delete-btn" onclick="return confirm('Delete this skin type?');">
+                        Delete
+                    </button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

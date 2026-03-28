@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Edit Appointment</h2>
+
+<form method="POST">
+
+    <label>Date</label>
+    <input type="date" name="appointment_date" value="{{ appt[1].strftime('%Y-%m-%d') }}" required>
+
+    <label>Time</label>
+    <input type="time" name="appointment_time" value="{{ appt[2].strftime('%H:%M') }}" required>
+
+    <label>Duration (minutes)</label>
+    <input type="text" name="duration" value="{{ appt[3] }}">
+
+    <label>Room</label>
+    <input type="text" name="room_number" value="{{ appt[4] or 1 }}">
+
+    <label>Notes</label>
+    <textarea name="notes">{{ appt[5] }}</textarea>
+
+    <br><br>
+
+    <button type="submit" class="btn">Update Appointment</button>
+    <a href="{{ url_for('daily_schedule', date=appt[1]) }}" class="btn">Cancel</a>
+
+</form>
+{% endblock %}

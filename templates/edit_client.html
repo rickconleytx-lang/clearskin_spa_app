@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Client{% endblock %}
+
+{% block content %}
+
+<h1>Edit Client</h1>
+
+<form method="POST">
+
+    <div class="form-buttons">
+        <button type="submit">Save Changes</button>
+
+        <a href="{{ url_for('client_history') }}" class="btn cancel-btn"
+           onclick="return confirm('Discard changes and return to Client History?')">
+            Cancel
+        </a>
+    </div>
+
+    <p>
+        <label>First Name:</label><br>
+        <input type="text" name="first_name" value="{{ client[0] }}" required>
+    </p>
+
+    <p>
+        <label>Last Name:</label><br>
+        <input type="text" name="last_name" value="{{ client[1] }}" required>
+    </p>
+
+    <p>
+        <label>Phone:</label><br>
+        <input type="text" name="phone" value="{{ client[2] or '' }}">
+    </p>
+
+    <p>
+        <label>Email:</label><br>
+        <input type="email" name="email" value="{{ client[3] or '' }}">
+    </p>
+
+    <p>
+        <label>Birth Date:</label><br>
+        <input type="date" name="birth_date" value="{{ client[4] or '' }}">
+    </p>
+
+    <p>
+        <label>Address:</label><br>
+        <input type="text" name="address" value="{{ client[5] or '' }}">
+    </p>
+
+    <p>
+        <label>City:</label><br>
+        <input type="text" name="city" value="{{ client[6] or '' }}">
+    </p>
+
+    <p>
+        <label>State:</label><br>
+        <input type="text" name="state" value="{{ client[7] or '' }}">
+    </p>
+
+    <p>
+        <label>Zip:</label><br>
+        <input type="text" name="zip" value="{{ client[8] or '' }}">
+    </p>
+
+    <p>
+        <label>Emergency Contact Name:</label><br>
+        <input type="text" name="emergency_contact_name" value="{{ client[9] or '' }}">
+    </p>
+
+    <p>
+        <label>Emergency Contact Phone:</label><br>
+        <input type="text" name="emergency_contact_phone" value="{{ client[10] or '' }}">
+    </p>
+
+    <p>
+        <label>Referred By:</label><br>
+        <input type="text" name="referred_by" value="{{ client[11] or '' }}">
+    </p>
+
+    <p>
+        <label>Notes One:</label><br>
+        <textarea name="notes_one" rows="4" cols="50">{{ client[12] or '' }}</textarea>
+    </p>
+
+    <p>
+        <label>Notes Two:</label><br>
+        <textarea name="notes_two" rows="4" cols="50">{{ client[13] or '' }}</textarea>
+    </p>
+
+    <p>
+        <label>Notes Three:</label><br>
+        <textarea name="notes_three" rows="4" cols="50">{{ client[14] or '' }}</textarea>
+    </p>
+
+    <p>
+        <label>Active Client:</label><br>
+        <select name="active_client">
+            <option value="true" {% if client[15] %}selected{% endif %}>Yes</option>
+            <option value="false" {% if not client[15] %}selected{% endif %}>No</option>
+        </select>
+    </p>
+
+</form>
+
+{% endblock %}

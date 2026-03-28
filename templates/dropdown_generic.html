@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>{{ title }}</h1>
+
+<div style="margin-bottom: 20px;">
+    <a class="btn" href="{{ url_for('admin') }}">Back to Admin</a>
+</div>
+
+<form method="POST" action="{{ url_for('manage_dropdown', dropdown_key=dropdown_key) }}">
+    <label for="new_value"><strong>{{ label }}</strong></label><br>
+    <input type="text" id="new_value" name="new_value" placeholder="Enter {{ label }}" required>
+    <button type="submit" class="btn">Add</button>
+</form>
+
+<br>
+
+<table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>{{ label }}</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in rows %}
+        <tr>
+            <td>{{ row[0] }}</td>
+            <td>{{ row[1] }}</td>
+            <td>
+                <form method="POST"
+                      action="{{ url_for('delete_dropdown_item', dropdown_key=dropdown_key, item_id=row[0]) }}"
+                      onsubmit="return confirm('Delete this item?');"
+                      style="display:inline;">
+                    <button type="submit" class="btn">Delete</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% if not rows %}
+<p>No records found.</p>
+{% endif %}
+
+{% endblock %}

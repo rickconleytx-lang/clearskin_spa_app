@@ -1,19 +1,16 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Clear Skin Esthetics Spa App</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-</head>
-<body>
-    <div class="container">
-        <h1>Clear Skin Esthetics Spa App</h1>
-        <p>Flask is running.</p>
+{% extends "base.html" %}
 
-        <div class="nav-links">
-            <a href="{{ url_for('client_history') }}">Client History</a>
-        </div>
+{% block content %}
+
+<h1>Welcome to Clear Skin Esthetics</h1>
+<p>Select an option from the menu above.</p>
+
+<div class="container">
+    <h2>Clear Skin Esthetics Spa App</h2>
+
+    <div class="nav-links">
+        <a href="{{ url_for('client_history') }}">Client History</a>
     </div>
-</body>
-</html>
+</div>
+
+{% endblock %}

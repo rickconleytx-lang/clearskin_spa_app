@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Redeem Gift Certificate</h1>
+
+<p><strong>Certificate Number:</strong> {{ gift_certificate[1] }}</p>
+<p><strong>Original Value:</strong> {{ gift_certificate[2] }}</p>
+<p><strong>Remaining Balance:</strong> {{ gift_certificate[3] }}</p>
+<p><strong>Purchased By:</strong> {{ gift_certificate[4] or '' }} {{ gift_certificate[5] or '' }}</p>
+<p><strong>Recipient:</strong> {{ gift_certificate[6] or '' }}</p>
+<p><strong>Status:</strong> {{ gift_certificate[7] or '' }}</p>
+
+<form method="POST">
+    <label for="redeemed_on">Redeemed On</label>
+    <input type="date" id="redeemed_on" name="redeemed_on">
+
+    <label for="redeemed_by">Redeemed By</label>
+    <input type="text" id="redeemed_by" name="redeemed_by">
+
+    <br><br>
+    <button type="submit" class="btn">Redeem Certificate</button>
+    <a href="{{ url_for('gift_certificates_home') }}" class="btn">Cancel</a>
+</form>
+{% endblock %}

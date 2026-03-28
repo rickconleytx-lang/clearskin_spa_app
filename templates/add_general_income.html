@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+
+{% block title %}Add General Income{% endblock %}
+
+{% block content %}
+<div class="form-page">
+    <div class="form-header">
+        <h1>Add General Income</h1>
+        <p class="form-subtitle">Use this form for income not tied to a client visit or appointment.</p>
+    </div>
+
+    <!-- Navigation -->
+        <div class="form-buttons">
+        <button type="submit" class="btn">Save General Income</button>
+        <a href="{{ url_for('income_report') }}" class="btn btn-secondary">View Income Report</a>
+     </div>
+
+
+    <div class="form-card">
+        <form method="POST" class="general-income-form">
+
+            <div class="form-grid">
+
+                <div class="form-group">
+                    <label for="income_date">Income Date</label>
+                    <input type="date" id="income_date" name="income_date" required value="{{ request.form.get('income_date', '') }}">
+                </div>
+
+                <div class="form-group">
+                    <label for="client_id">Client (Optional)</label>
+                    <select id="client_id" name="client_id">
+                        <option value="">-- General Income / No Client --</option>
+                        {% for client in clients %}
+                            <option value="{{ client[0] }}"
+                                {% if request.form.get('client_id') == client[0]|string %}selected{% endif %}>
+                                {{ client[2] }}, {{ client[1] }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="income_type">Income Type</label>
+                    <select id="income_type" name="income_type" required>
+                        <option value="">-- Select Income Type --</option>
+                        {% for row in income_types %}
+                            <option value="{{ row[0] }}"
+                                {% if request.form.get('income_type') == row[0] %}selected{% endif %}>
+                                {{ row[0] }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="payment_method">Payment Method</label>
+                    <select id="payment_method" name="payment_method" required>
+                        <option value="">-- Select Payment Method --</option>
+                        {% for row in payment_methods %}
+                            <option value="{{ row[0] }}"
+                                {% if request.form.get('payment_method') == row[0] %}selected{% endif %}>
+                                {{ row[0] }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-group full-width">
+                    <label for="description">Description</label>
+                    <input type="text" id="description" name="description" maxlength="255"
+                           placeholder="Example: Gift certificate sale, retail sale, membership payment"
+                           value="{{ request.form.get('description', '') }}">
+                </div>
+
+                <div class="form-group">
+                    <label for="service_amount">Amount</label>
+                    <input type="number" step="0.01" min="0" id="service_amount" name="service_amount"
+                           value="{{ request.form.get('service_amount', '0.00') }}">
+                </div>
+
+                <div class="form-group">
+                    <label for="retail_amount">Retail Amount</label>
+                    <input type="number" step="0.01" min="0" id="retail_amount" name="retail_amount"
+                           value="{{ request.form.get('retail_amount', '0.00') }}">
+                </div>
+
+                <div class="form-group">
+                    <label for="tax_amount">Tax Amount</label>
+                    <input type="number" step="0.01" min="0" id="tax_amount" name="tax_amount"
+                           value="{{ request.form.get('tax_amount', '0.00') }}">
+                </div>
+
+                <div class="form-group">
+                    <label for="total_amount">Total Amount</label>
+                    <input type="number" step="0.01" min="0" id="total_amount" name="total_amount" required
+                           value="{{ request.form.get('total_amount', '0.00') }}">
+                </div>
+
+                <div class="form-group full-width">
+                    <label for="square_payment_id">Square Payment ID</label>
+                    <input type="text" id="square_payment_id" name="square_payment_id" maxlength="100"
+                           value="{{ request.form.get('square_payment_id', '') }}">
+                </div>
+
+                <div class="form-group full-width">
+                    <label for="notes">Notes</label>
+                    <textarea id="notes" name="notes" rows="4"
+                              placeholder="Optional notes">{{ request.form.get('notes', '') }}</textarea>
+                </div>
+
+            </div>
+
+            <div class="form-buttons">
+                <button type="submit" class="btn">Save General Income</button>
+                <a href="{{ url_for('income_report') }}" class="btn btn-secondary">View Income Report</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const serviceInput = document.getElementById("service_amount");
+    const retailInput = document.getElementById("retail_amount");
+    const taxInput = document.getElementById("tax_amount");
+    const totalInput = document.getElementById("total_amount");
+
+    function toNumber(value) {
+        const num = parseFloat(value);
+        return isNaN(num) ? 0 : num;
+    }
+
+    function updateTotal() {
+        const total = toNumber(serviceInput.value) + toNumber(retailInput.value) + toNumber(taxInput.value);
+        totalInput.value = total.toFixed(2);
+    }
+
+    serviceInput.addEventListener("input", updateTotal);
+    retailInput.addEventListener("input", updateTotal);
+    taxInput.addEventListener("input", updateTotal);
+});
+</script>
+{% endblock %}

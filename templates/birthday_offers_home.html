@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}Birthday Offers{% endblock %}
+
+{% block content %}
+<h1>Upcoming Birthday Offers</h1>
+
+<p>Showing client birthdays in the next 30 days.</p>
+
+<table>
+    <thead>
+        <tr>
+            <th>Client Name</th>
+            <th>Birthday</th>
+            <th>Next Birthday</th>
+            <th>Days Away</th>
+            <th>Phone</th>
+            <th>Email</th>
+            <th>Offer Sent</th>
+            <th>Offer Sent Date</th>
+            <th>Acknowledged By</th>
+            <th>Action</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in upcoming_birthdays %}
+        <tr>
+            <td>{{ row.last_name }}, {{ row.first_name }}</td>
+            <td>{{ row.birth_date.strftime('%m/%d') if row.birth_date else '' }}</td>
+            <td>{{ row.next_birth_date.strftime('%m/%d/%Y') if row.next_birth_date else '' }}</td>
+            <td>
+                {% if row.days_until == 0 %}
+                    Today
+                {% else %}
+                    {{ row.days_until }}
+                {% endif %}
+            </td>
+            <td>{{ row.phone or '' }}</td>
+            <td>{{ row.email or '' }}</td>
+            <td>
+                {% if row.offer_sent %}
+                    Yes
+                {% else %}
+                    No
+                {% endif %}
+            </td>
+            <td>{{ row.offer_sent_date.strftime('%m/%d/%Y') if row.offer_sent_date else '' }}</td>
+            <td>{{ row.acknowledged_by or '' }}</td>
+            <td>
+                {% if row.offer_sent %}
+                    Sent
+                {% else %}
+                    <form method="POST"
+                          action="{{ url_for('mark_birthday_offer_sent', client_id=row.client_id) }}"
+                          style="display:inline;">
+                        <button type="submit" class="btn">Mark Sent</button>
+                    </form>
+                {% endif %}
+            </td>
+        </tr>
+        {% else %}
+        <tr>
+            <td colspan="10">No upcoming birthdays in the next 30 days.</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

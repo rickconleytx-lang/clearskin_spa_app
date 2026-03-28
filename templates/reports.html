@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Reports Month</h1>
+
+<div style="margin-bottom: 20px;">
+    <a class="btn" href="{{ url_for('reports') }}">Standard Reports</a>
+    <a class="btn" href="{{ url_for('reports_range') }}">Custom Date Range</a>
+    <button type="button" class="btn" onclick="window.print()">Print Report</button>
+</div>
+
+<br>
+
+<div class="dashboard-cards">
+    <div class="dashboard-card">
+        <h3>Today's Completed</h3>
+        <p>{{ daily_completed|length }}</p>
+    </div>
+
+    <div class="dashboard-card">
+        <h3>This Week Total</h3>
+        <p>{{ weekly_totals[0] }}</p>
+    </div>
+
+    <div class="dashboard-card">
+        <h3>This Week Completed</h3>
+        <p>{{ weekly_totals[2] }}</p>
+    </div>
+
+    <div class="dashboard-card">
+        <h3>Cancelled Appointments</h3>
+        <p>{{ cancelled_count }}</p>
+    </div>
+</div>
+
+<br>
+
+<div class="dashboard-cards">
+    <div class="dashboard-card">
+        <h3>Daily Revenue</h3>
+        <p>${{ '%.2f'|format(daily_revenue) }}</p>
+    </div>
+
+    <div class="dashboard-card">
+        <h3>Weekly Revenue</h3>
+        <p>${{ '%.2f'|format(weekly_revenue) }}</p>
+    </div>
+
+    <div class="dashboard-card">
+        <h3>Monthly Revenue</h3>
+        <p>${{ '%.2f'|format(monthly_revenue) }}</p>
+    </div>
+</div>
+
+<br>
+
+<div class="dashboard-cards">
+    <div class="dashboard-card">
+        <h3>Monthly Completed</h3>
+        <p>{{ monthly_completed_count }}</p>
+    </div>
+
+    <div class="dashboard-card">
+        <h3>Average Ticket</h3>
+        <p>${{ '%.2f'|format(average_ticket) }}</p>
+    </div>
+</div>
+
+<br>
+
+<h2>Today's Completed Appointments</h2>
+
+{% if daily_completed %}
+<table>
+    <thead>
+        <tr>
+            <th>Time</th>
+            <th>Client</th>
+            <th>Service</th>
+            <th>Room</th>
+            <th>Price</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in daily_completed %}
+        <tr>
+            <td>{{ row[5] if row[5] else '' }}</td>
+            <td>{{ row[1] }} {{ row[2] }}</td>
+            <td>{{ row[3] or 'Service' }}</td>
+            <td>{{ row[6] or '' }}</td>
+            <td>${{ '%.2f'|format(row[7] or 0) }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No completed appointments today.</p>
+{% endif %}
+
+<br>
+
+<h2>Weekly Totals</h2>
+<p><strong>{{ week_start }} to {{ week_end }}</strong></p>
+
+<table>
+    <thead>
+        <tr>
+            <th>Total</th>
+            <th>Booked</th>
+            <th>Completed</th>
+            <th>Cancelled</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>{{ weekly_totals[0] }}</td>
+            <td>{{ weekly_totals[1] }}</td>
+            <td>{{ weekly_totals[2] }}</td>
+            <td>{{ weekly_totals[3] }}</td>
+        </tr>
+    </tbody>
+</table>
+
+<br>
+
+<h2>Most Booked Services</h2>
+
+{% if most_booked_services %}
+<table>
+    <thead>
+        <tr>
+            <th>Service</th>
+            <th>Total Bookings</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in most_booked_services %}
+        <tr>
+            <td>{{ row[0] }}</td>
+            <td>{{ row[1] }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No service booking data available.</p>
+{% endif %}
+
+<br>
+
+<h2>Revenue by Service (This Month)</h2>
+
+{% if revenue_by_service %}
+<table>
+    <thead>
+        <tr>
+            <th>Service</th>
+            <th>Completed Appointments</th>
+            <th>Total Revenue</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in revenue_by_service %}
+        <tr>
+            <td>{{ row[0] }}</td>
+            <td>{{ row[1] }}</td>
+            <td>${{ '%.2f'|format(row[2] or 0) }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No completed service revenue data for this month.</p>
+{% endif %}
+
+{% endblock %}

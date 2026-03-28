@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1 style="color:red;">DAILY SCHEDULE</h1>
+
+
+<h3>{{ display_date.strftime('%A, %B %d, %Y') }}</h3>
+
+<div style="margin-bottom: 20px;">
+    <a class="btn" href="{{ url_for('calendar_view') }}">Back to Calendar</a>
+    <a class="btn" href="{{ url_for('add_appointment', selected_date=selected_date) }}">+ Add Appointment</a>
+</div>
+
+{% if appointments %}
+<table>
+    <thead>
+        <tr>
+            <th>Time</th>
+            <th>Client</th>
+            <th>Service</th>
+            <th>Status</th>
+            <th>Notes</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for appt in appointments %}
+        <tr>
+            <td>{{ appt[4].strftime('%I:%M %p') }}</td>
+            <td>{{ appt[1] }} {{ appt[2] }}</td>
+            <td>{{ appt[3] or 'Service' }}</td>
+            <td>{{ appt[7] }}</td>
+            <td>{{ appt[8] or '' }}</td>
+            <td>
+                <a href="{{ url_for('edit_appointment', appointment_id=appt[0]) }}" class="btn">Edit</a>
+
+                <a class="btn" href="{{ url_for('add_income', appointment_id=appt[0]) }}">
+                    Add Income
+                 </a>
+
+                <form method="POST" action="{{ url_for('delete_appointment', appointment_id=appt[0]) }}" style="display:inline;">
+                    <button type="submit" class="btn" onclick="return confirm('Delete this appointment?');">
+                        Delete
+                    </button>
+                </form>
+
+                <form method="POST" action="{{ url_for('complete_appointment', appointment_id=appt[0]) }}" style="display:inline;">
+                    <button type="submit" class="btn" style="background: orange;" onclick="return confirm('Mark this appointment as completed?');">
+                        Complete
+                    </button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No appointments scheduled for this day.</p>
+{% endif %}
+
+{% endblock %}

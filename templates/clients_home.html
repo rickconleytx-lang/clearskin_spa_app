@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block title %}Clients{% endblock %}
+
+<p style="color: green; font-weight: bold;">
+    All birthday offers are up to date.
+</p>
+
+
+{% block content %}
+
+<a class="btn" href="{{ url_for('birthday_offers_home') }}">Birthday Offers</a>
+
+<div class="section-page">
+    <div class="section-header">
+        <h1>Clients</h1>
+        <p class="section-subtitle">Manage client records, client history, and upcoming birthday tools.</p>
+    </div>
+    
+    <div class="section-card-grid">
+        <a class="section-card" href="{{ url_for('add_new_client') }}">
+            <h3>Add Client</h3>
+            <p>Create a new client record.</p>
+        </a>
+        
+        <a class="section-card" href="{{ url_for('client_history') }}">
+            <h3>Client History and FULL Record View/Edit</h3>
+            <p>View client details, visit history and records.</p>
+        </a>
+
+        </div>
+    </div>
+</div>
+
+<h2>Birthday Offers Needing Attention</h2>
+
+{% if birthday_clients %}
+<table>
+    <thead>
+        <tr>
+            <th>Client Name</th>
+            <th>Birthday</th>
+            <th>Month</th>
+            <th>Offer Sent</th>
+            <th>Offer Sent Date</th>
+            <th>Action</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in birthday_clients %}
+
+        <tr>
+            <td>{{ row[1] }} {{ row[2] }}</td>
+            <td>
+                {% if row[3] %}
+                    {{ row[3].strftime('%B %d') }}
+                {% else %}
+                    -
+                {% endif %}
+            </td>
+            <td>
+                {% if row[4] == 1 %}January
+                {% elif row[4] == 2 %}February
+                {% elif row[4] == 3 %}March
+                {% elif row[4] == 4 %}April
+                {% elif row[4] == 5 %}May
+                {% elif row[4] == 6 %}June
+                {% elif row[4] == 7 %}July
+                {% elif row[4] == 8 %}August
+                {% elif row[4] == 9 %}September
+                {% elif row[4] == 10 %}October
+                {% elif row[4] == 11 %}November
+                {% elif row[4] == 12 %}December
+                {% endif %}
+            </td>
+            <td>{{ 'Yes' if row[7] else 'No' }}</td>
+            <td>
+                {% if row[8] %}
+                    {{ row[8].strftime('%m/%d/%Y') }}
+                {% else %}
+                    -
+                {% endif %}
+            </td>
+            <td>
+                {% if not row[7] %}
+                <form method="POST" action="{{ url_for('mark_birthday_offer_sent', client_id=row[0]) }}">
+                    <button type="submit" class="btn">Mark Sent</button>
+                </form>
+                {% else %}
+                    Sent
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No birthday offers currently need attention.</p>
+{% endif %}
+
+{% endblock %}

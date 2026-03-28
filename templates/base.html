@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Clear Skin Esthetics{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+
+<body>
+
+    <!-- Banner -->
+    <div class="banner">
+        <img src="{{ url_for('static', filename='images/banner.png') }}" alt="Banner">
+    </div>
+
+    <!-- Navigation -->
+    <nav class="main-nav">
+    <a class="nav-btn" href="{{ url_for('dashboard') }}">Dashboard</a>
+    <a class="nav-btn" href="{{ url_for('calendar_view') }}">Calendar</a>
+    <a class="nav-btn" href="{{ url_for('clients_home') }}">Clients</a>
+    <a class="nav-btn" href="{{ url_for('income_home') }}">Income</a>
+    <a class="nav-btn" href="{{ url_for('expenses_home') }}">Expenses</a>
+    <a class="nav-btn" href="{{ url_for('employees_home') }}">Employees</a>
+    <a class="nav-btn" href="{{ url_for('admin') }}">Admin</a>
+</nav>     
+
+{% with messages = get_flashed_messages() %}
+  {% if messages %}
+    <div class="flash-messages">
+      {% for message in messages %}
+        <div class="flash">{{ message }}</div>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endwith %}
+
+
+
+<!-- Page Content -->  
+<div class="container">
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="flash {{ category }}">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+
+</div>
+
+<div class="footer-note">
+    Database design and implementation by Rick Conley. All rights reserved. 2026
+</div>
+</body>
+
+
+</body>
+</html>

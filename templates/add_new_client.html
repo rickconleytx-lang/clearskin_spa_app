@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+
+{% block title %}Add New Client - Page 1{% endblock %}
+
+{% block content %}
+<h1>Add New Client - Page 1</h1>
+
+<form method="POST">
+
+    <div class="form-buttons">
+        <button type="submit">Page 2</button>
+
+        <button type="reset"
+            onclick="return confirm('Are you sure you want to clear this form?')">
+            Clear Form
+        </button>
+
+        <a href="{{ url_for('cancel_new_client') }}" class="btn cancel-btn"
+           onclick="return confirm('Are you sure you want to cancel? Any unsaved information will be lost.')">
+           Cancel
+        </a>
+    </div>
+
+    <!-- your fields start here -->
+
+    <p>
+        <label>First Name:</label><br>
+        <input type="text" name="first_name" value="{{ step1_data.get('first_name', '') }}" required>
+    </p>
+
+    <p>
+        <label>Last Name:</label><br>
+        <input type="text" name="last_name" value="{{ step1_data.get('last_name', '') }}" required>
+    </p>
+
+    <p>
+        <label>Phone:</label><br>
+        <input type="text" name="phone" value="{{ step1_data.get('phone', '') }}">
+    </p>
+
+    <p>
+        <label>Email:</label><br>
+        <input type="email" name="email" value="{{ step1_data.get('email', '') }}">
+    </p>
+
+    <p>
+        <label>Birth Date:</label><br>
+        <input type="date" name="birth_date" value="{{ step1_data.get('birth_date', '') }}">
+    </p>
+
+    <p>
+        <label>Address:</label><br>
+        <input type="text" name="address" value="{{ step1_data.get('address', '') }}">
+    </p>
+
+    <p>
+        <label>City:</label><br>
+        <input type="text" name="city" value="{{ step1_data.get('city', '') }}">
+    </p>
+
+    <p>
+        <label>State:</label><br>
+        <input type="text" name="state" value="{{ step1_data.get('state', 'TX') }}">
+    </p>
+
+    <p>
+        <label>Zip:</label><br>
+        <input type="text" name="zip" value="{{ step1_data.get('zip', '') }}">
+    </p>
+
+</form>
+{% endblock %}

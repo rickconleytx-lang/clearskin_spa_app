@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block title %}Referral Sources{% endblock %}
+
+{% block content %}
+
+<h1>Referral Sources</h1>
+
+<form method="POST" class="admin-form">
+    <input type="text" name="referral_source_name" placeholder="Enter referral source" required>
+
+    <div class="admin-actions">
+        <button type="submit">Add Referral Source</button>
+        <a class="btn cancel-btn" href="{{ url_for('admin') }}">Back to Admin</a>
+    </div>
+</form>
+
+<table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Referral Source</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in referral_sources %}
+        <tr>
+            <td>{{ row[0] }}</td>
+            <td>{{ row[1] }}</td>
+            <td>
+                <form method="POST" action="{{ url_for('delete_referral_source', referral_source_id=row[0]) }}" style="display:inline;">
+                    <button type="submit" class="btn delete-btn" onclick="return confirm('Delete this referral source?');">
+                        Delete
+                    </button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

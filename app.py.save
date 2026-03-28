@@ -1,63 +1,15 @@
 from flask import Flask, render_template, request, redirect, url_for, session, flash
 from datetime import date, timedelta, datetime
+from flask import render_template, request, redirect, url_for
 from psycopg2 import sql
 from decimal import Decimal
 
 from db import get_db_connection
 
+
 app = Flask(__name__)
 app.secret_key = "your_secret_key_here"
 
-#  ---------------------
-#        HELPERS
-#  --------------------
-
-def get_status_id(status_name):
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    cur.execute("""
-        SELECT gift_certificate_status_id
-        FROM gift_certificate_statuses
-        WHERE status_name = %s
-    """, (status_name,))
-
-    result = cur.fetchone()
-
-    cur.close()
-    conn.close()
-
-    return result[0] if result else None
-
-
-
-def parse_bool(value):
-    if value is None:
-        return None
-
-    value = str(value).strip().lower()
-
-    if value in ("true", "yes", "y", "1", "on"):
-        return True
-    if value in ("false", "no", "n", "0", "off"):
-        return False
-    if value in ("none", "", "null"):
-        return None
-
-    return None
-
-#  ---------------
-#   DONE HELPERS
-#  --------------
-
-
-
-
-#  ----------------------
-#
-#   DATABASE HOME
-#
-#  ----------------------
 
 @app.route("/")
 def home():
@@ -171,27 +123,27 @@ def manage_dropdown(dropdown_key):
 
     if request.method == "POST":
         new_value = request.form.get("new_value", "").strip()
-    
-    if new_value:
-        try:
-            cur.execute(
-                sql.SQL("INSERT INTO {table} ({value_col}) VALUES (%s)").format(
-                    table=sql.Identifier(config["table"]),
-                    value_col=sql.Identifier(config["value"])
-                ),
-                (new_value,)
-            )
-            conn.commit()
-            flash(f'{config["title"]} added successfully.', "success")
-        except Exception as e:
-            conn.rollback()
-            flash(f"Error adding item: {e}", "error")
-    else:
-        flash("Value cannot be blank.", "error")
 
-    cur.close()
-    conn.close()
-    return redirect(url_for("manage_dropdown", dropdown_key=dropdown_key))
+        if new_value:
+            try:
+                cur.execute(
+                    sql.SQL("INSERT INTO {table} ({value_col}) VALUES (%s)").format(
+                        table=sql.Identifier(config["table"]),
+                        value_col=sql.Identifier(config["value"])
+                    ),
+                    (new_value,)
+                )
+                conn.commit()
+                flash(f'{config["title"]} added successfully.', "success")
+            except Exception as e:
+                conn.rollback()
+                flash(f"Error adding item: {e}", "error")
+        else:
+            flash("Value cannot be blank.", "error")
+
+        cur.close()
+        conn.close()
+        return redirect(url_for("manage_dropdown", dropdown_key=dropdown_key))
 
     cur.execute(
         sql.SQL("""
@@ -274,653 +226,14 @@ def delete_dropdown_item(dropdown_key, item_id):
 def income_home():
     return render_template("income_home.html")
 
-
-
-
-
-
-
-#  ------------------------------------------
-#      GIFT CERTIFICATES
-#
-#
-#  ------------------------------------------
-
-@app.route("/gift_certificates")
-def gift_certificates_home():
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    cur.execute("""
-        SELECT
-            gc.gift_cert_id,
-            gc.certificate_number,
-            gc.date_issued,
-            gc.expires_date,
-            gc.original_value,
-            gc.amount_paid,
-            gc.remaining_balance,
-            gc.purchased_by_first_name,
-            gc.purchased_by_last_name,
-            gc.recipient_name,
-            gcs.status_name,
-            gc.notes
-        FROM gift_certificates gc
-        LEFT JOIN gift_certificate_statuses gcs
-            ON gc.gift_certificate_status_id = gcs.gift_certificate_status_id
-        ORDER BY gc.date_issued DESC, gc.gift_cert_id DESC
-    """)
-
-    gift_certificates = cur.fetchall()
-
-    cur.close()
-    conn.close()
-
-    return render_template(
-        "gift_certificates_home.html",
-        gift_certificates=gift_certificates
-    )
-
-
-
-
-
-
-#  ------------------------------------------
-#      ADD GIFT CERTIFICATE
-#  ------------------------------------------
-
-@app.route("/add_gift_certificate", methods=["GET", "POST"])
-def add_gift_certificate():
-    conn = get_db_connection() 
-    cur = conn.cursor() 
-
-    if request.method == "POST":
-        certificate_number = request.form.get("certificate_number")
-        date_issued = request.form.get("date_issued") or None
-        expires_date = request.form.get("expires_date") or None
-        original_value = request.form.get("original_value") or None
-        amount_paid = request.form.get("amount_paid") or None
-        remaining_balance = request.form.get("remaining_balance") or None
-        purchased_by_first_name = request.form.get("purchased_by_first_name") or None
-        purchased_by_last_name = request.form.get("purchased_by_last_name") or None
-        purchaser_phone = request.form.get("purchaser_phone") or None
-        purchaser_email = request.form.get("purchaser_email") or None
-        recipient_name = request.form.get("recipient_name") or None
-        notes = request.form.get("notes") or None
-
-        gift_certificate_status_id = 5
-
-        if not certificate_number:
-            flash("Certificate number is required.", "danger")
-            return redirect(url_for("add_gift_certificate"))
-
-        cur.execute("""
-            INSERT INTO gift_certificates (
-                certificate_number,
-                date_issued,
-                expires_date,
-                original_value,
-                amount_paid,
-                remaining_balance,
-                purchased_by_first_name,
-                purchased_by_last_name,
-                purchaser_phone,
-                purchaser_email,
-                recipient_name,
-                notes,
-                gift_certificate_status_id
-            )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """, (
-            certificate_number,
-            date_issued,
-            expires_date,
-            original_value,
-            amount_paid,
-            remaining_balance,
-            purchased_by_first_name,
-            purchased_by_last_name,
-            purchaser_phone,
-            purchaser_email,
-            recipient_name,
-            notes,
-            gift_certificate_status_id
-        ))
-
-        conn.commit()
-        cur.close()
-        conn.close()
-
-        flash("Gift certificate added to inventory.", "success")
-        return redirect(url_for("gift_certificates_home"))
-
-    # GET
-    cur.close()
-    conn.close()
-    return render_template("add_gift_certificate.html")
-
-
-#  ------------------------------------------
-#         EDIT GIFT CERTIFICATE
-#  ------------------------------------------
-
-@app.route("/edit_gift_certificate/<int:certificate_id>", methods=["GET", "POST"])
-def edit_gift_certificate(certificate_id):
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    if request.method == "POST":
-        certificate_number = request.form.get("certificate_number")
-        date_issued = request.form.get("date_issued") or None
-        expires_date = request.form.get("expires_date") or None
-        original_value = request.form.get("original_value") or None
-        amount_paid = request.form.get("amount_paid") or None
-        remaining_balance = request.form.get("remaining_balance") or None
-        purchased_by_first_name = request.form.get("purchased_by_first_name") or None
-        purchased_by_last_name = request.form.get("purchased_by_last_name") or None
-        recipient_name = request.form.get("recipient_name") or None
-        gift_certificate_status_id = request.form.get("gift_certificate_status_id") or None
-        notes = request.form.get("notes") or None
-
-        cur.execute("""
-            UPDATE gift_certificates
-            SET certificate_number = %s,
-                date_issued = %s,
-                expires_date = %s,
-                original_value = %s,
-                amount_paid = %s,
-                remaining_balance = %s,
-                purchased_by_first_name = %s,
-                purchased_by_last_name = %s,
-                recipient_name = %s,
-                gift_certificate_status_id = %s,
-                notes = %s
-            WHERE gift_cert_id = %s
-        """, (
-            certificate_number,
-            date_issued,
-            expires_date,
-            original_value,
-            amount_paid,
-            remaining_balance,
-            purchased_by_first_name,
-            purchased_by_last_name,
-            recipient_name,
-            gift_certificate_status_id,
-            notes,
-            certificate_id
-        ))
-
-        conn.commit()
-        cur.close()
-        conn.close()
-
-        return redirect(url_for("gift_certificates_home"))
-
-    cur.execute("""
-        SELECT
-            gift_cert_id,
-            certificate_number,
-            date_issued,
-            expires_date,
-            original_value,
-            amount_paid,
-            remaining_balance,
-            purchased_by_first_name,
-            purchased_by_last_name,
-            recipient_name,
-            gift_certificate_status_id,
-            notes
-        FROM gift_certificates
-        WHERE gift_cert_id = %s
-    """, (certificate_id,))
-    gift_certificate = cur.fetchone()
-
-    cur.execute("""
-        SELECT gift_certificate_status_id, status_name
-        FROM gift_certificate_statuses
-        ORDER BY gift_certificate_status_id
-    """)
-    statuses = cur.fetchall()
-
-    cur.close()
-    conn.close()
-
-    return render_template(
-        "edit_gift_certificate.html",
-        gift_certificate=gift_certificate,
-        statuses=statuses
-    )
-
-
-#  ------------------------------------------
-#       REDEEM GIFT CERTIFICATE
-#  ------------------------------------------
-
-@app.route("/redeem_gift_certificate/<int:certificate_id>", methods=["GET", "POST"])
-def redeem_gift_certificate(certificate_id):
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    if request.method == "POST":
-        redeemed_on = request.form.get("redeemed_on") or None
-        redeemed_by = request.form.get("redeemed_by") or None
-
-        cur.execute("""
-            SELECT gift_certificate_status_id
-            FROM gift_certificate_statuses
-            WHERE status_name = %s
-            LIMIT 1
-        """, ("Redeemed",))
-        redeemed_row = cur.fetchone()
-
-        if not redeemed_row:
-            flash("Redeemed status not found.", "danger")
-            cur.close()
-            conn.close()
-            return redirect(url_for("gift_certificates_home"))
-
-        redeemed_status_id = redeemed_row[0]
-
-        cur.execute("""
-            UPDATE gift_certificates
-            SET redeemed_on = %s,
-                redeemed_by = %s,
-                remaining_balance = 0,
-                gift_certificate_status_id = %s
-            WHERE gift_cert_id = %s
-        """, (
-            redeemed_on,
-            redeemed_by,
-            redeemed_status_id,
-            certificate_id
-        ))
-
-        conn.commit()
-        flash("Gift certificate redeemed successfully.", "success")
-        cur.close()
-        conn.close()
-
-        return redirect(url_for("gift_certificates_home"))
-
-    cur.execute("""
-        SELECT
-            gc.gift_cert_id,
-            gc.certificate_number,
-            gc.original_value,
-            gc.remaining_balance,
-            gc.purchased_by_first_name,
-            gc.purchased_by_last_name,
-            gc.recipient_name,
-            gcs.status_name
-        FROM gift_certificates gc
-        LEFT JOIN gift_certificate_statuses gcs
-            ON gc.gift_certificate_status_id = gcs.gift_certificate_status_id
-        WHERE gc.gift_cert_id = %s
-    """, (certificate_id,))
-    gift_certificate = cur.fetchone()
-
-    cur.close()
-    conn.close()
-
-    return render_template(
-        "redeem_gift_certificate.html",
-        gift_certificate=gift_certificate
-    )
-
-
-
-
                 
 #  ------------------------------------------
 #      CLIENTS   HOME PAGE
 #  ------------------------------------------
 
-from datetime import date
-
 @app.route("/clients")
 def clients_home():
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    today = date.today()
-    current_month = today.month
-    current_day = today.day
-    current_year = today.year
-
-    months_to_show = [current_month]
-
-    if current_day >= 15:
-        next_month = 1 if current_month == 12 else current_month + 1
-        months_to_show.append(next_month)
-
-    cur.execute("""
-        SELECT
-            c.client_id,
-            c.first_name,
-            c.last_name,
-            c.birth_date,
-            EXTRACT(MONTH FROM c.birth_date) AS birth_month,
-            cbo.birthday_offer_id,
-            cbo.birthday_year,
-            COALESCE(cbo.offer_sent, FALSE) AS offer_sent,
-            cbo.offer_sent_date,
-            cbo.acknowledged_by,
-            cbo.notes
-        FROM clients c
-        LEFT JOIN client_birthday_offers cbo
-            ON c.client_id = cbo.client_id
-            AND cbo.birthday_year = %s
-        WHERE c.birth_date IS NOT NULL
-          AND EXTRACT(MONTH FROM c.birth_date) = ANY(%s)
-          AND COALESCE(cbo.offer_sent, FALSE) = FALSE
-        ORDER BY
-            EXTRACT(MONTH FROM c.birth_date),
-            EXTRACT(DAY FROM c.birth_date),
-            c.last_name,
-            c.first_name
-    """, (current_year, months_to_show))
-
-    birthday_clients = cur.fetchall()
-
-    print("birthday_clients =", birthday_clients)
-
-    # keep your normal clients query here too
-    cur.execute("""
-        SELECT client_id, first_name, last_name, phone, email, birth_date
-        FROM clients
-        ORDER BY last_name, first_name
-    """)
-    clients = cur.fetchall()
-
-    cur.close()
-    conn.close()
-
-    return render_template(
-        "clients_home.html",
-        clients=clients,
-        birthday_clients=birthday_clients
-    )
-
-
-
-
-#  ------------------------------------------
-#          
-#        FULL EDIT CLIENT   
-#  
-#  
-#  ------------------------------------------
-
-@app.route("/edit-client-full/<int:client_id>", methods=["GET", "POST"])
-def edit_client_full(client_id):
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    if request.method == "POST":
-        # ----- clients table fields -----
-        first_name = request.form.get("first_name")
-        last_name = request.form.get("last_name")
-        phone = request.form.get("phone")
-        email = request.form.get("email")
-        birth_date = request.form.get("birth_date") or None
-        address = request.form.get("address")
-        city = request.form.get("city")
-        state = request.form.get("state")
-        zip_code = request.form.get("zip")
-        emergency_contact_name = request.form.get("emergency_contact_name")
-        emergency_contact_phone = request.form.get("emergency_contact_phone")
-        referred_by = request.form.get("referred_by")
-        notes_one = request.form.get("notes_one")
-        notes_two = request.form.get("notes_two")
-        notes_three = request.form.get("notes_three")
-        active_client = True if request.form.get("active_client") == "on" else False
-
-        # ----- client_health_profile fields -----
-        sex = request.form.get("sex")
-        skin_type_id = request.form.get("skin_type_id") or None
-        fitzpatrick_id = request.form.get("fitzpatrick_id") or None
-        skin_concerns = request.form.get("skin_concerns")
-        skin_conditions = request.form.get("skin_conditions")
-        allergies = request.form.get("allergies")
-        medications = request.form.get("medications")
-        current_medical_conditions = request.form.get("current_medical_conditions")
-        past_medical_treatments = request.form.get("past_medical_treatments")
-
-        recent_injections = parse_bool(request.form.get("recent_injections"))
-        recent_laser = parse_bool(request.form.get("recent_laser"))
-        pregnant = parse_bool(request.form.get("pregnant"))
-        nursing = parse_bool(request.form.get("nursing"))
-        using_retinol = parse_bool(request.form.get("using_retinol"))
-        using_accutane = parse_bool(request.form.get("using_accutane"))
-
-
-        sun_exposure_level = request.form.get("sun_exposure_level")
-        last_facial_date = request.form.get("last_facial_date") or None
-        health_notes1 = request.form.get("health_notes1")
-        health_notes2 = request.form.get("health_notes2")
-        health_notes3 = request.form.get("health_notes3")
-
-        # ----- update clients -----
-        cur.execute("""
-            UPDATE clients
-            SET
-                first_name = %s,
-                last_name = %s,
-                phone = %s,
-                email = %s,
-                birth_date = %s,
-                address = %s,
-                city = %s,
-                state = %s,
-                zip = %s,
-                emergency_contact_name = %s,
-                emergency_contact_phone = %s,
-                referred_by = %s,
-                notes_one = %s,
-                notes_two = %s,
-                notes_three = %s,
-                active_client = %s,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE client_id = %s
-        """, (
-            first_name, last_name, phone, email, birth_date,
-            address, city, state, zip_code,
-            emergency_contact_name, emergency_contact_phone,
-            referred_by, notes_one, notes_two, notes_three,
-            active_client, client_id
-        ))
-
-        # ----- check whether health profile exists -----
-        cur.execute("""
-            SELECT health_profile_id
-            FROM client_health_profile
-            WHERE client_id = %s
-        """, (client_id,))
-        existing_health = cur.fetchone()
-
-        if existing_health:
-            # update existing health profile
-            cur.execute("""
-                UPDATE client_health_profile
-                SET
-                    sex = %s,
-                    skin_type_id = %s,
-                    fitzpatrick_id = %s,
-                    skin_concerns = %s,
-                    skin_conditions = %s,
-                    allergies = %s,
-                    medications = %s,
-                    current_medical_conditions = %s,
-                    past_medical_treatments = %s,
-                    recent_injections = %s,
-                    recent_laser = %s,
-                    pregnant = %s,
-                    nursing = %s,
-                    using_retinol = %s,
-                    using_accutane = %s,
-                    sun_exposure_level = %s,
-                    last_facial_date = %s,
-                    notes1 = %s,
-                    notes2 = %s,
-                    notes3 = %s,
-                    last_updated = CURRENT_DATE
-                WHERE client_id = %s
-            """, (
-                sex, skin_type_id, fitzpatrick_id, skin_concerns, skin_conditions,
-                allergies, medications, current_medical_conditions, past_medical_treatments,
-                recent_injections, recent_laser, pregnant, nursing,
-                using_retinol, using_accutane, sun_exposure_level,
-                last_facial_date, health_notes1, health_notes2, health_notes3,
-                client_id
-            ))
-        else:
-            # insert new health profile
-            cur.execute("""
-                INSERT INTO client_health_profile (
-                    client_id,
-                    sex,
-                    skin_type_id,
-                    fitzpatrick_id,
-                    skin_concerns,
-                    skin_conditions,
-                    allergies,
-                    medications,
-                    current_medical_conditions,
-                    past_medical_treatments,
-                    recent_injections,
-                    recent_laser,
-                    pregnant,
-                    nursing,
-                    using_retinol,
-                    using_accutane,
-                    sun_exposure_level,
-                    last_facial_date,
-                    notes1,
-                    notes2,
-                    notes3,
-                    last_updated,
-                    created_at
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_DATE, CURRENT_TIMESTAMP)
-            """, (
-                client_id,
-                sex,
-                skin_type_id,
-                fitzpatrick_id,
-                skin_concerns,
-                skin_conditions,
-                allergies,
-                medications,
-                current_medical_conditions,
-                past_medical_treatments,
-                recent_injections,
-                recent_laser,
-                pregnant,
-                nursing,
-                using_retinol,
-                using_accutane,
-                sun_exposure_level,
-                last_facial_date,
-                health_notes1,
-                health_notes2,
-                health_notes3
-            ))
-
-        conn.commit()
-        cur.close()
-        conn.close()
-
-        flash("Client full record updated successfully.", "success")
-        return redirect(url_for("clients_home"))
-
-    # ---------------- GET request ----------------
-
-    # get client record
-    cur.execute("""
-        SELECT
-            client_id,
-            first_name,
-            last_name,
-            phone,
-            email,
-            birth_date,
-            address,
-            city,
-            state,
-            zip,
-            emergency_contact_name,
-            emergency_contact_phone,
-            referred_by,
-            notes_one,
-            notes_two,
-            notes_three,
-            active_client,
-            created_at,
-            updated_at
-        FROM clients
-        WHERE client_id = %s
-    """, (client_id,))
-    client = cur.fetchone()
-
-    # get health profile
-    cur.execute("""
-        SELECT
-            health_profile_id,
-            client_id,
-            sex,
-            skin_type_id,
-            fitzpatrick_id,
-            skin_concerns,
-            skin_conditions,
-            allergies,
-            medications,
-            current_medical_conditions,
-            past_medical_treatments,
-            recent_injections,
-            recent_laser,
-            pregnant,
-            nursing,
-            using_retinol,
-            using_accutane,
-            sun_exposure_level,
-            last_facial_date,
-            notes1,
-            notes2,
-            notes3,
-            last_updated,
-            created_at
-        FROM client_health_profile
-        WHERE client_id = %s
-    """, (client_id,))
-    health = cur.fetchone()
-
-    # dropdown values
-    cur.execute("SELECT sex_type_id, sex_type FROM sex ORDER BY sex_type")
-    sex_options = cur.fetchall()
-
-    cur.execute("SELECT skin_type_id, skin_type_name FROM skin_types ORDER BY skin_type_name")
-    skin_types = cur.fetchall()
-
-    cur.execute("SELECT fitzpatrick_id, fitzpatrick_level FROM fitzpatrick_types ORDER BY fitzpatrick_id")
-    fitzpatrick_types = cur.fetchall()
-
-    cur.execute("SELECT referral_source_id, referral_source_name FROM referral_sources ORDER BY referral_source_name")
-    referral_sources = cur.fetchall()
-
-    cur.close()
-    conn.close()
-
-    return render_template(
-        "edit_client_full.html",
-        client=client,
-        health=health,
-        sex_options=sex_options, 
-        skin_types=skin_types,
-        fitzpatrick_types=fitzpatrick_types,
-        referral_sources=referral_sources
-    )
+    return render_template("clients_home.html")
 
 
 
@@ -939,6 +252,7 @@ def edit_client_full(client_id):
 #           BIRTHDAY OFFERS
 #  ------------------------------------------
 
+
 @app.route("/birthday-offers")
 def birthday_offers_home():
     conn = get_db_connection()
@@ -955,7 +269,7 @@ def birthday_offers_home():
             c.last_name,
             c.phone,
             c.email,
-            c.birth_date,
+            c.birthday,
             bo.birthday_offer_id,
             bo.offer_sent,
             bo.offer_sent_date,
@@ -965,24 +279,24 @@ def birthday_offers_home():
         LEFT JOIN client_birthday_offers bo
             ON c.client_id = bo.client_id
            AND bo.birthday_year = %s
-        WHERE c.birth_date IS NOT NULL
+        WHERE c.birthday IS NOT NULL
         ORDER BY
             CASE
                 WHEN TO_DATE(
-                    EXTRACT(MONTH FROM c.birth_date)::text || '-' ||
-                    EXTRACT(DAY FROM c.birth_date)::text || '-' ||
+                    EXTRACT(MONTH FROM c.birthday)::text || '-' ||
+                    EXTRACT(DAY FROM c.birthday)::text || '-' ||
                     %s::text,
                     'MM-DD-YYYY'
                 ) >= %s
                 THEN TO_DATE(
-                    EXTRACT(MONTH FROM c.birth_date)::text || '-' ||
-                    EXTRACT(DAY FROM c.birth_date)::text || '-' ||
+                    EXTRACT(MONTH FROM c.birthday)::text || '-' ||
+                    EXTRACT(DAY FROM c.birthday)::text || '-' ||
                     %s::text,
                     'MM-DD-YYYY'
                 )
                 ELSE TO_DATE(
-                    EXTRACT(MONTH FROM c.birth_date)::text || '-' ||
-                    EXTRACT(DAY FROM c.birth_date)::text || '-' ||
+                    EXTRACT(MONTH FROM c.birthday)::text || '-' ||
+                    EXTRACT(DAY FROM c.birthday)::text || '-' ||
                     (%s + 1)::text,
                     'MM-DD-YYYY'
                 )
@@ -994,14 +308,14 @@ def birthday_offers_home():
     upcoming_birthdays = []
 
     for row in all_birthdays:
-        birth_date = row[5]
-        if not birth_date:
+        birthday = row[5]
+        if not birthday:
             continue
 
-        this_year_bday = date(today.year, birth_date.month, birth_date.day)
+        this_year_bday = date(today.year, birthday.month, birthday.day)
 
         if this_year_bday < today:
-            next_birthday = date(today.year + 1, birth_date.month, birth_date.day)
+            next_birthday = date(today.year + 1, birthday.month, birthday.day)
         else:
             next_birthday = this_year_bday
 
@@ -1013,7 +327,7 @@ def birthday_offers_home():
                 "last_name": row[2],
                 "phone": row[3],
                 "email": row[4],
-                "birth_date": row[5],
+                "birthday": row[5],
                 "next_birthday": next_birthday,
                 "birthday_offer_id": row[6],
                 "offer_sent": row[7],
@@ -1030,10 +344,12 @@ def birthday_offers_home():
         "birthday_offers_home.html",
         upcoming_birthdays=upcoming_birthdays
     )
-        
+
+
+
+
 #  ------------------------------------------
-#        BIRTHDAY OFFERS MARK SENT
-#
+#           BIRTHDAY OFFERS MARK SENT 
 #  ------------------------------------------
 
 @app.route("/birthday-offers/mark-sent/<int:client_id>", methods=["POST"])
@@ -1076,8 +392,6 @@ def mark_birthday_offer_sent(client_id):
 
     flash("Birthday offer marked as sent.", "success")
     return redirect(url_for("birthday_offers_home"))
-
-
 
 
 
@@ -1615,33 +929,6 @@ def expense_report():
     total_params = []
 
     if start_date:
-        query += " AND expense_date >= %s"
-        params.append(start_date)
-
-    if end_date:
-        query += " AND expense_date <= %s"
-        params.append(end_date)
-
-    if category:
-        query += " AND category ILIKE %s"
-        params.append(category)
-
-    if payment_method:
-        query += " AND payment_method ILIKE %s"
-        params.append(payment_method)
-
-
-    cur.execute(query, tuple(params))
-    expenses = cur.fetchall()
-
-    total_query = """
-        SELECT COALESCE(SUM(amount), 0)
-        FROM expenses
-        WHERE 1=1
-    """
-    total_params = []
-
-    if start_date:
         total_query += " AND expense_date >= %s"
         total_params.append(start_date)
 
@@ -1660,42 +947,6 @@ def expense_report():
     cur.execute(total_query, tuple(total_params))
     report_total = cur.fetchone()[0]
 
-    category_totals_query = """
-        SELECT category, COALESCE(SUM(amount), 0)
-        FROM expenses
-        WHERE 1=1
-    """
-    category_totals_params = []
-
-    if start_date:
-        category_totals_query += " AND expense_date >= %s"
-        category_totals_params.append(start_date)
-
-    if end_date:
-        category_totals_query += " AND expense_date <= %s"
-        category_totals_params.append(end_date)
-
-    if category:
-        category_totals_query += " AND category ILIKE %s"
-        category_totals_params.append(category)
-
-    if payment_method:
-        category_totals_query += " AND payment_method ILIKE %s"
-        category_totals_params.append(payment_method)
-
-    category_totals_query += """
-        GROUP BY category
-        ORDER BY category
-    """
-
-    cur.execute(category_totals_query, tuple(category_totals_params))
-    category_totals_rows = cur.fetchall()
-
-    category_totals = {}
-    for row in category_totals_rows:
-        category_name = row[0] if row[0] else "Uncategorized"
-        category_totals[category_name] = row[1]
-
     cur.close()
     conn.close()
 
@@ -1703,8 +954,12 @@ def expense_report():
         "expense_report.html",
         expenses=expenses,
         report_total=report_total,
-        category_totals=category_totals
+        start_date=start_date,
+        end_date=end_date,
+        category=category,
+        payment_method=payment_method
     )
+
 
 #  ------------------------------------------
 #         EDIT EXPENSES
@@ -1817,242 +1072,6 @@ def delete_expense(expense_id):
 
     flash("Expense deleted successfully.", "success")
     return redirect(url_for("expenses_home"))
-
-
-#  ------------------------------------------
-#         EXPORT  EXPENSES TO CSV
-#  ------------------------------------------
-
-from flask import Response, request
-import csv
-import io
-
-@app.route("/export_expense_report_csv")
-def export_expense_report_csv():
-    start_date = request.args.get("start_date")
-    end_date = request.args.get("end_date")
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    query = """
-        SELECT
-            expense_date,
-            vendor_name,
-            category,
-            description,
-            amount,
-            payment_method,
-            notes
-        FROM expenses
-        WHERE 1=1
-    """
-    params = []
-
-    if start_date:
-        query += " AND expense_date >= %s"
-        params.append(start_date)
-
-    if end_date:
-        query += " AND expense_date <= %s"
-        params.append(end_date)
-
-    query += " ORDER BY expense_date DESC, expense_id DESC"
-
-    cur.execute(query, params)
-    rows = cur.fetchall()
-
-    cur.close()
-    conn.close()
-
-    output = io.StringIO()
-    writer = csv.writer(output)
-
-    # Header row
-    writer.writerow([
-        "Expense Date",
-        "Vendor Name",
-        "Category",
-        "Description",
-        "Amount",
-        "Payment Method",
-        "Notes"
-    ])
-
-    # Data rows
-    for row in rows:
-        writer.writerow(row)
-
-    csv_data = output.getvalue()
-    output.close()
-
-    return Response(
-        csv_data,
-        mimetype="text/csv",
-        headers={
-            "Content-Disposition": "attachment; filename=expense_report.csv"
-        }
-    )
-
-
-
-#  ------------------------------------------  
-#        EXPORT EXPENSES TO XLSX FORMAT
-#  ------------------------------------------
-
-from flask import send_file, request
-from openpyxl import Workbook
-from openpyxl.styles import Font
-from io import BytesIO
-from collections import defaultdict
-
-@app.route("/export_expense_report_xlsx")
-def export_expense_report_xlsx():
-    start_date = request.args.get("start_date")
-    end_date = request.args.get("end_date")
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    query = """
-        SELECT
-            expense_date,
-            vendor_name,
-            category,
-            description,
-            amount,
-            payment_method,
-            notes
-        FROM expenses
-        WHERE 1=1
-    """
-    params = []
-
-    if start_date:
-        query += " AND expense_date >= %s"
-        params.append(start_date)
-
-    if end_date:
-        query += " AND expense_date <= %s"
-        params.append(end_date)
-
-    query += " ORDER BY expense_date DESC, expense_id DESC"
-
-    cur.execute(query, params)
-    rows = cur.fetchall()
-
-    cur.close()
-    conn.close()
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Expense Report"
-
-    # Title
-    ws["A1"] = "Expense Report"
-    ws["A1"].font = Font(bold=True, size=14)
-
-    # Date range
-    if start_date and end_date:
-        ws["A2"] = f"Date Range: {start_date} to {end_date}"
-    elif start_date:
-        ws["A2"] = f"Date Range: From {start_date}"
-    elif end_date:
-        ws["A2"] = f"Date Range: Through {end_date}"
-    else:
-        ws["A2"] = "Date Range: All Expenses"
-
-    # Headers
-    headers = [
-        "Expense Date",
-        "Vendor Name",
-        "Category",
-        "Description",
-        "Amount",
-        "Payment Method",
-        "Notes"
-    ]
-
-    header_row = 4
-    for col_num, header in enumerate(headers, 1):
-        cell = ws.cell(row=header_row, column=col_num, value=header)
-        cell.font = Font(bold=True)
-
-    # Data rows
-    data_start_row = 5
-    grand_total = 0
-    category_totals = defaultdict(float)
-
-    for row_index, row in enumerate(rows, start=data_start_row):
-        expense_date, vendor_name, category, description, amount, payment_method, notes = row
-
-        ws.cell(row=row_index, column=1, value=expense_date)
-        ws.cell(row=row_index, column=2, value=vendor_name)
-        ws.cell(row=row_index, column=3, value=category)
-        ws.cell(row=row_index, column=4, value=description)
-        ws.cell(row=row_index, column=5, value=float(amount) if amount is not None else 0)
-        ws.cell(row=row_index, column=6, value=payment_method)
-        ws.cell(row=row_index, column=7, value=notes)
-
-        ws.cell(row=row_index, column=5).number_format = '$#,##0.00'
-
-        amt = float(amount) if amount is not None else 0
-        grand_total += amt
-        category_totals[category or "Uncategorized"] += amt
-
-    # Grand total
-    total_row = data_start_row + len(rows) + 1
-    ws.cell(row=total_row, column=4, value="GRAND TOTAL").font = Font(bold=True)
-    ws.cell(row=total_row, column=5, value=grand_total).font = Font(bold=True)
-    ws.cell(row=total_row, column=5).number_format = '$#,##0.00'
-
-    # Category totals section
-    category_start_row = total_row + 3
-    ws.cell(row=category_start_row, column=1, value="Category Totals").font = Font(bold=True, size=12)
-
-    ws.cell(row=category_start_row + 1, column=1, value="Category").font = Font(bold=True)
-    ws.cell(row=category_start_row + 1, column=2, value="Total").font = Font(bold=True)
-
-    current_row = category_start_row + 2
-    for category, total in sorted(category_totals.items()):
-        ws.cell(row=current_row, column=1, value=category)
-        ws.cell(row=current_row, column=2, value=total)
-        ws.cell(row=current_row, column=2).number_format = '$#,##0.00'
-        current_row += 1
-
-    # Column widths
-    widths = {
-        "A": 15,
-        "B": 22,
-        "C": 20,
-        "D": 30,
-        "E": 14,
-        "F": 18,
-        "G": 30
-    }
-
-    for col, width in widths.items():
-        ws.column_dimensions[col].width = width
-
-    # Filename
-    filename = "expense_report.xlsx"
-    if start_date and end_date:
-        filename = f"expense_report_{start_date}_to_{end_date}.xlsx"
-    elif start_date:
-        filename = f"expense_report_from_{start_date}.xlsx"
-    elif end_date:
-        filename = f"expense_report_to_{end_date}.xlsx"
-
-    output = BytesIO()
-    wb.save(output)
-    output.seek(0)
-
-    return send_file(
-        output,
-        as_attachment=True,
-        download_name=filename,
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
 
 
 
@@ -2594,7 +1613,6 @@ def daily_schedule():
 
 from flask import render_template
 from db import get_db_connection
-from datetime import date, timedelta
 
 
 @app.route("/dashboard")
@@ -2605,54 +1623,6 @@ def dashboard():
     # Total clients
     cur.execute("SELECT COUNT(*) FROM clients;")
     total_clients = cur.fetchone()[0]
-
-    today = date.today()
-    current_year = today.year
-    current_month = today.month
-    today_day = today.day
-
-    if current_month == 12:
-        next_month = 1
-        next_month_year = current_year + 1
-    else:
-        next_month = current_month + 1
-        next_month_year = current_year
-
-    cur.execute("""
-        SELECT
-            c.client_id,
-            c.first_name,
-            c.last_name,
-            c.birth_date,
-            cbo.offer_sent
-        FROM clients c
-        LEFT JOIN client_birthday_offers cbo
-            ON c.client_id = cbo.client_id
-            AND cbo.birthday_year = %s
-        WHERE c.birth_date IS NOT NULL
-        AND c.active_client = TRUE
-    """, (current_year,))
-
-    all_birthdays = cur.fetchall()
-
-    birthday_alert_count = 0
-
-    for row in all_birthdays:
-        birth_date = row[3]
-        offer_sent = row[4]
-
-        if not birth_date:
-            continue
-
-        birth_month = birth_date.month
-
-        # current month birthdays not yet sent
-        if birth_month == current_month and not offer_sent:
-            birthday_alert_count += 1
-
-        # after the 15th, also include next month birthdays
-        elif today.day >= 15 and birth_month == next_month and not offer_sent:
-            birthday_alert_count += 1
 
     # Today's appointments
     cur.execute("""
@@ -2770,11 +1740,9 @@ def dashboard():
         completed_count=completed_count,
         top_services=top_services,
         today_count=today_count,
-        birthday_alert_count=birthday_alert_count,
         upcoming_count=upcoming_count,
         next_appt=next_appt,
-        revenue_today=revenue_today
-           
+        revenue_today=revenue_today   
     )
 
 

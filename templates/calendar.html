@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Weekly Calendar</h1>
+
+<div class="calendar-nav" style="margin-bottom: 20px;">
+    <a class="btn" href="{{ url_for('calendar_view', offset=offset-1) }}">Previous</a>
+    <a class="btn" href="{{ url_for('calendar_view', offset=0) }}">Current Week</a>
+    <a class="btn" href="{{ url_for('calendar_view', offset=offset+1) }}">Next</a>
+    <br><br>
+    <a class="btn btn-today" href="{{ url_for('calendar_view', offset=0) }}">Today</a>
+</div>
+
+<div style="margin-bottom: 20px;">
+    <form method="GET" action="{{ url_for('calendar_view') }}">
+        <label for="start_date"><strong>From:</strong></label>
+        <input type="date" id="start_date" name="start_date" value="{{ request.args.get('start_date', '') }}">
+
+        <label for="end_date" style="margin-left: 10px;"><strong>To:</strong></label>
+        <input type="date" id="end_date" name="end_date" value="{{ request.args.get('end_date', '') }}">
+
+        <button type="submit" class="btn">Search</button>
+        <a class="btn" href="{{ url_for('calendar_view', offset=offset) }}">Clear</a>
+    </form>
+</div>
+
+{% if filtered_appointments is defined and request.args.get('start_date') and request.args.get('end_date') %}
+    <h3>Appointments in Selected Date Range</h3>
+
+    {% if filtered_appointments %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Time</th>
+                    <th>Client</th>
+                    <th>Service</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for appt in filtered_appointments %}
+                <tr>
+                    <td>{{ appt[0].strftime('%Y-%m-%d') }}</td>
+                    <td>{{ appt[1].strftime('%I:%M %p') }}</td>
+                    <td>{{ appt[2] }} {{ appt[3] }}</td>
+                    <td>{{ appt[4] or '' }}</td>
+                    <td>{{ appt[5]|title }}</td>
+                    <td>
+                        <a href="{{ url_for('edit_appointment', appointment_id=appt[6]) }}" class="btn btn-sm">Edit</a>
+                        <a href="{{ url_for('add_income', appointment_id=appt[6]) }}" class="btn btn-sm" style="background: green; color: white;">
+                            Add Income
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <br>
+    {% else %}
+        <p>No appointments found for that date range.</p>
+        <br>
+    {% endif %}
+{% endif %}
+
+{% if overdue_count > 0 %}
+<div class="next-appointment" style="background-color: #ffe5e5; border-left: 5px solid #cc0000;">
+    <strong>Overdue Booked Appointments:</strong> {{ overdue_count }}
+</div>
+
+<br>
+
+<div style="margin-bottom: 20px;">
+    <form method="POST" action="{{ url_for('complete_overdue_appointments') }}" style="display:inline;">
+        <button type="submit" class="btn" style="background: #cc0000;" onclick="return confirm('Mark all overdue booked appointments as completed?');">
+            Mark All Overdue Complete
+        </button>
+    </form>
+</div>
+{% endif %}
+
+{% if next_appt %}
+<div class="next-appointment">
+    <strong>Next Appointment:</strong>
+    {{ next_appt[0] }} {{ next_appt[1] }}
+    on {{ next_appt[2].strftime('%B %d, %Y') }}
+    at {{ next_appt[3].strftime('%I:%M %p') }}
+    ({{ next_appt[4] or 'Service' }})
+</div>
+<br>
+{% endif %}
+
+<h3>
+    {{ week_days[0].strftime('%B %d, %Y') }} -
+    {{ week_days[6].strftime('%B %d, %Y') }}
+</h3>
+
+<div class="calendar-weekdays">
+    <div>Sunday</div>
+    <div>Monday</div>
+    <div>Tuesday</div>
+    <div>Wednesday</div>
+    <div>Thursday</div>
+    <div>Friday</div>
+    <div>Saturday</div>
+</div>
+
+<br>
+
+<div class="calendar-grid">
+    {% for day in week_days %}
+        <div class="calendar-day {% if day == today %}today{% endif %}">
+            {% if day %}
+                <div class="calendar-day-number">
+                    <a href="{{ url_for('daily_schedule', date=day.strftime('%Y-%m-%d')) }}">
+                        {{ day.day }}
+                    </a>
+                </div>
+
+                <div class="calendar-events">
+                    {% for appt in appointments %}
+                        {% if appt[0] == day %}
+                            {% set is_past = (appt[0] < today) or (appt[0] == today and appt[1] < now_time) %}
+                            {% set is_future = (appt[0] > today) or (appt[0] == today and appt[1] > now_time) %}
+
+                            <div class="calendar-event {{ appt[5] }}{% if appt[5] == 'booked' and is_past %} overdue{% endif %}">
+                                <a href="{{ url_for('edit_appointment', appointment_id=appt[6]) }}" class="calendar-event-link">
+                                    <strong>{{ appt[1].strftime('%I:%M %p') }}</strong><br>
+                                    {{ appt[2] }} {{ appt[3] }}<br>
+                                    <small>{{ appt[4] or 'Service' }}</small><br>
+                                    <small>Status: {{ appt[5]|title }}</small>
+                                </a>
+
+                                <div style="margin-top: 8px;">
+                                    <a href="{{ url_for('edit_appointment', appointment_id=appt[6]) }}" class="btn btn-sm">Edit</a>
+
+                                    <a href="{{ url_for('add_income', appointment_id=appt[6]) }}"
+                                       class="btn btn-sm"
+                                       style="background: green; color: white;">
+                                        Add Income
+                                    </a>
+
+                                    {% if appt[5] == 'booked' and is_past %}
+                                    <form method="POST"
+                                          action="{{ url_for('complete_appointment', appointment_id=appt[6]) }}"
+                                          style="display:inline;">
+                                        <button type="submit"
+                                                class="btn btn-sm"
+                                                style="background: orange;"
+                                                onclick="return confirm('Mark this appointment complete?')">
+                                            Complete
+                                        </button>
+                                    </form>
+                                    {% endif %}
+
+                                    {% if appt[5] == 'booked' and is_future %}
+                                    <form method="POST"
+                                          action="{{ url_for('cancel_appointment', appointment_id=appt[6]) }}"
+                                          style="display:inline;">
+                                        <button type="submit"
+                                                class="btn btn-sm"
+                                                style="background: #cc0000;"
+                                                onclick="return confirm('Cancel this appointment?')">
+                                            Cancel
+                                        </button>
+                                    </form>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+            {% endif %}
+        </div>
+    {% endfor %}
+</div>
+{% endblock %}
