@@ -3,25 +3,36 @@
 {% block content %}
 <h1>Weekly Calendar</h1>
 
-<div class="calendar-nav" style="margin-bottom: 20px;">
-    <a class="btn" href="{{ url_for('calendar_view', offset=offset-1) }}">Previous</a>
-    <a class="btn" href="{{ url_for('calendar_view', offset=0) }}">Current Week</a>
-    <a class="btn" href="{{ url_for('calendar_view', offset=offset+1) }}">Next</a>
-    <br><br>
-    <a class="btn btn-today" href="{{ url_for('calendar_view', offset=0) }}">Today</a>
+<div style="margin-bottom: 15px;">
+    <a class="btn" href="{{ url_for('calendar_view', week_start=current_week_start.strftime('%Y-%m-%d')) }}">Today</a>
+
+    <a class="btn" href="{{ url_for('calendar_view', week_start=prev_week_start.strftime('%Y-%m-%d')) }}">Previous Week</a>
+
+    <a class="btn" href="{{ url_for('calendar_view', week_start=next_week_start.strftime('%Y-%m-%d')) }}">Next Week</a>
+
+    <a class="btn" href="{{ url_for('calendar_view', week_start=current_week_start.strftime('%Y-%m-%d')) }}">Current Week</a>
+
+    <form method="GET" action="{{ url_for('calendar_view') }}" style="display:inline-block; margin-left: 10px;">
+        <input type="date" name="goto_date" value="{{ goto_date if goto_date else '' }}">
+        <button type="submit" class="btn">Go To Date</button>
+    </form>
 </div>
+
 
 <div style="margin-bottom: 20px;">
     <form method="GET" action="{{ url_for('calendar_view') }}">
-        <label for="start_date"><strong>From:</strong></label>
+        <label for="start_date"><strong>Search Appointments From:</strong></label>
         <input type="date" id="start_date" name="start_date" value="{{ request.args.get('start_date', '') }}">
 
         <label for="end_date" style="margin-left: 10px;"><strong>To:</strong></label>
         <input type="date" id="end_date" name="end_date" value="{{ request.args.get('end_date', '') }}">
-
+         
         <button type="submit" class="btn">Search</button>
         <a class="btn" href="{{ url_for('calendar_view', offset=offset) }}">Clear</a>
+     
     </form>
+
+
 </div>
 
 {% if filtered_appointments is defined and request.args.get('start_date') and request.args.get('end_date') %}

@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Edit Income</h1>
+
+
+<h3>
+    Edit record for 
+    {% if income_record[11] %}
+        {{ income_record[11] }} {{ income_record[12] }}
+    {% else %}
+        General Income
+    {% endif %}
+    on 
+    {{ income_record[1].strftime('%Y-%m-%d') if income_record[1] else '' }}
+</h3>
+
+
+
+<form method="POST">
+
+    <label>Date</label>
+    <input type="date" name="income_date"
+           value="{{ income_record[1] if income_record[1] else '' }}">
+
+    <label>Service</label>
+    <input type="number" step="0.01" name="service_amount"
+           value="{{ income_record[2] or '' }}">
+
+    <label>Retail</label>
+    <input type="number" step="0.01" name="retail_amount"
+           value="{{ income_record[3] or '' }}">
+
+    <label>Tax</label>
+    <input type="number" step="0.01" name="tax_amount"
+           value="{{ income_record[4] or '' }}">
+
+    <label>Tip</label>
+    <input type="number" step="0.01" name="tip_amount"
+           value="{{ income_record[5] or '' }}">
+
+    <label>Total</label>
+    <input type="number" step="0.01" name="total_amount"
+           value="{{ income_record[6] or '' }}">
+
+    <label>Payment Method</label>
+    <input type="text" name="payment_method"
+           value="{{ income_record[7] or '' }}">
+
+    <label>Description</label>
+    <input type="text" name="description"
+           value="{{ income_record[8] or '' }}">
+
+    <label>Notes</label>
+    <textarea name="notes">{{ income_record[9] or '' }}</textarea>
+
+    <br><br>
+    <button type="submit" class="btn">Save Changes</button>
+    <a href="{{ url_for('income_home') }}" class="btn">Cancel</a>
+
+</form>
+
+{% endblock %}

@@ -6,7 +6,15 @@
 
 <h1>Add Gift Certificate</h1>
 
+
 <form method="POST">
+
+ <div style="display:flex; gap:10px; margin-bottom:15px;">
+        <button type="submit" class="btn">Save Certificate</button>
+        <a href="{{ url_for('gift_certificates_home') }}" class="btn">Cancel</a>
+    </div>
+
+
     <label for="certificate_number">Certificate Number</label>
     <input type="text" id="certificate_number" name="certificate_number" required>
 

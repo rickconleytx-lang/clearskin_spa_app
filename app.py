@@ -46,9 +46,265 @@ def parse_bool(value):
 
     return None
 
+
+
+def split_client_name(full_name):
+    if not full_name:
+        return "", ""
+
+    parts = full_name.strip().split()
+
+    if len(parts) == 1:
+        return parts[0], ""
+    return parts[0], " ".join(parts[1:])
+
+
+
+
 #  ---------------
 #   DONE HELPERS
 #  --------------
+
+
+
+#  ---------------
+#   ERROR HANDLERS
+#  --------------
+
+
+@app.errorhandler(404)
+def page_not_found(error):
+    return render_template("404.html"), 404
+
+@app.errorhandler(500)
+def internal_server_error(error):
+    return render_template("500.html"), 500
+
+
+
+
+#  -------------------------
+#
+#  SQUARE WEBHOOK
+#
+#  -------------------------
+
+@app.route("/square/webhook", methods=["POST"])
+def square_webhook():
+    payload = request.get_data(as_text=True)
+    signature = request.headers.get("x-square-hmacsha256-signature")
+
+    # validate signature here
+
+    event = request.get_json()
+
+    # look for booking.created
+    # parse booking id and details
+    # insert into incoming_square_bookings if not already present
+
+    return "", 200
+
+#  -------------------
+#   Square Incomming Bookings
+#
+#  ------------------
+
+@app.route("/incoming_bookings")
+def incoming_bookings():
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            incoming_booking_id,
+            square_booking_id,
+            client_name,
+            client_email,
+            client_phone,
+            appointment_date,
+            appointment_time,
+            service_name,
+            status,
+            created_at
+        FROM incoming_square_bookings
+        ORDER BY
+            CASE WHEN status = 'new' THEN 0 ELSE 1 END,
+            appointment_date,
+            appointment_time,
+            created_at DESC
+    """)
+    bookings = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template("incoming_bookings.html", bookings=bookings)
+
+
+#  -------------------------------------
+#   Square Incoming Booking Review
+#
+#  ------------------------------------
+
+@app.route("/incoming_bookings/<int:incoming_booking_id>")
+def review_incoming_booking(incoming_booking_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            incoming_booking_id,
+            square_booking_id,
+            client_name,
+            client_email,
+            client_phone,
+            appointment_date,
+            appointment_time,
+            service_name,
+            status,
+            raw_payload,
+            created_at
+        FROM incoming_square_bookings
+        WHERE incoming_booking_id = %s
+    """, (incoming_booking_id,))
+    booking = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if not booking:
+        flash("Incoming booking not found.", "error")
+        return redirect(url_for("incoming_bookings"))
+
+    return render_template("review_incoming_booking.html", booking=booking)
+
+
+
+
+#  ----------------------------------
+#
+#  SQUARE Ignore incoming 
+#
+#  ----------------------------------
+
+@app.route("/incoming_bookings/<int:incoming_booking_id>/ignore", methods=["POST"])
+def ignore_incoming_booking(incoming_booking_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE incoming_square_bookings
+        SET status = 'ignored',
+            reviewed_at = CURRENT_TIMESTAMP
+        WHERE incoming_booking_id = %s
+    """, (incoming_booking_id,))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    flash("Incoming booking marked as ignored.", "success")
+    return redirect(url_for("incoming_bookings"))
+
+
+
+#  ------------------------------
+#
+#  SQUARE ADD NEW CLIENT 
+#
+#  -----------------------------
+  
+
+@app.route("/incoming_bookings/<int:incoming_booking_id>/add_new_client")
+def add_new_client_from_booking(incoming_booking_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT *
+            FROM incoming_bookings
+            WHERE incoming_booking_id = %s
+        """, (incoming_booking_id,))
+
+        booking = cur.fetchone()
+
+        if not booking:
+            flash("Booking record not found.", "error")
+            return redirect(url_for("dashboard"))
+
+        return render_template(
+            "add_new_client.html",
+            booking=booking
+        )
+
+    except Exception as e:
+        flash(f"Error loading booking: {str(e)}", "error")
+        return redirect(url_for("dashboard"))
+
+    finally:
+        cur.close()
+        conn.close()
+
+    cur.execute("""
+        SELECT
+            incoming_booking_id,
+            client_name,
+            client_email,
+            client_phone,
+            appointment_date,
+            appointment_time,
+            service_name
+        FROM incoming_square_bookings
+        WHERE incoming_booking_id = %s
+    """, (incoming_booking_id,))
+    booking = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if not booking:
+        flash("Incoming booking not found.", "error")
+        return redirect(url_for("incoming_bookings"))
+
+    first_name, last_name = split_client_name(booking[1])
+
+    session["incoming_booking_data"] = {
+        "incoming_booking_id": booking[0],
+        "first_name": first_name,
+        "last_name": last_name,
+        "email": booking[2] or "",
+        "phone": booking[3] or "",
+        "appointment_date": booking[4].strftime("%Y-%m-%d") if booking[4] else "",
+        "appointment_time": booking[5].strftime("%H:%M:%S") if booking[5] else "",
+        "service_name": booking[6] or ""
+    }
+
+    return redirect(url_for("add_new_client"))
+
+
+
+
+
+
+#  ------------------
+#
+#  SQUARE MATCH EXISTING
+#
+#  ------------------
+
+
+
+@app.route("/incoming_bookings/<int:incoming_booking_id>/match_existing_client")
+def match_existing_client_booking(incoming_booking_id):
+    flash("Next step: choose existing client and create appointment.", "info")
+    return redirect(url_for("review_incoming_booking", incoming_booking_id=incoming_booking_id))
+
+
+
+
+
+
 
 
 
@@ -157,7 +413,6 @@ DROPDOWN_CONFIG = {
 #  --------------------------------
 
 
-
 @app.route("/admin/dropdowns/<dropdown_key>", methods=["GET", "POST"])
 def manage_dropdown(dropdown_key):
     if dropdown_key not in DROPDOWN_CONFIG:
@@ -171,27 +426,27 @@ def manage_dropdown(dropdown_key):
 
     if request.method == "POST":
         new_value = request.form.get("new_value", "").strip()
-    
-    if new_value:
-        try:
-            cur.execute(
-                sql.SQL("INSERT INTO {table} ({value_col}) VALUES (%s)").format(
-                    table=sql.Identifier(config["table"]),
-                    value_col=sql.Identifier(config["value"])
-                ),
-                (new_value,)
-            )
-            conn.commit()
-            flash(f'{config["title"]} added successfully.', "success")
-        except Exception as e:
-            conn.rollback()
-            flash(f"Error adding item: {e}", "error")
-    else:
-        flash("Value cannot be blank.", "error")
 
-    cur.close()
-    conn.close()
-    return redirect(url_for("manage_dropdown", dropdown_key=dropdown_key))
+        if new_value:
+            try:
+                cur.execute(
+                    sql.SQL("INSERT INTO {table} ({value_col}) VALUES (%s)").format(
+                        table=sql.Identifier(config["table"]),
+                        value_col=sql.Identifier(config["value"])
+                    ),
+                    (new_value,)
+                )
+                conn.commit()
+                flash(f'{config["title"]} added successfully.', "success")
+            except Exception as e:
+                conn.rollback()
+                flash(f"Error adding item: {e}", "error")
+        else:
+            flash("Value cannot be blank.", "error")
+
+        cur.close()
+        conn.close()
+        return redirect(url_for("manage_dropdown", dropdown_key=dropdown_key))
 
     cur.execute(
         sql.SQL("""
@@ -222,7 +477,8 @@ def manage_dropdown(dropdown_key):
 #
 #     DROP DOWNS  DELETE FUNCTION
 #
-#
+# ROUTE:  admin/dropdowns
+# 
 #  ------------------------------
 
 
@@ -268,13 +524,53 @@ def delete_dropdown_item(dropdown_key, item_id):
 
 #  ------------------------------------------
 #      INCOME HOME PAGE
+#
+# ROUTE: INCOME
+# URL: /income
+# SECTION: INCOME HOME PAGE
 #  ------------------------------------------
 
 @app.route("/income")
 def income_home():
-    return render_template("income_home.html")
+    conn = get_db_connection()
+    cur = conn.cursor()
 
+    # summary totals
+    cur.execute("SELECT COALESCE(SUM(total_amount), 0) FROM income")
+    total_income = cur.fetchone()[0] or 0
 
+    cur.execute("SELECT COALESCE(SUM(amount), 0) FROM expenses")
+    total_expenses = cur.fetchone()[0] or 0
+
+    net_total = total_income - total_expenses
+
+    # income list
+    cur.execute("""
+        SELECT
+            i.income_id,
+            i.income_date,
+            i.client_id,
+            c.first_name,
+            c.last_name,
+            i.total_amount,
+            i.payment_method
+        FROM income i
+        LEFT JOIN clients c
+            ON i.client_id = c.client_id
+        ORDER BY i.income_date DESC, i.income_id DESC
+    """)
+    income_records = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "income_home.html",
+        income_records=income_records,
+        total_income=total_income,
+        total_expenses=total_expenses,
+        net_total=net_total
+    )
 
 
 
@@ -2160,6 +2456,147 @@ def add_income(appointment_id):
 
     return render_template("add_income.html", appt=appt)
 
+
+
+
+#  --------------------------
+#
+#     EDIT  INCOME
+#
+#  ------------------------
+
+@app.route("/edit_income/<int:income_id>", methods=["GET", "POST"])
+def edit_income(income_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    if request.method == "POST":
+        income_date = request.form.get("income_date") or None
+        
+        service_amount = float(request.form.get("service_amount") or 0)
+        retail_amount = float(request.form.get("retail_amount") or 0)
+        tax_amount = float(request.form.get("tax_amount") or 0)
+        tip_amount = float(request.form.get("tip_amount") or 0)
+
+        total_amount = service_amount + retail_amount + tax_amount + tip_amount
+
+        payment_method = request.form.get("payment_method") or None
+        description = request.form.get("description") or None
+        notes = request.form.get("notes") or None
+        client_id = request.form.get("client_id") or None
+
+        cur.execute("""
+            UPDATE income
+            SET
+                income_date = %s,
+                service_amount = %s,
+                retail_amount = %s,
+                tax_amount = %s,
+                tip_amount = %s,
+                total_amount = %s,
+                payment_method = %s,
+                description = %s,
+                notes = %s,
+                client_id = %s
+            WHERE income_id = %s
+        """, (
+            income_date,
+            service_amount,
+            retail_amount,
+            tax_amount,
+            tip_amount,
+            total_amount,
+            payment_method,
+            description,
+            notes,
+            client_id,
+            income_id
+        ))        
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        flash("Income record updated successfully.", "success")
+        return redirect(url_for("income_home"))
+
+    cur.execute("""
+        SELECT
+            i.income_id,
+            i.income_date,
+            i.service_amount,
+            i.retail_amount,
+            i.tax_amount,
+            i.tip_amount,
+            i.total_amount,
+            i.payment_method,
+            i.description,
+            i.notes,
+            i.client_id,
+            c.first_name,
+            c.last_name
+        FROM income i
+        LEFT JOIN clients c ON i.client_id = c.client_id
+        WHERE i.income_id = %s
+    """, (income_id,))
+
+    income_record = cur.fetchone()
+
+    cur.execute("""
+        SELECT client_id, first_name, last_name
+        FROM clients
+        ORDER BY last_name, first_name
+    """)
+    clients = cur.fetchall()
+
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "edit_income.html",
+        income_record=income_record,
+        clients=clients,
+    )
+
+
+
+
+
+
+
+
+
+
+
+
+#  --------------------------
+#
+#     DELETE  INCOME
+#
+#  ------------------------
+
+@app.route("/delete_income/<int:income_id>", methods=["POST"])
+def delete_income(income_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("DELETE FROM income WHERE income_id = %s", (income_id,))
+    conn.commit()
+
+    cur.close()
+    conn.close()
+
+    flash("Income record deleted successfully.", "success")
+    return redirect(url_for("income_home"))
+
+
+
+
+
+
+
+
 #-----------------------------
 #
 #  INCOME REPORT
@@ -2435,16 +2872,30 @@ from flask import render_template, request, redirect, url_for
 
 @app.route("/calendar")
 def calendar_view():
-    offset = request.args.get("offset", default=0, type=int)
+    week_start_str = request.args.get("week_start")
+    goto_date = request.args.get("goto_date")
 
     today = date.today()
     now_time = datetime.now().time()
 
-    # Start week on Sunday
-    days_since_sunday = (today.weekday() + 1) % 7
-    start_of_week = today - timedelta(days=days_since_sunday) + timedelta(weeks=offset)
+    # Find current week's Sunday
+    today_days_since_sunday = (today.weekday() + 1) % 7
+    current_week_start = today - timedelta(days=today_days_since_sunday)
+
+    # Determine which week to display
+    if goto_date:
+        selected_date = datetime.strptime(goto_date, "%Y-%m-%d").date()
+        days_since_sunday = (selected_date.weekday() + 1) % 7
+        start_of_week = selected_date - timedelta(days=days_since_sunday)
+    elif week_start_str:
+        start_of_week = datetime.strptime(week_start_str, "%Y-%m-%d").date()
+    else:
+        start_of_week = current_week_start
 
     week_days = [start_of_week + timedelta(days=i) for i in range(7)]
+
+    prev_week_start = start_of_week - timedelta(days=7)
+    next_week_start = start_of_week + timedelta(days=7)
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -2525,11 +2976,18 @@ def calendar_view():
         appointments=appointments,
         today=today,
         now_time=now_time,
-        offset=offset,
         next_appt=next_appt,
         overdue_count=overdue_count,
-        filtered_appointments=filtered_appointments
+        filtered_appointments=filtered_appointments,
+        goto_date=goto_date,
+        start_of_week=start_of_week,
+        current_week_start=current_week_start,
+        prev_week_start=prev_week_start,
+        next_week_start=next_week_start
     )
+
+
+
 
 
 #  -----------------------------
@@ -3347,6 +3805,7 @@ def add_appointment():
         appointment_time = request.form["appointment_time"]
         status = request.form["status"]
         notes = request.form["notes"]
+        incoming_booking_id = request.form.get("incoming_booking_id", "")
 
         cur.execute("""
             INSERT INTO appointments (
@@ -3367,17 +3826,41 @@ def add_appointment():
             notes
         ))
 
+        if incoming_booking_id:
+            cur.execute("""
+                UPDATE incoming_square_bookings
+                SET status = 'imported',
+                    reviewed_at = CURRENT_TIMESTAMP
+                WHERE incoming_booking_id = %s
+            """, (incoming_booking_id,))
+            session.pop("incoming_booking_data", None)
+
         conn.commit()
         cur.close()
         conn.close()
 
-        return redirect(url_for("daily_schedule", selected_date=appointment_date))
+        return redirect(url_for("daily_schedule", date=appointment_date))
+
+    # GET values from normal flow or Square flow
+    client_id = request.args.get("client_id", "")
+    incoming_booking_id = request.args.get("incoming_booking_id", "")
+    prefill_date = request.args.get("appointment_date", "") or selected_date
+    prefill_time = request.args.get("appointment_time", "")
+    prefill_service_name = request.args.get("service_name", "")
 
     # GET form dropdown data
-    cur.execute("SELECT client_id, first_name, last_name FROM clients ORDER BY last_name, first_name")
+    cur.execute("""
+        SELECT client_id, first_name, last_name
+        FROM clients
+        ORDER BY last_name, first_name
+    """)
     clients = cur.fetchall()
 
-    cur.execute("SELECT service_id, service_name FROM services ORDER BY service_name")
+    cur.execute("""
+        SELECT service_id, service_name
+        FROM services
+        ORDER BY service_name
+    """)
     services = cur.fetchall()
 
     cur.close()
@@ -3387,8 +3870,15 @@ def add_appointment():
         "add_appointment.html",
         clients=clients,
         services=services,
-        selected_date=selected_date
+        selected_date=selected_date,
+        client_id=client_id,
+        incoming_booking_id=incoming_booking_id,
+        prefill_date=prefill_date,
+        prefill_time=prefill_time,
+        prefill_service_name=prefill_service_name
     )
+
+
 
 
 #  ---------------------
@@ -3647,7 +4137,7 @@ def client_history_detail_two(client_id):
 
 
 #  ---------------------------------
-#   ADD NEW CLIENT  
+#   ADD NEW CLIENT STEP 1  
 #         PAGE 1
 #  --------------------------------
 
@@ -3668,12 +4158,32 @@ def add_new_client():
         return redirect(url_for("add_new_client_step2"))
 
     step1_data = session.get("new_client_step1", {})
+
+    if not step1_data:
+        incoming_booking_data = session.get("incoming_booking_data", {})
+        if incoming_booking_data:
+            step1_data = {
+                "first_name": incoming_booking_data.get("first_name", ""),
+                "last_name": incoming_booking_data.get("last_name", ""),
+                "phone": incoming_booking_data.get("phone", ""),
+                "email": incoming_booking_data.get("email", ""),
+                "birth_date": "",
+                "address": "",
+                "city": "",
+                "state": "TX",
+                "zip": ""
+            }
+
     return render_template("add_new_client.html", step1_data=step1_data)
 
+
+
+
 #  ---------------------------------
-#   ADD NEW CLIENT   
+#   ADD NEW CLIENT STEP 2  
 #         PAGE 2
 #  --------------------------------
+
 
 @app.route("/add_new_client_step2", methods=["GET", "POST"])
 def add_new_client_step2():
@@ -3699,8 +4209,7 @@ def add_new_client_step2():
         if action == "save":
             step1 = session.get("new_client_step1", {})
             step2 = session.get("new_client_step2", {})
-
-            flash("Client added successfully!")
+            incoming_booking_data = session.get("incoming_booking_data", {})
 
             conn = get_db_connection()
             cur = conn.cursor()
@@ -3725,6 +4234,7 @@ def add_new_client_step2():
                     active_client
                 )
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING client_id
             """, (
                 step1.get("first_name", ""),
                 step1.get("last_name", ""),
@@ -3744,17 +4254,35 @@ def add_new_client_step2():
                 True if step2.get("active_client") == "true" else False
             ))
 
+            new_client_id = cur.fetchone()[0]
             conn.commit()
             cur.close()
             conn.close()
 
+            flash("Client added successfully!")
+
             session.pop("new_client_step1", None)
             session.pop("new_client_step2", None)
 
+            if incoming_booking_data:
+                return redirect(url_for(
+                    "add_appointment",
+                    client_id=new_client_id,
+                    incoming_booking_id=incoming_booking_data.get("incoming_booking_id", ""),
+                    appointment_date=incoming_booking_data.get("appointment_date", ""),
+                    appointment_time=incoming_booking_data.get("appointment_time", ""),
+                    service_name=incoming_booking_data.get("service_name", "")
+                ))
+
+            session.pop("incoming_booking_data", None)
             return redirect(url_for("client_history"))
 
     step2_data = session.get("new_client_step2", {})
     return render_template("add_new_client_step2.html", step2_data=step2_data)
+
+
+
+
 
 
 #  -----------------

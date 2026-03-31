@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}Review Incoming Booking{% endblock %}
+
+{% block content %}
+
+<h1>Review Incoming Booking</h1>
+
+<div class="section-page">
+    <div class="section-card">
+        <h3>Square Booking Information</h3>
+        <p><strong>Client:</strong> {{ booking[2] or "" }}</p>
+        <p><strong>Email:</strong> {{ booking[3] or "" }}</p>
+        <p><strong>Phone:</strong> {{ booking[4] or "" }}</p>
+        <p><strong>Date:</strong>
+            {% if booking[5] %}{{ booking[5].strftime('%m-%d-%Y') }}{% endif %}
+        </p>
+        <p><strong>Time:</strong>
+            {% if booking[6] %}{{ booking[6].strftime('%I:%M %p') }}{% endif %}
+        </p>
+        <p><strong>Service:</strong> {{ booking[7] or "" }}</p>
+        <p><strong>Status:</strong> {{ booking[8] }}</p>
+    </div>
+</div>
+
+<br>
+
+<div style="display:flex; gap:12px; flex-wrap:wrap;">
+    <a class="btn" href="{{ url_for('add_new_client_from_booking', incoming_booking_id=booking[0]) }}">
+        Add New Client + Appointment
+    </a>
+
+    <a class="btn" href="{{ url_for('match_existing_client_booking', incoming_booking_id=booking[0]) }}">
+        Match Existing Client + Add Appointment
+    </a>
+
+    <form method="POST" action="{{ url_for('ignore_incoming_booking', incoming_booking_id=booking[0]) }}" style="display:inline;">
+        <button type="submit" class="btn">Ignore</button>
+    </form>
+
+    <a class="btn" href="{{ url_for('incoming_bookings') }}">Back</a>
+</div>
+
+{% endblock %}

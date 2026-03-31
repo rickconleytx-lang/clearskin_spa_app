@@ -3,9 +3,100 @@
 {% block title %}Home{% endblock %}
 
 {% block content %}
-<h1>Welcome to the Clear Skin Esthetics Database</h1>
-<p>Your premier database. If you find any problems, please call someone who cares</p>
+
+<div class="section-page">
+    <div class="section-header">
+        <h1>Control Panel</h1>
+        <p class="section-subtitle">Quick access to all areas of the system.</p>
+    </div>
+
+    <!-- 🔹 HEADER 1 -->
+    <h2 style="margin-top: 25px;">Add Appointment, Gift Certificates and Birthday Offers</h2>
+    <div class="section-card-grid">
+
+        <a class="section-card" href="{{ url_for('calendar_view') }}">
+            <h3>Add Appointment</h3>
+            <p>Calendar-Select Go To Date-Click the date in the appointment day's box. Click Add Appointment & complete form.</p>
+        </a>
+
+        <a class="section-card" href="{{ url_for('gift_certificates_home') }}">
+            <h3>Gift Certificates</h3>
+            <p>Add New Gift Certificates when printed, update when sold and update when redeemed.</p>
+        </a>
+
+        <a class="section-card" href="{{ url_for('birthday_offers_home') }}">
+            <h3>Birthday Celebrations</h3>
+            <p>View and manage upcoming Client Birthdays, Mark when you have sent client a Birthday Offer.</p>
+        </a>
+
+    </div>
+
+    <!-- 🔹 HEADER 2 -->
+    <h2 style="margin-top: 30px;">Clients - Add New, History and Health Profile</h2>
+    <div class="section-card-grid">
+
+        <a class="section-card" href="{{ url_for('add_new_client') }}">
+            <h3>Add New Client</h3>
+            <p>Add New Client is 2 pages, this will take you to page 1, complete form, then click on Page 2, complete page 2 and Save.</p>
+        </a>
+
+        <a class="section-card" href="{{ url_for('client_history') }}">
+            <h3>Client History - View History, Edit and Delete</h3>
+            <p>Change this text and the url link.</p>
+        </a>
+
+        <a class="section-card" href="{{ url_for('client_history') }}">
+            <h3>Client Health Profile</h3>
+            <p>This form contains your client's health profile and allows Edits .</p>
+        </a>
+
+    </div>
+
+    <!-- 🔹 HEADER 3 -->
+    <h2 style="margin-top: 30px;">Clients Complete Record, Add Income Add Expenses</h2>
+    <div class="section-card-grid">
+
+        <a class="section-card" href="{{ url_for('client_history') }}">
+            <h3>Clients Complete Record</h3>
+            <p>View your Client's complete record, full edit available.</p>
+        </a>
+
+        <a class="section-card" href="{{ url_for('add_general_income') }}">
+            <h3>Add Income</h3>
+            <p>Click here to add any NON-Visit income, example: interest, refunds, loans.</p>
+        </a>
+
+        <a class="section-card" href="{{ url_for('add_expense') }}">
+            <h3>Add Expenses</h3>
+            <p>View/Edit/Delete Expense entries, View Expense Report and download to Excel.</p>
+        </a>
+
+    </div>
 
 
+
+
+    <!-- 🔹 HEADER 4 -->
+    <h2 style="margin-top: 30px;">Income Report, Expense Report</h2>
+    <div class="section-card-grid">
+
+        <a class="section-card" href="{{ url_for('income_report') }}">
+            <h3>Income Report</h3>
+            <p>View/Edit/Delete entries, View Income Report and Download for Excel.</p>
+        </a>
+
+        <a class="section-card" href="{{ url_for('expense_report') }}">
+            <h3>Expense Report</h3>
+            <p>View/Edit/Delete entries, View Expense Report and download to Excel.</p>
+        </a>
+
+        <a class="section-card" href="{{ url_for('home') }}">
+            <h3>Reserved for future use</h3>
+            <p>Reserved for future use.</p>
+        </a>
+
+    </div>
+
+</div>
 
 {% endblock %}
