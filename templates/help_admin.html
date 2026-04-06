@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+    
+{% block content %}
+<h1>Admin Help</h1>
+    
+<div class="help-section">
+    <h2>Using the Clients Page</h2>
+
+    <p>
+        The Appointments page has two sections: the Search section and the Appointments List.
+        The Search section is used to change the date range for the appointments shown in the
+        Appointment List.
+    </p>
+    
+    <p> 
+        When the Appointments page is opened, it will show the current day's appointments in the
+        Appointment List. If the day or date range you are looking for is already displayed,
+        there is no need to use the Search section. If the day or date range you want is not
+        displayed, you will need to use Search.
+    </p>
+</div>
+    
+<div class="help-section">
+    <h2>Using Search</h2>
+
+    <h3>From - To (Date Range)</h3>
+    <p>
+        Use the Date Range Search to search for either a single day or a range of dates.
+    </p>
+        
+    <p> 
+        To search for only one day, click inside the From box and use the Date Picker to select
+        the date. Then click in the To box and use the Date Picker to select the same date.
+        Finally, click the Filter button.
+    </p>
+        
+    <p>
+        To search for a range of dates, click inside the From box and use the Date Picker to
+        select the beginning date. Then click in the To box and use the Date Picker to select
+        the ending date of your date range. Finally, click the Filter button to display the
+        scheduled appointments within that date range.  
+    </p>
+            
+    <h3>Filter</h3>
+    <ul>
+        <li>Clicking Filter will display the selected date range in the Appointment List.</li>
+    </ul>
+            
+    <h3>Today</h3>
+    <ul>
+        <li>Clicking Today will display today's appointments in the Appointment List.</li>
+    </ul>
+
+    <h3>Show All Appointments</h3>
+    <ul>
+        <li>Displays all appointments ever scheduled in the Appointment List.</li>
+    </ul>
+
+    <h3>Add Appointment</h3>
+    <ul>
+        <li>Opens the Daily Schedule page so you can enter details for a new appointment.</li>
+    </ul>
+</div>
+
+<div class="help-section">
+    <h2>Appointment List View</h2>
+       
+    <p> 
+        The Appointment List View displays all appointments returned by the current search.
+        Each line contains appointment details as well as buttons for Edit, Add Income, and Cancel.
+    </p>
+        
+    <h3>Appointment Line</h3>
+    <p>Left to right:</p>
+    <ul>
+        <li>ID - each appointment has a unique appointment ID</li>
+        <li>Date of appointment</li>
+        <li>Time of appointment</li>
+        <li>Client name - Last Name, First Name</li>
+        <li>Service scheduled</li>
+        <li>Appointment status - Completed / Booked</li>
+        <li>
+            Actions
+            <ul>
+                <li>Edit Button - Click to edit or reschedule the appointment</li>
+                <li>Add Income Button - Click to finish the session, enter payment information, and complete the post-a$
+                <li>Cancel Button - Click to cancel the appointment</li>
+            </ul>
+        </li>
+    </ul>
+</div>  
+    
+{% endblock %}
+    
+

@@ -557,9 +557,68 @@ def help_calendar_page():
 def help_appointments_page():
     return render_template("help_appointments.html")
             
-    
-    
 
+
+@app.route("/help_client_management")
+def help_client_management_page():
+    return render_template("help_client_management.html")
+ 
+
+@app.route("/help_add_new_client")
+def help_add_new_client_page():
+    return render_template("help_add_new_client.html")
+
+
+
+@app.route("/help_clients")
+def help_clients_page():
+    return render_template("help_clients.html")
+
+
+@app.route("/help_birthday_offer")
+def help_birthday_offer_page():
+    return render_template("help_birthday_offer.html")
+
+
+
+@app.route("/help_income")
+def help_income_page():
+    return render_template("help_income.html")
+
+
+
+@app.route("/help_gift_certs")
+def help_gift_certs_page():
+    return render_template("help_gift_certs.html")
+
+
+@app.route("/help_expenses")
+def help_expenses_page():
+    return render_template("help_expenses.html")
+
+
+@app.route("/help_admin")
+def help_admin_page():
+    return render_template("help_admin.html")
+
+
+
+
+
+#   -----------------------
+#
+#     FUTURE CALENDAR SYNC
+#
+#  ----------------------
+    
+    
+@app.route("/admin/sync_calendar")
+def sync_calendar():
+    flash(
+        "Google Calendar sync is not active yet. This feature will be added after deployment.",
+        "info"
+    )
+    return redirect(url_for("admin"))
 
 
 
