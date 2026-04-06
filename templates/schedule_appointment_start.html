@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block title %}Schedule Appointment{% endblock %}
+
+{% block content %}
+<h1>Schedule Appointment</h1>
+
+{% if selected_date %}
+    <p><strong>Selected Date:</strong> {{ selected_date }}</p>
+{% endif %}
+
+<div class="form-section">
+    <form method="POST" action="{{ url_for('schedule_appointment_start') }}">
+        <input type="hidden" name="selected_date" value="{{ selected_date }}">
+
+        <div class="form-group">
+            <label for="last_name">Search by Last Name</label>
+            <input type="text" id="last_name" name="last_name" value="{{ last_name }}">
+        </div>
+
+        <div class="form-group">
+            <label for="birth_date">Search by Birthday</label>
+            <input type="date" id="birth_date" name="birth_date" value="{{ birth_date }}">
+        </div>
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Search</button>
+
+            <a href="{{ url_for('add_new_client', selected_date=selected_date) }}" class="btn btn-secondary">
+                Add New Client
+            </a>
+
+            <a href="{{ url_for('clients_home') }}" class="btn btn-secondary">
+                Cancel
+            </a>
+        </div>
+    </form>
+</div>
+
+{% if clients %}
+    <h2>Matching Clients</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Last Name</th>
+                <th>First Name</th>
+                <th>Birth Date</th>
+                <th>Phone</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for client in clients %}
+            <tr>
+                <td>{{ client[2] }}</td>
+                <td>{{ client[1] }}</td>
+                <td>{{ client[3] if client[3] else "" }}</td>
+                <td>{{ client[4] if client[4] else "" }}</td>
+                <td>
+                    <a href="{{ url_for('add_appointment', client_id=client[0], selected_date=selected_date) }}"
+                       class="btn btn-primary">
+                        Schedule Appointment
+                    </a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+{% elif request.method == "POST" %}
+    <p>No matching clients found.</p>
+
+    <a href="{{ url_for('add_new_client', selected_date=selected_date) }}" class="btn btn-primary">
+        Add New Client
+    </a>
+{% endif %}
+
+{% endblock %}

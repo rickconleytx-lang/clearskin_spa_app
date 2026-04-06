@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Calendar Help</h1>
+
+<div class="help-section">
+    <h2>Using the Calendar Page</h2>
+
+    <p>
+        The Weekly Calendar page has two sections: the Search section and the Week View.
+        The Week View displays the days of the week from Sunday to Saturday.
+    </p>
+
+    <p>
+        If the day you are looking for is already displayed in the weekly calendar view,
+        there is no need to use the search feature. If the day you are looking for is not
+        displayed, you will need to use Search.
+    </p>
+</div>
+
+<div class="help-section">
+    <h2>Using Search</h2>
+
+    <h3>Today</h3>
+    <ul>
+        <li>Clicking Today will display today's date in the Week View.</li>
+    </ul>
+
+    <h3>Previous Week</h3>
+    <ul>
+        <li>Clicking Previous Week will change the week displayed in the Week View to the previous week.</li>
+    </ul>
+
+    <h3>Next Week</h3>
+    <ul>
+        <li>Clicking Next Week will change the week displayed in the Week View to the next week.</li>
+    </ul>
+
+    <h3>Current Week</h3>
+    <ul>
+        <li>Clicking Current Week will change the week displayed in the Week View to the current week.</li>
+    </ul>
+
+    <h3>Go To Date</h3>
+    <ul>
+        <li>Using the Date Picker, select the date you wish to review.</li>
+        <li>Click "Go To Date." This will change the week displayed in the Week View to include the date you entered.</li>
+    </ul>
+</div>
+
+<div class="help-section">
+    <h2>Week View and Day View</h2>
+
+    <h3>Week View</h3>
+    <p>
+        The Week View displays the days of the week from Sunday to Saturday. If the week displayed
+        contains the current day, that day will be highlighted.
+    </p>
+
+    <p>
+        At the top of each day's block is that day's date. Inside each day's block are the
+        appointments scheduled for that day. The earliest appointment for the day will appear first,
+        and the latest appointment will appear last. An empty day's block means no appointments are
+        scheduled for that day.
+    </p>
+
+    <h3>Day View Appointment Block</h3>
+    <p>
+        The Appointment Block contains information about the appointment. Below is a description
+        of each line in the Appointment Block.
+    </p>
+
+    <ul>
+        <li>Top line is the appointment time</li>
+        <li>Client's name</li>
+        <li>Service type</li>
+        <li>Appointment status - Booked / Completed</li>
+        <li>Edit Button - Click to edit or reschedule the appointment</li>
+        <li>Finish Session Button - Click to finish the session, enter payment information, and complete the post-appointment summary notes</li>
+        <li>Cancel Button - Click to cancel the appointment</li>
+    </ul>
+</div>
+
+<div class="help-section">
+    <h2>Entering an Appointment</h2>
+    <ul>
+        <li>Click on a day's date at the top of the Day View.</li>
+        <li>This will open the Daily Schedule page so that you can enter details for a new appointment.</li>
+    </ul>
+
+    <h2>Edit Appointment</h2>
+    <p>
+        Use Edit to change any part of the appointment, including rescheduling to a different date,
+        changing the time, or changing the service type.
+    </p>
+
+    <h2>Finish Session</h2>
+    <p>
+        Clicking Finish Session will first take you to the Add Income page/form. Enter the payment
+        information for the appointment and then click Save Income.
+    </p>
+
+    <p>
+        After clicking Save Income, you will be taken to the Appointment Summary page so you can
+        enter details of the appointment, such as products used or recommended, at-home care, and notes.
+    </p>
+
+    <h2>Cancel</h2>
+    <p>
+        Clicking Cancel will allow you to cancel the appointment. After clicking Cancel, you will
+        receive a confirmation prompt before the appointment is canceled.
+    </p>
+</div>
+
+        
+{% endblock %}

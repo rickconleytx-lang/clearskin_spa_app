@@ -8,12 +8,21 @@
 {% endif %}
 
 <div style="margin-bottom: 20px;">
-    <a href="{{ url_for('client_history') }}" class="btn return-btn">
+    {% if selected_date %}
+        <a href="{{ url_for('daily_schedule', date=selected_date) }}" class="btn return-btn">
+            ← Back to Daily Schedule
+        </a>
+    {% endif %}
+
+    <a href="{{ url_for('client_history', client_id=client[0]) }}" class="btn return-btn">
         ← Return to Client History
     </a>
 </div>
 
-<form method="POST" action="{{ url_for('client_health_profile', client_id=client[0]) }}">
+<form method="POST" action="{{ url_for('client_health_profile', client_id=client[0], date=selected_date) }}">
+
+    <input type="hidden" name="appointment_id" value="{{ appointment_id or '' }}">
+    <input type="hidden" name="date" value="{{ selected_date or '' }}">
 
     <h3>Basic Information</h3>
 
@@ -21,9 +30,11 @@
         <label for="sex">Sex</label><br>
         <select id="sex" name="sex">
             <option value="">-- Select --</option>
-            <option value="Female" {% if profile and profile[2] == 'Female' %}selected{% endif %}>Female</option>
-            <option value="Male" {% if profile and profile[2] == 'Male' %}selected{% endif %}>Male</option>
-            <option value="Other" {% if profile and profile[2] == 'Other' %}selected{% endif %}>Other</option>
+            {% for row in sex_options %}
+                <option value="{{ row[1] }}" {% if profile and profile[2] == row[1] %}selected{% endif %}>
+                    {{ row[1] }}
+                </option>
+            {% endfor %}
         </select>
     </div>
 
@@ -32,7 +43,7 @@
         <select id="skin_type_id" name="skin_type_id">
             <option value="">-- Select Skin Type --</option>
             {% for row in skin_types %}
-                <option value="{{ row[0] }}" {% if profile and profile[1] == row[0] %}selected{% endif %}>
+                <option value="{{ row[0] }}" {% if profile and profile[3] == row[0] %}selected{% endif %}>
                     {{ row[1] }}
                 </option>
             {% endfor %}
@@ -44,23 +55,26 @@
         <select id="fitzpatrick_id" name="fitzpatrick_id">
             <option value="">-- Select Fitzpatrick Type --</option>
             {% for row in fitzpatrick_types %}
-                 <option value="{{ row[0] }}" {% if profile and profile[2] == row[0] %}selected{% endif %}>
-                     {% if row[2] %}
-                         {{ row[1] }} - {{ row[2] }}
-                     {% else %}
-                         {{ row[1] }}
-                     {% endif %}
-                 </option>
-             {% endfor %}
+                <option value="{{ row[0] }}" {% if profile and profile[4] == row[0] %}selected{% endif %}>
+                    {% if row[2] %}
+                        {{ row[1] }} - {{ row[2] }}
+                    {% else %}
+                        {{ row[1] }}
+                    {% endif %}
+                </option>
+            {% endfor %}
         </select>
-
-
-
-
-
     </div>
 
+    <br>
+    <br>
+
     <h3>Skin / Medical Information</h3>
+
+    <button type="submit" class="btn">Save Health Profile</button>
+    <a href="{{ url_for('client_history', client_id=client[0]) }}" class="btn btn-secondary">
+        Cancel
+    </a>
 
     <div>
         <label for="skin_concerns">Skin Concerns</label><br>
@@ -91,6 +105,17 @@
         <label for="past_medical_treatments">Past Medical Treatments</label><br>
         <textarea id="past_medical_treatments" name="past_medical_treatments" rows="3">{{ profile[10] if profile else '' }}</textarea>
     </div>
+
+    <br>
+    <br>
+
+    <button type="submit" class="btn">Save Health Profile</button>
+    <a href="{{ url_for('client_history', client_id=client[0]) }}" class="btn btn-secondary">
+        Cancel
+    </a>
+
+    <br>
+    <br>
 
     <h3>Treatment Contraindications</h3>
 
@@ -147,6 +172,9 @@
 
     <br>
     <button type="submit" class="btn">Save Health Profile</button>
-    <a class="btn" href="{{ url_for('client_history_detail_two', client_id=client[0]) }}">Cancel</a>
+    <a href="{{ url_for('client_history', client_id=client[0]) }}" class="btn btn-secondary">
+        Cancel
+    </a>
+
 </form>
 {% endblock %}

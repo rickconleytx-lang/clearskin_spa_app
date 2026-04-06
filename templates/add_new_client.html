@@ -7,8 +7,12 @@
 
 <form method="POST">
 
+    <input type="hidden" name="selected_date" value="{{ selected_date }}">
+
     <div class="form-buttons">
-        <button type="submit">Page 2</button>
+
+        
+        <button type="submit">Next Page</button>
 
         <button type="reset"
             onclick="return confirm('Are you sure you want to clear this form?')">

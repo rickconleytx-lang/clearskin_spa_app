@@ -1624,3 +1624,30 @@ form textarea {
     background-color: #fff8e1;
     border-left: 5px solid #cc9900;
 }
+
+.help-section {
+    margin-bottom: 30px;
+    padding: 20px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    background-color: #fafafa;
+}
+
+.help-section h2 {
+    color: #125e65;
+    margin-bottom: 10px;
+}
+
+.help-section h3 {
+    margin-top: 15px;
+    color: #333;
+}
+
+.help-section ul {
+    margin-left: 20px;
+    line-height: 1.7;
+}
+
+.help-section p {
+    line-height: 1.7;
+}

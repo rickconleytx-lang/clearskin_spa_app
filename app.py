@@ -1,7 +1,10 @@
-from flask import Flask, render_template, request, redirect, url_for, session, flash
+from flask import Flask, render_template, request, Response, send_file, redirect, url_for, session, flash
 from datetime import date, timedelta, datetime
 from psycopg2 import sql
 from decimal import Decimal
+import csv
+import io
+from openpyxl import Workbook
 
 from db import get_db_connection
 
@@ -57,6 +60,12 @@ def split_client_name(full_name):
     if len(parts) == 1:
         return parts[0], ""
     return parts[0], " ".join(parts[1:])
+
+
+def get_current_spa_id():
+    return session.get("spa_id", 1)
+
+
 
 
 
@@ -415,6 +424,8 @@ DROPDOWN_CONFIG = {
 
 @app.route("/admin/dropdowns/<dropdown_key>", methods=["GET", "POST"])
 def manage_dropdown(dropdown_key):
+    spa_id = get_current_spa_id()
+
     if dropdown_key not in DROPDOWN_CONFIG:
         flash("Invalid dropdown selection.", "error")
         return redirect(url_for("admin"))
@@ -484,6 +495,8 @@ def manage_dropdown(dropdown_key):
 
 @app.route("/admin/dropdowns/<dropdown_key>/delete/<path:item_id>", methods=["POST"])
 def delete_dropdown_item(dropdown_key, item_id):
+    spa_id = get_current_spa_id()
+
     if dropdown_key not in DROPDOWN_CONFIG:
         flash("Invalid dropdown selection.", "error")
         return redirect(url_for("admin"))
@@ -514,12 +527,189 @@ def delete_dropdown_item(dropdown_key, item_id):
 
 
 
-#  ------------------------------------------
+
+
+
+
+
+
+#  ---------------------
 #
-#      HOME PAGES  SECTION 
+#     HELP PAGES
+#
+#  -----------------
+
+
+
+@app.route("/help")
+def help_page():
+    return render_template("help.html")
+
+
+
+@app.route("/help_calendar")
+def help_calendar_page():   
+    return render_template("help_calendar.html")
+
+
+    
+@app.route("/help_appointments")
+def help_appointments_page():
+    return render_template("help_appointments.html")
+            
+    
+    
+
+
+
+
+#   ------------------------------------
 #
 #
-#  ------------------------------------------
+#   CLIENT MANAGEMENT
+#
+#   --------------------------------
+
+
+
+
+@app.route("/client_management")
+def client_management():
+    spa_id = get_current_spa_id()
+    search = request.args.get("search", "").strip()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    rows = []
+
+    if search:
+        cur.execute("""
+            SELECT
+                c.client_id,
+                c.first_name,
+                c.last_name,
+                c.phone,
+                c.email,
+                c.birth_date,
+
+                (
+                    SELECT MAX(a1.appointment_date)
+                    FROM appointments a1
+                    WHERE a1.client_id = c.client_id
+                      AND a1.spa_id = c.spa_id
+                      AND a1.appointment_date <= CURRENT_DATE
+                ) AS last_visit_date,
+
+                (
+                    SELECT MIN(a2.appointment_date)
+                    FROM appointments a2
+                    WHERE a2.client_id = c.client_id
+                      AND a2.spa_id = c.spa_id
+                      AND a2.appointment_date >= CURRENT_DATE
+                ) AS next_visit_date
+
+            FROM clients c
+            WHERE c.spa_id = %s
+              AND (
+                   LOWER(c.first_name) LIKE %s
+                   OR LOWER(c.last_name) LIKE %s
+                   OR c.phone LIKE %s
+              )
+            ORDER BY c.last_name, c.first_name
+        """, (
+            spa_id,
+            f"%{search.lower()}%",
+            f"%{search.lower()}%",
+            f"%{search}%"
+        ))
+
+        rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "client_management.html",
+        rows=rows,
+        search=search
+    )
+
+
+
+
+
+
+#  --------------------------------------
+#
+#  SCHEDULE APPOINTMENT START
+#
+#
+#  -----------------------------------
+
+@app.route("/schedule_appointment_start", methods=["GET", "POST"])
+def schedule_appointment_start():
+    spa_id = get_current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    clients = []
+
+    selected_date = request.args.get("selected_date") \
+        or request.form.get("selected_date") \
+        or ""
+
+    last_name = ""
+    birth_date = ""
+
+    if request.method == "POST":
+        last_name = request.form.get("last_name", "").strip()
+        birth_date = request.form.get("birth_date", "").strip()
+
+        query = """
+            SELECT
+                client_id,
+                first_name,
+                last_name,
+                birth_date,
+                phone
+            FROM clients
+            WHERE spa_id = %s
+        """
+        params = [spa_id]
+
+        if last_name:
+            query += " AND last_name ILIKE %s"
+            params.append(f"%{last_name}%")
+
+        if birth_date:
+            query += " AND birth_date = %s"
+            params.append(birth_date)
+
+        query += " ORDER BY last_name, first_name"
+
+        if last_name or birth_date:
+            cur.execute(query, tuple(params))
+            clients = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "schedule_appointment_start.html",
+        clients=clients,
+        selected_date=selected_date,
+        last_name=last_name,
+        birth_date=birth_date
+    )
+
+
+
+
+
+
+
 
 
 #  ------------------------------------------
@@ -571,6 +761,127 @@ def income_home():
         total_expenses=total_expenses,
         net_total=net_total
     )
+
+
+
+
+
+
+
+
+#  ------------------------------------------
+#           
+#           CLIENT FORMS 
+#
+#  ------------------------------------------
+
+
+@app.route("/client_forms/<int:client_id>", methods=["GET", "POST"])
+def client_forms(client_id):
+    spa_id = get_current_spa_id()
+    appointment_id = request.args.get("appointment_id") or request.form.get("appointment_id")
+    selected_date = request.args.get("date") or request.form.get("date")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    if request.method == "POST":
+        form_type_id = request.form.get("form_type_id")
+        date_given = request.form.get("date_given") or None
+        date_signed = request.form.get("date_signed") or None
+        form_given = "form_given" in request.form
+        form_signed = "form_signed" in request.form
+        notes = request.form.get("notes", "")
+
+        cur.execute("""
+            INSERT INTO client_forms_log (
+                spa_id,
+                client_id,
+                appointment_id,
+                form_type_id,
+                date_given,
+                date_signed,
+                form_given,
+                form_signed,
+                notes
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            spa_id,
+            client_id,
+            appointment_id,
+            form_type_id,
+            date_given,
+            date_signed,
+            form_given,
+            form_signed,
+            notes
+        ))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        flash("Client form log saved successfully.", "success")
+
+        return redirect(
+            url_for(
+                "client_forms",
+                client_id=client_id,
+                appointment_id=appointment_id,
+                date=selected_date
+            )
+        )
+
+    cur.execute("""
+        SELECT form_type_id, form_name
+        FROM form_types
+        WHERE spa_id = %s
+          AND active = TRUE
+        ORDER BY form_name
+    """, (spa_id,))
+    form_types = cur.fetchall()
+
+    cur.execute("""
+        SELECT client_id, first_name, last_name
+        FROM clients
+        WHERE client_id = %s
+          AND spa_id = %s
+    """, (client_id, spa_id))
+    client = cur.fetchone()
+
+    cur.execute("""
+        SELECT
+            cfl.client_form_log_id,
+            ft.form_name,
+            cfl.date_given,
+            cfl.date_signed,
+            cfl.form_given,
+            cfl.form_signed,
+            cfl.notes
+        FROM client_forms_log cfl
+        JOIN form_types ft
+            ON cfl.form_type_id = ft.form_type_id
+        WHERE cfl.client_id = %s
+          AND cfl.spa_id = %s
+        ORDER BY cfl.created_at DESC
+    """, (client_id, spa_id))
+    form_history = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "client_forms.html",
+        client=client,
+        form_types=form_types,
+        form_history=form_history,
+        appointment_id=appointment_id,
+        selected_date=selected_date
+    )
+
+
+
 
 
 
@@ -877,6 +1188,8 @@ from datetime import date
 
 @app.route("/clients")
 def clients_home():
+    spa_id = get_current_spa_id()
+
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -951,6 +1264,8 @@ def clients_home():
 
 @app.route("/edit-client-full/<int:client_id>", methods=["GET", "POST"])
 def edit_client_full(client_id):
+    spa_id = get_current_spa_id()
+
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -1237,6 +1552,7 @@ def edit_client_full(client_id):
 
 @app.route("/birthday-offers")
 def birthday_offers_home():
+    spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -1334,6 +1650,7 @@ def birthday_offers_home():
 
 @app.route("/birthday-offers/mark-sent/<int:client_id>", methods=["POST"])
 def mark_birthday_offer_sent(client_id):
+    spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -1395,6 +1712,7 @@ def mark_birthday_offer_sent(client_id):
 
 @app.route("/employees")
 def employees_home():
+    spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -1444,6 +1762,7 @@ def employees_home():
 
 @app.route("/employees/add", methods=["GET", "POST"])
 def add_employee():
+    spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -1551,6 +1870,7 @@ def add_employee():
 
 @app.route("/employees/edit/<int:employee_id>", methods=["GET", "POST"])
 def edit_employee(employee_id):
+    spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -1690,6 +2010,7 @@ def edit_employee(employee_id):
             
 @app.route("/employees/delete/<int:employee_id>", methods=["POST"])
 def delete_employee(employee_id):
+    spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -1721,6 +2042,7 @@ def delete_employee(employee_id):
 
 @app.route("/expenses")
 def expenses_home():
+    spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -1770,12 +2092,12 @@ def expenses_home():
 #      ADD  EXPENSES
 #  ------------------------------------------
 
-
 @app.route("/expenses/add", methods=["GET", "POST"])
-def add_expense():
+def add_expense(): 
+    spa_id = get_current_spa_id()
     conn = get_db_connection()
-    cur = conn.cursor()
-
+    cur = conn.cursor()  
+            
     if request.method == "POST":
         expense_date = request.form.get("expense_date")
         vendor_name = request.form.get("vendor_name")
@@ -1785,13 +2107,13 @@ def add_expense():
         payment_method = request.form.get("payment_method")
         receipt_file = request.form.get("receipt_file")
         notes = request.form.get("notes")
-
+        
         if not expense_date or not vendor_name or not amount:
             flash("Expense date, vendor name, and amount are required.", "error")
             cur.close()
             conn.close()
             return redirect(url_for("add_expense"))
-
+        
         try:
             amount = Decimal(amount)
         except:
@@ -1799,7 +2121,7 @@ def add_expense():
             cur.close()
             conn.close()
             return redirect(url_for("add_expense"))
-
+            
         cur.execute("""
             INSERT INTO expenses (
                 expense_date,
@@ -1815,40 +2137,55 @@ def add_expense():
         """, (
             expense_date,
             vendor_name,
-            category,
+            category,  
             description,
             amount,
             payment_method,
             receipt_file,
             notes
         ))
-
+        
         conn.commit()
         cur.close()
         conn.close()
-
+    
         flash("Expense added successfully.", "success")
         return redirect(url_for("expenses_home"))
-
-    cur.execute("SELECT vendor_name FROM vendor_name ORDER BY vendor_name ASC")
+            
+    cur.execute("""
+        SELECT vendors_name
+        FROM vendor_name
+        ORDER BY vendors_name ASC
+    """)
     vendors = cur.fetchall()
 
-    cur.execute("SELECT expense_cat_name FROM expense_categories ORDER BY expense_cat_name ASC")
+    cur.execute("""
+        SELECT expense_cat_name
+        FROM expense_categories
+        ORDER BY expense_cat_name ASC
+    """)
     categories = cur.fetchall()
-
-    cur.execute("SELECT payment_method FROM payment_methods ORDER BY payment_method ASC")
+        
+    cur.execute("""
+        SELECT payment_method
+        FROM payment_methods
+        ORDER BY payment_method ASC
+    """)
     payment_methods = cur.fetchall()
-
+            
     cur.close()
     conn.close()
-
+        
     return render_template(
-        "add_expense.html",
+        "add_expense.html",  
         today=date.today().isoformat(),
-        vendors=vendors,
+        vendors=vendors, 
         categories=categories,
         payment_methods=payment_methods
     )
+
+
+
 
         
 #  ------------------------------------------
@@ -1857,14 +2194,26 @@ def add_expense():
 
 @app.route("/expenses/report", methods=["GET"])
 def expense_report():
-    start_date = request.args.get("start_date")
-    end_date = request.args.get("end_date")
-    category = request.args.get("category")
-    payment_method = request.args.get("payment_method")
+    spa_id = get_current_spa_id()
+    start_date = request.args.get("start_date", "").strip()
+    end_date = request.args.get("end_date", "").strip()
+    category = request.args.get("category", "").strip()
+    vendor_name = request.args.get("vendor_name", "").strip()
 
     conn = get_db_connection()
     cur = conn.cursor()
 
+    # Load category dropdown options
+    cur.execute("""
+        SELECT expense_cat_id, expense_cat_name
+        FROM expense_categories
+        ORDER BY expense_cat_name
+    """)
+    category_options = cur.fetchall()
+
+    # -----------------------------
+    # Main expense rows
+    # -----------------------------
     query = """
         SELECT
             expense_id,
@@ -1891,45 +2240,21 @@ def expense_report():
         params.append(end_date)
 
     if category:
-        query += " AND category ILIKE %s"
+        query += " AND category = %s"
         params.append(category)
 
-    if payment_method:
-        query += " AND payment_method ILIKE %s"
-        params.append(payment_method)
+    if vendor_name:
+        query += " AND vendor_name ILIKE %s"
+        params.append(f"%{vendor_name}%")
 
     query += " ORDER BY expense_date DESC, expense_id DESC"
 
     cur.execute(query, tuple(params))
     expenses = cur.fetchall()
 
-    total_query = """
-        SELECT COALESCE(SUM(amount), 0)
-        FROM expenses
-        WHERE 1=1
-    """
-    total_params = []
-
-    if start_date:
-        query += " AND expense_date >= %s"
-        params.append(start_date)
-
-    if end_date:
-        query += " AND expense_date <= %s"
-        params.append(end_date)
-
-    if category:
-        query += " AND category ILIKE %s"
-        params.append(category)
-
-    if payment_method:
-        query += " AND payment_method ILIKE %s"
-        params.append(payment_method)
-
-
-    cur.execute(query, tuple(params))
-    expenses = cur.fetchall()
-
+    # -----------------------------
+    # Total amount
+    # -----------------------------
     total_query = """
         SELECT COALESCE(SUM(amount), 0)
         FROM expenses
@@ -1946,18 +2271,23 @@ def expense_report():
         total_params.append(end_date)
 
     if category:
-        total_query += " AND category ILIKE %s"
+        total_query += " AND category = %s"
         total_params.append(category)
 
-    if payment_method:
-        total_query += " AND payment_method ILIKE %s"
-        total_params.append(payment_method)
+    if vendor_name:
+        total_query += " AND vendor_name ILIKE %s"
+        total_params.append(f"%{vendor_name}%")
 
     cur.execute(total_query, tuple(total_params))
     report_total = cur.fetchone()[0]
 
+    # -----------------------------
+    # Category totals
+    # -----------------------------
     category_totals_query = """
-        SELECT category, COALESCE(SUM(amount), 0)
+        SELECT
+            category,
+            COALESCE(SUM(amount), 0)
         FROM expenses
         WHERE 1=1
     """
@@ -1972,12 +2302,12 @@ def expense_report():
         category_totals_params.append(end_date)
 
     if category:
-        category_totals_query += " AND category ILIKE %s"
+        category_totals_query += " AND category = %s"
         category_totals_params.append(category)
 
-    if payment_method:
-        category_totals_query += " AND payment_method ILIKE %s"
-        category_totals_params.append(payment_method)
+    if vendor_name:
+        category_totals_query += " AND vendor_name ILIKE %s"
+        category_totals_params.append(f"%{vendor_name}%")
 
     category_totals_query += """
         GROUP BY category
@@ -1997,10 +2327,17 @@ def expense_report():
 
     return render_template(
         "expense_report.html",
+        start_date=start_date,
+        end_date=end_date,
+        category=category,
+        vendor_name=vendor_name,
+        category_options=category_options,
         expenses=expenses,
         report_total=report_total,
         category_totals=category_totals
     )
+
+
 
 #  ------------------------------------------
 #         EDIT EXPENSES
@@ -2008,6 +2345,7 @@ def expense_report():
             
 @app.route("/expenses/edit/<int:expense_id>", methods=["GET", "POST"])
 def edit_expense(expense_id):
+    spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -2102,6 +2440,7 @@ def edit_expense(expense_id):
             
 @app.route("/expenses/delete/<int:expense_id>", methods=["POST"])
 def delete_expense(expense_id):
+    spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -2125,6 +2464,7 @@ import io
 
 @app.route("/export_expense_report_csv")
 def export_expense_report_csv():
+    spa_id = get_current_spa_id()
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
 
@@ -2204,6 +2544,7 @@ from collections import defaultdict
 
 @app.route("/export_expense_report_xlsx")
 def export_expense_report_xlsx():
+    spa_id = get_current_spa_id()
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
 
@@ -2371,12 +2712,15 @@ def export_expense_report_xlsx():
 
 @app.route("/add_income/<int:appointment_id>", methods=["GET", "POST"])
 def add_income(appointment_id):
+    spa_id = get_current_spa_id()
+    selected_date = request.args.get("date") or request.form.get("date") or ""
+
     conn = get_db_connection()
     cur = conn.cursor()
 
     # Get appointment and client info
     cur.execute("""
-        SELECT 
+        SELECT
             a.appointment_id,
             a.client_id,
             a.appointment_date,
@@ -2384,15 +2728,19 @@ def add_income(appointment_id):
             c.first_name,
             c.last_name
         FROM appointments a
-        JOIN clients c ON a.client_id = c.client_id
+        JOIN clients c
+            ON a.client_id = c.client_id
         WHERE a.appointment_id = %s
-    """, (appointment_id,))
+          AND a.spa_id = %s
+    """, (appointment_id, spa_id))
     appt = cur.fetchone()
 
     if not appt:
         cur.close()
         conn.close()
         flash("Appointment not found.", "error")
+        if selected_date:
+            return redirect(url_for("daily_schedule", date=selected_date))
         return redirect(url_for("appointments"))
 
     if request.method == "POST":
@@ -2430,8 +2778,8 @@ def add_income(appointment_id):
             )
         """, (
             income_date,
-            appt[1],          # client_id
-            appt[0],          # appointment_id
+            appt[1],   # client_id
+            appt[0],   # appointment_id
             income_type,
             description,
             service_amount,
@@ -2449,13 +2797,20 @@ def add_income(appointment_id):
         conn.close()
 
         flash("Income added successfully.", "success")
-        return redirect(url_for("daily_schedule", date=appt[2]))
+        return redirect(url_for(
+            "post_appointment_wrap_up",
+            appointment_id=appt[0],
+            date=selected_date
+        ))
 
     cur.close()
     conn.close()
 
-    return render_template("add_income.html", appt=appt)
-
+    return render_template(
+        "add_income.html",
+        appt=appt,
+        selected_date=selected_date
+    )
 
 
 
@@ -2467,6 +2822,7 @@ def add_income(appointment_id):
 
 @app.route("/edit_income/<int:income_id>", methods=["GET", "POST"])
 def edit_income(income_id):
+    spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -2560,9 +2916,168 @@ def edit_income(income_id):
     )
 
 
+    
+#  --------------------------
+#     INCOME EXPORT TO CSV      
+# ROUTE: income_report/csv    
+#
+#  ------------------------
+
+@app.route("/income_report/csv")
+def income_report_csv():
+    spa_id = get_current_spa_id()
+    today = date.today()
+    first_day = today.replace(day=1)
+
+    start_date = request.args.get("start_date", first_day.strftime("%Y-%m-%d"))
+    end_date = request.args.get("end_date", today.strftime("%Y-%m-%d"))
+    income_type = request.args.get("income_type", "").strip()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    filter_sql = "WHERE i.income_date BETWEEN %s AND %s"
+    params = [start_date, end_date]
+
+    if income_type:
+        filter_sql += " AND i.income_type = %s"
+        params.append(income_type)
+
+    cur.execute(f"""
+        SELECT
+            i.income_id,
+            i.income_date,
+            COALESCE(c.first_name || ' ' || c.last_name, 'No Client') AS client_name,
+            COALESCE(i.income_type, '') AS income_type,
+            COALESCE(i.description, '') AS description,
+            COALESCE(i.payment_method, '') AS payment_method,
+            COALESCE(i.service_amount, 0.00) AS service_amount,
+            COALESCE(i.retail_amount, 0.00) AS retail_amount,
+            COALESCE(i.tax_amount, 0.00) AS tax_amount,
+            COALESCE(i.total_amount, 0.00) AS total_amount,
+            COALESCE(i.notes, '') AS notes
+        FROM income i
+        LEFT JOIN clients c ON i.client_id = c.client_id
+        {filter_sql}
+        ORDER BY i.income_date DESC, i.income_id DESC
+    """, params)
+
+    rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    writer.writerow([
+        "Income ID",
+        "Income Date",
+        "Client Name",
+        "Income Type",
+        "Description",
+        "Payment Method",
+        "Service Amount",
+        "Retail Amount",
+        "Tax Amount",
+        "Total Amount",
+        "Notes"
+    ])
+
+    for row in rows:
+        writer.writerow(row)
+
+    output.seek(0)
+
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=income_report.csv"}
+    )
 
 
+# -----------------------
+# INCOME EXPORT TO EXCEL
+#  ROUTE: income_report/excel
+#
+#
+#  ----------------------
 
+@app.route("/income_report/excel")
+def income_report_excel():
+    spa_id = get_current_spa_id()
+    today = date.today()
+    first_day = today.replace(day=1)
+
+    start_date = request.args.get("start_date", first_day.strftime("%Y-%m-%d"))
+    end_date = request.args.get("end_date", today.strftime("%Y-%m-%d"))
+    income_type = request.args.get("income_type", "").strip()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    filter_sql = "WHERE i.income_date BETWEEN %s AND %s"
+    params = [start_date, end_date]
+
+    if income_type:
+        filter_sql += " AND i.income_type = %s"
+        params.append(income_type)
+
+    cur.execute(f"""
+        SELECT
+            i.income_id,
+            i.income_date,
+            COALESCE(c.first_name || ' ' || c.last_name, 'No Client') AS client_name,
+            COALESCE(i.income_type, '') AS income_type,
+            COALESCE(i.description, '') AS description,
+            COALESCE(i.payment_method, '') AS payment_method,
+            COALESCE(i.service_amount, 0.00) AS service_amount,
+            COALESCE(i.retail_amount, 0.00) AS retail_amount,
+            COALESCE(i.tax_amount, 0.00) AS tax_amount,
+            COALESCE(i.total_amount, 0.00) AS total_amount,
+            COALESCE(i.notes, '') AS notes
+        FROM income i
+        LEFT JOIN clients c ON i.client_id = c.client_id
+        {filter_sql}
+        ORDER BY i.income_date DESC, i.income_id DESC
+    """, params)
+
+    rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Income Report"
+
+    ws.append([
+        "Income ID",
+        "Income Date",
+        "Client Name",
+        "Income Type",
+        "Description",
+        "Payment Method",
+        "Service Amount",
+        "Retail Amount",
+        "Tax Amount",
+        "Total Amount",
+        "Notes"
+    ])
+
+    for row in rows:
+        ws.append(list(row))
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name="income_report.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
 
 
@@ -2578,6 +3093,7 @@ def edit_income(income_id):
 
 @app.route("/delete_income/<int:income_id>", methods=["POST"])
 def delete_income(income_id):
+    spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -2611,17 +3127,37 @@ from db import get_db_connection
 
 @app.route("/income_report")
 def income_report():
+    spa_id = get_current_spa_id()
     today = date.today()
     first_day = today.replace(day=1)
 
     start_date = request.args.get("start_date", first_day.strftime("%Y-%m-%d"))
     end_date = request.args.get("end_date", today.strftime("%Y-%m-%d"))
+    income_type = request.args.get("income_type", "").strip()
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Summary totals
+    # Get distinct income types for dropdown
     cur.execute("""
+        SELECT DISTINCT income_type
+        FROM income
+        WHERE income_type IS NOT NULL
+          AND income_type <> ''
+        ORDER BY income_type
+    """)
+    income_type_options = [row[0] for row in cur.fetchall()]
+
+    # Build filter
+    filter_sql = "WHERE income_date BETWEEN %s AND %s"
+    params = [start_date, end_date]
+
+    if income_type:
+        filter_sql += " AND income_type = %s"
+        params.append(income_type)
+
+    # Summary totals
+    cur.execute(f"""
         SELECT
             COUNT(*) AS total_entries,
             COALESCE(SUM(service_amount), 0.00) AS total_services,
@@ -2629,38 +3165,38 @@ def income_report():
             COALESCE(SUM(tax_amount), 0.00) AS total_tax,
             COALESCE(SUM(total_amount), 0.00) AS grand_total
         FROM income
-        WHERE income_date BETWEEN %s AND %s
-    """, (start_date, end_date))
+        {filter_sql}
+    """, params)
     summary = cur.fetchone()
 
     # Income type breakdown
-    cur.execute("""
+    cur.execute(f"""
         SELECT
             COALESCE(income_type, 'Unspecified') AS income_type,
             COUNT(*) AS entry_count,
             COALESCE(SUM(total_amount), 0.00) AS total_amount
         FROM income
-        WHERE income_date BETWEEN %s AND %s
+        {filter_sql}
         GROUP BY income_type
         ORDER BY total_amount DESC
-    """, (start_date, end_date))
+    """, params)
     income_type_breakdown = cur.fetchall()
 
     # Payment method breakdown
-    cur.execute("""
+    cur.execute(f"""
         SELECT
             COALESCE(payment_method, 'Unspecified') AS payment_method,
             COUNT(*) AS entry_count,
             COALESCE(SUM(total_amount), 0.00) AS total_amount
         FROM income
-        WHERE income_date BETWEEN %s AND %s
+        {filter_sql}
         GROUP BY payment_method
         ORDER BY total_amount DESC
-    """, (start_date, end_date))
+    """, params)
     payment_breakdown = cur.fetchall()
 
     # Detailed report rows
-    cur.execute("""
+    cur.execute(f"""
         SELECT
             i.income_id,
             i.income_date,
@@ -2675,9 +3211,9 @@ def income_report():
             COALESCE(i.notes, '') AS notes
         FROM income i
         LEFT JOIN clients c ON i.client_id = c.client_id
-        WHERE i.income_date BETWEEN %s AND %s
+        {filter_sql.replace("income_date", "i.income_date")}
         ORDER BY i.income_date DESC, i.income_id DESC
-    """, (start_date, end_date))
+    """, params)
     income_rows = cur.fetchall()
 
     cur.close()
@@ -2687,12 +3223,13 @@ def income_report():
         "income_report.html",
         start_date=start_date,
         end_date=end_date,
+        income_type=income_type,
+        income_type_options=income_type_options,
         summary=summary,
         income_type_breakdown=income_type_breakdown,
         payment_breakdown=payment_breakdown,
         income_rows=income_rows
     )
-
 
 
 #  -----------------------------
@@ -2707,6 +3244,7 @@ from db import get_db_connection
 
 @app.route("/add_general_income", methods=["GET", "POST"])
 def add_general_income():
+    spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -2872,6 +3410,7 @@ from flask import render_template, request, redirect, url_for
 
 @app.route("/calendar")
 def calendar_view():
+    spa_id = get_current_spa_id()
     week_start_str = request.args.get("week_start")
     goto_date = request.args.get("goto_date")
 
@@ -3002,6 +3541,7 @@ from datetime import datetime, date
 
 @app.route("/daily_schedule")
 def daily_schedule():
+    spa_id = get_current_spa_id()
     selected_date = request.args.get("date")
 
     if selected_date:
@@ -3015,6 +3555,7 @@ def daily_schedule():
     cur.execute("""
         SELECT
             a.appointment_id,
+            a.client_id,
             c.first_name,
             c.last_name,
             s.service_name,
@@ -3024,11 +3565,16 @@ def daily_schedule():
             a.status,
             a.notes
         FROM appointments a
-        JOIN clients c ON a.client_id = c.client_id
-        LEFT JOIN services s ON a.service_id = s.service_id
+        JOIN clients c
+            ON a.client_id = c.client_id
+           AND a.spa_id = c.spa_id
+        LEFT JOIN services s
+            ON a.service_id = s.service_id
+           AND a.spa_id = s.spa_id
         WHERE a.appointment_date = %s
+          AND a.spa_id = %s
         ORDER BY a.appointment_time
-    """, (display_date,))
+    """, (display_date, spa_id))
 
     appointments = cur.fetchall()
 
@@ -3040,6 +3586,10 @@ def daily_schedule():
         appointments=appointments,
         display_date=display_date
     )
+
+
+
+
 
 
 #  -----------------------------
@@ -3057,6 +3607,7 @@ from datetime import date, timedelta
 
 @app.route("/dashboard")
 def dashboard():
+    spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -3248,6 +3799,7 @@ from datetime import date, datetime, timedelta
 
 @app.route("/reports")
 def reports():
+    spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -3415,6 +3967,7 @@ from datetime import datetime
 
 @app.route("/reports/range", methods=["GET", "POST"])
 def reports_range():
+    spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -3555,21 +4108,27 @@ def reports_range():
 #
 #  -----------------------------
 
+
+
 @app.route("/client_health_profile/<int:client_id>", methods=["GET", "POST"])
 def client_health_profile(client_id):
+    appointment_id = request.args.get("appointment_id") or request.form.get("appointment_id")
+    selected_date = request.args.get("date") or request.form.get("date")
+    spa_id = get_current_spa_id()
+
     conn = get_db_connection()
     cur = conn.cursor()
 
     if request.method == "POST":
-        sex = request.form["sex"]
-        skin_type_id = request.form["skin_type_id"] or None
-        fitzpatrick_id = request.form["fitzpatrick_id"] or None
-        skin_concerns = request.form["skin_concerns"]
-        skin_conditions = request.form["skin_conditions"]
-        allergies = request.form["allergies"]
-        medications = request.form["medications"]
-        current_medical_conditions = request.form["current_medical_conditions"]
-        past_medical_treatments = request.form["past_medical_treatments"]
+        sex = request.form.get("sex") or None
+        skin_type_id = request.form.get("skin_type_id") or None
+        fitzpatrick_id = request.form.get("fitzpatrick_id") or None
+        skin_concerns = request.form.get("skin_concerns")
+        skin_conditions = request.form.get("skin_conditions")
+        allergies = request.form.get("allergies")
+        medications = request.form.get("medications")
+        current_medical_conditions = request.form.get("current_medical_conditions")
+        past_medical_treatments = request.form.get("past_medical_treatments")
 
         recent_injections = "recent_injections" in request.form
         recent_laser = "recent_laser" in request.form
@@ -3578,21 +4137,19 @@ def client_health_profile(client_id):
         using_retinol = "using_retinol" in request.form
         using_accutane = "using_accutane" in request.form
 
-        sun_exposure_level = request.form["sun_exposure_level"]
-        last_facial_date = request.form["last_facial_date"] or None
+        sun_exposure_level = request.form.get("sun_exposure_level")
+        last_facial_date = request.form.get("last_facial_date") or None
 
-        notes1 = request.form["notes1"]
-        notes2 = request.form["notes2"]
-        notes3 = request.form["notes3"]
+        notes1 = request.form.get("notes1")
+        notes2 = request.form.get("notes2")
+        notes3 = request.form.get("notes3")
 
         cur.execute("""
-            SELECT health_profile_id, skin_type_id, fitzpatrick_id
+            SELECT health_profile_id
             FROM client_health_profile
             WHERE client_id = %s
         """, (client_id,))
         existing_profile = cur.fetchone()
-
-
 
         if existing_profile:
             cur.execute("""
@@ -3697,12 +4254,18 @@ def client_health_profile(client_id):
         cur.close()
         conn.close()
 
-        flash("Health profile saved successfully.")
-        return redirect(url_for("client_health_profile", client_id=client_id))
-  
+        flash("Pre-session intake saved successfully.", "success")
 
+        if appointment_id:
+            return redirect(
+                url_for(
+                    "post_appointment_wrap_up",
+                    appointment_id=appointment_id,
+                    date=selected_date
+                )
+            )
 
-        return redirect(url_for("client_history_detail_two", client_id=client_id))
+        return redirect(url_for("clients_home"))
 
     cur.execute("""
         SELECT client_id, first_name, last_name
@@ -3710,6 +4273,13 @@ def client_health_profile(client_id):
         WHERE client_id = %s
     """, (client_id,))
     client = cur.fetchone()
+
+    cur.execute("""
+        SELECT sex_type_id, sex_type
+        FROM sex
+        ORDER BY sex_type
+    """)
+    sex_options = cur.fetchall()
 
     cur.execute("""
         SELECT skin_type_id, skin_type_name
@@ -3735,15 +4305,21 @@ def client_health_profile(client_id):
     cur.close()
     conn.close()
 
-
-
     return render_template(
         "client_health_profile.html",
         client=client,
+        appointment_id=appointment_id,
+        selected_date=selected_date,
         profile=profile,
+        sex_options=sex_options,
         skin_types=skin_types,
         fitzpatrick_types=fitzpatrick_types
     )
+
+
+
+
+
 
     
 #  ------------------------------------
@@ -3752,37 +4328,67 @@ def client_health_profile(client_id):
 #    
 #  -----------------------------------
 
+
+from datetime import date
+
 @app.route("/appointments")
 def appointments():
+    spa_id = get_current_spa_id()
+
+    start_date = request.args.get("start_date", "").strip()
+    end_date = request.args.get("end_date", "").strip()
+    show_all = request.args.get("show_all", "").strip()
+    today_str = date.today().isoformat()
+
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute("""
+    query = """
         SELECT
             a.appointment_id,
-            a.appointment_date,
-            a.appointment_time,
-            a.duration_minutes,
-            a.room_number,
-            a.status,
-            a.price_at_booking,
-            a.notes,
-            c.client_id,
+            a.client_id,
             c.first_name,
             c.last_name,
-            s.service_id,
-            s.service_name
+            s.service_name,
+            a.appointment_date,
+            a.appointment_time,
+            a.status,
+            a.notes
         FROM appointments a
-        JOIN clients c ON a.client_id = c.client_id
-        LEFT JOIN services s ON a.service_id = s.service_id
-        ORDER BY a.appointment_date ASC, a.appointment_time ASC
-    """)
+        JOIN clients c
+            ON a.client_id = c.client_id
+           AND a.spa_id = c.spa_id
+        LEFT JOIN service_name_types s
+            ON a.service_id = s.service_type_id
+           AND a.spa_id = s.spa_id
+        WHERE a.spa_id = %s
+    """
+    params = [spa_id]
+
+    if show_all != "1":
+        if start_date and end_date:
+            query += " AND a.appointment_date BETWEEN %s AND %s"
+            params.extend([start_date, end_date])
+        else:
+            query += " AND a.appointment_date = %s"
+            params.append(today_str)
+
+    query += " ORDER BY a.appointment_date, a.appointment_time"
+
+    cur.execute(query, tuple(params))
     appointments = cur.fetchall()
 
     cur.close()
     conn.close()
 
-    return render_template("appointments.html", appointments=appointments)
+    return render_template(
+        "appointments.html",
+        appointments=appointments,
+        start_date=start_date,
+        end_date=end_date,
+        today_str=today_str
+    )
+
 
 
 
@@ -3793,6 +4399,10 @@ def appointments():
 
 @app.route("/add_appointment", methods=["GET", "POST"])
 def add_appointment():
+    spa_id = get_current_spa_id()
+    client_id = request.args.get("client_id") or request.form.get("client_id") or ""
+    client_search = (request.args.get("client_search") or request.form.get("client_search") or "").strip()
+
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -3809,6 +4419,7 @@ def add_appointment():
 
         cur.execute("""
             INSERT INTO appointments (
+                spa_id,
                 client_id,
                 service_id,
                 appointment_date,
@@ -3816,8 +4427,9 @@ def add_appointment():
                 status,
                 notes
             )
-            VALUES (%s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
         """, (
+            spa_id,
             client_id,
             service_id,
             appointment_date,
@@ -3841,27 +4453,41 @@ def add_appointment():
 
         return redirect(url_for("daily_schedule", date=appointment_date))
 
-    # GET values from normal flow or Square flow
     client_id = request.args.get("client_id", "")
     incoming_booking_id = request.args.get("incoming_booking_id", "")
     prefill_date = request.args.get("appointment_date", "") or selected_date
     prefill_time = request.args.get("appointment_time", "")
     prefill_service_name = request.args.get("service_name", "")
 
-    # GET form dropdown data
-    cur.execute("""
-        SELECT client_id, first_name, last_name
-        FROM clients
-        ORDER BY last_name, first_name
-    """)
+    client_search = request.args.get("client_search", "").strip()
+
+    if client_search:
+        cur.execute("""
+            SELECT client_id, first_name, last_name
+            FROM clients
+            WHERE spa_id = %s
+              AND last_name ILIKE %s
+            ORDER BY last_name, first_name
+        """, (spa_id, f"%{client_search}%"))
+    else:
+        cur.execute("""
+            SELECT client_id, first_name, last_name
+            FROM clients
+            WHERE spa_id = %s
+            ORDER BY last_name, first_name
+            LIMIT 25
+        """, (spa_id,))
+
     clients = cur.fetchall()
 
+
     cur.execute("""
-        SELECT service_id, service_name
-        FROM services
+        SELECT service_type_id, service_name
+        FROM service_name_types
+        WHERE spa_id = %s
         ORDER BY service_name
-    """)
-    services = cur.fetchall()
+    """, (spa_id,))
+    service_types = cur.fetchall() 
 
     cur.close()
     conn.close()
@@ -3869,7 +4495,7 @@ def add_appointment():
     return render_template(
         "add_appointment.html",
         clients=clients,
-        services=services,
+        service_types=service_types,
         selected_date=selected_date,
         client_id=client_id,
         incoming_booking_id=incoming_booking_id,
@@ -3877,7 +4503,6 @@ def add_appointment():
         prefill_time=prefill_time,
         prefill_service_name=prefill_service_name
     )
-
 
 
 
@@ -3889,6 +4514,7 @@ def add_appointment():
 
 @app.route("/edit_appointment/<int:appointment_id>", methods=["GET", "POST"])
 def edit_appointment(appointment_id):
+    spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -3941,6 +4567,7 @@ def edit_appointment(appointment_id):
 
 @app.route("/delete_appointment/<int:appointment_id>", methods=["POST"])
 def delete_appointment(appointment_id):
+    spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -3965,6 +4592,7 @@ def delete_appointment(appointment_id):
 
 @app.route("/cancel_appointment/<int:appointment_id>", methods=["POST"])
 def cancel_appointment(appointment_id):
+    spa_id = get_current_spa_id()
     conn = get_db_connection()  
     cur = conn.cursor()
 
@@ -3996,6 +4624,7 @@ def cancel_appointment(appointment_id):
 
 @app.route("/complete_appointment/<int:appointment_id>", methods=["POST"])
 def complete_appointment(appointment_id):
+    spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -4031,6 +4660,7 @@ def complete_appointment(appointment_id):
 
 @app.route("/complete_overdue_appointments", methods=["POST"])
 def complete_overdue_appointments():
+    spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -4050,6 +4680,127 @@ def complete_overdue_appointments():
 
 
 
+#   -----------------------------
+#
+#    POST APPOINTMENT WRAP UP
+#
+#
+#
+#   ---------------------------
+
+
+
+@app.route("/post_appointment_wrap_up/<int:appointment_id>", methods=["GET", "POST"])
+def post_appointment_wrap_up(appointment_id):
+    spa_id = get_current_spa_id()
+    selected_date = request.args.get("date") or request.form.get("date") or ""
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    if request.method == "POST":
+        treatment_notes = request.form.get("treatment_notes", "")
+        products_used = request.form.get("products_used", "")
+        home_care_advice = request.form.get("home_care_advice", "")
+        provider_notes = request.form.get("provider_notes", "")
+
+        cur.execute("""
+            INSERT INTO appointment_wrap_up (
+                spa_id,
+                appointment_id,
+                treatment_notes,
+                products_used,
+                home_care_advice,
+                provider_notes
+            )
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (appointment_id)
+            DO UPDATE SET
+                treatment_notes = EXCLUDED.treatment_notes,
+                products_used = EXCLUDED.products_used,
+                home_care_advice = EXCLUDED.home_care_advice,
+                provider_notes = EXCLUDED.provider_notes
+        """, (
+            spa_id,
+            appointment_id,
+            treatment_notes,
+            products_used,
+            home_care_advice,
+            provider_notes
+        ))
+
+
+        cur.execute("""
+            UPDATE appointments
+            SET status = 'Completed'
+            WHERE appointment_id = %s
+              AND spa_id = %s
+        """, (appointment_id, spa_id))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        flash("Post appointment wrap-up saved.", "success")
+
+        if selected_date:
+            return redirect(url_for("daily_schedule", date=selected_date))
+
+        return redirect(url_for("post_appointment_wrap_up", appointment_id=appointment_id))
+
+    cur.execute("""
+        SELECT
+            a.appointment_id,
+            a.appointment_date,
+            a.appointment_time,
+            c.client_id,
+            c.first_name,
+            c.last_name
+        FROM appointments a
+        JOIN clients c
+            ON a.client_id = c.client_id
+           AND a.spa_id = c.spa_id
+        WHERE a.appointment_id = %s
+          AND a.spa_id = %s
+    """, (appointment_id, spa_id))
+    appointment = cur.fetchone()
+
+    cur.execute("""
+        SELECT
+            treatment_notes,
+            products_used,
+            home_care_advice,
+            provider_notes
+        FROM appointment_wrap_up
+        WHERE appointment_id = %s
+          AND spa_id = %s
+    """, (appointment_id, spa_id))
+    wrap_up = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if not appointment:
+        flash("Appointment not found.", "error")
+        if selected_date:
+            return redirect(url_for("daily_schedule", date=selected_date))
+        return redirect(url_for("appointments"))
+
+    return render_template(
+        "post_appointment_wrap_up.html",
+        appointment=appointment,
+        wrap_up=wrap_up,
+        selected_date=selected_date
+    )
+
+
+
+
+
+
+
+
+
 #  ------------------
 #      CLIENT SECTION
 #
@@ -4058,7 +4809,7 @@ def complete_overdue_appointments():
 
 @app.route("/client_history")
 def client_history():
-
+    spa_id = get_current_spa_id()
     search = request.args.get("search", "")
 
     conn = get_db_connection()
@@ -4091,24 +4842,63 @@ def client_history():
 #   Client History Detail page 1
 #  -----------------
 
+
 @app.route("/client_history/<int:client_id>")
 def client_history_detail(client_id):
+    spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT *
-        FROM vw_client_visit_history
+        SELECT client_id, first_name, last_name, phone, email, birth_date
+        FROM clients
         WHERE client_id = %s
-        ORDER BY appointment_date DESC NULLS LAST, appointment_time DESC NULLS LAST
-    """, (client_id,))
+          AND spa_id = %s
+    """, (client_id, spa_id))
+    client = cur.fetchone()
 
+    cur.execute("""
+        SELECT
+            a.appointment_id,
+            a.appointment_date,
+            a.appointment_time,
+            s.service_name,
+            a.duration_minutes,
+            a.room_number,
+            a.status,
+            a.notes,
+            aw.treatment_notes,
+            aw.products_used,
+            aw.home_care_advice,
+            aw.provider_notes
+        FROM appointments a
+        LEFT JOIN services s
+            ON a.service_id = s.service_id
+           AND a.spa_id = s.spa_id
+        LEFT JOIN appointment_wrap_up aw
+            ON a.appointment_id = aw.appointment_id
+           AND a.spa_id = aw.spa_id
+        WHERE a.client_id = %s
+          AND a.spa_id = %s
+        ORDER BY a.appointment_date DESC NULLS LAST,
+                 a.appointment_time DESC NULLS LAST
+    """, (client_id, spa_id))
     rows = cur.fetchall()
 
     cur.close()
     conn.close()
 
-    return render_template("client_history_detail.html", rows=rows, client_id=client_id)
+    return render_template(
+        "client_history_detail.html",
+        rows=rows,
+        client=client,
+        client_id=client_id
+    )
+
+
+
+
+
 
 #  ------------------
 #    Client History Detail page 2
@@ -4117,22 +4907,57 @@ def client_history_detail(client_id):
 
 @app.route("/client_history_two/<int:client_id>")
 def client_history_detail_two(client_id):
+    spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT *
-        FROM vw_client_visit_history
+        SELECT client_id, first_name, last_name, phone, email, birth_date
+        FROM clients
         WHERE client_id = %s
-        ORDER BY appointment_date DESC NULLS LAST, appointment_time DESC NULLS LAST
-    """, (client_id,))
+          AND spa_id = %s
+    """, (client_id, spa_id))
+    client = cur.fetchone()
 
+    cur.execute("""
+        SELECT
+            a.appointment_id,
+            a.appointment_date,
+            a.appointment_time,
+            s.service_name,
+            a.duration_minutes,
+            a.room_number,
+            a.status,
+            a.notes,
+            aw.treatment_notes,
+            aw.products_used,
+            aw.home_care_advice,
+            aw.provider_notes
+        FROM appointments a
+        LEFT JOIN services s
+            ON a.service_id = s.service_id
+           AND a.spa_id = s.spa_id
+        LEFT JOIN appointment_wrap_up aw
+            ON a.appointment_id = aw.appointment_id
+           AND a.spa_id = aw.spa_id
+        WHERE a.client_id = %s
+          AND a.spa_id = %s
+        ORDER BY a.appointment_date DESC NULLS LAST,
+                 a.appointment_time DESC NULLS LAST
+    """, (client_id, spa_id))
     rows = cur.fetchall()
 
     cur.close()
     conn.close()
 
-    return render_template("client_history_detail_two.html", rows=rows, client_id=client_id)
+    return render_template(
+        "client_history_detail_two.html",
+        rows=rows,
+        client=client,
+        client_id=client_id
+    )
+
+
 
 
 
@@ -4143,6 +4968,8 @@ def client_history_detail_two(client_id):
 
 @app.route("/add_new_client", methods=["GET", "POST"])
 def add_new_client():
+    spa_id = get_current_spa_id()
+    selected_date = request.args.get("selected_date") or request.form.get("selected_date") or ""
     if request.method == "POST":
         session["new_client_step1"] = {
             "first_name": request.form.get("first_name", ""),
@@ -4155,7 +4982,7 @@ def add_new_client():
             "state": request.form.get("state", "TX"),
             "zip": request.form.get("zip", "")
         }
-        return redirect(url_for("add_new_client_step2"))
+        return redirect(url_for("add_new_client_step2", selected_date=selected_date))
 
     step1_data = session.get("new_client_step1", {})
 
@@ -4174,7 +5001,7 @@ def add_new_client():
                 "zip": ""
             }
 
-    return render_template("add_new_client.html", step1_data=step1_data)
+    return render_template("add_new_client.html", selected_date=selected_date,  step1_data=step1_data)
 
 
 
@@ -4187,6 +5014,9 @@ def add_new_client():
 
 @app.route("/add_new_client_step2", methods=["GET", "POST"])
 def add_new_client_step2():
+    spa_id = get_current_spa_id()
+    selected_date = request.args.get("selected_date") or request.form.get("selected_date") or ""
+
     if "new_client_step1" not in session:
         return redirect(url_for("add_new_client"))
 
@@ -4275,12 +5105,24 @@ def add_new_client_step2():
                 ))
 
             session.pop("incoming_booking_data", None)
+
+            if selected_date:
+                return redirect(url_for(
+                    "add_appointment",
+                    client_id=new_client_id,
+                    selected_date=selected_date
+                ))
+
+
+
             return redirect(url_for("client_history"))
 
     step2_data = session.get("new_client_step2", {})
-    return render_template("add_new_client_step2.html", step2_data=step2_data)
-
-
+    return render_template(
+        "add_new_client_step2.html", 
+        step2_data=step2_data,
+        selected_date=selected_date
+    )
 
 
 
@@ -4293,6 +5135,7 @@ def add_new_client_step2():
 
 @app.route("/edit_client/<int:client_id>", methods=["GET", "POST"])
 def edit_client(client_id):
+    spa_id = get_current_spa_id()
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -4403,6 +5246,7 @@ def edit_client(client_id):
 
 @app.route("/delete_client/<int:client_id>", methods=["POST"])
 def delete_client(client_id):
+    spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -4437,6 +5281,7 @@ def admin():
 
 @app.route("/skin_types", methods=["GET", "POST"])
 def skin_types():
+    spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -4471,6 +5316,7 @@ def skin_types():
 
 @app.route("/delete_skin_type/<int:skin_type_id>", methods=["POST"])
 def delete_skin_type(skin_type_id):
+    spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -4493,6 +5339,7 @@ def delete_skin_type(skin_type_id):
 
 @app.route("/fitzpatrick_types", methods=["GET", "POST"])
 def fitzpatrick_types():
+    spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -4532,6 +5379,7 @@ def fitzpatrick_types():
 
 @app.route("/delete_fitzpatrick_types/<int:fitzpatrick_id>", methods=["POST"])
 def delete_fitzpatrick_types(fitzpatrick_id):
+    spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
         
@@ -4557,6 +5405,7 @@ def delete_fitzpatrick_types(fitzpatrick_id):
 
 @app.route("/edit_fitzpatrick_types/<int:fitzpatrick_id>", methods=["GET", "POST"])
 def edit_fitzpatrick_types(fitzpatrick_id):
+    spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -4602,6 +5451,7 @@ def edit_fitzpatrick_types(fitzpatrick_id):
 
 @app.route("/referral_sources", methods=["GET", "POST"])
 def referral_sources():
+    spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -4638,6 +5488,7 @@ def referral_sources():
 
 @app.route("/delete_referral_source/<int:referral_source_id>", methods=["POST"])
 def delete_referral_source(referral_source_id):
+    spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -4660,6 +5511,7 @@ def delete_referral_source(referral_source_id):
 
 @app.route("/cancel_new_client")
 def cancel_new_client():
+    spa_id = get_current_spa_id()
     session.pop("new_client_step1", None)
     session.pop("new_client_step2", None)
     return redirect(url_for("home"))
@@ -4669,6 +5521,7 @@ def cancel_new_client():
 
 @app.route("/clear_new_client")
 def clear_new_client():
+    spa_id = get_current_spa_id()
     session.pop("new_client_step1", None)
     session.pop("new_client_step2", None)
     return redirect(url_for("add_new_client"))
@@ -4676,8 +5529,12 @@ def clear_new_client():
 
 
 
+
+
+#   ----------------------------
+#  ------------------------------
 #  ---------------------------------
-#
+#    END   END   END   END   END
 #  --------------------------------
 
 

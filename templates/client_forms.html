@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Client Forms</h1>
+
+<h3>{{ client[2] }}, {{ client[1] }}</h3>
+
+<div style="margin-bottom: 15px;">
+    {% if selected_date %}
+        <a class="btn" href="{{ url_for('daily_schedule', date=selected_date) }}">
+            Back to Daily Schedule
+        </a>
+    {% endif %}
+</div>
+
+
+
+<form method="POST">
+   <form method="POST">
+        <input type="hidden" name="appointment_id" value="{{ appointment_id or '' }}">
+        <input type="hidden" name="date" value="{{ selected_date or '' }}">
+
+
+    <div class="form-group">
+        <label for="form_type_id">Form</label>
+        <select name="form_type_id" required>
+            <option value="">Select Form</option>
+            {% for form in form_types %}
+                <option value="{{ form[0] }}">{{ form[1] }}</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label>Date Given</label>
+        <input type="date" name="date_given">
+    </div>
+
+    <div class="form-group">
+        <label>Date Signed</label>
+        <input type="date" name="date_signed">
+    </div>
+
+    <div class="form-group">
+        <label>
+            <input type="checkbox" name="form_given">
+            Form Given
+        </label>
+    </div>
+
+    <div class="form-group">
+        <label>
+            <input type="checkbox" name="form_signed">
+            Form Signed
+        </label>
+    </div>
+
+    <div class="form-group">
+        <label>Notes</label>
+        <textarea name="notes" rows="3"></textarea>
+    </div>
+
+    <button type="submit" class="btn">Save Form Record</button>
+</form>
+
+<hr>
+
+<h3>Form History</h3>
+
+{% if form_history %}
+<table>
+    <thead>
+        <tr>
+            <th>Form</th>
+            <th>Date Given</th>
+            <th>Date Signed</th>
+            <th>Given</th>
+            <th>Signed</th>
+            <th>Notes</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in form_history %}
+        <tr>
+            <td>{{ row[1] }}</td>
+            <td>{{ row[2] or '' }}</td>
+            <td>{{ row[3] or '' }}</td>
+            <td>{{ 'Yes' if row[4] else 'No' }}</td>
+            <td>{{ 'Yes' if row[5] else 'No' }}</td>
+            <td>{{ row[6] or '' }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No forms logged yet.</p>
+{% endif %}
+
+{% endblock %}

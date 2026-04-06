@@ -1,62 +1,64 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Client History Detail</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-</head>
-<body>
-    <div class="container">
-        <h1>Client History Detail</h1>
+{% extends "base.html" %}
 
-<!-- MAIN NAV -->
-<div class="nav-links">
-    <a href="{{ url_for('home') }}">Home</a>
-    <a href="{{ url_for('client_history') }}">Back to Client History</a>
+{% block content %}
+<h1>Client History Detail</h1>
+
+<div class="nav-links" style="margin-bottom: 15px;">
+    <a class="btn" href="{{ url_for('home') }}">Home</a>
+    <a class="btn" href="{{ url_for('client_history') }}">Back to Client History</a>
+    <a class="btn" href="{{ url_for('client_management') }}">Client Management</a>
+    <a class="btn" href="{{ url_for('client_health_profile', client_id=client_id) }}">Health Profile</a>
 </div>
 
-<!-- PAGE NAV (NEW SECTION) -->
-<!-- PAGE NAV -->
-<div class="page-nav">
-    <a class="nav-btn secondary" href="{{ url_for('client_history_detail', client_id=client_id) }}">Previous</a>
-    <a class="nav-btn secondary" href="{{ url_for('client_health_profile', client_id=client_id) }}">Health Profile</a>
-    <a class="nav-btn primary" href="{{ url_for('client_history_detail_two', client_id=client_id) }}">Next</a>
-</div>
-        {% if rows %}
-            <div class="info-box">
-                <h2>{{ rows[0][1] }} {{ rows[0][2] }}</h2>
-                <p><strong>Client ID:</strong> {{ rows[0][0] }}</p>
-            </div>
-
-            <table>
-                <tr>
-                    <th>Date</th>
-                    <th>Time</th>
-                    <th>Service</th>
-                    <th>Status</th>
-                    <th>Skin Condition</th>
-                    <th>Treatment Performed</th>
-                    <th>Total Paid</th>
-                </tr>
-
-                {% for row in rows %}
-                <tr>
-                    <td>{{ row[4] or "" }}</td>
-                    <td>{{ row[5] or "" }}</td>
-                    <td>{{ row[9] or "" }}</td>
-                    <td>{{ row[6] or "" }}</td>
-                    <td>{{ row[23] or "" }}</td>
-                    <td>{{ row[24] or "" }}</td>
-                    <td>{{ row[19] or "" }}</td>
-                </tr>
-                {% endfor %}
-            </table>
-        {% else %}
-            <div class="no-data">
-                No history found for this client.
-            </div>
-        {% endif %}
+{% if client %}
+    <div class="info-box" style="margin-bottom: 20px;">
+        <h2>{{ client[1] }} {{ client[2] }}</h2>
+        <p><strong>Client ID:</strong> {{ client[0] }}</p>
+        <p><strong>Phone:</strong> {{ client[3] or '' }}</p>
+        <p><strong>Email:</strong> {{ client[4] or '' }}</p>
+        <p><strong>Birth Date:</strong> {{ client[5] or '' }}</p>
     </div>
-</body>
-</html>
+{% endif %}
+
+{% if rows %}
+    <table>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Time</th>
+                <th>Service</th>
+                <th>Duration</th>
+                <th>Room</th>
+                <th>Status</th>
+                <th>Appointment Notes</th>
+                <th>Treatment Notes</th>
+                <th>Products Used</th>
+                <th>Home Care Advice</th>
+                <th>Provider Notes</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+            <tr>
+                <td>{{ row[1] or '' }}</td>
+                <td>{{ row[2].strftime('%I:%M %p') if row[2] else '' }}</td>
+                <td>{{ row[3] or '' }}</td>
+                <td>{{ row[4] or '' }}</td>
+                <td>{{ row[5] or '' }}</td>
+                <td>{{ row[6]|title if row[6] else '' }}</td>
+                <td>{{ row[7] or '' }}</td>
+                <td>{{ row[8] or '' }}</td>
+                <td>{{ row[9] or '' }}</td>
+                <td>{{ row[10] or '' }}</td>
+                <td>{{ row[11] or '' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+{% else %}
+    <div class="no-data">
+        No history found for this client.
+    </div>
+{% endif %}
+
+{% endblock %}

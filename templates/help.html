@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Help & Quick Reference</h1>
+
+<div class="help-section">
+    <h2>Daily Workflow</h2>
+
+    <h3>Book Appointment</h3>
+    <ul>
+        <li>Go to <strong>Add Appointment</strong></li>
+        <li>Search client by last name</li>
+        <li>Select client</li>
+        <li>Select service</li>
+        <li>Choose date and time</li>
+        <li>Click <strong>Save Appointment</strong></li>
+    </ul>
+
+    <h3>Daily Schedule</h3>
+    <ul>
+        <li>Open the calendar</li>
+        <li>Select the date</li>
+        <li>Review appointments</li>
+        <li>Use <strong>Pre-Session Intake</strong> and <strong>Forms</strong></li>
+        <li>Edit appointment if needed</li>
+    </ul>
+
+    <h3>Finish Session</h3>
+    <ul>
+        <li>Click <strong>Finish Session</strong></li>
+        <li>Enter payment information</li>
+        <li>Complete post-session wrap-up</li>
+        <li>Optionally book next appointment</li>
+    </ul>
+</div>
+
+<div class="help-section">
+    <h2>Appointments Page</h2>
+    <ul>
+        <li><strong>Today</strong> = today’s appointments only</li>
+        <li><strong>Filter</strong> = date range search</li>
+        <li><strong>Show All Appointments</strong> = full history</li>
+    </ul>
+
+    <h3>Reschedule an Appointment</h3>
+    <ul>
+        <li>To reschedule an appointment please click Edit from the appointment on the Calendar</li>
+        <li>or from the Appointments page, click on the client and appointment you wish to rechedule</li>
+        <li>and click on Edit</li>
+    </ul>
+
+
+
+
+
+</div>
+
+<div class="help-section">
+    <h2>Client Search</h2>
+    <ul>
+        <li>Search by last name</li>
+        <li>Select client from dropdown</li>
+        <li>If not found, add as new client</li>
+    </ul>
+</div>
+
+<div class="help-section">
+    <h2>Troubleshooting</h2>
+    <ul>
+        <li>If client is missing, verify spelling of last name</li>
+        <li>If appointment is missing, check date filters</li>
+        <li>If service dropdown is incomplete, verify <strong>service_name_types</strong></li>
+    </ul>
+</div>
+
+<style>
+.help-section {
+    margin-bottom: 30px;
+    padding: 20px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    background-color: #fafafa;
+}
+
+.help-section h2 {
+    color: #125e65;
+    margin-bottom: 10px;
+}
+
+.help-section h3 {
+    margin-top: 15px;
+    color: #333;
+}
+
+.help-section ul {
+    margin-left: 20px;
+    line-height: 1.7;
+}
+</style>
+
+{% endblock %}

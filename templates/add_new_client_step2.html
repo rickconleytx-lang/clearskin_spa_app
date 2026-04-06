@@ -7,6 +7,8 @@
 
 <form method="POST">
 
+    <input type="hidden" name="selected_date" value="{{ selected_date }}">
+
     <div class="form-buttons">
         <button type="submit" name="action" value="back">Back to Page 1</button>
 
@@ -34,7 +36,7 @@
     </p>
 
     <p>
-        <label>Notes One:</label><br>
+        <label>Referred By Note:</label><br>
         <textarea name="notes_one" rows="4" cols="50">{{ step2_data.get('notes_one', '') }}</textarea>
     </p>
 

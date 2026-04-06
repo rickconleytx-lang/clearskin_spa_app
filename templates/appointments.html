@@ -1,7 +1,29 @@
 {% extends "base.html" %}
 
 {% block content %}
+
+<a href="{{ url_for('help_appointments_page') }}" class="btn">Page Help</a>
+<br><br>
+
 <h1>Appointments</h1>
+
+<form method="GET" style="margin-bottom: 20px;">
+    <label for="start_date">From</label>
+    <input type="date" id="start_date" name="start_date" value="{{ start_date or '' }}">
+
+    <label for="end_date">To</label>
+    <input type="date" id="end_date" name="end_date" value="{{ end_date or '' }}">
+
+    <button type="submit" class="btn">Filter</button>
+
+    <a href="{{ url_for('appointments', start_date=today_str, end_date=today_str) }}" class="btn">
+        Today
+    </a>
+
+    <a href="{{ url_for('appointments', show_all=1) }}" class="btn">
+        Show All Appointments
+    </a>
+</form>
 
 <div style="margin-bottom: 20px;">
     <a href="{{ url_for('add_appointment') }}" class="btn">Add Appointment</a>
@@ -16,10 +38,7 @@
                 <th>Time</th>
                 <th>Client</th>
                 <th>Service</th>
-                <th>Duration</th>
-                <th>Room</th>
                 <th>Status</th>
-                <th>Price</th>
                 <th>Actions</th>
             </tr>
         </thead>
@@ -28,19 +47,14 @@
             {% for row in appointments %}
             <tr>
                 <td>{{ row[0] }}</td>
-                <td>{{ row[1] }}</td>
-                <td>{{ row[2] }}</td>
-                <td>{{ row[9] }} {{ row[10] }}</td>
-                <td>{{ row[12] if row[12] else '' }}</td>
-                <td>{{ row[3] if row[3] else '' }}</td>
-                <td>{{ row[4] if row[4] else '' }}</td>
-                <td>{{ row[5] }}</td>
-                <td>{{ row[6] if row[6] else '' }}</td>
+                <td>{{ row[5].strftime('%m/%d/%Y') if row[5] else '' }}</td>
+                <td>{{ row[6].strftime('%I:%M %p') if row[6] else '' }}</td>
+                <td>{{ row[3] }}, {{ row[2] }}</td>
+                <td>{{ row[4] or '' }}</td>
+                <td>{{ row[7]|title if row[7] else '' }}</td>
 
-                <!-- ACTIONS COLUMN -->
                 <td>
-                    {% if row[7] %}
-                        <!-- View Note -->
+                    {% if row[8] %}
                         <div class="action-row">
                             <button type="button" class="btn note-btn"
                                     onclick="toggleNote('note-{{ row[0] }}')">
@@ -48,11 +62,10 @@
                             </button>
                         </div>
 
-                        <!-- Popup -->
                         <div id="note-{{ row[0] }}" class="note-popup-box">
                             <div class="note-popup-content">
                                 <strong>Notes</strong><br>
-                                {{ row[7] }}
+                                {{ row[8] }}
                                 <br><br>
                                 <button type="button" class="btn"
                                         onclick="toggleNote('note-{{ row[0] }}')">
@@ -62,17 +75,15 @@
                         </div>
                     {% endif %}
 
-                    <!-- Edit + Cancel -->
                     <div class="action-row">
                         <a href="{{ url_for('edit_appointment', appointment_id=row[0]) }}"
                            class="btn">Edit</a>
 
                         <a class="btn" href="{{ url_for('add_income', appointment_id=row[0]) }}">
                             Add Income
-                        </a>                        
+                        </a>
 
-
-                        {% if row[5] != 'cancelled' %}
+                        {% if row[7] != 'cancelled' %}
                         <form method="POST"
                               action="{{ url_for('cancel_appointment', appointment_id=row[0]) }}"
                               style="display:inline;"
@@ -82,14 +93,12 @@
                         {% endif %}
                     </div>
                 </td>
-
             </tr>
             {% endfor %}
         </tbody>
     </table>
 </div>
 
-<!-- JS for popup -->
 <script>
 function toggleNote(noteId) {
     const noteBox = document.getElementById(noteId);
@@ -101,7 +110,6 @@ function toggleNote(noteId) {
 }
 </script>
 
-<!-- Styles -->
 <style>
 .table-container {
     width: 100%;
@@ -111,7 +119,7 @@ function toggleNote(noteId) {
 
 .appointments-table {
     width: 100%;
-    min-width: 1300px;
+    min-width: 1000px;
     border-collapse: collapse;
 }
 

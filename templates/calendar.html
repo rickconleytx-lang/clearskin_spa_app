@@ -1,6 +1,11 @@
 {% extends "base.html" %}
 
 {% block content %}
+
+<a href="{{ url_for('help_calendar_page') }}" class="btn">Page Help</a>
+<br>
+<br>
+
 <h1>Weekly Calendar</h1>
 
 <div style="margin-bottom: 15px;">
@@ -61,7 +66,7 @@
                     <td>
                         <a href="{{ url_for('edit_appointment', appointment_id=appt[6]) }}" class="btn btn-sm">Edit</a>
                         <a href="{{ url_for('add_income', appointment_id=appt[6]) }}" class="btn btn-sm" style="background: green; color: white;">
-                            Add Income
+                            Add Payment
                         </a>
                     </td>
                 </tr>
@@ -74,6 +79,7 @@
         <br>
     {% endif %}
 {% endif %}
+
 
 {% if overdue_count > 0 %}
 <div class="next-appointment" style="background-color: #ffe5e5; border-left: 5px solid #cc0000;">
@@ -101,6 +107,8 @@
 </div>
 <br>
 {% endif %}
+
+Note: To book a new appointment, please click on the Date Number in calendar below.
 
 <h3>
     {{ week_days[0].strftime('%B %d, %Y') }} -
@@ -144,14 +152,18 @@
                                 </a>
 
                                 <div style="margin-top: 8px;">
-                                    <a href="{{ url_for('edit_appointment', appointment_id=appt[6]) }}" class="btn btn-sm">Edit</a>
 
-                                    <a href="{{ url_for('add_income', appointment_id=appt[6]) }}"
-                                       class="btn btn-sm"
-                                       style="background: green; color: white;">
-                                        Add Income
-                                    </a>
+                                   <a class="btn" href="{{ url_for('edit_appointment', appointment_id=appt[6]) }}">
+                                       Edit
+                                   </a>
 
+                                    <a href="{{ url_for('add_income', appointment_id=appt[6], date=selected_date) }}"
+                                        class="btn btn-sm"
+                                        style="background: green; color: white;">
+                                        Finish Session
+                                     </a>
+
+                                   
                                     {% if appt[5] == 'booked' and is_past %}
                                     <form method="POST"
                                           action="{{ url_for('complete_appointment', appointment_id=appt[6]) }}"

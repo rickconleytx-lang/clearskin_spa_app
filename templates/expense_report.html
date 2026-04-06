@@ -18,34 +18,55 @@
 
     <div class="form-group">
         <label for="category">Category</label>
-        <input type="text" id="category" name="category" value="{{ category or '' }}">
+        <select id="category" name="category">
+            <option value="">All Categories</option>
+            {% for item in category_options %}
+                <option value="{{ item[1] }}"
+                    {% if category == item[1] %}selected{% endif %}>
+                    {{ item[1] }}
+                </option>
+            {% endfor %}
+        </select>
     </div>
 
     <div class="form-group">
-        <label for="payment_method">Payment Method</label>
-        <input type="text" id="payment_method" name="payment_method" value="{{ payment_method or '' }}">
+        <label for="vendor_name">Vendor</label>
+        <input type="text" id="vendor_name" name="vendor_name" value="{{ vendor_name or '' }}">
     </div>
 
     <br>
+
     <button type="submit" class="btn">Run Report</button>
+    <a class="btn" href="{{ url_for('expense_report') }}">Reset</a>
     <a class="btn" href="{{ url_for('expenses_home') }}">Back to Expenses</a>
-
-    <a class="btn" href="{{ url_for('export_expense_report_csv', start_date=request.args.get('start_date', ''), end_date=request.args.get('end_date', '')) }}">
-    Export Report to CSV
-</a>
-
 </form>
 
 <br>
 
 <div class="report-actions no-print" style="margin-bottom: 15px;">
-    <a class="btn" href="{{ url_for('export_expense_report_xlsx', start_date=request.args.get('start_date', ''), end_date=request.args.get('end_date', '')) }}">
+    <a class="btn"
+       href="{{ url_for('export_expense_report_csv',
+            start_date=start_date,
+            end_date=end_date,
+            category=category,
+            vendor_name=vendor_name) }}">
+        Export to CSV
+    </a>
+
+    <a class="btn"
+       href="{{ url_for('export_expense_report_xlsx',
+            start_date=start_date,
+            end_date=end_date,
+            category=category,
+            vendor_name=vendor_name) }}">
         Export to Excel
     </a>
 
     <button type="button" class="btn" onclick="window.print()">
         Print Report
     </button>
+
+
 </div>
 
 <h3>Total: ${{ '%.2f'|format(report_total or 0) }}</h3>
@@ -105,9 +126,9 @@
         </tr>
     </thead>
     <tbody>
-        {% for category, total in category_totals.items() %}
+        {% for category_name, total in category_totals.items() %}
         <tr>
-            <td>{{ category }}</td>
+            <td>{{ category_name }}</td>
             <td>${{ '%.2f'|format(total or 0) }}</td>
         </tr>
         {% else %}

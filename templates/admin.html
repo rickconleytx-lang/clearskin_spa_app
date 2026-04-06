@@ -36,4 +36,52 @@
     <a class="btn" href="{{ url_for('manage_dropdown', dropdown_key='vendor_name') }}">Vendor Name</a>
 </div>
 
+
+
+<div class="admin-section">
+    <h2>Booking & Calendar Integration Settings</h2>
+
+    <div class="form-group">
+        <label for="integration_provider">Integration Provider</label>
+        <select name="integration_provider" id="integration_provider">
+            <option value="manual">Manual Only</option>
+            <option value="google_calendar">Google Calendar</option>
+            <option value="square">Square</option>
+            <option value="godaddy">GoDaddy</option>
+            <option value="outlook_calendar">Outlook Calendar</option>
+            <option value="other">Other</option>
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label>
+            <input type="checkbox" name="sync_enabled">
+            Enable Calendar Sync
+        </label>
+    </div>
+
+    <div class="form-group">
+        <label for="external_calendar_id">External Calendar ID / Email</label>
+        <input type="text" name="external_calendar_id" id="external_calendar_id">
+    </div>
+
+    <div class="form-group">
+        <label for="website_booking_provider">Website Booking Provider</label>
+        <select name="website_booking_provider" id="website_booking_provider">
+            <option value="">None</option>
+            <option value="square">Square</option>
+            <option value="godaddy">GoDaddy</option>
+            <option value="other">Other</option>
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label for="provider_notes">Provider Notes</label>
+        <textarea name="provider_notes" id="provider_notes" rows="3"></textarea>
+    </div>
+
+    <button type="button" class="btn" disabled>Save Settings (Coming Later)</button>
+</div>
+
+
 {% endblock %}

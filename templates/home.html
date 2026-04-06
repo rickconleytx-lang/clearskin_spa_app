@@ -1,8 +1,10 @@
 {% extends "base.html" %}
 
-{% block title %}Home{% endblock %}
+{% block title %}Clear Skin Esthetics Database{% endblock %}
 
 {% block content %}
+
+<a href="{{ url_for('help_page') }}" class="btn">Help</a>
 
 <div class="section-page">
     <div class="section-header">
@@ -90,10 +92,13 @@
             <p>View/Edit/Delete entries, View Expense Report and download to Excel.</p>
         </a>
 
-        <a class="section-card" href="{{ url_for('home') }}">
-            <h3>Reserved for future use</h3>
-            <p>Reserved for future use.</p>
+         <a class="section-card" href="{{ url_for('client_management') }}">
+            <h3>Client Management</h3>
+            <p>You one-stop-shop, for everything regarding your clients, Add New Clients, View and Add new appointments and search clients.</p>
         </a>
+    
+
+
 
     </div>
 

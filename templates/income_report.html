@@ -18,22 +18,67 @@
 
     <div class="report-filter-card no-print">
         <form method="GET" action="{{ url_for('income_report') }}" class="report-filter-form">
+
             <div class="filter-group">
                 <label for="start_date">Start Date</label>
-                <input type="date" id="start_date" name="start_date" value="{{ start_date }}">
-            </div>
+                <input
+                    type="date"
+                    id="start_date"
+                    name="start_date"
+                    value="{{ start_date }}"
+            >
+        </div>
 
-            <div class="filter-group">
-                <label for="end_date">End Date</label>
-                <input type="date" id="end_date" name="end_date" value="{{ end_date }}">
-            </div>
+        <div class="filter-group">
+            <label for="end_date">End Date</label>
+            <input
+                type="date"
+                id="end_date"
+                name="end_date"
+                value="{{ end_date }}"
+            >
+        </div>
 
-            <div class="filter-buttons">
-                <button type="submit" class="btn">Run Report</button>
-                <a class="btn btn-secondary" href="{{ url_for('income_report') }}">Reset</a>
-            </div>
-        </form>
-    </div>
+        <div class="filter-group">
+            <label for="income_type">Income Type</label>
+            <select id="income_type" name="income_type">
+                <option value="">All Income Types</option>
+                {% for item in income_type_options %}
+                    <option value="{{ item }}"
+                        {% if income_type == item %}selected{% endif %}>
+                        {{ item }}
+                    </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="filter-buttons">
+            <button type="submit" class="btn">Run Report</button>
+
+            <a class="btn btn-secondary"
+               href="{{ url_for('income_report') }}">
+                Reset
+            </a>
+
+            <a class="btn"
+               href="{{ url_for('income_report_csv',
+                   start_date=start_date,
+                   end_date=end_date,
+                   income_type=income_type) }}">
+                Export to CSV
+            </a>
+
+            <a class="btn"
+               href="{{ url_for('income_report_excel',
+                   start_date=start_date,
+                   end_date=end_date,
+                   income_type=income_type) }}">
+                Export to Excel
+            </a>
+        </div>
+
+    </form>
+</div>
 
     <div class="report-period">
         <strong>Reporting Period:</strong>

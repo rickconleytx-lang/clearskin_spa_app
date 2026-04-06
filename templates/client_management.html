@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+
+{% block title %}Client Management{% endblock %}
+
+{% block content %}
+
+<h1>Client Management</h1>
+
+<div style="margin-bottom: 20px;">
+    <a class="btn" href="{{ url_for('add_new_client') }}">
+        Add New Client
+    </a>
+
+    <a class="btn" href="{{ url_for('calendar_view') }}">
+        Go to Calendar
+    </a>
+
+    <a class="btn" href="{{ url_for('clients_home') }}">
+        Clients Home
+    </a>
+
+
+    <a class="btn" href="{{ url_for('appointments') }}">
+        Appointments List
+    </a>
+   
+
+
+</div>
+<br>
+<p style="margin-bottom: 15px;">
+    Search by first name, last name, or phone number to quickly access client records.
+</p>
+
+<form method="GET" style="margin-bottom: 20px;">
+    <label for="search">Search Client</label><br>
+    <input
+        type="text"
+        id="search"
+        name="search"
+        value="{{ search or '' }}"
+        placeholder="Search by first name, last name, or phone"
+    >
+    <button type="submit" class="btn">Search</button>
+    <a href="{{ url_for('client_management') }}" class="btn">Clear</a>
+</form>
+
+{% if rows %}
+<table>
+    <thead>
+        <tr>
+            <th>Client</th>
+            <th>Phone</th>
+            <th>Email</th>
+            <th>Birth Date</th>
+            <th>Last Visit</th>
+            <th>Next Visit</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in rows %}
+        <tr>
+            <td>{{ row[2] }}, {{ row[1] }}</td>
+            <td>{{ row[3] or '' }}</td>
+            <td>{{ row[4] or '' }}</td>
+            <td>{{ row[5] or '' }}</td>
+            <td>{{ row[6] or '' }}</td>
+            <td>{{ row[7] or '' }}</td>
+            <td>
+                <a class="btn" href="{{ url_for('add_appointment', client_id=row[0]) }}">
+                    Add Appointment
+                </a>
+
+                <a class="btn" href="{{ url_for('client_health_profile', client_id=row[0]) }}">
+                    Health / Intake
+                </a>
+
+                <a class="btn" href="{{ url_for('client_forms', client_id=row[0]) }}">
+                    Forms
+                </a>
+
+                <a class="btn" href="{{ url_for('client_history_detail', client_id=row[0]) }}">
+                    Visit Summary
+                </a>
+
+                <a class="btn" href="{{ url_for('edit_client_full', client_id=row[0]) }}">
+                    Full Record
+                </a>
+
+
+                <a class="btn" href="{{ url_for('edit_client', client_id=row[0]) }}">
+                    Edit
+                </a>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% elif search %}
+<p>No matching clients found.</p>
+{% else %}
+<p>Search for a client to manage appointments, intake, forms, and history.</p>
+{% endif %}
+
+{% endblock %}
