@@ -44,57 +44,78 @@
         </thead>
 
         <tbody>
-            {% for row in appointments %}
-            <tr>
-                <td>{{ row[0] }}</td>
-                <td>{{ row[5].strftime('%m/%d/%Y') if row[5] else '' }}</td>
-                <td>{{ row[6].strftime('%I:%M %p') if row[6] else '' }}</td>
-                <td>{{ row[3] }}, {{ row[2] }}</td>
-                <td>{{ row[4] or '' }}</td>
-                <td>{{ row[7]|title if row[7] else '' }}</td>
+            {% if appointments %}
+                {% for row in appointments %}
+                <tr>
+                    <td>{{ row[0] }}</td>
+                    <td>{{ row[5].strftime('%m/%d/%Y') if row[5] else '' }}</td>
+                    <td>{{ row[6].strftime('%I:%M %p') if row[6] else '' }}</td>
+                    <td>{{ row[3] }}, {{ row[2] }}</td>
+                    <td>{{ row[4] or '' }}</td>
+                    <td>{{ row[7]|title if row[7] else '' }}</td>
 
-                <td>
-                    {% if row[8] %}
-                        <div class="action-row">
-                            <button type="button" class="btn note-btn"
-                                    onclick="toggleNote('note-{{ row[0] }}')">
-                                View Note
-                            </button>
-                        </div>
-
-                        <div id="note-{{ row[0] }}" class="note-popup-box">
-                            <div class="note-popup-content">
-                                <strong>Notes</strong><br>
-                                {{ row[8] }}
-                                <br><br>
-                                <button type="button" class="btn"
+                    <td>
+                        {% if row[8] %}
+                            <div class="action-row">
+                                <button type="button"
+                                        class="btn note-btn"
                                         onclick="toggleNote('note-{{ row[0] }}')">
-                                    Close
+                                    View Note
                                 </button>
                             </div>
-                        </div>
-                    {% endif %}
 
-                    <div class="action-row">
-                        <a href="{{ url_for('edit_appointment', appointment_id=row[0]) }}"
-                           class="btn">Edit</a>
-
-                        <a class="btn" href="{{ url_for('add_income', appointment_id=row[0]) }}">
-                            Add Income
-                        </a>
-
-                        {% if row[7] != 'cancelled' %}
-                        <form method="POST"
-                              action="{{ url_for('cancel_appointment', appointment_id=row[0]) }}"
-                              style="display:inline;"
-                              onsubmit="return confirm('Cancel this appointment?');">
-                            <button type="submit" class="btn btn-danger">Cancel</button>
-                        </form>
+                            <div id="note-{{ row[0] }}" class="note-popup-box">
+                                <div class="note-popup-content">
+                                    <strong>Notes</strong><br><br>
+                                    {{ row[8] }}
+                                    <br><br>
+                                    <button type="button"
+                                            class="btn"
+                                            onclick="toggleNote('note-{{ row[0] }}')">
+                                        Close
+                                    </button>
+                                </div>
+                            </div>
                         {% endif %}
-                    </div>
-                </td>
-            </tr>
-            {% endfor %}
+
+                        <div class="action-row">
+                            <a href="{{ url_for('edit_appointment', appointment_id=row[0]) }}" class="btn">
+                                Edit
+                            </a>
+
+                            <a href="{{ url_for('reschedule_appointment', appointment_id=row[0]) }}" class="btn">
+                                Reschedule
+                            </a>
+
+                            <a href="{{ url_for('add_income', appointment_id=row[0]) }}" class="btn">
+                                Add Income
+                            </a>
+
+                            {% if row[7] != 'cancelled' %}
+                            <form method="POST"
+                                  action="{{ url_for('cancel_appointment', appointment_id=row[0]) }}"
+                                  style="display:inline;"
+                                  onsubmit="return confirm('Cancel this appointment?');">
+                                <button type="submit" class="btn btn-danger">Cancel</button>
+                            </form>
+                            {% endif %}
+
+                            <form method="POST"
+                                  action="{{ url_for('delete_appointment', appointment_id=row[0]) }}"
+                                  style="display:inline;"
+                                  onsubmit="return confirm('Are you sure you want to permanently delete this appointment?');">
+                                <input type="hidden" name="selected_date" value="{{ row[5].isoformat() if row[5] else '' }}">
+                                <button type="submit" class="btn btn-delete">Delete</button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="7" class="empty-message">No appointments found.</td>
+                </tr>
+            {% endif %}
         </tbody>
     </table>
 </div>
@@ -169,17 +190,35 @@ function toggleNote(noteId) {
     word-wrap: break-word;
 }
 
+.empty-message {
+    text-align: center;
+    padding: 25px;
+    color: #666;
+    font-style: italic;
+}
+
 .btn {
     padding: 6px 10px;
     margin: 2px;
     border-radius: 4px;
     text-decoration: none;
     cursor: pointer;
+    border: none;
+    display: inline-block;
 }
 
 .btn-danger {
     background-color: #c0392b;
     color: white;
+}
+
+.btn-delete {
+    background-color: #7f1d1d;
+    color: white;
+}
+
+.btn-delete:hover {
+    background-color: #5e1414;
 }
 </style>
 

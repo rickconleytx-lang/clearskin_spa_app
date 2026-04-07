@@ -4643,21 +4643,39 @@ def edit_appointment(appointment_id):
 @app.route("/delete_appointment/<int:appointment_id>", methods=["POST"])
 def delete_appointment(appointment_id):
     spa_id = get_current_spa_id()
+
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # get date before deleting (for redirect)
-    cur.execute("SELECT appointment_date FROM appointments WHERE appointment_id = %s", (appointment_id,))
+    # get date before deleting for redirect
+    cur.execute("""
+        SELECT appointment_date
+        FROM appointments
+        WHERE appointment_id = %s
+          AND spa_id = %s
+    """, (appointment_id, spa_id))
+
     appt = cur.fetchone()
 
-    cur.execute("DELETE FROM appointments WHERE appointment_id = %s", (appointment_id,))
-    
+    if not appt:
+        cur.close()
+        conn.close()
+        flash("Appointment not found.", "error")
+        return redirect(url_for("appointments"))
+
+    cur.execute("""
+        DELETE FROM appointments
+        WHERE appointment_id = %s
+          AND spa_id = %s
+    """, (appointment_id, spa_id))
+
     conn.commit()
     cur.close()
     conn.close()
 
-    return redirect(url_for('daily_schedule', date=appt[0]))
+    flash("Appointment deleted successfully.", "success")
 
+    return redirect(url_for("appointments", date=appt[0]))
 
 #  ---------------------
 #
@@ -4687,6 +4705,126 @@ def cancel_appointment(appointment_id):
     flash("Appointment cancelled.", "warning") 
 
     return redirect(url_for("calendar_view", offset=0))
+
+
+
+
+
+
+#  -----------------
+#     
+#   RESCHEDULE   APPOINTMENT
+#  
+#  
+#  -----------------
+
+@app.route("/reschedule_appointment/<int:appointment_id>", methods=["GET", "POST"])
+def reschedule_appointment(appointment_id):
+    spa_id = get_current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    if request.method == "POST":
+        service_type_id = (request.form.get("service_type_id") or "").strip()
+        appointment_date = (request.form.get("appointment_date") or "").strip()
+        appointment_time = (request.form.get("appointment_time") or "").strip()
+        status = (request.form.get("status") or "").strip()
+        notes = (request.form.get("notes") or "").strip()
+        original_date = (request.form.get("original_date") or "").strip()
+
+        if not service_type_id or not appointment_date or not appointment_time or not status:
+            flash("Please complete all required fields.", "error")
+            cur.close()
+            conn.close()
+            return redirect(url_for("reschedule_appointment", appointment_id=appointment_id))
+
+        cur.execute("""
+            UPDATE appointments
+            SET
+                service_type_id = %s,
+                appointment_date = %s,
+                appointment_time = %s,
+                status = %s,
+                notes = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE appointment_id = %s
+              AND spa_id = %s
+        """, (
+            service_type_id,
+            appointment_date,
+            appointment_time,
+            status,
+            notes,
+            appointment_id,
+            spa_id
+        ))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        flash("Appointment rescheduled successfully.", "success")
+
+        if appointment_date:
+            return redirect(url_for("daily_schedule", date=appointment_date))
+
+        if original_date:
+            return redirect(url_for("daily_schedule", date=original_date))
+
+        return redirect(url_for("appointments"))
+
+    cur.execute("""
+        SELECT
+            a.appointment_id,
+            a.client_id,
+            c.first_name,
+            c.last_name,
+            a.service_type_id,
+            a.appointment_date,
+            a.appointment_time,
+            a.status,
+            a.notes
+        FROM appointments a
+        JOIN clients c
+          ON a.client_id = c.client_id
+        WHERE a.appointment_id = %s
+          AND a.spa_id = %s
+    """, (appointment_id, spa_id))
+
+    appointment = cur.fetchone()
+
+    if not appointment:
+        cur.close()
+        conn.close()
+        flash("Appointment not found.", "error")
+        return redirect(url_for("appointments"))
+
+    cur.execute("""
+        SELECT service_type_id, service_name
+        FROM service_name_types
+        WHERE spa_id = %s
+        ORDER BY service_name
+    """, (spa_id,))
+    service_types = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "reschedule_appointment.html",
+        appointment=appointment,
+        service_types=service_types
+    )
+
+
+
+
+
+
+
+
+
 
 
 
