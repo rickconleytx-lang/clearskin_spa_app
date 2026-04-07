@@ -4,12 +4,19 @@ from psycopg2 import sql
 from decimal import Decimal
 import csv
 import io
+import os
 from openpyxl import Workbook
+from dotenv import load_dotenv
 
 from db import get_db_connection
 
+load_dotenv()
+
 app = Flask(__name__)
-app.secret_key = "your_secret_key_here"
+app.secret_key = os.environ.get("SECRET_KEY", "local-dev-key")
+
+
+
 
 #  ---------------------
 #        HELPERS
