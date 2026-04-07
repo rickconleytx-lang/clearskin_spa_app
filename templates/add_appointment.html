@@ -60,6 +60,8 @@
         </p>
     {% endif %}
 
+    <p>Service count: {{ service_types|length }}</p>
+
     <label for="service_type_id">Service</label>
     <select name="service_type_id" id="service_type_id" required>
         <option value="">Select Service</option>
