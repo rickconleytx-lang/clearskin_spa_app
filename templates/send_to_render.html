@@ -1,0 +1,92 @@
+
+
+UPDATE SQL ON RENDER
+ONLY IF CHANGES MADE:
+ALTER TABLE ...
+ADD COLUMN ...
+DROP COLUMN ...
+ADD CONSTRAINT ...
+CREATE TABLE ...
+
+ALTER TABLE ...
+ADD COLUMN ...
+DROP COLUMN ...
+ADD CONSTRAINT ...
+CREATE TABLE ...
+
+SELECT ...
+
+
+
+from terminal:
+/Library/PostgreSQL/18/bin/psql "postgresql://clearskin_user:6082WiIdYmGhvIEbF3x0g5JHnxtLNsor@dpg-d7a5d37pm1nc73bu0s80-a.ohio-postgres.render.com/clearskin_spa?sslmode=require"
+
+
+then normal SQL 
+example:
+SELECT column_name
+FROM information_schema.columns
+WHERE table_name = 'appointments'
+ORDER BY ordinal_position;
+
+
+
+
+
+
+
+
+
+
+
+
+
+GIT BACKUP
+
+git add .
+git commit -m "Fixed appointment booking flow with service_type_id"
+git push
+
+
+
+
+PostgreSQL BACKUP - only if changed SQL tables or critical records
+
+/Library/PostgreSQL/18/bin/pg_dump -U postgres -d clearskin_spa_app > ~/spa_success_backup_apr7.sql
+
+
+
+
+
+BACKUP DATABASE
+
+/Library/PostgreSQL/18/bin/pg_dump -U postgres -d clearskin_spa > ~/spa_success_backup_apr7.sql
+
+
+
+
+OPTIONAL SAFE BACKUP
+cp app.py app_backup_apr7.py
+
+
+
+PUSH TO RENDER:
+git push
+
+
+
+FOR MINOR CHANGES (HELP PAGES,,,ETC)
+
+git add .
+git commit -m "Update help pages"
+git push
+
+
+
+
+LIST LOCAL DATABASES:
+
+/Library/PostgreSQL/18/bin/psql -U postgres -l
+
+
+

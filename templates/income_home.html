@@ -46,9 +46,12 @@
 
     <div class="summary-card">
         <h3>Difference</h3>
-        <p style="color: {% if net_total >= 0 %}green{% else %}red{% endif %};">
-        <p>${{ "%.2f"|format(net_total) }}</p>
-    </div>
+        <p style="color: {{ 'green' if net_total >= 0 else 'red' }};">
+            ${{ "%.2f"|format(net_total) }}
+    </p>
+
+</div>
+
 </div>
 
 
