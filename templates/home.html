@@ -4,9 +4,18 @@
 
 {% block content %}
 
-<a href="{{ url_for('help_page') }}" class="btn">Help</a>
+
+<div style+"margin-bottom: 15px;">
+    <a href="{{ url_for('help_page') }}" class="btn">Help</a>
+    <a href="{{ url_for('income_report') }}" class="btn">Income</a>
+    <a href="{{ url_for('expense_report') }}" class="btn">Expenses</a>
+    <a href="{{ url_for('employees_home') }}" class="btn">Employees</a>
+    <a href="{{ url_for('admin') }}" class="btn">Admin</a>
+</div>
 
 <div class="section-page">
+
+
     <div class="section-header">
         <h1>Control Panel</h1>
         <p class="section-subtitle">Quick access to all areas of the system.</p>

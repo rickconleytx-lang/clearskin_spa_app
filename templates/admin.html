@@ -42,6 +42,60 @@
 </div>
 
 
+<div class="admin-section">
+    <h2>Time Settings</h2>
+
+    <p><strong>Server UTC Time:</strong> {{ utc_now.strftime("%Y-%m-%d %I:%M %p") }}</p>
+    <p><strong>Spa Current Time:</strong> {{ spa_now.strftime("%Y-%m-%d %I:%M %p") }}</p>
+    <p><strong>Current Timezone:</strong> {{ current_timezone }}</p>
+
+    <form method="POST" action="{{ url_for('save_time_settings') }}">
+        <div class="form-group">
+            <label for="timezone_name">Select Timezone</label>
+
+          <select name="timezone_name" id="timezone_name" required>
+              <optgroup label="United States">
+                  <option value="America/New_York" {% if current_timezone == "America/New_York" %}selected{% endif %}>Eastern Time</option>
+                  <option value="America/Chicago" {% if current_timezone == "America/Chicago" %}selected{% endif %}>Central Time</option>
+                  <option value="America/Denver" {% if current_timezone == "America/Denver" %}selected{% endif %}>Mountain Time</option>
+                  <option value="America/Los_Angeles" {% if current_timezone == "America/Los_Angeles" %}selected{% endif %}>Pacific Time</option>
+                  <option value="America/Anchorage" {% if current_timezone == "America/Anchorage" %}selected{% endif %}>Alaska Time</option>
+                  <option value="Pacific/Honolulu" {% if current_timezone == "Pacific/Honolulu" %}selected{% endif %}>Hawaii Time</option>
+               </optgroup>
+
+               <optgroup label="Canada">
+                   <option value="America/Toronto" {% if current_timezone == "America/Toronto" %}selected{% endif %}>Toronto</option>
+                   <option value="America/Vancouver" {% if current_timezone == "America/Vancouver" %}selected{% endif %}>Vancouver</option>
+                   <option value="America/Edmonton" {% if current_timezone == "America/Edmonton" %}selected{% endif %}>Edmonton</option>
+                   <option value="America/Halifax" {% if current_timezone == "America/Halifax" %}selected{% endif %}>Halifax</option>
+               </optgroup>
+
+               <optgroup label="Europe">
+                   <option value="Europe/London" {% if current_timezone == "Europe/London" %}selected{% endif %}>London</option>
+                   <option value="Europe/Dublin" {% if current_timezone == "Europe/Dublin" %}selected{% endif %}>Dublin</option>
+                   <option value="Europe/Paris" {% if current_timezone == "Europe/Paris" %}selected{% endif %}>Paris</option>
+                   <option value="Europe/Berlin" {% if current_timezone == "Europe/Berlin" %}selected{% endif %}>Berlin</option>
+                   <option value="Europe/Madrid" {% if current_timezone == "Europe/Madrid" %}selected{% endif %}>Madrid</option>
+                   <option value="Europe/Rome" {% if current_timezone == "Europe/Rome" %}selected{% endif %}>Rome</option>
+               </optgroup>
+
+               <optgroup label="Australia / Asia">
+                   <option value="Australia/Sydney" {% if current_timezone == "Australia/Sydney" %}selected{% endif %}>Sydney</option>
+                   <option value="Australia/Perth" {% if current_timezone == "Australia/Perth" %}selected{% endif %}>Perth</option>
+                   <option value="Asia/Tokyo" {% if current_timezone == "Asia/Tokyo" %}selected{% endif %}>Tokyo</option>
+                   <option value="Asia/Singapore" {% if current_timezone == "Asia/Singapore" %}selected{% endif %}>Singapore</option>
+                   <option value="Asia/Dubai" {% if current_timezone == "Asia/Dubai" %}selected{% endif %}>Dubai</option>
+               </optgroup>
+           </select>
+        
+
+        </div>
+        <br>
+        <button type="submit" class="btn">Save Time Settings</button>
+    </form>
+</div>
+
+
 
 <div class="admin-section">
     <h2>Booking & Calendar Integration Settings</h2>

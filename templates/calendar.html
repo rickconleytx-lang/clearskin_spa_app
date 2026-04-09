@@ -6,16 +6,24 @@
 <br>
 <br>
 
+<div class="summary-card" style="font-size: 14px; padding: 8px;">
+    <h3 style="font-size: 16px; margin-bottom: 4px;">Current Spa Time</h3>
+    <p style="margin: 2px 0;">{{ formatted_spa_time }}</p>
+    <p style="margin: 2px 0;">{{ current_timezone }}</p>
+</div>
+
+<br>
+
 <h1>Weekly Calendar</h1>
 
 <div style="margin-bottom: 15px;">
-    <a class="btn" href="{{ url_for('calendar_view', week_start=current_week_start.strftime('%Y-%m-%d')) }}">Today</a>
+    <a class="btn" href="{{ url_for('calendar_view', week_start=current_week_start.strftime('%Y-%m-%d')) }}#week-view">Today</a>
 
-    <a class="btn" href="{{ url_for('calendar_view', week_start=prev_week_start.strftime('%Y-%m-%d')) }}">Previous Week</a>
+    <a class="btn" href="{{ url_for('calendar_view', week_start=prev_week_start.strftime('%Y-%m-%d')) }}#week-view">Previous Week</a>
 
-    <a class="btn" href="{{ url_for('calendar_view', week_start=next_week_start.strftime('%Y-%m-%d')) }}">Next Week</a>
+    <a class="btn" href="{{ url_for('calendar_view', week_start=next_week_start.strftime('%Y-%m-%d')) }}#week-view">Next Week</a>
 
-    <a class="btn" href="{{ url_for('calendar_view', week_start=current_week_start.strftime('%Y-%m-%d')) }}">Current Week</a>
+    <a class="btn" href="{{ url_for('calendar_view', week_start=current_week_start.strftime('%Y-%m-%d')) }}#week-view">Current Week</a>
 
     <form method="GET" action="{{ url_for('calendar_view') }}" style="display:inline-block; margin-left: 10px;">
         <input type="date" name="goto_date" value="{{ goto_date if goto_date else '' }}">
@@ -107,6 +115,10 @@
 </div>
 <br>
 {% endif %}
+
+
+<div id="week-view"></div>
+<h1>Weekly Day View</h1>
 
 Note: To book a new appointment, please click on the Date Number in calendar below.
 

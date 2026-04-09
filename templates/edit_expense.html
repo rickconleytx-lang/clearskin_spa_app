@@ -17,8 +17,8 @@
         <select id="vendor_name" name="vendor_name" required>
             <option value="">Select Vendor</option>
             {% for row in vendors %}
-            <option value="{{ row[1] }}" {% if expense[2] == row[1] %}selected{% endif %}>
-                {{ row[1] }}
+            <option value="{{ row[0] }}" {% if expense[2] == row[0] %}selected{% endif %}>
+                {{ row[0] }}
             </option>
             {% endfor %}
         </select>
@@ -29,8 +29,8 @@
         <select id="category" name="category">
             <option value="">Select Category</option>
             {% for row in categories %}
-            <option value="{{ row[1] }}" {% if expense[3] == row[1] %}selected{% endif %}>
-                {{ row[1] }}
+            <option value="{{ row[0] }}" {% if expense[3] == row[0] %}selected{% endif %}>
+                {{ row[0] }}
             </option>
             {% endfor %}
         </select>
@@ -51,8 +51,8 @@
         <select id="payment_method" name="payment_method">
             <option value="">Select Payment Method</option>
             {% for row in payment_methods %}
-            <option value="{{ row[1] }}" {% if expense[6] == row[1] %}selected{% endif %}>
-                {{ row[1] }}
+            <option value="{{ row[0] }}" {% if expense[6] == row[0] %}selected{% endif %}>
+                {{ row[0] }}
             </option>
             {% endfor %}
         </select>

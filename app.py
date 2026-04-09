@@ -73,13 +73,21 @@ def get_current_spa_id():
     return session.get("spa_id", 1)
 
 
+def get_spa_today():
+    return get_spa_now().date()
 
+
+def get_spa_current_time():
+    return get_spa_now().time()
 
 
 
 #  ---------------
 #   DONE HELPERS
 #  --------------
+
+
+
 
 
 
@@ -95,6 +103,78 @@ def page_not_found(error):
 @app.errorhandler(500)
 def internal_server_error(error):
     return render_template("500.html"), 500
+
+
+
+
+
+
+
+
+#  -------------------------
+#  
+#     SAVE TIME ZONE SETTINGS
+#  
+#  -------------------------
+
+
+@app.route("/save_time_settings", methods=["POST"])
+def save_time_settings():
+    spa_id = get_current_spa_id()
+
+    timezone_name = request.form.get("timezone_name", "").strip()
+
+    # PUT IT RIGHT HERE
+    allowed_timezones = {
+        "America/New_York",
+        "America/Chicago",
+        "America/Denver",
+        "America/Los_Angeles",
+        "America/Anchorage",
+        "Pacific/Honolulu",
+        "America/Toronto",
+        "America/Vancouver",
+        "America/Edmonton",
+        "America/Halifax",
+        "Europe/London",
+        "Europe/Dublin",
+        "Europe/Paris",
+        "Europe/Berlin",
+        "Europe/Madrid",
+        "Europe/Rome",
+        "Australia/Sydney",
+        "Australia/Perth",
+        "Asia/Tokyo",
+        "Asia/Singapore",
+        "Asia/Dubai"
+    }
+
+    if timezone_name not in allowed_timezones:
+        flash("Invalid timezone selected.", "error")
+        return redirect(url_for("admin"))
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE spas
+        SET timezone_name = %s
+        WHERE spa_id = %s
+    """, (timezone_name, spa_id))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    flash("Time settings updated successfully.", "success")
+    return redirect(url_for("admin"))
+
+
+
+
+
+
+
 
 
 
@@ -638,11 +718,11 @@ def sync_calendar():
 
 
 
-
 @app.route("/client_management")
 def client_management():
     spa_id = get_current_spa_id()
     search = request.args.get("search", "").strip()
+    today = get_spa_today()
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -664,7 +744,7 @@ def client_management():
                     FROM appointments a1
                     WHERE a1.client_id = c.client_id
                       AND a1.spa_id = c.spa_id
-                      AND a1.appointment_date <= CURRENT_DATE
+                      AND a1.appointment_date <= %s
                 ) AS last_visit_date,
 
                 (
@@ -672,7 +752,7 @@ def client_management():
                     FROM appointments a2
                     WHERE a2.client_id = c.client_id
                       AND a2.spa_id = c.spa_id
-                      AND a2.appointment_date >= CURRENT_DATE
+                      AND a2.appointment_date >= %s
                 ) AS next_visit_date
 
             FROM clients c
@@ -684,6 +764,8 @@ def client_management():
               )
             ORDER BY c.last_name, c.first_name
         """, (
+            today,
+            today,
             spa_id,
             f"%{search.lower()}%",
             f"%{search.lower()}%",
@@ -700,7 +782,6 @@ def client_management():
         rows=rows,
         search=search
     )
-
 
 
 
@@ -2478,7 +2559,7 @@ def edit_expense(expense_id):
         flash("Expense not found.", "error")
         return redirect(url_for("expenses_home"))
 
-    cur.execute("SELECT vendor_name FROM vendor_name ORDER BY vendor_name ASC")
+    cur.execute("SELECT vendors_name FROM vendor_name ORDER BY vendors_name ASC")
     vendors = cur.fetchall()
 
     cur.execute("SELECT expense_cat_name FROM expense_categories ORDER BY expense_cat_name ASC")
@@ -2496,8 +2577,7 @@ def edit_expense(expense_id):
         vendors=vendors,
         categories=categories,
         payment_methods=payment_methods
-    )
-
+    )    
 
 
 #  ------------------------------------------
@@ -3159,7 +3239,10 @@ def income_report_excel():
 
 @app.route("/delete_income/<int:income_id>", methods=["POST"])
 def delete_income(income_id):
-    spa_id = get_current_spa_id()
+    start_date = request.form.get("start_date", "").strip()
+    end_date = request.form.get("end_date", "").strip()
+    income_type = request.form.get("income_type", "").strip()
+
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -3169,10 +3252,14 @@ def delete_income(income_id):
     cur.close()
     conn.close()
 
-    flash("Income record deleted successfully.", "success")
-    return redirect(url_for("income_home"))
+    flash("Income record deleted.", "success")
 
-
+    return redirect(url_for(
+        "income_report",
+        start_date=start_date,
+        end_date=end_date,
+        income_type=income_type
+    ))
 
 
 
@@ -3197,8 +3284,8 @@ def income_report():
     today = date.today()
     first_day = today.replace(day=1)
 
-    start_date = request.args.get("start_date", first_day.strftime("%Y-%m-%d"))
-    end_date = request.args.get("end_date", today.strftime("%Y-%m-%d"))
+    start_date = request.args.get("start_date") or first_day.strftime("%Y-%m-%d")
+    end_date = request.args.get("end_date") or today.strftime("%Y-%m-%d")
     income_type = request.args.get("income_type", "").strip()
 
     conn = get_db_connection()
@@ -3471,7 +3558,9 @@ def add_general_income():
 #
 #  -----------------------------
 
-from datetime import date, timedelta, datetime
+
+
+from datetime import timedelta, datetime
 from flask import render_template, request, redirect, url_for
 
 @app.route("/calendar")
@@ -3479,9 +3568,13 @@ def calendar_view():
     spa_id = get_current_spa_id()
     week_start_str = request.args.get("week_start")
     goto_date = request.args.get("goto_date")
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
 
-    today = date.today()
-    now_time = datetime.now().time()
+    spa_now = get_spa_now()
+    today = spa_now.date()
+    now_time = spa_now.time()
+    current_timezone = get_current_spa_timezone()
 
     # Find current week's Sunday
     today_days_since_sunday = (today.weekday() + 1) % 7
@@ -3505,8 +3598,6 @@ def calendar_view():
     conn = get_db_connection()
     cur = conn.cursor()
 
-    start_date = request.args.get("start_date")
-    end_date = request.args.get("end_date")
     filtered_appointments = []
 
     if start_date and end_date:
@@ -3522,9 +3613,10 @@ def calendar_view():
             FROM appointments a
             JOIN clients c ON a.client_id = c.client_id
             LEFT JOIN services s ON a.service_id = s.service_id
-            WHERE a.appointment_date BETWEEN %s AND %s
+            WHERE a.spa_id = %s
+              AND a.appointment_date BETWEEN %s AND %s
             ORDER BY a.appointment_date, a.appointment_time
-        """, (start_date, end_date))
+        """, (spa_id, start_date, end_date))
         filtered_appointments = cur.fetchall()
 
     # Show booked appointments for the displayed week
@@ -3540,9 +3632,10 @@ def calendar_view():
         FROM appointments a
         JOIN clients c ON a.client_id = c.client_id
         LEFT JOIN services s ON a.service_id = s.service_id
-        WHERE a.appointment_date BETWEEN %s AND %s
+        WHERE a.spa_id = %s
+          AND a.appointment_date BETWEEN %s AND %s
         ORDER BY a.appointment_date, a.appointment_time
-    """, (week_days[0], week_days[-1]))
+    """, (spa_id, week_days[0], week_days[-1]))
     appointments = cur.fetchall()
 
     # Next booked appointment banner
@@ -3556,24 +3649,41 @@ def calendar_view():
         FROM appointments a
         JOIN clients c ON a.client_id = c.client_id
         LEFT JOIN services s ON a.service_id = s.service_id
-        WHERE a.status = 'booked'
-          AND (a.appointment_date + a.appointment_time) >= CURRENT_TIMESTAMP
+        WHERE a.spa_id = %s
+          AND a.status = 'booked'
+          AND (
+                a.appointment_date > %s
+                OR (
+                    a.appointment_date = %s
+                    AND a.appointment_time >= %s
+                )
+              )
         ORDER BY a.appointment_date, a.appointment_time
         LIMIT 1
-    """)
+    """, (spa_id, today, today, now_time))
     next_appt = cur.fetchone()
 
     # Overdue booked appointment count
     cur.execute("""
         SELECT COUNT(*)
         FROM appointments
-        WHERE status = 'booked'
-          AND (appointment_date + appointment_time) < CURRENT_TIMESTAMP
-    """)
+        WHERE spa_id = %s
+          AND status = 'booked'
+          AND (
+                appointment_date < %s
+                OR (
+                    appointment_date = %s
+                    AND appointment_time < %s
+                )
+              )
+    """, (spa_id, today, today, now_time))
     overdue_count = cur.fetchone()[0]
 
     cur.close()
     conn.close()
+
+    formatted_spa_time = spa_now.strftime("%A, %B %d, %Y %I:%M %p")
+
 
     return render_template(
         "calendar.html",
@@ -3581,6 +3691,9 @@ def calendar_view():
         appointments=appointments,
         today=today,
         now_time=now_time,
+        spa_now=spa_now,
+        formatted_spa_time=formatted_spa_time,
+        current_timezone=current_timezone,
         next_appt=next_appt,
         overdue_count=overdue_count,
         filtered_appointments=filtered_appointments,
@@ -3595,12 +3708,15 @@ def calendar_view():
 
 
 
+
+
 #  -----------------------------
 #     
 #     
 #     DAILY SCHEDULE
 #  
 #  -----------------------------
+
 
 
 from datetime import datetime, date
@@ -3613,7 +3729,7 @@ def daily_schedule():
     if selected_date:
         display_date = datetime.strptime(selected_date, "%Y-%m-%d").date()
     else:
-        display_date = date.today()
+        display_date = get_spa_today()
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -3658,6 +3774,7 @@ def daily_schedule():
 
 
 
+
 #  -----------------------------
 #    
 #
@@ -3666,10 +3783,10 @@ def daily_schedule():
 #  -----------------------------
 
 
+
 from flask import render_template
 from db import get_db_connection
 from datetime import date, timedelta
-
 
 @app.route("/dashboard")
 def dashboard():
@@ -3677,11 +3794,10 @@ def dashboard():
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Total clients
-    cur.execute("SELECT COUNT(*) FROM clients;")
-    total_clients = cur.fetchone()[0]
+    spa_now = get_spa_now()
+    today = spa_now.date()
+    now_time = spa_now.time()
 
-    today = date.today()
     current_year = today.year
     current_month = today.month
     today_day = today.day
@@ -3692,6 +3808,14 @@ def dashboard():
     else:
         next_month = current_month + 1
         next_month_year = current_year
+
+    # Total clients
+    cur.execute("""
+        SELECT COUNT(*)
+        FROM clients
+        WHERE spa_id = %s;
+    """, (spa_id,))
+    total_clients = cur.fetchone()[0]
 
     cur.execute("""
         SELECT
@@ -3704,9 +3828,10 @@ def dashboard():
         LEFT JOIN client_birthday_offers cbo
             ON c.client_id = cbo.client_id
             AND cbo.birthday_year = %s
-        WHERE c.birth_date IS NOT NULL
-        AND c.active_client = TRUE
-    """, (current_year,))
+        WHERE c.spa_id = %s
+          AND c.birth_date IS NOT NULL
+          AND c.active_client = TRUE
+    """, (current_year, spa_id))
 
     all_birthdays = cur.fetchall()
 
@@ -3740,11 +3865,16 @@ def dashboard():
             a.appointment_time,
             a.status
         FROM appointments a
-        JOIN clients c ON a.client_id = c.client_id
-        LEFT JOIN services s ON a.service_id = s.service_id
-        WHERE a.appointment_date = CURRENT_DATE
+        JOIN clients c
+            ON a.client_id = c.client_id
+           AND a.spa_id = c.spa_id
+        LEFT JOIN services s
+            ON a.service_id = s.service_id
+           AND a.spa_id = s.spa_id
+        WHERE a.spa_id = %s
+          AND a.appointment_date = %s
         ORDER BY a.appointment_time ASC;
-    """)
+    """, (spa_id, today))
     todays_appointments = cur.fetchall()
 
     # Upcoming appointments (future only)
@@ -3758,21 +3888,27 @@ def dashboard():
             a.appointment_time,
             a.status
         FROM appointments a
-        JOIN clients c ON a.client_id = c.client_id
-        LEFT JOIN services s ON a.service_id = s.service_id
-        WHERE a.appointment_date > CURRENT_DATE
+        JOIN clients c
+            ON a.client_id = c.client_id
+           AND a.spa_id = c.spa_id
+        LEFT JOIN services s
+            ON a.service_id = s.service_id
+           AND a.spa_id = s.spa_id
+        WHERE a.spa_id = %s
+          AND a.appointment_date > %s
           AND a.status NOT IN ('cancelled', 'completed')
         ORDER BY a.appointment_date ASC, a.appointment_time ASC
         LIMIT 10;
-    """)
+    """, (spa_id, today))
     upcoming_appointments = cur.fetchall()
 
     # Completed appointments count
     cur.execute("""
         SELECT COUNT(*)
         FROM appointments
-        WHERE status = 'completed';
-    """)
+        WHERE spa_id = %s
+          AND status = 'completed';
+    """, (spa_id,))
     completed_count = cur.fetchone()[0]
 
     # Top services
@@ -3781,58 +3917,72 @@ def dashboard():
             COALESCE(s.service_name, 'Unknown Service') AS service_name,
             COUNT(*) AS total_booked
         FROM appointments a
-        LEFT JOIN services s ON a.service_id = s.service_id
+        LEFT JOIN services s
+            ON a.service_id = s.service_id
+           AND a.spa_id = s.spa_id
+        WHERE a.spa_id = %s
         GROUP BY s.service_name
         ORDER BY total_booked DESC
         LIMIT 5;
-    """)
+    """, (spa_id,))
     top_services = cur.fetchall()
 
     # Optional summary counts
     cur.execute("""
         SELECT COUNT(*)
         FROM appointments
-        WHERE appointment_date = CURRENT_DATE;
-    """)
+        WHERE spa_id = %s
+          AND appointment_date = %s;
+    """, (spa_id, today))
     today_count = cur.fetchone()[0]
 
     cur.execute("""
         SELECT COUNT(*)
         FROM appointments
-        WHERE appointment_date > CURRENT_DATE
+        WHERE spa_id = %s
+          AND appointment_date > %s
           AND status NOT IN ('cancelled', 'completed');
-    """)
+    """, (spa_id, today))
     upcoming_count = cur.fetchone()[0]
-
 
     # Next appointment
     cur.execute("""
         SELECT
             c.first_name,
             c.last_name,
-            a.appointment_date,            
+            a.appointment_date,
             a.appointment_time,
             s.service_name
         FROM appointments a
-        JOIN clients c ON a.client_id = c.client_id
-        LEFT JOIN services s ON a.service_id = s.service_id
-        WHERE a.status = 'booked'
-          AND (a.appointment_date + a.appointment_time) >= NOW()
+        JOIN clients c
+            ON a.client_id = c.client_id
+           AND a.spa_id = c.spa_id
+        LEFT JOIN services s
+            ON a.service_id = s.service_id
+           AND a.spa_id = s.spa_id
+        WHERE a.spa_id = %s
+          AND a.status = 'booked'
+          AND (
+                a.appointment_date > %s
+                OR (
+                    a.appointment_date = %s
+                    AND a.appointment_time >= %s
+                )
+              )
         ORDER BY a.appointment_date ASC, a.appointment_time ASC
         LIMIT 1;
-    """)
+    """, (spa_id, today, today, now_time))
     next_appt = cur.fetchone()
-
 
     # Revenue today (completed appointments only)
     cur.execute("""
         SELECT COALESCE(SUM(price_at_booking), 0)
         FROM appointments
-        WHERE appointment_date = CURRENT_DATE
+        WHERE spa_id = %s
+          AND appointment_date = %s
           AND status = 'completed';
-    """)
+    """, (spa_id, today))
     revenue_today = cur.fetchone()[0]
-
 
     cur.close()
     conn.close()
@@ -3849,8 +3999,8 @@ def dashboard():
         upcoming_count=upcoming_count,
         next_appt=next_appt,
         revenue_today=revenue_today
-           
     )
+
 
 
 
@@ -5331,6 +5481,8 @@ def add_new_client_step2():
             return redirect(url_for("client_history"))
 
     step2_data = session.get("new_client_step2", {})
+
+
     return render_template(
         "add_new_client_step2.html", 
         step2_data=step2_data,
@@ -5475,14 +5627,105 @@ def delete_client(client_id):
 
 
 
+
+
+
+
+
+
 #  -----------------
-#   ADMIN PAGE
+#   TIME ZONES
+#       
+#  ----------------
+
+
+
+
+
+#  -----------------
+#    TIME ZONES
 #
 #  ----------------
 
+
+
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+def get_current_spa_timezone():
+    spa_id = get_current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT timezone_name
+        FROM spas
+        WHERE spa_id = %s
+    """, (spa_id,))
+    row = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if row and row[0]:
+        return row[0]
+
+    return "America/Chicago"
+
+
+def get_spa_now():
+    timezone_name = get_current_spa_timezone()
+    return datetime.now(ZoneInfo(timezone_name))
+
+
+def get_utc_now():
+    return datetime.now(ZoneInfo("UTC"))
+
+
+#   ---------------------------------
+#
+#    ADMIN PAGE
+#
+#   --------------------------------
+
+
+
 @app.route("/admin")
 def admin():
-    return render_template("admin.html")
+
+    spa_id = get_current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT timezone_name
+        FROM spas
+        WHERE spa_id = %s
+    """, (spa_id,))
+    row = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    current_timezone = row[0] if row and row[0] else "America/Chicago"
+    utc_now = get_utc_now()
+    spa_now = datetime.now(ZoneInfo(current_timezone))
+
+
+ 
+    return render_template(
+        "admin.html",
+        current_timezone=current_timezone,
+        utc_now=utc_now,
+        spa_now=spa_now
+    )      
+
+
+
+
+
 
 
 #  --------------
