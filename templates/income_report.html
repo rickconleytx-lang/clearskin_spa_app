@@ -26,59 +26,59 @@
                     id="start_date"
                     name="start_date"
                     value="{{ start_date }}"
-            >
-        </div>
+                >
+            </div>
 
-        <div class="filter-group">
-            <label for="end_date">End Date</label>
-            <input
-                type="date"
-                id="end_date"
-                name="end_date"
-                value="{{ end_date }}"
-            >
-        </div>
+            <div class="filter-group">
+                <label for="end_date">End Date</label>
+                <input
+                    type="date"
+                    id="end_date"
+                    name="end_date"
+                    value="{{ end_date }}"
+                >
+            </div>
 
-        <div class="filter-group">
-            <label for="income_type">Income Type</label>
-            <select id="income_type" name="income_type">
-                <option value="">All Income Types</option>
-                {% for item in income_type_options %}
-                    <option value="{{ item }}"
-                        {% if income_type == item %}selected{% endif %}>
-                        {{ item }}
-                    </option>
-                {% endfor %}
-            </select>
-        </div>
+            <div class="filter-group">
+                <label for="income_type">Income Type</label>
+                <select id="income_type" name="income_type">
+                    <option value="">All Income Types</option>
+                    {% for item in income_type_options %}
+                        <option value="{{ item }}"
+                            {% if income_type == item %}selected{% endif %}>
+                            {{ item }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
 
-        <div class="filter-buttons">
-            <button type="submit" class="btn">Run Report</button>
+            <div class="filter-buttons">
+                <button type="submit" class="btn">Run Report</button>
 
-            <a class="btn btn-secondary"
-               href="{{ url_for('income_report') }}">
-                Reset
-            </a>
+                <a class="btn btn-secondary"
+                   href="{{ url_for('income_report') }}">
+                    Reset
+                </a>
 
-            <a class="btn"
-               href="{{ url_for('income_report_csv',
-                   start_date=start_date,
-                   end_date=end_date,
-                   income_type=income_type) }}">
-                Export to CSV
-            </a>
+                <a class="btn"
+                   href="{{ url_for('income_report_csv',
+                       start_date=start_date,
+                       end_date=end_date,
+                       income_type=income_type) }}">
+                    Export to CSV
+                </a>
 
-            <a class="btn"
-               href="{{ url_for('income_report_excel',
-                   start_date=start_date,
-                   end_date=end_date,
-                   income_type=income_type) }}">
-                Export to Excel
-            </a>
-        </div>
+                <a class="btn"
+                   href="{{ url_for('income_report_excel',
+                       start_date=start_date,
+                       end_date=end_date,
+                       income_type=income_type) }}">
+                    Export to Excel
+                </a>
+            </div>
 
-    </form>
-</div>
+        </form>
+    </div>
 
     <div class="report-period">
         <strong>Reporting Period:</strong>
@@ -87,28 +87,38 @@
 
     <div class="summary-cards">
         <div class="summary-card">
-            <h3>Grand Total</h3>
-            <p>${{ '%.2f'|format(summary[4]) }}</p>
+            <h3>Total Entries</h3>
+            <p>{{ summary[0] }}</p>
         </div>
 
         <div class="summary-card">
-            <h3>Service Income</h3>
+            <h3>Service Sales</h3>
             <p>${{ '%.2f'|format(summary[1]) }}</p>
         </div>
 
         <div class="summary-card">
-            <h3>Retail Income</h3>
+            <h3>Retail Sales</h3>
             <p>${{ '%.2f'|format(summary[2]) }}</p>
         </div>
 
         <div class="summary-card">
-            <h3>Tax Collected</h3>
+            <h3>Tips Collected</h3>
             <p>${{ '%.2f'|format(summary[3]) }}</p>
         </div>
 
         <div class="summary-card">
-            <h3>Total Entries</h3>
-            <p>{{ summary[0] }}</p>
+            <h3>Tax Collected</h3>
+            <p>${{ '%.2f'|format(summary[4]) }}</p>
+        </div>
+
+        <div class="summary-card">
+            <h3>Gross Collected</h3>
+            <p>${{ '%.2f'|format(summary[5]) }}</p>
+        </div>
+
+        <div class="summary-card">
+            <h3>Spa Income</h3>
+            <p>${{ '%.2f'|format(summary[6]) }}</p>
         </div>
     </div>
 
@@ -121,7 +131,9 @@
                         <tr>
                             <th>Income Type</th>
                             <th>Entries</th>
-                            <th>Total</th>
+                            <th>Spa Income</th>
+                            <th>Tips</th>
+                            <th>Gross Collected</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -131,11 +143,13 @@
                                 <td>{{ row[0] }}</td>
                                 <td>{{ row[1] }}</td>
                                 <td>${{ '%.2f'|format(row[2]) }}</td>
+                                <td>${{ '%.2f'|format(row[3]) }}</td>
+                                <td>${{ '%.2f'|format(row[4]) }}</td>
                             </tr>
                             {% endfor %}
                         {% else %}
                             <tr>
-                                <td colspan="3" class="no-data">No data found for this date range.</td>
+                                <td colspan="5" class="no-data">No data found for this date range.</td>
                             </tr>
                         {% endif %}
                     </tbody>
@@ -151,7 +165,9 @@
                         <tr>
                             <th>Payment Method</th>
                             <th>Entries</th>
-                            <th>Total</th>
+                            <th>Spa Income</th>
+                            <th>Tips</th>
+                            <th>Gross Collected</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -161,11 +177,13 @@
                                 <td>{{ row[0] }}</td>
                                 <td>{{ row[1] }}</td>
                                 <td>${{ '%.2f'|format(row[2]) }}</td>
+                                <td>${{ '%.2f'|format(row[3]) }}</td>
+                                <td>${{ '%.2f'|format(row[4]) }}</td>
                             </tr>
                             {% endfor %}
                         {% else %}
                             <tr>
-                                <td colspan="3" class="no-data">No payment data found for this date range.</td>
+                                <td colspan="5" class="no-data">No payment data found for this date range.</td>
                             </tr>
                         {% endif %}
                     </tbody>
@@ -173,7 +191,6 @@
             </div>
         </div>
     </div>
-
 
     <div class="report-section detail-section">
         <h2>Detailed Income Transactions</h2>
@@ -184,10 +201,12 @@
                     <tr>
                         <th>Date</th>
                         <th>Client</th>
+                        <th>Employee</th>
                         <th>Income Type</th>
                         <th>Description / Services</th>
                         <th>Payment Method</th>
                         <th>Service</th>
+                        <th>Tip</th>
                         <th>Retail</th>
                         <th>Tax</th>
                         <th>Total</th>
@@ -201,47 +220,42 @@
                         <tr>
                             <td>{{ row[1].strftime('%Y-%m-%d') if row[1] else '' }}</td>
                             <td>{{ row[2] }}</td>
-                            <td>{{ row[3] or '—' }}</td>
+                            <td>{{ row[3] }}</td>
                             <td>{{ row[4] or '—' }}</td>
                             <td>{{ row[5] or '—' }}</td>
-                            <td class="amount-cell">${{ '%.2f'|format(row[6]) }}</td>
+                            <td>{{ row[6] or '—' }}</td>
                             <td class="amount-cell">${{ '%.2f'|format(row[7]) }}</td>
                             <td class="amount-cell">${{ '%.2f'|format(row[8]) }}</td>
-                            <td class="amount-cell total-highlight">${{ '%.2f'|format(row[9]) }}</td>
+                            <td class="amount-cell">${{ '%.2f'|format(row[9]) }}</td>
+                            <td class="amount-cell">${{ '%.2f'|format(row[10]) }}</td>
+                            <td class="amount-cell total-highlight">${{ '%.2f'|format(row[11]) }}</td>
                             <td>
-                                {% if row[10] %}
-                                    {{ row[10] }}
+                                {% if row[12] %}
+                                    {{ row[12] }}
                                 {% else %}
                                     <span class="muted-text">—</span>
                                 {% endif %}
                             </td>
-
                             <td>
-
                                 <a href="{{ url_for('edit_income', income_id=row[0]) }}" class="btn btn-small">Edit</a>
 
+                                <form method="POST"
+                                      action="{{ url_for('delete_income', income_id=row[0]) }}"
+                                      style="display:inline;"
+                                      onsubmit="return confirm('Are you sure you want to delete this income record?');">
 
-                            <form method="POST"
-                                action="{{ url_for('delete_income', income_id=row[0]) }}"
-                                style="display:inline;"
-                                onsubmit="return confirm('Are you sure you want to delete this income record?');">
-    
-                                <input type="hidden" name="start_date" value="{{ start_date }}">
-                                <input type="hidden" name="end_date" value="{{ end_date }}">
-                                <input type="hidden" name="income_type" value="{{ income_type }}">
+                                    <input type="hidden" name="start_date" value="{{ start_date }}">
+                                    <input type="hidden" name="end_date" value="{{ end_date }}">
+                                    <input type="hidden" name="income_type" value="{{ income_type }}">
 
-                                <button type="submit" class="btn btn-small">Delete</button>
-                            </form>     
-
-
-
-                             </td>  
-
-                        <tr>
+                                    <button type="submit" class="btn btn-small">Delete</button>
+                                </form>
+                            </td>
+                        </tr>
                         {% endfor %}
                     {% else %}
                         <tr>
-                            <td colspan="10" class="no-data">No income records found for the selected date range.</td>
+                            <td colspan="13" class="no-data">No income records found for the selected date range.</td>
                         </tr>
                     {% endif %}
                 </tbody>

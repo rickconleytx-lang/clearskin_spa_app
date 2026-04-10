@@ -1853,9 +1853,15 @@ def mark_birthday_offer_sent(client_id):
 
 
 
+
+
+
+
 #  ------------------------------------------
 #      EMPLOYEES   HOME PAGE
 #  ------------------------------------------
+
+
 
 @app.route("/employees")
 def employees_home():
@@ -1900,6 +1906,311 @@ def employees_home():
         total_employees=total_employees,
         active_employees=active_employees
     )
+
+
+
+
+
+
+#   ---------------------------------------
+#
+#   EMPLOYEE PAY SUMMARY
+#
+#
+#   ---------------------------------------
+
+
+
+from datetime import date
+
+@app.route("/employee_pay_summary")
+def employee_pay_summary():
+    spa_id = get_current_spa_id()
+
+    today = date.today()
+    first_day = today.replace(day=1)
+
+    start_date = request.args.get("start_date") or first_day.strftime("%Y-%m-%d")
+    end_date = request.args.get("end_date") or today.strftime("%Y-%m-%d")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            e.employee_id,
+            e.first_name || ' ' || e.last_name AS employee_name,
+            COUNT(i.income_id) AS sessions_worked,
+            COALESCE(SUM(i.service_amount), 0.00) AS service_sales,
+            COALESCE(SUM(i.retail_amount), 0.00) AS retail_sales,
+            COALESCE(SUM(i.tip_amount), 0.00) AS tips_earned,
+            COALESCE(SUM(i.total_amount), 0.00) AS gross_collected
+        FROM employees e
+        LEFT JOIN income i
+            ON e.employee_id = i.employee_id
+           AND i.spa_id = e.spa_id
+           AND i.income_date BETWEEN %s AND %s
+        WHERE e.spa_id = %s
+        GROUP BY e.employee_id, e.first_name, e.last_name
+        ORDER BY e.last_name, e.first_name
+    """, (start_date, end_date, spa_id))
+
+    rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "employee_pay_summary.html",
+        rows=rows,
+        start_date=start_date,
+        end_date=end_date
+    )
+
+
+
+
+
+
+#   ----------------------------------------
+#
+#   ADD  EMPLOYEE COMPENSATION
+#
+#
+#   ---------------------------------------
+
+
+
+@app.route("/add_employee_compensation", methods=["GET", "POST"])
+def add_employee_compensation():
+    spa_id = get_current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT employee_id, first_name || ' ' || last_name AS employee_name
+        FROM employees
+        WHERE spa_id = %s
+        ORDER BY first_name, last_name
+    """, (spa_id,))
+    employees = cur.fetchall()
+
+    if request.method == "POST":
+        payment_date = request.form.get("payment_date")
+        employee_id = request.form.get("employee_id") or None
+
+        tip_payout = float(request.form.get("tip_payout") or 0)
+        draw_amount = float(request.form.get("draw_amount") or 0)
+        extra_pay = float(request.form.get("extra_pay") or 0)
+
+        notes = request.form.get("notes") or ""
+
+        if tip_payout > 0:
+            cur.execute("""
+                INSERT INTO employee_compensation (
+                    spa_id,
+                    employee_id,
+                    payment_date,
+                    compensation_type,
+                    amount,
+                    notes
+                )
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (
+                spa_id,
+                employee_id,
+                payment_date,
+                "tip_payout",
+                tip_payout,
+                notes
+            ))
+
+        if draw_amount > 0:
+            cur.execute("""
+                INSERT INTO employee_compensation (
+                    spa_id,
+                    employee_id,
+                    payment_date,
+                    compensation_type,
+                    amount,
+                    notes
+                )
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (
+                spa_id,
+                employee_id,
+                payment_date,
+                "draw",
+                draw_amount,
+                notes
+            ))
+
+        if extra_pay > 0:
+            cur.execute("""
+                INSERT INTO employee_compensation (
+                    spa_id,
+                    employee_id,
+                    payment_date,
+                    compensation_type,
+                    amount,
+                    notes
+                )
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (
+                spa_id,
+                employee_id,
+                payment_date,
+                "extra_pay",
+                extra_pay,
+                notes
+            ))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        flash("Compensation saved successfully.", "success")
+        return redirect(url_for("employee_compensation_report"))
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "add_employee_compensation.html",
+        employees=employees
+    )
+
+
+
+
+
+#   -------------------------------
+#
+#  EMPLOYEE COMPENSATION REPORT
+#
+#   -------------------------------
+
+
+
+@app.route("/employee_compensation_report")
+def employee_compensation_report():
+    spa_id = get_current_spa_id()
+    today = date.today()
+    first_day = today.replace(day=1)
+
+    start_date = request.args.get("start_date") or first_day.strftime("%Y-%m-%d")
+    end_date = request.args.get("end_date") or today.strftime("%Y-%m-%d")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Page totals for summary cards
+    cur.execute("""
+        SELECT
+            COALESCE(SUM(tip_amount), 0.00) AS tips_earned
+        FROM income
+        WHERE spa_id = %s
+          AND income_date BETWEEN %s AND %s
+    """, (spa_id, start_date, end_date))
+    tips_earned_total = cur.fetchone()[0]
+
+    cur.execute("""
+        SELECT
+            COALESCE(SUM(CASE WHEN compensation_type = 'tip_payout' THEN amount ELSE 0 END), 0.00) AS tip_payouts,
+            COALESCE(SUM(CASE WHEN compensation_type = 'draw' THEN amount ELSE 0 END), 0.00) AS draws,
+            COALESCE(SUM(CASE WHEN compensation_type = 'extra_pay' THEN amount ELSE 0 END), 0.00) AS extra_pay,
+            COALESCE(SUM(amount), 0.00) AS total_comp_paid
+        FROM employee_compensation
+        WHERE spa_id = %s
+          AND payment_date BETWEEN %s AND %s
+    """, (spa_id, start_date, end_date))
+    comp_totals = cur.fetchone()
+
+    tip_payouts_total = comp_totals[0]
+    draws_total = comp_totals[1]
+    extra_pay_total = comp_totals[2]
+    total_comp_paid = comp_totals[3]
+    outstanding_tips = tips_earned_total - tip_payouts_total
+
+    # Employee summary
+    cur.execute("""
+        SELECT
+            e.employee_id,
+            e.first_name || ' ' || e.last_name AS employee_name,
+            COALESCE(inc.tips_earned, 0.00) AS tips_earned,
+            COALESCE(comp.tip_payouts, 0.00) AS tip_payouts,
+            COALESCE(comp.draws, 0.00) AS draws,
+            COALESCE(comp.extra_pay, 0.00) AS extra_pay
+        FROM employees e
+        LEFT JOIN (
+            SELECT
+                employee_id,
+                COALESCE(SUM(tip_amount), 0.00) AS tips_earned
+            FROM income
+            WHERE spa_id = %s
+              AND income_date BETWEEN %s AND %s
+            GROUP BY employee_id
+        ) inc ON e.employee_id = inc.employee_id
+        LEFT JOIN (
+            SELECT
+                employee_id,
+                COALESCE(SUM(CASE WHEN compensation_type = 'tip_payout' THEN amount ELSE 0 END), 0.00) AS tip_payouts,
+                COALESCE(SUM(CASE WHEN compensation_type = 'draw' THEN amount ELSE 0 END), 0.00) AS draws,
+                COALESCE(SUM(CASE WHEN compensation_type = 'extra_pay' THEN amount ELSE 0 END), 0.00) AS extra_pay
+            FROM employee_compensation
+            WHERE spa_id = %s
+              AND payment_date BETWEEN %s AND %s
+            GROUP BY employee_id
+        ) comp ON e.employee_id = comp.employee_id
+        WHERE e.spa_id = %s
+        ORDER BY e.last_name, e.first_name
+    """, (
+        spa_id, start_date, end_date,
+        spa_id, start_date, end_date,
+        spa_id
+    ))
+    summary_rows = cur.fetchall()
+
+    # Detailed ledger rows
+    cur.execute("""
+        SELECT
+            ec.compensation_id,
+            ec.payment_date,
+            e.first_name || ' ' || e.last_name AS employee_name,
+            ec.compensation_type,
+            ec.amount,
+            COALESCE(ec.notes, '') AS notes
+        FROM employee_compensation ec
+        LEFT JOIN employees e ON ec.employee_id = e.employee_id
+        WHERE ec.spa_id = %s
+          AND ec.payment_date BETWEEN %s AND %s
+        ORDER BY ec.payment_date DESC, ec.compensation_id DESC
+    """, (spa_id, start_date, end_date))
+    ledger_rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "employee_compensation_report.html",
+        summary_rows=summary_rows,
+        ledger_rows=ledger_rows,
+        start_date=start_date,
+        end_date=end_date,
+        tips_earned_total=tips_earned_total,
+        tip_payouts_total=tip_payouts_total,
+        draws_total=draws_total,
+        extra_pay_total=extra_pay_total,
+        total_comp_paid=total_comp_paid,
+        outstanding_tips=outstanding_tips
+    )
+
+
+
+
+
+
 
 
 #  ------------------------------------------
@@ -2881,6 +3192,17 @@ def add_income(appointment_id):
     """, (appointment_id, spa_id))
     appt = cur.fetchone()
 
+
+    cur.execute("""
+        SELECT employee_id,
+               first_name || ' ' || last_name AS employee_name
+        FROM employees
+        WHERE spa_id = %s
+        ORDER BY employee_name
+    """, (spa_id,))
+    employees = cur.fetchall()
+
+
     if not appt:
         cur.close()
         conn.close()
@@ -2890,23 +3212,27 @@ def add_income(appointment_id):
         return redirect(url_for("appointments"))
 
     if request.method == "POST":
-        income_date = request.form["income_date"]
-        income_type = request.form["income_type"]
-        description = request.form["description"]
-        service_amount = request.form["service_amount"] or 0
-        retail_amount = request.form["retail_amount"] or 0
-        tax_amount = request.form["tax_amount"] or 0
-        tip_amount = request.form["tip_amount"] or 0
-        total_amount = request.form["total_amount"] or 0
-        payment_method = request.form["payment_method"]
-        square_payment_id = request.form["square_payment_id"]
-        notes = request.form["notes"]
+        income_date = request.form.get("income_date")
+        income_type = request.form.get("income_type")
+        description = request.form.get("description")
+        service_amount = request.form.get("service_amount") or 0
+        retail_amount = request.form.get("retail_amount") or 0
+        tax_amount = request.form.get("tax_amount") or 0
+        tip_amount = request.form.get("tip_amount") or 0
+        total_amount = request.form.get("total_amount") or 0
+        payment_method = request.form.get("payment_method")
+        visit_id = None
+        employee_id = request.form.get("employee_id") or None
+        square_payment_id = request.form.get("square_payment_id") or None
+        notes = request.form.get("notes") or ""
 
+   
         cur.execute("""
             INSERT INTO income (
                 income_date,
                 client_id,
                 appointment_id,
+                visit_id,
                 income_type,
                 description,
                 service_amount,
@@ -2917,15 +3243,18 @@ def add_income(appointment_id):
                 payment_method,
                 square_payment_id,
                 notes,
+                spa_id,
+                employee_id,
                 created_at
             )
             VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
             )
         """, (
             income_date,
             appt[1],   # client_id
             appt[0],   # appointment_id
+            visit_id,
             income_type,
             description,
             service_amount,
@@ -2935,7 +3264,9 @@ def add_income(appointment_id):
             total_amount,
             payment_method,
             square_payment_id,
-            notes
+            notes,
+            spa_id,
+            employee_id
         ))
 
         conn.commit()
@@ -2949,13 +3280,15 @@ def add_income(appointment_id):
             date=selected_date
         ))
 
+
     cur.close()
     conn.close()
 
     return render_template(
         "add_income.html",
         appt=appt,
-        selected_date=selected_date
+        selected_date=selected_date,
+        employees=employees
     )
 
 
@@ -3069,6 +3402,7 @@ def edit_income(income_id):
 #
 #  ------------------------
 
+
 @app.route("/income_report/csv")
 def income_report_csv():
     spa_id = get_current_spa_id()
@@ -3082,8 +3416,8 @@ def income_report_csv():
     conn = get_db_connection()
     cur = conn.cursor()
 
-    filter_sql = "WHERE i.income_date BETWEEN %s AND %s"
-    params = [start_date, end_date]
+    filter_sql = "WHERE i.spa_id = %s AND i.income_date BETWEEN %s AND %s"
+    params = [spa_id, start_date, end_date]
 
     if income_type:
         filter_sql += " AND i.income_type = %s"
@@ -3094,16 +3428,19 @@ def income_report_csv():
             i.income_id,
             i.income_date,
             COALESCE(c.first_name || ' ' || c.last_name, 'No Client') AS client_name,
+            COALESCE(e.first_name || ' ' || e.last_name, 'Unassigned') AS employee_name,
             COALESCE(i.income_type, '') AS income_type,
             COALESCE(i.description, '') AS description,
             COALESCE(i.payment_method, '') AS payment_method,
             COALESCE(i.service_amount, 0.00) AS service_amount,
+            COALESCE(i.tip_amount, 0.00) AS tip_amount,
             COALESCE(i.retail_amount, 0.00) AS retail_amount,
             COALESCE(i.tax_amount, 0.00) AS tax_amount,
             COALESCE(i.total_amount, 0.00) AS total_amount,
             COALESCE(i.notes, '') AS notes
         FROM income i
         LEFT JOIN clients c ON i.client_id = c.client_id
+        LEFT JOIN employees e ON i.employee_id = e.employee_id
         {filter_sql}
         ORDER BY i.income_date DESC, i.income_id DESC
     """, params)
@@ -3120,10 +3457,12 @@ def income_report_csv():
         "Income ID",
         "Income Date",
         "Client Name",
+        "Employee",
         "Income Type",
         "Description",
         "Payment Method",
         "Service Amount",
+        "Tip Amount",
         "Retail Amount",
         "Tax Amount",
         "Total Amount",
@@ -3142,12 +3481,18 @@ def income_report_csv():
     )
 
 
+
+
+
+
+
 # -----------------------
 # INCOME EXPORT TO EXCEL
 #  ROUTE: income_report/excel
 #
 #
 #  ----------------------
+
 
 @app.route("/income_report/excel")
 def income_report_excel():
@@ -3162,8 +3507,8 @@ def income_report_excel():
     conn = get_db_connection()
     cur = conn.cursor()
 
-    filter_sql = "WHERE i.income_date BETWEEN %s AND %s"
-    params = [start_date, end_date]
+    filter_sql = "WHERE i.spa_id = %s AND i.income_date BETWEEN %s AND %s"
+    params = [spa_id, start_date, end_date]
 
     if income_type:
         filter_sql += " AND i.income_type = %s"
@@ -3174,16 +3519,19 @@ def income_report_excel():
             i.income_id,
             i.income_date,
             COALESCE(c.first_name || ' ' || c.last_name, 'No Client') AS client_name,
+            COALESCE(e.first_name || ' ' || e.last_name, 'Unassigned') AS employee_name,
             COALESCE(i.income_type, '') AS income_type,
             COALESCE(i.description, '') AS description,
             COALESCE(i.payment_method, '') AS payment_method,
             COALESCE(i.service_amount, 0.00) AS service_amount,
+            COALESCE(i.tip_amount, 0.00) AS tip_amount,
             COALESCE(i.retail_amount, 0.00) AS retail_amount,
             COALESCE(i.tax_amount, 0.00) AS tax_amount,
             COALESCE(i.total_amount, 0.00) AS total_amount,
             COALESCE(i.notes, '') AS notes
         FROM income i
         LEFT JOIN clients c ON i.client_id = c.client_id
+        LEFT JOIN employees e ON i.employee_id = e.employee_id
         {filter_sql}
         ORDER BY i.income_date DESC, i.income_id DESC
     """, params)
@@ -3201,10 +3549,12 @@ def income_report_excel():
         "Income ID",
         "Income Date",
         "Client Name",
+        "Employee",
         "Income Type",
         "Description",
         "Payment Method",
         "Service Amount",
+        "Tip Amount",
         "Retail Amount",
         "Tax Amount",
         "Total Amount",
@@ -3273,6 +3623,9 @@ def delete_income(income_id):
 #
 #  --------------------------
 
+
+
+
 from datetime import date
 from flask import render_template, request
 from db import get_db_connection
@@ -3295,15 +3648,16 @@ def income_report():
     cur.execute("""
         SELECT DISTINCT income_type
         FROM income
-        WHERE income_type IS NOT NULL
+        WHERE spa_id = %s
+          AND income_type IS NOT NULL
           AND income_type <> ''
         ORDER BY income_type
-    """)
+    """, (spa_id,))
     income_type_options = [row[0] for row in cur.fetchall()]
 
     # Build filter
-    filter_sql = "WHERE income_date BETWEEN %s AND %s"
-    params = [start_date, end_date]
+    filter_sql = "WHERE spa_id = %s AND income_date BETWEEN %s AND %s"
+    params = [spa_id, start_date, end_date]
 
     if income_type:
         filter_sql += " AND income_type = %s"
@@ -3315,8 +3669,10 @@ def income_report():
             COUNT(*) AS total_entries,
             COALESCE(SUM(service_amount), 0.00) AS total_services,
             COALESCE(SUM(retail_amount), 0.00) AS total_retail,
+            COALESCE(SUM(tip_amount), 0.00) AS total_tips,
             COALESCE(SUM(tax_amount), 0.00) AS total_tax,
-            COALESCE(SUM(total_amount), 0.00) AS grand_total
+            COALESCE(SUM(total_amount), 0.00) AS gross_collected,
+            COALESCE(SUM(service_amount + retail_amount), 0.00) AS spa_income
         FROM income
         {filter_sql}
     """, params)
@@ -3327,11 +3683,13 @@ def income_report():
         SELECT
             COALESCE(income_type, 'Unspecified') AS income_type,
             COUNT(*) AS entry_count,
-            COALESCE(SUM(total_amount), 0.00) AS total_amount
+            COALESCE(SUM(service_amount + retail_amount), 0.00) AS spa_income,
+            COALESCE(SUM(tip_amount), 0.00) AS total_tips,
+            COALESCE(SUM(total_amount), 0.00) AS gross_collected
         FROM income
         {filter_sql}
         GROUP BY income_type
-        ORDER BY total_amount DESC
+        ORDER BY gross_collected DESC
     """, params)
     income_type_breakdown = cur.fetchall()
 
@@ -3340,11 +3698,13 @@ def income_report():
         SELECT
             COALESCE(payment_method, 'Unspecified') AS payment_method,
             COUNT(*) AS entry_count,
-            COALESCE(SUM(total_amount), 0.00) AS total_amount
+            COALESCE(SUM(service_amount + retail_amount), 0.00) AS spa_income,
+            COALESCE(SUM(tip_amount), 0.00) AS total_tips,
+            COALESCE(SUM(total_amount), 0.00) AS gross_collected
         FROM income
         {filter_sql}
         GROUP BY payment_method
-        ORDER BY total_amount DESC
+        ORDER BY gross_collected DESC
     """, params)
     payment_breakdown = cur.fetchall()
 
@@ -3354,17 +3714,20 @@ def income_report():
             i.income_id,
             i.income_date,
             COALESCE(c.first_name || ' ' || c.last_name, 'No Client') AS client_name,
+            COALESCE(e.first_name || ' ' || e.last_name, 'Unassigned') AS employee_name,
             COALESCE(i.income_type, '') AS income_type,
             COALESCE(i.description, '') AS description,
             COALESCE(i.payment_method, '') AS payment_method,
             COALESCE(i.service_amount, 0.00) AS service_amount,
+            COALESCE(i.tip_amount, 0.00) AS tip_amount,
             COALESCE(i.retail_amount, 0.00) AS retail_amount,
             COALESCE(i.tax_amount, 0.00) AS tax_amount,
             COALESCE(i.total_amount, 0.00) AS total_amount,
             COALESCE(i.notes, '') AS notes
         FROM income i
         LEFT JOIN clients c ON i.client_id = c.client_id
-        {filter_sql.replace("income_date", "i.income_date")}
+        LEFT JOIN employees e ON i.employee_id = e.employee_id
+        {filter_sql.replace("spa_id", "i.spa_id").replace("income_date", "i.income_date")}
         ORDER BY i.income_date DESC, i.income_id DESC
     """, params)
     income_rows = cur.fetchall()
@@ -3383,6 +3746,14 @@ def income_report():
         payment_breakdown=payment_breakdown,
         income_rows=income_rows
     )
+
+
+
+
+
+
+
+
 
 
 #  -----------------------------

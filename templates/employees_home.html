@@ -5,6 +5,22 @@
 {% block content %}
 <h1>Employees</h1>
 
+<div class="form-buttons">
+    <a href="{{ url_for('employee_pay_summary') }}" class="btn">
+        Employee Earnings
+    </a>
+
+    <a href="{{ url_for('employee_compensation_report') }}" class="btn">
+        Compensation Report
+    </a>
+
+    <a href="{{ url_for('add_employee_compensation') }}" class="btn">
+        Add Payout / Draw
+    </a>
+</div>
+
+
+
 <div class="dashboard-cards">
     <div class="dashboard-card">
         <h3>Total Employees</h3>

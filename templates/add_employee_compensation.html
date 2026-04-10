@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block title %}Add Employee Compensation{% endblock %}
+
+{% block content %}
+<div class="page-content">
+    <h1>Add Employee Compensation</h1>
+    <p class="report-subtitle">Record tip payouts, draws, and extra pay for an employee.</p>
+
+    <form method="POST" class="styled-form">
+
+        <div class="form-group">
+            <label for="payment_date">Payment Date</label>
+            <input
+                type="date"
+                id="payment_date"
+                name="payment_date"
+                required
+            >
+        </div>
+
+        <div class="form-group">
+            <label for="employee_id">Employee</label>
+            <select id="employee_id" name="employee_id" required>
+                <option value="">Select Employee</option>
+                {% for emp in employees %}
+                    <option value="{{ emp[0] }}">{{ emp[1] }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="tip_payout">Tip Payout</label>
+            <input
+                type="number"
+                step="0.01"
+                id="tip_payout"
+                name="tip_payout"
+                value="0.00"
+                min="0"
+            >
+        </div>
+
+        <div class="form-group">
+            <label for="draw_amount">Draw</label>
+            <input
+                type="number"
+                step="0.01"
+                id="draw_amount"
+                name="draw_amount"
+                value="0.00"
+                min="0"
+            >
+        </div>
+
+        <div class="form-group">
+            <label for="extra_pay">Extra Pay</label>
+            <input
+                type="number"
+                step="0.01"
+                id="extra_pay"
+                name="extra_pay"
+                value="0.00"
+                min="0"
+            >
+        </div>
+
+        <div class="form-group">
+            <label for="notes">Notes</label>
+            <textarea
+                id="notes"
+                name="notes"
+                rows="4"
+                placeholder="Optional notes"
+            ></textarea>
+        </div>
+
+        <div class="form-buttons">
+            <button type="submit" class="btn">Save Compensation</button>
+
+            <a href="{{ url_for('employee_compensation_report') }}" class="btn btn-secondary">
+                Back to Compensation Report
+            </a>
+        </div>
+
+    </form>
+</div>
+{% endblock %}

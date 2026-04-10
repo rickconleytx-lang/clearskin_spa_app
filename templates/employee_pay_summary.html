@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}Employee Pay Summary{% endblock %}
+
+{% block content %}
+<div class="report-page">
+
+<div class="form-buttons">
+            <button type="submit" class="btn">Save Compensation</button>
+                
+            <a href="{{ url_for('employees_home') }}" class="btn btn-secondary">
+                Back to Employees Home
+            </a>
+        </div>
+
+    <h1>Employee Pay Summary</h1>
+
+    <p>
+        <strong>Reporting Period:</strong>
+        {{ start_date }} through {{ end_date }}
+    </p>
+
+    <div class="table-wrap">
+        <table class="styled-report-table">
+            <thead>
+                <tr>
+                    <th>Employee</th>
+                    <th>Sessions Worked</th>
+                    <th>Service Sales</th>
+                    <th>Retail Sales</th>
+                    <th>Tips Earned</th>
+                    <th>Gross Collected</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                <tr>
+                    <td>{{ row[1] }}</td>
+                    <td>{{ row[2] }}</td>
+                    <td>${{ '%.2f'|format(row[3]) }}</td>
+                    <td>${{ '%.2f'|format(row[4]) }}</td>
+                    <td>${{ '%.2f'|format(row[5]) }}</td>
+                    <td>${{ '%.2f'|format(row[6]) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+</div>
+{% endblock %}
