@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Compensation Types{% endblock %}
+
+{% block content %}
+<h1>Compensation Types</h1>
+
+<div class="form-buttons">
+    <a href="{{ url_for('employee_admin') }}" class="btn btn-secondary">
+        Back to Employee Admin
+    </a>
+
+    <a href="{{ url_for('add_compensation_type') }}" class="btn">
+        Add Compensation Type
+    </a>
+</div>
+
+<br>
+
+<table>
+    <thead>
+        <tr>
+            <th>Type Name</th>
+            <th>Status</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in rows %}
+        <tr>
+            <td>{{ row[1] }}</td>
+            <td>{{ 'Active' if row[2] else 'Inactive' }}</td>
+            <td>
+                <a class="btn" href="{{ url_for('edit_compensation_type', compensation_type_id=row[0]) }}">
+                    Edit
+                </a>
+
+                <form method="POST"
+                      action="{{ url_for('toggle_compensation_type', compensation_type_id=row[0]) }}"
+                      style="display:inline;">
+                    <button type="submit" class="btn">
+                        {{ 'Deactivate' if row[2] else 'Activate' }}
+                    </button>
+                </form>
+            </td>
+        </tr>
+        {% else %}
+        <tr>
+            <td colspan="3">No compensation types found.</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

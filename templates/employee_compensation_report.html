@@ -6,17 +6,20 @@
 <div class="report-page">
 
     <div class="report-header">
-
-
-    <div class="form-buttons">
+        <div class="form-buttons">
             <a href="{{ url_for('employees_home') }}" class="btn btn-secondary">
                 Back to Employee Home
             </a>
-    </div>
+
+            <a href="{{ url_for('employee_compensation_history') }}" class="btn">
+                Compensation History
+            </a>
+
+        </div>
 
         <div>
             <h1>Employee Compensation Report</h1>
-            <p class="report-subtitle">Tips earned, payouts, draws, and extra pay</p>
+            <p class="report-subtitle">Flexible employee compensation by date range</p>
         </div>
     </div>
 
@@ -46,26 +49,10 @@
         {{ start_date }} through {{ end_date }}
     </div>
 
-
     <div class="summary-cards">
         <div class="summary-card">
             <h3>Tips Earned</h3>
             <p>${{ '%.2f'|format(tips_earned_total) }}</p>
-        </div>
-
-        <div class="summary-card">
-            <h3>Tip Payouts</h3>
-            <p>${{ '%.2f'|format(tip_payouts_total) }}</p>
-        </div>
-
-        <div class="summary-card">
-            <h3>Draws</h3>
-            <p>${{ '%.2f'|format(draws_total) }}</p>
-        </div>
-
-        <div class="summary-card">
-            <h3>Extra Pay</h3>
-            <p>${{ '%.2f'|format(extra_pay_total) }}</p>
         </div>
 
         <div class="summary-card">
@@ -79,7 +66,6 @@
         </div>
     </div>
 
-
     <div class="report-section">
         <h2>Employee Summary</h2>
         <div class="table-wrap">
@@ -88,10 +74,8 @@
                     <tr>
                         <th>Employee</th>
                         <th>Tips Earned</th>
-                        <th>Tip Payouts</th>
-                        <th>Draws</th>
-                        <th>Extra Pay</th>
-                        <th>Tips Outstanding</th>
+                        <th>Total Compensation Paid</th>
+                        <th>Outstanding Balance</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -101,14 +85,12 @@
                             <td>{{ row[1] }}</td>
                             <td class="amount-cell">${{ '%.2f'|format(row[2]) }}</td>
                             <td class="amount-cell">${{ '%.2f'|format(row[3]) }}</td>
-                            <td class="amount-cell">${{ '%.2f'|format(row[4]) }}</td>
-                            <td class="amount-cell">${{ '%.2f'|format(row[5]) }}</td>
-                            <td class="amount-cell total-highlight">${{ '%.2f'|format(row[2] - row[3]) }}</td>
+                            <td class="amount-cell total-highlight">${{ '%.2f'|format(row[4]) }}</td>
                         </tr>
                         {% endfor %}
                     {% else %}
                         <tr>
-                            <td colspan="6" class="no-data">No compensation data found for this date range.</td>
+                            <td colspan="4" class="no-data">No compensation data found for this date range.</td>
                         </tr>
                     {% endif %}
                 </tbody>
@@ -135,7 +117,7 @@
                         <tr>
                             <td>{{ row[1].strftime('%Y-%m-%d') if row[1] else '' }}</td>
                             <td>{{ row[2] }}</td>
-                            <td>{{ row[3].replace('_', ' ').title() if row[3] else '—' }}</td>
+                            <td>{{ row[3] if row[3] else '—' }}</td>
                             <td class="amount-cell">${{ '%.2f'|format(row[4]) }}</td>
                             <td>{{ row[5] if row[5] else '—' }}</td>
                         </tr>

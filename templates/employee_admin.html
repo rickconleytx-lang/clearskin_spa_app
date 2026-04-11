@@ -1,0 +1,37 @@
+k{% extends "base.html" %}
+
+{% block title %}Employee Admin{% endblock %}
+
+{% block content %}
+<h1>Employee Admin</h1>
+
+<div class="form-buttons">
+    <a href="{{ url_for('employees_home') }}" class="btn btn-secondary">
+        Back to Employees
+    </a>
+
+    <a href="{{ url_for('add_employee') }}" class="btn">
+        Add Employee
+    </a>
+
+    <a href="{{ url_for('employee_compensation_report') }}" class="btn">
+        Compensation Report
+    </a>
+
+    <a href="{{ url_for('compensation_types_report') }}" class="btn">
+        Manage Compensation Types
+    </a>
+</div>
+
+<div class="dashboard-cards">
+    <a href="{{ url_for('employees_home') }}" class="dashboard-card" style="text-decoration:none; color:inherit; display:block;">
+        <h3>Employees</h3>
+        <p>Manage employee records and setup.</p>
+    </a>
+
+    <a href="{{ url_for('compensation_types_report') }}" class="dashboard-card" style="text-decoration:none; color:inherit; display:block;">
+        <h3>Compensation Types</h3>
+        <p>Add, edit, and deactivate compensation categories.</p>
+    </a>
+</div>
+{% endblock %}

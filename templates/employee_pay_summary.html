@@ -6,8 +6,6 @@
 <div class="report-page">
 
 <div class="form-buttons">
-            <button type="submit" class="btn">Save Compensation</button>
-                
             <a href="{{ url_for('employees_home') }}" class="btn btn-secondary">
                 Back to Employees Home
             </a>
@@ -15,10 +13,28 @@
 
     <h1>Employee Pay Summary</h1>
 
-    <p>
-        <strong>Reporting Period:</strong>
-        {{ start_date }} through {{ end_date }}
-    </p>
+    <form method="GET" action="{{ url_for('employee_pay_summary') }}">
+        <div class="form-row">
+            <div class="form-group">
+                <label for="start_date">Start Date</label>
+                <input type="date" id="start_date" name="start_date" value="{{ start_date }}">
+            </div>
+
+            <div class="form-group">
+                <label for="end_date">End Date</label>
+                <input type="date" id="end_date" name="end_date" value="{{ end_date }}">
+            </div>
+        </div>
+
+        <div class="form-buttons">
+            <button type="submit" class="btn">Apply Filters</button>
+            <a href="{{ url_for('employee_pay_summary') }}" class="btn">Current Month</a>
+        </div>
+    </form>
+
+<p><strong>Reporting Period:</strong> {{ start_date }} through {{ end_date }}</p>
+
+
 
     <div class="table-wrap">
         <table class="styled-report-table">

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block title %}Add Compensation Type{% endblock %}
+
+{% block content %}
+<h1>Add Compensation Type</h1>
+
+<form method="POST">
+    <div class="form-group">
+        <label for="compensation_type_name">Compensation Type Name</label>
+        <input type="text"
+               id="compensation_type_name"
+               name="compensation_type_name"
+               value="{{ request.form.get('compensation_type_name', '') }}"
+               required>
+    </div>
+
+    <div class="form-buttons">
+        <button type="submit" class="btn">Save</button>
+        <a href="{{ url_for('compensation_types_report') }}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}

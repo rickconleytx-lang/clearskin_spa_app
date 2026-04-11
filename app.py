@@ -1870,7 +1870,7 @@ def employees_home():
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT 
+        SELECT
             employee_id,
             first_name,
             last_name,
@@ -1887,14 +1887,24 @@ def employees_home():
             pay_rate,
             created_at
         FROM employees
+        WHERE spa_id = %s
         ORDER BY last_name ASC, first_name ASC
-    """)
+    """, (spa_id,))
     employees = cur.fetchall()
 
-    cur.execute("SELECT COUNT(*) FROM employees")
+    cur.execute("""
+        SELECT COUNT(*)
+        FROM employees
+        WHERE spa_id = %s
+    """, (spa_id,))
     total_employees = cur.fetchone()[0]
 
-    cur.execute("SELECT COUNT(*) FROM employees WHERE status = 'Active'")
+    cur.execute("""
+        SELECT COUNT(*)
+        FROM employees
+        WHERE spa_id = %s
+          AND status = 'Active'
+    """, (spa_id,))
     active_employees = cur.fetchone()[0]
 
     cur.close()
@@ -1906,7 +1916,6 @@ def employees_home():
         total_employees=total_employees,
         active_employees=active_employees
     )
-
 
 
 
@@ -1988,6 +1997,7 @@ def add_employee_compensation():
     conn = get_db_connection()
     cur = conn.cursor()
 
+    # Load employees
     cur.execute("""
         SELECT employee_id, first_name || ' ' || last_name AS employee_name
         FROM employees
@@ -1996,90 +2006,371 @@ def add_employee_compensation():
     """, (spa_id,))
     employees = cur.fetchall()
 
+    # Load compensation types for all 4 dropdowns
+    cur.execute("""
+        SELECT compensation_type_id, compensation_type_name
+        FROM compensation_types
+        WHERE spa_id = %s
+          AND is_active = TRUE
+        ORDER BY compensation_type_name
+    """, (spa_id,))
+    compensation_types = cur.fetchall()
+
     if request.method == "POST":
         payment_date = request.form.get("payment_date")
         employee_id = request.form.get("employee_id") or None
+        notes = (request.form.get("notes") or "").strip()
 
-        tip_payout = float(request.form.get("tip_payout") or 0)
-        draw_amount = float(request.form.get("draw_amount") or 0)
-        extra_pay = float(request.form.get("extra_pay") or 0)
+        # Gather up to 4 compensation lines
+        detail_lines = []
 
-        notes = request.form.get("notes") or ""
+        for i in range(1, 5):
+            comp_type_id = request.form.get(f"comp_type_{i}") or None
+            amount_raw = request.form.get(f"amount_{i}") or "0"
 
-        if tip_payout > 0:
+            try:
+                amount = float(amount_raw)
+            except ValueError:
+                amount = 0
+
+            if comp_type_id and amount > 0:
+                detail_lines.append((comp_type_id, amount))
+
+        # Validation
+        if not payment_date:
+            flash("Payment date is required.", "error")
+        elif not employee_id:
+            flash("Employee is required.", "error")
+        elif not detail_lines:
+            flash("Enter at least one compensation line with type and amount.", "error")
+        else:
+            # Insert header
             cur.execute("""
                 INSERT INTO employee_compensation (
                     spa_id,
                     employee_id,
-                    payment_date,
-                    compensation_type,
-                    amount,
+                    compensation_date,
                     notes
                 )
-                VALUES (%s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s)
+                RETURNING compensation_id
             """, (
                 spa_id,
                 employee_id,
                 payment_date,
-                "tip_payout",
-                tip_payout,
                 notes
             ))
+            compensation_id = cur.fetchone()[0]
 
-        if draw_amount > 0:
-            cur.execute("""
-                INSERT INTO employee_compensation (
-                    spa_id,
-                    employee_id,
-                    payment_date,
-                    compensation_type,
-                    amount,
-                    notes
-                )
-                VALUES (%s, %s, %s, %s, %s, %s)
-            """, (
-                spa_id,
-                employee_id,
-                payment_date,
-                "draw",
-                draw_amount,
-                notes
-            ))
+            # Insert detail lines
+            for comp_type_id, amount in detail_lines:
+                cur.execute("""
+                    INSERT INTO employee_compensation_lines (
+                        compensation_id,
+                        compensation_type_id,
+                        amount
+                    )
+                    VALUES (%s, %s, %s)
+                """, (
+                    compensation_id,
+                    comp_type_id,
+                    amount
+                ))
 
-        if extra_pay > 0:
-            cur.execute("""
-                INSERT INTO employee_compensation (
-                    spa_id,
-                    employee_id,
-                    payment_date,
-                    compensation_type,
-                    amount,
-                    notes
-                )
-                VALUES (%s, %s, %s, %s, %s, %s)
-            """, (
-                spa_id,
-                employee_id,
-                payment_date,
-                "extra_pay",
-                extra_pay,
-                notes
-            ))
+            conn.commit()
+            cur.close()
+            conn.close()
 
-        conn.commit()
-        cur.close()
-        conn.close()
-
-        flash("Compensation saved successfully.", "success")
-        return redirect(url_for("employee_compensation_report"))
+            flash("Compensation saved successfully.", "success")
+            return redirect(url_for("employee_compensation_report"))
 
     cur.close()
     conn.close()
 
     return render_template(
         "add_employee_compensation.html",
-        employees=employees
+        employees=employees,
+        compensation_types=compensation_types
     )
+
+
+
+
+
+#   -------------------------------
+#  
+#     EMPLOYEE  ADMIN
+#   
+#   -------------------------------
+
+@app.route("/employee_admin")
+def employee_admin():
+    return render_template("employee_admin.html")
+
+
+
+
+
+
+
+
+
+#   ------------------------------------------
+#
+#   EMPLOYEE COMPENSATION HELPER
+# 
+#     HELPER         HELPER        HELPER
+#   -----------------------------------------
+
+def get_employee_compensation_history_data(spa_id, employee_id="", start_date="", end_date=""):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    query = """
+        SELECT
+            ec.compensation_id,
+            ec.compensation_date,
+            e.first_name,
+            e.last_name,
+            ct.compensation_type_name,
+            ecl.amount,
+            ec.notes,
+            ec.created_at
+        FROM employee_compensation ec
+        JOIN employees e
+            ON ec.employee_id = e.employee_id
+        JOIN employee_compensation_lines ecl
+            ON ec.compensation_id = ecl.compensation_id
+        LEFT JOIN compensation_types ct
+            ON ecl.compensation_type_id = ct.compensation_type_id
+        WHERE ec.spa_id = %s
+          AND ec.compensation_date BETWEEN %s AND %s
+    """
+    params = [spa_id, start_date, end_date]
+
+    if employee_id:
+        query += " AND ec.employee_id = %s"
+        params.append(employee_id)
+
+    query += """
+        ORDER BY ec.compensation_date DESC,
+                 ec.compensation_id DESC,
+                 ct.compensation_type_name ASC
+    """
+
+    cur.execute(query, tuple(params))
+    rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return rows
+
+
+
+
+
+
+
+
+
+
+
+#   -------------------------------
+#  
+#  COMPENSATION TYPES
+#   
+#   -------------------------------
+
+
+@app.route("/compensation_types")
+def compensation_types_report():
+    spa_id = get_current_spa_id()
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            compensation_type_id,
+            compensation_type_name,
+            is_active
+        FROM compensation_types
+        WHERE spa_id = %s
+        ORDER BY compensation_type_name
+    """, (spa_id,))
+    rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "compensation_types_report.html",
+        rows=rows
+    )
+
+
+
+
+#   -------------------------------
+#  
+#   ADD   COMPENSATION TYPE
+#   
+#   -------------------------------
+
+
+
+@app.route("/add_compensation_type", methods=["GET", "POST"])
+def add_compensation_type():
+    spa_id = get_current_spa_id()
+
+    if request.method == "POST":
+        compensation_type_name = (request.form.get("compensation_type_name") or "").strip()
+
+        if not compensation_type_name:
+            flash("Compensation type name is required.", "error")
+        else:
+            conn = get_db_connection()
+            cur = conn.cursor()
+
+            cur.execute("""
+                SELECT 1
+                FROM compensation_types
+                WHERE spa_id = %s
+                  AND LOWER(compensation_type_name) = LOWER(%s)
+            """, (spa_id, compensation_type_name))
+            existing = cur.fetchone()
+
+            if existing:
+                cur.close()
+                conn.close()
+                flash("That compensation type already exists.", "warning")
+            else:
+                cur.execute("""
+                    INSERT INTO compensation_types (
+                        spa_id,
+                        compensation_type_name,
+                        is_active
+                    )
+                    VALUES (%s, %s, TRUE)
+                """, (spa_id, compensation_type_name))
+
+                conn.commit()
+                cur.close()
+                conn.close()
+
+                flash("Compensation type added successfully.", "success")
+                return redirect(url_for("compensation_types_report"))
+
+    return render_template("add_compensation_type.html")
+
+
+
+
+
+#   -------------------------------
+#  
+#    EDIT COMPENSATION  TYPE
+#   
+#   -------------------------------
+
+
+@app.route("/edit_compensation_type/<int:compensation_type_id>", methods=["GET", "POST"])
+def edit_compensation_type(compensation_type_id):
+    spa_id = get_current_spa_id()
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    if request.method == "POST":
+        compensation_type_name = (request.form.get("compensation_type_name") or "").strip()
+
+        if not compensation_type_name:
+            flash("Compensation type name is required.", "error")
+        else:
+            cur.execute("""
+                SELECT 1
+                FROM compensation_types
+                WHERE spa_id = %s
+                  AND LOWER(compensation_type_name) = LOWER(%s)
+                  AND compensation_type_id <> %s
+            """, (spa_id, compensation_type_name, compensation_type_id))
+            existing = cur.fetchone()
+
+            if existing:
+                flash("That compensation type already exists.", "warning")
+            else:
+                cur.execute("""
+                    UPDATE compensation_types
+                    SET compensation_type_name = %s
+                    WHERE compensation_type_id = %s
+                      AND spa_id = %s
+                """, (compensation_type_name, compensation_type_id, spa_id))
+
+                conn.commit()
+                cur.close()
+                conn.close()
+
+                flash("Compensation type updated successfully.", "success")
+                return redirect(url_for("compensation_types_report"))
+
+    cur.execute("""
+        SELECT
+            compensation_type_id,
+            compensation_type_name,
+            is_active
+        FROM compensation_types
+        WHERE compensation_type_id = %s
+          AND spa_id = %s
+    """, (compensation_type_id, spa_id))
+    row = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if not row:
+        flash("Compensation type not found.", "error")
+        return redirect(url_for("compensation_types_report"))
+
+    return render_template(
+        "edit_compensation_type.html",
+        row=row
+    )
+
+
+
+
+
+
+
+#   -------------------------------
+#  
+#     TOGGLE  COMPENSATION TYPE
+#   
+#   -------------------------------
+
+
+@app.route("/toggle_compensation_type/<int:compensation_type_id>", methods=["POST"])
+def toggle_compensation_type(compensation_type_id):
+    spa_id = get_current_spa_id()
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE compensation_types
+        SET is_active = NOT is_active
+        WHERE compensation_type_id = %s
+          AND spa_id = %s
+    """, (compensation_type_id, spa_id))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    flash("Compensation type status updated.", "success")
+    return redirect(url_for("compensation_types_report"))
+
+
+
+
 
 
 
@@ -2105,33 +2396,27 @@ def employee_compensation_report():
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Page totals for summary cards
+    # Total tips earned
     cur.execute("""
-        SELECT
-            COALESCE(SUM(tip_amount), 0.00) AS tips_earned
+        SELECT COALESCE(SUM(tip_amount), 0.00)
         FROM income
         WHERE spa_id = %s
           AND income_date BETWEEN %s AND %s
     """, (spa_id, start_date, end_date))
     tips_earned_total = cur.fetchone()[0]
 
+    # Total compensation paid
     cur.execute("""
-        SELECT
-            COALESCE(SUM(CASE WHEN compensation_type = 'tip_payout' THEN amount ELSE 0 END), 0.00) AS tip_payouts,
-            COALESCE(SUM(CASE WHEN compensation_type = 'draw' THEN amount ELSE 0 END), 0.00) AS draws,
-            COALESCE(SUM(CASE WHEN compensation_type = 'extra_pay' THEN amount ELSE 0 END), 0.00) AS extra_pay,
-            COALESCE(SUM(amount), 0.00) AS total_comp_paid
-        FROM employee_compensation
-        WHERE spa_id = %s
-          AND payment_date BETWEEN %s AND %s
+        SELECT COALESCE(SUM(ecl.amount), 0.00)
+        FROM employee_compensation ec
+        JOIN employee_compensation_lines ecl
+            ON ec.compensation_id = ecl.compensation_id
+        WHERE ec.spa_id = %s
+          AND ec.compensation_date BETWEEN %s AND %s
     """, (spa_id, start_date, end_date))
-    comp_totals = cur.fetchone()
+    total_comp_paid = cur.fetchone()[0]
 
-    tip_payouts_total = comp_totals[0]
-    draws_total = comp_totals[1]
-    extra_pay_total = comp_totals[2]
-    total_comp_paid = comp_totals[3]
-    outstanding_tips = tips_earned_total - tip_payouts_total
+    outstanding_tips = tips_earned_total - total_comp_paid
 
     # Employee summary
     cur.execute("""
@@ -2139,9 +2424,8 @@ def employee_compensation_report():
             e.employee_id,
             e.first_name || ' ' || e.last_name AS employee_name,
             COALESCE(inc.tips_earned, 0.00) AS tips_earned,
-            COALESCE(comp.tip_payouts, 0.00) AS tip_payouts,
-            COALESCE(comp.draws, 0.00) AS draws,
-            COALESCE(comp.extra_pay, 0.00) AS extra_pay
+            COALESCE(comp.total_comp_paid, 0.00) AS total_comp_paid,
+            COALESCE(inc.tips_earned, 0.00) - COALESCE(comp.total_comp_paid, 0.00) AS outstanding_balance
         FROM employees e
         LEFT JOIN (
             SELECT
@@ -2154,14 +2438,14 @@ def employee_compensation_report():
         ) inc ON e.employee_id = inc.employee_id
         LEFT JOIN (
             SELECT
-                employee_id,
-                COALESCE(SUM(CASE WHEN compensation_type = 'tip_payout' THEN amount ELSE 0 END), 0.00) AS tip_payouts,
-                COALESCE(SUM(CASE WHEN compensation_type = 'draw' THEN amount ELSE 0 END), 0.00) AS draws,
-                COALESCE(SUM(CASE WHEN compensation_type = 'extra_pay' THEN amount ELSE 0 END), 0.00) AS extra_pay
-            FROM employee_compensation
-            WHERE spa_id = %s
-              AND payment_date BETWEEN %s AND %s
-            GROUP BY employee_id
+                ec.employee_id,
+                COALESCE(SUM(ecl.amount), 0.00) AS total_comp_paid
+            FROM employee_compensation ec
+            JOIN employee_compensation_lines ecl
+                ON ec.compensation_id = ecl.compensation_id
+            WHERE ec.spa_id = %s
+              AND ec.compensation_date BETWEEN %s AND %s
+            GROUP BY ec.employee_id
         ) comp ON e.employee_id = comp.employee_id
         WHERE e.spa_id = %s
         ORDER BY e.last_name, e.first_name
@@ -2176,16 +2460,21 @@ def employee_compensation_report():
     cur.execute("""
         SELECT
             ec.compensation_id,
-            ec.payment_date,
+            ec.compensation_date,
             e.first_name || ' ' || e.last_name AS employee_name,
-            ec.compensation_type,
-            ec.amount,
+            ct.compensation_type_name,
+            ecl.amount,
             COALESCE(ec.notes, '') AS notes
         FROM employee_compensation ec
-        LEFT JOIN employees e ON ec.employee_id = e.employee_id
+        JOIN employee_compensation_lines ecl
+            ON ec.compensation_id = ecl.compensation_id
+        JOIN compensation_types ct
+            ON ecl.compensation_type_id = ct.compensation_type_id
+        LEFT JOIN employees e
+            ON ec.employee_id = e.employee_id
         WHERE ec.spa_id = %s
-          AND ec.payment_date BETWEEN %s AND %s
-        ORDER BY ec.payment_date DESC, ec.compensation_id DESC
+          AND ec.compensation_date BETWEEN %s AND %s
+        ORDER BY ec.compensation_date DESC, ec.compensation_id DESC, ct.compensation_type_name
     """, (spa_id, start_date, end_date))
     ledger_rows = cur.fetchall()
 
@@ -2199,12 +2488,426 @@ def employee_compensation_report():
         start_date=start_date,
         end_date=end_date,
         tips_earned_total=tips_earned_total,
-        tip_payouts_total=tip_payouts_total,
-        draws_total=draws_total,
-        extra_pay_total=extra_pay_total,
         total_comp_paid=total_comp_paid,
         outstanding_tips=outstanding_tips
     )
+
+
+
+
+
+
+#   ----------------------------------
+#
+#     EMPLOYEE COMPENSATION HISTORY
+#
+#
+#   --------------------------------
+
+
+
+
+@app.route("/employee_compensation_history")
+def employee_compensation_history():
+    spa_id = get_current_spa_id()
+
+    today = date.today()
+    first_day = today.replace(day=1)
+
+    employee_id = request.args.get("employee_id", "").strip()
+    start_date = request.args.get("start_date", first_day.strftime("%Y-%m-%d")).strip()
+    end_date = request.args.get("end_date", today.strftime("%Y-%m-%d")).strip()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT employee_id, first_name, last_name
+        FROM employees
+        WHERE spa_id = %s
+        ORDER BY last_name, first_name
+    """, (spa_id,))
+    employees = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    rows = get_employee_compensation_history_data(
+        spa_id=spa_id,
+        employee_id=employee_id,
+        start_date=start_date,
+        end_date=end_date
+    )
+
+    total_amount = sum((row[5] or 0) for row in rows)
+
+    return render_template(
+        "employee_compensation_history.html",
+        employees=employees,
+        rows=rows,
+        employee_id=employee_id,
+        start_date=start_date,
+        end_date=end_date,
+        total_amount=total_amount
+    )
+
+
+
+
+
+
+
+
+
+#   -----------------------------------------
+#       DELETE  EMPLOYEE COMPENSATION HISTORY
+#
+#    
+#
+#
+#   -----------------------------------------
+
+
+@app.route("/delete_employee_compensation/<int:compensation_id>", methods=["POST"])
+def delete_employee_compensation(compensation_id):
+    spa_id = get_current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT compensation_id
+        FROM employee_compensation
+        WHERE compensation_id = %s
+          AND spa_id = %s
+    """, (compensation_id, spa_id))
+    record = cur.fetchone()
+
+    if not record:
+        cur.close()
+        conn.close()
+        flash("Compensation record not found.", "error")
+        return redirect(url_for("employee_compensation_history"))
+
+    cur.execute("""
+        DELETE FROM employee_compensation_lines
+        WHERE compensation_id = %s
+    """, (compensation_id,))
+
+    cur.execute("""
+        DELETE FROM employee_compensation
+        WHERE compensation_id = %s
+          AND spa_id = %s
+    """, (compensation_id, spa_id))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    flash("Full compensation entry deleted successfully.", "success")
+    return redirect(url_for("employee_compensation_history"))
+
+
+
+
+
+
+
+#   -----------------------------------------
+#       EDIT   EMPLOYEE COMPENSATION HISTORY
+#           
+#
+#
+#
+#   -----------------------------------------
+
+
+
+@app.route("/edit_employee_compensation/<int:compensation_id>", methods=["GET", "POST"])
+def edit_employee_compensation(compensation_id):
+    spa_id = get_current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Load employees
+    cur.execute("""
+        SELECT employee_id, first_name || ' ' || last_name AS employee_name
+        FROM employees
+        WHERE spa_id = %s
+        ORDER BY first_name, last_name
+    """, (spa_id,))
+    employees = cur.fetchall()
+
+    # Load active compensation types
+    cur.execute("""
+        SELECT compensation_type_id, compensation_type_name
+        FROM compensation_types
+        WHERE spa_id = %s
+          AND is_active = TRUE
+        ORDER BY compensation_type_name
+    """, (spa_id,))
+    compensation_types = cur.fetchall()
+
+    if request.method == "POST":
+        payment_date = request.form.get("payment_date")
+        employee_id = request.form.get("employee_id") or None
+        notes = (request.form.get("notes") or "").strip()
+
+        detail_lines = []
+
+        for i in range(1, 5):
+            comp_type_id = request.form.get(f"comp_type_{i}") or None
+            amount_raw = request.form.get(f"amount_{i}") or "0"
+
+            try:
+                amount = float(amount_raw)
+            except ValueError:
+                amount = 0
+
+            if comp_type_id and amount > 0:
+                detail_lines.append((comp_type_id, amount))
+
+        # Validation
+        if not payment_date:
+            flash("Payment date is required.", "error")
+        elif not employee_id:
+            flash("Employee is required.", "error")
+        elif not detail_lines:
+            flash("Enter at least one compensation line with type and amount.", "error")
+        else:
+            # Update header
+            cur.execute("""
+                UPDATE employee_compensation
+                SET employee_id = %s,
+                    compensation_date = %s,
+                    notes = %s
+                WHERE compensation_id = %s
+                  AND spa_id = %s
+            """, (
+                employee_id,
+                payment_date,
+                notes,
+                compensation_id,
+                spa_id
+            ))
+
+            # Remove old detail lines
+            cur.execute("""
+                DELETE FROM employee_compensation_lines
+                WHERE compensation_id = %s
+            """, (compensation_id,))
+
+            # Insert updated detail lines
+            for comp_type_id, amount in detail_lines:
+                cur.execute("""
+                    INSERT INTO employee_compensation_lines (
+                        compensation_id,
+                        compensation_type_id,
+                        amount
+                    )
+                    VALUES (%s, %s, %s)
+                """, (
+                    compensation_id,
+                    comp_type_id,
+                    amount
+                ))
+
+            conn.commit()
+            cur.close()
+            conn.close()
+
+            flash("Compensation updated successfully.", "success")
+            return redirect(url_for("employee_compensation_history"))
+
+    # Load header record
+    cur.execute("""
+        SELECT compensation_id, employee_id, compensation_date, notes
+        FROM employee_compensation
+        WHERE compensation_id = %s
+          AND spa_id = %s
+    """, (compensation_id, spa_id))
+    compensation = cur.fetchone()
+
+    # Load detail lines
+    cur.execute("""
+        SELECT compensation_type_id, amount
+        FROM employee_compensation_lines
+        WHERE compensation_id = %s
+        ORDER BY compensation_type_id
+    """, (compensation_id,))
+    existing_lines = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    # Pad to 4 rows for form display
+    detail_rows = list(existing_lines)
+    while len(detail_rows) < 4:
+        detail_rows.append((None, ""))
+
+    return render_template(
+        "edit_employee_compensation.html",
+        compensation=compensation,
+        employees=employees,
+        compensation_types=compensation_types,
+        detail_rows=detail_rows
+    )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#   -----------------------------------------
+#       EXPORT EMPLOYEE COMPENSATION HISTORY
+#
+#     EXPORT TO CSV   EPXORT
+#
+#
+#   -----------------------------------------
+
+
+
+@app.route("/export_employee_compensation_history_csv")
+def export_employee_compensation_history_csv():
+    spa_id = get_current_spa_id()
+
+    today = date.today()
+    first_day = today.replace(day=1)
+
+    employee_id = request.args.get("employee_id", "").strip()
+    start_date = request.args.get("start_date", first_day.strftime("%Y-%m-%d")).strip()
+    end_date = request.args.get("end_date", today.strftime("%Y-%m-%d")).strip()
+
+    rows = get_employee_compensation_history_data(
+        spa_id=spa_id,
+        employee_id=employee_id,
+        start_date=start_date,
+        end_date=end_date
+    )
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    writer.writerow([
+        "Compensation ID",
+        "Compensation Date",
+        "Employee First Name",
+        "Employee Last Name",
+        "Compensation Type",
+        "Amount",
+        "Notes",
+        "Created At"
+    ])
+
+    for row in rows:
+        writer.writerow([
+            row[0],
+            row[1].strftime("%Y-%m-%d") if row[1] else "",
+            row[2] or "",
+            row[3] or "",
+            row[4] or "",
+            float(row[5] or 0),
+            row[6] or "",
+            row[7].strftime("%Y-%m-%d %I:%M %p") if row[7] else ""
+        ])
+
+    output.seek(0)
+
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={
+            "Content-Disposition": "attachment; filename=employee_compensation_history.csv"
+        }
+    )
+
+
+
+
+
+
+
+
+
+#   ----------------------------------------
+#   EXPORT   EXPORT  EXPORT TO EXCEL
+#
+#   EXPORT EMPLOYEE COMPENSATION HISTORY
+#
+#            EXPORT TO EXCEL
+#
+#   ---------------------------------------
+
+
+
+@app.route("/export_employee_compensation_history_excel")
+def export_employee_compensation_history_excel():
+    spa_id = get_current_spa_id()
+
+    today = date.today()
+    first_day = today.replace(day=1)
+
+    employee_id = request.args.get("employee_id", "").strip()
+    start_date = request.args.get("start_date", first_day.strftime("%Y-%m-%d")).strip()
+    end_date = request.args.get("end_date", today.strftime("%Y-%m-%d")).strip()
+
+    rows = get_employee_compensation_history_data(
+        spa_id=spa_id,
+        employee_id=employee_id,
+        start_date=start_date,
+        end_date=end_date
+    )
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Compensation History"
+
+    ws.append([
+        "Compensation ID",
+        "Compensation Date",
+        "Employee First Name",
+        "Employee Last Name",
+        "Compensation Type",
+        "Amount",
+        "Notes",
+        "Created At"
+    ])
+
+    for row in rows:
+        ws.append([
+            row[0],
+            row[1].strftime("%Y-%m-%d") if row[1] else "",
+            row[2] or "",
+            row[3] or "",
+            row[4] or "",
+            float(row[5] or 0),
+            row[6] or "",
+            row[7].strftime("%Y-%m-%d %I:%M %p") if row[7] else ""
+        ])
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    return Response(
+        output.getvalue(),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": "attachment; filename=employee_compensation_history.xlsx"
+        }
+    )
+
+
 
 
 
