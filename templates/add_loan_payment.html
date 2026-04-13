@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Add Loan Payment</h1>
+
+<form method="POST">
+    <div class="form-group">
+        <label for="loan_id">Loan</label>
+        <select id="loan_id" name="loan_id" required>
+            <option value="">Select Loan</option>
+            {% for loan in loans %}
+                <option value="{{ loan[0] }}">{{ loan[1] }}</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label for="payment_date">Payment Date</label>
+        <input type="date" id="payment_date" name="payment_date" required>
+    </div>
+
+    <div class="form-group">
+        <label for="principal_paid">Principal Paid</label>
+        <input type="number" step="0.01" id="principal_paid" name="principal_paid" value="0.00">
+    </div>
+
+    <div class="form-group">
+        <label for="interest_paid">Interest Paid</label>
+        <input type="number" step="0.01" id="interest_paid" name="interest_paid" value="0.00">
+    </div>
+
+    <div class="form-group">
+        <label for="total_payment">Total Payment</label>
+        <input type="number" step="0.01" id="total_payment" name="total_payment" required>
+    </div>
+
+    <div class="form-group">
+        <label for="notes">Notes</label>
+        <textarea id="notes" name="notes" rows="4"></textarea>
+    </div>
+
+    <div class="form-buttons">
+        <button type="submit" class="btn">Save Payment</button>
+        <a href="{{ url_for('loans_home') }}" class="btn">Cancel</a>
+    </div>
+</form>
+{% endblock %}

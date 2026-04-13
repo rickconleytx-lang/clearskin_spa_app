@@ -6,9 +6,44 @@
 <br>
 <br>
 
+<form method="GET" class="filter-form">
+    <div class="form-row">
+        <div class="form-group">
+            <label for="certificate_search">Find Certificate Number</label>
+            <input type="text"
+                   id="certificate_search"
+                   name="certificate_search"
+                   value="{{ certificate_search or '' }}"
+                   placeholder="Enter certificate number">
+        </div>
 
+        <div class="form-group">
+            <label for="sort_by">Sort By</label>
+            <select name="sort_by" id="sort_by">
+                <option value="date_desc" {% if sort_by == 'date_desc' %}selected{% endif %}>Newest First</option>
+                <option value="date_asc" {% if sort_by == 'date_asc' %}selected{% endif %}>Oldest First</option>
+                <option value="cert_asc" {% if sort_by == 'cert_asc' %}selected{% endif %}>Certificate # Ascending</option>
+                <option value="cert_desc" {% if sort_by == 'cert_desc' %}selected{% endif %}>Certificate # Descending</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label>&nbsp;</label>
+            <div class="form-buttons">
+                <button type="submit" class="btn">Apply</button>
+                <a href="{{ url_for('gift_certificates_home') }}" class="btn">Clear</a>
+            </div>
+        </div>
+    </div>
+</form>
 
 <h1>Gift Certificates</h1>
+
+{% if filter_by == 'expiring_soon' %}
+    <p style="background-color:#ffe5e5; border-left:5px solid red; padding:10px; margin-bottom:15px;">
+        Showing gift certificates expiring within the next 60 days.
+    </p>
+{% endif %}
 
 <div style="margin-bottom: 20px;">
     <a class="btn" href="{{ url_for('add_gift_certificate') }}">+ New Certificate</a>
@@ -41,13 +76,13 @@
             <td>{{ row[5] }}</td>
             <td>{{ row[6] }}</td>
             <td>{{ row[7] or '' }} {{ row[8] or '' }}</td>
-            <td>{{ row[9] or '' }} {{ row[10] or '' }}</td>
-            <td>{{ row[11] }}</td>
-            <td>{{ row[12] or '' }}</td>
+            <td>{{ row[10] or '' }}</td>
+            <td>{{ row[9] or '' }}</td>
+            <td>{{ row[11] or '' }}</td>
             <td>
                 <a class="btn" href="{{ url_for('edit_gift_certificate', certificate_id=row[0]) }}">Edit</a>
                 <a class="btn" href="{{ url_for('redeem_gift_certificate', certificate_id=row[0]) }}">Redeem</a>
-            </td> 
+            </td>
         </tr>
         {% endfor %}
     </tbody>

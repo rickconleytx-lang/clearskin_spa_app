@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Edit Owner Reimbursement</h1>
+
+<form method="POST">
+    <div class="form-group">
+        <label for="reimbursement_date">Reimbursement Date</label>
+        <input type="date"
+               id="reimbursement_date"
+               name="reimbursement_date"
+               value="{{ reimbursement[1].strftime('%Y-%m-%d') if reimbursement[1] else '' }}"
+               required>
+    </div>
+
+    <div class="form-group">
+        <label for="amount">Amount</label>
+        <input type="number"
+               step="0.01"
+               id="amount"
+               name="amount"
+               value="{{ reimbursement[2] }}"
+               required>
+    </div>
+
+    <div class="form-group">
+        <label for="payment_method">Payment Method</label>
+        <input type="text"
+               id="payment_method"
+               name="payment_method"
+               maxlength="50"
+               value="{{ reimbursement[3] or '' }}">
+    </div>
+
+    <div class="form-group">
+        <label for="notes">Notes</label>
+        <textarea id="notes" name="notes" rows="4">{{ reimbursement[4] or '' }}</textarea>
+    </div>
+
+    <div class="form-buttons">
+        <button type="submit" class="btn">Update Reimbursement</button>
+        <a href="{{ url_for('funding_home') }}" class="btn">Cancel</a>
+    </div>
+</form>
+{% endblock %}

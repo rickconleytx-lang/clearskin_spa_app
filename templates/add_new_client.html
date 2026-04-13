@@ -32,29 +32,29 @@
     </div>
 
     <!-- your fields start here -->
-
+      <span style="color: red; font-size: x-small;">* Required Field</span>
     <p>
-        <label>First Name:</label><br>
+        <label>First Name:<span style="color: red;">*</span></label><br>
         <input type="text" name="first_name" value="{{ step1_data.get('first_name', '') }}" required>
     </p>
 
     <p>
-        <label>Last Name:</label><br>
+        <label>Last Name:<span style="color: red;">*</span></label><br>
         <input type="text" name="last_name" value="{{ step1_data.get('last_name', '') }}" required>
     </p>
 
     <p>
-        <label>Phone:</label><br>
-        <input type="text" name="phone" value="{{ step1_data.get('phone', '') }}">
+        <label>Phone:<span style="color: red;">*</span></label><br>
+        <input type="text" name="phone" value="{{ step1_data.get('phone', '') }}" required>
     </p>
 
     <p>
-        <label>Email:</label><br>
-        <input type="email" name="email" value="{{ step1_data.get('email', '') }}">
+        <label>Email:<span style="color: red;">*</span></label><br>
+        <input type="email" name="email" value="{{ step1_data.get('email', '') }}" required>
     </p>
 
     <p>
-        <label>Birth Date:</label><br>
+        <label>Birth Date:<span style="color: red;">*</span></label><br>
         <input type="date" name="birth_date" value="{{ step1_data.get('birth_date', '') }}">
     </p>
 

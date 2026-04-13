@@ -7,9 +7,10 @@
 
 <div style+"margin-bottom: 15px;">
     <a href="{{ url_for('help_page') }}" class="btn">Help</a>
-    <a href="{{ url_for('income_report') }}" class="btn">Income</a>
-    <a href="{{ url_for('expense_report') }}" class="btn">Expenses</a>
+    <a href="{{ url_for('income_home') }}" class="btn">Income</a>
+    <a href="{{ url_for('expenses_home') }}" class="btn">Expenses</a>
     <a href="{{ url_for('employees_home') }}" class="btn">Employees</a>
+    <a href="{{ url_for('funding_home') }}" class="btn">Loans</a>
     <a href="{{ url_for('admin') }}" class="btn">Admin</a>
 </div>
 
@@ -25,9 +26,9 @@
     <h2 style="margin-top: 25px;">Add Appointment, Gift Certificates and Birthday Offers</h2>
     <div class="section-card-grid">
 
-        <a class="section-card" href="{{ url_for('calendar_view') }}">
+        <a class="section-card" href="{{ url_for('add_appointment') }}">
             <h3>Add Appointment</h3>
-            <p>Calendar-Select Go To Date-Click the date in the appointment day's box. Click Add Appointment & complete form.</p>
+            <p>This will take you to the Add Appointment Page, or go to Calendar-Select Go To Date-Click the date in the appointment day's box. Click Add Appointment & complete form.</p>
         </a>
 
         <a class="section-card" href="{{ url_for('gift_certificates_home') }}">
@@ -53,7 +54,8 @@
 
         <a class="section-card" href="{{ url_for('client_history') }}">
             <h3>Client History - View History, Edit and Delete</h3>
-            <p>Change this text and the url link.</p>
+            <p>View and Manage all aspects of your Clients.  Review Visit Summaries, Health Profiles and the Full Record of your clients. 
+               Each destination will allow for Edits.</p>
         </a>
 
         <a class="section-card" href="{{ url_for('client_history') }}">
@@ -105,11 +107,34 @@
             <h3>Client Management</h3>
             <p>You one-stop-shop, for everything regarding your clients, Add New Clients, View and Add new appointments and search clients.</p>
         </a>
-    
-
-
 
     </div>
+
+        <!-- 🔹 HEADER 5 -->
+    <h2 style="margin-top: 30px;">Employees, Manage, View Reports and Compensation Data</h2>
+    <div class="section-card-grid">
+
+        <a class="section-card" href="{{ url_for('employee_pay_summary') }}">
+            <h3>Employee Pay Summary</h3>
+            <p>Quick Re-cap of each employee, shows Sessions Worked, Service Sales, Retail Sales, Tips Earned and Gross Collections.</p>
+        </a>
+    
+        <a class="section-card" href="{{ url_for('employee_compensation_report') }}">
+            <h3>Employee Compensation Report</h3>
+            <p>Provides Employee Summary (Tips Earned, Total Compensation Paid) and Employee Compensation Ledger.  The ledger shows
+               Date of Compensation Pay, Type Compensation, Amount and a Notes section.</p>
+        </a>
+
+         <a class="section-card" href="{{ url_for('employees_home') }}">
+            <h3>Employee Home</h3>
+            <p>From the Employee Home you can Manage and View all aspects of your Employees.  You can add, edit and delete employees and view 
+               Employee Summaries,view and add Employee Compensation data.</p>
+        </a>
+
+    </div>
+
+         
+
 
 </div>
 

@@ -31,11 +31,12 @@
 
     {% for i in range(1, 5) %}
 
-
     <div class="form-row compensation-row">
         <div class="form-group comp-type-group">
-            <label for="comp_type_1">Compensation Type 1</label>
-            <select id="comp_type_1" name="comp_type_1">
+            <label for="comp_type_{{ i }}">
+                Compensation Type {{ i }}
+            </label>
+            <select id="comp_type_{{ i }}" name="comp_type_{{ i }}">
                 <option value="">Select Type</option>
                 {% for ct in compensation_types %}
                     <option value="{{ ct[0] }}">{{ ct[1] }}</option>
@@ -44,20 +45,29 @@
         </div>
 
         <div class="form-group amount-group">
-            <label for="amount_1">Amount 1</label>
-            <input type="number" step="0.01" id="amount_1" name="amount_1">
+            <label for="amount_{{ i }}">
+                Amount {{ i }}
+            </label>
+            <input type="number"
+                   step="0.01"
+                   id="amount_{{ i }}"
+                   name="amount_{{ i }}">
         </div>
     </div>
 
-    {% endfor %}
+{% endfor %}
 
-    <div class="form-group">
-        <label for="notes">Notes</label>
-        <textarea id="notes"
-                  name="notes"
-                  rows="3"
-                  placeholder="Optional notes"></textarea>
-    </div>
+<div class="form-group">
+    <label for="notes">Notes</label>
+    <textarea id="notes"
+              name="notes"
+              rows="3"
+              placeholder="Optional notes"></textarea>
+</div>
+
+
+
+
 
     <div class="form-buttons">
         <button type="submit" class="btn">Save Compensation</button>

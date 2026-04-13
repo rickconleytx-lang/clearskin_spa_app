@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "base_no_nav.html" %}
 
 {% block content %}
 <h1>Post Appointment Wrap-Up</h1>
@@ -41,13 +41,6 @@
 
     <div class="form-buttons">
         <button type="submit" class="btn">Save Wrap-Up</button>
-
-        <a class="btn"
-           style="background: #4CAF50; color: white;"
-           href="{{ url_for('add_appointment', client_id=appointment[3]) }}">
-           Book Next Appointment
-        </a>
-
 
 
         {% if selected_date %}

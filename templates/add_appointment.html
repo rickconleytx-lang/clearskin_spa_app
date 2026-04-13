@@ -2,6 +2,7 @@
 
 {% block content %}
 <h1>Add Appointment</h1>
+<span style="color: red; font-size: x-small;">* Required Field</span>
 
 <form method="GET" action="{{ url_for('add_appointment') }}">
     <label for="client_search">Search Client (Last Name)</label>
@@ -31,6 +32,7 @@
     {% if prefill_service_name %}
         <input type="hidden" name="prefill_service_name" value="{{ prefill_service_name }}">
     {% endif %}
+
 </form>
 
 <br>
@@ -43,7 +45,7 @@
     <input type="hidden" name="prefill_time" value="{{ prefill_time or '' }}">
     <input type="hidden" name="prefill_service_name" value="{{ prefill_service_name or '' }}">
 
-    <label for="client_id">Select Client</label>
+    <label for="client_id">Select Client<span style="color: red;"> *</span></label>
     <select name="client_id" id="client_id" required>
         <option value="">Select Client</option>
         {% for client in clients %}
@@ -60,9 +62,7 @@
         </p>
     {% endif %}
 
-    <p>Service count: {{ service_types|length }}</p>
-
-    <label for="service_type_id">Service</label>
+    <label for="service_type_id">Service<span style= "color: red;"> *</span></label>
     <select name="service_type_id" id="service_type_id" required>
         <option value="">Select Service</option>
         {% for service in service_types %}
@@ -72,14 +72,14 @@
         {% endfor %}
     </select>
 
-    <label for="appointment_date">Appointment Date</label>
+    <label for="appointment_date">Appointment Date<span style= "color: red;"> *</span></label>
     <input type="date"
            id="appointment_date"
            name="appointment_date"
            value="{{ prefill_date or selected_date or '' }}"
            required>
 
-    <label for="appointment_time">Time</label>
+    <label for="appointment_time">Time<span style= "color: red;"> *</span></label>
     <input type="time"
            id="appointment_time"
            name="appointment_time"

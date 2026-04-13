@@ -7,12 +7,13 @@
 <p><strong>Appointment Date:</strong> {{ appt[2].strftime('%Y-%m-%d') }}</p>
 <p><strong>Appointment Time:</strong> {{ appt[3].strftime('%I:%M %p') }}</p>
 
+<span style="color: red; font-size: x-small;">* Required Field</span>
 <form method="POST">
     <label for="income_date">Income Date</label>
     <input type="date" id="income_date" name="income_date"
            value="{{ appt[2].strftime('%Y-%m-%d') }}" required>
 
-    <label for="income_type">Income Type</label>
+    <label for="income_type">Income Type<span style="color: red;"> *</span></label>
     <select id="income_type" name="income_type" required>
         <option value="Service">Service</option>
         <option value="Retail">Retail</option>
@@ -24,7 +25,7 @@
            placeholder="Signature Facial, Product Sale, etc.">
 
     <div class="form-group">
-        <label for="employee_id">Employee</label>
+        <label for="employee_id">Employee<span style="color: red;"> *</span></label>
         <select name="employee_id" id="employee_id" required>
             <option value="">Select Employee</option>
             {% for emp in employees %}

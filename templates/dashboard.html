@@ -12,6 +12,25 @@
 {% endif %}
 
 
+{% if expiring_gc_count > 0 %}
+    <a href="{{ url_for('gift_certificates_home', filter='expiring_soon') }}"
+       style="
+           display:block;
+           background-color:#ffe5e5;
+           border-left:5px solid red;
+           padding:12px;
+           margin-bottom:15px;
+           text-decoration:none;
+           color:black;
+           font-weight:bold;
+       ">
+        Gift Certificate Alert:
+        {{ expiring_gc_count }}
+        certificate{% if expiring_gc_count != 1 %}s{% endif %}
+        expire within the next 60 days.
+    </a>
+{% endif %}
+
 
 {% if next_appt %}
 <div class="next-appointment">

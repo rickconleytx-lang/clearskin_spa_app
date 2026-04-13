@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Edit Business Loan</h1>
+
+<form method="POST">
+    <div class="form-group">
+        <label for="loan_name">Loan Name</label>
+        <input type="text"
+               id="loan_name"
+               name="loan_name"
+               maxlength="100"
+               required
+               value="{{ loan[1] }}">
+    </div>
+
+    <div class="form-group">
+        <label for="lender_name">Lender Name</label>
+        <input type="text"
+               id="lender_name"
+               name="lender_name"
+               maxlength="100"
+               value="{{ loan[2] or '' }}">
+    </div>
+
+    <div class="form-group">
+        <label for="loan_start_date">Loan Start Date</label>
+        <input type="date"
+               id="loan_start_date"
+               name="loan_start_date"
+               value="{{ loan[3].strftime('%Y-%m-%d') if loan[3] else '' }}">
+    </div>
+
+    <div class="form-group">
+        <label for="original_amount">Original Amount</label>
+        <input type="number"
+               step="0.01"
+               id="original_amount"
+               name="original_amount"
+               required
+               value="{{ loan[4] }}">
+    </div>
+
+    <div class="form-group">
+        <label for="interest_rate">Interest Rate</label>
+        <input type="number"
+               step="0.001"
+               id="interest_rate"
+               name="interest_rate"
+               value="{{ loan[5] if loan[5] is not none else '' }}">
+    </div>
+
+    <div class="form-group">
+        <label for="term_months">Term (Months)</label>
+        <input type="number"
+               id="term_months"
+               name="term_months"
+               value="{{ loan[6] or '' }}">
+    </div>
+
+    <div class="form-group">
+        <label for="is_active">Active Loan?</label>
+        <select id="is_active" name="is_active">
+            <option value="yes" {% if loan[8] %}selected{% endif %}>Yes</option>
+            <option value="no" {% if not loan[8] %}selected{% endif %}>No</option>
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label for="notes">Notes</label>
+        <textarea id="notes" name="notes" rows="4">{{ loan[7] or '' }}</textarea>
+    </div>
+
+    <div class="form-buttons">
+        <button type="submit" class="btn">Update Loan</button>
+        <a href="{{ url_for('loans_home') }}" class="btn">Cancel</a>
+    </div>
+</form>
+{% endblock %}

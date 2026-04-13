@@ -709,6 +709,819 @@ def sync_calendar():
 
 
 
+
+
+#   ------------------------------------------
+#
+#     Owner and Loan Funding
+#
+#
+#
+#   ------------------------------------------
+
+
+
+#   -----------------------  
+#
+#      FUNDING     
+#
+#  ----------------------
+    
+
+
+@app.route("/funding")
+def funding_home():
+    spa_id = get_current_spa_id()
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT COALESCE(SUM(amount), 0)
+        FROM owner_contributions
+        WHERE spa_id = %s
+    """, (spa_id,))
+    total_contributions = cur.fetchone()[0]
+
+    cur.execute("""
+        SELECT COALESCE(SUM(amount), 0)
+        FROM owner_reimbursements
+        WHERE spa_id = %s
+    """, (spa_id,))
+    total_reimbursements = cur.fetchone()[0]
+
+    net_owner_funding = total_contributions - total_reimbursements
+
+    cur.execute("""
+        SELECT
+            owner_contribution_id,
+            contribution_date,
+            amount,
+            funding_source,
+            notes
+        FROM owner_contributions
+        WHERE spa_id = %s
+        ORDER BY contribution_date DESC, owner_contribution_id DESC
+    """, (spa_id,))
+    contributions = cur.fetchall()
+
+    cur.execute("""
+        SELECT
+            owner_reimbursement_id,
+            reimbursement_date,
+            amount,
+            payment_method,
+            notes
+        FROM owner_reimbursements
+        WHERE spa_id = %s
+        ORDER BY reimbursement_date DESC, owner_reimbursement_id DESC
+    """, (spa_id,))
+    reimbursements = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "funding_home.html",
+        total_contributions=total_contributions,
+        total_reimbursements=total_reimbursements,
+        net_owner_funding=net_owner_funding,
+        contributions=contributions,
+        reimbursements=reimbursements
+    )
+                
+                
+                
+#   -----------------------
+#
+#    OWNER CONTRIBUTIONS                     
+#
+#  ----------------------
+                    
+                    
+                      
+@app.route("/owner_contributions/add", methods=["GET", "POST"])
+def add_owner_contribution():
+    spa_id = get_current_spa_id()
+
+    if request.method == "POST":
+        contribution_date = request.form.get("contribution_date")
+        amount = request.form.get("amount")
+        funding_source = request.form.get("funding_source", "").strip()
+        notes = request.form.get("notes", "").strip()
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            INSERT INTO owner_contributions (
+                spa_id,
+                contribution_date,
+                amount,
+                funding_source,
+                notes
+            )
+            VALUES (%s, %s, %s, %s, %s)
+        """, (
+            spa_id,
+            contribution_date,
+            amount,
+            funding_source,
+            notes
+        ))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        flash("Owner contribution added successfully.", "success")
+        return redirect(url_for("funding_home"))
+
+    return render_template("add_owner_contribution.html")
+                
+                
+
+                
+#   -----------------------
+#
+#   OWNER REIMBURSEMENTS      
+#
+#  ----------------------
+                    
+                    
+@app.route("/owner_reimbursements/add", methods=["GET", "POST"])
+def add_owner_reimbursement():
+    spa_id = get_current_spa_id()
+
+    if request.method == "POST":
+        reimbursement_date = request.form.get("reimbursement_date")
+        amount = request.form.get("amount")
+        payment_method = request.form.get("payment_method", "").strip()
+        notes = request.form.get("notes", "").strip()
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            INSERT INTO owner_reimbursements (
+                spa_id,
+                reimbursement_date,
+                amount,
+                payment_method,
+                notes
+            )
+            VALUES (%s, %s, %s, %s, %s)
+        """, (
+            spa_id,
+            reimbursement_date,
+            amount,
+            payment_method,
+            notes
+        ))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        flash("Owner reimbursement added successfully.", "success")
+        return redirect(url_for("funding_home"))
+
+    return render_template("add_owner_reimbursement.html")
+
+
+                
+                
+                
+#   -----------------------
+#
+#   LOANS   HOME                   
+#
+#  ----------------------
+                    
+                    
+                      
+
+@app.route("/loans")
+def loans_home():
+    spa_id = get_current_spa_id()
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            bl.loan_id,
+            bl.loan_name,
+            bl.lender_name,
+            bl.loan_start_date,
+            bl.original_amount,
+            bl.interest_rate,
+            bl.term_months,
+            bl.notes,
+            bl.is_active,
+            COALESCE(SUM(lp.principal_paid), 0) AS principal_paid_total,
+            COALESCE(SUM(lp.interest_paid), 0) AS interest_paid_total,
+            bl.original_amount - COALESCE(SUM(lp.principal_paid), 0) AS remaining_balance
+        FROM business_loans bl
+        LEFT JOIN loan_payments lp
+            ON bl.loan_id = lp.loan_id
+           AND lp.spa_id = bl.spa_id
+        WHERE bl.spa_id = %s
+        GROUP BY
+            bl.loan_id,
+            bl.loan_name,
+            bl.lender_name,
+            bl.loan_start_date,
+            bl.original_amount,
+            bl.interest_rate,
+            bl.term_months,
+            bl.notes,
+            bl.is_active
+        ORDER BY bl.loan_start_date DESC NULLS LAST, bl.loan_id DESC
+    """, (spa_id,))
+    loans = cur.fetchall()
+
+    cur.execute("""
+        SELECT COALESCE(SUM(original_amount), 0)
+        FROM business_loans
+        WHERE spa_id = %s
+    """, (spa_id,))
+    total_original_loans = cur.fetchone()[0]
+
+    cur.execute("""
+        SELECT COALESCE(SUM(principal_paid), 0)
+        FROM loan_payments
+        WHERE spa_id = %s
+    """, (spa_id,))
+    total_principal_paid = cur.fetchone()[0]
+
+    cur.execute("""
+        SELECT COALESCE(SUM(interest_paid), 0)
+        FROM loan_payments
+        WHERE spa_id = %s
+    """, (spa_id,))
+    total_interest_paid = cur.fetchone()[0]
+
+    total_remaining_balance = total_original_loans - total_principal_paid
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "loans_home.html",
+        loans=loans,
+        total_original_loans=total_original_loans,
+        total_principal_paid=total_principal_paid,
+        total_interest_paid=total_interest_paid,
+        total_remaining_balance=total_remaining_balance
+    )
+
+                
+                
+                
+#   -----------------------
+#
+#    ADD BUSINESS LOANS                     
+#
+#  ----------------------
+                    
+                    
+                      
+
+@app.route("/business_loans/add", methods=["GET", "POST"])
+def add_business_loan():
+    spa_id = get_current_spa_id()
+
+    if request.method == "POST":
+        loan_name = request.form.get("loan_name", "").strip()
+        lender_name = request.form.get("lender_name", "").strip()
+        loan_start_date = request.form.get("loan_start_date") or None
+        original_amount = request.form.get("original_amount")
+        interest_rate = request.form.get("interest_rate") or None
+        term_months = request.form.get("term_months") or None
+        notes = request.form.get("notes", "").strip()
+        is_active = True if request.form.get("is_active") == "yes" else False
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            INSERT INTO business_loans (
+                spa_id,
+                loan_name,
+                lender_name,
+                loan_start_date,
+                original_amount,
+                interest_rate,
+                term_months,
+                notes,
+                is_active
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            spa_id,
+            loan_name,
+            lender_name,
+            loan_start_date,
+            original_amount,
+            interest_rate,
+            term_months,
+            notes,
+            is_active
+        ))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        flash("Business loan added successfully.", "success")
+        return redirect(url_for("loans_home"))
+
+    return render_template("add_business_loan.html")
+
+                
+                
+                
+#   -----------------------
+#
+#    ADD LOAN PAYMENT                     
+#
+#  ----------------------
+                    
+                    
+                      
+
+@app.route("/loan_payments/add", methods=["GET", "POST"])
+def add_loan_payment():
+    spa_id = get_current_spa_id()
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    if request.method == "POST":
+        loan_id = request.form.get("loan_id")
+        payment_date = request.form.get("payment_date")
+        principal_paid = request.form.get("principal_paid") or 0
+        interest_paid = request.form.get("interest_paid") or 0
+        total_payment = request.form.get("total_payment")
+        notes = request.form.get("notes", "").strip()
+
+        cur.execute("""
+            INSERT INTO loan_payments (
+                spa_id,
+                loan_id,
+                payment_date,
+                principal_paid,
+                interest_paid,
+                total_payment,
+                notes
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """, (
+            spa_id,
+            loan_id,
+            payment_date,
+            principal_paid,
+            interest_paid,
+            total_payment,
+            notes
+        ))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        flash("Loan payment added successfully.", "success")
+        return redirect(url_for("loans_home"))
+
+    cur.execute("""
+        SELECT loan_id, loan_name
+        FROM business_loans
+        WHERE spa_id = %s
+          AND is_active = TRUE
+        ORDER BY loan_name
+    """, (spa_id,))
+    loans = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "add_loan_payment.html",
+        loans=loans
+    )
+
+
+
+
+
+#   ------------------------------------
+#   
+#         EDIT OWNER CONTRIBUTIONS   
+#  
+#   
+#   --------------------------------
+
+
+@app.route("/owner_contributions/edit/<int:owner_contribution_id>", methods=["GET", "POST"])
+def edit_owner_contribution(owner_contribution_id):
+    spa_id = get_current_spa_id()
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    if request.method == "POST":
+        contribution_date = request.form.get("contribution_date")
+        amount = request.form.get("amount")
+        funding_source = request.form.get("funding_source", "").strip()
+        notes = request.form.get("notes", "").strip()
+
+        cur.execute("""
+            UPDATE owner_contributions
+            SET contribution_date = %s,
+                amount = %s,
+                funding_source = %s,
+                notes = %s
+            WHERE owner_contribution_id = %s
+              AND spa_id = %s
+        """, (
+            contribution_date,
+            amount,
+            funding_source,
+            notes,
+            owner_contribution_id,
+            spa_id
+        ))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        flash("Owner contribution updated successfully.", "success")
+        return redirect(url_for("funding_home"))
+
+    cur.execute("""
+        SELECT
+            owner_contribution_id,
+            contribution_date,
+            amount,
+            funding_source,
+            notes
+        FROM owner_contributions
+        WHERE owner_contribution_id = %s
+          AND spa_id = %s
+    """, (owner_contribution_id, spa_id))
+
+    contribution = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if not contribution:
+        flash("Owner contribution not found.", "error")
+        return redirect(url_for("funding_home"))
+
+    return render_template(
+        "edit_owner_contribution.html",
+        contribution=contribution
+    )
+
+
+
+
+
+
+
+
+#   ------------------------------------
+#
+#      DELETE OWNER CONTRIBUTIONS
+#                    
+#
+#   --------------------------------
+
+
+
+@app.route("/owner_contributions/delete/<int:owner_contribution_id>", methods=["POST"])
+def delete_owner_contribution(owner_contribution_id):
+    spa_id = get_current_spa_id()
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        DELETE FROM owner_contributions
+        WHERE owner_contribution_id = %s
+          AND spa_id = %s
+    """, (owner_contribution_id, spa_id))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    flash("Owner contribution deleted successfully.", "success")
+    return redirect(url_for("funding_home"))
+
+
+
+
+
+
+
+        
+#   ------------------------------------
+#
+#    EDIT OWNER REIMBURSEMENTS
+#
+#
+#   --------------------------------
+                     
+
+@app.route("/owner_reimbursements/edit/<int:owner_reimbursement_id>", methods=["GET", "POST"])
+def edit_owner_reimbursement(owner_reimbursement_id):
+    spa_id = get_current_spa_id()
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    if request.method == "POST":
+        reimbursement_date = request.form.get("reimbursement_date")
+        amount = request.form.get("amount")
+        payment_method = request.form.get("payment_method", "").strip()
+        notes = request.form.get("notes", "").strip()
+
+        cur.execute("""
+            UPDATE owner_reimbursements
+            SET reimbursement_date = %s,
+                amount = %s,
+                payment_method = %s,
+                notes = %s
+            WHERE owner_reimbursement_id = %s
+              AND spa_id = %s
+        """, (
+            reimbursement_date,
+            amount,
+            payment_method,
+            notes,
+            owner_reimbursement_id,
+            spa_id
+        ))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        flash("Owner reimbursement updated successfully.", "success")
+        return redirect(url_for("funding_home"))
+
+    cur.execute("""
+        SELECT
+            owner_reimbursement_id,
+            reimbursement_date,
+            amount,
+            payment_method,
+            notes
+        FROM owner_reimbursements
+        WHERE owner_reimbursement_id = %s
+          AND spa_id = %s
+    """, (owner_reimbursement_id, spa_id))
+
+    reimbursement = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if not reimbursement:
+        flash("Owner reimbursement not found.", "error")
+        return redirect(url_for("funding_home"))
+
+    return render_template(
+        "edit_owner_reimbursement.html",
+        reimbursement=reimbursement
+    )
+
+
+
+
+
+
+
+#   ------------------------------------
+#   
+#       DELETE OWNER REIMBURSEMENT        
+#  
+#   
+#   --------------------------------
+
+
+@app.route("/owner_reimbursements/delete/<int:owner_reimbursement_id>", methods=["POST"])
+def delete_owner_reimbursement(owner_reimbursement_id):
+    spa_id = get_current_spa_id()
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        DELETE FROM owner_reimbursements
+        WHERE owner_reimbursement_id = %s
+          AND spa_id = %s
+    """, (owner_reimbursement_id, spa_id))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    flash("Owner reimbursement deleted successfully.", "success")
+    return redirect(url_for("funding_home"))
+
+
+
+
+
+
+#   ------------------------------------
+#   
+#      EDIT LOAN    
+#   
+#   
+#   --------------------------------
+
+@app.route("/business_loans/edit/<int:loan_id>", methods=["GET", "POST"])
+def edit_business_loan(loan_id):
+    spa_id = get_current_spa_id()
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    if request.method == "POST":
+        loan_name = request.form.get("loan_name", "").strip()
+        lender_name = request.form.get("lender_name", "").strip()
+        loan_start_date = request.form.get("loan_start_date") or None
+        original_amount = request.form.get("original_amount")
+        interest_rate = request.form.get("interest_rate") or None
+        term_months = request.form.get("term_months") or None
+        notes = request.form.get("notes", "").strip()
+        is_active = True if request.form.get("is_active") == "yes" else False
+
+        cur.execute("""
+            UPDATE business_loans
+            SET loan_name = %s,
+                lender_name = %s,
+                loan_start_date = %s,
+                original_amount = %s,
+                interest_rate = %s,
+                term_months = %s,
+                notes = %s,
+                is_active = %s
+            WHERE loan_id = %s
+              AND spa_id = %s
+        """, (
+            loan_name,
+            lender_name,
+            loan_start_date,
+            original_amount,
+            interest_rate,
+            term_months,
+            notes,
+            is_active,
+            loan_id,
+            spa_id
+        ))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        flash("Business loan updated successfully.", "success")
+        return redirect(url_for("loans_home"))
+
+    cur.execute("""
+        SELECT
+            loan_id,
+            loan_name,
+            lender_name,
+            loan_start_date,
+            original_amount,
+            interest_rate,
+            term_months,
+            notes,
+            is_active
+        FROM business_loans
+        WHERE loan_id = %s
+          AND spa_id = %s
+    """, (loan_id, spa_id))
+
+    loan = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if not loan:
+        flash("Business loan not found.", "error")
+        return redirect(url_for("loans_home"))
+
+    return render_template(
+        "edit_business_loan.html",
+        loan=loan
+    )
+
+
+
+
+
+
+#   ------------------------------------
+#   
+#   DELETE BUSINESS LOAN
+#   
+#   
+#   ------------------------------------
+
+
+@app.route("/business_loans/delete/<int:loan_id>", methods=["POST"])
+def delete_business_loan(loan_id):
+    spa_id = get_current_spa_id()
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        DELETE FROM business_loans
+        WHERE loan_id = %s
+          AND spa_id = %s
+    """, (loan_id, spa_id))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    flash("Business loan and all related payments deleted successfully.", "success")
+    return redirect(url_for("loans_home"))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#   ------------------------------------
+#   
+#   
+#   
+#   
+#   --------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#   ------------------------------------
+#   
+#   
+#   
+#   
+#   --------------------------------
+
+
+
+
+
+
+
+
+
+#   ------------------------------------
+#   
+#   
+#   
+#   
+#   --------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #   ------------------------------------
 #
 #
@@ -1042,10 +1855,41 @@ def client_forms(client_id):
 
 @app.route("/gift_certificates")
 def gift_certificates_home():
+    spa_id = get_current_spa_id()
+
+    certificate_search = request.args.get("certificate_search", "").strip()
+    sort_by = request.args.get("sort_by", "date_desc")
+    filter_by = request.args.get("filter", "").strip()
+
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute("""
+    where_clauses = ["gc.spa_id = %s"]
+    params = [spa_id]
+
+    if certificate_search:
+        where_clauses.append("gc.certificate_number ILIKE %s")
+        params.append(f"%{certificate_search}%")
+
+    if filter_by == "expiring_soon":
+        where_clauses.append("gc.expires_date IS NOT NULL")
+        where_clauses.append("gc.expires_date >= CURRENT_DATE")
+        where_clauses.append("gc.expires_date <= CURRENT_DATE + INTERVAL '60 days'")
+        where_clauses.append("gcs.status_name IN ('Active', 'Printed')")
+        where_clauses.append("gc.remaining_balance > 0")
+
+    where_sql = "WHERE " + " AND ".join(where_clauses)
+
+    if sort_by == "date_asc":
+        order_sql = "ORDER BY gc.date_issued ASC, gc.gift_cert_id ASC"
+    elif sort_by == "cert_asc":
+        order_sql = "ORDER BY gc.certificate_number ASC"
+    elif sort_by == "cert_desc":
+        order_sql = "ORDER BY gc.certificate_number DESC"
+    else:
+        order_sql = "ORDER BY gc.date_issued DESC, gc.gift_cert_id DESC"
+
+    query = f"""
         SELECT
             gc.gift_cert_id,
             gc.certificate_number,
@@ -1062,9 +1906,11 @@ def gift_certificates_home():
         FROM gift_certificates gc
         LEFT JOIN gift_certificate_statuses gcs
             ON gc.gift_certificate_status_id = gcs.gift_certificate_status_id
-        ORDER BY gc.date_issued DESC, gc.gift_cert_id DESC
-    """)
+        {where_sql}
+        {order_sql}
+    """
 
+    cur.execute(query, params)
     gift_certificates = cur.fetchall()
 
     cur.close()
@@ -1072,7 +1918,10 @@ def gift_certificates_home():
 
     return render_template(
         "gift_certificates_home.html",
-        gift_certificates=gift_certificates
+        gift_certificates=gift_certificates,
+        certificate_search=certificate_search,
+        sort_by=sort_by,
+        filter_by=filter_by
     )
 
 
@@ -5058,11 +5907,29 @@ def dashboard():
     """, (spa_id, today))
     revenue_today = cur.fetchone()[0]
 
+
+    cur.execute("""
+    SELECT COUNT(*)
+        FROM gift_certificates gc
+        LEFT JOIN gift_certificate_statuses gcs
+            ON gc.gift_certificate_status_id = gcs.gift_certificate_status_id
+        WHERE gc.spa_id = %s
+          AND gc.expires_date IS NOT NULL
+          AND gc.expires_date >= CURRENT_DATE
+          AND gc.expires_date <= CURRENT_DATE + INTERVAL '60 days'
+          AND gcs.status_name IN ('Active', 'Printed')
+          AND gc.remaining_balance > 0
+    """, (spa_id,))
+    expiring_gc_count = cur.fetchone()[0]
+
+
+
     cur.close()
     conn.close()
 
     return render_template(
         "dashboard.html",
+        expiring_gc_count=expiring_gc_count,
         total_clients=total_clients,
         todays_appointments=todays_appointments,
         upcoming_appointments=upcoming_appointments,
@@ -6178,7 +7045,8 @@ def post_appointment_wrap_up(appointment_id):
         cur.close()
         conn.close()
 
-        flash("Post appointment wrap-up saved.", "success")
+        flash("Wrap-Up was saved successfully.", "success")
+        return redirect(url_for("post_appointment_wrap_up_saved", appointment_id=appointment_id))
 
         if selected_date:
             return redirect(url_for("daily_schedule", date=selected_date))
@@ -6234,6 +7102,23 @@ def post_appointment_wrap_up(appointment_id):
 
 
 
+#  ----------------------------
+#      POST APPOINTMENT SAVED
+#    
+#   
+#   ---------------------------
+
+
+
+
+@app.route("/post_appointment_wrap_up_saved/<int:appointment_id>")
+def post_appointment_wrap_up_saved(appointment_id):
+
+
+    return render_template(
+        "post_appointment_wrap_up_saved.html",
+        appointment_id=appointment_id
+    )
 
 
 

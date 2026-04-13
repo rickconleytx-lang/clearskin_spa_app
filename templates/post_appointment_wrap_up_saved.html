@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block title %}Wrap-Up Saved{% endblock %}
+
+{% block content %}
+    <h1>Wrap-Up Saved</h1>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="flash {{ category }}">
+                    {{ message }}
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <div class="form-buttons">
+        <a href="{{ url_for('schedule_appointment_start') }}" class="btn">
+            Schedule Next Appointment
+        </a>
+
+    </div>
+{% endblock %}
