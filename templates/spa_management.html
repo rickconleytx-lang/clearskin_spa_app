@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Spa Management</h1>
+
+<div class="form-buttons">
+    <a href="{{ url_for('credit_processors') }}" class="btn">
+        Credit Processors
+    </a>
+
+    <a href="{{ url_for('loans_home') }}" class="btn">
+        Business Loans
+    </a>
+
+    <a href="{{ url_for('funding_home') }}" class="btn">
+        Funding
+    </a>
+
+    <a href="{{ url_for('loans_home') }}" class="btn">
+        Add Owner Contribution
+    </a>
+</div>
+
+<div class="admin-card-grid">
+    <a href="{{ url_for('credit_processors') }}" class="admin-card">
+        <h3>Credit Processors</h3>
+        <p>Manage processor fees and active processors.</p>
+    </a>
+
+    <a href="{{ url_for('loans_home') }}" class="admin-card">
+        <h3>Business Loans</h3>
+        <p>View loan balances and payment history.</p>
+    </a>
+
+    <a href="{{ url_for('funding_home') }}" class="admin-card">
+        <h3>Funding</h3>
+        <p>Owner contributions and reimbursements.</p>
+    </a>
+</div>
+
+{% endblock %}

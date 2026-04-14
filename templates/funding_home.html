@@ -7,6 +7,15 @@
     <a href="{{ url_for('add_owner_contribution') }}" class="btn">Add Owner Contribution</a>
     <a href="{{ url_for('add_owner_reimbursement') }}" class="btn">Add Owner Reimbursement</a>
     <a href="{{ url_for('loans_home') }}" class="btn">Loans</a>
+    <a href="{{ url_for('export_loan_contributions_csv') }}" class="btn">
+    Export CSV
+    </a>
+
+    <a href="{{ url_for('export_loan_contributions_excel', start_date=start_date, end_date=end_date) }}" class="btn">
+    Export Excel
+    </a>
+
+
 </div>
 
 <br>

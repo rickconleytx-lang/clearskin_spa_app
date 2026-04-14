@@ -13,12 +13,12 @@
             {% endfor %}
         </select>
     </div>
-
+    
     <div class="form-group">
         <label for="payment_date">Payment Date</label>
         <input type="date" id="payment_date" name="payment_date" required>
     </div>
-
+ 
     <div class="form-group">
         <label for="principal_paid">Principal Paid</label>
         <input type="number" step="0.01" id="principal_paid" name="principal_paid" value="0.00">
@@ -31,7 +31,7 @@
 
     <div class="form-group">
         <label for="total_payment">Total Payment</label>
-        <input type="number" step="0.01" id="total_payment" name="total_payment" required>
+        <input type="number" step="0.01" id="total_payment" name="total_payment" value="0.00" readonly>
     </div>
 
     <div class="form-group">
@@ -44,4 +44,25 @@
         <a href="{{ url_for('loans_home') }}" class="btn">Cancel</a>
     </div>
 </form>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const principalField = document.getElementById("principal_paid");
+    const interestField = document.getElementById("interest_paid");
+    const totalField = document.getElementById("total_payment");
+
+    function calculateTotal() {
+        const principal = parseFloat(principalField.value) || 0;
+        const interest = parseFloat(interestField.value) || 0;
+        totalField.value = (principal + interest).toFixed(2);
+    }
+
+    principalField.addEventListener("input", calculateTotal);
+    interestField.addEventListener("input", calculateTotal);
+
+    calculateTotal();
+});
+</script>
+
 {% endblock %}
+

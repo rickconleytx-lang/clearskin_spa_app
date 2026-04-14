@@ -8,8 +8,9 @@
 <p><strong>Appointment Time:</strong> {{ appt[3].strftime('%I:%M %p') }}</p>
 
 <span style="color: red; font-size: x-small;">* Required Field</span>
+
 <form method="POST">
-    <label for="income_date">Income Date</label>
+    <label for="income_date">Income Date<span style="color: red;"> *</span></label>
     <input type="date" id="income_date" name="income_date"
            value="{{ appt[2].strftime('%Y-%m-%d') }}" required>
 
@@ -34,7 +35,6 @@
         </select>
     </div>
 
-
     <label for="service_amount">Service Amount</label>
     <input type="number" step="0.01" id="service_amount" name="service_amount" value="0.00">
 
@@ -51,7 +51,8 @@
     <input type="number" step="0.01" id="total_amount" name="total_amount" value="0.00" readonly required>
 
     <label for="payment_method">Payment Method</label>
-    <select id="payment_method" name="payment_method">
+    <select id="payment_method" name="payment_method" required>
+        <option value="">Select Payment Method</option>
         <option value="Cash">Cash</option>
         <option value="Card">Card</option>
         <option value="Apple Pay">Apple Pay</option>
@@ -60,8 +61,20 @@
         <option value="Other">Other</option>
     </select>
 
-    <label for="square_payment_id">Square Payment ID</label>
-    <input type="text" id="square_payment_id" name="square_payment_id">
+    <div id="credit_processor_group" style="display: none;">
+        <label for="credit_processor_id">Credit Processor</label>
+        <select id="credit_processor_id" name="credit_processor_id">
+            <option value="">Select Processor</option>
+            {% for processor in credit_processors %}
+                <option value="{{ processor[0] }}">{{ processor[1] }}</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div id="processor_payment_group" style="display: none;">
+        <label for="processor_payment_id">Payment Processor Payment ID</label>
+        <input type="text" id="processor_payment_id" name="processor_payment_id">
+    </div>
 
     <label for="notes">Notes</label>
     <textarea id="notes" name="notes" rows="4"></textarea>
@@ -72,23 +85,62 @@
 </form>
 
 <script>
-function calculateTotal() {
-    const service = parseFloat(document.getElementById("service_amount").value) || 0;
-    const retail = parseFloat(document.getElementById("retail_amount").value) || 0;
-    const tax = parseFloat(document.getElementById("tax_amount").value) || 0;
-    const tip = parseFloat(document.getElementById("tip_amount").value) || 0;
+document.addEventListener("DOMContentLoaded", function () {
+    const serviceField = document.getElementById("service_amount");
+    const retailField = document.getElementById("retail_amount");
+    const taxField = document.getElementById("tax_amount");
+    const tipField = document.getElementById("tip_amount");
+    const totalField = document.getElementById("total_amount");
 
-    const total = service + retail + tax + tip;
-    document.getElementById("total_amount").value = total.toFixed(2);
-}
+    const paymentMethodField = document.getElementById("payment_method");
+    const creditProcessorGroup = document.getElementById("credit_processor_group");
+    const creditProcessorField = document.getElementById("credit_processor_id");
+    const processorPaymentGroup = document.getElementById("processor_payment_group");
 
-document.getElementById("service_amount").addEventListener("input", calculateTotal);
-document.getElementById("retail_amount").addEventListener("input", calculateTotal);
-document.getElementById("tax_amount").addEventListener("input", calculateTotal);
-document.getElementById("tip_amount").addEventListener("input", calculateTotal);
+    function calculateTotal() {
+        const service = parseFloat(serviceField.value) || 0;
+        const retail = parseFloat(retailField.value) || 0;
+        const tax = parseFloat(taxField.value) || 0;
+        const tip = parseFloat(tipField.value) || 0;
 
-window.addEventListener("load", calculateTotal);
+        const total = service + retail + tax + tip;
+        totalField.value = total.toFixed(2);
+    }
+
+    function togglePaymentFields() {
+        const paymentMethod = paymentMethodField.value.trim().toLowerCase();
+        const cardBasedMethods = ["card", "apple pay", "google pay", "square"];
+
+        if (cardBasedMethods.includes(paymentMethod)) {
+            creditProcessorGroup.style.display = "block";
+        } else {
+            creditProcessorGroup.style.display = "none";
+            creditProcessorField.value = "";
+        }
+
+
+        if (cardBasedMethods.includes(paymentMethod)) {
+            processorPaymentGroup.style.display = "block";
+        } else {
+            processorPaymentGroup.style.display = "none";
+            document.getElementById("processor_payment_id").value = "";
+        }
+
+
+
+
+    }
+
+    serviceField.addEventListener("input", calculateTotal);
+    retailField.addEventListener("input", calculateTotal);
+    taxField.addEventListener("input", calculateTotal);
+    tipField.addEventListener("input", calculateTotal);
+
+    paymentMethodField.addEventListener("change", togglePaymentFields);
+
+    calculateTotal();
+    togglePaymentFields();
+});
 </script>
-
 
 {% endblock %}

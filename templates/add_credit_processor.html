@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Add Credit Processor</h1>
+
+<form method="POST">
+    <div class="form-group">
+        <label for="credit_processor_name">Processor Name</label>
+        <input type="text" id="credit_processor_name" name="credit_processor_name" required>
+    </div>
+
+    <div class="form-group">
+        <label for="percentage_fee">Percentage Fee</label>
+        <input type="number" step="0.0001" id="percentage_fee" name="percentage_fee" value="0.0000">
+    </div>
+
+    <div class="form-group">
+        <label for="flat_fee">Flat Fee</label>
+        <input type="number" step="0.01" id="flat_fee" name="flat_fee" value="0.00">
+    </div>
+
+    <div class="form-group">
+        <label for="additional_fee">Additional Fee</label>
+        <input type="number" step="0.01" id="additional_fee" name="additional_fee" value="0.00">
+    </div>
+
+    <div class="form-buttons">
+        <button type="submit" class="btn">Save Processor</button>
+        <a href="{{ url_for('credit_processors') }}" class="btn">Cancel</a>
+    </div>
+</form>
+
+{% endblock %}

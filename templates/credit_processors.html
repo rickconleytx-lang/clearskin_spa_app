@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Credit Processors</h1>
+
+<div class="form-buttons">
+    <a href="{{ url_for('spa_management') }}" class="btn">Back to Spa Management</a>
+    <a href="{{ url_for('add_credit_processor') }}" class="btn">Add Credit Processor</a>
+</div>
+
+{% if processors %}
+    <table>
+        <thead>
+            <tr>
+                <th>Processor Name</th>
+                <th>% Fee</th>
+                <th>Flat Fee</th>
+                <th>Additional Fee</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for row in processors %}
+            <tr>
+                <td>{{ row[1] }}</td>
+                <td>{{ "%.4f"|format(row[2] or 0) }}</td>
+                <td>${{ "%.2f"|format(row[3] or 0) }}</td>
+                <td>${{ "%.2f"|format(row[4] or 0) }}</td>
+
+                <td>
+                    {% if row[5] %}
+                        Active
+                    {% else %}
+                        Inactive
+                    {% endif %}
+                </td>
+
+                <td>
+                    <a href="{{ url_for('edit_credit_processor', credit_processor_id=row[0]) }}" class="btn btn-small">
+                        Edit
+                    </a>
+
+                    <form method="POST"
+                          action="{{ url_for('toggle_credit_processor', credit_processor_id=row[0]) }}"
+                          style="display:inline;"
+                          onsubmit="return confirm('Are you sure you want to change this processor status?');">
+                        <button type="submit" class="btn btn-small">
+                            {% if row[5] %}Deactivate{% else %}Activate{% endif %}
+                        </button>
+                    </form>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+{% else %}
+    <p>No credit processors found yet.</p>
+{% endif %}
+
+{% endblock %}

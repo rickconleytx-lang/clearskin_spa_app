@@ -1,0 +1,90 @@
+added the followning SQL tables and edits:
+ADDED CREDIT PROCESSORS
+
+
+
+
+CREATE TABLE credit_processors (
+    credit_processor_id SERIAL PRIMARY KEY,
+    spa_id INT NOT NULL
+        REFERENCES spas(spa_id)
+        ON DELETE CASCADE,
+    credit_processor_name VARCHAR(100) NOT NULL,
+    percentage_fee NUMERIC(6,4) NOT NULL DEFAULT 0,
+    flat_fee NUMERIC(10,2) NOT NULL DEFAULT 0,
+    additional_fee NUMERIC(10,2) NOT NULL DEFAULT 0,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+
+SELECT * FROM credit_processors;
+
+
+
+
+
+
+ALTER TABLE income
+ADD COLUMN credit_processor_id INT
+    REFERENCES credit_processors(credit_processor_id),
+ADD COLUMN processing_fee_amount NUMERIC(10,2) NOT NULL DEFAULT 0,
+ADD COLUMN net_received NUMERIC(10,2) NOT NULL DEFAULT 0,
+ADD COLUMN processor_percentage_fee NUMERIC(6,4) NOT NULL DEFAULT 0,
+ADD COLUMN processor_flat_fee NUMERIC(10,2) NOT NULL DEFAULT 0,
+ADD COLUMN processor_additional_fee NUMERIC(10,2) NOT NULL DEFAULT 0;
+
+SELECT * FROM income;
+
+
+
+
+
+INSERT INTO credit_processors (
+    spa_id,
+    credit_processor_name,
+    percentage_fee,
+    flat_fee,
+    additional_fee
+)
+VALUES (
+    1,
+    'Square',
+    2.5,
+    0.15,
+    0.00
+);
+
+
+SELECT * FROM credit_processors;
+
+
+
+
+
+
+ALTER TABLE income
+RENAME COLUMN square_payment_id TO processor_payment_id;
+
+
+SELECT * FROM income;
+
+
+
+
+
+SELECT
+    income_date,
+    payment_method,
+    total_amount,
+    processing_fee_amount,
+    net_received,
+    processor_payment_id
+FROM income
+ORDER BY income_id DESC
+LIMIT 5;
+
+
+RENDER UPLOAD COMPLETE
+
+
+#--------------------------------------------------------

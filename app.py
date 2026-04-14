@@ -7,9 +7,10 @@ import io
 import os
 from openpyxl import Workbook
 from dotenv import load_dotenv
-
+from openpyxl.styles import Font
 from db import get_db_connection
-
+output = io.StringIO()
+file_data = io.BytesIO()
 load_dotenv()
 
 app = Flask(__name__)
@@ -199,6 +200,11 @@ def square_webhook():
     # insert into incoming_square_bookings if not already present
 
     return "", 200
+
+
+
+
+
 
 #  -------------------
 #   Square Incomming Bookings
@@ -691,6 +697,234 @@ def help_admin_page():
 
 
 
+                 
+#   -----------------------
+#               
+#     SPA MANAGEMENT PAGE
+#               
+#  ----------------------
+
+@app.route("/spa_management")
+def spa_management():
+    return render_template("spa_management.html")
+
+
+
+
+#   -----------------------
+#  
+#     CREDIT   PROCESSORS
+#
+#  ----------------------
+
+@app.route("/credit_processors")
+def credit_processors():
+    spa_id = get_current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            credit_processor_id,
+            credit_processor_name,
+            percentage_fee,
+            flat_fee,
+            additional_fee,
+            is_active
+        FROM credit_processors
+        WHERE spa_id = %s
+        ORDER BY credit_processor_name
+    """, (spa_id,))
+
+    processors = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "credit_processors.html",
+        processors=processors
+    )
+
+
+
+
+#   -----------------------
+#     
+#      ADD CREDIT PROCESSORS
+#  
+#  ----------------------
+
+
+
+
+@app.route("/credit_processors/add", methods=["GET", "POST"])
+def add_credit_processor():
+    spa_id = get_current_spa_id()
+
+    if request.method == "POST":
+        credit_processor_name = request.form.get("credit_processor_name", "").strip()
+        percentage_fee = request.form.get("percentage_fee") or 0
+        flat_fee = request.form.get("flat_fee") or 0
+        additional_fee = request.form.get("additional_fee") or 0
+
+        if not credit_processor_name:
+            flash("Processor name is required.", "error")
+            return redirect(url_for("add_credit_processor"))
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            INSERT INTO credit_processors (
+                spa_id,
+                credit_processor_name,
+                percentage_fee,
+                flat_fee,
+                additional_fee,
+                is_active
+            )
+            VALUES (%s, %s, %s, %s, %s, TRUE)
+        """, (
+            spa_id,
+            credit_processor_name,
+            percentage_fee,
+            flat_fee,
+            additional_fee
+        ))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        flash("Credit processor added successfully.", "success")
+        return redirect(url_for("credit_processors"))
+
+    return render_template("add_credit_processor.html")
+
+
+
+
+#   ----------------------------
+#     
+#     EDIT CREDIT PROCESSOR
+#  
+#  ----------------------------
+
+
+
+@app.route("/credit_processors/edit/<int:credit_processor_id>", methods=["GET", "POST"])
+def edit_credit_processor(credit_processor_id):
+    spa_id = get_current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    if request.method == "POST":
+        credit_processor_name = request.form.get("credit_processor_name", "").strip()
+        percentage_fee = request.form.get("percentage_fee") or 0
+        flat_fee = request.form.get("flat_fee") or 0
+        additional_fee = request.form.get("additional_fee") or 0
+
+        if not credit_processor_name:
+            cur.close()
+            conn.close()
+            flash("Processor name is required.", "error")
+            return redirect(url_for("edit_credit_processor", credit_processor_id=credit_processor_id))
+
+        cur.execute("""
+            UPDATE credit_processors
+            SET credit_processor_name = %s,
+                percentage_fee = %s,
+                flat_fee = %s,
+                additional_fee = %s
+            WHERE credit_processor_id = %s
+              AND spa_id = %s
+        """, (
+            credit_processor_name,
+            percentage_fee,
+            flat_fee,
+            additional_fee,
+            credit_processor_id,
+            spa_id
+        ))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        flash("Credit processor updated successfully.", "success")
+        return redirect(url_for("credit_processors"))
+
+    cur.execute("""
+        SELECT
+            credit_processor_id,
+            credit_processor_name,
+            percentage_fee,
+            flat_fee,
+            additional_fee,
+            is_active
+        FROM credit_processors
+        WHERE credit_processor_id = %s
+          AND spa_id = %s
+    """, (credit_processor_id, spa_id))
+
+    processor = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if not processor:
+        flash("Credit processor not found.", "error")
+        return redirect(url_for("credit_processors"))
+
+    return render_template(
+        "edit_credit_processor.html",
+        processor=processor
+    )
+
+
+
+
+#   ------------------------------
+#     TOGGLE ACTIVE/DEACTIVATE
+#     CREDIT PROCESSORS
+#  
+#  ------------------------------
+
+
+@app.route("/credit_processors/toggle/<int:credit_processor_id>", methods=["POST"])
+def toggle_credit_processor(credit_processor_id):
+    spa_id = get_current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE credit_processors
+        SET is_active = NOT is_active
+        WHERE credit_processor_id = %s
+          AND spa_id = %s
+    """, (credit_processor_id, spa_id))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    flash("Credit processor status updated.", "success")
+    return redirect(url_for("credit_processors"))
+
+
+
+
+
+
+
+
+
+
+
 
 #   -----------------------
 #
@@ -715,9 +949,272 @@ def sync_calendar():
 #
 #     Owner and Loan Funding
 #
-#
+#       HELPERS
 #
 #   ------------------------------------------
+
+
+
+
+
+
+
+#   --------------------------------------------------
+#
+#
+#              HELPER   QUERY
+#
+#
+#  ----------------------------------------------------
+
+
+
+
+from datetime import date
+
+
+def get_loan_contribution_rows(spa_id, start_date=None, end_date=None):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    query = """
+        SELECT
+            contribution_date AS activity_date,
+            'Owner Contribution' AS activity_type,
+            funding_source AS description,
+            amount,
+            NULL AS payment_method,
+            NULL AS loan_name,
+            notes
+        FROM owner_contributions
+        WHERE spa_id = %s
+    """
+    params = [spa_id]
+
+    if start_date:
+        query += " AND contribution_date >= %s"
+        params.append(start_date)
+
+    if end_date:
+        query += " AND contribution_date <= %s"
+        params.append(end_date)
+
+    query += """
+
+        UNION ALL
+
+        SELECT
+            reimbursement_date AS activity_date,
+            'Owner Reimbursement' AS activity_type,
+            NULL AS description,
+            amount,
+            payment_method,
+            NULL AS loan_name,
+            notes
+        FROM owner_reimbursements
+        WHERE spa_id = %s
+    """
+    params.append(spa_id)
+
+    if start_date:
+        query += " AND reimbursement_date >= %s"
+        params.append(start_date)
+
+    if end_date:
+        query += " AND reimbursement_date <= %s"
+        params.append(end_date)
+
+    query += """
+
+        UNION ALL
+
+        SELECT
+            lp.payment_date AS activity_date,
+            'Loan Payment' AS activity_type,
+            CONCAT('Principal: $', lp.principal_paid,
+                   ' / Interest: $', lp.interest_paid) AS description,
+            lp.total_payment AS amount,
+            NULL AS payment_method,
+            bl.loan_name,
+            lp.notes
+        FROM loan_payments lp
+        LEFT JOIN business_loans bl
+            ON lp.loan_id = bl.loan_id
+        WHERE lp.spa_id = %s
+    """
+    params.append(spa_id)
+
+    if start_date:
+        query += " AND lp.payment_date >= %s"
+        params.append(start_date)
+
+    if end_date:
+        query += " AND lp.payment_date <= %s"
+        params.append(end_date)
+
+    query += " ORDER BY activity_date DESC"
+
+    cur.execute(query, tuple(params))
+    rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+    return rows
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#   --------------------------------------
+#     LOAN CONTRIBUTIONS EXPORT   CSV
+#
+#   --------------------------------------
+
+@app.route("/loan_contributions/export/csv")
+def export_loan_contributions_csv():
+    spa_id = get_current_spa_id()
+
+    start_date = request.args.get("start_date", "").strip()
+    end_date = request.args.get("end_date", "").strip()
+
+    rows = get_loan_contribution_rows(
+        spa_id=spa_id,
+        start_date=start_date or None,
+        end_date=end_date or None
+    )
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    writer.writerow([
+        "Date",
+        "Type",
+        "Description",
+        "Amount",
+        "Payment Method",
+        "Loan",
+        "Notes"
+    ])
+
+    for row in rows:
+        writer.writerow([
+            row[0].strftime("%Y-%m-%d") if row[0] else "",
+            row[1] or "",
+            row[2] or "",
+            f"{float(row[3]):.2f}" if row[3] is not None else "0.00",
+            row[4] or "",
+            row[5] or "",
+            row[6] or ""
+        ])
+
+    csv_data = output.getvalue()
+    output.close()
+
+    return Response(
+        csv_data,
+        mimetype="text/csv",
+        headers={
+            "Content-Disposition": "attachment; filename=loan_contributions.csv"
+        }
+    )
+
+
+#   --------------------------------------
+#     LOAN CONTRIBUTIONS EXPORT   EXCEL
+#
+#   --------------------------------------
+
+@app.route("/loan_contributions/export/excel")
+def export_loan_contributions_excel():
+    spa_id = get_current_spa_id()
+
+    start_date = request.args.get("start_date", "").strip()
+    end_date = request.args.get("end_date", "").strip()
+
+    rows = get_loan_contribution_rows(
+        spa_id=spa_id,
+        start_date=start_date or None,
+        end_date=end_date or None
+    )
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Loans & Contributions"
+
+    headers = [
+        "Date",
+        "Type",
+        "Description",
+        "Amount",
+        "Payment Method",
+        "Loan",
+        "Notes"
+    ]
+
+    ws.append(headers)
+
+    for row in rows:
+        ws.append([
+            row[0].strftime("%Y-%m-%d") if row[0] else "",
+            row[1] or "",
+            row[2] or "",
+            float(row[3]) if row[3] is not None else 0.00,
+            row[4] or "",
+            row[5] or "",
+            row[6] or ""
+        ])
+
+    # make columns fit nicely
+    for column in ws.columns:
+        max_length = 0
+        column_letter = column[0].column_letter
+
+        for cell in column:
+            try:
+                max_length = max(max_length, len(str(cell.value)))
+            except:
+                pass
+
+        ws.column_dimensions[column_letter].width = max_length + 2
+
+    # format amount column
+    for cell in ws["D"][1:]:
+        cell.number_format = "$#,##0.00"
+
+    file_data = io.BytesIO()
+    wb.save(file_data)
+    file_data.seek(0)
+
+    return send_file(
+        file_data,
+        as_attachment=True,
+        download_name="loan_contributions.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -976,6 +1473,7 @@ def loans_home():
 
                 
                 
+
                 
 #   -----------------------
 #
@@ -1058,9 +1556,9 @@ def add_loan_payment():
     if request.method == "POST":
         loan_id = request.form.get("loan_id")
         payment_date = request.form.get("payment_date")
-        principal_paid = request.form.get("principal_paid") or 0
-        interest_paid = request.form.get("interest_paid") or 0
-        total_payment = request.form.get("total_payment")
+        principal_paid = float(request.form.get("principal_paid") or 0)
+        interest_paid = float(request.form.get("interest_paid") or 0)
+        total_payment = principal_paid + interest_paid
         notes = request.form.get("notes", "").strip()
 
         cur.execute("""
@@ -1453,23 +1951,6 @@ def delete_business_loan(loan_id):
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-#   ------------------------------------
-#   
-#   
-#   
-#   
-#   --------------------------------
 
 
 
@@ -4755,6 +5236,15 @@ def add_income(appointment_id):
     employees = cur.fetchall()
 
 
+    cur.execute("""
+        SELECT credit_processor_id, credit_processor_name
+        FROM credit_processors
+        WHERE spa_id = %s
+          AND is_active = TRUE
+        ORDER BY credit_processor_name
+    """, (spa_id,))
+    credit_processors = cur.fetchall()
+
     if not appt:
         cur.close()
         conn.close()
@@ -4767,15 +5257,68 @@ def add_income(appointment_id):
         income_date = request.form.get("income_date")
         income_type = request.form.get("income_type")
         description = request.form.get("description")
-        service_amount = request.form.get("service_amount") or 0
-        retail_amount = request.form.get("retail_amount") or 0
-        tax_amount = request.form.get("tax_amount") or 0
-        tip_amount = request.form.get("tip_amount") or 0
-        total_amount = request.form.get("total_amount") or 0
-        payment_method = request.form.get("payment_method")
+
+        service_amount = float(request.form.get("service_amount") or 0)
+        retail_amount = float(request.form.get("retail_amount") or 0)
+        tax_amount = float(request.form.get("tax_amount") or 0)
+        tip_amount = float(request.form.get("tip_amount") or 0)
+
+        total_amount = round(service_amount + retail_amount + tax_amount + tip_amount, 2)
+
+        payment_method = request.form.get("payment_method", "").strip()
+        credit_processor_id = request.form.get("credit_processor_id") or None
+        processor_payment_id = request.form.get("processor_payment_id") or None
+
+        print("DEBUG payment_method:", payment_method)
+        print("DEBUG credit_processor_id:", credit_processor_id)
+        print("DEBUG processor_payment_id:", processor_payment_id)
+        print("DEBUG total_amount:", total_amount)
+
+        processing_fee_amount = 0.00
+        net_received = total_amount
+        processor_percentage_fee = 0.00
+        processor_flat_fee = 0.00
+        processor_additional_fee = 0.00
+
+        card_based_methods = ["card", "credit card", "apple pay", "google pay", "square"]
+
+        if payment_method.lower() in card_based_methods:
+            print("DEBUG entered fee calculation block")
+
+            if credit_processor_id:
+                cur.execute("""
+                    SELECT percentage_fee, flat_fee, additional_fee
+                    FROM credit_processors
+                    WHERE credit_processor_id = %s
+                      AND spa_id = %s
+                      AND is_active = TRUE
+                """, (credit_processor_id, spa_id))
+
+                processor_row = cur.fetchone()
+                print("DEBUG processor_row:", processor_row)
+
+                if processor_row:
+                    processor_percentage_fee = float(processor_row[0] or 0)
+                    processor_flat_fee = float(processor_row[1] or 0)
+                    processor_additional_fee = float(processor_row[2] or 0)
+
+                    processing_fee_amount = round(
+                        (total_amount * (processor_percentage_fee / 100))
+                        + processor_flat_fee
+                        + processor_additional_fee,
+                        2
+                    )
+
+                    net_received = round(
+                        total_amount - processing_fee_amount,
+                        2
+                    )
+            else:
+                credit_processor_id = None
+
         visit_id = None
         employee_id = request.form.get("employee_id") or None
-        square_payment_id = request.form.get("square_payment_id") or None
+        processor_payment_id = request.form.get("processor_payment_id") or None
         notes = request.form.get("notes") or ""
 
    
@@ -4793,14 +5336,20 @@ def add_income(appointment_id):
                 tip_amount,
                 total_amount,
                 payment_method,
-                square_payment_id,
+                processor_payment_id,
                 notes,
                 spa_id,
                 employee_id,
+                credit_processor_id,
+                processing_fee_amount,
+                net_received,
+                processor_percentage_fee,
+                processor_flat_fee,
+                processor_additional_fee,
                 created_at
             )
             VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
             )
         """, (
             income_date,
@@ -4815,11 +5364,18 @@ def add_income(appointment_id):
             tip_amount,
             total_amount,
             payment_method,
-            square_payment_id,
+            processor_payment_id,
             notes,
             spa_id,
-            employee_id
+            employee_id,
+            credit_processor_id,
+            processing_fee_amount,
+            net_received,
+            processor_percentage_fee,
+            processor_flat_fee,
+            processor_additional_fee
         ))
+
 
         conn.commit()
         cur.close()
@@ -4840,6 +5396,7 @@ def add_income(appointment_id):
         "add_income.html",
         appt=appt,
         selected_date=selected_date,
+        credit_processors=credit_processors,
         employees=employees
     )
 
@@ -4851,6 +5408,8 @@ def add_income(appointment_id):
 #
 #  ------------------------
 
+
+
 @app.route("/edit_income/<int:income_id>", methods=["GET", "POST"])
 def edit_income(income_id):
     spa_id = get_current_spa_id()
@@ -4859,15 +5418,55 @@ def edit_income(income_id):
 
     if request.method == "POST":
         income_date = request.form.get("income_date") or None
-        
+        income_type = request.form.get("income_type", "").strip()  or "General"
+        employee_id = request.form.get("employee_id") or None
+
         service_amount = float(request.form.get("service_amount") or 0)
         retail_amount = float(request.form.get("retail_amount") or 0)
         tax_amount = float(request.form.get("tax_amount") or 0)
         tip_amount = float(request.form.get("tip_amount") or 0)
 
-        total_amount = service_amount + retail_amount + tax_amount + tip_amount
+        total_amount = round(service_amount + retail_amount + tax_amount + tip_amount, 2)
 
-        payment_method = request.form.get("payment_method") or None
+        payment_method = request.form.get("payment_method", "").strip()
+        credit_processor_id = request.form.get("credit_processor_id") or None
+        processor_payment_id = request.form.get("processor_payment_id") or None
+
+        processing_fee_amount = 0.00
+        net_received = total_amount
+        processor_percentage_fee = 0.00
+        processor_flat_fee = 0.00
+        processor_additional_fee = 0.00
+
+        card_based_methods = ["card", "credit card", "apple pay", "google pay", "square"]
+
+        if payment_method.lower() in card_based_methods:
+            if credit_processor_id:
+                cur.execute("""
+                    SELECT percentage_fee, flat_fee, additional_fee
+                    FROM credit_processors
+                    WHERE credit_processor_id = %s
+                      AND spa_id = %s
+                      AND is_active = TRUE
+                """, (credit_processor_id, spa_id))
+                processor_row = cur.fetchone()
+
+                if processor_row:
+                    processor_percentage_fee = float(processor_row[0] or 0)
+                    processor_flat_fee = float(processor_row[1] or 0)
+                    processor_additional_fee = float(processor_row[2] or 0)
+
+                    processing_fee_amount = round(
+                        (total_amount * (processor_percentage_fee / 100))
+                        + processor_flat_fee
+                        + processor_additional_fee,
+                        2
+                    )
+                    net_received = round(total_amount - processing_fee_amount, 2)
+        else:
+            credit_processor_id = None
+            processor_payment_id = None
+
         description = request.form.get("description") or None
         notes = request.form.get("notes") or None
         client_id = request.form.get("client_id") or None
@@ -4876,66 +5475,107 @@ def edit_income(income_id):
             UPDATE income
             SET
                 income_date = %s,
+                income_type = %s,
+                description = %s,
                 service_amount = %s,
                 retail_amount = %s,
                 tax_amount = %s,
                 tip_amount = %s,
                 total_amount = %s,
                 payment_method = %s,
-                description = %s,
+                processor_payment_id = %s,
                 notes = %s,
+                employee_id = %s,
+                credit_processor_id = %s,
+                processing_fee_amount = %s,
+                net_received = %s,
+                processor_percentage_fee = %s,
+                processor_flat_fee = %s,
+                processor_additional_fee = %s,
                 client_id = %s
             WHERE income_id = %s
+              AND spa_id = %s
         """, (
             income_date,
+            income_type,
+            description,
             service_amount,
             retail_amount,
             tax_amount,
             tip_amount,
             total_amount,
             payment_method,
-            description,
+            processor_payment_id,
             notes,
+            employee_id,
+            credit_processor_id,
+            processing_fee_amount,
+            net_received,
+            processor_percentage_fee,
+            processor_flat_fee,
+            processor_additional_fee,
             client_id,
-            income_id
-        ))        
+            income_id,
+            spa_id
+        ))
 
         conn.commit()
         cur.close()
         conn.close()
 
         flash("Income record updated successfully.", "success")
-        return redirect(url_for("income_home"))
+        return redirect(url_for("income_report"))
 
     cur.execute("""
         SELECT
             i.income_id,
             i.income_date,
+            i.income_type,
+            i.description,
             i.service_amount,
             i.retail_amount,
             i.tax_amount,
             i.tip_amount,
             i.total_amount,
             i.payment_method,
-            i.description,
+            i.processor_payment_id,
             i.notes,
             i.client_id,
+            i.employee_id,
+            i.credit_processor_id,
             c.first_name,
             c.last_name
         FROM income i
         LEFT JOIN clients c ON i.client_id = c.client_id
         WHERE i.income_id = %s
-    """, (income_id,))
-
+          AND i.spa_id = %s
+    """, (income_id, spa_id))
     income_record = cur.fetchone()
 
     cur.execute("""
         SELECT client_id, first_name, last_name
         FROM clients
+        WHERE spa_id = %s
         ORDER BY last_name, first_name
-    """)
+    """, (spa_id,))
     clients = cur.fetchall()
 
+    cur.execute("""
+        SELECT employee_id, first_name, last_name
+        FROM employees
+        WHERE spa_id = %s
+        ORDER BY last_name, first_name
+    """, (spa_id,))
+    employees = cur.fetchall()
+
+    cur.execute("""
+        SELECT credit_processor_id, credit_processor_name
+        FROM credit_processors
+        WHERE spa_id = %s
+          AND is_active = TRUE
+        ORDER BY credit_processor_name
+    """, (spa_id,))
+    credit_processors = cur.fetchall()
 
     cur.close()
     conn.close()
@@ -4944,7 +5584,12 @@ def edit_income(income_id):
         "edit_income.html",
         income_record=income_record,
         clients=clients,
+        employees=employees,
+        credit_processors=credit_processors
     )
+
+
+
 
 
     
@@ -5224,6 +5869,8 @@ def income_report():
             COALESCE(SUM(tip_amount), 0.00) AS total_tips,
             COALESCE(SUM(tax_amount), 0.00) AS total_tax,
             COALESCE(SUM(total_amount), 0.00) AS gross_collected,
+            COALESCE(SUM(processing_fee_amount), 0.00) AS total_processing_fees,
+            COALESCE(SUM(net_received), 0.00) AS total_net_received,
             COALESCE(SUM(service_amount + retail_amount), 0.00) AS spa_income
         FROM income
         {filter_sql}
@@ -5237,7 +5884,9 @@ def income_report():
             COUNT(*) AS entry_count,
             COALESCE(SUM(service_amount + retail_amount), 0.00) AS spa_income,
             COALESCE(SUM(tip_amount), 0.00) AS total_tips,
-            COALESCE(SUM(total_amount), 0.00) AS gross_collected
+            COALESCE(SUM(total_amount), 0.00) AS gross_collected,
+            COALESCE(SUM(processing_fee_amount), 0.00) AS total_processing_fees,
+            COALESCE(SUM(net_received), 0.00) AS total_net_received
         FROM income
         {filter_sql}
         GROUP BY income_type
@@ -5252,13 +5901,32 @@ def income_report():
             COUNT(*) AS entry_count,
             COALESCE(SUM(service_amount + retail_amount), 0.00) AS spa_income,
             COALESCE(SUM(tip_amount), 0.00) AS total_tips,
-            COALESCE(SUM(total_amount), 0.00) AS gross_collected
+            COALESCE(SUM(total_amount), 0.00) AS gross_collected,
+            COALESCE(SUM(processing_fee_amount), 0.00) AS total_processing_fees,
+            COALESCE(SUM(net_received), 0.00) AS total_net_received
         FROM income
         {filter_sql}
         GROUP BY payment_method
         ORDER BY gross_collected DESC
     """, params)
     payment_breakdown = cur.fetchall()
+
+    # Credit processor breakdown
+    cur.execute(f"""
+        SELECT
+            COALESCE(cp.credit_processor_name, 'None') AS credit_processor_name,
+            COUNT(*) AS entry_count,
+            COALESCE(SUM(total_amount), 0.00) AS gross_collected,
+            COALESCE(SUM(processing_fee_amount), 0.00) AS total_processing_fees,
+            COALESCE(SUM(net_received), 0.00) AS total_net_received
+        FROM income i
+        LEFT JOIN credit_processors cp
+            ON i.credit_processor_id = cp.credit_processor_id
+        {filter_sql.replace("spa_id", "i.spa_id").replace("income_date", "i.income_date").replace("income_type", "i.income_type")}
+        GROUP BY cp.credit_processor_name
+        ORDER BY total_processing_fees DESC, gross_collected DESC
+    """, params)
+    processor_breakdown = cur.fetchall()
 
     # Detailed report rows
     cur.execute(f"""
@@ -5270,16 +5938,21 @@ def income_report():
             COALESCE(i.income_type, '') AS income_type,
             COALESCE(i.description, '') AS description,
             COALESCE(i.payment_method, '') AS payment_method,
+            COALESCE(cp.credit_processor_name, '') AS credit_processor_name,
+            COALESCE(i.processor_payment_id, '') AS processor_payment_id,
             COALESCE(i.service_amount, 0.00) AS service_amount,
             COALESCE(i.tip_amount, 0.00) AS tip_amount,
             COALESCE(i.retail_amount, 0.00) AS retail_amount,
             COALESCE(i.tax_amount, 0.00) AS tax_amount,
             COALESCE(i.total_amount, 0.00) AS total_amount,
+            COALESCE(i.processing_fee_amount, 0.00) AS processing_fee_amount,
+            COALESCE(i.net_received, 0.00) AS net_received,
             COALESCE(i.notes, '') AS notes
         FROM income i
         LEFT JOIN clients c ON i.client_id = c.client_id
         LEFT JOIN employees e ON i.employee_id = e.employee_id
-        {filter_sql.replace("spa_id", "i.spa_id").replace("income_date", "i.income_date")}
+        LEFT JOIN credit_processors cp ON i.credit_processor_id = cp.credit_processor_id
+        {filter_sql.replace("spa_id", "i.spa_id").replace("income_date", "i.income_date").replace("income_type", "i.income_type")}
         ORDER BY i.income_date DESC, i.income_id DESC
     """, params)
     income_rows = cur.fetchall()
@@ -5296,9 +5969,9 @@ def income_report():
         summary=summary,
         income_type_breakdown=income_type_breakdown,
         payment_breakdown=payment_breakdown,
+        processor_breakdown=processor_breakdown,
         income_rows=income_rows
     )
-
 
 
 

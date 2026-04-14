@@ -63,3 +63,8 @@ loans_home.html
 add_business_loan.html
 add_loan_payment.html
 
+added
+
+Edit and Deletes
+
+Push to Render complete

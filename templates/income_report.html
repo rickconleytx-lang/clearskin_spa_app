@@ -117,8 +117,18 @@
         </div>
 
         <div class="summary-card">
-            <h3>Spa Income</h3>
+            <h3>Processor Fees</h3>
             <p>${{ '%.2f'|format(summary[6]) }}</p>
+        </div>
+
+        <div class="summary-card">
+            <h3>Net Received</h3>
+            <p>${{ '%.2f'|format(summary[7]) }}</p>
+        </div>
+
+        <div class="summary-card">
+            <h3>Spa Income</h3>
+            <p>${{ '%.2f'|format(summary[8]) }}</p>
         </div>
     </div>
 
@@ -134,6 +144,8 @@
                             <th>Spa Income</th>
                             <th>Tips</th>
                             <th>Gross Collected</th>
+                            <th>Processor Fees</th>
+                            <th>Net Received</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -145,11 +157,14 @@
                                 <td>${{ '%.2f'|format(row[2]) }}</td>
                                 <td>${{ '%.2f'|format(row[3]) }}</td>
                                 <td>${{ '%.2f'|format(row[4]) }}</td>
+                                <td>${{ '%.2f'|format(row[5]) }}</td>
+                                <td>${{ '%.2f'|format(row[6]) }}</td>
                             </tr>
                             {% endfor %}
+
                         {% else %}
                             <tr>
-                                <td colspan="5" class="no-data">No data found for this date range.</td>
+                                <td colspan="7" class="no-data">No data found for this date range.</td>
                             </tr>
                         {% endif %}
                     </tbody>
@@ -168,6 +183,8 @@
                             <th>Spa Income</th>
                             <th>Tips</th>
                             <th>Gross Collected</th>
+                            <th>Processor Fees</th>
+                            <th>Net Received</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -179,16 +196,52 @@
                                 <td>${{ '%.2f'|format(row[2]) }}</td>
                                 <td>${{ '%.2f'|format(row[3]) }}</td>
                                 <td>${{ '%.2f'|format(row[4]) }}</td>
+                                <td>${{ '%.2f'|format(row[5]) }}</td>
+                                <td>${{ '%.2f'|format(row[6]) }}</td>
                             </tr>
                             {% endfor %}
                         {% else %}
                             <tr>
-                                <td colspan="5" class="no-data">No payment data found for this date range.</td>
+                                <td colspan="7" class="no-data">No payment data found for this date range.</td>
                             </tr>
                         {% endif %}
                     </tbody>
                 </table>
             </div>
+        </div>
+    </div>
+
+    <div class="report-section">
+        <h2>Credit Processor Breakdown</h2>
+        <div class="table-wrap">
+            <table class="styled-report-table compact-table">
+                <thead>
+                    <tr>
+                        <th>Processor</th>
+                        <th>Entries</th>
+                        <th>Gross Collected</th>
+                        <th>Processor Fees</th>
+                        <th>Net Received</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% if processor_breakdown %}
+                        {% for row in processor_breakdown %}
+                        <tr>
+                            <td>{{ row[0] }}</td>
+                            <td>{{ row[1] }}</td>
+                            <td>${{ '%.2f'|format(row[2]) }}</td>
+                            <td>${{ '%.2f'|format(row[3]) }}</td>
+                            <td>${{ '%.2f'|format(row[4]) }}</td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="5" class="no-data">No processor data found for this date range.</td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
         </div>
     </div>
 
@@ -205,11 +258,15 @@
                         <th>Income Type</th>
                         <th>Description / Services</th>
                         <th>Payment Method</th>
+                        <th>Processor</th>
+                        <th>Processor Payment ID</th>
                         <th>Service</th>
                         <th>Tip</th>
                         <th>Retail</th>
                         <th>Tax</th>
                         <th>Total</th>
+                        <th>Processor Fee</th>
+                        <th>Net Received</th>
                         <th>Notes</th>
                         <th>Actions</th>
                     </tr>
@@ -224,14 +281,24 @@
                             <td>{{ row[4] or '—' }}</td>
                             <td>{{ row[5] or '—' }}</td>
                             <td>{{ row[6] or '—' }}</td>
-                            <td class="amount-cell">${{ '%.2f'|format(row[7]) }}</td>
-                            <td class="amount-cell">${{ '%.2f'|format(row[8]) }}</td>
+                            <td>{{ row[7] or '—' }}</td>
+                            <td>
+                                {% if row[8] %}
+                                    {{ row[8] }}
+                                {% else %}
+                                    <span class="muted-text">—</span>
+                                {% endif %}
+                            </td>
                             <td class="amount-cell">${{ '%.2f'|format(row[9]) }}</td>
                             <td class="amount-cell">${{ '%.2f'|format(row[10]) }}</td>
-                            <td class="amount-cell total-highlight">${{ '%.2f'|format(row[11]) }}</td>
+                            <td class="amount-cell">${{ '%.2f'|format(row[11]) }}</td>
+                            <td class="amount-cell">${{ '%.2f'|format(row[12]) }}</td>
+                            <td class="amount-cell total-highlight">${{ '%.2f'|format(row[13]) }}</td>
+                            <td class="amount-cell">${{ '%.2f'|format(row[14]) }}</td>
+                            <td class="amount-cell">${{ '%.2f'|format(row[15]) }}</td>
                             <td>
-                                {% if row[12] %}
-                                    {{ row[12] }}
+                                {% if row[16] %}
+                                    {{ row[16] }}
                                 {% else %}
                                     <span class="muted-text">—</span>
                                 {% endif %}
@@ -255,7 +322,7 @@
                         {% endfor %}
                     {% else %}
                         <tr>
-                            <td colspan="13" class="no-data">No income records found for the selected date range.</td>
+                            <td colspan="17" class="no-data">No income records found for the selected date range.</td>
                         </tr>
                     {% endif %}
                 </tbody>
