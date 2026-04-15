@@ -53,3 +53,11 @@ STEPS
 6.  enter what SQL file contains into the README_applied_updates.sql 
 
 
+
+
+
+UPLOADING ALL TO RENDER
+
+git add .
+    git commit -m "Add Credit Processor tables"
+    git push

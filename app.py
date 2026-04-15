@@ -1958,51 +1958,6 @@ def delete_business_loan(loan_id):
 
 
 
-
-
-
-
-
-
-
-#   ------------------------------------
-#   
-#   
-#   
-#   
-#   --------------------------------
-
-
-
-
-
-
-
-
-
-#   ------------------------------------
-#   
-#   
-#   
-#   
-#   --------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 #   ------------------------------------
 #
 #
@@ -2381,6 +2336,8 @@ def gift_certificates_home():
             gc.remaining_balance,
             gc.purchased_by_first_name,
             gc.purchased_by_last_name,
+            gc.purchaser_phone,
+            gc.purchaser_email,
             gc.recipient_name,
             gcs.status_name,
             gc.notes
@@ -2489,13 +2446,14 @@ def add_gift_certificate():
 #         EDIT GIFT CERTIFICATE
 #  ------------------------------------------
 
+
 @app.route("/edit_gift_certificate/<int:certificate_id>", methods=["GET", "POST"])
 def edit_gift_certificate(certificate_id):
     conn = get_db_connection()
     cur = conn.cursor()
 
     if request.method == "POST":
-        certificate_number = request.form.get("certificate_number")
+        certificate_number = request.form.get("certificate_number") or None
         date_issued = request.form.get("date_issued") or None
         expires_date = request.form.get("expires_date") or None
         original_value = request.form.get("original_value") or None
@@ -2503,6 +2461,8 @@ def edit_gift_certificate(certificate_id):
         remaining_balance = request.form.get("remaining_balance") or None
         purchased_by_first_name = request.form.get("purchased_by_first_name") or None
         purchased_by_last_name = request.form.get("purchased_by_last_name") or None
+        purchaser_phone = request.form.get("purchaser_phone") or None
+        purchaser_email = request.form.get("purchaser_email") or None
         recipient_name = request.form.get("recipient_name") or None
         gift_certificate_status_id = request.form.get("gift_certificate_status_id") or None
         notes = request.form.get("notes") or None
@@ -2517,6 +2477,8 @@ def edit_gift_certificate(certificate_id):
                 remaining_balance = %s,
                 purchased_by_first_name = %s,
                 purchased_by_last_name = %s,
+                purchaser_phone = %s,
+                purchaser_email = %s,
                 recipient_name = %s,
                 gift_certificate_status_id = %s,
                 notes = %s
@@ -2530,6 +2492,8 @@ def edit_gift_certificate(certificate_id):
             remaining_balance,
             purchased_by_first_name,
             purchased_by_last_name,
+            purchaser_phone,
+            purchaser_email,
             recipient_name,
             gift_certificate_status_id,
             notes,
@@ -2553,6 +2517,8 @@ def edit_gift_certificate(certificate_id):
             remaining_balance,
             purchased_by_first_name,
             purchased_by_last_name,
+            purchaser_phone,
+            purchaser_email,
             recipient_name,
             gift_certificate_status_id,
             notes
@@ -2576,6 +2542,11 @@ def edit_gift_certificate(certificate_id):
         gift_certificate=gift_certificate,
         statuses=statuses
     )
+
+
+
+
+
 
 
 #  ------------------------------------------
@@ -2652,6 +2623,243 @@ def redeem_gift_certificate(certificate_id):
         "redeem_gift_certificate.html",
         gift_certificate=gift_certificate
     )
+
+
+
+
+
+
+
+#   ------------------------------------------
+#
+#   GIFT CERTIFICATES REMINDER
+#
+#
+#   ------------------------------------------
+
+
+@app.route("/gift_certificate_reminders")
+def gift_certificate_reminders():
+    spa_id = get_current_spa_id()
+    active_status_id = get_status_id("Active")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            gc.gift_cert_id,
+            gc.purchased_by_first_name,
+            gc.purchased_by_last_name,
+            gc.purchaser_email,
+            gc.recipient_name,
+            gc.date_issued,
+            gc.expires_date,
+            gc.remaining_balance,
+            CASE
+                WHEN gc.expires_date = CURRENT_DATE THEN 'same_day'
+                WHEN gc.expires_date <= CURRENT_DATE + INTERVAL '7 days' THEN '7_day'
+                ELSE '30_day'
+            END AS reminder_type
+        FROM gift_certificates gc
+        WHERE gc.spa_id = %s
+          AND gc.gift_certificate_status_id = %s
+          AND gc.remaining_balance > 0
+          AND gc.purchaser_email IS NOT NULL
+          AND gc.purchaser_email <> ''
+          AND gc.expires_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '30 days'
+        ORDER BY gc.expires_date ASC, gc.gift_cert_id ASC
+    """, (spa_id, active_status_id))
+
+    rows = cur.fetchall()
+
+    eligible_rows = []
+
+    for row in rows:
+        gift_cert_id = row[0]
+        reminder_type = row[8]
+
+        cur.execute("""
+            SELECT 1
+            FROM gift_certificate_email_reminders
+            WHERE spa_id = %s
+              AND gift_cert_id = %s
+              AND reminder_type = %s
+            LIMIT 1
+        """, (spa_id, gift_cert_id, reminder_type))
+
+        already_sent = cur.fetchone()
+
+        if not already_sent:
+            expires_date = row[6]
+            days_left = (expires_date - date.today()).days if expires_date else None
+
+            eligible_rows.append({
+                "gift_cert_id": row[0],
+                "purchased_by_first_name": row[1],
+                "purchased_by_last_name": row[2],
+                "purchaser_email": row[3],
+                "recipient_name": row[4],
+                "date_issued": row[5],
+                "expires_date": row[6],
+                "remaining_balance": row[7],
+                "reminder_type": row[8],
+                "days_left": days_left
+            })
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "gift_certificate_reminders.html",
+        reminders=eligible_rows
+    )
+
+
+
+
+#   ----------------------------
+#
+#   SEND GIFT CERT REMINDER 
+#
+#   ---------------------------
+
+
+@app.route("/send_gift_certificate_reminder/<int:gift_cert_id>", methods=["POST"])
+def send_gift_certificate_reminder(gift_cert_id):
+    spa_id = get_current_spa_id()
+    active_status_id = get_status_id("Active")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                gc.gift_cert_id,
+                gc.purchased_by_first_name,
+                gc.purchased_by_last_name,
+                gc.purchaser_email,
+                gc.recipient_name,
+                gc.expires_date,
+                gc.remaining_balance
+            FROM gift_certificates gc
+            WHERE gc.spa_id = %s
+              AND gc.gift_cert_id = %s
+              AND gc.gift_certificate_status_id = %s
+              AND gc.remaining_balance > 0
+              AND gc.purchaser_email IS NOT NULL
+              AND gc.purchaser_email <> ''
+            LIMIT 1
+        """, (spa_id, gift_cert_id, active_status_id))
+
+        row = cur.fetchone()
+
+        if not row:
+            flash("Gift certificate not eligible for reminder.", "error")
+            return redirect(url_for("gift_certificate_reminders"))
+
+        gift_cert_id = row[0]
+        purchaser_first = row[1] or ""
+        purchaser_last = row[2] or ""
+        purchaser_email = (row[3] or "").strip()
+        recipient_name = row[4] or ""
+        expires_date = row[5]
+        remaining_balance = float(row[6] or 0)
+
+        days_left = (expires_date - date.today()).days if expires_date else 999
+
+        if days_left <= 0:
+            reminder_type = "same_day"
+        elif days_left <= 7:
+            reminder_type = "7_day"
+        else:
+            reminder_type = "30_day"
+
+        cur.execute("""
+            SELECT 1
+            FROM gift_certificate_email_reminders
+            WHERE spa_id = %s
+              AND gift_cert_id = %s
+              AND reminder_type = %s
+            LIMIT 1
+        """, (spa_id, gift_cert_id, reminder_type))
+
+        already_sent = cur.fetchone()
+
+        if already_sent:
+            flash("Reminder already sent for this stage.", "warning")
+            return redirect(url_for("gift_certificate_reminders"))
+
+        subject = "Gift Certificate Reminder - Expiring Soon"
+
+        body = f"""Hello {purchaser_first},
+
+This is a friendly reminder that a gift certificate purchased from ClearSkin Spa is set to expire on {expires_date.strftime('%m/%d/%Y')}.
+
+Recipient: {recipient_name}
+Remaining Balance: ${remaining_balance:.2f}
+
+Please contact us if you would like to schedule an appointment before it expires.
+
+Thank you,
+ClearSkin Spa
+"""
+
+        # SAFE TEST MODE
+        print("----- GIFT CERTIFICATE REMINDER EMAIL -----")
+        print("TO:", purchaser_email)
+        print("SUBJECT:", subject)
+        print("BODY:")
+        print(body)
+        print("------------------------------------------")
+
+        cur.execute("""
+            INSERT INTO gift_certificate_email_reminders (
+                spa_id,
+                gift_cert_id,
+                reminder_type,
+                recipient_email,
+                sent_status,
+                sent_date,
+                notes
+            )
+            VALUES (%s, %s, %s, %s, %s, NOW(), %s)
+        """, (
+            spa_id,
+            gift_cert_id,
+            reminder_type,
+            purchaser_email,
+            "Sent",
+            f"Manual reminder prepared for {purchaser_email}"
+        ))
+
+        conn.commit()
+        flash("Gift certificate reminder logged successfully.", "success")
+
+    except Exception as e:
+        conn.rollback()
+        flash(f"Error sending reminder: {e}", "error")
+
+    finally:
+        cur.close()
+        conn.close()
+
+    return redirect(url_for("gift_certificate_reminders"))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

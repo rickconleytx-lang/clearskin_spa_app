@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Gift Certificate Reminders</h1>
+
+<div class="form-buttons">
+    <a href="{{ url_for('home') }}" class="btn">Back to Home</a>
+</div>
+
+{% if reminders %}
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Purchaser</th>
+                <th>Email</th>
+                <th>Recipient</th>
+                <th>Issued</th>
+                <th>Expires</th>
+                <th>Days Left</th>
+                <th>Balance</th>
+                <th>Reminder Type</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in reminders %}
+            <tr>
+                <td>{{ row.gift_cert_id }}</td>
+                <td>{{ row.purchased_by_first_name }} {{ row.purchased_by_last_name }}</td>
+                <td>{{ row.purchaser_email }}</td>
+                <td>{{ row.recipient_name }}</td>
+                <td>{{ row.date_issued.strftime('%m/%d/%Y') if row.date_issued else '' }}</td>
+                <td>{{ row.expires_date.strftime('%m/%d/%Y') if row.expires_date else '' }}</td>
+                <td>{{ row.days_left }}</td>
+                <td>${{ '%.2f'|format(row.remaining_balance) }}</td>
+                <td>{{ row.reminder_type }}</td>
+                <td>
+                    <form method="POST"
+                          action="{{ url_for('send_gift_certificate_reminder', gift_cert_id=row.gift_cert_id) }}"
+                          style="display:inline;"
+                          onsubmit="return confirm('Send reminder email for this gift certificate?');">
+                        <button type="submit" class="btn btn-small">Send Reminder</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+{% else %}
+    <p>No gift certificates currently need reminder emails.</p>
+{% endif %}
+{% endblock %}
