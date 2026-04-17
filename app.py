@@ -710,6 +710,19 @@ def spa_management():
 
 
 
+#   -----------------------
+#
+#     BUSINESS FINANCING PAGE
+#   
+#  ----------------------
+
+@app.route("/business_financing_home")
+def business_financing_home():
+    return render_template("business_financing_home.html")
+     
+
+
+
 
 #   -----------------------
 #  

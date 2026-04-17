@@ -1,9 +1,32 @@
 {% extends "base.html" %}
+{% from "components/cards.html" import section_card %}
+
 
 {% block title %}Expense Report{% endblock %}
 
 {% block content %}
 <h1>Expense Report</h1>
+
+<div class="narrow-cards">
+    {{ section_card("Back to Expenses", "Return to Expenses Home",  url_for('expenses_home')) }}
+    {{ section_card("Export to CSV", "Exports the file in CSV format", 
+            url_for('export_expense_report_csv',
+            start_date=start_date,
+            end_date=end_date,
+            category=category,
+            vendor_name=vendor_name)) }}
+
+    {{ section_card("Export to Excel", "Exports the file in Excel (xlsx) format", url_for('export_expense_report_xlsx',
+            start_date=start_date,
+            end_date=end_date,
+            category=category,
+            vendor_name=vendor_name)) }}
+
+    {{ section_card("Print Report", "Prints Report", "javascript:window.print();") }}
+</div>
+
+
+
 
 <form method="GET" action="{{ url_for('expense_report') }}">
     <div class="form-group">
@@ -36,38 +59,19 @@
 
     <br>
 
+<div class="report-actions no-print">
+
     <button type="submit" class="btn">Run Report</button>
     <a class="btn" href="{{ url_for('expense_report') }}">Reset</a>
-    <a class="btn" href="{{ url_for('expenses_home') }}">Back to Expenses</a>
-</form>
-
-<br>
-
-<div class="report-actions no-print" style="margin-bottom: 15px;">
-    <a class="btn"
-       href="{{ url_for('export_expense_report_csv',
-            start_date=start_date,
-            end_date=end_date,
-            category=category,
-            vendor_name=vendor_name) }}">
-        Export to CSV
-    </a>
-
-    <a class="btn"
-       href="{{ url_for('export_expense_report_xlsx',
-            start_date=start_date,
-            end_date=end_date,
-            category=category,
-            vendor_name=vendor_name) }}">
-        Export to Excel
-    </a>
 
     <button type="button" class="btn" onclick="window.print()">
         Print Report
     </button>
 
-
 </div>
+
+</form>
+
 
 <h3>Total: ${{ '%.2f'|format(report_total or 0) }}</h3>
 

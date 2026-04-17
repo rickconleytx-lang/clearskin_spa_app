@@ -1,0 +1,6 @@
+{% macro section_card(title, text, url) %}
+<a class="section-card" href="{{ url }}">
+    <h3>{{ title }}</h3>
+    <p>{{ text|safe }}</p>
+</a>
+{% endmacro %}

@@ -1,11 +1,22 @@
 {% extends "base.html" %}
+{% from "components/cards.html" import section_card %}
 
 {% block content %}
 
-<a href="{{ url_for('help_appointments_page') }}" class="btn">Page Help</a>
+
+    <a href="{{ url_for('help_appointments_page') }}" class="btn">Page Help</a>
 <br><br>
 
+
+
 <h1>Appointments</h1>
+
+<div class="narrow-cards">
+    {{ section_card("Calendar", "Go to Calendar",  url_for('calendar_view')) }}
+    {{ section_card("2.  empty", "Reserved", url_for('help_appointments_page')) }}
+    {{ section_card("3.  empty", "Reserved", url_for('help_appointments_page')) }}
+    {{ section_card("4.  empty", "Reserved", url_for('help_appointments_page')) }}
+</div>
 
 <form method="GET" style="margin-bottom: 20px;">
     <label for="start_date">From</label>

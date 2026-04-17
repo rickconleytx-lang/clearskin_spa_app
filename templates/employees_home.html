@@ -1,27 +1,21 @@
 {% extends "base.html" %}
+{% from "components/cards.html" import section_card %}
+
 
 {% block title %}Employees{% endblock %}
 
 {% block content %}
 <h1>Employees Home</h1>
 
-<div class="form-buttons">
-    <a href="{{ url_for('employee_pay_summary') }}" class="btn">
-        Employee Pay Summary
-    </a>
-
-    <a href="{{ url_for('employee_compensation_report') }}" class="btn">
-        Compensation Report
-    </a>
-
-    <a href="{{ url_for('add_employee_compensation') }}" class="btn">
-        Add Compensation
-    </a>
-
-    <a href="{{ url_for('employee_admin') }}" class="btn">
-        Employee Admin
-    </a>
+<div class="narrow-cards">
+    {{ section_card("Add New Employee", "Add a New Employee",  url_for('add_employee')) }}
+    {{ section_card("Add Employee Compensation", "Add your Employee's Compensation (Pay Check)",  url_for('add_employee_compensation')) }}
+    {{ section_card("Employee Pay Summary", "Summary Report of Employee Pay",  url_for('employee_pay_summary')) }}
+    {{ section_card("Compensation Report", "Provides an Employee Compensation Summary and Compensation Ledger",  url_for('employee_compensation_report')) }}
+    {{ section_card("Employee Admin Page", "Add/Manage Employee Records & Compensation Categories",  url_for('employee_admin')) }}
 </div>
+
+<br>
 
 <div class="dashboard-cards">
     <div class="dashboard-card">
@@ -35,13 +29,6 @@
     </div>
 </div>
 
-<br>
-
-<div class="admin-links">
-    <a class="btn" href="{{ url_for('add_employee') }}">Add Employee</a>
-</div>
-
-<br>
 
 <table>
     <thead>

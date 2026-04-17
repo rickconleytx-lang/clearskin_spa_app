@@ -1,39 +1,33 @@
 {% extends "base.html" %}
+{% from "components/cards.html" import section_card %}
+
 
 {% block title %}Client Management{% endblock %}
 
 {% block content %}
 
-<a href="{{ url_for('help_client_management_page') }}" class="btn">Page Help</a>
-<br>
-<br>
-
-
-
 <h1>Client Management</h1>
+Sequence of steps for Adding New Client, Add the Appointment, Gather and Enter health history information, Pre-Session and Post Session Wrap-up.
+<div class="narrow-cards">
+    {{ section_card("1.  Client Books", "Search for name, then-<br> Add Appointment.<br> No Record - Add New Client") }}
+    {{ section_card("2.  Enter/Review Health/Intake Record", "Search Name below, then click on Health/Intake") }}
+    {{ section_card("3.  Verify & Update", "Search for Client below, Open Health/Intake,  discuss with client and  make necessary updates") }}
+    {{ section_card("4.  Wrap up the Session",
+                    "Please <span style='color: red;'>CLICK HERE</span> and Go To Calendar, click on Finish Session, then enter payment and notes", url_for('calendar_view')) }}
+</div>
+<br><br>
+For any other Client related action, please search for Client's Name, then use an Action Button(Add Appointment, Health / Intake, Forms, Visit Summaries, Full Record, Edit) next to their record.
+<div style="margin-bottom: 20px;">    
+<br>
+    <a class="btn" href="{{ url_for('help_client_management_page') }}"> 
+        Page Help
 
-<div style="margin-bottom: 20px;">
     <a class="btn" href="{{ url_for('add_new_client') }}">
         Add New Client
     </a>
 
-    <a class="btn" href="{{ url_for('calendar_view') }}">
-        Go to Calendar
-    </a>
-
-    <a class="btn" href="{{ url_for('clients_home') }}">
-        Clients Home
-    </a>
-
-
-    <a class="btn" href="{{ url_for('appointments') }}">
-        Appointments List
-    </a>
-   
-
-
 </div>
-<br>
+
 <p style="margin-bottom: 15px;">
     Search by first name, last name, or phone number to quickly access client records.
 </p>
@@ -87,7 +81,7 @@
                 </a>
 
                 <a class="btn" href="{{ url_for('client_history_detail', client_id=row[0]) }}">
-                    Visit Summary
+                    Visit Summaries
                 </a>
 
                 <a class="btn" href="{{ url_for('edit_client_full', client_id=row[0]) }}">

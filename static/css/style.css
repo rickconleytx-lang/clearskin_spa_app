@@ -1442,7 +1442,7 @@ form textarea {
 ========================= */
 
 .section-page {
-    max-width: 1100px;
+			    max-width: 1100px;
     margin: 0 auto;
     padding: 20px;
 }
@@ -1683,4 +1683,40 @@ form textarea {
     height: 38px;
     padding: 6px 10px;
     box-sizing: border-box;
+}
+
+.narrow-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 240px));
+    gap: 40px;
+    justify-content: center;
+}
+
+.narrow-cards .section-card {
+    width: 220px;
+    max-width: 220px;
+}
+
+html, body {
+    height: 100%;
+    margin: 0;
+}
+
+body {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+.main-content {
+    flex: 1;
+}
+
+.footer-note {
+    text-align: center;
+    padding: 10px 0;
+    background: transparent;
+    border-top: none;
+    font-size: 13px;
+    color: #666;
 }

@@ -14,6 +14,8 @@
 
 
 
+
+
 <div class="section-page">
 
 
@@ -36,7 +38,7 @@
             <p>Add New Gift Certificates when printed, update when sold and update when redeemed.</p>
         </a>
 
-        <a class="section-card" href="{{ url_for('birthday_offers_home') }}">  
+        <a class="section-card" href="{{ url_for('birthday_offers_home') }}">
             <h3>Birthday Celebrations</h3>
             <p>View and manage upcoming Client Birthdays, Mark when you have sent client a Birthday Offer.</p>
         </a>
@@ -73,7 +75,7 @@
             <p>Take care of all aspects of your Employees.</p>
         </a>
 
-        <a class="section-card" href="{{ url_for('business_financing_home') }}">
+        <a class="section-card" href="{{ url_for('loans_home') }}">
             <h3>Loans & Start-up</h3>
             <p>Loans, Owner Contribution, Owner Reimbursements and Payments. </p>
         </a>
@@ -113,9 +115,9 @@
     <h2 style="margin-top: 30px;">Future Section</h2>
     <div class="section-card-grid">
 
-     <a class="section-card" href="{{ url_for('clients_home') }}">
-            <h3>Clients</h3>
-            <p>Rick decide if you need this .</p>
+     <a class="section-card" href="{{ url_for('home') }}">
+            <h3>Future Features</h3>
+            <p>Reserved for future features.</p>
         </a>
             
         <a class="section-card" href="{{ url_for('home') }}">

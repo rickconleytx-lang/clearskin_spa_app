@@ -1,20 +1,30 @@
 {% extends "base.html" %}
+{% from "components/cards.html" import section_card %}
+
+
 
 {% block content %}
 <h1>Owner Funding</h1>
 
-<div class="form-buttons">
-    <a href="{{ url_for('add_owner_contribution') }}" class="btn">Add Owner Contribution</a>
-    <a href="{{ url_for('add_owner_reimbursement') }}" class="btn">Add Owner Reimbursement</a>
-    <a href="{{ url_for('loans_home') }}" class="btn">Loans</a>
-    <a href="{{ url_for('export_loan_contributions_csv') }}" class="btn">
-    Export CSV
-    </a>
+<div class="narrow-cards">
+    {{ section_card("Add Owner Contribution", "Add Owner Contributions",  url_for('add_owner_contribution')) }}
+    {{ section_card("Add Owner Reimbursement", "Add Reimbursements to Owner",  url_for('add_owner_reimbursement')) }}
+    {{ section_card("Loans Home Page", "Go to Loans Home Page", url_for('loans_home')) }}
 
-    <a href="{{ url_for('export_loan_contributions_excel', start_date=start_date, end_date=end_date) }}" class="btn">
-    Export Excel
-    </a>
-
+    {{ section_card("Export to CSV format", "Exports the file in CSV format",
+            url_for('export_loan_contributions_csv')) }}
+   
+    {{ section_card(
+        "Export to Excel", 
+        "Export to Excel in xlsx format",
+        url_for(
+            'export_loan_contributions_excel',
+            start_date=start_date,
+            end_date=end_date
+      )
+) }}
+             
+</div>
 
 </div>
 

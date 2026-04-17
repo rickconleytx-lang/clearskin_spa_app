@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% from "components/cards.html" import section_card %}
+
+
+{% block title %}Business Financing{% endblock %}
+
+{% block content %}
+
+<h1>Business Financing Home</h1>
+
+<div class="narrow-cards">
+    {{ section_card("Owner Funding", "Owner Funding Home Page: Add Contributions, Reimbursements View/Manage Reports",  url_for('funding_home')) }}
+    {{ section_card("Loans", "Loans Home Page: Add/Manage Business Loan, View Reports ",  url_for('loans_home')) }}
+    {{ section_card("edit me", "Provides an Employee Compensation Summary and Compensation Ledger", url_for('employee_compensation_report')) }}
+    {{ section_card("edit me", "Add/Edit/Deactivate Compensation Categories",  url_for('compensation_types_report')) }}
+</div>
+
+
+{% endblock %}
+

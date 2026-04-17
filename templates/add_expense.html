@@ -5,6 +5,10 @@
 {% block content %}
 <h1>Add Expense</h1>
 
+    <button type="submit" class="btn">Save Expense</button>
+    <a class="btn" href="{{ url_for('expenses_home') }}">Cancel</a>
+
+
 <form method="POST" action="{{ url_for('add_expense') }}">
     <div class="form-group">
         <label for="expense_date">Expense Date</label>
