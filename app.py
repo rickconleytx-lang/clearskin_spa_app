@@ -82,6 +82,17 @@ def get_spa_current_time():
     return get_spa_now().time()
 
 
+def send_email(to_email, subject, body):
+    ...
+
+
+
+
+
+
+
+
+
 
 #  ---------------
 #   DONE HELPERS
@@ -720,6 +731,16 @@ def spa_management():
 def business_financing_home():
     return render_template("business_financing_home.html")
      
+
+
+
+#   -----------------------
+#       
+#   
+#
+#  ----------------------
+        
+
 
 
 
@@ -1474,6 +1495,14 @@ def loans_home():
 
     cur.close()
     conn.close()
+
+
+    import os
+
+    print("MAILGUN_API_KEY:", os.environ.get("MAILGUN_API_KEY"))
+
+
+
 
     return render_template(
         "loans_home.html",
@@ -2302,6 +2331,7 @@ def client_forms(client_id):
 #
 #  ------------------------------------------
 
+
 @app.route("/gift_certificates")
 def gift_certificates_home():
     spa_id = get_current_spa_id()
@@ -2353,10 +2383,21 @@ def gift_certificates_home():
             gc.purchaser_email,
             gc.recipient_name,
             gcs.status_name,
-            gc.notes
+            gc.notes,
+            COALESCE(r.sent_status, 'Not Sent') AS email_sent_status,
+            r.sent_date
         FROM gift_certificates gc
         LEFT JOIN gift_certificate_statuses gcs
             ON gc.gift_certificate_status_id = gcs.gift_certificate_status_id
+        LEFT JOIN (
+            SELECT DISTINCT ON (gift_cert_id)
+                gift_cert_id,
+                sent_status,
+                sent_date
+            FROM gift_certificate_email_reminders
+            ORDER BY gift_cert_id, sent_date DESC
+        ) r
+            ON gc.gift_cert_id = r.gift_cert_id
         {where_sql}
         {order_sql}
     """
@@ -2374,6 +2415,7 @@ def gift_certificates_home():
         sort_by=sort_by,
         filter_by=filter_by
     )
+
 
 
 
@@ -2848,7 +2890,7 @@ ClearSkin Spa
         ))
 
         conn.commit()
-        flash("Gift certificate reminder logged successfully.", "success")
+        flash("Gift certificate reminder processed and logged successfully.", "success")
 
     except Exception as e:
         conn.rollback()
@@ -2865,10 +2907,56 @@ ClearSkin Spa
 
 
 
+#   --------------------------------------------
+#
+#     GIFT CERTIFICATE REMINDER HISTORY
+#
+#
+#
+#   ---------------------------------------------
 
 
 
+@app.route("/gift_certificate_reminder_history")
+def gift_certificate_reminder_history():
+    spa_id = get_current_spa_id()
+    print("DEBUG current spa_id:", spa_id)
 
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            r.gc_email_reminder_id,
+            r.gift_cert_id,
+            r.spa_id,
+            gc.certificate_number,
+            gc.purchased_by_first_name,
+            gc.purchased_by_last_name,
+            r.recipient_email,
+            gc.recipient_name,
+            gc.expires_date,
+            r.reminder_type,
+            r.sent_status,
+            r.sent_date,
+            r.notes
+        FROM gift_certificate_email_reminders r
+        LEFT JOIN gift_certificates gc
+            ON r.gift_cert_id = gc.gift_cert_id
+        WHERE r.spa_id = %s
+        ORDER BY r.sent_date DESC NULLS LAST, r.gc_email_reminder_id DESC
+    """, (spa_id,))
+
+    reminders = cur.fetchall()
+    print("DEBUG reminders found:", reminders)
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "sent_reminder_history.html",
+        reminders=reminders
+    )
 
 
 

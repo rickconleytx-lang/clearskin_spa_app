@@ -63,6 +63,7 @@
 
 
 {% if gift_certificates %}
+<div class="table-container">
 <table>
     <thead>
         <tr>
@@ -115,6 +116,7 @@
         {% endfor %}
     </tbody>
 </table>
+</div>
 
 {% else %}
     <p>No gift certificates found.</p>

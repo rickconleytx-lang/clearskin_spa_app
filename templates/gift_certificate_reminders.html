@@ -1,10 +1,11 @@
 {% extends "base.html" %}
+                
 
 {% block content %}
 <h1>Gift Certificate Reminders</h1>
 
 <div class="form-buttons">
-    <a href="{{ url_for('home') }}" class="btn">Back to Home</a>
+    <a href="{{ url_for('gift_certificates_home') }}" class="btn">Back to Gift Certificates</a>
 </div>
 
 {% if reminders %}
@@ -30,8 +31,8 @@
                 <td>{{ row.purchased_by_first_name }} {{ row.purchased_by_last_name }}</td>
                 <td>{{ row.purchaser_email }}</td>
                 <td>{{ row.recipient_name }}</td>
-                <td>{{ row.date_issued.strftime('%m/%d/%Y') if row.date_issued else '' }}</td>
-                <td>{{ row.expires_date.strftime('%m/%d/%Y') if row.expires_date else '' }}</td>
+                <td>{{ row.date_issued or '' }}</td>
+                <td>{{ row.expires_date or '' }}</td>
                 <td>{{ row.days_left }}</td>
                 <td>${{ '%.2f'|format(row.remaining_balance) }}</td>
                 <td>{{ row.reminder_type }}</td>

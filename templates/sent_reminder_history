@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Gift Certificate Reminder History</h1>
+
+<div class="form-buttons">
+    <a href="{{ url_for('home') }}" class="btn">Back to Home</a>
+    <a href="{{ url_for('gift_certificate_reminders') }}" class="btn">Gift Certificate Reminders</a>
+    <a href="{{ url_for('gift_certificates_home') }}" class="btn">Gift Certificates</a>
+</div>
+
+{% if reminders %}
+    <table>
+        <thead>
+            <tr>
+                <th>Log ID</th>
+                <th>Gift Cert ID</th>
+                <th>Certificate #</th>
+                <th>Purchaser</th>
+                <th>Recipient Email</th>
+                <th>Recipient Name</th>
+                <th>Expires</th>
+                <th>Reminder Type</th>
+                <th>Status</th>
+                <th>Sent Date</th>
+                <th>Notes</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in reminders %}
+            <tr>
+                <td>{{ row[0] }}</td>
+                <td>{{ row[1] }}</td>
+                <td>{{ row[2] or '' }}</td>
+                <td>{{ (row[3] or '') ~ ' ' ~ (row[4] or '') }}</td>
+                <td>{{ row[5] or '' }}</td>
+                <td>{{ row[6] or '' }}</td>
+                <td>{{ row[7] or '' }}</td>
+                <td>{{ row[8] or '' }}</td>
+                <td>
+                    {% if row[9] == 'Sent' %}
+                        <span style="color: green; font-weight: bold;">Sent</span>
+                    {% elif row[9] == 'Failed' %}
+                        <span style="color: red; font-weight: bold;">Failed</span>
+                    {% else %}
+                        <span style="color: gray;">{{ row[9] or 'Unknown' }}</span>
+                    {% endif %}
+                </td>
+
+                <td>{{ row[10] or '' }}</td>
+                <td>{{ row[11] or '' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+{% else %}
+    <p>No gift certificate reminder history found.</p>
+{% endif %}
+{% endblock %}
