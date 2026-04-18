@@ -5,14 +5,14 @@
 
 <form method="POST">
 
-    <label>Date</label>
+    <label>Date <span style="color: red;">*</span></label>
     <input type="date" name="appointment_date" value="{{ appt[1].strftime('%Y-%m-%d') }}" required>
 
-    <label>Time</label>
+    <label>Time <span style="color: red;">*</span></label>
     <input type="time" name="appointment_time" value="{{ appt[2].strftime('%H:%M') }}" required>
 
-    <label>Duration (minutes)</label>
-    <input type="text" name="duration" value="{{ appt[3] }}">
+    <label>Duration (minutes) <span style="color: red;">*</span></label>
+    <input type="text" name="duration" value="{{ appt[3] }}" required>
 
     <label>Room</label>
     <input type="text" name="room_number" value="{{ appt[4] or 1 }}">
