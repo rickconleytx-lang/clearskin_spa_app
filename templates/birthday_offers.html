@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Birthday Offers</h1>
+
+<div class="form-buttons">
+    <a href="{{ url_for('dashboard') }}" class="btn">Back to Dashboard</a>
+</div>
+
+{% if birthday_clients %}
+<table>
+    <thead>
+        <tr>
+            <th>Client</th>
+            <th>Email</th>
+            <th>Birth Date</th>
+            <th>Action</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for client in birthday_clients %}
+        <tr>
+            <td>{{ client.first_name }} {{ client.last_name }}</td>
+            <td>{{ client.email }}</td>
+            <td>
+                {% if client.birth_date %}
+                    {{ client.birth_date.strftime("%m-%d") }}
+                {% endif %}
+            </td>
+            <td>
+                {# use this later when Mailgun is active #}
+                {#
+                <form method="POST"
+                      action="{{ url_for('send_birthday_offer', client_id=client.client_id) }}"
+                      style="display:inline;">
+                    <button type="submit" class="btn btn-small">Send Email</button>
+                </form>
+                #}
+
+                <form method="POST"
+                      action="{{ url_for('mark_birthday_offer_sent') }}"
+                      style="display:inline;">
+                    <input type="hidden" name="client_id" value="{{ client.client_id }}">
+                    <button type="submit"
+                            class="btn btn-small"
+                            onclick="return confirm('Mark this birthday offer as sent?');">
+                        Mark Sent
+                    </button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No birthday offers are currently due.</p>
+{% endif %}
+
+{% endblock %}

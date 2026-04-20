@@ -4,102 +4,560 @@
 
 {% block content %}
 
-<h1>Edit Client</h1>
+<div class="client-edit-page">
 
-<form method="POST">
+    <div class="page-header">
 
-    <div class="form-buttons">
-        <button type="submit">Save Changes</button>
+        <div class="summary-bar">
 
-        <a href="{{ url_for('client_history') }}" class="btn cancel-btn"
-           onclick="return confirm('Discard changes and return to Client History?')">
-            Cancel
-        </a>
+
+    <! -- ROW 1 --->
+    <div class="summary-card">
+        <span class="summary-label">Total Visits</span>
+        <span class="summary-value">{{ total_visits }}</span>
     </div>
 
-    <p>
-        <label>First Name:</label><br>
-        <input type="text" name="first_name" value="{{ client[0] }}" required>
-    </p>
 
-    <p>
-        <label>Last Name:</label><br>
-        <input type="text" name="last_name" value="{{ client[1] }}" required>
-    </p>
+    <div class="summary-card">
+        <span class="summary-label">Total Revenue</span>
+        <span class="summary-value">${{ "%.2f"|format(total_revenue or 0) }}</span>
+    </div>
 
-    <p>
-        <label>Phone:</label><br>
-        <input type="text" name="phone" value="{{ client[2] or '' }}">
-    </p>
 
-    <p>
-        <label>Email:</label><br>
-        <input type="email" name="email" value="{{ client[3] or '' }}">
-    </p>
+    <! --- ROW 2 --->
 
-    <p>
-        <label>Birth Date:</label><br>
-        <input type="date" name="birth_date" value="{{ client[4] or '' }}">
-    </p>
+    <div class="summary-card">
+        <span class="summary-label">Last Visit</span>
+        <span class="summary-value">
+            {{ last_visit[0].strftime('%m/%d/%Y') if last_visit else '—' }}
+        </span>
+    </div>
 
-    <p>
-        <label>Address:</label><br>
-        <input type="text" name="address" value="{{ client[5] or '' }}">
-    </p>
 
-    <p>
-        <label>City:</label><br>
-        <input type="text" name="city" value="{{ client[6] or '' }}">
-    </p>
+    <div class="summary-card">
+        <span class="summary-label">Lifetime Value</span>
+        <span class="summary-value">${{ "%.2f"|format(lifetime_value or 0) }}</span>
+    </div>
 
-    <p>
-        <label>State:</label><br>
-        <input type="text" name="state" value="{{ client[7] or '' }}">
-    </p>
 
-    <p>
-        <label>Zip:</label><br>
-        <input type="text" name="zip" value="{{ client[8] or '' }}">
-    </p>
 
-    <p>
-        <label>Emergency Contact Name:</label><br>
-        <input type="text" name="emergency_contact_name" value="{{ client[9] or '' }}">
-    </p>
+    <!  ---  ROW 3  --->
 
-    <p>
-        <label>Emergency Contact Phone:</label><br>
-        <input type="text" name="emergency_contact_phone" value="{{ client[10] or '' }}">
-    </p>
 
-    <p>
-        <label>Referred By:</label><br>
-        <input type="text" name="referred_by" value="{{ client[11] or '' }}">
-    </p>
+    <div class="summary-card">
+        <span class="summary-label">Next Appointment</span>
+        <span class="summary-value">
+            {% if next_appt %}
+                {{ next_appt[0].strftime('%m/%d/%Y') }}
+            {% else %}
+                —
+            {% endif %}
+        </span>
+    </div>
 
-    <p>
-        <label>Referred By Notes:</label><br>
-        <textarea name="notes_one" rows="4" cols="50">{{ client[12] or '' }}</textarea>
-    </p>
 
-    <p>
-        <label>Notes Two:</label><br>
-        <textarea name="notes_two" rows="4" cols="50">{{ client[13] or '' }}</textarea>
-    </p>
+    <div class="summary-card">
+        <span class="summary-label">Average Ticket</span>
+        <span class="summary-value">${{ "%.2f"|format(average_ticket or 0) }}</span>
+    </div>
+</div>
 
-    <p>
-        <label>Notes Three:</label><br>
-        <textarea name="notes_three" rows="4" cols="50">{{ client[14] or '' }}</textarea>
-    </p>
 
-    <p>
-        <label>Active Client:</label><br>
-        <select name="active_client">
-            <option value="true" {% if client[15] %}selected{% endif %}>Yes</option>
-            <option value="false" {% if not client[15] %}selected{% endif %}>No</option>
-        </select>
-    </p>
 
-</form>
+<div class="history-card">
+    <div class="card-header">
+        <h2>Recent Appointments</h2>
+        <p>Last 10 appointments for this client.</p>
+    </div>
+
+    <div class="card-body">
+        {% if recent_appointments %}
+            <div class="table-wrap">
+                <table class="history-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Time</th>
+                            <th>Duration</th>
+                            <th>Room</th>
+                            <th>Status</th>
+                            <th>Channel</th>
+                            <th>Price</th>
+                            <th>Notes</th>
+                            <th>Open</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for appt in recent_appointments %}
+                            <tr>
+                                <td>{{ appt[1].strftime('%m/%d/%Y') if appt[1] else '' }}</td>
+                                <td>{{ appt[2].strftime('%I:%M %p') if appt[2] else '' }}</td>
+                                <td>{{ appt[3] or '' }} min</td>
+                                <td>{{ appt[4] or '' }}</td>
+                                <td>
+                                    <span class="status-pill status-{{ (appt[5] or 'unknown')|lower }}">
+                                        {{ appt[5] or 'Unknown' }}
+                                    </span>
+                                </td>
+                                <td>{{ appt[6] or '' }}</td>
+                                <td>${{ "%.2f" |format(appt[7] or 0) }}
+                                <td class="notes-cell">{{ appt[8] or '' }}</td>
+                                <td>
+                                    <a class="table-link" href="{{ url_for('edit_appointment', appointment_id=appt[0]) }}">
+                                        Open
+                                    </a>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <p class="empty-state">No appointments found for this client.</p>
+        {% endif %}
+    </div>
+</div>
+
+
+
+
+        <div>
+            <h1>Edit Client</h1>
+            {% if client %}
+                <p class="page-subtitle">Update profile details for <strong>{{ client[0] }} {{ client[1] }}</strong></p>
+            {% endif %}
+        </div>
+
+        <div class="header-actions">
+            <a class="btn" href="{{ url_for('client_history') }}">Back to Client History</a>
+            <button type="submit" form="edit-client-form" class="btn btn-primary">Save Changes</button>
+        </div>
+    </div>
+
+    <form method="POST" id="edit-client-form">
+
+        <!-- BASIC INFORMATION -->
+        <div class="form-card">
+            <div class="card-header">
+                <h2>Basic Information</h2>
+                <p>Core client details and account status.</p>
+            </div>
+
+            <div class="card-body">
+                <div class="form-row two-col">
+                    <div class="form-group">
+                        <label>First Name</label>
+                        <input type="text" name="first_name" value="{{ client[0] if client else '' }}" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Last Name</label>
+                        <input type="text" name="last_name" value="{{ client[1] if client else '' }}" required>
+                    </div>
+                </div>
+
+                <div class="form-row two-col">
+                    <div class="form-group">
+                        <label>Phone</label>
+                        <input type="text" name="phone" value="{{ client[2] if client else '' }}">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Email</label>
+                        <input type="email" name="email" value="{{ client[3] if client else '' }}">
+                    </div>
+                </div>
+
+                <div class="form-row two-col">
+                    <div class="form-group">
+                        <label>Birth Date</label>
+                        <input type="date" name="birth_date" value="{{ client[4].strftime('%Y-%m-%d') if client and client[4] else '' }}">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Client Status</label>
+                        <select name="client_status">
+                            <option value="Current" {% if client and client[11] == 'Current' %}selected{% endif %}>Current</option>
+                            <option value="Inactive" {% if client and client[11] == 'Inactive' %}selected{% endif %}>Inactive</option>
+                            <option value="Prospect" {% if client and client[11] == 'Prospect' %}selected{% endif %}>Prospect</option>
+                            <option value="Former" {% if client and client[11] == 'Former' %}selected{% endif %}>Former</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ADDRESS -->
+        <div class="form-card">
+            <div class="card-header">
+                <h2>Address</h2>
+                <p>Mailing and location details.</p>
+            </div>
+
+            <div class="card-body">
+                <div class="form-group">
+                    <label>Address</label>
+                    <input type="text" name="address" value="{{ client[5] if client else '' }}">
+                </div>
+
+                <div class="form-row three-col">
+                    <div class="form-group">
+                        <label>City</label>
+                        <input type="text" name="city" value="{{ client[6] if client else '' }}">
+                    </div>
+
+                    <div class="form-group">
+                        <label>State</label>
+                        <input type="text" name="state" value="{{ client[7] if client else '' }}">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Zip</label>
+                        <input type="text" name="zip" value="{{ client[8] if client else '' }}">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- LOCATION -->
+        <div class="form-card">
+            <div class="card-header">
+                <h2>Location Preferences</h2>
+                <p>Assign home and preferred spa locations.</p>
+            </div>
+
+            <div class="card-body">
+                <div class="form-row two-col">
+                    <div class="form-group">
+                        <label>Primary Spa Location</label>
+                        <select name="spa_location_id">
+                            <option value="">-- Select Location --</option>
+                            {% for location in locations %}
+                                <option value="{{ location[0] }}" {% if client and client[9] == location[0] %}selected{% endif %}>
+                                    {{ location[1] }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Preferred Location</label>
+                        <select name="preferred_location_id">
+                            <option value="">-- Select Preferred Location --</option>
+                            {% for location in locations %}
+                                <option value="{{ location[0] }}" {% if client and client[10] == location[0] %}selected{% endif %}>
+                                    {{ location[1] }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- COMMUNICATION -->
+        <div class="form-card">
+            <div class="card-header">
+                <h2>Communication Preferences</h2>
+                <p>Set how the client prefers to be reached.</p>
+            </div>
+
+            <div class="card-body">
+                <div class="form-row two-col">
+                    <div class="form-group">
+                        <label>Preferred Language</label>
+                        <input type="text" name="preferred_language" value="{{ client[12] if client and client[12] else '' }}">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Preferred Contact Method</label>
+                        <select name="preferred_contact_method">
+                            <option value="">Select Method</option>
+                            <option value="Phone" {% if client and client[16] == 'Phone' %}selected{% endif %}>Phone</option>
+                            <option value="Text" {% if client and client[16] == 'Text' %}selected{% endif %}>Text</option>
+                            <option value="Email" {% if client and client[16] == 'Email' %}selected{% endif %}>Email</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="checkbox-grid">
+                    <label class="checkbox-card">
+                        <input type="checkbox" name="ok_to_call" {% if client and client[13] %}checked{% endif %}>
+                        <span>OK to Call</span>
+                    </label>
+
+                    <label class="checkbox-card">
+                        <input type="checkbox" name="ok_to_text" {% if client and client[14] %}checked{% endif %}>
+                        <span>OK to Text</span>
+                    </label>
+
+                    <label class="checkbox-card">
+                        <input type="checkbox" name="ok_to_email" {% if client and client[15] %}checked{% endif %}>
+                        <span>OK to Email</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- EMERGENCY / REFERRAL -->
+        <div class="form-card">
+            <div class="card-header">
+                <h2>Emergency Contact & Referral</h2>
+                <p>Backup contact details and referral source.</p>
+            </div>
+
+            <div class="card-body">
+                <div class="form-row two-col">
+                    <div class="form-group">
+                        <label>Emergency Contact Name</label>
+                        <input type="text" name="emergency_contact_name" value="{{ client[17] if client else '' }}">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Emergency Contact Phone</label>
+                        <input type="text" name="emergency_contact_phone" value="{{ client[18] if client else '' }}">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Referred By</label>
+                    <input type="text" name="referred_by" value="{{ client[19] if client else '' }}">
+                </div>
+            </div>
+        </div>
+
+        <!-- NOTES -->
+        <div class="form-card">
+            <div class="card-header">
+                <h2>Notes</h2>
+                <p>Store client details, reminders, and extra context.</p>
+            </div>
+
+            <div class="card-body">
+                <div class="form-group">
+                    <label>Notes One</label>
+                    <textarea name="notes_one" rows="4">{{ client[20] if client else '' }}</textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>Notes Two</label>
+                    <textarea name="notes_two" rows="4">{{ client[21] if client else '' }}</textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>Notes Three</label>
+                    <textarea name="notes_three" rows="4">{{ client[22] if client else '' }}</textarea>
+                </div>
+            </div>
+        </div>
+
+        <!-- ACTIVE STATUS -->
+        <div class="form-card">
+            <div class="card-header">
+                <h2>Account Status</h2>
+                <p>Control whether this client is active in the system.</p>
+            </div>
+
+            <div class="card-body">
+                <div class="form-row one-col">
+                    <div class="form-group status-group">
+                        <label>Active Client</label>
+                        <select name="active_client">
+                            <option value="true" {% if client and client[23] %}selected{% endif %}>Yes</option>
+                            <option value="false" {% if client and not client[23] %}selected{% endif %}>No</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="bottom-actions">
+            <a class="btn" href="{{ url_for('client_history') }}">Back to Client History</a>
+            <button type="submit" class="btn btn-primary">Save Changes</button>
+        </div>
+
+    </form>
+</div>
+
+<style>
+    .client-edit-page {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 10px 0 30px 0;
+    }
+
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 20px;
+        flex-wrap: wrap;
+        margin-bottom: 24px;
+        padding: 20px 24px;
+        background: #fff;
+        border: 1px solid #e3e3e3;
+        border-radius: 14px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
+    }
+
+    .page-header h1 {
+        margin: 0 0 6px 0;
+        font-size: 2rem;
+    }
+
+    .page-subtitle {
+        margin: 0;
+        color: #666;
+        font-size: 0.98rem;
+    }
+
+    .header-actions,
+    .bottom-actions {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+    }
+
+    .form-card {
+        background: #fff;
+        border: 1px solid #e3e3e3;
+        border-radius: 14px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
+        margin-bottom: 22px;
+        overflow: hidden;
+    }
+
+    .card-header {
+        padding: 18px 22px 14px 22px;
+        border-bottom: 1px solid #efefef;
+        background: #fafafa;
+    }
+
+    .card-header h2 {
+        margin: 0 0 4px 0;
+        font-size: 1.2rem;
+    }
+
+    .card-header p {
+        margin: 0;
+        color: #666;
+        font-size: 0.94rem;
+    }
+
+    .card-body {
+        padding: 22px;
+    }
+
+    .form-row {
+        display: grid;
+        gap: 18px;
+        margin-bottom: 18px;
+    }
+
+    .form-row:last-child {
+        margin-bottom: 0;
+    }
+
+    .one-col {
+        grid-template-columns: 1fr;
+    }
+
+    .two-col {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .three-col {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .form-group {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .form-group label {
+        font-weight: 600;
+        margin-bottom: 7px;
+        color: #333;
+    }
+
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+        width: 100%;
+        padding: 11px 12px;
+        border: 1px solid #cfcfcf;
+        border-radius: 10px;
+        font-size: 0.98rem;
+        box-sizing: border-box;
+        background: #fff;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .form-group input:focus,
+    .form-group select:focus,
+    .form-group textarea:focus {
+        outline: none;
+        border-color: #888;
+        box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.06);
+    }
+
+    .form-group textarea {
+        resize: vertical;
+        min-height: 100px;
+    }
+
+    .checkbox-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+        margin-top: 8px;
+    }
+
+    .checkbox-card {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 14px 16px;
+        border: 1px solid #dcdcdc;
+        border-radius: 12px;
+        background: #fcfcfc;
+        cursor: pointer;
+        font-weight: 600;
+    }
+
+    .checkbox-card input[type="checkbox"] {
+        width: 18px;
+        height: 18px;
+        margin: 0;
+    }
+
+    .status-group {
+        max-width: 260px;
+    }
+
+    .bottom-actions {
+        margin-top: 10px;
+        justify-content: flex-end;
+    }
+
+    @media (max-width: 900px) {
+        .two-col,
+        .three-col,
+        .checkbox-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .page-header {
+            flex-direction: column;
+        }
+
+        .header-actions,
+        .bottom-actions {
+            width: 100%;
+            justify-content: flex-start;
+        }
+    }
+</style>
 
 {% endblock %}

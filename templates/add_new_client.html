@@ -1,38 +1,35 @@
 {% extends "base.html" %}
-
+    
 {% block title %}Add New Client - Page 1{% endblock %}
-
+    
 {% block content %}
-
+       
 <a href="{{ url_for('help_add_new_client_page') }}" class="btn">Page Help</a>
 <br>
 <br>
 
-
 <h1>Add New Client - Page 1</h1>
-
+        
 <form method="POST">
 
     <input type="hidden" name="selected_date" value="{{ selected_date }}">
-
-    <div class="form-buttons">
-
         
+    <div class="form-buttons">
         <button type="submit">Next Page</button>
-
+        
         <button type="reset"
             onclick="return confirm('Are you sure you want to clear this form?')">
             Clear Form
         </button>
-
+        
         <a href="{{ url_for('cancel_new_client') }}" class="btn cancel-btn"
            onclick="return confirm('Are you sure you want to cancel? Any unsaved information will be lost.')">
            Cancel
         </a>
     </div>
+        
+    <span style="color: red; font-size: x-small;">* Required Field</span>
 
-    <!-- your fields start here -->
-      <span style="color: red; font-size: x-small;">* Required Field</span>
     <p>
         <label>First Name:<span style="color: red;">*</span></label><br>
         <input type="text" name="first_name" value="{{ step1_data.get('first_name', '') }}" required>
@@ -54,7 +51,7 @@
     </p>
 
     <p>
-        <label>Birth Date:<span style="color: red;">*</span></label><br>
+        <label>Birth Date:</label><br>
         <input type="date" name="birth_date" value="{{ step1_data.get('birth_date', '') }}">
     </p>
 
@@ -67,16 +64,124 @@
         <label>City:</label><br>
         <input type="text" name="city" value="{{ step1_data.get('city', '') }}">
     </p>
-
+        
     <p>
         <label>State:</label><br>
         <input type="text" name="state" value="{{ step1_data.get('state', 'TX') }}">
     </p>
-
+    
     <p>
         <label>Zip:</label><br>
         <input type="text" name="zip" value="{{ step1_data.get('zip', '') }}">
     </p>
 
+    <hr>
+
+    <p>
+        <label>Spa Location:</label><br>
+        <select name="spa_location_id">
+            <option value="">Select Location</option>
+            {% for location in locations %}
+                <option value="{{ location[0] }}"
+                    {% if step1_data.get('spa_location_id', '')|string == location[0]|string %}selected{% endif %}>
+                    {{ location[1] }}
+                </option>
+            {% endfor %}
+        </select>
+    </p>
+
+    <p>
+        <label>Preferred Location:</label><br>
+        <select name="preferred_location_id">
+            <option value="">Select Preferred Location</option>
+            {% for location in locations %}
+                <option value="{{ location[0] }}"
+                    {% if step1_data.get('preferred_location_id', '')|string == location[0]|string %}selected{% endif %}>
+                    {{ location[1] }}
+                </option>
+            {% endfor %}
+        </select>
+    </p>
+
+    <p>
+        <label>Client Status:</label><br>
+        <select name="client_status">
+            <option value="Current"
+                {% if step1_data.get('client_status', 'Current') == 'Current' %}selected{% endif %}>
+                Current
+            </option>
+            <option value="Previous"
+                {% if step1_data.get('client_status', '') == 'Previous' %}selected{% endif %}>
+                Previous
+            </option>
+            <option value="Prior Spa Client"
+                {% if step1_data.get('client_status', '') == 'Prior Spa Client' %}selected{% endif %}>
+                Prior Spa Client
+            </option>
+        </select>
+    </p>
+
+    <p>
+        <label>Preferred Language:</label><br>
+        <select name="preferred_language">
+            <option value="">Select Language</option>
+            <option value="English"
+                {% if step1_data.get('preferred_language', '') == 'English' %}selected{% endif %}>
+                English
+            </option>
+            <option value="Spanish"
+                {% if step1_data.get('preferred_language', '') == 'Spanish' %}selected{% endif %}>
+                Spanish
+            </option>
+        </select>
+    </p>
+
+    <p>
+        <label>Preferred Contact Method:</label><br>
+        <select name="preferred_contact_method">
+            <option value="">Select Method</option>
+            <option value="Phone"
+                {% if step1_data.get('preferred_contact_method', '') == 'Phone' %}selected{% endif %}>
+                Phone
+            </option>
+            <option value="Email"
+                {% if step1_data.get('preferred_contact_method', '') == 'Email' %}selected{% endif %}>
+                Email
+            </option>
+            <option value="Text"
+                {% if step1_data.get('preferred_contact_method', '') == 'Text' %}selected{% endif %}>
+                Text
+            </option>
+            <option value="Email/Text"
+                {% if step1_data.get('preferred_contact_method', '') == 'Email/Text' %}selected{% endif %}>
+                Email/Text
+            </option>
+        </select>
+    </p>
+
+    <p>
+        <label>Contact Permissions:</label><br>
+
+        <label>
+            <input type="checkbox" name="ok_to_call" value="true"
+                {% if step1_data.get('ok_to_call', True) %}checked{% endif %}>
+            OK to Call
+        </label>
+        <br>
+
+        <label>
+            <input type="checkbox" name="ok_to_text" value="true"
+                {% if step1_data.get('ok_to_text', True) %}checked{% endif %}>
+            OK to Text
+        </label>
+        <br>
+
+        <label>
+            <input type="checkbox" name="ok_to_email" value="true"
+                {% if step1_data.get('ok_to_email', True) %}checked{% endif %}>
+            OK to Email
+        </label>
+    </p>
+        
 </form>
 {% endblock %}

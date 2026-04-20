@@ -13,6 +13,9 @@ output = io.StringIO()
 file_data = io.BytesIO()
 load_dotenv()
 
+from flask import g
+
+
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "local-dev-key")
 
@@ -23,23 +26,44 @@ app.secret_key = os.environ.get("SECRET_KEY", "local-dev-key")
 #        HELPERS
 #  --------------------
 
+def current_spa_id():
+    from flask import g
+    return g.spa_id
+
+#  -------
+#
+# Get Statis
+# spa_id good
+#  -------
+
 def get_status_id(status_name):
+    from flask import g
+
+    spa_id = g.spa_id
+
     conn = get_db_connection()
     cur = conn.cursor()
-
-    cur.execute("""
+        
+    cur.execute("""   
         SELECT gift_certificate_status_id
         FROM gift_certificate_statuses
         WHERE status_name = %s
-    """, (status_name,))
-
+          AND spa_id = %s
+    """, (status_name, spa_id))
+    
     result = cur.fetchone()
-
+    
     cur.close()
     conn.close()
-
+    
     return result[0] if result else None
 
+
+
+#   ----------------
+#
+#
+#   --------------
 
 
 def parse_bool(value):
@@ -59,6 +83,14 @@ def parse_bool(value):
 
 
 
+
+
+#   --------------------------
+#
+#
+#
+#   --------------------------
+
 def split_client_name(full_name):
     if not full_name:
         return "", ""
@@ -70,16 +102,29 @@ def split_client_name(full_name):
     return parts[0], " ".join(parts[1:])
 
 
+
+
+
 def get_current_spa_id():
     return session.get("spa_id", 1)
+
+
+
+
 
 
 def get_spa_today():
     return get_spa_now().date()
 
 
+
+
+
 def get_spa_current_time():
     return get_spa_now().time()
+
+
+
 
 
 def send_email(to_email, subject, body):
@@ -99,6 +144,20 @@ def send_email(to_email, subject, body):
 #  --------------
 
 
+@app.before_request
+def load_spa():
+    g.spa_id = get_current_spa_id()
+    if not g.spa_id:
+        raise Exception("spa_id is missing")
+
+
+    
+@app.context_processor
+def inject_spa():
+    return dict(spa_id=g.get("spa_id"))
+
+
+
 
 
 
@@ -112,10 +171,15 @@ def send_email(to_email, subject, body):
 def page_not_found(error):
     return render_template("404.html"), 404
 
+
+
+
+
+
+
 @app.errorhandler(500)
 def internal_server_error(error):
     return render_template("500.html"), 500
-
 
 
 
@@ -127,16 +191,17 @@ def internal_server_error(error):
 #  
 #     SAVE TIME ZONE SETTINGS
 #  
+#    spa_id good
+#
 #  -------------------------
 
 
 @app.route("/save_time_settings", methods=["POST"])
 def save_time_settings():
-    spa_id = get_current_spa_id()
-
+    spa_id = current_spa_id()
+    
     timezone_name = request.form.get("timezone_name", "").strip()
-
-    # PUT IT RIGHT HERE
+    
     allowed_timezones = {
         "America/New_York",
         "America/Chicago",
@@ -165,23 +230,21 @@ def save_time_settings():
         flash("Invalid timezone selected.", "error")
         return redirect(url_for("admin"))
 
-    conn = get_db_connection()
+    conn = get_db_connection()   
     cur = conn.cursor()
-
+    
     cur.execute("""
         UPDATE spas
         SET timezone_name = %s
         WHERE spa_id = %s
     """, (timezone_name, spa_id))
-
+        
     conn.commit()
     cur.close()
     conn.close()
-
+        
     flash("Time settings updated successfully.", "success")
     return redirect(url_for("admin"))
-
-
 
 
 
@@ -194,11 +257,14 @@ def save_time_settings():
 #  -------------------------
 #
 #  SQUARE WEBHOOK
-#
+#                   NOT SAFE  NOT SAFE
 #  -------------------------
 
 @app.route("/square/webhook", methods=["POST"])
 def square_webhook():
+
+    return "", 204
+
     payload = request.get_data(as_text=True)
     signature = request.headers.get("x-square-hmacsha256-signature")
 
@@ -219,11 +285,14 @@ def square_webhook():
 
 #  -------------------
 #   Square Incomming Bookings
-#
+#            NOT SAFE  NOT SAFE
 #  ------------------
 
 @app.route("/incoming_bookings")
 def incoming_bookings():
+
+    return "", 204
+
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -256,11 +325,14 @@ def incoming_bookings():
 
 #  -------------------------------------
 #   Square Incoming Booking Review
-#
+#        NOT SAFE   NOT  SAFE
 #  ------------------------------------
 
 @app.route("/incoming_bookings/<int:incoming_booking_id>")
 def review_incoming_booking(incoming_booking_id):
+    
+    return "", 204
+
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -297,11 +369,14 @@ def review_incoming_booking(incoming_booking_id):
 #  ----------------------------------
 #
 #  SQUARE Ignore incoming 
-#
+#            NOT SAAFE   NOT  SAFE
 #  ----------------------------------
 
 @app.route("/incoming_bookings/<int:incoming_booking_id>/ignore", methods=["POST"])
 def ignore_incoming_booking(incoming_booking_id):
+    
+    return "", 204
+
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -324,12 +399,15 @@ def ignore_incoming_booking(incoming_booking_id):
 #  ------------------------------
 #
 #  SQUARE ADD NEW CLIENT 
-#
+#  NOT SAFE    NOT  SAFE
 #  -----------------------------
   
 
 @app.route("/incoming_bookings/<int:incoming_booking_id>/add_new_client")
 def add_new_client_from_booking(incoming_booking_id):
+    
+    return "", 204
+
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -403,7 +481,7 @@ def add_new_client_from_booking(incoming_booking_id):
 #  ------------------
 #
 #  SQUARE MATCH EXISTING
-#
+#     NOT SAFE  NOT SAFE
 #  ------------------
 
 
@@ -432,76 +510,108 @@ def match_existing_client_booking(incoming_booking_id):
 def home():
     return render_template("home.html")
 
+
+
+
+
+
+
+
+
+#   ---------------------------
+#
+#
+#    DROP DOWN CONFIG
+#
+#
+#   ---------------------------
+
+
+
+
 DROPDOWN_CONFIG = {
     "appointment_status": {
         "title": "Appointment Status",
         "table": "appointment_status",
         "pk": "status_id",
         "value": "status_name",
-        "label": "Status Name"
+        "label": "Status Name",
+        "spa_scoped": True
     },
-        "referral_sources": {
+
+       "referral_sources": {
     "title": "Referral Sources",
     "table": "referral_sources",
     "pk": "referral_source_id",
     "value": "referral_source_name",
-    "label": "Referral Source Name"
+    "label": "Referral Source Name",
+    "spa_scoped": True
    },
+
     "client_form_names": {
         "title": "Client Form Names",
         "table": "client_form_names",
         "pk": "form_type",
         "value": "form_type_name",
-        "label": "Form Type Name"
+        "label": "Form Type Name",
+        "spa_scoped": True
     },
+
     "expense_categories": {
         "title": "Expense Categories",
         "table": "expense_categories",
         "pk": "expense_cat_id",
         "value": "expense_cat_name",
-        "label": "Expense Category Name"
+        "label": "Expense Category Name",
+        "spa_scoped": True
     },
     "income_types": {
         "title": "Income Types",
         "table": "income_types",
         "pk": "income_type_id",
         "value": "income_type_name",
-        "label": "Income Type Name"
+        "label": "Income Type Name",
+        "spa_scoped": True
     },
     "payment_methods": {
         "title": "Payment Methods",
         "table": "payment_methods",
         "pk": "payment_method_id",
         "value": "payment_method",
-        "label": "Payment Method"
+        "label": "Payment Method",
+        "spa_scoped": True
     },
     "service_name_types": {
         "title": "Service Name Types",
         "table": "service_name_types",
         "pk": "service_type_id",
         "value": "service_name",
-        "label": "Service Name"
+        "label": "Service Name",
+        "spa_scoped": True 
     },
     "sex": {
         "title": "Sex",
         "table": "sex",
         "pk": "sex_type_id",
         "value": "sex_type",
-        "label": "Sex Type"
+        "label": "Sex Type",
+        "spa_scoped": True
     },
     "treatment_rooms": {
         "title": "Treatment Rooms",
         "table": "treatment_rooms",
         "pk": "room_id",
         "value": "room_name",
-        "label": "Room Name"
+        "label": "Room Name",
+        "spa_scoped": True
     },
     "vendor_name": {
         "title": "Vendor Name",
         "table": "vendor_name",
         "pk": "vendor_id",
         "value": "vendors_name",
-        "label": "Vendor Name"
+        "label": "Vendor Name",
+        "spa_scoped": True
     }
 }
 
@@ -526,9 +636,26 @@ DROPDOWN_CONFIG = {
 #  --------------------------------
 
 
+
+
+
+
+
+#   ----------------------------
+#
+#     ADMIN DROPDOWNS
+#
+#   spa_id good
+#
+#   -----------------------------
+
+
+
+from psycopg2 import sql
+
 @app.route("/admin/dropdowns/<dropdown_key>", methods=["GET", "POST"])
 def manage_dropdown(dropdown_key):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
 
     if dropdown_key not in DROPDOWN_CONFIG:
         flash("Invalid dropdown selection.", "error")
@@ -545,11 +672,14 @@ def manage_dropdown(dropdown_key):
         if new_value:
             try:
                 cur.execute(
-                    sql.SQL("INSERT INTO {table} ({value_col}) VALUES (%s)").format(
+                    sql.SQL("""
+                        INSERT INTO {table} (spa_id, {value_col})
+                        VALUES (%s, %s)
+                    """).format(
                         table=sql.Identifier(config["table"]),
                         value_col=sql.Identifier(config["value"])
                     ),
-                    (new_value,)
+                    (spa_id, new_value)
                 )
                 conn.commit()
                 flash(f'{config["title"]} added successfully.', "success")
@@ -567,12 +697,14 @@ def manage_dropdown(dropdown_key):
         sql.SQL("""
             SELECT {pk_col}, {value_col}
             FROM {table}
+            WHERE spa_id = %s
             ORDER BY {value_col}
         """).format(
             pk_col=sql.Identifier(config["pk"]),
             value_col=sql.Identifier(config["value"]),
             table=sql.Identifier(config["table"])
-        )
+        ),
+        (spa_id,)
     )
     rows = cur.fetchall()
 
@@ -588,18 +720,25 @@ def manage_dropdown(dropdown_key):
     )
 
 
+
+
+
+
+
+
+
 #  --------------------------------
 #
 #     DROP DOWNS  DELETE FUNCTION
 #
 # ROUTE:  admin/dropdowns
-# 
+#           spa_id good
 #  ------------------------------
 
 
 @app.route("/admin/dropdowns/<dropdown_key>/delete/<path:item_id>", methods=["POST"])
 def delete_dropdown_item(dropdown_key, item_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
 
     if dropdown_key not in DROPDOWN_CONFIG:
         flash("Invalid dropdown selection.", "error")
@@ -612,14 +751,23 @@ def delete_dropdown_item(dropdown_key, item_id):
 
     try:
         cur.execute(
-            sql.SQL("DELETE FROM {table} WHERE {pk_col} = %s").format(
+            sql.SQL("""
+                DELETE FROM {table}
+                WHERE {pk_col} = %s
+                  AND spa_id = %s
+            """).format(
                 table=sql.Identifier(config["table"]),
                 pk_col=sql.Identifier(config["pk"])
             ),
-            (item_id,)
+            (item_id, spa_id)
         )
         conn.commit()
-        flash("Item deleted successfully.", "success")
+
+        if cur.rowcount == 0:
+            flash("Item not found.", "error")
+        else:
+            flash("Item deleted successfully.", "success")
+
     except Exception as e:
         conn.rollback()
         flash(f"Error deleting item: {e}", "error")
@@ -628,7 +776,6 @@ def delete_dropdown_item(dropdown_key, item_id):
     conn.close()
 
     return redirect(url_for("manage_dropdown", dropdown_key=dropdown_key))
-
 
 
 
@@ -736,10 +883,11 @@ def business_financing_home():
 
 #   -----------------------
 #       
-#   
+#      TEST MAILGUN EMAIL   
 #
 #  ----------------------
         
+
 
 
 
@@ -749,11 +897,15 @@ def business_financing_home():
 #  
 #     CREDIT   PROCESSORS
 #
+#
+#
+#     spa_id good
+#
 #  ----------------------
 
 @app.route("/credit_processors")
 def credit_processors():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -787,52 +939,58 @@ def credit_processors():
 #   -----------------------
 #     
 #      ADD CREDIT PROCESSORS
-#  
+#
+#       spa_id good  
 #  ----------------------
-
-
 
 
 @app.route("/credit_processors/add", methods=["GET", "POST"])
 def add_credit_processor():
-    spa_id = get_current_spa_id()
-
+    spa_id = current_spa_id()
+    
     if request.method == "POST":
         credit_processor_name = request.form.get("credit_processor_name", "").strip()
-        percentage_fee = request.form.get("percentage_fee") or 0
-        flat_fee = request.form.get("flat_fee") or 0
-        additional_fee = request.form.get("additional_fee") or 0
-
+        percentage_fee = float(request.form.get("percentage_fee") or 0)
+        flat_fee = float(request.form.get("flat_fee") or 0)
+        additional_fee = float(request.form.get("additional_fee") or 0)
+            
         if not credit_processor_name:
             flash("Processor name is required.", "error")
             return redirect(url_for("add_credit_processor"))
-
+            
         conn = get_db_connection()
         cur = conn.cursor()
-
-        cur.execute("""
-            INSERT INTO credit_processors (
+        
+        try:
+            cur.execute("""
+                INSERT INTO credit_processors (
+                    spa_id,
+                    credit_processor_name,
+                    percentage_fee,
+                    flat_fee,
+                    additional_fee,
+                    is_active
+                )
+                VALUES (%s, %s, %s, %s, %s, TRUE)
+            """, (
                 spa_id,
                 credit_processor_name,
                 percentage_fee,
                 flat_fee,
-                additional_fee,
-                is_active
-            )
-            VALUES (%s, %s, %s, %s, %s, TRUE)
-        """, (
-            spa_id,
-            credit_processor_name,
-            percentage_fee,
-            flat_fee,
-            additional_fee
-        ))
+                additional_fee
+            ))
 
-        conn.commit()
-        cur.close()
-        conn.close()
+            conn.commit()
+            flash("Credit processor added successfully.", "success")
 
-        flash("Credit processor added successfully.", "success")
+        except Exception as e:
+            conn.rollback()
+            flash(f"Error adding processor: {e}", "error")
+
+        finally:
+            cur.close()
+            conn.close()
+
         return redirect(url_for("credit_processors"))
 
     return render_template("add_credit_processor.html")
@@ -840,17 +998,19 @@ def add_credit_processor():
 
 
 
+
 #   ----------------------------
 #     
 #     EDIT CREDIT PROCESSOR
-#  
+#
+#     spa_id good  
 #  ----------------------------
 
 
 
 @app.route("/credit_processors/edit/<int:credit_processor_id>", methods=["GET", "POST"])
 def edit_credit_processor(credit_processor_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -925,12 +1085,13 @@ def edit_credit_processor(credit_processor_id):
 #     TOGGLE ACTIVE/DEACTIVATE
 #     CREDIT PROCESSORS
 #  
+#     spa_id good
 #  ------------------------------
 
 
 @app.route("/credit_processors/toggle/<int:credit_processor_id>", methods=["POST"])
 def toggle_credit_processor(credit_processor_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -989,6 +1150,42 @@ def sync_calendar():
 
 
 
+#   ----------------------------------------------
+#
+#
+#     BIRTHDAY HELPER
+#
+#
+#
+#
+#   --------------------------------------------
+
+
+
+
+def get_birthday_campaign_year(birth_date, today):
+    current_year = today.year
+    current_month = today.month
+    today_day = today.day
+
+    if current_month == 12:
+        next_month = 1
+        next_month_year = current_year + 1
+    else:
+        next_month = current_month + 1
+        next_month_year = current_year
+
+    birth_month = birth_date.month
+
+    if birth_month == current_month:
+        return current_year
+
+    if today_day >= 15 and birth_month == next_month:
+        return next_month_year
+
+    return None
+
+
 
 
 
@@ -998,7 +1195,7 @@ def sync_calendar():
 #
 #              HELPER   QUERY
 #
-#
+#              spa-id good
 #  ----------------------------------------------------
 
 
@@ -1074,6 +1271,7 @@ def get_loan_contribution_rows(spa_id, start_date=None, end_date=None):
         FROM loan_payments lp
         LEFT JOIN business_loans bl
             ON lp.loan_id = bl.loan_id
+           AND lp.spa_id = bl.spa_id
         WHERE lp.spa_id = %s
     """
     params.append(spa_id)
@@ -1118,7 +1316,7 @@ def get_loan_contribution_rows(spa_id, start_date=None, end_date=None):
 
 @app.route("/loan_contributions/export/csv")
 def export_loan_contributions_csv():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
 
     start_date = request.args.get("start_date", "").strip()
     end_date = request.args.get("end_date", "").strip()
@@ -1172,7 +1370,7 @@ def export_loan_contributions_csv():
 
 @app.route("/loan_contributions/export/excel")
 def export_loan_contributions_excel():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
 
     start_date = request.args.get("start_date", "").strip()
     end_date = request.args.get("end_date", "").strip()
@@ -1256,13 +1454,14 @@ def export_loan_contributions_excel():
 #
 #      FUNDING     
 #
+#    spa_id good
 #  ----------------------
     
 
 
 @app.route("/funding")
 def funding_home():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -1326,13 +1525,14 @@ def funding_home():
 #
 #    OWNER CONTRIBUTIONS                     
 #
+#     spa_id good
 #  ----------------------
                     
                     
                       
 @app.route("/owner_contributions/add", methods=["GET", "POST"])
 def add_owner_contribution():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
 
     if request.method == "POST":
         contribution_date = request.form.get("contribution_date")
@@ -1376,48 +1576,59 @@ def add_owner_contribution():
 #
 #   OWNER REIMBURSEMENTS      
 #
+#    spa_id good
 #  ----------------------
                     
                     
 @app.route("/owner_reimbursements/add", methods=["GET", "POST"])
 def add_owner_reimbursement():
-    spa_id = get_current_spa_id()
-
+    spa_id = current_spa_id()
+        
     if request.method == "POST":
         reimbursement_date = request.form.get("reimbursement_date")
-        amount = request.form.get("amount")
+        amount = float(request.form.get("amount") or 0)
         payment_method = request.form.get("payment_method", "").strip()
         notes = request.form.get("notes", "").strip()
 
+        if not reimbursement_date or amount <= 0:
+            flash("Valid date and amount are required.", "error")
+            return redirect(url_for("add_owner_reimbursement"))
+
         conn = get_db_connection()
         cur = conn.cursor()
-
-        cur.execute("""
-            INSERT INTO owner_reimbursements (
-                spa_id,
+             
+        try:
+            cur.execute("""
+                INSERT INTO owner_reimbursements (
+                    spa_id,
+                    reimbursement_date,
+                    amount,
+                    payment_method,
+                    notes
+                )
+                VALUES (%s, %s, %s, %s, %s)
+            """, (
+                spa_id, 
                 reimbursement_date,
                 amount,
                 payment_method,
                 notes
-            )
-            VALUES (%s, %s, %s, %s, %s)
-        """, (
-            spa_id,
-            reimbursement_date,
-            amount,
-            payment_method,
-            notes
-        ))
+            ))
+    
+            conn.commit()
+            flash("Owner reimbursement added successfully.", "success")
 
-        conn.commit()
-        cur.close()
-        conn.close()
+        except Exception as e:
+            conn.rollback()
+            flash(f"Error saving reimbursement: {e}", "error")
 
-        flash("Owner reimbursement added successfully.", "success")
+        finally:
+            cur.close()
+            conn.close()
+
         return redirect(url_for("funding_home"))
 
     return render_template("add_owner_reimbursement.html")
-
 
                 
                 
@@ -1426,14 +1637,13 @@ def add_owner_reimbursement():
 #
 #   LOANS   HOME                   
 #
+#    spa_id good   
 #  ----------------------
                     
                     
-                      
-
 @app.route("/loans")
 def loans_home():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -1496,14 +1706,6 @@ def loans_home():
     cur.close()
     conn.close()
 
-
-    import os
-
-    print("MAILGUN_API_KEY:", os.environ.get("MAILGUN_API_KEY"))
-
-
-
-
     return render_template(
         "loans_home.html",
         loans=loans,
@@ -1511,7 +1713,7 @@ def loans_home():
         total_principal_paid=total_principal_paid,
         total_interest_paid=total_interest_paid,
         total_remaining_balance=total_remaining_balance
-    )
+    )                      
 
                 
                 
@@ -1521,15 +1723,15 @@ def loans_home():
 #
 #    ADD BUSINESS LOANS                     
 #
+#    spa_id good
 #  ----------------------
                     
                     
-                      
-
+        
 @app.route("/business_loans/add", methods=["GET", "POST"])
-def add_business_loan():
-    spa_id = get_current_spa_id()
-
+def add_business_loan(): 
+    spa_id = current_spa_id()
+            
     if request.method == "POST":
         loan_name = request.form.get("loan_name", "").strip()
         lender_name = request.form.get("lender_name", "").strip()
@@ -1539,43 +1741,45 @@ def add_business_loan():
         term_months = request.form.get("term_months") or None
         notes = request.form.get("notes", "").strip()
         is_active = True if request.form.get("is_active") == "yes" else False
-
+        
         conn = get_db_connection()
         cur = conn.cursor()
-
+        
         cur.execute("""
             INSERT INTO business_loans (
-                spa_id,
-                loan_name,
-                lender_name,
+                spa_id,  
+                loan_name, 
+                lender_name,   
                 loan_start_date,
                 original_amount,
                 interest_rate,
                 term_months,
-                notes,
+                notes,  
                 is_active
             )
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             spa_id,
             loan_name,
-            lender_name,
+            lender_name,   
             loan_start_date,
             original_amount,
             interest_rate,
             term_months,
-            notes,
+            notes, 
             is_active
         ))
-
+        
         conn.commit()
         cur.close()
         conn.close()
-
+    
         flash("Business loan added successfully.", "success")
         return redirect(url_for("loans_home"))
-
+        
     return render_template("add_business_loan.html")
+                      
+
 
                 
                 
@@ -1584,14 +1788,13 @@ def add_business_loan():
 #
 #    ADD LOAN PAYMENT                     
 #
+#   spa_id good
 #  ----------------------
                     
                     
-                      
-
 @app.route("/loan_payments/add", methods=["GET", "POST"])
 def add_loan_payment():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -1602,6 +1805,26 @@ def add_loan_payment():
         interest_paid = float(request.form.get("interest_paid") or 0)
         total_payment = principal_paid + interest_paid
         notes = request.form.get("notes", "").strip()
+
+        if not loan_id or not payment_date:
+            cur.close()
+            conn.close()
+            flash("Loan and payment date are required.", "error")
+            return redirect(url_for("add_loan_payment"))
+
+        cur.execute("""
+            SELECT loan_id
+            FROM business_loans
+            WHERE loan_id = %s
+              AND spa_id = %s
+        """, (loan_id, spa_id))
+        valid_loan = cur.fetchone()
+
+        if not valid_loan:
+            cur.close()
+            conn.close()
+            flash("Invalid loan selected.", "error")
+            return redirect(url_for("add_loan_payment"))
 
         cur.execute("""
             INSERT INTO loan_payments (
@@ -1646,7 +1869,8 @@ def add_loan_payment():
     return render_template(
         "add_loan_payment.html",
         loans=loans
-    )
+    )                      
+
 
 
 
@@ -2156,18 +2380,31 @@ def schedule_appointment_start():
 # ROUTE: INCOME
 # URL: /income
 # SECTION: INCOME HOME PAGE
+#
+#    spa_id safe
+#
 #  ------------------------------------------
 
 @app.route("/income")
 def income_home():
+    spa_id = current_spa_id()
+
     conn = get_db_connection()
     cur = conn.cursor()
 
     # summary totals
-    cur.execute("SELECT COALESCE(SUM(total_amount), 0) FROM income")
+    cur.execute("""
+        SELECT COALESCE(SUM(total_amount), 0)
+        FROM income
+        WHERE spa_id = %s
+    """, (spa_id,))
     total_income = cur.fetchone()[0] or 0
 
-    cur.execute("SELECT COALESCE(SUM(amount), 0) FROM expenses")
+    cur.execute("""
+        SELECT COALESCE(SUM(amount), 0)
+        FROM expenses
+        WHERE spa_id = %s
+    """, (spa_id,))
     total_expenses = cur.fetchone()[0] or 0
 
     net_total = total_income - total_expenses
@@ -2185,8 +2422,10 @@ def income_home():
         FROM income i
         LEFT JOIN clients c
             ON i.client_id = c.client_id
+           AND i.spa_id = c.spa_id
+        WHERE i.spa_id = %s
         ORDER BY i.income_date DESC, i.income_id DESC
-    """)
+    """, (spa_id,))
     income_records = cur.fetchall()
 
     cur.close()
@@ -2206,17 +2445,17 @@ def income_home():
 
 
 
-
 #  ------------------------------------------
 #           
 #           CLIENT FORMS 
 #
+#    spa_id good
 #  ------------------------------------------
 
 
 @app.route("/client_forms/<int:client_id>", methods=["GET", "POST"])
 def client_forms(client_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     appointment_id = request.args.get("appointment_id") or request.form.get("appointment_id")
     selected_date = request.args.get("date") or request.form.get("date")
 
@@ -2229,7 +2468,65 @@ def client_forms(client_id):
         date_signed = request.form.get("date_signed") or None
         form_given = "form_given" in request.form
         form_signed = "form_signed" in request.form
-        notes = request.form.get("notes", "")
+        notes = request.form.get("notes", "").strip()
+
+        # Validate client belongs to this spa
+        cur.execute("""
+            SELECT 1
+            FROM clients
+            WHERE client_id = %s
+              AND spa_id = %s
+        """, (client_id, spa_id))
+        valid_client = cur.fetchone()
+
+        if not valid_client:
+            cur.close()
+            conn.close()
+            flash("Client not found.", "error")
+            return redirect(url_for("client_history"))
+
+        # Validate form type belongs to this spa
+        cur.execute("""
+            SELECT 1
+            FROM form_types
+            WHERE form_type_id = %s
+              AND spa_id = %s
+              AND active = TRUE
+        """, (form_type_id, spa_id))
+        valid_form_type = cur.fetchone()
+
+        if not valid_form_type:
+            cur.close()
+            conn.close()
+            flash("Invalid form type selected.", "error")
+            return redirect(url_for(
+                "client_forms",
+                client_id=client_id,
+                appointment_id=appointment_id,
+                date=selected_date
+            ))
+
+        # Optional: validate appointment belongs to this spa/client if present
+        if appointment_id:
+            cur.execute("""
+                SELECT 1
+                FROM appointments
+                WHERE appointment_id = %s
+                  AND client_id = %s
+                  AND spa_id = %s
+            """, (appointment_id, client_id, spa_id))
+            valid_appointment = cur.fetchone()
+
+            if not valid_appointment:
+                cur.close()
+                conn.close()
+                flash("Invalid appointment selected.", "error")
+                return redirect(url_for(
+                    "client_forms",
+                    client_id=client_id,
+                    appointment_id=appointment_id,
+                    date=selected_date
+                ))
 
         cur.execute("""
             INSERT INTO client_forms_log (
@@ -2288,6 +2585,12 @@ def client_forms(client_id):
     """, (client_id, spa_id))
     client = cur.fetchone()
 
+    if not client:
+        cur.close()
+        conn.close()
+        flash("Client not found.", "error")
+        return redirect(url_for("client_history"))
+
     cur.execute("""
         SELECT
             cfl.client_form_log_id,
@@ -2300,6 +2603,7 @@ def client_forms(client_id):
         FROM client_forms_log cfl
         JOIN form_types ft
             ON cfl.form_type_id = ft.form_type_id
+           AND cfl.spa_id = ft.spa_id
         WHERE cfl.client_id = %s
           AND cfl.spa_id = %s
         ORDER BY cfl.created_at DESC
@@ -2324,7 +2628,6 @@ def client_forms(client_id):
 
 
 
-
 #  ------------------------------------------
 #      GIFT CERTIFICATES
 #
@@ -2334,7 +2637,9 @@ def client_forms(client_id):
 
 @app.route("/gift_certificates")
 def gift_certificates_home():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
+    spa_now = get_spa_now()
+    today = spa_now.date()
 
     certificate_search = request.args.get("certificate_search", "").strip()
     sort_by = request.args.get("sort_by", "date_desc")
@@ -2389,6 +2694,7 @@ def gift_certificates_home():
         FROM gift_certificates gc
         LEFT JOIN gift_certificate_statuses gcs
             ON gc.gift_certificate_status_id = gcs.gift_certificate_status_id
+           AND gc.spa_id = gcs.spa_id 
         LEFT JOIN (
             SELECT DISTINCT ON (gift_cert_id)
                 gift_cert_id,
@@ -2398,9 +2704,31 @@ def gift_certificates_home():
             ORDER BY gift_cert_id, sent_date DESC
         ) r
             ON gc.gift_cert_id = r.gift_cert_id
+           AND gc.spa_id = r.spa_id
         {where_sql}
         {order_sql}
     """
+
+    spa_now = get_spa_now()
+    today = spa_now.date()
+
+    expiring_gc_count = 0
+
+    # Count for alert/banner/card
+    cur.execute("""
+        SELECT COUNT(*)
+        FROM gift_certificates gc
+        JOIN gift_certificate_statuses gcs
+          ON gc.gift_certificate_status_id = gcs.gift_certificate_status_id
+        WHERE gc.spa_id = %s
+          AND gcs.status_name = 'Active'
+          AND gc.amount_paid > 0
+          AND gc.is_redeemed = FALSE
+          AND gc.remaining_balance > 0
+          AND gc.expires_date BETWEEN %s AND (%s + INTERVAL '60 days')
+    """, (spa_id, today, today))
+    expiring_gc_count = cur.fetchone()[0] or 0
+
 
     cur.execute(query, params)
     gift_certificates = cur.fetchall()
@@ -2413,7 +2741,8 @@ def gift_certificates_home():
         gift_certificates=gift_certificates,
         certificate_search=certificate_search,
         sort_by=sort_by,
-        filter_by=filter_by
+        filter_by=filter_by,
+        expiring_gc_count=expiring_gc_count
     )
 
 
@@ -2424,15 +2753,20 @@ def gift_certificates_home():
 
 #  ------------------------------------------
 #      ADD GIFT CERTIFICATE
+#
+#
+#    spa_id good
 #  ------------------------------------------
+
 
 @app.route("/add_gift_certificate", methods=["GET", "POST"])
 def add_gift_certificate():
-    conn = get_db_connection() 
-    cur = conn.cursor() 
+    spa_id = current_spa_id()
+    conn = get_db_connection()
+    cur = conn.cursor()
 
     if request.method == "POST":
-        certificate_number = request.form.get("certificate_number")
+        certificate_number = (request.form.get("certificate_number") or "").strip()
         date_issued = request.form.get("date_issued") or None
         expires_date = request.form.get("expires_date") or None
         original_value = request.form.get("original_value") or None
@@ -2445,14 +2779,40 @@ def add_gift_certificate():
         recipient_name = request.form.get("recipient_name") or None
         notes = request.form.get("notes") or None
 
-        gift_certificate_status_id = 5
-
         if not certificate_number:
+            cur.close()
+            conn.close()
             flash("Certificate number is required.", "danger")
             return redirect(url_for("add_gift_certificate"))
 
-        cur.execute("""
-            INSERT INTO gift_certificates (
+        active_status_id = get_status_id("Active")
+        if not active_status_id:
+            cur.close()
+            conn.close()
+            flash("Active gift certificate status not found.", "danger")
+            return redirect(url_for("gift_certificates_home"))
+
+        try:
+            cur.execute("""
+                INSERT INTO gift_certificates (
+                    spa_id,
+                    certificate_number,
+                    date_issued,
+                    expires_date,
+                    original_value,
+                    amount_paid,
+                    remaining_balance,
+                    purchased_by_first_name,
+                    purchased_by_last_name,
+                    purchaser_phone,
+                    purchaser_email,
+                    recipient_name,
+                    notes,
+                    gift_certificate_status_id
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                spa_id,
                 certificate_number,
                 date_issued,
                 expires_date,
@@ -2465,45 +2825,46 @@ def add_gift_certificate():
                 purchaser_email,
                 recipient_name,
                 notes,
-                gift_certificate_status_id
-            )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """, (
-            certificate_number,
-            date_issued,
-            expires_date,
-            original_value,
-            amount_paid,
-            remaining_balance,
-            purchased_by_first_name,
-            purchased_by_last_name,
-            purchaser_phone,
-            purchaser_email,
-            recipient_name,
-            notes,
-            gift_certificate_status_id
-        ))
+                active_status_id
+            ))
 
-        conn.commit()
-        cur.close()
-        conn.close()
+            conn.commit()
+            flash("Gift certificate added to inventory.", "success")
 
-        flash("Gift certificate added to inventory.", "success")
+        except Exception as e:
+            conn.rollback()
+            flash(f"Error adding gift certificate: {e}", "danger")
+
+        finally:
+            cur.close()
+            conn.close()
+
         return redirect(url_for("gift_certificates_home"))
 
-    # GET
     cur.close()
     conn.close()
     return render_template("add_gift_certificate.html")
 
 
+
+
+
+
+
+
 #  ------------------------------------------
 #         EDIT GIFT CERTIFICATE
+#
+#
+#
+#      spa_id good
 #  ------------------------------------------
+
 
 
 @app.route("/edit_gift_certificate/<int:certificate_id>", methods=["GET", "POST"])
 def edit_gift_certificate(certificate_id):
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -2522,6 +2883,21 @@ def edit_gift_certificate(certificate_id):
         gift_certificate_status_id = request.form.get("gift_certificate_status_id") or None
         notes = request.form.get("notes") or None
 
+        if gift_certificate_status_id:
+            cur.execute("""
+                SELECT 1
+                FROM gift_certificate_statuses
+                WHERE gift_certificate_status_id = %s
+                  AND spa_id = %s
+            """, (gift_certificate_status_id, spa_id))
+            valid_status = cur.fetchone()
+
+            if not valid_status:
+                cur.close()
+                conn.close()
+                flash("Invalid gift certificate status selected.", "danger")
+                return redirect(url_for("edit_gift_certificate", certificate_id=certificate_id))
+
         cur.execute("""
             UPDATE gift_certificates
             SET certificate_number = %s,
@@ -2538,6 +2914,7 @@ def edit_gift_certificate(certificate_id):
                 gift_certificate_status_id = %s,
                 notes = %s
             WHERE gift_cert_id = %s
+              AND spa_id = %s
         """, (
             certificate_number,
             date_issued,
@@ -2552,13 +2929,15 @@ def edit_gift_certificate(certificate_id):
             recipient_name,
             gift_certificate_status_id,
             notes,
-            certificate_id
+            certificate_id,
+            spa_id
         ))
 
         conn.commit()
         cur.close()
         conn.close()
 
+        flash("Gift certificate updated successfully.", "success")
         return redirect(url_for("gift_certificates_home"))
 
     cur.execute("""
@@ -2579,14 +2958,22 @@ def edit_gift_certificate(certificate_id):
             notes
         FROM gift_certificates
         WHERE gift_cert_id = %s
-    """, (certificate_id,))
+          AND spa_id = %s
+    """, (certificate_id, spa_id))
     gift_certificate = cur.fetchone()
+
+    if not gift_certificate:
+        cur.close()
+        conn.close()
+        flash("Gift certificate not found.", "danger")
+        return redirect(url_for("gift_certificates_home"))
 
     cur.execute("""
         SELECT gift_certificate_status_id, status_name
         FROM gift_certificate_statuses
+        WHERE spa_id = %s
         ORDER BY gift_certificate_status_id
-    """)
+    """, (spa_id,))
     statuses = cur.fetchall()
 
     cur.close()
@@ -2604,12 +2991,20 @@ def edit_gift_certificate(certificate_id):
 
 
 
+
+
 #  ------------------------------------------
 #       REDEEM GIFT CERTIFICATE
+#
+#
+#    spa_id good
 #  ------------------------------------------
+
+
 
 @app.route("/redeem_gift_certificate/<int:certificate_id>", methods=["GET", "POST"])
 def redeem_gift_certificate(certificate_id):
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -2617,21 +3012,12 @@ def redeem_gift_certificate(certificate_id):
         redeemed_on = request.form.get("redeemed_on") or None
         redeemed_by = request.form.get("redeemed_by") or None
 
-        cur.execute("""
-            SELECT gift_certificate_status_id
-            FROM gift_certificate_statuses
-            WHERE status_name = %s
-            LIMIT 1
-        """, ("Redeemed",))
-        redeemed_row = cur.fetchone()
-
-        if not redeemed_row:
-            flash("Redeemed status not found.", "danger")
+        redeemed_status_id = get_status_id("Redeemed")
+        if not redeemed_status_id:
             cur.close()
             conn.close()
+            flash("Redeemed status not found.", "danger")
             return redirect(url_for("gift_certificates_home"))
-
-        redeemed_status_id = redeemed_row[0]
 
         cur.execute("""
             UPDATE gift_certificates
@@ -2640,12 +3026,21 @@ def redeem_gift_certificate(certificate_id):
                 remaining_balance = 0,
                 gift_certificate_status_id = %s
             WHERE gift_cert_id = %s
+              AND spa_id = %s
         """, (
             redeemed_on,
             redeemed_by,
             redeemed_status_id,
-            certificate_id
+            certificate_id,
+            spa_id
         ))
+
+        if cur.rowcount == 0:
+            conn.rollback()
+            cur.close()
+            conn.close()
+            flash("Gift certificate not found.", "danger")
+            return redirect(url_for("gift_certificates_home"))
 
         conn.commit()
         flash("Gift certificate redeemed successfully.", "success")
@@ -2667,12 +3062,18 @@ def redeem_gift_certificate(certificate_id):
         FROM gift_certificates gc
         LEFT JOIN gift_certificate_statuses gcs
             ON gc.gift_certificate_status_id = gcs.gift_certificate_status_id
+           AND gc.spa_id = gcs.spa_id
         WHERE gc.gift_cert_id = %s
-    """, (certificate_id,))
+          AND gc.spa_id = %s
+    """, (certificate_id, spa_id))
     gift_certificate = cur.fetchone()
 
     cur.close()
     conn.close()
+
+    if not gift_certificate:
+        flash("Gift certificate not found.", "danger")
+        return redirect(url_for("gift_certificates_home"))
 
     return render_template(
         "redeem_gift_certificate.html",
@@ -2685,17 +3086,19 @@ def redeem_gift_certificate(certificate_id):
 
 
 
+
+
 #   ------------------------------------------
 #
 #   GIFT CERTIFICATES REMINDER
 #
-#
+#     spa_id good
 #   ------------------------------------------
 
 
 @app.route("/gift_certificate_reminders")
 def gift_certificate_reminders():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     active_status_id = get_status_id("Active")
 
     conn = get_db_connection()
@@ -2890,6 +3293,8 @@ ClearSkin Spa
         ))
 
         conn.commit()
+
+        flash("Reminder email test generated in console. Mailgun is not active yet.", "info")
         flash("Gift certificate reminder processed and logged successfully.", "success")
 
     except Exception as e:
@@ -3323,6 +3728,20 @@ def edit_client_full(client_id):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #  ------------------------------------------
 #           BIRTHDAYS            
 #
@@ -3332,131 +3751,355 @@ def edit_client_full(client_id):
 
 
 
+            
+
+
+
+
+
+
+
+
 #  ------------------------------------------
 #           BIRTHDAY OFFERS
 #  ------------------------------------------
 
-@app.route("/birthday-offers")
-def birthday_offers_home():
+
+
+
+@app.route("/birthday_offers")
+def birthday_offers():
     spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
-    today = date.today()
-    end_date = today + timedelta(days=30)
+    spa_now = get_spa_now()
+    today = spa_now.date()
+    
     current_year = today.year
+    current_month = today.month
+    today_day = today.day
+
+    if current_month == 12:
+        next_month = 1
+        next_month_year = current_year + 1
+    else:
+        next_month = current_month + 1
+        next_month_year = current_year
 
     cur.execute("""
         SELECT
             c.client_id,
             c.first_name,
             c.last_name,
-            c.phone,
             c.email,
             c.birth_date,
-            bo.birthday_offer_id,
-            bo.offer_sent,
-            bo.offer_sent_date,
-            bo.acknowledged_by,
-            bo.notes
+            cbo.birthday_year,
+            cbo.offer_sent,
+            cbo.offer_sent_date,
+            cbo.sent_status,
+            cbo.notes
         FROM clients c
-        LEFT JOIN client_birthday_offers bo
-            ON c.client_id = bo.client_id
-           AND bo.birthday_year = %s
-        WHERE c.birth_date IS NOT NULL
-        ORDER BY
-            CASE
-                WHEN TO_DATE(
-                    EXTRACT(MONTH FROM c.birth_date)::text || '-' ||
-                    EXTRACT(DAY FROM c.birth_date)::text || '-' ||
-                    %s::text,
-                    'MM-DD-YYYY'
-                ) >= %s
-                THEN TO_DATE(
-                    EXTRACT(MONTH FROM c.birth_date)::text || '-' ||
-                    EXTRACT(DAY FROM c.birth_date)::text || '-' ||
-                    %s::text,
-                    'MM-DD-YYYY'
-                )
-                ELSE TO_DATE(
-                    EXTRACT(MONTH FROM c.birth_date)::text || '-' ||
-                    EXTRACT(DAY FROM c.birth_date)::text || '-' ||
-                    (%s + 1)::text,
-                    'MM-DD-YYYY'
-                )
-            END
-    """, (current_year, current_year, today, current_year, current_year))
+        LEFT JOIN client_birthday_offers cbo
+            ON c.client_id = cbo.client_id
+            AND cbo.birthday_year IN (%s, %s)
+        WHERE c.spa_id = %s
+          AND c.birth_date IS NOT NULL
+          AND c.active_client = TRUE
+          AND c.email IS NOT NULL
+          AND TRIM(c.email) <> ''
+        ORDER BY EXTRACT(MONTH FROM c.birth_date),
+                 EXTRACT(DAY FROM c.birth_date),
+                 c.last_name,
+                 c.first_name
+    """, (current_year, next_month_year, spa_id))
 
-    all_birthdays = cur.fetchall()
+    rows = cur.fetchall()
 
-    upcoming_birthdays = []
+    offer_lookup = {}
+    client_lookup = {}
 
-    for row in all_birthdays:
-        birth_date = row[5]
+    for row in rows:
+        client_id = row[0]
+        first_name = row[1]
+        last_name = row[2]
+        email = row[3]
+        birth_date = row[4]
+        birthday_year = row[5]
+        offer_sent = row[6]
+        offer_sent_date = row[7]
+        sent_status = row[8]
+        notes = row[9]
+
+        client_lookup[client_id] = {
+            "client_id": client_id,
+            "first_name": first_name,
+            "last_name": last_name,
+            "email": email,
+            "birth_date": birth_date
+        }
+
+        if birthday_year is not None:
+            offer_lookup[(client_id, birthday_year)] = {
+                "offer_sent": bool(offer_sent),
+                "offer_sent_date": offer_sent_date,
+                "sent_status": sent_status,
+                "notes": notes
+            }
+
+    birthday_clients = []
+
+    for client in client_lookup.values():
+        birth_date = client["birth_date"]
+
         if not birth_date:
             continue
 
-        this_year_bday = date(today.year, birth_date.month, birth_date.day)
+        campaign_year = get_birthday_campaign_year(birth_date, today)
 
-        if this_year_bday < today:
-            next_birthday = date(today.year + 1, birth_date.month, birth_date.day)
-        else:
-            next_birthday = this_year_bday
+        if campaign_year is None:
+            continue
 
-        if today <= next_birthday <= end_date:
-            days_until = (next_birthday - today).days
-            upcoming_birthdays.append({
-                "client_id": row[0],
-                "first_name": row[1],
-                "last_name": row[2],
-                "phone": row[3],
-                "email": row[4],
-                "birth_date": row[5],
-                "next_birthday": next_birthday,
-                "birthday_offer_id": row[6],
-                "offer_sent": row[7],
-                "offer_sent_date": row[8],
-                "acknowledged_by": row[9],
-                "notes": row[10],
-                "days_until": days_until
-            })
+        offer_record = offer_lookup.get((client["client_id"], campaign_year), {})
+        already_sent = offer_record.get("offer_sent", False)
+
+        if already_sent:
+            continue
+
+        birthday_clients.append({
+            "client_id": client["client_id"],
+            "first_name": client["first_name"],
+            "last_name": client["last_name"],
+            "email": client["email"],
+            "birth_date": client["birth_date"],
+            "campaign_year": campaign_year,
+            "offer_sent_date": offer_record.get("offer_sent_date"),
+            "sent_status": offer_record.get("sent_status"),
+            "notes": offer_record.get("notes")
+        })
 
     cur.close()
     conn.close()
 
     return render_template(
-        "birthday_offers_home.html",
-        upcoming_birthdays=upcoming_birthdays
+        "birthday_offers.html",
+        birthday_clients=birthday_clients,
+        today=today
     )
+
+
+
+
+
+
+
+
+
+
         
 #  ------------------------------------------
 #        BIRTHDAY OFFERS MARK SENT
 #
 #  ------------------------------------------
 
-@app.route("/birthday-offers/mark-sent/<int:client_id>", methods=["POST"])
-def mark_birthday_offer_sent(client_id):
+
+
+
+@app.route("/birthday-offers/mark-sent", methods=["POST"])
+def mark_birthday_offer_sent():
     spa_id = get_current_spa_id()
+    client_id = request.form.get("client_id")
+
+    if not client_id:
+        flash("Missing client ID.", "error")
+        return redirect(url_for("birthday_offers"))
+
+    spa_now = get_spa_now()
+    today = spa_now.date()
+    current_year = today.year
+    current_month = today.month
+    today_day = today.day
+
+    if current_month == 12:
+        next_month = 1
+        next_month_year = current_year + 1
+    else:
+        next_month = current_month + 1
+        next_month_year = current_year
+
     conn = get_db_connection()
     cur = conn.cursor()
 
-    current_year = date.today().year
+    # Get client's birth date
+    cur.execute("""
+        SELECT birth_date
+        FROM clients
+        WHERE client_id = %s
+          AND spa_id = %s
+    """, (client_id, spa_id))
+
+    client = cur.fetchone()
+
+    if not client or not client[0]:
+        cur.close()
+        conn.close()
+        flash("Client birthday not found.", "error")
+        return redirect(url_for("birthday_offers"))
+
+    birth_date = client[0]
+    
+    campaign_year = get_birthday_campaign_year(birth_date, today)
+
+    if campaign_year is None:
+        cur.close()
+        conn.close()
+        flash("Client is not in the active birthday campaign window.", "error")
+        return redirect(url_for("birthday_offers"))
+
+    acknowledged_by = "System Admin"
 
     cur.execute("""
-        SELECT birthday_offer_id
-        FROM client_birthday_offers
-        WHERE client_id = %s AND birthday_year = %s
-    """, (client_id, current_year))
-    existing = cur.fetchone()
+        INSERT INTO client_birthday_offers (
+            client_id,
+            birthday_year,
+            offer_sent,
+            offer_sent_date,
+            acknowledged_by,
+            notes,
+            created_at,
+            spa_id,
+            email_template_id,
+            sent_status
+        )
+        VALUES (%s, %s, TRUE, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (client_id, birthday_year)
+        DO UPDATE SET
+            offer_sent = TRUE,
+            offer_sent_date = EXCLUDED.offer_sent_date,
+            acknowledged_by = EXCLUDED.acknowledged_by,
+            notes = EXCLUDED.notes,
+            spa_id = EXCLUDED.spa_id,
+            sent_status = EXCLUDED.sent_status
+    """, (
+        client_id,
+        campaign_year,
+        spa_now,
+        acknowledged_by,
+        "Marked sent manually",
+        spa_now,
+        spa_id,
+        None,
+        "manual"
+    ))
 
-    if existing:
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    flash("Birthday offer marked as sent.", "success")
+    return redirect(url_for("birthday_offers"))
+
+
+
+
+
+
+
+
+
+
+
+#    --------------------------------------
+#
+#      BIRTHDAY OFFERS SEND
+#
+#
+#   ---------------------------------------
+
+
+@app.route("/birthday-offers/send/<int:client_id>", methods=["POST"])
+def send_birthday_offer(client_id):
+    spa_id = get_current_spa_id()
+    spa_now = get_spa_now()
+    campaign_year = spa_now.year
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT first_name, last_name, email, birth_date
+        FROM clients
+        WHERE spa_id = %s
+          AND client_id = %s
+          AND active_client = TRUE
+    """, (spa_id, client_id))
+
+    client = cur.fetchone()
+
+    if not client:
+        cur.close()
+        conn.close()
+        flash("Client not found.", "error")
+        return redirect(url_for("birthday_offers"))
+
+    first_name, last_name, email, birth_date = client
+
+    if not email or not email.strip():
+        cur.close()
+        conn.close()
+        flash("Client does not have an email address.", "error")
+        return redirect(url_for("birthday_offers"))
+
+    subject, body = build_birthday_email(first_name)
+
+    email_sent_successfully = False
+    error_note = None
+    email_template_id = None   # set later if you start using saved templates
+
+    try:
+        # Replace later with your actual Mailgun function
+        # email_sent_successfully = send_email_via_mailgun(email, subject, body)
+        pass
+    except Exception as e:
+        error_note = str(e)
+
+    if email_sent_successfully:
         cur.execute("""
-            UPDATE client_birthday_offers
-            SET offer_sent = TRUE,
-                offer_sent_date = CURRENT_DATE,
-                acknowledged_by = %s
-            WHERE client_id = %s AND birthday_year = %s
-        """, ("Staff", client_id, current_year))
+            INSERT INTO client_birthday_offers (
+                client_id,
+                birthday_year,
+                offer_sent,
+                offer_sent_date,
+                acknowledged_by,
+                notes,
+                created_at,
+                spa_id,
+                email_template_id,
+                sent_status
+            )
+            VALUES (%s, %s, TRUE, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (client_id, birthday_year)
+            DO UPDATE SET
+                offer_sent = TRUE,
+                offer_sent_date = EXCLUDED.offer_sent_date,
+                sent_status = EXCLUDED.sent_status,
+                email_template_id = EXCLUDED.email_template_id,
+                notes = EXCLUDED.notes,
+                spa_id = EXCLUDED.spa_id
+        """, (
+            client_id,
+            campaign_year,
+            spa_now,
+            "system",
+            "Birthday email sent successfully",
+            spa_now,
+            spa_id,
+            email_template_id,
+            "sent"
+        ))
+
+        conn.commit()
+        flash(f"Birthday email sent to {first_name} {last_name}.", "success")
     else:
         cur.execute("""
             INSERT INTO client_birthday_offers (
@@ -3464,17 +4107,79 @@ def mark_birthday_offer_sent(client_id):
                 birthday_year,
                 offer_sent,
                 offer_sent_date,
-                acknowledged_by
+                acknowledged_by,
+                notes,
+                created_at,
+                spa_id,
+                email_template_id,
+                sent_status
             )
-            VALUES (%s, %s, TRUE, CURRENT_DATE, %s)
-        """, (client_id, current_year, "Staff"))
+            VALUES (%s, %s, FALSE, NULL, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (client_id, birthday_year)
+            DO UPDATE SET
+                offer_sent = FALSE,
+                sent_status = EXCLUDED.sent_status,
+                notes = EXCLUDED.notes,
+                spa_id = EXCLUDED.spa_id
+        """, (
+            client_id,
+            campaign_year,
+            "system",
+            error_note or "Email send failed",
+            spa_now,
+            spa_id,
+            email_template_id,
+            "failed"
+        ))
 
-    conn.commit()
+        conn.commit()
+        flash("Birthday email could not be sent.", "error")
+
     cur.close()
     conn.close()
 
-    flash("Birthday offer marked as sent.", "success")
-    return redirect(url_for("birthday_offers_home"))
+    return redirect(url_for("birthday_offers"))
+
+
+
+
+#   ----------------------------------
+#
+#   HARD CODED BIRTHDAY EMAIL
+#
+#
+#   ----------------------------------
+
+
+def build_birthday_email(client_first_name):
+    subject = "Happy Birthday from ClearSkin Spa!"
+
+    body = f"""
+Hi {client_first_name},
+
+Happy Birthday from all of us at ClearSkin Spa!
+
+To celebrate your special month, we would love to offer you a birthday gift from us. Please contact us to schedule your appointment and mention your birthday offer.
+
+We appreciate your business and hope you have a wonderful birthday month!
+
+Blessings,
+ClearSkin Spa
+"""
+
+    return subject, body
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -6693,6 +7398,9 @@ from flask import render_template
 from db import get_db_connection
 from datetime import date, timedelta
 
+
+
+
 @app.route("/dashboard")
 def dashboard():
     spa_id = get_current_spa_id()
@@ -6703,168 +7411,75 @@ def dashboard():
     today = spa_now.date()
     now_time = spa_now.time()
 
-    current_year = today.year
-    current_month = today.month
-    today_day = today.day
-
-    if current_month == 12:
-        next_month = 1
-        next_month_year = current_year + 1
-    else:
-        next_month = current_month + 1
-        next_month_year = current_year
+    # Safe defaults
+    birthday_alert_count = 0
+    expiring_gc_count = 0
+    next_appt = None
+    today_count = 0
+    upcoming_count = 0
+    completed_count = 0
+    total_clients = 0
+    revenue_today = 0.00
+    todays_appointments = []
+    upcoming_appointments = []
+    top_services = []
 
     # Total clients
     cur.execute("""
         SELECT COUNT(*)
         FROM clients
-        WHERE spa_id = %s;
+        WHERE spa_id = %s
     """, (spa_id,))
-    total_clients = cur.fetchone()[0]
+    total_clients = cur.fetchone()[0] or 0
 
+    # Revenue today
     cur.execute("""
-        SELECT
-            c.client_id,
-            c.first_name,
-            c.last_name,
-            c.birth_date,
-            cbo.offer_sent
-        FROM clients c
-        LEFT JOIN client_birthday_offers cbo
-            ON c.client_id = cbo.client_id
-            AND cbo.birthday_year = %s
+        SELECT COALESCE(SUM(total_amount), 0)
+        FROM income
+        WHERE spa_id = %s
+          AND income_date = %s
+    """, (spa_id, today))
+    revenue_today = cur.fetchone()[0] or 0.00
+
+    # Birthday alert count
+    # Adjust this query if your birthday table/logic differs
+    cur.execute("""
+        SELECT COUNT(*)
+        FROM client_birthday_offers cbo
+        JOIN clients c ON c.client_id = cbo.client_id
         WHERE c.spa_id = %s
-          AND c.birth_date IS NOT NULL
-          AND c.active_client = TRUE
-    """, (current_year, spa_id))
+          AND cbo.offer_sent = FALSE
+          AND cbo.birthday_year = %s
+    """, (spa_id, today.year))
+    birthday_alert_count = cur.fetchone()[0] or 0
 
-    all_birthdays = cur.fetchall()
-
-    birthday_alert_count = 0
-
-    for row in all_birthdays:
-        birth_date = row[3]
-        offer_sent = row[4]
-
-        if not birth_date:
-            continue
-
-        birth_month = birth_date.month
-
-        # current month birthdays not yet sent
-        if birth_month == current_month and not offer_sent:
-            birthday_alert_count += 1
-
-        # after the 15th, also include next month birthdays
-        elif today.day >= 15 and birth_month == next_month and not offer_sent:
-            birthday_alert_count += 1
-
-    # Today's appointments
-    cur.execute("""
-        SELECT
-            a.appointment_id,
-            c.first_name,
-            c.last_name,
-            s.service_name,
-            a.appointment_date,
-            a.appointment_time,
-            a.status
-        FROM appointments a
-        JOIN clients c
-            ON a.client_id = c.client_id
-           AND a.spa_id = c.spa_id
-        LEFT JOIN services s
-            ON a.service_id = s.service_id
-           AND a.spa_id = s.spa_id
-        WHERE a.spa_id = %s
-          AND a.appointment_date = %s
-        ORDER BY a.appointment_time ASC;
-    """, (spa_id, today))
-    todays_appointments = cur.fetchall()
-
-    # Upcoming appointments (future only)
-    cur.execute("""
-        SELECT
-            a.appointment_id,
-            c.first_name,
-            c.last_name,
-            s.service_name,
-            a.appointment_date,
-            a.appointment_time,
-            a.status
-        FROM appointments a
-        JOIN clients c
-            ON a.client_id = c.client_id
-           AND a.spa_id = c.spa_id
-        LEFT JOIN services s
-            ON a.service_id = s.service_id
-           AND a.spa_id = s.spa_id
-        WHERE a.spa_id = %s
-          AND a.appointment_date > %s
-          AND a.status NOT IN ('cancelled', 'completed')
-        ORDER BY a.appointment_date ASC, a.appointment_time ASC
-        LIMIT 10;
-    """, (spa_id, today))
-    upcoming_appointments = cur.fetchall()
-
-    # Completed appointments count
+    # Expiring gift certificate count
     cur.execute("""
         SELECT COUNT(*)
-        FROM appointments
-        WHERE spa_id = %s
-          AND status = 'completed';
-    """, (spa_id,))
-    completed_count = cur.fetchone()[0]
-
-    # Top services
-    cur.execute("""
-        SELECT
-            COALESCE(s.service_name, 'Unknown Service') AS service_name,
-            COUNT(*) AS total_booked
-        FROM appointments a
-        LEFT JOIN services s
-            ON a.service_id = s.service_id
-           AND a.spa_id = s.spa_id
-        WHERE a.spa_id = %s
-        GROUP BY s.service_name
-        ORDER BY total_booked DESC
-        LIMIT 5;
-    """, (spa_id,))
-    top_services = cur.fetchall()
-
-    # Optional summary counts
-    cur.execute("""
-        SELECT COUNT(*)
-        FROM appointments
-        WHERE spa_id = %s
-          AND appointment_date = %s;
-    """, (spa_id, today))
-    today_count = cur.fetchone()[0]
-
-    cur.execute("""
-        SELECT COUNT(*)
-        FROM appointments
-        WHERE spa_id = %s
-          AND appointment_date > %s
-          AND status NOT IN ('cancelled', 'completed');
-    """, (spa_id, today))
-    upcoming_count = cur.fetchone()[0]
+        FROM gift_certificates gc 
+        JOIN gift_certificate_statuses gcs
+        ON gc.gift_certificate_status_id = gcs.gift_certificate_status_id
+        WHERE gc.spa_id = %s
+        AND gcs.status_name = 'Active'
+        AND gc.amount_paid > 0
+        AND gc.is_redeemed = FALSE
+        AND gc.remaining_balance > 0
+        AND gc.expires_date BETWEEN %s AND (%s + INTERVAL '60 days')
+    """, (spa_id, today, today))
+    expiring_gc_count = cur.fetchone()[0] or 0
 
     # Next appointment
     cur.execute("""
         SELECT
+            a.appointment_id,
             c.first_name,
             c.last_name,
             a.appointment_date,
             a.appointment_time,
             s.service_name
         FROM appointments a
-        JOIN clients c
-            ON a.client_id = c.client_id
-           AND a.spa_id = c.spa_id
-        LEFT JOIN services s
-            ON a.service_id = s.service_id
-           AND a.spa_id = s.spa_id
+        JOIN clients c ON a.client_id = c.client_id
+        LEFT JOIN services s ON a.service_id = s.service_id
         WHERE a.spa_id = %s
           AND a.status = 'booked'
           AND (
@@ -6874,55 +7489,140 @@ def dashboard():
                     AND a.appointment_time >= %s
                 )
               )
-        ORDER BY a.appointment_date ASC, a.appointment_time ASC
-        LIMIT 1;
+        ORDER BY a.appointment_date, a.appointment_time
+        LIMIT 1
     """, (spa_id, today, today, now_time))
-    next_appt = cur.fetchone()
+    row = cur.fetchone()
+    if row:
+        # Make it match template indexes:
+        # next_appt[0] first_name
+        # next_appt[1] last_name
+        # next_appt[2] appointment_date
+        # next_appt[3] appointment_time
+        # next_appt[4] service_name
+        next_appt = (row[1], row[2], row[3], row[4], row[5])
 
-    # Revenue today (completed appointments only)
+    # Today's appointments count
     cur.execute("""
-        SELECT COALESCE(SUM(price_at_booking), 0)
+        SELECT COUNT(*)
         FROM appointments
         WHERE spa_id = %s
           AND appointment_date = %s
-          AND status = 'completed';
     """, (spa_id, today))
-    revenue_today = cur.fetchone()[0]
+    today_count = cur.fetchone()[0] or 0
 
-
+    # Upcoming appointments count
     cur.execute("""
-    SELECT COUNT(*)
-        FROM gift_certificates gc
-        LEFT JOIN gift_certificate_statuses gcs
-            ON gc.gift_certificate_status_id = gcs.gift_certificate_status_id
-        WHERE gc.spa_id = %s
-          AND gc.expires_date IS NOT NULL
-          AND gc.expires_date >= CURRENT_DATE
-          AND gc.expires_date <= CURRENT_DATE + INTERVAL '60 days'
-          AND gcs.status_name IN ('Active', 'Printed')
-          AND gc.remaining_balance > 0
+        SELECT COUNT(*)
+        FROM appointments
+        WHERE spa_id = %s
+          AND status = 'booked'
+          AND (
+                appointment_date > %s
+                OR (
+                    appointment_date = %s
+                    AND appointment_time > %s
+                )
+              )
+    """, (spa_id, today, today, now_time))
+    upcoming_count = cur.fetchone()[0] or 0
+
+    # Completed appointments count
+    cur.execute("""
+        SELECT COUNT(*)
+        FROM appointments
+        WHERE spa_id = %s
+          AND status = 'completed'
     """, (spa_id,))
-    expiring_gc_count = cur.fetchone()[0]
+    completed_count = cur.fetchone()[0] or 0
 
+    # Today's appointment table
+    cur.execute("""
+        SELECT
+            a.appointment_id,      -- row[0]
+            c.first_name,          -- row[1]
+            c.last_name,           -- row[2]
+            s.service_name,        -- row[3]
+            a.appointment_date,    -- row[4]
+            a.appointment_time,    -- row[5]
+            a.status               -- row[6]
+        FROM appointments a
+        JOIN clients c ON a.client_id = c.client_id
+        LEFT JOIN services s ON a.service_id = s.service_id
+        WHERE a.spa_id = %s
+          AND a.appointment_date = %s
+        ORDER BY a.appointment_time
+    """, (spa_id, today))
+    todays_appointments = cur.fetchall()
 
+    # Upcoming appointments table
+    cur.execute("""
+        SELECT
+            a.appointment_id,      -- row[0]
+            c.first_name,          -- row[1]
+            c.last_name,           -- row[2]
+            s.service_name,        -- row[3]
+            a.appointment_date,    -- row[4]
+            a.appointment_time,    -- row[5]
+            a.status               -- row[6]
+        FROM appointments a
+        JOIN clients c ON a.client_id = c.client_id
+        LEFT JOIN services s ON a.service_id = s.service_id
+        WHERE a.spa_id = %s
+          AND (
+                a.appointment_date > %s
+                OR (
+                    a.appointment_date = %s
+                    AND a.appointment_time > %s
+                )
+              )
+        ORDER BY a.appointment_date, a.appointment_time
+        LIMIT 10
+    """, (spa_id, today, today, now_time))
+    upcoming_appointments = cur.fetchall()
+
+    # Top services
+    cur.execute("""
+        SELECT
+            COALESCE(s.service_name, 'Unknown Service') AS service_name,
+            COUNT(*) AS booked_count
+        FROM appointments a
+        LEFT JOIN services s ON a.service_id = s.service_id
+        WHERE a.spa_id = %s
+        GROUP BY COALESCE(s.service_name, 'Unknown Service')
+        ORDER BY booked_count DESC, service_name ASC
+        LIMIT 5
+    """, (spa_id,))
+    top_services = cur.fetchall()
 
     cur.close()
     conn.close()
 
     return render_template(
         "dashboard.html",
+        birthday_alert_count=birthday_alert_count,
         expiring_gc_count=expiring_gc_count,
+        next_appt=next_appt,
+        today_count=today_count,
+        upcoming_count=upcoming_count,
+        completed_count=completed_count,
         total_clients=total_clients,
+        revenue_today=revenue_today,
         todays_appointments=todays_appointments,
         upcoming_appointments=upcoming_appointments,
-        completed_count=completed_count,
-        top_services=top_services,
-        today_count=today_count,
-        birthday_alert_count=birthday_alert_count,
-        upcoming_count=upcoming_count,
-        next_appt=next_appt,
-        revenue_today=revenue_today
+        top_services=top_services
     )
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -7464,15 +8164,17 @@ def client_health_profile(client_id):
 #  ------------------------------------
 #      APPOINTMEENTS
 #
-#    
+#    spa_id good
 #  -----------------------------------
 
 
 from datetime import date
 
+
+
 @app.route("/appointments")
 def appointments():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
 
     start_date = request.args.get("start_date", "").strip()
     end_date = request.args.get("end_date", "").strip()
@@ -7531,21 +8233,30 @@ def appointments():
 
 
 
+
+
+
+
+
+
 #  --------------------
 #   ADD APPOINTMENT
 #
+#
+#
+#    spa_id good
 #  ---------------------
+
 
 @app.route("/add_appointment", methods=["GET", "POST"])
 def add_appointment():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     client_id = request.args.get("client_id") or request.form.get("client_id") or ""
     client_search = (request.args.get("client_search") or request.form.get("client_search") or "").strip()
+    selected_date = request.args.get("selected_date") or request.form.get("selected_date") or ""
 
     conn = get_db_connection()
     cur = conn.cursor()
-
-    selected_date = request.args.get("selected_date", "")
 
     if request.method == "POST":
         print("FORM KEYS:", list(request.form.keys()))
@@ -7556,7 +8267,13 @@ def add_appointment():
         appointment_time = (request.form.get("appointment_time") or "").strip()
         status = (request.form.get("status") or "").strip()
         notes = (request.form.get("notes") or "").strip()
-        incoming_booking_id = request.form.get("incoming_booking_id", "").strip()
+        incoming_booking_id = (request.form.get("incoming_booking_id") or "").strip()
+
+        if not client_id:
+            flash("Client is required.", "error")
+            cur.close()
+            conn.close()
+            return redirect(url_for("add_appointment", selected_date=selected_date))
 
         if not service_type_id:
             flash("Service was not submitted. Hard refresh the page and try again.", "error")
@@ -7564,6 +8281,39 @@ def add_appointment():
             conn.close()
             return redirect(url_for("add_appointment", selected_date=selected_date))
 
+        if not appointment_date or not appointment_time:
+            flash("Appointment date and time are required.", "error")
+            cur.close()
+            conn.close()
+            return redirect(url_for("add_appointment", selected_date=selected_date))
+
+        cur.execute("""
+            SELECT 1
+            FROM clients
+            WHERE client_id = %s
+              AND spa_id = %s
+        """, (client_id, spa_id))
+        valid_client = cur.fetchone()
+
+        if not valid_client:
+            flash("Invalid client selected.", "error")
+            cur.close()
+            conn.close()
+            return redirect(url_for("add_appointment", selected_date=selected_date))
+
+        cur.execute("""
+            SELECT 1
+            FROM service_name_types
+            WHERE service_type_id = %s
+              AND spa_id = %s
+        """, (service_type_id, spa_id))
+        valid_service = cur.fetchone()
+
+        if not valid_service:
+            flash("Invalid service selected.", "error")
+            cur.close()
+            conn.close()
+            return redirect(url_for("add_appointment", selected_date=selected_date))
 
         cur.execute("""
             INSERT INTO appointments (
@@ -7592,7 +8342,8 @@ def add_appointment():
                 SET status = 'imported',
                     reviewed_at = CURRENT_TIMESTAMP
                 WHERE incoming_booking_id = %s
-            """, (incoming_booking_id,))
+                  AND spa_id = %s
+            """, (incoming_booking_id, spa_id))
             session.pop("incoming_booking_data", None)
 
         conn.commit()
@@ -7636,7 +8387,6 @@ def add_appointment():
     """, (spa_id,))
     service_types = cur.fetchall()
 
-
     cur.close()
     conn.close()
 
@@ -7654,15 +8404,27 @@ def add_appointment():
 
 
 
+
+
+
+
+
+
+
+
 #  ---------------------
 #
 #   EDIT  APPOINTMENT
 #
+#
+#    spa_id good
+#
 #  -------------------- 
+
 
 @app.route("/edit_appointment/<int:appointment_id>", methods=["GET", "POST"])
 def edit_appointment(appointment_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -7682,13 +8444,29 @@ def edit_appointment(appointment_id):
                 notes = %s,
                 updated_at = CURRENT_TIMESTAMP
             WHERE appointment_id = %s
-        """, (appointment_date, appointment_time, duration, room_number, notes, appointment_id))
+              AND spa_id = %s
+        """, (
+            appointment_date,
+            appointment_time,
+            duration,
+            room_number,
+            notes,
+            appointment_id,
+            spa_id
+        ))
+
+        if cur.rowcount == 0:
+            conn.rollback()
+            cur.close()
+            conn.close()
+            flash("Appointment not found.", "error")
+            return redirect(url_for("appointments"))
 
         conn.commit()
         cur.close()
         conn.close()
 
-        return redirect(url_for('daily_schedule', date=appointment_date))
+        return redirect(url_for("daily_schedule", date=appointment_date))
 
     # GET (load existing data)
     cur.execute("""
@@ -7696,26 +8474,38 @@ def edit_appointment(appointment_id):
                duration_minutes, room_number, notes
         FROM appointments
         WHERE appointment_id = %s
-    """, (appointment_id,))
-    
+          AND spa_id = %s
+    """, (appointment_id, spa_id))
+
     appt = cur.fetchone()
 
     cur.close()
     conn.close()
 
+    if not appt:
+        flash("Appointment not found.", "error")
+        return redirect(url_for("appointments"))
+
     return render_template("edit_appointment.html", appt=appt)
+
+
+
+
+
 
 
 
 #  ---------------------
 #   
 #   DELETE  APPOINTMENT
-#  
+#
+#
+#   spa_id good  
 #  --------------------
 
 @app.route("/delete_appointment/<int:appointment_id>", methods=["POST"])
 def delete_appointment(appointment_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -7753,31 +8543,42 @@ def delete_appointment(appointment_id):
 #  ---------------------
 #
 #   CANCEL APPOINTMENT
-#
+#       spa_id good
 #  --------------------
+
+
 
 @app.route("/cancel_appointment/<int:appointment_id>", methods=["POST"])
 def cancel_appointment(appointment_id):
-    spa_id = get_current_spa_id()
-    conn = get_db_connection()  
+    spa_id = current_spa_id()
+    conn = get_db_connection()
     cur = conn.cursor()
 
-    # Only allow cancelling future appointments
+    # Only allow cancelling future appointments for this spa
     cur.execute("""
         UPDATE appointments
         SET status = 'cancelled',
             updated_at = CURRENT_TIMESTAMP
         WHERE appointment_id = %s
+          AND spa_id = %s
           AND (appointment_date + appointment_time) > CURRENT_TIMESTAMP
-    """, (appointment_id,))
-            
+    """, (appointment_id, spa_id))
+
+    if cur.rowcount == 0:
+        conn.rollback()
+        cur.close()
+        conn.close()
+        flash("Appointment not found or can no longer be cancelled.", "error")
+        return redirect(url_for("calendar_view", offset=0))
+
     conn.commit()
     cur.close()
     conn.close()
-                
-    flash("Appointment cancelled.", "warning") 
 
+    flash("Appointment cancelled.", "warning")
     return redirect(url_for("calendar_view", offset=0))
+
+
 
 
 
@@ -7788,12 +8589,14 @@ def cancel_appointment(appointment_id):
 #     
 #   RESCHEDULE   APPOINTMENT
 #  
-#  
+#  spa_id good
 #  -----------------
+
+
 
 @app.route("/reschedule_appointment/<int:appointment_id>", methods=["GET", "POST"])
 def reschedule_appointment(appointment_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -7808,6 +8611,21 @@ def reschedule_appointment(appointment_id):
 
         if not service_type_id or not appointment_date or not appointment_time or not status:
             flash("Please complete all required fields.", "error")
+            cur.close()
+            conn.close()
+            return redirect(url_for("reschedule_appointment", appointment_id=appointment_id))
+
+        # Validate service belongs to this spa
+        cur.execute("""
+            SELECT 1
+            FROM service_name_types
+            WHERE service_type_id = %s
+              AND spa_id = %s
+        """, (service_type_id, spa_id))
+        valid_service = cur.fetchone()
+
+        if not valid_service:
+            flash("Invalid service selected.", "error")
             cur.close()
             conn.close()
             return redirect(url_for("reschedule_appointment", appointment_id=appointment_id))
@@ -7832,6 +8650,13 @@ def reschedule_appointment(appointment_id):
             appointment_id,
             spa_id
         ))
+
+        if cur.rowcount == 0:
+            conn.rollback()
+            cur.close()
+            conn.close()
+            flash("Appointment not found.", "error")
+            return redirect(url_for("appointments"))
 
         conn.commit()
         cur.close()
@@ -7861,6 +8686,7 @@ def reschedule_appointment(appointment_id):
         FROM appointments a
         JOIN clients c
           ON a.client_id = c.client_id
+         AND a.spa_id = c.spa_id
         WHERE a.appointment_id = %s
           AND a.spa_id = %s
     """, (appointment_id, spa_id))
@@ -7900,17 +8726,18 @@ def reschedule_appointment(appointment_id):
 
 
 
-
 #  -----------------
 #
 #     COMPLETE APPOINTMENT
 #
-#
+#     spa_id good
 #  -----------------
+
+
 
 @app.route("/complete_appointment/<int:appointment_id>", methods=["POST"])
 def complete_appointment(appointment_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -7918,35 +8745,58 @@ def complete_appointment(appointment_id):
         SELECT appointment_date
         FROM appointments
         WHERE appointment_id = %s
-    """, (appointment_id,))
+          AND spa_id = %s
+    """, (appointment_id, spa_id))
     appt = cur.fetchone()
+
+    if not appt:
+        cur.close()
+        conn.close()
+        flash("Appointment not found.", "error")
+        return redirect(url_for("appointments"))
 
     cur.execute("""
         UPDATE appointments
         SET status = 'completed',
             updated_at = CURRENT_TIMESTAMP
         WHERE appointment_id = %s
+          AND spa_id = %s
           AND (appointment_date + appointment_time) <= CURRENT_TIMESTAMP
-    """, (appointment_id,))
+    """, (appointment_id, spa_id))
+
+    if cur.rowcount == 0:
+        conn.rollback()
+        cur.close()
+        conn.close()
+        flash("Appointment cannot be completed yet.", "error")
+        return redirect(url_for("daily_schedule", date=appt[0]))
 
     conn.commit()
     cur.close()
     conn.close()
 
-    if appt:
-        return redirect(url_for('daily_schedule', date=appt[0]))
-    return redirect(url_for('calendar_view', offset=0))
+    flash("Appointment marked completed.", "success")
+    return redirect(url_for("daily_schedule", date=appt[0]))
+
+
+
+
+
+
+
 
 
 #  ------------------
 #     
 #   COMPLETE OVERDUE APPOINTMENTS 
-#    
+#    spa_id good
 #  -----------------
+
+
 
 @app.route("/complete_overdue_appointments", methods=["POST"])
 def complete_overdue_appointments():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -7954,15 +8804,28 @@ def complete_overdue_appointments():
         UPDATE appointments
         SET status = 'completed',
             updated_at = CURRENT_TIMESTAMP
-        WHERE status = 'booked'
+        WHERE spa_id = %s
+          AND status = 'booked'
           AND (appointment_date + appointment_time) < CURRENT_TIMESTAMP
-    """)
+    """, (spa_id,))
+
+    updated_count = cur.rowcount
 
     conn.commit()
     cur.close()
     conn.close()
 
-    return redirect(url_for('calendar_view', offset=0))
+    if updated_count:
+        flash(f"{updated_count} overdue appointment(s) marked completed.", "success")
+    else:
+        flash("No overdue appointments to complete.", "info")
+
+    return redirect(url_for("calendar_view", offset=0))
+
+
+
+
+
 
 
 
@@ -7971,14 +8834,13 @@ def complete_overdue_appointments():
 #    POST APPOINTMENT WRAP UP
 #
 #
-#
+#     spa_id good
 #   ---------------------------
-
 
 
 @app.route("/post_appointment_wrap_up/<int:appointment_id>", methods=["GET", "POST"])
 def post_appointment_wrap_up(appointment_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     selected_date = request.args.get("date") or request.form.get("date") or ""
 
     conn = get_db_connection()
@@ -7990,6 +8852,23 @@ def post_appointment_wrap_up(appointment_id):
         home_care_advice = request.form.get("home_care_advice", "")
         provider_notes = request.form.get("provider_notes", "")
 
+        # Validate appointment belongs to this spa
+        cur.execute("""
+            SELECT 1
+            FROM appointments
+            WHERE appointment_id = %s
+              AND spa_id = %s
+        """, (appointment_id, spa_id))
+        valid_appointment = cur.fetchone()
+
+        if not valid_appointment:
+            cur.close()
+            conn.close()
+            flash("Appointment not found.", "error")
+            if selected_date:
+                return redirect(url_for("daily_schedule", date=selected_date))
+            return redirect(url_for("appointments"))
+
         cur.execute("""
             INSERT INTO appointment_wrap_up (
                 spa_id,
@@ -8000,7 +8879,7 @@ def post_appointment_wrap_up(appointment_id):
                 provider_notes
             )
             VALUES (%s, %s, %s, %s, %s, %s)
-            ON CONFLICT (appointment_id)
+            ON CONFLICT (spa_id, appointment_id)
             DO UPDATE SET
                 treatment_notes = EXCLUDED.treatment_notes,
                 products_used = EXCLUDED.products_used,
@@ -8015,10 +8894,10 @@ def post_appointment_wrap_up(appointment_id):
             provider_notes
         ))
 
-
         cur.execute("""
             UPDATE appointments
-            SET status = 'Completed'
+            SET status = 'Completed',
+                updated_at = CURRENT_TIMESTAMP
             WHERE appointment_id = %s
               AND spa_id = %s
         """, (appointment_id, spa_id))
@@ -8029,11 +8908,6 @@ def post_appointment_wrap_up(appointment_id):
 
         flash("Wrap-Up was saved successfully.", "success")
         return redirect(url_for("post_appointment_wrap_up_saved", appointment_id=appointment_id))
-
-        if selected_date:
-            return redirect(url_for("daily_schedule", date=selected_date))
-
-        return redirect(url_for("post_appointment_wrap_up", appointment_id=appointment_id))
 
     cur.execute("""
         SELECT
@@ -8084,6 +8958,9 @@ def post_appointment_wrap_up(appointment_id):
 
 
 
+
+
+
 #  ----------------------------
 #      POST APPOINTMENT SAVED
 #    
@@ -8109,50 +8986,66 @@ def post_appointment_wrap_up_saved(appointment_id):
 #      CLIENT SECTION
 #
 #    Client History
+#
+#  spa_id safe
+#
 #  -----------------
+
 
 @app.route("/client_history")
 def client_history():
-    spa_id = get_current_spa_id()
-    search = request.args.get("search", "")
-
+    spa_id = current_spa_id()
+    search = request.args.get("search", "").strip()
+    
     conn = get_db_connection()
     cur = conn.cursor()
-
+            
     if search:
-        cur.execute("""
+        cur.execute("""   
             SELECT client_id, first_name, last_name
             FROM clients
-            WHERE LOWER(first_name) LIKE %s
-               OR LOWER(last_name) LIKE %s
-               OR phone LIKE %s
-            ORDER BY last_name
-        """, (f"%{search.lower()}%", f"%{search.lower()}%", f"%{search}%"))
+            WHERE spa_id = %s
+              AND (
+                   LOWER(first_name) LIKE %s
+                   OR LOWER(last_name) LIKE %s
+                   OR phone LIKE %s
+              )
+            ORDER BY last_name, first_name
+        """, (spa_id, f"%{search.lower()}%", f"%{search.lower()}%", f"%{search}%"))
     else:
         cur.execute("""
             SELECT client_id, first_name, last_name
             FROM clients
-            ORDER BY last_name
-        """)
-
+            WHERE spa_id = %s
+            ORDER BY last_name, first_name
+        """, (spa_id,))
+        
     rows = cur.fetchall()
-
+    
     cur.close()
     conn.close()
-
+        
     return render_template("client_history.html", rows=rows, search=search)
+
+
+
 
 #  ------------------
 #   Client History Detail page 1
+#
+#
+#   Spa_id good
+#
 #  -----------------
 
 
 @app.route("/client_history/<int:client_id>")
 def client_history_detail(client_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
-
+    
+    # Get client (protected by spa_id)
     cur.execute("""
         SELECT client_id, first_name, last_name, phone, email, birth_date
         FROM clients
@@ -8161,7 +9054,14 @@ def client_history_detail(client_id):
     """, (client_id, spa_id))
     client = cur.fetchone()
 
-    cur.execute("""
+    # 🚨 Safety: prevent invalid or cross-spa access
+    if not client:
+        cur.close()
+        conn.close()
+        return "Client not found", 404
+
+    # Appointment history
+    cur.execute("""  
         SELECT
             a.appointment_id,
             a.appointment_date,
@@ -8172,7 +9072,7 @@ def client_history_detail(client_id):
             a.status,
             a.notes,
             aw.treatment_notes,
-            aw.products_used,
+            aw.products_used, 
             aw.home_care_advice,
             aw.provider_notes
         FROM appointments a
@@ -8188,30 +9088,31 @@ def client_history_detail(client_id):
                  a.appointment_time DESC NULLS LAST
     """, (client_id, spa_id))
     rows = cur.fetchall()
-
+        
     cur.close()
     conn.close()
-
+            
     return render_template(
         "client_history_detail.html",
         rows=rows,
-        client=client,
-        client_id=client_id
+        client=client
     )
-
-
 
 
 
 
 #  ------------------
 #    Client History Detail page 2
+#
+#
+#    spa_id good
+#
 #  -----------------
 
 
 @app.route("/client_history_two/<int:client_id>")
 def client_history_detail_two(client_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -8222,6 +9123,11 @@ def client_history_detail_two(client_id):
           AND spa_id = %s
     """, (client_id, spa_id))
     client = cur.fetchone()
+
+    if not client:
+        cur.close()
+        conn.close()
+        return "Client not found", 404
 
     cur.execute("""
         SELECT
@@ -8264,28 +9170,59 @@ def client_history_detail_two(client_id):
 
 
 
-
 #  ---------------------------------
 #   ADD NEW CLIENT STEP 1  
 #         PAGE 1
+#
+#
+#
+#    spa_id good
+#
+#
 #  --------------------------------
+
 
 @app.route("/add_new_client", methods=["GET", "POST"])
 def add_new_client():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     selected_date = request.args.get("selected_date") or request.form.get("selected_date") or ""
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT spa_location_id, location_name
+        FROM spa_locations
+        WHERE spa_id = %s
+          AND is_active = TRUE
+        ORDER BY location_name
+    """, (spa_id,))
+    locations = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
     if request.method == "POST":
         session["new_client_step1"] = {
-            "first_name": request.form.get("first_name", ""),
-            "last_name": request.form.get("last_name", ""),
-            "phone": request.form.get("phone", ""),
-            "email": request.form.get("email", ""),
+            "first_name": request.form.get("first_name", "").strip(),
+            "last_name": request.form.get("last_name", "").strip(),
+            "phone": request.form.get("phone", "").strip(),
+            "email": request.form.get("email", "").strip(),
             "birth_date": request.form.get("birth_date", ""),
-            "address": request.form.get("address", ""),
-            "city": request.form.get("city", ""),
-            "state": request.form.get("state", "TX"),
-            "zip": request.form.get("zip", "")
+            "address": request.form.get("address", "").strip(),
+            "city": request.form.get("city", "").strip(),
+            "state": request.form.get("state", "TX").strip(),
+            "zip": request.form.get("zip", "").strip(),
+            "spa_location_id": request.form.get("spa_location_id") or "",
+            "preferred_location_id": request.form.get("preferred_location_id") or "",
+            "client_status": request.form.get("client_status", "Current").strip(),
+            "preferred_language": request.form.get("preferred_language", "").strip(),
+            "ok_to_call": "ok_to_call" in request.form,
+            "ok_to_text": "ok_to_text" in request.form,
+            "ok_to_email": "ok_to_email" in request.form,
+            "preferred_contact_method": request.form.get("preferred_contact_method", "").strip()
         }
+
         return redirect(url_for("add_new_client_step2", selected_date=selected_date))
 
     step1_data = session.get("new_client_step1", {})
@@ -8302,10 +9239,26 @@ def add_new_client():
                 "address": "",
                 "city": "",
                 "state": "TX",
-                "zip": ""
+                "zip": "",
+                "spa_location_id": "",
+                "preferred_location_id": "",
+                "client_status": "Current",
+                "preferred_language": "",
+                "ok_to_call": True,
+                "ok_to_text": True,
+                "ok_to_email": True,
+                "preferred_contact_method": ""
             }
 
-    return render_template("add_new_client.html", selected_date=selected_date,  step1_data=step1_data)
+    return render_template(
+        "add_new_client.html",
+        selected_date=selected_date,
+        step1_data=step1_data,
+        locations=locations
+    )
+
+
+
 
 
 
@@ -8313,32 +9266,42 @@ def add_new_client():
 #  ---------------------------------
 #   ADD NEW CLIENT STEP 2  
 #         PAGE 2
+#
+#    spa_id good
+#
 #  --------------------------------
 
 
 @app.route("/add_new_client_step2", methods=["GET", "POST"])
 def add_new_client_step2():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     selected_date = request.args.get("selected_date") or request.form.get("selected_date") or ""
 
-    if "new_client_step1" not in session:
+    step1 = session.get("new_client_step1")
+    if not step1:
+        return redirect(url_for("add_new_client"))
+
+    # Optional but recommended: protect against cross-spa session data
+    if step1.get("spa_id") and step1.get("spa_id") != spa_id:
+        session.pop("new_client_step1", None)
+        session.pop("new_client_step2", None)
         return redirect(url_for("add_new_client"))
 
     if request.method == "POST":
         session["new_client_step2"] = {
-            "emergency_contact_name": request.form.get("emergency_contact_name", ""),
-            "emergency_contact_phone": request.form.get("emergency_contact_phone", ""),
-            "referred_by": request.form.get("referred_by", ""),
-            "notes_one": request.form.get("notes_one", ""),
-            "notes_two": request.form.get("notes_two", ""),
-            "notes_three": request.form.get("notes_three", ""),
+            "emergency_contact_name": request.form.get("emergency_contact_name", "").strip(),
+            "emergency_contact_phone": request.form.get("emergency_contact_phone", "").strip(),
+            "referred_by": request.form.get("referred_by", "").strip(),
+            "notes_one": request.form.get("notes_one", "").strip(),
+            "notes_two": request.form.get("notes_two", "").strip(),
+            "notes_three": request.form.get("notes_three", "").strip(),
             "active_client": request.form.get("active_client", "true")
         }
 
         action = request.form.get("action")
 
         if action == "back":
-            return redirect(url_for("add_new_client"))
+            return redirect(url_for("add_new_client", selected_date=selected_date))
 
         if action == "save":
             step1 = session.get("new_client_step1", {})
@@ -8350,6 +9313,7 @@ def add_new_client_step2():
 
             cur.execute("""
                 INSERT INTO clients (
+                    spa_id,
                     first_name,
                     last_name,
                     phone,
@@ -8359,6 +9323,14 @@ def add_new_client_step2():
                     city,
                     state,
                     zip,
+                    spa_location_id,
+                    preferred_location_id,
+                    client_status,
+                    preferred_language,
+                    ok_to_call,
+                    ok_to_text,
+                    ok_to_email,
+                    preferred_contact_method,
                     emergency_contact_name,
                     emergency_contact_phone,
                     referred_by,
@@ -8367,9 +9339,16 @@ def add_new_client_step2():
                     notes_three,
                     active_client
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s
+                )
                 RETURNING client_id
             """, (
+                spa_id,
                 step1.get("first_name", ""),
                 step1.get("last_name", ""),
                 step1.get("phone", ""),
@@ -8379,6 +9358,14 @@ def add_new_client_step2():
                 step1.get("city", ""),
                 step1.get("state", ""),
                 step1.get("zip", ""),
+                step1.get("spa_location_id") or None,
+                step1.get("preferred_location_id") or None,
+                step1.get("client_status", "Current"),
+                step1.get("preferred_language") or None,
+                step1.get("ok_to_call", True),
+                step1.get("ok_to_text", True),
+                step1.get("ok_to_email", True),
+                step1.get("preferred_contact_method") or None,
                 step2.get("emergency_contact_name", ""),
                 step2.get("emergency_contact_phone", ""),
                 step2.get("referred_by", ""),
@@ -8399,6 +9386,7 @@ def add_new_client_step2():
             session.pop("new_client_step2", None)
 
             if incoming_booking_data:
+                session.pop("incoming_booking_data", None)
                 return redirect(url_for(
                     "add_appointment",
                     client_id=new_client_id,
@@ -8417,18 +9405,19 @@ def add_new_client_step2():
                     selected_date=selected_date
                 ))
 
-
-
             return redirect(url_for("client_history"))
 
     step2_data = session.get("new_client_step2", {})
 
-
     return render_template(
-        "add_new_client_step2.html", 
+        "add_new_client_step2.html",
         step2_data=step2_data,
         selected_date=selected_date
     )
+
+
+
+
 
 
 
@@ -8446,22 +9435,42 @@ def edit_client(client_id):
     conn = get_db_connection()
     cur = conn.cursor()
 
+    # Load active locations for dropdowns
+    cur.execute("""
+        SELECT spa_location_id, location_name
+        FROM spa_locations
+        WHERE spa_id = %s
+          AND is_active = TRUE
+        ORDER BY location_name
+    """, (spa_id,))
+    locations = cur.fetchall()
+
     if request.method == "POST":
-        first_name = request.form.get("first_name", "")
-        last_name = request.form.get("last_name", "")
-        phone = request.form.get("phone", "")
-        email = request.form.get("email", "")
+        first_name = request.form.get("first_name", "").strip()
+        last_name = request.form.get("last_name", "").strip()
+        phone = request.form.get("phone", "").strip()
+        email = request.form.get("email", "").strip()
         birth_date = request.form.get("birth_date") or None
-        address = request.form.get("address", "")
-        city = request.form.get("city", "")
-        state = request.form.get("state", "")
-        zip_code = request.form.get("zip", "")
-        emergency_contact_name = request.form.get("emergency_contact_name", "")
-        emergency_contact_phone = request.form.get("emergency_contact_phone", "")
-        referred_by = request.form.get("referred_by", "")
-        notes_one = request.form.get("notes_one", "")
-        notes_two = request.form.get("notes_two", "")
-        notes_three = request.form.get("notes_three", "")
+        address = request.form.get("address", "").strip()
+        city = request.form.get("city", "").strip()
+        state = request.form.get("state", "").strip()
+        zip_code = request.form.get("zip", "").strip()
+
+        spa_location_id = request.form.get("spa_location_id") or None
+        preferred_location_id = request.form.get("preferred_location_id") or None
+        client_status = request.form.get("client_status", "Current").strip()
+        preferred_language = request.form.get("preferred_language", "").strip() or None
+        ok_to_call = "ok_to_call" in request.form
+        ok_to_text = "ok_to_text" in request.form
+        ok_to_email = "ok_to_email" in request.form
+        preferred_contact_method = request.form.get("preferred_contact_method", "").strip() or None
+
+        emergency_contact_name = request.form.get("emergency_contact_name", "").strip()
+        emergency_contact_phone = request.form.get("emergency_contact_phone", "").strip()
+        referred_by = request.form.get("referred_by", "").strip()
+        notes_one = request.form.get("notes_one", "").strip()
+        notes_two = request.form.get("notes_two", "").strip()
+        notes_three = request.form.get("notes_three", "").strip()
         active_client = True if request.form.get("active_client") == "true" else False
 
         cur.execute("""
@@ -8475,6 +9484,14 @@ def edit_client(client_id):
                 city = %s,
                 state = %s,
                 zip = %s,
+                spa_location_id = %s,
+                preferred_location_id = %s,
+                client_status = %s,
+                preferred_language = %s,
+                ok_to_call = %s,
+                ok_to_text = %s,
+                ok_to_email = %s,
+                preferred_contact_method = %s,
                 emergency_contact_name = %s,
                 emergency_contact_phone = %s,
                 referred_by = %s,
@@ -8484,6 +9501,7 @@ def edit_client(client_id):
                 active_client = %s,
                 updated_at = CURRENT_TIMESTAMP
             WHERE client_id = %s
+              AND spa_id = %s
         """, (
             first_name,
             last_name,
@@ -8494,6 +9512,14 @@ def edit_client(client_id):
             city,
             state,
             zip_code,
+            spa_location_id,
+            preferred_location_id,
+            client_status,
+            preferred_language,
+            ok_to_call,
+            ok_to_text,
+            ok_to_email,
+            preferred_contact_method,
             emergency_contact_name,
             emergency_contact_phone,
             referred_by,
@@ -8501,7 +9527,8 @@ def edit_client(client_id):
             notes_two,
             notes_three,
             active_client,
-            client_id
+            client_id,
+            spa_id
         ))
 
         conn.commit()
@@ -8509,7 +9536,6 @@ def edit_client(client_id):
         conn.close()
 
         flash("Client updated successfully!")
-
         return redirect(url_for("client_history"))
 
     cur.execute("""
@@ -8523,6 +9549,14 @@ def edit_client(client_id):
             city,
             state,
             zip,
+            spa_location_id,
+            preferred_location_id,
+            client_status,
+            preferred_language,
+            ok_to_call,
+            ok_to_text,
+            ok_to_email,
+            preferred_contact_method,
             emergency_contact_name,
             emergency_contact_phone,
             referred_by,
@@ -8532,14 +9566,122 @@ def edit_client(client_id):
             active_client
         FROM clients
         WHERE client_id = %s
-    """, (client_id,))
+          AND spa_id = %s
+    """, (client_id, spa_id))
 
     client = cur.fetchone()
+
+
+    # --- CLIENT SUMMARY DATA ---
+
+    # Total visits
+    cur.execute("""
+        SELECT COUNT(*)
+        FROM appointments
+        WHERE client_id = %s
+          AND spa_id = %s
+          AND status = 'completed'
+    """, (client_id, spa_id))
+    total_visits = cur.fetchone()[0]
+
+    # Total revenue
+    cur.execute("""
+        SELECT COALESCE(SUM(total_amount), 0)
+        FROM income
+        WHERE client_id = %s
+          AND spa_id = %s
+    """, (client_id, spa_id))
+    total_revenue = cur.fetchone()[0]
+
+    # Last visit
+    cur.execute("""
+        SELECT appointment_date
+        FROM appointments
+        WHERE client_id = %s
+          AND spa_id = %s
+          AND status = 'completed'
+        ORDER BY appointment_date DESC
+        LIMIT 1
+    """, (client_id, spa_id))
+    last_visit = cur.fetchone()
+
+    # Next appointment
+    cur.execute("""
+        SELECT appointment_date, appointment_time
+        FROM appointments
+        WHERE client_id = %s
+          AND spa_id = %s
+          AND status = 'booked'
+          AND appointment_date >= CURRENT_DATE
+        ORDER BY appointment_date, appointment_time
+        LIMIT 1
+    """, (client_id, spa_id))
+    next_appt = cur.fetchone()
+
+
+    # --- RECENT APPOINTMENT HISTORY ---
+    cur.execute("""
+        SELECT
+            appointment_id,
+            appointment_date,
+            appointment_time,
+            duration_minutes,
+            room_number,
+            status,
+            booking_channel,
+            price_at_booking,            
+            notes
+        FROM appointments
+        WHERE client_id = %s
+          AND spa_id = %s
+        ORDER BY appointment_date DESC, appointment_time DESC
+        LIMIT 10
+    """, (client_id, spa_id))
+    recent_appointments = cur.fetchall()
+
+    # Lifetime value from appointments
+    cur.execute("""
+        SELECT COALESCE(SUM(price_at_booking), 0)
+        FROM appointments
+        WHERE client_id = %s
+          AND spa_id = %s
+          AND status = 'completed'
+    """, (client_id, spa_id))
+    lifetime_value = cur.fetchone()[0]
+
+
+    # Average ticket from completed appointments
+    cur.execute("""
+        SELECT COALESCE(AVG(price_at_booking), 0)
+        FROM appointments
+        WHERE client_id = %s
+          AND spa_id = %s
+          AND LOWER(status) = 'completed'
+    """, (client_id, spa_id))
+    average_ticket = cur.fetchone()[0]
+
 
     cur.close()
     conn.close()
 
-    return render_template("edit_client.html", client=client, client_id=client_id)
+    return render_template(
+        "edit_client.html",
+        client=client,
+        client_id=client_id,
+        locations=locations,
+        total_visits=total_visits,
+        total_revenue=total_revenue,
+        last_visit=last_visit,
+        next_appt=next_appt,
+        recent_appointments=recent_appointments,
+        lifetime_value=lifetime_value,
+        average_ticket=average_ticket
+    )
+
+
+
+
+
 
 
 
@@ -8846,19 +9988,20 @@ def edit_fitzpatrick_types(fitzpatrick_id):
 #    REFERRAL SOURCES
 #  -----------------------
 
+
 @app.route("/referral_sources", methods=["GET", "POST"])
 def referral_sources():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
-
+    
     if request.method == "POST":
-        referral_source_name = request.form["referral_source_name"]
+        referral_source_name = request.form["referral_source_name"].strip()
 
         cur.execute("""
-            INSERT INTO referral_sources (referral_source_name)
-            VALUES (%s)
-        """, (referral_source_name,))
+            INSERT INTO referral_sources (spa_id, referral_source_name)
+            VALUES (%s, %s)
+        """, (spa_id, referral_source_name))
         conn.commit()
 
         cur.close()
@@ -8868,14 +10011,20 @@ def referral_sources():
     cur.execute("""
         SELECT referral_source_id, referral_source_name
         FROM referral_sources
+        WHERE spa_id = %s
         ORDER BY referral_source_id
-    """)
+    """, (spa_id,))
     referral_sources_list = cur.fetchall()
 
     cur.close()
     conn.close()
 
     return render_template("referral_sources.html", referral_sources=referral_sources_list)
+
+
+
+
+
 
 #  --------------------
 #

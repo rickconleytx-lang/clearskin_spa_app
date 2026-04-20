@@ -1766,3 +1766,132 @@ table thead th {
 .table-container thead th:first-child {
     z-index: 15;
 }
+
+
+.alert-banner {
+    background-color: #ffe5e5;
+    border-left: 6px solid #cc0000;
+    padding: 12px;
+    margin-bottom: 15px;
+    font-weight: bold;
+}
+
+.alert-card {
+    background-color: #ffe5e5;
+    border: 2px solid #cc0000;
+}
+
+
+.summary-bar {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.summary-card {
+    background: #fff;
+    border: 1px solid #e3e3e3;
+    border-radius: 12px;
+    padding: 16px;
+    text-align: center;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.summary-label {
+    display: block;
+    font-size: 0.85rem;
+    color: #777;
+    margin-bottom: 6px;
+}
+
+.summary-value {
+    font-size: 1.3rem;
+    font-weight: 600;
+}
+
+@media (max-width: 600px) {
+    .summary-bar {
+        grid-template-columns: 1fr;
+    }
+}
+
+.history-card {
+    background: #fff;
+    border: 1px solid #e3e3e3;
+    border-radius: 14px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
+    margin-bottom: 22px;
+    overflow: hidden;
+}
+
+.table-wrap {
+    overflow-x: auto;
+}
+
+.history-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.95rem;
+}
+
+.history-table th,
+.history-table td {
+    padding: 12px 10px;
+    border-bottom: 1px solid #efefef;
+    text-align: left;
+    vertical-align: top;
+}
+
+.history-table th {
+    background: #fafafa;
+    font-weight: 700;
+    color: #444;
+}
+
+.history-table tr:hover {
+    background: #fcfcfc;
+}
+
+.notes-cell {
+    max-width: 260px;
+    white-space: normal;
+    color: #555;
+}
+
+.table-link {
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.status-pill {
+    display: inline-block;
+    padding: 5px 10px;
+    border-radius: 999px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    border: 1px solid #ddd;
+    background: #f7f7f7;
+}
+
+.status-booked {
+    background: #f3f8ff;
+}
+
+.status-completed {
+    background: #f3fcf4;
+}
+
+.status-cancelled {
+    background: #fff4f4;
+}
+
+.status-no-show {
+    background: #fff8ef;
+}
+
+.empty-state {
+    margin: 0;
+    color: #666;
+}
+

@@ -1,0 +1,143 @@
+c
+
+
+
+April 19 
+
+SQL changes
+
+
+
+
+
+CREATE TABLE spa_locations (
+    spa_location_id SERIAL PRIMARY KEY,
+    spa_id INT NOT NULL REFERENCES spas(spa_id) ON DELETE CASCADE,
+    location_name VARCHAR(100) NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+ALTER TABLE spa_locations
+ADD CONSTRAINT uq_spa_locations_name UNIQUE (spa_id, location_name);
+
+
+INSERT INTO spa_locations (spa_id, location_name)
+VALUES
+    (1, 'Justin'),
+	(1, 'Flower Mound'),
+    (1, 'Fort Worth');
+
+
+
+SELECT * FROM spa_locations;
+
+
+
+
+
+
+
+ALTER TABLE clients
+ADD COLUMN spa_location_id INT REFERENCES spa_locations(spa_location_id),
+ADD COLUMN preferred_location_id INT REFERENCES spa_locations(spa_location_id),
+ADD COLUMN client_status VARCHAR(50) NOT NULL DEFAULT 'Current',
+ADD COLUMN preferred_language VARCHAR(50),
+ADD COLUMN ok_to_call BOOLEAN NOT NULL DEFAULT TRUE,
+ADD COLUMN ok_to_text BOOLEAN NOT NULL DEFAULT TRUE,
+ADD COLUMN ok_to_email BOOLEAN NOT NULL DEFAULT TRUE,
+ADD COLUMN preferred_contact_method VARCHAR(50);
+
+
+
+ALTER TABLE clients
+ADD CONSTRAINT chk_client_status
+CHECK (client_status IN ('Current', 'Previous', 'Prior Spa Client'));
+
+ALTER TABLE clients
+ADD CONSTRAINT chk_preferred_contact_method
+CHECK (preferred_contact_method IN ('Phone', 'Email', 'Text', 'Email/Text'));
+
+
+SELECT * FROM clients;
+
+
+
+
+
+ALTER TABLE visit_summary
+ADD COLUMN reminder_to_schedule BOOLEAN NOT NULL DEFAULT FALSE,
+ADD COLUMN reminder_service_type VARCHAR(100),
+ADD COLUMN reminder_days_after INT,
+ADD COLUMN reminder_date DATE;
+
+ALTER TABLE visit_summary
+ADD CONSTRAINT chk_reminder_days_after
+CHECK (reminder_days_after IS NULL OR reminder_days_after >= 0);
+
+
+
+
+SELECT * FROM visit_summary;
+
+
+
+CREATE TABLE client_statuses (
+    client_status_id SERIAL PRIMARY KEY,
+    status_name VARCHAR(50) NOT NULL UNIQUE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+
+
+
+INSERT INTO client_statuses (status_name)
+VALUES
+    ('Current'),
+    ('Previous'),
+    ('Prior Spa Client');
+
+SELECT * FROM client_statuses;
+
+
+
+
+
+
+CREATE TABLE preferred_contact_methods (
+    preferred_contact_method_id SERIAL PRIMARY KEY,
+    method_name VARCHAR(50) NOT NULL UNIQUE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+
+
+
+INSERT INTO preferred_contact_methods (method_name)
+VALUES
+    ('Phone'),
+    ('Email'),
+    ('Text'),
+    ('Email/Text');
+
+
+SELECT * FROM preferred_contact_methods;
+
+
+CREATE TABLE preferred_languages (
+    preferred_language_id SERIAL PRIMARY KEY,
+    language_name VARCHAR(50) NOT NULL UNIQUE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+
+
+INSERT INTO preferred_languages (language_name)
+VALUES
+    ('English'),
+    ('Spanish');
+
+SELECT * FROM preferred_languages;
+
+
+ALL TABLES ABOVE UPLOADED TO RENDER 
