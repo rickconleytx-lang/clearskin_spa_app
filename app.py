@@ -2704,7 +2704,6 @@ def gift_certificates_home():
             ORDER BY gift_cert_id, sent_date DESC
         ) r
             ON gc.gift_cert_id = r.gift_cert_id
-           AND gc.spa_id = r.spa_id
         {where_sql}
         {order_sql}
     """
