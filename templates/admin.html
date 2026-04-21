@@ -44,8 +44,20 @@
     <a class="btn" href="{{ url_for('manage_dropdown', dropdown_key='income_types') }}">Income Types</a>
     <a class="btn" href="{{ url_for('manage_dropdown', dropdown_key='payment_methods') }}">Payment Methods</a>
     <a class="btn" href="{{ url_for('manage_dropdown', dropdown_key='vendor_name') }}">Vendor Name</a>
+    <a class="btn" href="{{ url_for('manage_dropdown', dropdown_key='compensation_types') }}">Compensation Types</a>
 </div>
 
+<br>
+
+<h2>Spa Management</h2>
+<div class="admin-links">
+    <a class="btn" href="{{ url_for('manage_dropdown', dropdown_key='spa_locations') }}">Spa Locations</a>
+    <a class="btn" href="{{ url_for('manage_dropdown', dropdown_key='client_statuses') }}">Client Statuses</a>
+    <a class="btn" href="{{ url_for('manage_dropdown', dropdown_key='preferred_contact_methods') }}">Preferred Contact Methods</a>
+    <a class="btn" href="{{ url_for('manage_dropdown', dropdown_key='vendor_name') }}">Vendor Name</a>
+</div>
+<br>
+<p style="color: red";>Important:  Each Spa MUST set their Time Zone</p>
 
 <div class="admin-section">
     <h2>Time Settings</h2>

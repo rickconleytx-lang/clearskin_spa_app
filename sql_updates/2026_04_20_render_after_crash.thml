@@ -1,0 +1,171 @@
+RENDER   RENDER   RENDER
+
+THIS IS FROM PGADMIN AFTER THE CRASH ON 4/20
+
+
+
+
+
+
+
+
+ALTER TABLE client_statuses
+ADD CONSTRAINT unique_status_per_spa
+UNIQUE (spa_id, status_name);
+
+SELECT *
+FROM income_types
+WHERE spa_id IS NULL;
+
+ALTER TABLE income_types
+ALTER COLUMN spa_id SET NOT NULL;
+
+ALTER TABLE income_types
+ADD CONSTRAINT fk_income_types_spa
+FOREIGN KEY (spa_id)
+REFERENCES spas(spa_id)
+ON DELETE CASCADE;
+
+ALTER TABLE skin_types
+ADD COLUMN spa_id INT;
+
+UPDATE skin_types
+SET spa_id = 1;
+
+SELECT *
+FROM skin_types
+WHERE spa_id IS NULL;
+
+ALTER TABLE skin_types
+ALTER COLUMN spa_id SET NOT NULL;
+
+
+ALTER TABLE skin_types
+ADD CONSTRAINT fk_skin_types_spa
+FOREIGN KEY (spa_id)
+REFERENCES spas(spa_id)
+ON DELETE CASCADE;
+
+
+ALTER TABLE skin_types
+DROP CONSTRAINT IF EXISTS skin_types_skin_type_name_key;
+
+
+ALTER TABLE skin_types
+ADD CONSTRAINT unique_skin_type_per_spa
+UNIQUE (spa_id, skin_type_name);
+
+
+SELECT *
+FROM appointment_status
+WHERE spa_id IS NULL;
+
+SELECT *
+FROM appointment_status
+WHERE spa_id IS NULL;
+
+ALTER TABLE appointment_status
+ALTER COLUMN spa_id SET NOT NULL;
+
+ALTER TABLE appointment_status
+ADD CONSTRAINT fk_appointment_status_spa
+FOREIGN KEY (spa_id)
+REFERENCES spas(spa_id)
+ON DELETE CASCADE;
+
+ALTER TABLE appointment_status
+ADD CONSTRAINT unique_appointment_status_per_spa
+UNIQUE (spa_id, status_name);
+
+
+
+INSERT INTO preferred_contact_methods (method_name)
+VALUES
+    ('Phone'),
+    ('Email'),
+    ('Text'),
+    ('Email/Text');
+
+
+SELECT * FROM preferred_contact_methods;
+
+
+CREATE TABLE preferred_languages (
+    preferred_language_id SERIAL PRIMARY KEY,
+    language_name VARCHAR(50) NOT NULL UNIQUE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+
+
+INSERT INTO preferred_languages (language_name)
+VALUES
+    ('English'),
+    ('Spanish');
+
+    
+SELECT * FROM preferred_languages;
+
+
+CREATE TABLE client_statuses (
+    client_status_id SERIAL PRIMARY KEY,
+    status_name VARCHAR(50) NOT NULL UNIQUE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+
+
+INSERT INTO client_statuses (status_name)
+VALUES
+    ('Current'),
+    ('Previous'),
+    ('Prior Spa Client');
+    
+SELECT * FROM client_statuses;
+
+
+CREATE TABLE preferred_contact_methods (
+    preferred_contact_method_id SERIAL PRIMARY KEY,
+    method_name VARCHAR(50) NOT NULL UNIQUE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+
+
+ALTER TABLE visit_summary
+ADD COLUMN reminder_to_schedule BOOLEAN NOT NULL DEFAULT FALSE,
+ADD COLUMN reminder_service_type VARCHAR(100),
+ADD COLUMN reminder_days_after INT,
+ADD COLUMN reminder_date DATE;
+
+
+ALTER TABLE visit_summary
+ADD CONSTRAINT chk_reminder_days_after
+CHECK (reminder_days_after IS NULL OR reminder_days_after >= 0);
+
+
+
+
+SELECT * FROM visit_summary;
+
+
+ALTER TABLE clients
+ADD COLUMN spa_location_id INT REFERENCES spa_locations(spa_location_id),
+ADD COLUMN preferred_location_id INT REFERENCES spa_locations(spa_location_id),
+ADD COLUMN client_status VARCHAR(50) NOT NULL DEFAULT 'Current',
+ADD COLUMN preferred_language VARCHAR(50),
+ADD COLUMN ok_to_call BOOLEAN NOT NULL DEFAULT TRUE,
+ADD COLUMN ok_to_text BOOLEAN NOT NULL DEFAULT TRUE,
+ADD COLUMN ok_to_email BOOLEAN NOT NULL DEFAULT TRUE,
+ADD COLUMN preferred_contact_method VARCHAR(50);
+
+ALTER TABLE clients
+ADD CONSTRAINT chk_client_status
+CHECK (client_status IN ('Current', 'Previous', 'Prior Spa Client'));
+
+ALTER TABLE clients
+ADD CONSTRAINT chk_preferred_contact_method
+CHECK (preferred_contact_method IN ('Phone', 'Email', 'Text', 'Email/Text'));
+    
+    
+

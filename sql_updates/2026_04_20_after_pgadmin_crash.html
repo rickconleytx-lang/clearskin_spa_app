@@ -1,0 +1,232 @@
+LOCAL SQL
+
+
+
+AFTER PGADMIN CRASH
+
+THIS IS APRIL19 TO WHAT I COULD RECOVER TODAY
+
+
+
+
+
+
+SELECT * 
+FROM employee_status
+WHERE spa_id IS NULL;
+
+
+ALTER TABLE compensation_types
+ALTER COLUMN spa_id SET NOT NULL;
+
+ALTER TABLE employee_status
+ALTER COLUMN spa_id SET NOT NULL;
+
+
+ALTER TABLE employee_status
+ALTER COLUMN spa_id SET NOT NULL;
+
+
+ALTER TABLE employee_status
+ADD CONSTRAINT fk_status_name_spa
+FOREIGN KEY (spa_id)
+REFERENCES spas(spa_id)
+ON DELETE CASCADE;
+
+ALTER TABLE employee_status
+ADD CONSTRAINT unique_status_name_per_spa
+UNIQUE (spa_id, status_type_name);
+
+
+ALTER TABLE employee_status
+ADD CONSTRAINT unique_employee_status_name_per_spa
+UNIQUE (spa_id, status_name);
+
+
+CREATE TABLE user_feedback (
+    feedback_id SERIAL PRIMARY KEY,
+    spa_id INT NOT NULL,
+    user_name VARCHAR(100),
+    page_name VARCHAR(100),
+    feedback_type VARCHAR(50), -- Bug / Suggestion / UX Issue
+    message TEXT NOT NULL,
+    severity VARCHAR(20), -- Low / Medium / High
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    is_resolved BOOLEAN DEFAULT FALSE
+);
+
+
+CREATE TABLE user_feedback (
+    feedback_id SERIAL PRIMARY KEY,
+    spa_id INT NOT NULL,
+    user_name VARCHAR(100),
+    page_name VARCHAR(100),
+    feedback_type VARCHAR(50), -- Bug / Suggestion / UX Issue
+    message TEXT NOT NULL,
+    severity VARCHAR(20), -- Low / Medium / High
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    is_resolved BOOLEAN DEFAULT FALSE
+);
+
+ALTER TABLE user_feedback
+ADD COLUMN admin_notes TEXT;
+
+ALTER TABLE user_feedback
+ADD COLUMN expected_behavior TEXT;
+
+
+SELECT
+    table_name
+FROM information_schema.tables
+WHERE table_schema = 'public'
+ORDER BY table_name;
+
+SELECT schemaname, tablename
+FROM pg_tables
+WHERE tablename = 'user_feedback';
+
+
+SELECT table_schema, table_name
+FROM information_schema.tables
+WHERE table_name = 'user_feedback';
+
+SELECT
+    table_name
+FROM information_schema.tables
+WHERE table_schema = 'public'
+ORDER BY table_name;
+
+SELECT current_database(), current_user;
+
+
+ALTER TABLE appointment_wrap_up
+ADD CONSTRAINT appointment_wrap_up_spa_appointment_unique
+UNIQUE (spa_id, appointment_id);
+
+ALTER TABLE client_birthday_offers
+DROP CONSTRAINT IF EXISTS client_birthday_offers_client_id_birthday_year_key;
+
+ALTER TABLE client_birthday_offers
+ADD CONSTRAINT client_birthday_offers_spa_id_client_id_birthday_year_key
+UNIQUE (spa_id, client_id, birthday_year);
+
+
+ALTER TABLE visit_summary
+ADD CONSTRAINT chk_reminder_days_after
+CHECK (reminder_days_after IS NULL OR reminder_days_after >= 0);
+
+SELECT * FROM visit_summary;
+
+
+
+
+SELECT spa_id, appointment_id, COUNT(*)
+FROM appointment_wrap_up
+GROUP BY spa_id, appointment_id
+HAVING COUNT(*) > 1;
+
+
+
+CREATE TABLE preferred_languages (
+    preferred_language_id SERIAL PRIMARY KEY,
+    language_name VARCHAR(50) NOT NULL UNIQUE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+SELECT * FROM preferred_languages;
+
+
+INSERT INTO preferred_languages (language_name)
+VALUES
+    ('English'),
+    ('Spanish');
+
+CREATE TABLE preferred_contact_methods (
+    preferred_contact_method_id SERIAL PRIMARY KEY,
+    method_name VARCHAR(50) NOT NULL UNIQUE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+
+SELECT * FROM preferred_contact_methods;
+
+
+INSERT INTO preferred_contact_methods (method_name)
+VALUES
+    ('Phone'),
+    ('Email'),
+    ('Text'),
+    ('Email/Text');
+
+
+SELECT * FROM preferred_contact_methods;
+
+
+
+CREATE TABLE client_statuses (
+    client_status_id SERIAL PRIMARY KEY,
+    status_name VARCHAR(50) NOT NULL UNIQUE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+SELECT * FROM client_statuses;
+
+INSERT INTO client_statuses (status_name)
+VALUES
+    ('Current'),
+    ('Previous'),
+    ('Prior Spa Client');
+
+SELECT * FROM client_statuses;
+
+
+
+ALTER TABLE clients
+ADD COLUMN spa_location_id INT REFERENCES spa_locations(spa_location_id),
+ADD COLUMN preferred_location_id INT REFERENCES spa_locations(spa_location_id),
+ADD COLUMN client_status VARCHAR(50) NOT NULL DEFAULT 'Current',
+ADD COLUMN preferred_language VARCHAR(50),
+ADD COLUMN ok_to_call BOOLEAN NOT NULL DEFAULT TRUE,
+ADD COLUMN ok_to_text BOOLEAN NOT NULL DEFAULT TRUE,
+ADD COLUMN ok_to_email BOOLEAN NOT NULL DEFAULT TRUE,
+ADD COLUMN preferred_contact_method VARCHAR(50);
+
+
+SELECT * FROM clients;
+
+
+ALTER TABLE visit_summary
+ADD COLUMN reminder_to_schedule BOOLEAN NOT NULL DEFAULT FALSE,
+ADD COLUMN reminder_service_type VARCHAR(100),
+ADD COLUMN reminder_days_after INT,
+ADD COLUMN reminder_date DATE;
+
+CREATE TABLE spa_locations (
+    spa_location_id SERIAL PRIMARY KEY,
+    spa_id INT NOT NULL REFERENCES spas(spa_id) ON DELETE CASCADE,
+    location_name VARCHAR(100) NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+SELECT * FROM spa_locations;
+
+ALTER TABLE spa_locations
+ADD CONSTRAINT uq_spa_locations_name UNIQUE (spa_id, location_name);
+
+
+
+INSERT INTO spa_locations (spa_id, location_name)
+VALUES
+    (1, 'Justin'),
+	(1, 'Flower Mound'),
+    (1, 'Fort Worth');
+
+SELECT * FROM spa_locations;
+
+
+
+
+
+
+

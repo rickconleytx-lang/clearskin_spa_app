@@ -21,6 +21,9 @@
         <a class="nav-btn" href="{{ url_for('calendar_view') }}">Calendar</a>
         <a class="nav-btn" href="{{ url_for('appointments') }}">Appointments</a>      
         <a class="nav-btn" href="{{ url_for('client_management') }}">Client Management</a>
+    <div style="margin-top: 10px; margin-bottom: 10px;">
+         <a class="btn" href="{{ url_for('feedback', page=request.url) }}">Report Issue</a>
+    </div>
     </nav>
 
     <!-- Page Content -->

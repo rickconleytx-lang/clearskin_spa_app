@@ -612,7 +612,45 @@ DROPDOWN_CONFIG = {
         "value": "vendors_name",
         "label": "Vendor Name",
         "spa_scoped": True
+    },
+    "compensation_types": {
+        "title": "Compensation Types",
+        "table": "compensation_types", 
+        "pk": "compensation_type_id",
+        "value": "compensation_type_name",
+        "label": "Compensation Type",
+        "spa_scoped": True
+    },
+
+    "spa_locations": {
+        "title": "Spa Locations",
+        "table": "spa_locations",
+        "pk": "spa_location_id",
+        "value": "location_name",
+        "label": "Spa Locations",
+        "spa_scoped": True
+    },
+
+    "client_statuses": {
+        "title": "Client Statuses",     
+        "table": "client_statuses",     
+        "pk": "client_status_id",
+        "value": "status_name",
+        "label": "Client Statuses",    
+        "spa_scoped": True
+    },
+
+        "preferred_contact_methods": {
+        "title": "Preferred Contact Methods",
+        "table": "preferred_contact_methods",
+        "pk": "preferred_contact_method_id",
+        "value": "method_name", 
+        "label": "Preferred Contact Methods",
+        "spa_scoped": True
     }
+
+
+
 }
 
 
@@ -887,6 +925,223 @@ def business_financing_home():
 #
 #  ----------------------
         
+
+
+
+
+#   -------------------------
+#
+#
+#  FEEDBACK FORM
+#
+#
+#
+#   -------------------------
+
+
+@app.route("/feedback", methods=["GET", "POST"])
+def feedback():
+    spa_id = current_spa_id()
+
+    if request.method == "POST":
+        user_name = (request.form.get("user_name") or "").strip()
+        page_name = (request.form.get("page_name") or "").strip()
+        feedback_type = (request.form.get("feedback_type") or "").strip()
+        message = (request.form.get("message") or "").strip()
+        expected_behavior = (request.form.get("expected_behavior") or "").strip()
+        severity = (request.form.get("severity") or "").strip()
+        
+
+        if not feedback_type:
+            flash("Please select a feedback type.", "error")
+            return redirect(url_for("feedback"))
+
+        if not message:
+            flash("Please enter your feedback.", "error")
+            return redirect(url_for("feedback"))
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            INSERT INTO user_feedback (
+                spa_id,
+                user_name,
+                page_name,
+                feedback_type,
+                message,
+                expected_behavior,
+                severity
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """, (
+            spa_id,
+            user_name if user_name else None,
+            page_name if page_name else None,
+            feedback_type,
+            message,
+            expected_behavior if expected_behavior else None,
+            severity if severity else None
+        ))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        flash("Thank you. Your feedback has been submitted.", "success")
+        return redirect(url_for("feedback"))
+
+    page_name = request.args.get("page") or request.referrer or request.url
+
+    return render_template("feedback.html", page_name=page_name)
+
+
+
+#   -------------------------
+#       
+#   
+#  FEEDBACK ADMIN
+#       
+#   
+#   
+#   -------------------------
+
+
+
+@app.route("/feedback-admin")
+def feedback_admin():
+    spa_id = current_spa_id()
+
+    feedback_type = (request.args.get("feedback_type") or "").strip()
+    status = (request.args.get("status") or "").strip()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    query = """
+        SELECT
+            feedback_id,
+            user_name,
+            page_name,
+            feedback_type,
+            message,
+            severity,
+            created_at,
+            is_resolved
+        FROM user_feedback
+        WHERE spa_id = %s
+    """
+    params = [spa_id]
+
+    if feedback_type:
+        query += " AND feedback_type = %s"
+        params.append(feedback_type)
+
+    if status == "open":
+        query += " AND is_resolved = FALSE"
+    elif status == "resolved":
+        query += " AND is_resolved = TRUE"
+
+    query += " ORDER BY is_resolved ASC, created_at DESC"
+
+    cur.execute(query, tuple(params))
+    feedback_items = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "feedback_admin.html",
+        feedback_items=feedback_items,
+        selected_type=feedback_type,
+        selected_status=status
+    )
+
+
+
+
+
+#   -----------------------
+#     
+#    FEEDBACK RESOLVE
+#     
+#     
+#     
+#    
+#  
+#  ----------------------
+
+
+
+
+
+@app.route("/feedback/resolve/<int:feedback_id>", methods=["POST"])
+def resolve_feedback(feedback_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE user_feedback
+        SET is_resolved = TRUE
+        WHERE feedback_id = %s
+          AND spa_id = %s
+    """, (feedback_id, spa_id))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    flash("Feedback marked as resolved.", "success")
+    return redirect(url_for("feedback_admin"))
+
+
+
+
+
+
+
+        
+#   -----------------------
+#
+#    FEEDBACK REOPEN 
+#
+#
+#
+#
+#
+#  ---------------------- 
+       
+
+
+
+@app.route("/feedback/reopen/<int:feedback_id>", methods=["POST"])
+def reopen_feedback(feedback_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE user_feedback
+        SET is_resolved = FALSE
+        WHERE feedback_id = %s
+          AND spa_id = %s
+    """, (feedback_id, spa_id))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    flash("Feedback reopened.", "success")
+    return redirect(url_for("feedback_admin"))
+
+
+
+
+
+
 
 
 
@@ -1880,13 +2135,13 @@ def add_loan_payment():
 #   
 #         EDIT OWNER CONTRIBUTIONS   
 #  
-#   
+#  spa id and route good  
 #   --------------------------------
 
 
 @app.route("/owner_contributions/edit/<int:owner_contribution_id>", methods=["GET", "POST"])
 def edit_owner_contribution(owner_contribution_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -1912,6 +2167,13 @@ def edit_owner_contribution(owner_contribution_id):
             owner_contribution_id,
             spa_id
         ))
+
+        if cur.rowcount == 0:
+            conn.rollback()
+            cur.close()
+            conn.close()
+            flash("Owner contribution not found.", "error")
+            return redirect(url_for("funding_home"))
 
         conn.commit()
         cur.close()
@@ -1957,14 +2219,14 @@ def edit_owner_contribution(owner_contribution_id):
 #
 #      DELETE OWNER CONTRIBUTIONS
 #                    
-#
+#        spa id and route good
 #   --------------------------------
 
 
 
 @app.route("/owner_contributions/delete/<int:owner_contribution_id>", methods=["POST"])
 def delete_owner_contribution(owner_contribution_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -1973,6 +2235,13 @@ def delete_owner_contribution(owner_contribution_id):
         WHERE owner_contribution_id = %s
           AND spa_id = %s
     """, (owner_contribution_id, spa_id))
+
+    if cur.rowcount == 0:
+        conn.rollback()
+        cur.close()
+        conn.close()
+        flash("Owner contribution not found.", "error")
+        return redirect(url_for("funding_home"))
 
     conn.commit()
     cur.close()
@@ -1992,13 +2261,13 @@ def delete_owner_contribution(owner_contribution_id):
 #
 #    EDIT OWNER REIMBURSEMENTS
 #
-#
+#   spa id and route ok
 #   --------------------------------
                      
 
 @app.route("/owner_reimbursements/edit/<int:owner_reimbursement_id>", methods=["GET", "POST"])
 def edit_owner_reimbursement(owner_reimbursement_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -2024,6 +2293,13 @@ def edit_owner_reimbursement(owner_reimbursement_id):
             owner_reimbursement_id,
             spa_id
         ))
+
+        if cur.rowcount == 0:
+            conn.rollback()
+            cur.close()
+            conn.close()
+            flash("Owner reimbursement not found.", "error")
+            return redirect(url_for("funding_home"))
 
         conn.commit()
         cur.close()
@@ -2068,13 +2344,13 @@ def edit_owner_reimbursement(owner_reimbursement_id):
 #   
 #       DELETE OWNER REIMBURSEMENT        
 #  
-#   
+#   spa id and route good
 #   --------------------------------
 
 
 @app.route("/owner_reimbursements/delete/<int:owner_reimbursement_id>", methods=["POST"])
 def delete_owner_reimbursement(owner_reimbursement_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -2083,6 +2359,13 @@ def delete_owner_reimbursement(owner_reimbursement_id):
         WHERE owner_reimbursement_id = %s
           AND spa_id = %s
     """, (owner_reimbursement_id, spa_id))
+
+    if cur.rowcount == 0:
+        conn.rollback()
+        cur.close()
+        conn.close()
+        flash("Owner reimbursement not found.", "error")
+        return redirect(url_for("funding_home"))
 
     conn.commit()
     cur.close()
@@ -2100,12 +2383,12 @@ def delete_owner_reimbursement(owner_reimbursement_id):
 #   
 #      EDIT LOAN    
 #   
-#   
+#    spa id and route ok 
 #   --------------------------------
 
 @app.route("/business_loans/edit/<int:loan_id>", methods=["GET", "POST"])
 def edit_business_loan(loan_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -2143,6 +2426,13 @@ def edit_business_loan(loan_id):
             loan_id,
             spa_id
         ))
+
+        if cur.rowcount == 0:
+            conn.rollback()
+            cur.close()
+            conn.close()
+            flash("Business loan not found.", "error")
+            return redirect(url_for("loans_home"))
 
         conn.commit()
         cur.close()
@@ -2190,13 +2480,13 @@ def edit_business_loan(loan_id):
 #   
 #   DELETE BUSINESS LOAN
 #   
-#   
+#   spa id and route  ok
 #   ------------------------------------
 
 
 @app.route("/business_loans/delete/<int:loan_id>", methods=["POST"])
 def delete_business_loan(loan_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -2205,6 +2495,13 @@ def delete_business_loan(loan_id):
         WHERE loan_id = %s
           AND spa_id = %s
     """, (loan_id, spa_id))
+
+    if cur.rowcount == 0:
+        conn.rollback()
+        cur.close()
+        conn.close()
+        flash("Business loan not found.", "error")
+        return redirect(url_for("loans_home"))
 
     conn.commit()
     cur.close()
@@ -2228,14 +2525,14 @@ def delete_business_loan(loan_id):
 #
 #
 #   CLIENT MANAGEMENT
-#
+#  spa id and route good
 #   --------------------------------
 
 
 
 @app.route("/client_management")
 def client_management():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     search = request.args.get("search", "").strip()
     today = get_spa_today()
 
@@ -2306,12 +2603,12 @@ def client_management():
 #
 #  SCHEDULE APPOINTMENT START
 #
-#
+#  spa id and route good
 #  -----------------------------------
 
 @app.route("/schedule_appointment_start", methods=["GET", "POST"])
 def schedule_appointment_start():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -2631,7 +2928,7 @@ def client_forms(client_id):
 #  ------------------------------------------
 #      GIFT CERTIFICATES
 #
-#
+#  spa id and route good
 #  ------------------------------------------
 
 
@@ -2704,6 +3001,7 @@ def gift_certificates_home():
             ORDER BY gift_cert_id, sent_date DESC
         ) r
             ON gc.gift_cert_id = r.gift_cert_id
+           AND gc.spa_id = r.spa_id
         {where_sql}
         {order_sql}
     """
@@ -2719,6 +3017,7 @@ def gift_certificates_home():
         FROM gift_certificates gc
         JOIN gift_certificate_statuses gcs
           ON gc.gift_certificate_status_id = gcs.gift_certificate_status_id
+         AND gc.spa_id = gcs.spa_id          
         WHERE gc.spa_id = %s
           AND gcs.status_name = 'Active'
           AND gc.amount_paid > 0
@@ -3178,13 +3477,14 @@ def gift_certificate_reminders():
 #   ----------------------------
 #
 #   SEND GIFT CERT REMINDER 
-#
+#  
+#   spa id and route good
 #   ---------------------------
 
 
 @app.route("/send_gift_certificate_reminder/<int:gift_cert_id>", methods=["POST"])
 def send_gift_certificate_reminder(gift_cert_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     active_status_id = get_status_id("Active")
 
     conn = get_db_connection()
@@ -3224,6 +3524,7 @@ def send_gift_certificate_reminder(gift_cert_id):
         expires_date = row[5]
         remaining_balance = float(row[6] or 0)
 
+        today = get_spa_today()
         days_left = (expires_date - date.today()).days if expires_date else 999
 
         if days_left <= 0:
@@ -3315,7 +3616,7 @@ ClearSkin Spa
 #
 #     GIFT CERTIFICATE REMINDER HISTORY
 #
-#
+#     spa id and route good
 #
 #   ---------------------------------------------
 
@@ -3323,7 +3624,7 @@ ClearSkin Spa
 
 @app.route("/gift_certificate_reminder_history")
 def gift_certificate_reminder_history():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     print("DEBUG current spa_id:", spa_id)
 
     conn = get_db_connection()
@@ -3347,6 +3648,7 @@ def gift_certificate_reminder_history():
         FROM gift_certificate_email_reminders r
         LEFT JOIN gift_certificates gc
             ON r.gift_cert_id = gc.gift_cert_id
+           AND r.spa_id = gc.spa_id
         WHERE r.spa_id = %s
         ORDER BY r.sent_date DESC NULLS LAST, r.gc_email_reminder_id DESC
     """, (spa_id,))
@@ -3372,13 +3674,21 @@ def gift_certificate_reminder_history():
                 
 #  ------------------------------------------
 #      CLIENTS   HOME PAGE
+#
+#
+#
+#  spa id and route good
+#
 #  ------------------------------------------
+
+
+
 
 from datetime import date
 
 @app.route("/clients")
 def clients_home():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -3410,8 +3720,10 @@ def clients_home():
         FROM clients c
         LEFT JOIN client_birthday_offers cbo
             ON c.client_id = cbo.client_id
-            AND cbo.birthday_year = %s
-        WHERE c.birth_date IS NOT NULL
+           AND c.spa_id = cbo.spa_id
+           AND cbo.birthday_year = %s
+        WHERE c.spa_id = %s
+          AND c.birth_date IS NOT NULL
           AND EXTRACT(MONTH FROM c.birth_date) = ANY(%s)
           AND COALESCE(cbo.offer_sent, FALSE) = FALSE
         ORDER BY
@@ -3419,18 +3731,18 @@ def clients_home():
             EXTRACT(DAY FROM c.birth_date),
             c.last_name,
             c.first_name
-    """, (current_year, months_to_show))
+    """, (current_year, spa_id, months_to_show))
 
     birthday_clients = cur.fetchall()
 
     print("birthday_clients =", birthday_clients)
 
-    # keep your normal clients query here too
     cur.execute("""
         SELECT client_id, first_name, last_name, phone, email, birth_date
         FROM clients
+        WHERE spa_id = %s
         ORDER BY last_name, first_name
-    """)
+    """, (spa_id,))
     clients = cur.fetchall()
 
     cur.close()
@@ -3445,141 +3757,251 @@ def clients_home():
 
 
 
+
+
+
+
+
+
+
 #  ------------------------------------------
 #          
 #        FULL EDIT CLIENT   
 #  
-#  
+#     spa id and full route good
 #  ------------------------------------------
+
+
 
 @app.route("/edit-client-full/<int:client_id>", methods=["GET", "POST"])
 def edit_client_full(client_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    if request.method == "POST":
-        # ----- clients table fields -----
-        first_name = request.form.get("first_name")
-        last_name = request.form.get("last_name")
-        phone = request.form.get("phone")
-        email = request.form.get("email")
-        birth_date = request.form.get("birth_date") or None
-        address = request.form.get("address")
-        city = request.form.get("city")
-        state = request.form.get("state")
-        zip_code = request.form.get("zip")
-        emergency_contact_name = request.form.get("emergency_contact_name")
-        emergency_contact_phone = request.form.get("emergency_contact_phone")
-        referred_by = request.form.get("referred_by")
-        notes_one = request.form.get("notes_one")
-        notes_two = request.form.get("notes_two")
-        notes_three = request.form.get("notes_three")
-        active_client = True if request.form.get("active_client") == "on" else False
-
-        # ----- client_health_profile fields -----
-        sex = request.form.get("sex")
-        skin_type_id = request.form.get("skin_type_id") or None
-        fitzpatrick_id = request.form.get("fitzpatrick_id") or None
-        skin_concerns = request.form.get("skin_concerns")
-        skin_conditions = request.form.get("skin_conditions")
-        allergies = request.form.get("allergies")
-        medications = request.form.get("medications")
-        current_medical_conditions = request.form.get("current_medical_conditions")
-        past_medical_treatments = request.form.get("past_medical_treatments")
-
-        recent_injections = parse_bool(request.form.get("recent_injections"))
-        recent_laser = parse_bool(request.form.get("recent_laser"))
-        pregnant = parse_bool(request.form.get("pregnant"))
-        nursing = parse_bool(request.form.get("nursing"))
-        using_retinol = parse_bool(request.form.get("using_retinol"))
-        using_accutane = parse_bool(request.form.get("using_accutane"))
-
-
-        sun_exposure_level = request.form.get("sun_exposure_level")
-        last_facial_date = request.form.get("last_facial_date") or None
-        health_notes1 = request.form.get("health_notes1")
-        health_notes2 = request.form.get("health_notes2")
-        health_notes3 = request.form.get("health_notes3")
-
-        # ----- update clients -----
+    try:
+        # Always verify the client belongs to the current spa first
         cur.execute("""
-            UPDATE clients
-            SET
-                first_name = %s,
-                last_name = %s,
-                phone = %s,
-                email = %s,
-                birth_date = %s,
-                address = %s,
-                city = %s,
-                state = %s,
-                zip = %s,
-                emergency_contact_name = %s,
-                emergency_contact_phone = %s,
-                referred_by = %s,
-                notes_one = %s,
-                notes_two = %s,
-                notes_three = %s,
-                active_client = %s,
-                updated_at = CURRENT_TIMESTAMP
+            SELECT
+                client_id,
+                first_name,
+                last_name,
+                phone,
+                email,
+                birth_date,
+                address,
+                city,
+                state,
+                zip,
+                emergency_contact_name,
+                emergency_contact_phone,
+                referred_by,
+                notes_one,
+                notes_two,
+                notes_three,
+                active_client,
+                created_at,
+                updated_at
+            FROM clients
             WHERE client_id = %s
-        """, (
-            first_name, last_name, phone, email, birth_date,
-            address, city, state, zip_code,
-            emergency_contact_name, emergency_contact_phone,
-            referred_by, notes_one, notes_two, notes_three,
-            active_client, client_id
-        ))
+              AND spa_id = %s
+        """, (client_id, spa_id))
+        client = cur.fetchone()
 
-        # ----- check whether health profile exists -----
-        cur.execute("""
-            SELECT health_profile_id
-            FROM client_health_profile
-            WHERE client_id = %s
-        """, (client_id,))
-        existing_health = cur.fetchone()
+        if not client:
+            flash("Client not found.", "error")
+            return redirect(url_for("clients_home"))
 
-        if existing_health:
-            # update existing health profile
+        if request.method == "POST":
+            # ----- clients table fields -----
+            first_name = request.form.get("first_name", "").strip()
+            last_name = request.form.get("last_name", "").strip()
+            phone = request.form.get("phone", "").strip()
+            email = request.form.get("email", "").strip()
+            birth_date = request.form.get("birth_date") or None
+            address = request.form.get("address", "").strip()
+            city = request.form.get("city", "").strip()
+            state = request.form.get("state", "").strip()
+            zip_code = request.form.get("zip", "").strip()
+            emergency_contact_name = request.form.get("emergency_contact_name", "").strip()
+            emergency_contact_phone = request.form.get("emergency_contact_phone", "").strip()
+            referred_by = request.form.get("referred_by", "").strip()
+            notes_one = request.form.get("notes_one", "").strip()
+            notes_two = request.form.get("notes_two", "").strip()
+            notes_three = request.form.get("notes_three", "").strip()
+            active_client = True if request.form.get("active_client") == "on" else False
+
+            # ----- client_health_profile fields -----
+            sex = request.form.get("sex", "").strip()
+            skin_type_id = request.form.get("skin_type_id") or None
+            fitzpatrick_id = request.form.get("fitzpatrick_id") or None
+            skin_concerns = request.form.get("skin_concerns", "").strip()
+            skin_conditions = request.form.get("skin_conditions", "").strip()
+            allergies = request.form.get("allergies", "").strip()
+            medications = request.form.get("medications", "").strip()
+            current_medical_conditions = request.form.get("current_medical_conditions", "").strip()
+            past_medical_treatments = request.form.get("past_medical_treatments", "").strip()
+
+            recent_injections = parse_bool(request.form.get("recent_injections"))
+            recent_laser = parse_bool(request.form.get("recent_laser"))
+            pregnant = parse_bool(request.form.get("pregnant"))
+            nursing = parse_bool(request.form.get("nursing"))
+            using_retinol = parse_bool(request.form.get("using_retinol"))
+            using_accutane = parse_bool(request.form.get("using_accutane"))
+
+            sun_exposure_level = request.form.get("sun_exposure_level", "").strip()
+            last_facial_date = request.form.get("last_facial_date") or None
+            health_notes1 = request.form.get("health_notes1", "").strip()
+            health_notes2 = request.form.get("health_notes2", "").strip()
+            health_notes3 = request.form.get("health_notes3", "").strip()
+
+            # ----- update clients -----
             cur.execute("""
-                UPDATE client_health_profile
+                UPDATE clients
                 SET
-                    sex = %s,
-                    skin_type_id = %s,
-                    fitzpatrick_id = %s,
-                    skin_concerns = %s,
-                    skin_conditions = %s,
-                    allergies = %s,
-                    medications = %s,
-                    current_medical_conditions = %s,
-                    past_medical_treatments = %s,
-                    recent_injections = %s,
-                    recent_laser = %s,
-                    pregnant = %s,
-                    nursing = %s,
-                    using_retinol = %s,
-                    using_accutane = %s,
-                    sun_exposure_level = %s,
-                    last_facial_date = %s,
-                    notes1 = %s,
-                    notes2 = %s,
-                    notes3 = %s,
-                    last_updated = CURRENT_DATE
+                    first_name = %s,
+                    last_name = %s,
+                    phone = %s,
+                    email = %s,
+                    birth_date = %s,
+                    address = %s,
+                    city = %s,
+                    state = %s,
+                    zip = %s,
+                    emergency_contact_name = %s,
+                    emergency_contact_phone = %s,
+                    referred_by = %s,
+                    notes_one = %s,
+                    notes_two = %s,
+                    notes_three = %s,
+                    active_client = %s,
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE client_id = %s
+                  AND spa_id = %s
             """, (
-                sex, skin_type_id, fitzpatrick_id, skin_concerns, skin_conditions,
-                allergies, medications, current_medical_conditions, past_medical_treatments,
-                recent_injections, recent_laser, pregnant, nursing,
-                using_retinol, using_accutane, sun_exposure_level,
-                last_facial_date, health_notes1, health_notes2, health_notes3,
-                client_id
+                first_name,
+                last_name,
+                phone,
+                email,
+                birth_date,
+                address,
+                city,
+                state,
+                zip_code,
+                emergency_contact_name,
+                emergency_contact_phone,
+                referred_by,
+                notes_one,
+                notes_two,
+                notes_three,
+                active_client,
+                client_id,
+                spa_id
             ))
-        else:
-            # insert new health profile
+
+            if cur.rowcount == 0:
+                conn.rollback()
+                flash("Client not found.", "error")
+                return redirect(url_for("clients_home"))
+
+            # ----- check whether health profile exists -----
             cur.execute("""
-                INSERT INTO client_health_profile (
+                SELECT health_profile_id
+                FROM client_health_profile
+                WHERE client_id = %s
+                  AND spa_id = %s
+            """, (client_id, spa_id))
+            existing_health = cur.fetchone()
+
+            if existing_health:
+                # update existing health profile
+                cur.execute("""
+                    UPDATE client_health_profile
+                    SET
+                        sex = %s,
+                        skin_type_id = %s,
+                        fitzpatrick_id = %s,
+                        skin_concerns = %s,
+                        skin_conditions = %s,
+                        allergies = %s,
+                        medications = %s,
+                        current_medical_conditions = %s,
+                        past_medical_treatments = %s,
+                        recent_injections = %s,
+                        recent_laser = %s,
+                        pregnant = %s,
+                        nursing = %s,
+                        using_retinol = %s,
+                        using_accutane = %s,
+                        sun_exposure_level = %s,
+                        last_facial_date = %s,
+                        notes1 = %s,
+                        notes2 = %s,
+                        notes3 = %s,
+                        last_updated = CURRENT_DATE
+                    WHERE client_id = %s
+                      AND spa_id = %s
+                """, (
+                    sex,
+                    skin_type_id,
+                    fitzpatrick_id,
+                    skin_concerns,
+                    skin_conditions,
+                    allergies,
+                    medications,
+                    current_medical_conditions,
+                    past_medical_treatments,
+                    recent_injections,
+                    recent_laser,
+                    pregnant,
+                    nursing,
+                    using_retinol,
+                    using_accutane,
+                    sun_exposure_level,
+                    last_facial_date,
+                    health_notes1,
+                    health_notes2,
+                    health_notes3,
+                    client_id,
+                    spa_id
+                ))
+            else:
+                # insert new health profile
+                cur.execute("""
+                    INSERT INTO client_health_profile (
+                        spa_id,
+                        client_id,
+                        sex,
+                        skin_type_id,
+                        fitzpatrick_id,
+                        skin_concerns,
+                        skin_conditions,
+                        allergies,
+                        medications,
+                        current_medical_conditions,
+                        past_medical_treatments,
+                        recent_injections,
+                        recent_laser,
+                        pregnant,
+                        nursing,
+                        using_retinol,
+                        using_accutane,
+                        sun_exposure_level,
+                        last_facial_date,
+                        notes1,
+                        notes2,
+                        notes3,
+                        last_updated,
+                        created_at
+                    )
+                    VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        CURRENT_DATE, CURRENT_TIMESTAMP
+                    )
+                """, (
+                    spa_id,
                     client_id,
                     sex,
                     skin_type_id,
@@ -3598,14 +4020,20 @@ def edit_client_full(client_id):
                     using_accutane,
                     sun_exposure_level,
                     last_facial_date,
-                    notes1,
-                    notes2,
-                    notes3,
-                    last_updated,
-                    created_at
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_DATE, CURRENT_TIMESTAMP)
-            """, (
+                    health_notes1,
+                    health_notes2,
+                    health_notes3
+                ))
+
+            conn.commit()
+            flash("Client full record updated successfully.", "success")
+            return redirect(url_for("clients_home"))
+
+        # ---------------- GET request ----------------
+
+        cur.execute("""
+            SELECT
+                health_profile_id,
                 client_id,
                 sex,
                 skin_type_id,
@@ -3624,107 +4052,66 @@ def edit_client_full(client_id):
                 using_accutane,
                 sun_exposure_level,
                 last_facial_date,
-                health_notes1,
-                health_notes2,
-                health_notes3
-            ))
+                notes1,
+                notes2,
+                notes3,
+                last_updated,
+                created_at
+            FROM client_health_profile
+            WHERE client_id = %s
+              AND spa_id = %s
+        """, (client_id, spa_id))
+        health = cur.fetchone()
 
-        conn.commit()
-        cur.close()
-        conn.close()
+        # global lookup tables
+        cur.execute("""
+            SELECT sex_type_id, sex_type
+            FROM sex
+            ORDER BY sex_type
+        """, (spa_id,))
+        sex_options = cur.fetchall()
 
-        flash("Client full record updated successfully.", "success")
+        cur.execute("""
+            SELECT skin_type_id, skin_type_name
+            FROM skin_types
+            ORDER BY skin_type_name
+        """, (spa_id,))
+        skin_types = cur.fetchall()
+
+        cur.execute("""
+            SELECT fitzpatrick_id, fitzpatrick_level
+            FROM fitzpatrick_types
+            ORDER BY fitzpatrick_id
+        """, (spa_id,))
+        fitzpatrick_types = cur.fetchall()
+
+        # spa-owned lookup table
+        cur.execute("""
+            SELECT referral_source_id, referral_source_name
+            FROM referral_sources
+            WHERE spa_id = %s
+            ORDER BY referral_source_name
+        """, (spa_id,))
+        referral_sources = cur.fetchall()
+
+        return render_template(
+            "edit_client_full.html",
+            client=client,
+            health=health,
+            sex_options=sex_options,
+            skin_types=skin_types,
+            fitzpatrick_types=fitzpatrick_types,
+            referral_sources=referral_sources
+        )
+
+    except Exception as e:
+        conn.rollback()
+        flash(f"Error updating client record: {e}", "error")
         return redirect(url_for("clients_home"))
 
-    # ---------------- GET request ----------------
-
-    # get client record
-    cur.execute("""
-        SELECT
-            client_id,
-            first_name,
-            last_name,
-            phone,
-            email,
-            birth_date,
-            address,
-            city,
-            state,
-            zip,
-            emergency_contact_name,
-            emergency_contact_phone,
-            referred_by,
-            notes_one,
-            notes_two,
-            notes_three,
-            active_client,
-            created_at,
-            updated_at
-        FROM clients
-        WHERE client_id = %s
-    """, (client_id,))
-    client = cur.fetchone()
-
-    # get health profile
-    cur.execute("""
-        SELECT
-            health_profile_id,
-            client_id,
-            sex,
-            skin_type_id,
-            fitzpatrick_id,
-            skin_concerns,
-            skin_conditions,
-            allergies,
-            medications,
-            current_medical_conditions,
-            past_medical_treatments,
-            recent_injections,
-            recent_laser,
-            pregnant,
-            nursing,
-            using_retinol,
-            using_accutane,
-            sun_exposure_level,
-            last_facial_date,
-            notes1,
-            notes2,
-            notes3,
-            last_updated,
-            created_at
-        FROM client_health_profile
-        WHERE client_id = %s
-    """, (client_id,))
-    health = cur.fetchone()
-
-    # dropdown values
-    cur.execute("SELECT sex_type_id, sex_type FROM sex ORDER BY sex_type")
-    sex_options = cur.fetchall()
-
-    cur.execute("SELECT skin_type_id, skin_type_name FROM skin_types ORDER BY skin_type_name")
-    skin_types = cur.fetchall()
-
-    cur.execute("SELECT fitzpatrick_id, fitzpatrick_level FROM fitzpatrick_types ORDER BY fitzpatrick_id")
-    fitzpatrick_types = cur.fetchall()
-
-    cur.execute("SELECT referral_source_id, referral_source_name FROM referral_sources ORDER BY referral_source_name")
-    referral_sources = cur.fetchall()
-
-    cur.close()
-    conn.close()
-
-    return render_template(
-        "edit_client_full.html",
-        client=client,
-        health=health,
-        sex_options=sex_options, 
-        skin_types=skin_types,
-        fitzpatrick_types=fitzpatrick_types,
-        referral_sources=referral_sources
-    )
-
-
-
+    finally:
+        cur.close()
+        conn.close()
 
 
 
@@ -3761,6 +4148,9 @@ def edit_client_full(client_id):
 
 #  ------------------------------------------
 #           BIRTHDAY OFFERS
+#
+#
+#     spa id and route good
 #  ------------------------------------------
 
 
@@ -3768,7 +4158,7 @@ def edit_client_full(client_id):
 
 @app.route("/birthday_offers")
 def birthday_offers():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -3801,7 +4191,8 @@ def birthday_offers():
         FROM clients c
         LEFT JOIN client_birthday_offers cbo
             ON c.client_id = cbo.client_id
-            AND cbo.birthday_year IN (%s, %s)
+           AND c.spa_id = cbo.spa_id
+           AND cbo.birthday_year IN (%s, %s)
         WHERE c.spa_id = %s
           AND c.birth_date IS NOT NULL
           AND c.active_client = TRUE
@@ -3899,6 +4290,8 @@ def birthday_offers():
 #  ------------------------------------------
 #        BIRTHDAY OFFERS MARK SENT
 #
+#
+#    spa id and route good
 #  ------------------------------------------
 
 
@@ -3906,7 +4299,7 @@ def birthday_offers():
 
 @app.route("/birthday-offers/mark-sent", methods=["POST"])
 def mark_birthday_offer_sent():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     client_id = request.form.get("client_id")
 
     if not client_id:
@@ -3917,7 +4310,6 @@ def mark_birthday_offer_sent():
     today = spa_now.date()
     current_year = today.year
     current_month = today.month
-    today_day = today.day
 
     if current_month == 12:
         next_month = 1
@@ -3929,75 +4321,75 @@ def mark_birthday_offer_sent():
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Get client's birth date
-    cur.execute("""
-        SELECT birth_date
-        FROM clients
-        WHERE client_id = %s
-          AND spa_id = %s
-    """, (client_id, spa_id))
+    try:
+        # Verify client belongs to current spa
+        cur.execute("""
+            SELECT birth_date
+            FROM clients
+            WHERE client_id = %s
+              AND spa_id = %s
+        """, (client_id, spa_id))
 
-    client = cur.fetchone()
+        client = cur.fetchone()
 
-    if not client or not client[0]:
-        cur.close()
-        conn.close()
-        flash("Client birthday not found.", "error")
-        return redirect(url_for("birthday_offers"))
+        if not client or not client[0]:
+            flash("Client birthday not found.", "error")
+            return redirect(url_for("birthday_offers"))
 
-    birth_date = client[0]
-    
-    campaign_year = get_birthday_campaign_year(birth_date, today)
+        birth_date = client[0]
+        campaign_year = get_birthday_campaign_year(birth_date, today)
 
-    if campaign_year is None:
-        cur.close()
-        conn.close()
-        flash("Client is not in the active birthday campaign window.", "error")
-        return redirect(url_for("birthday_offers"))
+        if campaign_year is None:
+            flash("Client is not in the active birthday campaign window.", "error")
+            return redirect(url_for("birthday_offers"))
 
-    acknowledged_by = "System Admin"
+        acknowledged_by = "System Admin"
 
-    cur.execute("""
-        INSERT INTO client_birthday_offers (
-            client_id,
-            birthday_year,
-            offer_sent,
-            offer_sent_date,
-            acknowledged_by,
-            notes,
-            created_at,
+        cur.execute("""
+            INSERT INTO client_birthday_offers (
+                spa_id,
+                client_id,
+                birthday_year,
+                offer_sent,
+                offer_sent_date,
+                acknowledged_by,
+                notes,
+                created_at,
+                email_template_id,
+                sent_status
+            )
+            VALUES (%s, %s, %s, TRUE, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (spa_id, client_id, birthday_year)
+            DO UPDATE SET
+                offer_sent = TRUE,
+                offer_sent_date = EXCLUDED.offer_sent_date,
+                acknowledged_by = EXCLUDED.acknowledged_by,
+                notes = EXCLUDED.notes,
+                sent_status = EXCLUDED.sent_status
+        """, (
             spa_id,
-            email_template_id,
-            sent_status
-        )
-        VALUES (%s, %s, TRUE, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (client_id, birthday_year)
-        DO UPDATE SET
-            offer_sent = TRUE,
-            offer_sent_date = EXCLUDED.offer_sent_date,
-            acknowledged_by = EXCLUDED.acknowledged_by,
-            notes = EXCLUDED.notes,
-            spa_id = EXCLUDED.spa_id,
-            sent_status = EXCLUDED.sent_status
-    """, (
-        client_id,
-        campaign_year,
-        spa_now,
-        acknowledged_by,
-        "Marked sent manually",
-        spa_now,
-        spa_id,
-        None,
-        "manual"
-    ))
+            client_id,
+            campaign_year,
+            spa_now,
+            acknowledged_by,
+            "Marked sent manually",
+            spa_now,
+            None,
+            "manual"
+        ))
 
-    conn.commit()
-    cur.close()
-    conn.close()
+        conn.commit()
+        flash("Birthday offer marked as sent.", "success")
+        return redirect(url_for("birthday_offers"))
 
-    flash("Birthday offer marked as sent.", "success")
-    return redirect(url_for("birthday_offers"))
+    except Exception as e:
+        conn.rollback()
+        flash(f"Error marking birthday offer sent: {e}", "error")
+        return redirect(url_for("birthday_offers"))
 
+    finally:
+        cur.close()
+        conn.close()
 
 
 
@@ -4012,15 +4404,15 @@ def mark_birthday_offer_sent():
 #
 #      BIRTHDAY OFFERS SEND
 #
-#
+#     spa id and route good
 #   ---------------------------------------
 
 
 @app.route("/birthday-offers/send/<int:client_id>", methods=["POST"])
 def send_birthday_offer(client_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     spa_now = get_spa_now()
-    campaign_year = spa_now.year
+    today = spa_now.date()
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -4043,6 +4435,19 @@ def send_birthday_offer(client_id):
 
     first_name, last_name, email, birth_date = client
 
+    if not birth_date:
+        cur.close()
+        conn.close()
+        flash("Client birthday not found.", "error")
+        return redirect(url_for("birthday_offers"))
+
+    campaign_year = get_birthday_campaign_year(birth_date, today)
+    if campaign_year is None:
+        cur.close()
+        conn.close()
+        flash("Client is not in the active birthday campaign window.", "error")
+        return redirect(url_for("birthday_offers"))
+
     if not email or not email.strip():
         cur.close()
         conn.close()
@@ -4053,7 +4458,7 @@ def send_birthday_offer(client_id):
 
     email_sent_successfully = False
     error_note = None
-    email_template_id = None   # set later if you start using saved templates
+    email_template_id = None
 
     try:
         # Replace later with your actual Mailgun function
@@ -4065,6 +4470,7 @@ def send_birthday_offer(client_id):
     if email_sent_successfully:
         cur.execute("""
             INSERT INTO client_birthday_offers (
+                spa_id,
                 client_id,
                 birthday_year,
                 offer_sent,
@@ -4072,27 +4478,26 @@ def send_birthday_offer(client_id):
                 acknowledged_by,
                 notes,
                 created_at,
-                spa_id,
                 email_template_id,
                 sent_status
             )
-            VALUES (%s, %s, TRUE, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (client_id, birthday_year)
+            VALUES (%s, %s, %s, TRUE, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (spa_id, client_id, birthday_year)
             DO UPDATE SET
                 offer_sent = TRUE,
                 offer_sent_date = EXCLUDED.offer_sent_date,
+                acknowledged_by = EXCLUDED.acknowledged_by,
                 sent_status = EXCLUDED.sent_status,
                 email_template_id = EXCLUDED.email_template_id,
-                notes = EXCLUDED.notes,
-                spa_id = EXCLUDED.spa_id
+                notes = EXCLUDED.notes
         """, (
+            spa_id,
             client_id,
             campaign_year,
             spa_now,
             "system",
             "Birthday email sent successfully",
             spa_now,
-            spa_id,
             email_template_id,
             "sent"
         ))
@@ -4102,6 +4507,7 @@ def send_birthday_offer(client_id):
     else:
         cur.execute("""
             INSERT INTO client_birthday_offers (
+                spa_id,
                 client_id,
                 birthday_year,
                 offer_sent,
@@ -4109,24 +4515,24 @@ def send_birthday_offer(client_id):
                 acknowledged_by,
                 notes,
                 created_at,
-                spa_id,
                 email_template_id,
                 sent_status
             )
-            VALUES (%s, %s, FALSE, NULL, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (client_id, birthday_year)
+            VALUES (%s, %s, %s, FALSE, NULL, %s, %s, %s, %s, %s)
+            ON CONFLICT (spa_id, client_id, birthday_year)
             DO UPDATE SET
                 offer_sent = FALSE,
+                acknowledged_by = EXCLUDED.acknowledged_by,
                 sent_status = EXCLUDED.sent_status,
-                notes = EXCLUDED.notes,
-                spa_id = EXCLUDED.spa_id
+                email_template_id = EXCLUDED.email_template_id,
+                notes = EXCLUDED.notes
         """, (
+            spa_id,
             client_id,
             campaign_year,
             "system",
             error_note or "Email send failed",
             spa_now,
-            spa_id,
             email_template_id,
             "failed"
         ))
@@ -4138,6 +4544,8 @@ def send_birthday_offer(client_id):
     conn.close()
 
     return redirect(url_for("birthday_offers"))
+
+
 
 
 
@@ -4181,7 +4589,19 @@ ClearSkin Spa
 
 
 
-
+#   ----------------------------------------------------------------------------
+#
+#
+#
+#
+#
+#
+#   ALL ROUTES ABOVE HAVE BEEN CHECKED FOR SAFE MULTI-SPA USE
+#
+#
+#
+#
+#  ----------------------------------------------------------------------------
 
 
 
