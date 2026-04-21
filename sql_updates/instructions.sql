@@ -61,6 +61,9 @@ UPLOADING ALL TO RENDER
 git add .
     git commit -m "Add Credit Processor tables"
     git push
+
+
+
  git add .
-    git commit -m "Added new tables and altered tables"
+    git commit -m "Added Mailgun email, feedback form cleaned up routes"
     git push

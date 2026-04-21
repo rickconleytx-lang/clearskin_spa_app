@@ -20,7 +20,7 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "local-dev-key")
 
 
-
+print("APP FILE LOADED")
 
 #  ---------------------
 #        HELPERS
@@ -131,7 +131,23 @@ def send_email(to_email, subject, body):
     ...
 
 
+def get_spa_name(spa_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
 
+    try:
+        cur.execute("""
+            SELECT spa_name
+            FROM spas
+            WHERE spa_id = %s
+        """, (spa_id,))
+        
+        spa_row = cur.fetchone()
+        return spa_row[0] if spa_row else "Your Spa"
+
+    finally:
+        cur.close()
+        conn.close()
 
 
 
@@ -494,10 +510,47 @@ def match_existing_client_booking(incoming_booking_id):
 
 
 
+#   --------------------------------------------------------------
+#
+#
+#
+#              MAILGUN TEST
+#
+#   
+#   ----------------------------------------------------------
 
 
+import os
+import requests
 
+def send_email(to, subject, text):
+    mailgun_api_key = os.environ.get("MAILGUN_API_KEY", "").strip()
+    mailgun_domain = os.environ.get("MAILGUN_DOMAIN", "").strip()
+    mailgun_from = os.environ.get("MAILGUN_FROM", "").strip()
 
+    response = requests.post(
+        f"https://api.mailgun.net/v3/{mailgun_domain}/messages",
+        auth=("api", mailgun_api_key),
+        data={
+            "from": mailgun_from,
+            "to": [to],
+            "subject": subject,
+            "text": text
+        },
+        timeout=20
+    )
+    return response
+
+@app.route("/test-email")
+def test_email():
+    resp = send_email(
+        to="your_real_email@gmail.com",
+        subject="Mailgun Test from App",
+        text="If you got this, the app integration works."
+    )
+    print("MAILGUN STATUS:", resp.status_code)
+    print("MAILGUN BODY:", resp.text)
+    return "EMAIL ROUTE RAN"
 
 
 #  ----------------------
@@ -646,6 +699,15 @@ DROPDOWN_CONFIG = {
         "pk": "preferred_contact_method_id",
         "value": "method_name", 
         "label": "Preferred Contact Methods",
+        "spa_scoped": True
+    },
+
+        "preferred_languages": {
+        "title": "Preferred Languages",
+        "table": "preferred_languages",
+        "pk": "preferred_language_id",
+        "value": "language_name",   
+        "label": "Preferred Languages",
         "spa_scoped": True
     }
 
@@ -950,50 +1012,93 @@ def feedback():
         message = (request.form.get("message") or "").strip()
         expected_behavior = (request.form.get("expected_behavior") or "").strip()
         severity = (request.form.get("severity") or "").strip()
-        
 
         if not feedback_type:
             flash("Please select a feedback type.", "error")
-            return redirect(url_for("feedback"))
+            return redirect(url_for("feedback", page=page_name))
 
         if not message:
             flash("Please enter your feedback.", "error")
-            return redirect(url_for("feedback"))
+            return redirect(url_for("feedback", page=page_name))
 
         conn = get_db_connection()
         cur = conn.cursor()
 
-        cur.execute("""
-            INSERT INTO user_feedback (
+        try:
+            cur.execute("""
+                INSERT INTO user_feedback (
+                    spa_id,
+                    user_name,
+                    page_name,
+                    feedback_type,
+                    message,
+                    expected_behavior,
+                    severity
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (
                 spa_id,
-                user_name,
-                page_name,
+                user_name if user_name else None,
+                page_name if page_name else None,
                 feedback_type,
                 message,
-                expected_behavior,
-                severity
-            )
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """, (
-            spa_id,
-            user_name if user_name else None,
-            page_name if page_name else None,
-            feedback_type,
-            message,
-            expected_behavior if expected_behavior else None,
-            severity if severity else None
-        ))
+                expected_behavior if expected_behavior else None,
+                severity if severity else None
+            ))
 
-        conn.commit()
-        cur.close()
-        conn.close()
+            conn.commit()
 
-        flash("Thank you. Your feedback has been submitted.", "success")
-        return redirect(url_for("feedback"))
+            print("FEEDBACK ROUTE HIT")
+            print("REQUEST METHOD:", request.method)
+            print("ABOUT TO CHECK EMAIL ALERT")
+
+            if severity == "High":
+                try:
+                    response = send_email(
+                        to="rickconleytx@gmail.com",
+                        subject=f" SEV {severity} | {feedback_type} | {page_name}",
+                        text=(
+                            f"Spa ID: {spa_id}\n"
+                            f"User Name: {user_name or 'Not provided'}\n"
+                            f"Page: {page_name or 'Not provided'}\n"
+                            f"Type: {feedback_type}\n"
+                            f"Severity: {severity or 'Not provided'}\n"
+                            f"Expected Behavior: {expected_behavior or 'Not provided'}\n\n"
+                            f"Message:\n{message}"
+                        )
+                    )
+
+                    print("MAILGUN STATUS:", response.status_code)
+                    print("MAILGUN BODY:", response.text)
+
+                except Exception as email_error:
+                    print("MAILGUN ERROR:", str(email_error))
+
+            flash("Thank you. Your feedback has been submitted.", "success")
+            return redirect(url_for("feedback", page=page_name))
+
+        except Exception as db_error:
+            conn.rollback()
+            print("FEEDBACK DB ERROR:", str(db_error))
+            flash("There was a problem saving your feedback.", "error")
+            return redirect(url_for("feedback", page=page_name))
+
+        finally:
+            cur.close()
+            conn.close()
 
     page_name = request.args.get("page") or request.referrer or request.url
-
     return render_template("feedback.html", page_name=page_name)
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1013,10 +1118,19 @@ def feedback_admin():
     spa_id = current_spa_id()
 
     feedback_type = (request.args.get("feedback_type") or "").strip()
-    status = (request.args.get("status") or "").strip()
+    status = (request.args.get("status") or "open").strip()
 
     conn = get_db_connection()
     cur = conn.cursor()
+
+    cur.execute("""
+        SELECT COUNT(*)
+        FROM user_feedback
+        WHERE spa_id = %s
+          AND (is_resolved IS FALSE OR is_resolved IS NULL)
+    """, (spa_id,))
+    open_count = cur.fetchone()[0]
+    print("OPEN COUNT:", open_count)
 
     query = """
         SELECT
@@ -1024,8 +1138,9 @@ def feedback_admin():
             user_name,
             page_name,
             feedback_type,
-            message,
             severity,
+            expected_behavior,
+            message,
             created_at,
             is_resolved
         FROM user_feedback
@@ -1054,10 +1169,9 @@ def feedback_admin():
         "feedback_admin.html",
         feedback_items=feedback_items,
         selected_type=feedback_type,
-        selected_status=status
+        selected_status=status,
+        open_count=open_count
     )
-
-
 
 
 
@@ -1550,8 +1664,603 @@ def get_loan_contribution_rows(spa_id, start_date=None, end_date=None):
 
 
 
+#   ------------------------------------------------
+#
+#
+#
+#     EMAIL CAMPAIGNS
+#
+#
+#
+#   -----------------------------------------------
+
+def get_birthday_template(spa_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT subject_line, body_text
+            FROM email_templates
+            WHERE spa_id = %s
+              AND template_type = 'Birthday'
+              AND is_active = TRUE
+            ORDER BY email_template_id DESC
+            LIMIT 1
+        """, (spa_id,))
+
+        template = cur.fetchone()
+        return template
+
+    finally:
+        cur.close()
+        conn.close()
 
 
+def render_email_template(template_text, context):
+    if not template_text:
+        return ""
+
+    rendered = template_text
+    for key, value in context.items():
+        rendered = rendered.replace(f"{{{key}}}", str(value or ""))
+
+    return rendered
+
+
+
+
+
+
+
+
+
+
+
+#   --------------------------------------
+#         BIRTHDAYS
+#     HARD CODED EMAIL   
+#   --------------------------------------
+
+
+def build_birthday_email(first_name):
+    subject = "Happy Birthday from Your Spa!"
+    body = (
+        f"Hi {first_name},\n\n"
+        f"Happy Birthday!\n\n"
+        f"We wanted to wish you a wonderful birthday and celebrate with you.\n"
+        f"Please enjoy your special birthday offer from us.\n\n"
+        f"Thank you for being a valued client.\n\n"
+        f"Warmly,\n"
+        f"Your Spa Team"
+    )
+    return subject, body
+
+
+
+
+#   ----------------------------
+#
+#
+#    BIRTHDAY MANUAL SEND
+#
+#   SPA ID AND ROUTE GOOD
+#   --------------------------
+
+
+
+
+@app.route("/birthday-emails/send-month", methods=["POST"])
+def send_birthday_emails_month():
+    spa_id = current_spa_id()
+    spa_now = get_spa_now()
+    today = spa_now.date()
+    campaign_year = today.year
+    campaign_month = today.month
+
+    spa_name = get_spa_name(spa_id)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                c.client_id,
+                c.first_name,
+                c.email,
+                c.birth_date
+            FROM clients c
+            WHERE c.spa_id = %s
+              AND c.active_client = TRUE
+              AND c.email IS NOT NULL
+              AND c.email <> ''
+              AND c.birth_date IS NOT NULL
+              AND EXTRACT(MONTH FROM c.birth_date) = %s
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM birthday_email_log bel
+                  WHERE bel.spa_id = c.spa_id
+                    AND bel.client_id = c.client_id
+                    AND bel.campaign_year = %s
+              )
+            ORDER BY EXTRACT(DAY FROM c.birth_date), c.first_name
+        """, (spa_id, campaign_month, campaign_year))
+
+        birthday_clients = cur.fetchall()
+        print("SENDABLE MONTH CLIENTS:", birthday_clients)
+
+        template = get_birthday_template(spa_id)
+
+        if template:
+            template_subject, template_body = template
+        else:
+            template_subject = "Clear Skin Spa, wishing you a Very Happy Birthday!"
+            template_body = (
+                "Hi {first_name},\n\n"
+                "Happy Birthday from all of us at ClearSkin Spa.\n\n"
+                "We wanted to wish you a wonderful birthday month and thank you for being a valued client.\n\n"
+                "We have a special birthday offer available for you this month.\n\n"
+                "Warmly,\n"
+                "ClearSkin Spa"
+            )
+
+        sent_count = 0
+        failed_count = 0
+
+        for client_id, first_name, email, birth_date in birthday_clients:
+            try:
+                context = {
+                    "first_name": first_name,
+                    "spa_name": spa_name,
+                    "birth_month": birth_date.strftime("%B") if birth_date else ""
+                }
+
+                subject = render_email_template(template_subject, context)
+                body = render_email_template(template_body, context)
+
+                response = send_email(
+                    to=email,
+                    subject=subject,
+                    text=body
+                )
+
+                if response.status_code == 200:
+                    cur.execute("""
+                        INSERT INTO birthday_email_log (
+                            spa_id,
+                            client_id,
+                            campaign_year
+                        )
+                        VALUES (%s, %s, %s)
+                    """, (spa_id, client_id, campaign_year))
+                    sent_count += 1
+                else:
+                    print("BIRTHDAY EMAIL FAILED:", response.status_code, response.text)
+                    failed_count += 1
+
+            except Exception as email_error:
+                print("BIRTHDAY EMAIL ERROR:", str(email_error))
+                failed_count += 1
+
+        conn.commit()
+
+        if sent_count == 0:
+            flash("No birthday emails to send for this month.", "info")
+        elif failed_count == 0:
+            flash(f"Birthday month emails sent: {sent_count}.", "success")
+        else:
+            flash(f"Birthday month emails sent: {sent_count}. Failed: {failed_count}.", "warning")
+
+        return redirect(url_for("birthday_offers"))
+
+    except Exception as db_error:
+        conn.rollback()
+        print("BIRTHDAY MONTH SEND ERROR:", str(db_error))
+        flash("There was a problem sending birthday month emails.", "error")
+        return redirect(url_for("birthday_offers"))
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
+
+
+
+
+
+#   -----------------------------------
+#
+#
+#     BIRTHDAY TEMPLATE 
+#
+#
+#  --------------------------------
+
+@app.route("/email-templates")
+def email_templates_admin():
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            email_template_id,
+            template_name,
+            template_type,
+            subject_line,
+            body_text,
+            is_active,
+            created_at,
+            updated_at
+        FROM email_templates
+        WHERE spa_id = %s
+        ORDER BY template_type, template_name, email_template_id DESC
+    """, (spa_id,))
+
+    templates = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template("email_templates_admin.html", templates=templates)
+
+
+
+
+
+
+#   ------------------------------
+#
+#
+#   BIRTHDAY TEMPLATE ADD
+#
+#
+#   ------------------------------
+
+
+
+
+@app.route("/email-templates/add", methods=["GET", "POST"])
+def add_email_template():
+    spa_id = current_spa_id()
+
+    if request.method == "POST":
+        template_name = (request.form.get("template_name") or "").strip()
+        template_type = (request.form.get("template_type") or "").strip()
+        subject_line = (request.form.get("subject_line") or "").strip()
+        body_text = (request.form.get("body_text") or "").strip()
+        is_active = True if request.form.get("is_active") == "on" else False
+
+        if not template_name:
+            flash("Template name is required.", "error")
+            return redirect(url_for("add_email_template"))
+
+        if not template_type:
+            flash("Template type is required.", "error")
+            return redirect(url_for("add_email_template"))
+
+        if not subject_line:
+            flash("Subject line is required.", "error")
+            return redirect(url_for("add_email_template"))
+
+        if not body_text:
+            flash("Body text is required.", "error")
+            return redirect(url_for("add_email_template"))
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        try:
+            if is_active:
+                cur.execute("""
+                    UPDATE email_templates
+                    SET is_active = FALSE,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE spa_id = %s
+                      AND template_type = %s
+                """, (spa_id, template_type))
+
+            cur.execute("""
+                INSERT INTO email_templates (
+                    spa_id,
+                    template_name,
+                    template_type,
+                    subject_line,
+                    body_text,
+                    is_active
+                )
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (
+                spa_id,
+                template_name,
+                template_type,
+                subject_line,
+                body_text,
+                is_active
+            ))
+
+            conn.commit()
+            flash("Email template added successfully.", "success")
+            return redirect(url_for("email_templates_admin"))
+
+        except Exception as e:
+            conn.rollback()
+            print("ADD EMAIL TEMPLATE ERROR:", str(e))
+            flash("There was a problem adding the template.", "error")
+            return redirect(url_for("add_email_template"))
+
+        finally:
+            cur.close()
+            conn.close()
+
+    return render_template("email_template_form.html", template=None)
+
+
+
+
+
+
+#   -------------------------------
+#
+#     BIRTHDAYS TEMPLATE EDIT
+#
+#
+#   -------------------------------
+
+
+
+@app.route("/email-templates/edit/<int:email_template_id>", methods=["GET", "POST"])
+def edit_email_template(email_template_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    if request.method == "POST":
+        template_name = (request.form.get("template_name") or "").strip()
+        template_type = (request.form.get("template_type") or "").strip()
+        subject_line = (request.form.get("subject_line") or "").strip()
+        body_text = (request.form.get("body_text") or "").strip()
+        is_active = True if request.form.get("is_active") == "on" else False
+
+        if not template_name:
+            flash("Template name is required.", "error")
+            return redirect(url_for("edit_email_template", email_template_id=email_template_id))
+
+        if not template_type:
+            flash("Template type is required.", "error")
+            return redirect(url_for("edit_email_template", email_template_id=email_template_id))
+
+        if not subject_line:
+            flash("Subject line is required.", "error")
+            return redirect(url_for("edit_email_template", email_template_id=email_template_id))
+
+        if not body_text:
+            flash("Body text is required.", "error")
+            return redirect(url_for("edit_email_template", email_template_id=email_template_id))
+
+        try:
+            if is_active:
+                cur.execute("""
+                    UPDATE email_templates
+                    SET is_active = FALSE,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE spa_id = %s
+                      AND template_type = %s
+                      AND email_template_id <> %s
+                """, (spa_id, template_type, email_template_id))
+
+            cur.execute("""
+                UPDATE email_templates
+                SET template_name = %s,
+                    template_type = %s,
+                    subject_line = %s,
+                    body_text = %s,
+                    is_active = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE email_template_id = %s
+                  AND spa_id = %s
+            """, (
+                template_name,
+                template_type,
+                subject_line,
+                body_text,
+                is_active,
+                email_template_id,
+                spa_id
+            ))
+
+            conn.commit()
+            flash("Email template updated successfully.", "success")
+            return redirect(url_for("email_templates_admin"))
+
+        except Exception as e:
+            conn.rollback()
+            print("EDIT EMAIL TEMPLATE ERROR:", str(e))
+            flash("There was a problem updating the template.", "error")
+            return redirect(url_for("edit_email_template", email_template_id=email_template_id))
+
+    cur.execute("""
+        SELECT
+            email_template_id,
+            template_name,
+            template_type,
+            subject_line,
+            body_text,
+            is_active
+        FROM email_templates
+        WHERE email_template_id = %s
+          AND spa_id = %s
+    """, (email_template_id, spa_id))
+
+    template = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if not template:
+        flash("Email template not found.", "error")
+        return redirect(url_for("email_templates_admin"))
+
+    return render_template("email_template_form.html", template=template)
+
+
+
+
+
+
+
+#   -------------------------
+#
+#    EMAIL TEMPLATE ACTIVATE
+#
+#
+#
+#   ---------------------------
+
+@app.route("/email-templates/activate/<int:email_template_id>", methods=["POST"])
+def activate_email_template(email_template_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT template_type
+            FROM email_templates
+            WHERE email_template_id = %s
+              AND spa_id = %s
+        """, (email_template_id, spa_id))
+
+        row = cur.fetchone()
+
+        if not row:
+            flash("Template not found.", "error")
+            return redirect(url_for("email_templates_admin"))
+
+        template_type = row[0]
+
+        cur.execute("""
+            UPDATE email_templates
+            SET is_active = FALSE,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE spa_id = %s
+              AND template_type = %s
+        """, (spa_id, template_type))
+
+        cur.execute("""
+            UPDATE email_templates
+            SET is_active = TRUE,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE email_template_id = %s
+              AND spa_id = %s
+        """, (email_template_id, spa_id))
+
+        conn.commit()
+        flash("Template activated successfully.", "success")
+
+    except Exception as e:
+        conn.rollback()
+        print("ACTIVATE EMAIL TEMPLATE ERROR:", str(e))
+        flash("There was a problem activating the template.", "error")
+
+    finally:
+        cur.close()
+        conn.close()
+
+    return redirect(url_for("email_templates_admin"))
+
+
+
+
+#   ----------------------------------
+#
+#   EMAIL TEMPLATE DELETE
+#
+#
+#   SPA_ID AND ROUTE GOOD  4/21/26
+#   ---------------------------------
+
+
+@app.route("/email-templates/delete/<int:email_template_id>", methods=["POST"])
+def delete_email_template(email_template_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            DELETE FROM email_templates
+            WHERE email_template_id = %s
+              AND spa_id = %s
+        """, (email_template_id, spa_id))
+
+        conn.commit()
+        flash("Template deleted.", "success")
+
+    except Exception as e:
+        conn.rollback()
+        print("DELETE TEMPLATE ERROR:", str(e))
+        flash("Could not delete template.", "error")
+
+    finally:
+        cur.close()
+        conn.close()
+
+    return redirect(url_for("email_templates_admin"))
+
+
+
+
+
+#   ---------------------------------------
+#
+#    EMAIL TEMPLATE PREVIEW
+#
+#
+#   SPA_ID AND ROUTE GOOD    4/21/26
+#   ----------------------------------------
+
+
+@app.route("/email-templates/preview/<int:email_template_id>")
+def preview_email_template(email_template_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT subject_line, body_text
+        FROM email_templates
+        WHERE email_template_id = %s
+          AND spa_id = %s
+    """, (email_template_id, spa_id))
+
+    template = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if not template:
+        return "Template not found"
+
+    subject, body = template
+
+    context = {
+        "first_name": "Sample"
+    }
+
+    subject = render_email_template(subject, context)
+    body = render_email_template(body, context)
+
+    return f"<h2>{subject}</h2><pre>{body}</pre>"
 
 
 
@@ -2993,12 +3702,13 @@ def gift_certificates_home():
             ON gc.gift_certificate_status_id = gcs.gift_certificate_status_id
            AND gc.spa_id = gcs.spa_id 
         LEFT JOIN (
-            SELECT DISTINCT ON (gift_cert_id)
+            SELECT DISTINCT ON (gift_cert_id, spa_id)
                 gift_cert_id,
+                spa_id,
                 sent_status,
                 sent_date
             FROM gift_certificate_email_reminders
-            ORDER BY gift_cert_id, sent_date DESC
+            ORDER BY gift_cert_id, spa_id, sent_date DESC
         ) r
             ON gc.gift_cert_id = r.gift_cert_id
            AND gc.spa_id = r.spa_id

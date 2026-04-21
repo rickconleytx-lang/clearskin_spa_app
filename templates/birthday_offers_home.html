@@ -5,6 +5,10 @@
 {% block content %}
 
 <a href="{{ url_for('help_birthday_offer_page') }}" class="btn">Page Help</a>
+<form method="POST" action="{{ url_for('send_birthday_emails_today') }}">
+    <button type="submit" class="btn">Send Today’s Birthday Emails</button>
+</form>
+
 <br>
 <br>
 

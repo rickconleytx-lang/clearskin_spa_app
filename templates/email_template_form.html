@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}
+    {% if template %}Edit Email Template{% else %}Add Email Template{% endif %}
+{% endblock %}
+
+{% block content %}
+<h1>
+    {% if template %}
+        Edit Email Template
+    {% else %}
+        Add Email Template
+    {% endif %}
+</h1>
+
+<div class="form-buttons">
+    <a href="{{ url_for('email_templates_admin') }}" class="btn">Back to Templates</a>
+</div>
+
+<form method="POST">
+    <div class="form-group">
+        <label for="template_name">Template Name</label>
+        <input type="text"
+               id="template_name"
+               name="template_name"
+               value="{{ template[1] if template else '' }}"
+               required>
+    </div>
+
+    <div class="form-group">
+        <label for="template_type">Template Type</label>
+        <select id="template_type" name="template_type" required>
+            <option value="">Select Type</option>
+            <option value="Birthday" {% if template and template[2] == "Birthday" %}selected{% endif %}>Birthday</option>
+            <option value="Gift Certificate" {% if template and template[2] == "Gift Certificate" %}selected{% endif %}>Gift Certificate</option>
+            <option value="Promotion" {% if template and template[2] == "Promotion" %}selected{% endif %}>Promotion</option>
+            <option value="Reminder" {% if template and template[2] == "Reminder" %}selected{% endif %}>Reminder</option>
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label for="subject_line">Subject Line</label>
+        <input type="text"
+               id="subject_line"
+               name="subject_line"
+               value="{{ template[3] if template else '' }}"
+               required>
+    </div>
+
+    <div class="form-group">
+        <label for="body_text">Body Text</label>
+        <textarea id="body_text"
+                  name="body_text"
+                  rows="14"
+                  required>{{ template[4] if template else '' }}</textarea>
+    </div>
+
+    <div class="form-group">
+        <label>
+            <input type="checkbox"
+                   name="is_active"
+                   {% if template and template[5] %}checked{% endif %}>
+            Active Template
+        </label>
+    </div>
+
+    <div class="form-buttons">
+        <button type="submit" class="btn">
+            {% if template %}Save Changes{% else %}Add Template{% endif %}
+        </button>
+        <a href="{{ url_for('email_templates_admin') }}" class="btn">Cancel</a>
+    </div>
+</form>
+
+<div style="margin-top: 30px;">
+    <h3>Available Placeholders</h3>
+    <p><strong>{first_name}</strong> = Client first name</p>
+</div>
+{% endblock %}
