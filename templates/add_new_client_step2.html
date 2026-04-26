@@ -11,11 +11,10 @@
 
     <div class="form-buttons">
         <button type="submit" name="action" value="back">Back to Page 1</button>
-
         <button type="submit" name="action" value="save">Save</button>
 
         <button type="button" class="btn cancel-btn"
-            onclick="if(confirm('Are you sure you want to cancel? Any unsaved information will be lost.')) { window.location.href='{{ url_for('cancel_new_client') }}'; }">
+            onclick="if(confirm('Are you sure you want to cancel? Any unsaved information will be lost.')) { window.location.href='{{ url_for('client_history') }}'; }">
             Cancel
         </button>
     </div>
@@ -30,10 +29,51 @@
         <input type="text" name="emergency_contact_phone" value="{{ step2_data.get('emergency_contact_phone', '') }}">
     </p>
 
-    <p>
-        <label>Referred By:</label><br>
-        <input type="text" name="referred_by" value="{{ step2_data.get('referred_by', '') }}">
-    </p>
+    <div class="form-group">
+        <label for="referrer_type">Referrer Type</label>
+        <select id="referrer_type" name="referrer_type" onchange="toggleReferrerFields()">
+            <option value="" {% if step2_data.get('referrer_type', '') == '' %}selected{% endif %}>Not Referred / Unknown</option>
+            <option value="Client" {% if step2_data.get('referrer_type') == 'Client' %}selected{% endif %}>Existing Client</option>
+            <option value="Non-Client" {% if step2_data.get('referrer_type') == 'Non-Client' %}selected{% endif %}>Non-Client</option>
+        </select>
+    </div>
+
+    <div id="client-referrer-fields" style="display:none;">
+        <div class="form-group">
+            <label for="referred_by">Referred By (Existing Client)</label>
+            <select id="referred_by" name="referred_by">
+                <option value="">Select Client</option>
+                {% for client in clients_for_referral %}
+                    <option value="{{ client[0] }}"
+                        {% if step2_data.get('referred_by', '')|string == client[0]|string %}selected{% endif %}>
+                        {{ client[1] }} {{ client[2] }}
+                    </option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
+
+    <div id="non-client-referrer-fields" style="display:none;">
+        <div class="form-group">
+            <label for="referrer_name">Referrer Name</label>
+            <input type="text" id="referrer_name" name="referrer_name" value="{{ step2_data.get('referrer_name', '') }}">
+        </div>
+
+        <div class="form-group">
+            <label for="referrer_business_name">Business Name</label>
+            <input type="text" id="referrer_business_name" name="referrer_business_name" value="{{ step2_data.get('referrer_business_name', '') }}">
+        </div>
+
+        <div class="form-group">
+            <label for="referrer_phone">Referrer Phone</label>
+            <input type="text" id="referrer_phone" name="referrer_phone" value="{{ step2_data.get('referrer_phone', '') }}">
+        </div>
+
+        <div class="form-group">
+            <label for="referrer_email">Referrer Email</label>
+            <input type="email" id="referrer_email" name="referrer_email" value="{{ step2_data.get('referrer_email', '') }}">
+        </div>
+    </div>
 
     <p>
         <label>Referred By Note:</label><br>
@@ -59,4 +99,26 @@
     </p>
 
 </form>
+
+<script>
+function toggleReferrerFields() {
+    const referrerType = document.getElementById("referrer_type").value;
+    const clientFields = document.getElementById("client-referrer-fields");
+    const nonClientFields = document.getElementById("non-client-referrer-fields");
+
+    if (referrerType === "Client") {
+        clientFields.style.display = "block";
+        nonClientFields.style.display = "none";
+    } else if (referrerType === "Non-Client") {
+        clientFields.style.display = "none";
+        nonClientFields.style.display = "block";
+    } else {
+        clientFields.style.display = "none";
+        nonClientFields.style.display = "none";
+    }
+}
+
+document.addEventListener("DOMContentLoaded", toggleReferrerFields);
+</script>
+
 {% endblock %}

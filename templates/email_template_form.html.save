@@ -13,8 +13,6 @@
     {% endif %}
 </h1>
 
-<h1>this is email_template_form.html</h1>
-
 <div class="form-buttons">
     <a href="{{ url_for('email_templates_admin') }}" class="btn">Back to Templates</a>
 </div>
@@ -41,7 +39,7 @@
     </div>
 
     <div class="form-group">
-        <label for="subject_line">Subject Line -  <span style="color: red; font-size: small;">ex: Happy Birthday from {spa_name}</span></label>
+        <label for="subject_line">Subject Line</label>
         <input type="text"
                id="subject_line"
                name="subject_line"
@@ -58,8 +56,6 @@
     </div>
 
     <div class="form-group">
-<br>
-Active Template
         <label>
             <input type="checkbox"
                    name="is_active"
@@ -88,18 +84,17 @@ Active Template
 
     <code>{first_name}</code>
     <button type="button"
-            class="btn btn-small btn-copy"
+            class="btn btn-small"
             style="margin-left: 80px;"
             onclick="copyPlaceholder('{first_name}')">
         Copy
     </button>
 
     <br>
-    <br>
 
     <code>{spa_name}</code>
     <button type="button"
-            class="btn btn-small btn-copy"
+            class="btn btn-small"
             style="margin-left: 96px;"
             onclick="copyPlaceholder('{spa_name}')">
         Copy
@@ -109,66 +104,58 @@ Active Template
 
 <p style="color: red;">Birthdays:</p>
 
-    <code>{birth_month}</code>
+    <code>{certificate_number}</code>
+cç˚˚˚
     <button type="button"
-            class="btn btn-small btn-copy"
-            style="margin-left: 75px;"
-            onclick="copyPlaceholder('{birth_month}')">
+            class="btn btn-small"
+            style="margin-left: 20px;"
+            onclick="copyPlaceholder('{certificate_number}')">
         Copy 
     </button>
     
-    <br>
     <br>
 
 <p style="color: red;">Gift Certificates:</p>    
 
     <code>{certificate_number}</code>
     <button type="button"
-            class="btn btn-small btn-copy"
+            class="btn btn-small"
             style="margin-left: 20px;"
             onclick="copyPlaceholder('{certificate_number}')">
         Copy
     </button>
 
     <br>
-    <br>
-
     <code>{original_value}</code>
     <button type="button"
-            class="btn btn-small btn-copy"
+            class="btn btn-small"
             style="margin-left: 50px;"
             onclick="copyPlaceholder('{original_value}')">
         Copy
     </button>
 
     <br>
-    <br>
-
     <code>{remaining_balance}</code>
     <button type="button"
-            class="btn btn-small btn-copy"
+            class="btn btn-small"
             style="margin-left: 25px;"
             onclick="copyPlaceholder('{remaining_balance}')">
         Copy 
     </button>
 
     <br>
-    <br>
-
     <code>{expires_date}</code>
     <button type="button"
-            class="btn btn-small btn-copy"
+            class="btn btn-small"
             style="margin-left: 65px;"
             onclick="copyPlaceholder('{expires_date}')">
         Copy 
     </button>
 
     <br>
-    <br>
-
     <code>{recipient_name}</code>
     <button type="button"
-            class="btn btn-small btn-copy"
+            class="btn btn-small"
             style="margin-left: 50px;"
             onclick="copyPlaceholder('{recipient_name}')">
         Copy 

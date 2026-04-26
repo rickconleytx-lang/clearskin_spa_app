@@ -6,7 +6,7 @@
 <h1>Email Templates</h1>
 
 <div class="form-buttons">
-    <a href="{{ url_for('dashboard') }}" class="btn">Back to Dashboard</a>
+    <a href="{{ url_for('general_email') }}" class="btn">Back to Email Campaign</a>
     <a href="{{ url_for('add_email_template') }}" class="btn">Add Email Template</a>
 </div>
 
@@ -37,25 +37,34 @@
             </td>
             <td>{{ t[7].strftime('%Y-%m-%d %I:%M %p') if t[7] else '' }}</td>
             <td>
-                <a href="{{ url_for('edit_email_template', email_template_id=t[0]) }}" class="btn btn-small">Edit</a>
 
-                {% if not t[5] %}
-                <form method="POST"
-                      action="{{ url_for('activate_email_template', email_template_id=t[0]) }}"
-                      style="display:inline;">
-                    <button type="submit" class="btn btn-small">Make Active</button>
-                </form>
 
-                <form method="POST"
-                      action="{{ url_for('delete_email_template', email_template_id=t[0]) }}"
-                      style="display:inline;">
-                    <button type="submit"
-                            class="btn btn-small"
-                            onclick="return confirm('Delete this template?');">
-                        Delete
-                    </button>
-                  </form>
+                    <a href="{{ url_for('preview_email_template', email_template_id=t[0]) }}"
+                        class="btn btn-small">
+                         Preview
+                    </a>
 
+                    <a href="{{ url_for('edit_email_template', template_id=t[0]) }}" class="btn btn-small">
+                        Edit
+                    </a>
+
+                {% if not t[5] %}  
+
+                    <form method="POST"
+                          action="{{ url_for('activate_email_template', email_template_id=t[0]) }}"
+                          style="display:inline;">
+                        <button type="submit" class="btn btn-small">Make Active</button>
+                    </form>
+
+                    <form method="POST"
+                          action="{{ url_for('delete_email_template', email_template_id=t[0]) }}"
+                          style="display:inline;">
+                        <button type="submit"
+                                class="btn btn-small"
+                                onclick="return confirm('Delete this template?');">
+                            Delete
+                        </button>
+                    </form>
                 {% endif %}
             </td>
         </tr>

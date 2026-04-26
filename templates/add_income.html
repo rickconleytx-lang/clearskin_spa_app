@@ -41,6 +41,13 @@
     <label for="retail_amount">Retail Amount</label>
     <input type="number" step="0.01" id="retail_amount" name="retail_amount" placeholder="0.00">
 
+    <label for="available_credit">Available Credit</label>
+    <input type="number" step="0.01" id="available_credit" name="available_credit"
+       value="{{ '%.2f'|format(credit_balance or 0) }}" readonly>
+
+    <label for="credit_applied">Credit Applied</label>
+    <input type="number" step="0.01" min="0" id="credit_applied" name="credit_applied" value="0.00">
+
     <label for="tax_amount">Tax Amount</label>
     <input type="number" step="0.01" id="tax_amount" name="tax_amount" placeholder="0.00">
 
@@ -90,6 +97,8 @@ document.addEventListener("DOMContentLoaded", function () {
     const retailField = document.getElementById("retail_amount");
     const taxField = document.getElementById("tax_amount");
     const tipField = document.getElementById("tip_amount");
+    const creditAppliedField = document.getElementById("credit_applied");
+    const availableCreditField = document.getElementById("available_credit");
     const totalField = document.getElementById("total_amount");
 
     const paymentMethodField = document.getElementById("payment_method");
@@ -102,8 +111,26 @@ document.addEventListener("DOMContentLoaded", function () {
         const retail = parseFloat(retailField.value) || 0;
         const tax = parseFloat(taxField.value) || 0;
         const tip = parseFloat(tipField.value) || 0;
+        const availableCredit = parseFloat(availableCreditField.value) || 0;
+        let creditApplied = parseFloat(creditAppliedField.value) || 0;
 
-        const total = service + retail + tax + tip;
+        const discountableTotal = service + retail;
+
+        if (creditApplied < 0) {
+            creditApplied = 0;
+        }
+
+        if (creditApplied > availableCredit) {
+            creditApplied = availableCredit;
+        }
+
+        if (creditApplied > discountableTotal) {
+            creditApplied = discountableTotal;
+        }
+
+        creditAppliedField.value = creditApplied.toFixed(2);
+
+        const total = service + retail + tax + tip - creditApplied;
         totalField.value = total.toFixed(2);
     }
 
@@ -113,28 +140,20 @@ document.addEventListener("DOMContentLoaded", function () {
 
         if (cardBasedMethods.includes(paymentMethod)) {
             creditProcessorGroup.style.display = "block";
+            processorPaymentGroup.style.display = "block";
         } else {
             creditProcessorGroup.style.display = "none";
             creditProcessorField.value = "";
-        }
-
-
-        if (cardBasedMethods.includes(paymentMethod)) {
-            processorPaymentGroup.style.display = "block";
-        } else {
             processorPaymentGroup.style.display = "none";
             document.getElementById("processor_payment_id").value = "";
         }
-
-
-
-
     }
 
     serviceField.addEventListener("input", calculateTotal);
     retailField.addEventListener("input", calculateTotal);
     taxField.addEventListener("input", calculateTotal);
     tipField.addEventListener("input", calculateTotal);
+    creditAppliedField.addEventListener("input", calculateTotal);
 
     paymentMethodField.addEventListener("change", togglePaymentFields);
 
@@ -142,5 +161,7 @@ document.addEventListener("DOMContentLoaded", function () {
     togglePaymentFields();
 });
 </script>
+
+
 
 {% endblock %}

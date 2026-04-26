@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% from "components/cards.html" import section_card %}
+
+
+{% block content %}
+
+
+<h1>Email Campaigns</h1>
+<p>Notice:  This database shall not be used for mass-market and spam  emails.  Emails must only be sent to <br>
+Opted-in clients. The sending of spam/mass-marketed emails is a violaiton of the Terms of Agreement.</p>
+
+<form method="GET">
+
+
+<div class="narrow-cards">
+    {{ section_card("Email History", "Go to Calendar",  url_for('email_history')) }}
+    {{ section_card("Email Templates", "Manage Email Templates", url_for('email_templates_admin')) }}
+    {{ section_card("Add New Template", "Add New Email Template", url_for('add_email_template')) }}
+    {{ section_card("Reserved", "Not Used", url_for('general_email')) }}
+</div>
+    
+ 
+
+
+
+
+    <label>Email Type</label><br>
+    <select name="template_type" onchange="this.form.submit()">
+        <option value="">Select Type</option>
+        {% for t in template_types %}
+            <option value="{{ t[0] }}" {% if t[0] == template_type %}selected{% endif %}>
+                {{ t[0] }}
+            </option>
+        {% endfor %}
+    </select>
+
+    <br><br>
+
+    <label>Template</label><br>
+    <select name="template_id">
+        <option value="">Select Template</option>
+        {% for t in templates %}
+             <option value="{{ t[0] }}" {% if template_id|string == t[0]|string %}selected{% endif %}>
+                 {{ t[1] }}
+             </option>
+        {% endfor %}
+    </select>
+    <br><br>
+
+    <label>Search Clients</label><br>
+    <input type="text" name="search" value="{{ search or '' }}">
+
+    <button type="submit">Search</button>
+
+    <button type="submit" class="btn">Search</button>
+    <button type="submit" name="show_all" value="1" class="btn">Show All Clients</button>
+
+<br>
+<br>
+
+    <button type="submit"
+            class="btn"
+            onclick="return confirm('Send this email to selected clients?');">
+        Send Selected Emails
+    </button>
+            
+
+    <button type="submit"
+            class="btn"
+            onclick="selectAllClients(); return confirm('Send this email to ALL clients currently listed?');">
+        Send All Listed
+    </button>
+
+
+
+
+</form>
+
+<hr>
+
+{% if clients %}
+
+<form method="POST" action="{{ url_for('general_email_send') }}">
+
+    <input type="hidden" name="template_id" value="{{ template_id }}">
+
+    <table>
+        <tr>
+            <th>Select</th>
+            <th>Client</th>
+            <th>Email</th>
+            <th>Preview</th>
+        </tr>
+
+        {% for c in clients %}
+        <tr>
+             <td>
+                 <input type="checkbox" name="client_ids" value="{{ c[0] }}">
+             </td>
+
+             <td>{{ c[2] }}, {{ c[1] }}</td>
+
+             <td>{{ c[3] }}</td>
+
+        <td>
+            {% if template_id %}
+                <a class="btn btn-small"
+                   href="{{ url_for('general_email_preview', template_id=template_id, client_id=c[0]) }}">
+                    Preview
+                </a>
+                <a href="{{ url_for('edit_email_template', template_id=template_id) }}" class="btn btn-small">Edit</a>
+             {% else %}
+                 <span style="color: gray;">Select Template</span>
+             {% endif %}
+        </td>
+
+
+        </tr>
+        {% endfor %}
+    </table>
+
+    <br>
+
+    <button type="submit"
+            class="btn"
+            onclick="return confirm('Send this email to selected clients?');">
+        Send Selected Emails
+    </button>
+
+
+    <button type="submit"
+            class="btn"
+            onclick="selectAllClients(); return confirm('Send this email to ALL clients currently listed?');">
+        Send All Listed
+    </button>
+
+</form>
+
+{% endif %}
+
+<script>
+function selectAllClients() {
+    document.querySelectorAll('input[name="client_ids"]').forEach(function(box) {
+        box.checked = true;
+    });
+}
+</script>
+
+
+
+{% endblock %}
+

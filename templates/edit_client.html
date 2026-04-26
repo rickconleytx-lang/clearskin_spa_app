@@ -60,6 +60,18 @@
         <span class="summary-label">Average Ticket</span>
         <span class="summary-value">${{ "%.2f"|format(average_ticket or 0) }}</span>
     </div>
+
+    <div class="dashboard-card">
+        <h3>Available Credit</h3>
+        <p><strong>Available Credit:</strong> ${{ '%.2f'|format(credit_balance or 0) }}</p>
+
+        {% if credit_balance and credit_balance > 0 %}
+            <p style="color: green;">Client has available credit to apply to next service</p>
+        {% endif %}
+
+        </p>
+    </div>
+
 </div>
 
 

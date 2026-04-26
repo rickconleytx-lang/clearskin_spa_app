@@ -17,8 +17,16 @@ from flask import g
 
 
 app = Flask(__name__)
+
+# Mailgun config
+MAILGUN_API_KEY = os.getenv("MAILGUN_API_KEY")
+MAILGUN_DOMAIN = os.getenv("MAILGUN_DOMAIN")
+MAILGUN_FROM = os.getenv("MAILGUN_FROM")
+
 app.secret_key = os.environ.get("SECRET_KEY", "local-dev-key")
 
+
+print("APP.PY LOADED - SWITCH TEST VERSION", flush=True)
 
 print("APP FILE LOADED")
 
@@ -167,10 +175,45 @@ def load_spa():
         raise Exception("spa_id is missing")
 
 
+
+
     
 @app.context_processor
 def inject_spa():
     return dict(spa_id=g.get("spa_id"))
+
+
+
+
+
+
+
+@app.context_processor
+def inject_current_spa():
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT spa_name
+            FROM spas
+            WHERE spa_id = %s
+        """, (spa_id,))
+        row = cur.fetchone()
+        spa_name = row[0] if row else "Your Spa"
+
+    finally:
+        cur.close()
+        conn.close()
+
+    return {
+        "active_spa_id": spa_id,
+        "active_spa_name": spa_name
+    }
+
+
 
 
 
@@ -186,9 +229,6 @@ def inject_spa():
 @app.errorhandler(404)
 def page_not_found(error):
     return render_template("404.html"), 404
-
-
-
 
 
 
@@ -261,6 +301,33 @@ def save_time_settings():
         
     flash("Time settings updated successfully.", "success")
     return redirect(url_for("admin"))
+
+
+#   ----------------------------------
+#
+#     SWITCH ROUTE
+#
+#    this will switch users
+#
+#>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+#
+#    DELETE  DELETE  DELETE AFTER TESTNG
+#
+#
+#    DELETE  DELETE  DELETE AFTER TESTING
+#   ---------------------------------
+
+
+
+@app.route("/switch-spa/<int:spa_id>")
+def switch_spa(spa_id):
+    print("SWITCH ROUTE HIT:", spa_id, flush=True)
+    session["spa_id"] = spa_id
+
+    flash(f"Switched to spa {spa_id}.", "success")
+    return redirect(url_for("dashboard"))
+
+
 
 
 
@@ -502,7 +569,7 @@ def add_new_client_from_booking(incoming_booking_id):
 
 
 
-@app.route("/incoming_bookings/<int:incoming_booking_id>/match_existing_client")
+app.route("/incoming_bookings/<int:incoming_booking_id>/match_existing_client")
 def match_existing_client_booking(incoming_booking_id):
     flash("Next step: choose existing client and create appointment.", "info")
     return redirect(url_for("review_incoming_booking", incoming_booking_id=incoming_booking_id))
@@ -983,11 +1050,32 @@ def business_financing_home():
 
 #   -----------------------
 #       
-#      TEST MAILGUN EMAIL   
+#     ACCOUNTING HOME
 #
 #  ----------------------
         
+@app.route("/accounting_home")
+def accounting_home():
+    return render_template("accounting_home.html")
 
+
+
+
+
+#   -----------------------
+#
+#     Finance HOME    
+#
+#  ----------------------
+            
+@app.route("/finance_home")
+def finance_home():
+    return render_template("finance_home.html")
+
+
+@app.route("/birthday_offers1_home")
+def birthday_offers1_home():
+    return render_template("birthday_offers1_home.html")
 
 
 
@@ -1559,6 +1647,39 @@ def get_birthday_campaign_year(birth_date, today):
 
 
 
+
+#   --------------------------------------------------
+#  
+#       
+#             GIFT CERTIFICATE EMAIL   HELPER
+#
+#              spa-id good
+#  ----------------------------------------------------
+
+
+def get_email_template_by_type(spa_id, template_type):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT subject_line, body_text
+            FROM email_templates
+            WHERE spa_id = %s
+              AND template_type = %s
+              AND is_active = TRUE
+            ORDER BY email_template_id DESC
+            LIMIT 1
+        """, (spa_id, template_type))
+        return cur.fetchone()
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
 #   --------------------------------------------------
 #
 #
@@ -1664,6 +1785,12 @@ def get_loan_contribution_rows(spa_id, start_date=None, end_date=None):
 
 
 
+
+
+
+
+
+
 #   ------------------------------------------------
 #
 #
@@ -1671,10 +1798,10 @@ def get_loan_contribution_rows(spa_id, start_date=None, end_date=None):
 #     EMAIL CAMPAIGNS
 #
 #
-#
+# >>>>>>>>>>>>>>>>delete afte all works
 #   -----------------------------------------------
 
-def get_birthday_template(spa_id):
+#def get_birthday_template(spa_id):
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -1697,6 +1824,10 @@ def get_birthday_template(spa_id):
         conn.close()
 
 
+
+
+
+
 def render_email_template(template_text, context):
     if not template_text:
         return ""
@@ -1716,14 +1847,15 @@ def render_email_template(template_text, context):
 
 
 
-
 #   --------------------------------------
 #         BIRTHDAYS
 #     HARD CODED EMAIL   
+# >>>>>>>>>>>>>>>>>>>>>>>>>delete after all works
 #   --------------------------------------
 
 
-def build_birthday_email(first_name):
+
+#def build_birthday_email(first_name):
     subject = "Happy Birthday from Your Spa!"
     body = (
         f"Hi {first_name},\n\n"
@@ -1752,6 +1884,8 @@ def build_birthday_email(first_name):
 
 @app.route("/birthday-emails/send-month", methods=["POST"])
 def send_birthday_emails_month():
+
+
     spa_id = current_spa_id()
     spa_now = get_spa_now()
     today = spa_now.date()
@@ -1790,19 +1924,19 @@ def send_birthday_emails_month():
         birthday_clients = cur.fetchall()
         print("SENDABLE MONTH CLIENTS:", birthday_clients)
 
-        template = get_birthday_template(spa_id)
+        template = get_email_template_by_type(spa_id, "Birthday")
 
         if template:
             template_subject, template_body = template
         else:
-            template_subject = "Clear Skin Spa, wishing you a Very Happy Birthday!"
+            template_subject = "{spa_name}, wishing you a Very Happy Birthday!"
             template_body = (
                 "Hi {first_name},\n\n"
-                "Happy Birthday from all of us at ClearSkin Spa.\n\n"
+                "Happy Birthday from all of us at {spa_name}.\n\n"
                 "We wanted to wish you a wonderful birthday month and thank you for being a valued client.\n\n"
                 "We have a special birthday offer available for you this month.\n\n"
                 "Warmly,\n"
-                "ClearSkin Spa"
+                "{spa_name}"
             )
 
         sent_count = 0
@@ -1852,13 +1986,13 @@ def send_birthday_emails_month():
         else:
             flash(f"Birthday month emails sent: {sent_count}. Failed: {failed_count}.", "warning")
 
-        return redirect(url_for("birthday_offers"))
+        return redirect(url_for("birthday_offers_home"))
 
     except Exception as db_error:
         conn.rollback()
         print("BIRTHDAY MONTH SEND ERROR:", str(db_error))
         flash("There was a problem sending birthday month emails.", "error")
-        return redirect(url_for("birthday_offers"))
+        return redirect(url_for("birthday_offers_home"))
 
     finally:
         cur.close()
@@ -1877,11 +2011,13 @@ def send_birthday_emails_month():
 #
 #     BIRTHDAY TEMPLATE 
 #
-#
+# 
 #  --------------------------------
 
 @app.route("/email-templates")
 def email_templates_admin():
+
+
     spa_id = current_spa_id()
 
     conn = get_db_connection()
@@ -1919,14 +2055,16 @@ def email_templates_admin():
 #
 #   BIRTHDAY TEMPLATE ADD
 #
-#
+#   >>>>>>DELETE AFTER ALL WORKS
 #   ------------------------------
 
 
 
 
-@app.route("/email-templates/add", methods=["GET", "POST"])
-def add_email_template():
+# @app.route("/email-templates/add", methods=["GET", "POST"])
+def add_email_template_disabled():
+
+
     spa_id = current_spa_id()
 
     if request.method == "POST":
@@ -2009,13 +2147,14 @@ def add_email_template():
 #
 #     BIRTHDAYS TEMPLATE EDIT
 #
-#
+#    >>>>>> DELETE WHEN ALL WORKS
 #   -------------------------------
 
 
 
-@app.route("/email-templates/edit/<int:email_template_id>", methods=["GET", "POST"])
-def edit_email_template(email_template_id):
+#@app.route("/email-templates/edit/<int:email_template_id>", methods=["GET", "POST"])
+def edit_email_template_DISABLED(email_template_id):
+
     spa_id = current_spa_id()
 
     conn = get_db_connection()
@@ -2123,6 +2262,8 @@ def edit_email_template(email_template_id):
 #
 #   ---------------------------
 
+
+
 @app.route("/email-templates/activate/<int:email_template_id>", methods=["POST"])
 def activate_email_template(email_template_id):
     spa_id = current_spa_id()
@@ -2179,17 +2320,20 @@ def activate_email_template(email_template_id):
 
 
 
+
 #   ----------------------------------
 #
 #   EMAIL TEMPLATE DELETE
 #
 #
-#   SPA_ID AND ROUTE GOOD  4/21/26
+#   
 #   ---------------------------------
+
 
 
 @app.route("/email-templates/delete/<int:email_template_id>", methods=["POST"])
 def delete_email_template(email_template_id):
+
     spa_id = current_spa_id()
 
     conn = get_db_connection()
@@ -2225,13 +2369,14 @@ def delete_email_template(email_template_id):
 #    EMAIL TEMPLATE PREVIEW
 #
 #
-#   SPA_ID AND ROUTE GOOD    4/21/26
+#  
 #   ----------------------------------------
 
 
 @app.route("/email-templates/preview/<int:email_template_id>")
 def preview_email_template(email_template_id):
     spa_id = current_spa_id()
+
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -2263,6 +2408,925 @@ def preview_email_template(email_template_id):
     return f"<h2>{subject}</h2><pre>{body}</pre>"
 
 
+
+
+
+
+
+#   ------------------------------------------------
+#
+#
+#    GIFT CERTIFICATES      EMAIL CAMPAIGN
+#
+#    GIFT CERTIFICATE SEND
+#
+#          4/23/26
+#   -----------------------------------------------
+
+
+@app.route("/gift-certificates/email/<int:gift_cert_id>", methods=["POST"])
+def send_gift_certificate_email(gift_cert_id):
+    spa_id = current_spa_id()
+    spa_name = get_spa_name(spa_id)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        print("GIFT CERT EMAIL ROUTE HIT", flush=True)
+        print("SPA ID:", spa_id, flush=True)
+        print("GIFT CERT ID:", gift_cert_id, flush=True)
+
+        cur.execute("""
+            SELECT
+                gc.gift_cert_id,
+                gc.certificate_number,
+                gc.original_value,
+                gc.remaining_balance,
+                gc.expires_date,
+                gc.recipient_name,
+                gc.purchaser_email
+            FROM gift_certificates gc
+            WHERE gc.gift_cert_id = %s
+              AND gc.spa_id = %s
+        """, (gift_cert_id, spa_id))
+        gift_cert = cur.fetchone()
+
+        print("GIFT CERT ROW:", gift_cert, flush=True)
+
+        if not gift_cert:
+            flash("Gift certificate not found.", "error")
+            return redirect(url_for("gift_certificates_home"))
+
+        (
+            gc_id,
+            certificate_number,
+            original_value,
+            remaining_balance,
+            expires_date,
+            recipient_name,
+            purchaser_email
+        ) = gift_cert
+
+        print("PURCHASER EMAIL:", purchaser_email, flush=True)
+
+        if not purchaser_email or not purchaser_email.strip():
+            flash("No purchaser email found for this gift certificate.", "error")
+            return redirect(url_for("gift_certificates_home"))
+
+        template = get_email_template_by_type(spa_id, "Gift Certificate")
+        print("TEMPLATE FOUND:", bool(template), flush=True)
+
+        if template:
+            subject_template, body_template = template
+        else:
+            subject_template = "Your Gift Certificate from {spa_name}"
+            body_template = (
+                "Hi,\n\n"
+                "Thank you for your purchase from {spa_name}.\n\n"
+                "Gift Certificate Details:\n"
+                "Certificate Number: {certificate_number}\n"
+                "Original Value: ${original_value}\n"
+                "Remaining Balance: ${remaining_balance}\n"
+                "Expiration Date: {expires_date}\n"
+                "Recipient: {recipient_name}\n\n"
+                "We appreciate your business!\n\n"
+                "{spa_name}"
+            )
+
+        context = {
+            "spa_name": spa_name,
+            "certificate_number": certificate_number or "",
+            "original_value": f"{float(original_value or 0):.2f}",
+            "remaining_balance": f"{float(remaining_balance or 0):.2f}",
+            "expires_date": expires_date.strftime("%Y-%m-%d") if expires_date else "",
+            "recipient_name": recipient_name or ""
+        }
+
+        subject = render_email_template(subject_template, context)
+        body = render_email_template(body_template, context)
+
+        print("SUBJECT:", subject, flush=True)
+        print("ABOUT TO SEND EMAIL", flush=True)
+
+        response = send_email(
+            to=purchaser_email,
+            subject=subject,
+            text=body
+        )
+
+        print("GIFT CERT EMAIL STATUS:", response.status_code, flush=True)
+        print("GIFT CERT EMAIL BODY:", response.text, flush=True)
+
+        if response.status_code == 200:
+            flash("Gift certificate email sent.", "success")
+        else:
+            flash("Gift certificate email failed to send.", "error")
+
+        return redirect(url_for("gift_certificates_home"))
+
+    except Exception as e:
+        print("GIFT CERT EMAIL ERROR:", repr(e), flush=True)
+        flash("There was a problem sending the gift certificate email.", "error")
+        return redirect(url_for("gift_certificates_home"))
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
+
+
+
+
+
+#   ---------------------------
+#
+#
+#     GENERAL EMAILS
+# THANK YOU - REMINDERS - ETC
+#
+#
+#
+#   ---------------------------
+
+
+@app.route("/general-email", methods=["GET", "POST"])
+def general_email():
+    spa_id = current_spa_id()
+
+    template_type = request.args.get("template_type", "")
+    template_id = request.args.get("template_id", "")
+    search = request.args.get("search", "").strip()
+    show_all = request.args.get("show_all")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Get template types
+    cur.execute("""
+        SELECT DISTINCT template_type
+        FROM email_templates
+        WHERE spa_id = %s
+        ORDER BY template_type
+    """, (spa_id,))
+    template_types = cur.fetchall()
+
+    # Get templates for selected type
+    templates = []
+    if template_type:
+        cur.execute("""
+            SELECT email_template_id, template_name
+            FROM email_templates
+            WHERE spa_id = %s
+              AND template_type = %s
+              AND is_active = TRUE
+            ORDER BY template_name
+        """, (spa_id, template_type))
+        templates = cur.fetchall()
+
+    # Search clients
+    clients = []
+    if search:
+        cur.execute("""
+            SELECT client_id, first_name, last_name, email
+            FROM clients
+            WHERE spa_id = %s
+              AND (
+                   LOWER(first_name) LIKE %s
+                   OR LOWER(last_name) LIKE %s
+                   OR email LIKE %s
+              )
+              AND email IS NOT NULL
+            ORDER BY last_name, first_name
+        """, (
+            spa_id,
+            f"%{search.lower()}%",
+            f"%{search.lower()}%",
+            f"%{search}%"
+        ))
+        clients = cur.fetchall()
+
+    
+    elif show_all:
+        cur.execute("""
+            SELECT client_id, first_name, last_name, email
+            FROM clients
+            WHERE spa_id = %s
+              AND email IS NOT NULL
+              AND TRIM(email) <> ''
+            ORDER BY last_name, first_name
+        """, (spa_id,))
+        clients = cur.fetchall()
+
+
+
+
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "general_email.html",
+        template_types=template_types,
+        templates=templates,
+        clients=clients,
+        template_type=template_type,
+        template_id=template_id,
+        search=search,
+        show_all=show_all
+    )
+
+
+
+
+
+
+#   ----------------------------------
+#
+#
+#  GENERAL EMAIL  PREVIEW
+#
+#
+#    SPA_ID AND ROUTE GOOD   4/23/26
+#   ------------------------------------
+
+
+@app.route("/general-email/preview", methods=["GET"])
+def general_email_preview():
+    spa_id = current_spa_id()
+
+    template_id = request.args.get("template_id")
+    client_id = request.args.get("client_id")
+
+    if not template_id:
+        flash("Please select a template to preview.", "error")
+        return redirect(url_for("general_email"))
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT subject_line, body_text
+            FROM email_templates
+            WHERE email_template_id = %s
+              AND spa_id = %s
+        """, (template_id, spa_id))
+        template = cur.fetchone()
+
+        if not template:
+            flash("Template not found.", "error")
+            return redirect(url_for("general_email"))
+
+        subject_template, body_template = template
+
+        if client_id:
+            cur.execute("""
+                SELECT first_name, last_name, email
+                FROM clients
+                WHERE client_id = %s
+                  AND spa_id = %s
+            """, (client_id, spa_id))
+            client = cur.fetchone()
+        else:
+            client = None
+
+        if client:
+            first_name, last_name, email = client
+        else:
+            first_name = "Sample"
+            last_name = "Client"
+            email = "sample@example.com"
+
+        spa_name = get_spa_name(spa_id)
+
+        context = {
+            "first_name": first_name,
+            "last_name": last_name,
+            "email": email,
+            "spa_name": spa_name
+        }
+
+        subject = render_email_template(subject_template, context)
+        body = render_email_template(body_template, context)
+
+        return render_template(
+            "general_email_preview.html",
+            subject=subject,
+            body=body,
+            first_name=first_name,
+            last_name=last_name,
+            email=email
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
+#   --------------------------------
+#
+#
+#    SEND GENERAL EMAILS
+#
+#
+#
+#  SPA_ID AND ROUTE GOOD   4/23/26
+#   ---------------------------------
+
+
+@app.route("/general-email/send", methods=["POST"])
+def general_email_send():
+    spa_id = current_spa_id()
+    spa_name = get_spa_name(spa_id)
+
+    template_id = request.form.get("template_id")
+    client_ids = request.form.getlist("client_ids")
+
+    print("GENERAL EMAIL SEND HIT", flush=True)
+    print("TEMPLATE ID:", template_id, flush=True)
+    print("CLIENT IDS:", client_ids, flush=True)
+
+    if not template_id:
+        flash("Please select an email template.", "error")
+        return redirect(url_for("general_email"))
+
+    if not client_ids:
+        flash("Please select at least one client.", "error")
+        return redirect(url_for("general_email"))
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    sent_count = 0
+    failed_count = 0
+
+    try:
+        cur.execute("""
+            SELECT template_type, subject_line, body_text
+            FROM email_templates
+            WHERE email_template_id = %s
+              AND spa_id = %s
+              AND is_active = TRUE
+        """, (template_id, spa_id))
+        template = cur.fetchone()
+
+        if not template:
+            flash("Template not found or inactive.", "error")
+            return redirect(url_for("general_email"))
+
+        template_type, subject_template, body_template = template
+
+        for client_id in client_ids:
+            cur.execute("""
+                SELECT client_id, first_name, last_name, email
+                FROM clients
+                WHERE client_id = %s
+                  AND spa_id = %s
+                  AND email IS NOT NULL
+                  AND email <> ''
+            """, (client_id, spa_id))
+            client = cur.fetchone()
+
+            if not client:
+                failed_count += 1
+                continue
+
+            client_id, first_name, last_name, email = client
+
+            context = {
+                "first_name": first_name or "",
+                "last_name": last_name or "",
+                "email": email or "",
+                "spa_name": spa_name
+            }
+
+            subject = render_email_template(subject_template, context)
+            body = render_email_template(body_template, context)
+
+            try:
+                response = send_email(
+                    to=email,
+                    subject=subject,
+                    text=body
+                )
+
+                print("MAILGUN STATUS:", response.status_code, flush=True)
+                print("MAILGUN BODY:", response.text, flush=True)
+
+                if response.status_code == 200:
+                    sent_status = "Sent"
+                    error_message = None
+                    sent_count += 1
+                else:
+                    sent_status = "Failed"
+                    error_message = response.text
+                    failed_count += 1
+
+            except Exception as email_error:
+                sent_status = "Error"
+                error_message = str(email_error)
+                failed_count += 1
+                print("GENERAL EMAIL ERROR:", error_message)
+
+            cur.execute("""
+                INSERT INTO email_send_log (
+                    spa_id,
+                    client_id,
+                    template_id,
+                    email_type,
+                    recipient_email,
+                    subject_line,
+                    sent_status,
+                    error_message
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                spa_id,
+                client_id,
+                template_id,
+                template_type,
+                email,
+                subject,
+                sent_status,
+                error_message
+            ))
+
+        conn.commit()
+        flash(f"Emails sent: {sent_count}. Failed: {failed_count}.", "success")
+        return redirect(url_for("general_email"))
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
+
+#   ------------------------------------
+#
+#
+#       EMAIL HISTORY
+#
+#
+#
+#   ----------------------------------
+
+
+
+@app.route("/email-history")
+def email_history():
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            e.sent_at,
+            e.email_type,
+            e.recipient_email,
+            e.subject_line,
+            e.sent_status,
+            e.error_message,
+            c.first_name,
+            c.last_name
+        FROM email_send_log e
+        LEFT JOIN clients c
+            ON e.client_id = c.client_id
+           AND e.spa_id = c.spa_id
+        WHERE e.spa_id = %s
+        ORDER BY e.sent_at DESC
+        LIMIT 100
+    """, (spa_id,))
+
+    rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template("email_history.html", rows=rows)
+
+
+
+
+#   ------------------------------------
+#
+#
+#      CLEAR -  EMAIL HISTORY
+#
+#
+#
+#   ----------------------------------
+
+
+@app.route("/email-history/clear", methods=["POST"])
+def clear_email_history():
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            DELETE FROM email_send_log
+            WHERE spa_id = %s
+        """, (spa_id,))
+
+        conn.commit()
+        flash("Email history cleared.", "success")
+
+    except Exception as e:
+        conn.rollback()
+        print("CLEAR EMAIL HISTORY ERROR:", str(e))
+        flash("Error clearing email history.", "error")
+
+    finally:
+        cur.close()
+        conn.close()
+
+    return redirect(url_for("email_history"))
+
+
+
+
+
+
+
+
+
+
+#   ----------------------------------------
+#
+#       SEND ONE BIRTHDAY EMAIL
+#
+#
+#    4/25/26
+#   -------------------------------------
+
+@app.route("/birthday-offers/send-one/<int:client_id>", methods=["POST"])
+def send_one_birthday_offer_email(client_id):
+    spa_id = current_spa_id()
+    spa_name = get_spa_name(spa_id)
+    today = get_spa_today()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT client_id, first_name, email, birth_date
+            FROM clients
+            WHERE spa_id = %s
+              AND client_id = %s
+              AND active_client = TRUE
+              AND email IS NOT NULL
+              AND TRIM(email) <> ''
+              AND birth_date IS NOT NULL
+        """, (spa_id, client_id))
+        client = cur.fetchone()
+
+        if not client:
+            flash("Client not found or missing email/birthday.", "error")
+            return redirect(url_for("birthday_offers_home"))
+
+        client_id, first_name, email, birth_date = client
+        campaign_year = get_birthday_campaign_year(birth_date, today)
+
+        template = get_email_template_by_type(spa_id, "Birthday")
+
+        if template:
+            subject_template, body_template = template
+        else:
+            subject_template = "{spa_name}, wishing you a Very Happy Birthday!"
+            body_template = (
+                "Hi {first_name},\n\n"
+                "Happy Birthday from all of us at {spa_name}.\n\n"
+                "We hope you have a wonderful birthday month.\n\n"
+                "Warmly,\n"
+                "{spa_name}"
+            )
+
+        context = {
+            "first_name": first_name,
+            "spa_name": spa_name,
+            "birth_month": birth_date.strftime("%B") if birth_date else ""
+        }
+
+        subject = render_email_template(subject_template, context)
+        body = render_email_template(body_template, context)
+
+        response = send_email(to=email, subject=subject, text=body)
+
+        if response.status_code == 200:
+            cur.execute("""
+                UPDATE client_birthday_offers
+                SET offer_sent = TRUE,
+                    offer_sent_date = CURRENT_DATE,
+                    sent_status = 'Sent'
+                WHERE spa_id = %s
+                  AND client_id = %s
+                  AND birthday_year = %s
+            """, (spa_id, client_id, campaign_year))
+
+            if cur.rowcount == 0:
+                cur.execute("""
+                    INSERT INTO client_birthday_offers (
+                        spa_id,
+                        client_id,
+                        birthday_year,
+                        offer_sent,
+                        offer_sent_date,
+                        sent_status
+                    )
+                    VALUES (%s, %s, %s, TRUE, CURRENT_DATE, 'Sent')
+                """, (spa_id, client_id, campaign_year))
+
+            conn.commit()
+            flash("Birthday email sent.", "success")
+        else:
+            print("BIRTHDAY EMAIL FAILED:", response.status_code, response.text)
+            flash("Birthday email failed to send.", "error")
+
+        return redirect(url_for("birthday_offers_home"))
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
+
+
+#   --------------------------------------
+#   
+#   
+#    SEND ALL  SEND ALL BIRTHDAY EMAILS
+#   
+#      4/25/26
+#   --------------------------------------
+
+@app.route("/birthday-offers/send-all", methods=["POST"])
+def send_all_birthday_offer_emails():
+    spa_id = current_spa_id()
+    spa_name = get_spa_name(spa_id)
+    today = get_spa_today()
+    end_date = today + timedelta(days=45)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    sent_count = 0
+    failed_count = 0
+
+    try:
+        cur.execute("""
+            SELECT
+                c.client_id,
+                c.first_name,
+                c.email,
+                c.birth_date
+            FROM clients c
+            WHERE c.spa_id = %s
+              AND c.active_client = TRUE
+              AND c.birth_date IS NOT NULL
+              AND c.email IS NOT NULL
+              AND TRIM(c.email) <> ''
+            ORDER BY c.last_name, c.first_name
+        """, (spa_id,))
+        clients = cur.fetchall()
+
+        template = get_email_template_by_type(spa_id, "Birthday")
+
+        if template:
+            subject_template, body_template = template
+        else:
+            subject_template = "{spa_name}, wishing you a Very Happy Birthday!"
+            body_template = (
+                "Hi {first_name},\n\n"
+                "Happy Birthday from all of us at {spa_name}.\n\n"
+                "We hope you have a wonderful birthday month.\n\n"
+                "Warmly,\n"
+                "{spa_name}"
+            )
+
+        for client_id, first_name, email, birth_date in clients:
+            this_year_birthday = birth_date.replace(year=today.year)
+
+            if this_year_birthday < today:
+                next_birth_date = birth_date.replace(year=today.year + 1)
+            else:
+                next_birth_date = this_year_birthday
+
+            if not (today <= next_birth_date <= end_date):
+                continue
+
+            campaign_year = next_birth_date.year
+
+            cur.execute("""
+                SELECT offer_sent
+                FROM client_birthday_offers
+                WHERE spa_id = %s
+                  AND client_id = %s
+                  AND birthday_year = %s
+            """, (spa_id, client_id, campaign_year))
+            offer_row = cur.fetchone()
+
+            if offer_row and offer_row[0]:
+                continue
+
+            context = {
+                "first_name": first_name,
+                "spa_name": spa_name,
+                "birth_month": birth_date.strftime("%B") if birth_date else ""
+            }
+
+            subject = render_email_template(subject_template, context)
+            body = render_email_template(body_template, context)
+
+            response = send_email(to=email, subject=subject, text=body)
+
+            if response.status_code == 200:
+                cur.execute("""
+                    UPDATE client_birthday_offers
+                    SET offer_sent = TRUE,
+                        offer_sent_date = CURRENT_DATE,
+                        sent_status = 'Sent'
+                    WHERE spa_id = %s
+                      AND client_id = %s
+                      AND birthday_year = %s
+                """, (spa_id, client_id, campaign_year))
+
+                if cur.rowcount == 0:
+                    cur.execute("""
+                        INSERT INTO client_birthday_offers (
+                            spa_id,
+                            client_id,
+                            birthday_year,
+                            offer_sent,
+                            offer_sent_date,
+                            sent_status
+                        )
+                        VALUES (%s, %s, %s, TRUE, CURRENT_DATE, 'Sent')
+                    """, (spa_id, client_id, campaign_year))
+
+                sent_count += 1
+            else:
+                print("BIRTHDAY EMAIL FAILED:", response.status_code, response.text)
+                failed_count += 1
+
+        conn.commit()
+        flash(f"Birthday emails sent: {sent_count}. Failed: {failed_count}.", "success")
+        return redirect(url_for("birthday_offers_home"))
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#   --------------------------------------
+#
+#
+#   ADD EMAIL TEMPLATE
+#
+#
+#   --------------------------------------
+
+@app.route("/email-templates/add", methods=["GET", "POST"])
+def add_email_template():
+    spa_id = current_spa_id()
+
+    if request.method == "POST":
+        template_name = request.form.get("template_name")
+        template_type = request.form.get("template_type")
+        subject_line = request.form.get("subject_line")
+        body_text = request.form.get("body_text")
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            INSERT INTO email_templates (
+                spa_id,
+                template_name,
+                template_type,
+                subject_line,
+                body_text,
+                is_active
+            )
+            VALUES (%s, %s, %s, %s, %s, TRUE)
+        """, (
+            spa_id,
+            template_name,
+            template_type,
+            subject_line,
+            body_text
+        ))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        flash("Template added successfully.", "success")
+        return redirect(url_for("email_templates_admin"))
+
+    return render_template("add_email_template.html")
+
+
+
+
+
+
+
+
+#   --------------------------------------
+#                   
+#
+#     EDIT  EMAIL TEMPLATE
+#
+#               
+#   --------------------------------------
+
+
+
+@app.route("/email-templates/edit/<int:template_id>", methods=["GET", "POST"])
+def edit_email_template(template_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    if request.method == "POST":
+        template_name = request.form.get("template_name")
+        template_type = request.form.get("template_type")
+        subject_line = request.form.get("subject_line")
+        body_text = request.form.get("body_text")
+        is_active = True if request.form.get("is_active") else False
+
+        cur.execute("""
+            UPDATE email_templates
+            SET template_name = %s,
+                template_type = %s,
+                subject_line = %s,
+                body_text = %s,
+                is_active = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE email_template_id = %s
+              AND spa_id = %s
+        """, (
+            template_name,
+            template_type,
+            subject_line,
+            body_text,
+            is_active,
+            template_id,
+            spa_id
+        ))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        flash("Template updated.", "success")
+        return redirect(url_for("email_templates_admin"))
+
+    cur.execute("""
+        SELECT email_template_id, template_name, template_type,
+               subject_line, body_text, is_active
+        FROM email_templates
+        WHERE email_template_id = %s
+          AND spa_id = %s
+    """, (template_id, spa_id))
+
+    template = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "edit_email_template.html", 
+        template=template
+   )
 
 
 
@@ -3234,15 +4298,15 @@ def delete_business_loan(loan_id):
 #
 #
 #   CLIENT MANAGEMENT
-#  spa id and route good
+#  spa id and route good  4/22/26
 #   --------------------------------
-
 
 
 @app.route("/client_management")
 def client_management():
     spa_id = current_spa_id()
     search = request.args.get("search", "").strip()
+    show_all = request.args.get("show_all")
     today = get_spa_today()
 
     conn = get_db_connection()
@@ -3291,6 +4355,43 @@ def client_management():
             f"%{search.lower()}%",
             f"%{search.lower()}%",
             f"%{search}%"
+        ))
+
+        rows = cur.fetchall()
+
+    elif show_all:
+        cur.execute("""
+            SELECT
+                c.client_id,
+                c.first_name,
+                c.last_name,
+                c.phone,
+                c.email,
+                c.birth_date,
+
+                (
+                    SELECT MAX(a1.appointment_date)
+                    FROM appointments a1
+                    WHERE a1.client_id = c.client_id
+                      AND a1.spa_id = c.spa_id
+                      AND a1.appointment_date <= %s
+                ) AS last_visit_date,
+
+                (
+                    SELECT MIN(a2.appointment_date)
+                    FROM appointments a2
+                    WHERE a2.client_id = c.client_id
+                      AND a2.spa_id = c.spa_id
+                      AND a2.appointment_date >= %s
+                ) AS next_visit_date
+
+            FROM clients c
+            WHERE c.spa_id = %s
+            ORDER BY c.last_name, c.first_name
+        """, (
+            today,
+            today,
+            spa_id
         ))
 
         rows = cur.fetchall()
@@ -4186,136 +5287,10 @@ def gift_certificate_reminders():
 
 #   ----------------------------
 #
-#   SEND GIFT CERT REMINDER 
 #  
-#   spa id and route good
 #   ---------------------------
 
 
-@app.route("/send_gift_certificate_reminder/<int:gift_cert_id>", methods=["POST"])
-def send_gift_certificate_reminder(gift_cert_id):
-    spa_id = current_spa_id()
-    active_status_id = get_status_id("Active")
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    try:
-        cur.execute("""
-            SELECT
-                gc.gift_cert_id,
-                gc.purchased_by_first_name,
-                gc.purchased_by_last_name,
-                gc.purchaser_email,
-                gc.recipient_name,
-                gc.expires_date,
-                gc.remaining_balance
-            FROM gift_certificates gc
-            WHERE gc.spa_id = %s
-              AND gc.gift_cert_id = %s
-              AND gc.gift_certificate_status_id = %s
-              AND gc.remaining_balance > 0
-              AND gc.purchaser_email IS NOT NULL
-              AND gc.purchaser_email <> ''
-            LIMIT 1
-        """, (spa_id, gift_cert_id, active_status_id))
-
-        row = cur.fetchone()
-
-        if not row:
-            flash("Gift certificate not eligible for reminder.", "error")
-            return redirect(url_for("gift_certificate_reminders"))
-
-        gift_cert_id = row[0]
-        purchaser_first = row[1] or ""
-        purchaser_last = row[2] or ""
-        purchaser_email = (row[3] or "").strip()
-        recipient_name = row[4] or ""
-        expires_date = row[5]
-        remaining_balance = float(row[6] or 0)
-
-        today = get_spa_today()
-        days_left = (expires_date - date.today()).days if expires_date else 999
-
-        if days_left <= 0:
-            reminder_type = "same_day"
-        elif days_left <= 7:
-            reminder_type = "7_day"
-        else:
-            reminder_type = "30_day"
-
-        cur.execute("""
-            SELECT 1
-            FROM gift_certificate_email_reminders
-            WHERE spa_id = %s
-              AND gift_cert_id = %s
-              AND reminder_type = %s
-            LIMIT 1
-        """, (spa_id, gift_cert_id, reminder_type))
-
-        already_sent = cur.fetchone()
-
-        if already_sent:
-            flash("Reminder already sent for this stage.", "warning")
-            return redirect(url_for("gift_certificate_reminders"))
-
-        subject = "Gift Certificate Reminder - Expiring Soon"
-
-        body = f"""Hello {purchaser_first},
-
-This is a friendly reminder that a gift certificate purchased from ClearSkin Spa is set to expire on {expires_date.strftime('%m/%d/%Y')}.
-
-Recipient: {recipient_name}
-Remaining Balance: ${remaining_balance:.2f}
-
-Please contact us if you would like to schedule an appointment before it expires.
-
-Thank you,
-ClearSkin Spa
-"""
-
-        # SAFE TEST MODE
-        print("----- GIFT CERTIFICATE REMINDER EMAIL -----")
-        print("TO:", purchaser_email)
-        print("SUBJECT:", subject)
-        print("BODY:")
-        print(body)
-        print("------------------------------------------")
-
-        cur.execute("""
-            INSERT INTO gift_certificate_email_reminders (
-                spa_id,
-                gift_cert_id,
-                reminder_type,
-                recipient_email,
-                sent_status,
-                sent_date,
-                notes
-            )
-            VALUES (%s, %s, %s, %s, %s, NOW(), %s)
-        """, (
-            spa_id,
-            gift_cert_id,
-            reminder_type,
-            purchaser_email,
-            "Sent",
-            f"Manual reminder prepared for {purchaser_email}"
-        ))
-
-        conn.commit()
-
-        flash("Reminder email test generated in console. Mailgun is not active yet.", "info")
-        flash("Gift certificate reminder processed and logged successfully.", "success")
-
-    except Exception as e:
-        conn.rollback()
-        flash(f"Error sending reminder: {e}", "error")
-
-    finally:
-        cur.close()
-        conn.close()
-
-    return redirect(url_for("gift_certificate_reminders"))
 
 
 
@@ -4829,27 +5804,12 @@ def edit_client_full(client_id):
 
 
 
-
-
-
-
-
-
-
-
-
 #  ------------------------------------------
 #           BIRTHDAYS            
 #
 #
 #  
 #  ------------------------------------------
-
-
-
-            
-
-
 
 
 
@@ -4864,36 +5824,24 @@ def edit_client_full(client_id):
 #  ------------------------------------------
 
 
-
-
-@app.route("/birthday_offers")
-def birthday_offers():
+@app.route("/birthday_offers_home")
+def birthday_offers_home():
     spa_id = current_spa_id()
-    conn = get_db_connection()
-    cur = conn.cursor()
-
     spa_now = get_spa_now()
     today = spa_now.date()
-    
-    current_year = today.year
-    current_month = today.month
-    today_day = today.day
+    end_date = today + timedelta(days=45)
 
-    if current_month == 12:
-        next_month = 1
-        next_month_year = current_year + 1
-    else:
-        next_month = current_month + 1
-        next_month_year = current_year
+    conn = get_db_connection()
+    cur = conn.cursor()
 
     cur.execute("""
         SELECT
             c.client_id,
             c.first_name,
             c.last_name,
+            c.phone,
             c.email,
             c.birth_date,
-            cbo.birthday_year,
             cbo.offer_sent,
             cbo.offer_sent_date,
             cbo.sent_status,
@@ -4902,90 +5850,66 @@ def birthday_offers():
         LEFT JOIN client_birthday_offers cbo
             ON c.client_id = cbo.client_id
            AND c.spa_id = cbo.spa_id
-           AND cbo.birthday_year IN (%s, %s)
+           AND cbo.birthday_year = %s
         WHERE c.spa_id = %s
           AND c.birth_date IS NOT NULL
           AND c.active_client = TRUE
-          AND c.email IS NOT NULL
-          AND TRIM(c.email) <> ''
-        ORDER BY EXTRACT(MONTH FROM c.birth_date),
-                 EXTRACT(DAY FROM c.birth_date),
-                 c.last_name,
-                 c.first_name
-    """, (current_year, next_month_year, spa_id))
+        ORDER BY c.last_name, c.first_name
+    """, (today.year, spa_id))
 
     rows = cur.fetchall()
-
-    offer_lookup = {}
-    client_lookup = {}
-
-    for row in rows:
-        client_id = row[0]
-        first_name = row[1]
-        last_name = row[2]
-        email = row[3]
-        birth_date = row[4]
-        birthday_year = row[5]
-        offer_sent = row[6]
-        offer_sent_date = row[7]
-        sent_status = row[8]
-        notes = row[9]
-
-        client_lookup[client_id] = {
-            "client_id": client_id,
-            "first_name": first_name,
-            "last_name": last_name,
-            "email": email,
-            "birth_date": birth_date
-        }
-
-        if birthday_year is not None:
-            offer_lookup[(client_id, birthday_year)] = {
-                "offer_sent": bool(offer_sent),
-                "offer_sent_date": offer_sent_date,
-                "sent_status": sent_status,
-                "notes": notes
-            }
-
-    birthday_clients = []
-
-    for client in client_lookup.values():
-        birth_date = client["birth_date"]
-
-        if not birth_date:
-            continue
-
-        campaign_year = get_birthday_campaign_year(birth_date, today)
-
-        if campaign_year is None:
-            continue
-
-        offer_record = offer_lookup.get((client["client_id"], campaign_year), {})
-        already_sent = offer_record.get("offer_sent", False)
-
-        if already_sent:
-            continue
-
-        birthday_clients.append({
-            "client_id": client["client_id"],
-            "first_name": client["first_name"],
-            "last_name": client["last_name"],
-            "email": client["email"],
-            "birth_date": client["birth_date"],
-            "campaign_year": campaign_year,
-            "offer_sent_date": offer_record.get("offer_sent_date"),
-            "sent_status": offer_record.get("sent_status"),
-            "notes": offer_record.get("notes")
-        })
 
     cur.close()
     conn.close()
 
+    upcoming_birthdays = []
+
+    for row in rows:
+        (
+            client_id,
+            first_name,
+            last_name,
+            phone,
+            email,
+            birth_date,
+            offer_sent,
+            offer_sent_date,
+            sent_status,
+            notes
+        ) = row
+
+        this_year_birthday = birth_date.replace(year=today.year)
+
+        if this_year_birthday < today:
+            next_birth_date = birth_date.replace(year=today.year + 1)
+        else:
+            next_birth_date = this_year_birthday
+
+        if today <= next_birth_date <= end_date:
+            days_until = (next_birth_date - today).days
+
+            upcoming_birthdays.append({
+                "client_id": client_id,
+                "first_name": first_name,
+                "last_name": last_name,
+                "phone": phone,
+                "email": email,
+                "birth_date": birth_date,
+                "next_birth_date": next_birth_date,
+                "days_until": days_until,
+                "offer_sent": bool(offer_sent),
+                "offer_sent_date": offer_sent_date,
+                "sent_status": sent_status,
+                "notes": notes,
+                "acknowledged_by": notes
+            })
+
     return render_template(
-        "birthday_offers.html",
-        birthday_clients=birthday_clients,
+        "birthday_offers_home.html",
+        upcoming_birthdays=upcoming_birthdays,
         today=today
     )
+
 
 
 
@@ -5001,20 +5925,20 @@ def birthday_offers():
 #        BIRTHDAY OFFERS MARK SENT
 #
 #
-#    spa id and route good
+#  >>>>>>>>> when all working
 #  ------------------------------------------
 
 
 
 
-@app.route("/birthday-offers/mark-sent", methods=["POST"])
-def mark_birthday_offer_sent():
+#@app.route("/birthday-offers/mark-sent", methods=["POST"])
+def mark_birthday_offer_sent_disabled():
     spa_id = current_spa_id()
     client_id = request.form.get("client_id")
 
     if not client_id:
         flash("Missing client ID.", "error")
-        return redirect(url_for("birthday_offers"))
+        return redirect(url_for("birthday_offers_home"))
 
     spa_now = get_spa_now()
     today = spa_now.date()
@@ -5044,19 +5968,19 @@ def mark_birthday_offer_sent():
 
         if not client or not client[0]:
             flash("Client birthday not found.", "error")
-            return redirect(url_for("birthday_offers"))
+            return redirect(url_for("birthday_offers_home"))
 
         birth_date = client[0]
         campaign_year = get_birthday_campaign_year(birth_date, today)
 
         if campaign_year is None:
             flash("Client is not in the active birthday campaign window.", "error")
-            return redirect(url_for("birthday_offers"))
+            return redirect(url_for("birthday_offers_home"))
 
         acknowledged_by = "System Admin"
 
         cur.execute("""
-            INSERT INTO client_birthday_offers (
+            INSERT INTO client_birthday_offers_home (
                 spa_id,
                 client_id,
                 birthday_year,
@@ -5090,12 +6014,12 @@ def mark_birthday_offer_sent():
 
         conn.commit()
         flash("Birthday offer marked as sent.", "success")
-        return redirect(url_for("birthday_offers"))
+        return redirect(url_for("birthday_offers_home"))
 
     except Exception as e:
         conn.rollback()
         flash(f"Error marking birthday offer sent: {e}", "error")
-        return redirect(url_for("birthday_offers"))
+        return redirect(url_for("birthday_offers_home"))
 
     finally:
         cur.close()
@@ -5114,12 +6038,13 @@ def mark_birthday_offer_sent():
 #
 #      BIRTHDAY OFFERS SEND
 #
-#     spa id and route good
+#   
 #   ---------------------------------------
 
 
 @app.route("/birthday-offers/send/<int:client_id>", methods=["POST"])
 def send_birthday_offer(client_id):
+
     spa_id = current_spa_id()
     spa_now = get_spa_now()
     today = spa_now.date()
@@ -5253,7 +6178,7 @@ def send_birthday_offer(client_id):
     cur.close()
     conn.close()
 
-    return redirect(url_for("birthday_offers"))
+    return redirect(url_for("birthday_offers_home"))
 
 
 
@@ -5264,11 +6189,11 @@ def send_birthday_offer(client_id):
 #
 #   HARD CODED BIRTHDAY EMAIL
 #
-#
+#>>>>>>>>>>>>>>DELETE WHEN WORKING
 #   ----------------------------------
 
 
-def build_birthday_email(client_first_name):
+#def build_birthday_email(client_first_name):
     subject = "Happy Birthday from ClearSkin Spa!"
 
     body = f"""
@@ -6391,12 +7316,15 @@ def export_employee_compensation_history_excel():
 
 #  ------------------------------------------
 #          ADD EMPLOYEE
+#
+#
+#
+#   spa_id good   route good 4/22
 #  ------------------------------------------
-
 
 @app.route("/employees/add", methods=["GET", "POST"])
 def add_employee():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -6432,6 +7360,7 @@ def add_employee():
 
         cur.execute("""
             INSERT INTO employees (
+                spa_id,
                 first_name,
                 last_name,
                 address_line1,
@@ -6455,8 +7384,9 @@ def add_employee():
                 pay_rate,
                 notes
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
+            spa_id,
             first_name,
             last_name,
             address_line1,
@@ -6488,13 +7418,27 @@ def add_employee():
         flash("Employee added successfully.", "success")
         return redirect(url_for("employees_home"))
 
-    cur.execute("SELECT status_name FROM employee_status ORDER BY status_name ASC")
+    cur.execute("""
+        SELECT status_name
+        FROM employee_status
+        WHERE spa_id = %s
+        ORDER BY status_name ASC
+    """, (spa_id,))
     statuses = cur.fetchall()
 
     cur.close()
     conn.close()
 
     return render_template("add_employee.html", statuses=statuses)
+
+
+
+
+
+
+
+
+
 
 
 
@@ -7339,13 +8283,17 @@ def export_expense_report_xlsx():
 
 
 #  ------------------------------------------
-#         ADD INCOME
+#        
+#        ADD INCOME
+#
+#
+#    spa_id good.... route good  4/23/26
 #  ------------------------------------------
 
 
 @app.route("/add_income/<int:appointment_id>", methods=["GET", "POST"])
 def add_income(appointment_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     selected_date = request.args.get("date") or request.form.get("date") or ""
 
     conn = get_db_connection()
@@ -7396,6 +8344,18 @@ def add_income(appointment_id):
             return redirect(url_for("daily_schedule", date=selected_date))
         return redirect(url_for("appointments"))
 
+
+    credit_balance = 0.00
+
+    cur.execute("""
+        SELECT COALESCE(SUM(amount), 0.00)
+        FROM client_credit_transactions
+        WHERE spa_id = %s
+          AND client_id = %s
+    """, (spa_id, appt[1]))
+    credit_balance = float(cur.fetchone()[0] or 0.00)
+
+
     if request.method == "POST":
         income_date = request.form.get("income_date")
         income_type = request.form.get("income_type")
@@ -7405,12 +8365,66 @@ def add_income(appointment_id):
         retail_amount = float(request.form.get("retail_amount") or 0)
         tax_amount = float(request.form.get("tax_amount") or 0)
         tip_amount = float(request.form.get("tip_amount") or 0)
-
+        credit_applied = float(request.form.get("credit_applied") or 0)
         total_amount = round(service_amount + retail_amount + tax_amount + tip_amount, 2)
-
         payment_method = request.form.get("payment_method", "").strip()
         credit_processor_id = request.form.get("credit_processor_id") or None
         processor_payment_id = request.form.get("processor_payment_id") or None
+
+
+            # Refresh available credit
+        cur.execute("""
+            SELECT COALESCE(SUM(amount), 0.00)
+            FROM client_credit_transactions
+            WHERE spa_id = %s
+              AND client_id = %s
+        """, (spa_id, appt[1]))
+        credit_balance = float(cur.fetchone()[0] or 0.00)
+
+        discountable_total = round(service_amount + retail_amount, 2)
+
+        if credit_applied < 0:
+            flash("Credit applied cannot be negative.", "error")
+            cur.close()
+            conn.close()
+            return redirect(url_for("add_income", appointment_id=appointment_id, date=selected_date))
+
+        if credit_applied > credit_balance:
+            flash("Credit applied cannot exceed available credit.", "error")
+            cur.close()
+            conn.close()
+            return redirect(url_for("add_income", appointment_id=appointment_id, date=selected_date))
+
+        if credit_applied > discountable_total:
+            flash("Credit applied cannot exceed service and retail total.", "error")
+            cur.close()
+            conn.close()
+            return redirect(url_for("add_income", appointment_id=appointment_id, date=selected_date))       
+
+
+        if credit_applied > 0:
+            cur.execute("""
+                INSERT INTO client_credit_transactions (
+                    spa_id,
+                    client_id,
+                    source_type,
+                    source_id,
+                    transaction_date,
+                    transaction_type,
+                    amount,
+                    notes
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                spa_id,
+                appt[1],
+                "Income",
+                None,
+                income_date,
+                "Applied",
+                -abs(credit_applied),
+                f"Client credit applied to income for appointment {appt[0]}."
+            ))
 
         print("DEBUG payment_method:", payment_method)
         print("DEBUG credit_processor_id:", credit_processor_id)
@@ -7540,7 +8554,8 @@ def add_income(appointment_id):
         appt=appt,
         selected_date=selected_date,
         credit_processors=credit_processors,
-        employees=employees
+        employees=employees,
+        credit_balance=credit_balance
     )
 
 
@@ -10031,6 +11046,72 @@ def post_appointment_wrap_up(appointment_id):
               AND spa_id = %s
         """, (appointment_id, spa_id))
 
+        # Award referral credit if this client was referred and has now completed an appointment
+        cur.execute("""
+            SELECT
+                a.client_id,
+                a.appointment_date
+            FROM appointments a
+            WHERE a.appointment_id = %s
+              AND a.spa_id = %s
+        """, (appointment_id, spa_id))
+        appointment_info = cur.fetchone()
+
+        if appointment_info:
+            referred_client_id, completed_date = appointment_info
+
+            cur.execute("""
+                SELECT
+                    referral_id,
+                    referrer_type,
+                    referrer_client_id,
+                    reward_amount,
+                    credit_earned
+                FROM referrals
+                WHERE spa_id = %s
+                  AND referred_client_id = %s
+                ORDER BY referral_id DESC
+                LIMIT 1
+            """, (spa_id, referred_client_id))
+            referral_row = cur.fetchone()
+
+            if referral_row:
+                referral_id, referrer_type, referrer_client_id, reward_amount, credit_earned = referral_row
+
+                if not credit_earned:
+                    cur.execute("""
+                        UPDATE referrals
+                        SET credit_earned = TRUE,
+                            first_completed_appointment_date = %s
+                        WHERE referral_id = %s
+                          AND spa_id = %s
+                    """, (completed_date, referral_id, spa_id))
+
+                    # Only create a credit transaction if the referrer is an existing client
+                    if referrer_type == "Client" and referrer_client_id:
+                        cur.execute("""
+                            INSERT INTO client_credit_transactions (
+                                spa_id,
+                                client_id,
+                                source_type,
+                                source_id,
+                                transaction_date,
+                                transaction_type,
+                                amount,
+                                notes
+                            )
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        """, (
+                            spa_id,
+                            referrer_client_id,
+                            "Referral",
+                            referral_id,
+                            completed_date,
+                            "Earned",
+                            reward_amount,
+                            f"Referral credit earned when referred client {referred_client_id} completed first appointment."
+                        ))
+
         conn.commit()
         cur.close()
         conn.close()
@@ -10121,16 +11202,20 @@ def post_appointment_wrap_up_saved(appointment_id):
 #  -----------------
 
 
+
+
+
+
 @app.route("/client_history")
 def client_history():
     spa_id = current_spa_id()
     search = request.args.get("search", "").strip()
-    
+
     conn = get_db_connection()
     cur = conn.cursor()
-            
+
     if search:
-        cur.execute("""   
+        cur.execute("""
             SELECT client_id, first_name, last_name
             FROM clients
             WHERE spa_id = %s
@@ -10148,13 +11233,21 @@ def client_history():
             WHERE spa_id = %s
             ORDER BY last_name, first_name
         """, (spa_id,))
-        
+
     rows = cur.fetchall()
-    
+
     cur.close()
     conn.close()
-        
-    return render_template("client_history.html", rows=rows, search=search)
+
+    return render_template(
+        "client_history.html",
+        rows=rows,
+        search=search
+    )
+
+
+
+    
 
 
 
@@ -10410,7 +11503,6 @@ def add_new_client_step2():
     if not step1:
         return redirect(url_for("add_new_client"))
 
-    # Optional but recommended: protect against cross-spa session data
     if step1.get("spa_id") and step1.get("spa_id") != spa_id:
         session.pop("new_client_step1", None)
         session.pop("new_client_step2", None)
@@ -10420,7 +11512,12 @@ def add_new_client_step2():
         session["new_client_step2"] = {
             "emergency_contact_name": request.form.get("emergency_contact_name", "").strip(),
             "emergency_contact_phone": request.form.get("emergency_contact_phone", "").strip(),
+            "referrer_type": request.form.get("referrer_type", "").strip(),
             "referred_by": request.form.get("referred_by", "").strip(),
+            "referrer_name": request.form.get("referrer_name", "").strip(),
+            "referrer_business_name": request.form.get("referrer_business_name", "").strip(),
+            "referrer_phone": request.form.get("referrer_phone", "").strip(),
+            "referrer_email": request.form.get("referrer_email", "").strip(),
             "notes_one": request.form.get("notes_one", "").strip(),
             "notes_two": request.form.get("notes_two", "").strip(),
             "notes_three": request.form.get("notes_three", "").strip(),
@@ -10440,74 +11537,125 @@ def add_new_client_step2():
             conn = get_db_connection()
             cur = conn.cursor()
 
-            cur.execute("""
-                INSERT INTO clients (
+            try:
+                cur.execute("""
+                    INSERT INTO clients (
+                        spa_id,
+                        first_name,
+                        last_name,
+                        phone,
+                        email,
+                        birth_date,
+                        address,
+                        city,
+                        state,
+                        zip,
+                        spa_location_id,
+                        preferred_location_id,
+                        client_status,
+                        preferred_language,
+                        ok_to_call,
+                        ok_to_text,
+                        ok_to_email,
+                        preferred_contact_method,
+                        emergency_contact_name,
+                        emergency_contact_phone,
+                        referred_by,
+                        notes_one,
+                        notes_two,
+                        notes_three,
+                        active_client
+                    )
+                    VALUES (
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s
+                    )
+                    RETURNING client_id
+                """, (
                     spa_id,
-                    first_name,
-                    last_name,
-                    phone,
-                    email,
-                    birth_date,
-                    address,
-                    city,
-                    state,
-                    zip,
-                    spa_location_id,
-                    preferred_location_id,
-                    client_status,
-                    preferred_language,
-                    ok_to_call,
-                    ok_to_text,
-                    ok_to_email,
-                    preferred_contact_method,
-                    emergency_contact_name,
-                    emergency_contact_phone,
-                    referred_by,
-                    notes_one,
-                    notes_two,
-                    notes_three,
-                    active_client
-                )
-                VALUES (
-                    %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s
-                )
-                RETURNING client_id
-            """, (
-                spa_id,
-                step1.get("first_name", ""),
-                step1.get("last_name", ""),
-                step1.get("phone", ""),
-                step1.get("email", ""),
-                step1.get("birth_date") or None,
-                step1.get("address", ""),
-                step1.get("city", ""),
-                step1.get("state", ""),
-                step1.get("zip", ""),
-                step1.get("spa_location_id") or None,
-                step1.get("preferred_location_id") or None,
-                step1.get("client_status", "Current"),
-                step1.get("preferred_language") or None,
-                step1.get("ok_to_call", True),
-                step1.get("ok_to_text", True),
-                step1.get("ok_to_email", True),
-                step1.get("preferred_contact_method") or None,
-                step2.get("emergency_contact_name", ""),
-                step2.get("emergency_contact_phone", ""),
-                step2.get("referred_by", ""),
-                step2.get("notes_one", ""),
-                step2.get("notes_two", ""),
-                step2.get("notes_three", ""),
-                True if step2.get("active_client") == "true" else False
-            ))
+                    step1.get("first_name", ""),
+                    step1.get("last_name", ""),
+                    step1.get("phone", ""),
+                    step1.get("email", ""),
+                    step1.get("birth_date") or None,
+                    step1.get("address", ""),
+                    step1.get("city", ""),
+                    step1.get("state", ""),
+                    step1.get("zip", ""),
+                    step1.get("spa_location_id") or None,
+                    step1.get("preferred_location_id") or None,
+                    step1.get("client_status", "Current"),
+                    step1.get("preferred_language") or None,
+                    step1.get("ok_to_call", True),
+                    step1.get("ok_to_text", True),
+                    step1.get("ok_to_email", True),
+                    step1.get("preferred_contact_method") or None,
+                    step2.get("emergency_contact_name", ""),
+                    step2.get("emergency_contact_phone", ""),
+                    step2.get("referred_by") if step2.get("referrer_type") == "Client" and step2.get("referred_by") else None,
+                    step2.get("notes_one", ""),
+                    step2.get("notes_two", ""),
+                    step2.get("notes_three", ""),
+                    True if step2.get("active_client") == "true" else False
+                ))
 
-            new_client_id = cur.fetchone()[0]
-            conn.commit()
-            cur.close()
-            conn.close()
+                new_client_id = cur.fetchone()[0]
+
+                referrer_type = step2.get("referrer_type", "").strip()
+                referred_by = step2.get("referred_by", "").strip()
+                referrer_name = step2.get("referrer_name", "").strip()
+                referrer_business_name = step2.get("referrer_business_name", "").strip()
+                referrer_phone = step2.get("referrer_phone", "").strip()
+                referrer_email = step2.get("referrer_email", "").strip()
+
+                if referrer_type == "Client" and referred_by:
+                    cur.execute("""
+                        INSERT INTO referrals (
+                            spa_id,
+                            referred_client_id,
+                            referrer_type,
+                            referrer_client_id,
+                            referral_date
+                        )
+                        VALUES (%s, %s, %s, %s, CURRENT_DATE)
+                    """, (
+                        spa_id,
+                        new_client_id,
+                        "Client",
+                        int(referred_by)
+                    ))
+
+                elif referrer_type == "Non-Client" and referrer_name:
+                    cur.execute("""
+                        INSERT INTO referrals (
+                            spa_id,
+                            referred_client_id,
+                            referrer_type,
+                            referrer_name,
+                            referrer_business_name,
+                            referrer_phone,
+                            referrer_email,
+                            referral_date
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_DATE)
+                    """, (
+                        spa_id,
+                        new_client_id,
+                        "Non-Client",
+                        referrer_name,
+                        referrer_business_name if referrer_business_name else None,
+                        referrer_phone if referrer_phone else None,
+                        referrer_email if referrer_email else None
+                    ))
+
+                conn.commit()
+
+            finally:
+                cur.close()
+                conn.close()
 
             flash("Client added successfully!")
 
@@ -10536,14 +11684,29 @@ def add_new_client_step2():
 
             return redirect(url_for("client_history"))
 
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT client_id, first_name, last_name
+        FROM clients
+        WHERE spa_id = %s
+          AND active_client = TRUE
+        ORDER BY last_name, first_name
+    """, (spa_id,))
+    clients_for_referral = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
     step2_data = session.get("new_client_step2", {})
 
     return render_template(
         "add_new_client_step2.html",
         step2_data=step2_data,
-        selected_date=selected_date
+        selected_date=selected_date,
+        clients_for_referral=clients_for_referral
     )
-
 
 
 
@@ -10790,6 +11953,14 @@ def edit_client(client_id):
     average_ticket = cur.fetchone()[0]
 
 
+    cur.execute("""
+        SELECT COALESCE(SUM(amount), 0.00)
+        FROM client_credit_transactions
+        WHERE client_id = %s
+          AND spa_id = %s
+    """, (client_id, spa_id))
+    credit_balance = cur.fetchone()[0]
+
     cur.close()
     conn.close()
 
@@ -10804,7 +11975,8 @@ def edit_client(client_id):
         next_appt=next_appt,
         recent_appointments=recent_appointments,
         lifetime_value=lifetime_value,
-        average_ticket=average_ticket
+        average_ticket=average_ticket,
+        credit_balance=credit_balance
     )
 
 

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% from "components/cards.html" import section_card %}
+
+{% block content %}
+        
+    
+<h1>Corporate Finance Department</h1>
+
+<div class="narrow-cards">
+    {{ section_card("Loans", "Loans Department",  url_for('loans_home')) }}
+    {{ section_card("Private Funding", "Private Funding, Crowd Funding", url_for('funding_home')) }}
+    {{ section_card("Reserved", "Reserved", url_for('finance_home')) }}
+    {{ section_card("Reserved", "Reserved", url_for('finance_home')) }}
+</div>
+
+<form method="GET" style="margin-bottom: 20px;">
+
+
+
+
+
+
+</form>
+
+
+
+{% endblock %}
+
+

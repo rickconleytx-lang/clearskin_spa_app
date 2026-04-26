@@ -4,6 +4,14 @@
 
 {% block content %}
 <h1>Feedback Admin</h1>
+
+<div class="form-buttons" style="margin-bottom: 15px;">
+    <span style="margin-right: 10px;"><strong>Current Spa:</strong> {{ active_spa_id }}</span>
+
+    <a href="{{ url_for('switch_spa', spa_id=1) }}" class="btn">Spa 1</a>
+    <a href="{{ url_for('switch_spa', spa_id=2) }}" class="btn">Spa 2</a>
+</div>
+
 <h3>Open Issues: {{ open_count }}</h3>
 
 <form method="GET" class="form-container" style="margin-bottom: 20px;">

@@ -52,7 +52,10 @@
 
     <p>
         <label>Birth Date:</label><br>
-        <input type="date" name="birth_date" value="{{ step1_data.get('birth_date', '') }}">
+        <input type="text"
+                name="birth_date" 
+                placeholder="mm/dd/yyyy"
+                pattern="\d{2}/\d{2}/\d{4}">
     </p>
 
     <p>

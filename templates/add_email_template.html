@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>{{ 'Edit Template' if template else 'Add Template' }}</h1>
+
+<div class="form-buttons">
+    <a href="{{ url_for('email_templates_admin') }}" class="btn">Back to Templates</a>
+</div>
+
+<form method="POST">
+
+    <div class="form-group">
+        <label>Template Name</label><br>
+        <input type="text" name="template_name"
+               value="{{ template[1] if template else '' }}"
+               required>
+    </div>
+
+    <div class="form-group">
+        <label>Template Type</label><br>
+        <input type="text" name="template_type"
+               value="{{ template[2] if template else '' }}"
+               placeholder="Example: Thank You, After Care, Promotion"
+               required>
+    </div>
+
+    <div class="form-group">
+        <label>Subject Line</label><br>
+        <input type="text" name="subject_line"
+               value="{{ template[3] if template else '' }}"
+               required>
+    </div>
+
+    <div class="form-group">
+        <label>Body</label><br>
+        <textarea name="body_text" rows="10" style="width:100%;" required>{{ template[4] if template else '' }}</textarea>
+    </div>
+
+    {% if template %}
+    <div class="form-group">
+        <label>
+            <input type="checkbox" name="is_active"
+                   {% if template[5] %}checked{% endif %}>
+            Active
+        </label>
+    </div>
+    {% endif %}
+
+    <br>
+
+    <button type="submit" class="btn btn-primary">
+        {{ 'Update Template' if template else 'Save Template' }}
+    </button>
+
+</form>
+
+{% endblock %}

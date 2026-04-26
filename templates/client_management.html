@@ -41,8 +41,11 @@ For any other Client related action, please search for Client's Name, then use a
         value="{{ search or '' }}"
         placeholder="Search by first name, last name, or phone"
     >
+
     <button type="submit" class="btn">Search</button>
+    <button type="submit" name="show_all" value="1" class="btn">Show All</button>
     <a href="{{ url_for('client_management') }}" class="btn">Clear</a>
+
 </form>
 
 {% if rows %}
@@ -66,7 +69,13 @@ For any other Client related action, please search for Client's Name, then use a
             <td>{{ row[4] or '' }}</td>
             <td>{{ row[5] or '' }}</td>
             <td>{{ row[6] or '' }}</td>
-            <td>{{ row[7] or '' }}</td>
+            <td>
+                {% if row[7] %}
+                    <span style="color: green;">{{ row[7] }}</span>
+                {% else %}
+                    <span style="color: #999;">None Scheduled</span>
+                 {% endif %}
+             </td>
             <td>
                 <a class="btn" href="{{ url_for('add_appointment', client_id=row[0]) }}">
                     Add Appointment
@@ -76,27 +85,28 @@ For any other Client related action, please search for Client's Name, then use a
                     Health / Intake
                 </a>
 
-                <a class="btn" href="{{ url_for('client_forms', client_id=row[0]) }}">
-                    Forms
-                </a>
-
                 <a class="btn" href="{{ url_for('client_history_detail', client_id=row[0]) }}">
                     Visit Summaries
                 </a>
+                <br>
+
+                <a class="btn" href="{{ url_for('edit_client', client_id=row[0]) }}">
+                    Client FULL Summary & Edit
 
                 <a class="btn" href="{{ url_for('edit_client_full', client_id=row[0]) }}">
                     Full Record
                 </a>
 
+                <a class="btn" href="{{ url_for('client_forms', client_id=row[0]) }}">
+                    Forms
+                </a>  
 
-                <a class="btn" href="{{ url_for('edit_client', client_id=row[0]) }}">
-                    Edit
-                </a>
             </td>
         </tr>
         {% endfor %}
     </tbody>
 </table>
+
 {% elif search %}
 <p>No matching clients found.</p>
 {% else %}

@@ -1912,3 +1912,16 @@ table thead th {
     opacity: 0.9;
 }
 </style>
+
+.placeholder-grid {
+    display: grid;
+    grid-template-columns: 220px 80px; /* fixed widths */
+    gap: 26px 30px;
+    align-items: center;
+}
+
+.btn-copy {
+    padding: 2px 6px;
+    font-size: 12px;
+    line-height: 1;
+}

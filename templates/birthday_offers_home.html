@@ -5,8 +5,11 @@
 {% block content %}
 
 <a href="{{ url_for('help_birthday_offer_page') }}" class="btn">Page Help</a>
-<form method="POST" action="{{ url_for('send_birthday_emails_today') }}">
-    <button type="submit" class="btn">Send Today’s Birthday Emails</button>
+
+<form method="POST"
+      action="{{ url_for('send_all_birthday_offer_emails') }}"
+      onsubmit="return confirm('Send birthday emails to all unsent clients listed on this page?');">
+    <button type="submit" class="btn">Send All Birthday Emails</button>
 </form>
 
 <br>
@@ -16,11 +19,12 @@
 
 <h1>Upcoming Birthday Offers</h1>
 
-<p>Showing client birthdays in the next 30 days.</p>
+<p>Showing client birthdays in the next 45 days.</p>
 
 <table>
     <thead>
         <tr>
+            <th>Client ID</th>
             <th>Client Name</th>
             <th>Birthday</th>
             <th>Next Birthday</th>
@@ -35,43 +39,53 @@
     </thead>
     <tbody>
         {% for row in upcoming_birthdays %}
+
         <tr>
+            <td>{{ row.client_id }}</td>
             <td>{{ row.last_name }}, {{ row.first_name }}</td>
             <td>{{ row.birth_date.strftime('%m/%d') if row.birth_date else '' }}</td>
             <td>{{ row.next_birth_date.strftime('%m/%d/%Y') if row.next_birth_date else '' }}</td>
             <td>
                 {% if row.days_until == 0 %}
-                    Today
+                    <span style="color: red; font-weight: bold;">Today</span>
                 {% else %}
                     {{ row.days_until }}
                 {% endif %}
             </td>
             <td>{{ row.phone or '' }}</td>
             <td>{{ row.email or '' }}</td>
+
             <td>
                 {% if row.offer_sent %}
-                    Yes
+                    <span style="color: green; font-weight: bold;">Yes</span>
                 {% else %}
-                    No
+                    <span style="color: red;">No</span>
                 {% endif %}
             </td>
+
             <td>{{ row.offer_sent_date.strftime('%m/%d/%Y') if row.offer_sent_date else '' }}</td>
+
             <td>{{ row.acknowledged_by or '' }}</td>
+
             <td>
                 {% if row.offer_sent %}
                     Sent
                 {% else %}
+
                     <form method="POST"
-                          action="{{ url_for('mark_birthday_offer_sent', client_id=row.client_id) }}"
-                          style="display:inline;">
-                        <button type="submit" class="btn">Mark Sent</button>
-                    </form>
+                        action="{{ url_for('send_one_birthday_offer_email', client_id=row.client_id) }}"
+                        style="display:inline;"
+                        onsubmit="return confirm('Send birthday email to this client?');">
+                      <button type="submit" class="btn btn-small">Send Email</button>
+                     </form>
+
                 {% endif %}
             </td>
         </tr>
+
         {% else %}
         <tr>
-            <td colspan="10">No upcoming birthdays in the next 30 days.</td>
+            <td colspan="10">No upcoming birthdays in the next 45 days.</td>
         </tr>
         {% endfor %}
     </tbody>

@@ -38,7 +38,7 @@
                 <td>{{ row.reminder_type }}</td>
                 <td>
                     <form method="POST"
-                          action="{{ url_for('send_gift_certificate_reminder', gift_cert_id=row.gift_cert_id) }}"
+                          action="{{ url_for('send_gift_certificate_email', gift_cert_id=row.gift_cert_id) }}"
                           style="display:inline;"
                           onsubmit="return confirm('Send reminder email for this gift certificate?');">
                         <button type="submit" class="btn btn-small">Send Reminder</button>

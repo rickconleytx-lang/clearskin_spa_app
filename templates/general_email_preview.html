@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block title %}Email Preview{% endblock %}
+
+{% block content %}
+<h1>Email Preview</h1>
+
+<div class="form-buttons">
+    <a href="{{ url_for('general_email') }}" class="btn">Back to General Email</a>
+</div>
+
+<div style="border:1px solid #ccc; padding:15px; border-radius:8px; margin-bottom:20px;">
+    <p><strong>Preview Client:</strong> {{ first_name }} {{ last_name }} — {{ email }}</p>
+    <p><strong>Subject:</strong> {{ subject }}</p>
+</div>
+
+<div style="border:1px solid #ccc; padding:15px; border-radius:8px; white-space:pre-wrap;">
+{{ body }}
+</div>
+{% endblock %}

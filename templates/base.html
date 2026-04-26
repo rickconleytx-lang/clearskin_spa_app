@@ -8,6 +8,9 @@
 </head>
 
 <body>
+    <div style="background-color:#f4f4f4; padding:8px 15px; margin-bottom:15px; border-bottom:1px solid #ccc;">
+        <strong>Current Spa:</strong> {{ active_spa_name }} (ID: {{ active_spa_id }})
+    </div>
 
     <!-- Banner -->
     <div class="banner">
@@ -25,6 +28,10 @@
          <a class="btn" href="{{ url_for('feedback', page=path) }}">Report Issue</a>
     </div>
     </nav>
+
+
+
+
 
     <!-- Page Content -->
     <div class="container">

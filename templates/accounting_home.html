@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% from "components/cards.html" import section_card %}
+
+{% block content %}
+
+
+<h1>Accounting Department</h1>
+
+<div class="narrow-cards">
+    {{ section_card("Income", "Accounts Receivable Department",  url_for('income_home')) }}
+    {{ section_card("Expenses", "Accounts Payable Department", url_for('expenses_home')) }}
+    {{ section_card("Financing Home", "Corporate Finance Department", url_for('finance_home')) }}
+</div>
+
+<form method="GET" style="margin-bottom: 20px;">
+
+
+
+
+
+
+</form>
+
+
+
+{% endblock %}

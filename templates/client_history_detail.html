@@ -7,7 +7,9 @@
     <a class="btn" href="{{ url_for('home') }}">Home</a>
     <a class="btn" href="{{ url_for('client_history') }}">Back to Client History</a>
     <a class="btn" href="{{ url_for('client_management') }}">Client Management</a>
-    <a class="btn" href="{{ url_for('client_health_profile', client_id=client_id) }}">Health Profile</a>
+    {% if client %}
+        <a class="btn" href="{{ url_for('client_health_profile', client_id=client[0]) }}">Health Profile</a>
+    {% endif %}
 </div>
 
 {% if client %}
