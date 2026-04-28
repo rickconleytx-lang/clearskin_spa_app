@@ -10,6 +10,8 @@
 
     <a href="{{ url_for('switch_spa', spa_id=1) }}" class="btn">Spa 1</a>
     <a href="{{ url_for('switch_spa', spa_id=2) }}" class="btn">Spa 2</a>
+    <a href="{{ url_for('add_spa') }}" class="btn">Add Spa</a>
+     <a href="{{ url_for('add_user') }}" class="btn">Add User</a>
 </div>
 
 <h3>Open Issues: {{ open_count }}</h3>
@@ -50,6 +52,7 @@
             <tr>
                 <th>Date</th>
                 <th>User</th>
+                <th>User Email</th>
                 <th>Page</th>
                 <th>Type</th>
                 <th>Severity</th>
@@ -62,47 +65,53 @@
         <tbody>
             {% for item in feedback_items %}
             <tr>
-                <td>{{ item[7].strftime('%Y-%m-%d %I:%M %p') if item[7] else '' }}</td>
+                <td>{{ item[8].strftime('%Y-%m-%d %I:%M %p') if item[8] else '' }}</td>
                 <td>{{ item[1] or '' }}</td>
+                <td>{{ item[2] or '' }}</td>
+
                 <td>
-                    {% if item[2] %}
-                        {{ item[2].split('?')[0].rstrip('/').split('/')[-1].replace('-', ' ').title() if item[2].split('?')[0].rstrip('/').split('/')[-1] else 'Home' }}
+                    {% if item[3] %}
+                        {{ item[3].split('?')[0].rstrip('/').split('/')[-1].replace('-', ' ').title() if item[3].split('?')[0].rstrip('/').split('/')[-1] else 'Home' }}
                     {% else %}
                         Home
                     {% endif %}
                 </td>
-                <td>{{ item[3] }}</td>
+
+                <td>{{ item[4] }}</td>
 
                 <td>
-                     {% if item[4] == "High" or item[4] == "5" %}
-                          <span style="color:red; font-weight:bold;">{{ item[4] }}</span>
-                     {% else %}
-                          {{ item[4] or '' }}
-                     {% endif %}
+                    {% if item[7] == "High" or item[7] == "5" %}
+                        <span style="color:red; font-weight:bold;">{{ item[7] }}</span>
+                    {% else %}
+                        {{ item[7] or '' }}
+                    {% endif %}
                 </td>
 
-                <td style="max-width: 250px; white-space: pre-wrap;">{{ item[5] or '' }}</td>
+                <td style="max-width: 250px; white-space: pre-wrap;">{{ item[6] or '' }}</td>
 
-                <td style="max-width: 350px; white-space: pre-wrap;">{{ item[6] }}</td>
+                <td style="max-width: 350px; white-space: pre-wrap;">{{ item[5] or '' }}</td>
+
                 <td>
-                    {% if item[8] %}
+                    {% if item[9] %}
                         Resolved
                     {% else %}
                         Open
                     {% endif %}
                 </td>
+
                 <td>
-                    {% if not item[8] %}
+                    {% if not item[9] %}
                         <form method="POST" action="{{ url_for('resolve_feedback', feedback_id=item[0]) }}">
                             <button type="submit" class="btn">Resolve</button>
                         </form>
                     {% else %}
                         <form method="POST" action="{{ url_for('reopen_feedback', feedback_id=item[0]) }}">
-                           <button type="submit" class="btn">Reopen</button>
-                        </form>
-                    {% endif %}
-                </td>
-            </tr>
+                            <button type="submit" class="btn">Reopen</button>
+                </form>
+            {% endif %}
+        </td>
+    </tr>
+
             {% endfor %}
         </tbody>
     </table>

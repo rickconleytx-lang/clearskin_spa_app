@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}Add Spa{% endblock %}
+
+{% block content %}
+
+<h1>Add New Spa</h1>
+
+<form method="POST">
+
+    <h2>Business Information</h2>
+
+    <label>Spa / Business Name</label><br>
+    <input type="text" name="spa_name" required><br><br>
+
+    <label>Timezone</label><br>
+    <input type="text" name="timezone_name" value="America/Chicago"><br><br>
+
+    <h2>Owner Information</h2>
+
+    <label>Owner First Name</label><br>
+    <input type="text" name="owner_first_name"><br><br>
+
+    <label>Owner Last Name</label><br>
+    <input type="text" name="owner_last_name"><br><br>
+
+    <label>Owner Email</label><br>
+    <input type="email" name="owner_email" required><br><br>
+
+    <label>Owner Phone</label><br>
+    <input type="text" name="owner_phone"><br><br>
+
+    <h2>Owner Login</h2>
+
+    <label>Username</label><br>
+    <input type="text" name="username" required><br><br>
+
+    <label>Temporary Password</label><br>
+    <input type="password" name="password" required><br><br>
+
+    <button type="submit" class="btn">Create Spa</button>
+    <a class="btn" href="{{ url_for('dashboard') }}">Cancel</a>
+
+</form>
+
+{% endblock %}

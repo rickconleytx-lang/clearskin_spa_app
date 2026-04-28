@@ -12,7 +12,7 @@ from db import get_db_connection
 output = io.StringIO()
 file_data = io.BytesIO()
 load_dotenv()
-
+from flask import abort
 from flask import g
 
 
@@ -26,17 +26,48 @@ MAILGUN_FROM = os.getenv("MAILGUN_FROM")
 app.secret_key = os.environ.get("SECRET_KEY", "local-dev-key")
 
 
+from werkzeug.security import generate_password_hash, check_password_hash
+from functools import wraps
+
+
+
+
 print("APP.PY LOADED - SWITCH TEST VERSION", flush=True)
 
 print("APP FILE LOADED")
+
+
+print("GENERAL EMAIL SEND HIT", flush=True)
+print("MAILGUN DOMAIN:", MAILGUN_DOMAIN, flush=True)
+print("MAILGUN FROM:", MAILGUN_FROM, flush=True)
+print("MAILGUN KEY STARTS:", MAILGUN_API_KEY[:4] if MAILGUN_API_KEY else None, flush=True)
+
+
+
+
 
 #  ---------------------
 #        HELPERS
 #  --------------------
 
 def current_spa_id():
-    from flask import g
-    return g.spa_id
+    from flask import g, session
+
+    if session.get("role") == "master_admin":
+        return None  # 👈 key fix
+
+    spa_id = getattr(g, "spa_id", None)
+
+    if not spa_id:
+        raise Exception("spa_id is missing")
+
+    return spa_id
+
+
+
+
+
+
 
 #  -------
 #
@@ -88,7 +119,35 @@ def parse_bool(value):
         return None
 
     return None
+#   -----------------
+#
+#   ----------------
 
+@app.context_processor
+def inject_spa_name():
+    try:
+        spa_id = current_spa_id()
+        if not spa_id:
+            return dict(spa_name="")
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT spa_name
+            FROM spas
+            WHERE spa_id = %s
+        """, (spa_id,))
+
+        spa = cur.fetchone()
+
+        cur.close()
+        conn.close()
+
+        return dict(spa_name=spa[0] if spa else "")
+
+    except:
+        return dict(spa_name="")
 
 
 
@@ -111,10 +170,29 @@ def split_client_name(full_name):
 
 
 
+#   ----------------------------
+#
+#   CURRENT SPA ID
+#
+#   -----------------------
+
+def current_spa_id():
+    from flask import g, session
+
+    # Not logged in yet
+    if "user_id" not in session:
+        return None
+
+    # Master admin is not tied to one spa
+    if session.get("role") == "master_admin":
+        return None
+
+    return getattr(g, "spa_id", None)
 
 
-def get_current_spa_id():
-    return session.get("spa_id", 1)
+
+
+
 
 
 
@@ -158,21 +236,138 @@ def get_spa_name(spa_id):
         conn.close()
 
 
+#   ---------------------------
+#
+#     LOGIN HELPERS
+#
+#
+#   ---------------------------
 
 
+
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if "user_id" not in session:
+            flash("Please log in first.", "error")
+            return redirect(url_for("login"))
+        return f(*args, **kwargs)
+    return decorated_function
+
+    return redirect(url_for("login", next=request.url))
+
+
+
+
+
+
+
+
+def master_admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if session.get("role") != "master_admin":
+            flash("Access denied.", "error")
+            return redirect(url_for("dashboard"))
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+
+
+#   ---------------------------
+#
+#      ALLOWED USERS
+#
+#       
+#   ---------------------------
+        
+ALLOWED_USER_ROLES = ["admin", "manager", "staff"]
+
+def clean_user_role(role):
+    if role not in ALLOWED_USER_ROLES:
+        return "staff"
+    return role
+
+
+def require_master_admin():
+    if session.get("role") != "master_admin":
+        abort(403)
+
+
+
+
+
+def require_admin_or_master():
+    if session.get("role") not in ["admin", "master_admin"]:
+        abort(403)
+
+
+def current_user_role():
+    return session.get("role")
+
+
+def require_master_admin():
+    if session.get("role") != "master_admin":
+        abort(403)
 
 
 
 #  ---------------
-#   DONE HELPERS
+#  LOAD SPA
+#
+#
+#
+#
+#
+#
+#
 #  --------------
 
 
 @app.before_request
 def load_spa():
-    g.spa_id = get_current_spa_id()
-    if not g.spa_id:
-        raise Exception("spa_id is missing")
+    if request.endpoint in ("login", "logout", "static"):
+        return
+
+    if "user_id" not in session:
+        return redirect(url_for("login"))
+
+    if session.get("role") == "master_admin":
+        g.spa_id = None
+        return
+
+    spa_id = session.get("spa_id")
+
+    if not spa_id:
+        session.clear()
+        return redirect(url_for("login"))
+
+    g.spa_id = spa_id
+
+
+
+
+#   ----------------------
+#
+#    DEF SPA REQUIRES
+#
+#   ---------------------
+
+
+from functools import wraps
+
+def spa_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        spa_id = current_spa_id()
+
+        if not spa_id:
+            return redirect(url_for("feedback_admin"))
+
+        return f(*args, **kwargs)
+    return decorated_function
+
 
 
 
@@ -181,8 +376,6 @@ def load_spa():
 @app.context_processor
 def inject_spa():
     return dict(spa_id=g.get("spa_id"))
-
-
 
 
 
@@ -607,6 +800,9 @@ def send_email(to, subject, text):
         timeout=20
     )
     return response
+
+
+
 
 @app.route("/test-email")
 def test_email():
@@ -1079,6 +1275,295 @@ def birthday_offers1_home():
 
 
 
+
+#   ------------------------------------------------
+#
+#
+#     LOGIN
+#
+#
+#
+#
+#   ---------------------------------------------
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT user_id, spa_id, first_name, last_name, email, password_hash, role
+            FROM users
+            WHERE LOWER(email) = %s
+              AND active = TRUE
+        """, (email,))
+
+        user = cur.fetchone()
+
+        cur.close()
+        conn.close()
+
+        if not user:
+            print("USER NOT FOUND FOR EMAIL:", email)
+            flash("Invalid email or password.", "error")
+            return render_template("login.html")
+
+        password_match = check_password_hash(user[5], password)
+        print("PASSWORD MATCH:", password_match)
+
+        if not password_match:
+            flash("Invalid email or password.", "error")
+            return render_template("login.html")
+
+        role = user[6]
+
+        session.clear()
+        session["user_id"] = user[0]
+        session["spa_id"] = user[1]
+        session["first_name"] = user[2]
+        session["last_name"] = user[3]
+        session["email"] = user[4]
+        session["role"] = role
+
+        flash("Logged in successfully.", "success")
+
+
+        return redirect(url_for("dashboard"))
+
+    return render_template("login.html")
+
+
+
+
+
+
+
+
+
+
+#   -------------------------
+#
+#
+#         LOGOUT 
+#
+#
+#
+#   -------------------------
+
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    flash("You have been logged out.", "success")
+    return redirect(url_for("login"))
+
+
+
+
+
+
+
+
+
+
+#   -------------------------
+#
+#
+#       ADD SPA
+#
+#
+#
+#   -------------------------
+
+@app.route("/add-spa", methods=["GET", "POST"])
+def add_spa():
+    require_master_admin()
+
+    if request.method == "POST":
+        spa_name = request.form.get("spa_name", "").strip()
+        owner_first_name = request.form.get("owner_first_name", "").strip()
+        owner_last_name = request.form.get("owner_last_name", "").strip()
+        owner_email = request.form.get("owner_email", "").strip().lower()
+        owner_phone = request.form.get("owner_phone", "").strip()
+        timezone_name = request.form.get("timezone_name", "America/Chicago").strip()
+
+        username = request.form.get("username", "").strip().lower()
+        password = request.form.get("password", "").strip()
+
+        if not spa_name or not owner_email or not username or not password:
+            flash("Spa name, owner email, username, and password are required.", "error")
+            return redirect(url_for("add_spa"))
+
+        password_hash = generate_password_hash(password)
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        try:
+            cur.execute("""
+                INSERT INTO spas (
+                    spa_name,
+                    owner_first_name,
+                    owner_last_name,
+                    owner_email,
+                    owner_phone,
+                    timezone_name,
+                    active,
+                    sync_enabled,
+                    subscription_status
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, TRUE, FALSE, 'active')
+                RETURNING spa_id
+            """, (
+                spa_name,
+                owner_first_name,
+                owner_last_name,
+                owner_email,
+                owner_phone,
+                timezone_name
+            ))
+
+            spa_id = cur.fetchone()[0]
+
+            cur.execute("""
+                INSERT INTO users (
+                    spa_id,
+                    first_name,
+                    last_name,
+                    email,
+                    username,
+                    password_hash,
+                    role,
+                    active
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, 'admin', TRUE)
+            """, (
+                spa_id,
+                owner_first_name,
+                owner_last_name,
+                owner_email,
+                username,
+                password_hash
+            ))
+
+            conn.commit()
+            flash("Spa and owner admin user created successfully.", "success")
+            return redirect(url_for("dashboard"))
+
+        except Exception as e:
+            conn.rollback()
+            flash(f"Error creating spa: {e}", "error")
+            return redirect(url_for("add_spa"))
+
+        finally:
+            cur.close()
+            conn.close()
+
+    return render_template("add_spa.html")
+
+
+
+
+#   -------------------------
+#
+#       
+#    ADD USER 
+#
+#
+#
+#   -------------------------
+
+
+@app.route("/users/add", methods=["GET", "POST"])
+@login_required
+def add_user():
+    require_admin_or_master()
+
+    if request.method == "POST":
+        spa_id = current_spa_id()
+
+        first_name = request.form.get("first_name", "").strip()
+        last_name = request.form.get("last_name", "").strip()
+        email = request.form.get("email", "").strip().lower()
+        username = request.form.get("username", "").strip().lower()
+        password = request.form.get("password", "")
+        role = clean_user_role(request.form.get("role", "staff"))
+
+        if not email or not username or not password:
+            flash("Email, username, and password are required.", "error")
+            return redirect(url_for("add_user"))
+
+        password_hash = generate_password_hash(password)
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        try:
+            cur.execute("""
+                INSERT INTO users (
+                    spa_id,
+                    first_name,
+                    last_name,
+                    email,
+                    username,
+                    password_hash,
+                    role,
+                    active
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, TRUE)
+            """, (
+                spa_id,
+                first_name,
+                last_name,
+                email,
+                username,
+                password_hash,
+                role
+            ))
+
+            conn.commit()
+            flash("User created successfully.", "success")
+            return redirect(url_for("dashboard"))
+
+        except Exception as e:
+            conn.rollback()
+            flash(f"Error creating user: {e}", "error")
+            return redirect(url_for("add_user"))
+
+        finally:
+            cur.close()
+            conn.close()
+
+    return render_template("add_user.html")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #   -------------------------
 #
 #
@@ -1090,11 +1575,14 @@ def birthday_offers1_home():
 
 
 @app.route("/feedback", methods=["GET", "POST"])
+@login_required
+@spa_required
 def feedback():
     spa_id = current_spa_id()
 
     if request.method == "POST":
         user_name = (request.form.get("user_name") or "").strip()
+        user_email = (request.form.get("user_email") or "").strip()       
         page_name = (request.form.get("page_name") or "").strip()
         feedback_type = (request.form.get("feedback_type") or "").strip()
         message = (request.form.get("message") or "").strip()
@@ -1117,16 +1605,18 @@ def feedback():
                 INSERT INTO user_feedback (
                     spa_id,
                     user_name,
+                    user_email,
                     page_name,
                     feedback_type,
                     message,
                     expected_behavior,
                     severity
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 spa_id,
                 user_name if user_name else None,
+                user_email if user_email else None,
                 page_name if page_name else None,
                 feedback_type,
                 message,
@@ -1148,6 +1638,7 @@ def feedback():
                         text=(
                             f"Spa ID: {spa_id}\n"
                             f"User Name: {user_name or 'Not provided'}\n"
+                            f"User Email: {user_email or 'Not provided'}\n"
                             f"Page: {page_name or 'Not provided'}\n"
                             f"Type: {feedback_type}\n"
                             f"Severity: {severity or 'Not provided'}\n"
@@ -1201,7 +1692,10 @@ def feedback():
 
 
 
+
 @app.route("/feedback-admin")
+@login_required
+@master_admin_required
 def feedback_admin():
     spa_id = current_spa_id()
 
@@ -1224,6 +1718,7 @@ def feedback_admin():
         SELECT
             feedback_id,
             user_name,
+            user_email,
             page_name,
             feedback_type,
             severity,
@@ -1402,6 +1897,8 @@ def credit_processors():
 
 
 @app.route("/credit_processors/add", methods=["GET", "POST"])
+@login_required
+@spa_required
 def add_credit_processor():
     spa_id = current_spa_id()
     
@@ -1466,6 +1963,8 @@ def add_credit_processor():
 
 
 @app.route("/credit_processors/edit/<int:credit_processor_id>", methods=["GET", "POST"])
+@login_required
+@spa_required
 def edit_credit_processor(credit_processor_id):
     spa_id = current_spa_id()
 
@@ -1547,6 +2046,8 @@ def edit_credit_processor(credit_processor_id):
 
 
 @app.route("/credit_processors/toggle/<int:credit_processor_id>", methods=["POST"])
+@login_required
+@spa_required
 def toggle_credit_processor(credit_processor_id):
     spa_id = current_spa_id()
 
@@ -1883,6 +2384,8 @@ def render_email_template(template_text, context):
 
 
 @app.route("/birthday-emails/send-month", methods=["POST"])
+@login_required
+@spa_required
 def send_birthday_emails_month():
 
 
@@ -2015,6 +2518,8 @@ def send_birthday_emails_month():
 #  --------------------------------
 
 @app.route("/email-templates")
+@login_required
+@spa_required
 def email_templates_admin():
 
 
@@ -2062,6 +2567,8 @@ def email_templates_admin():
 
 
 # @app.route("/email-templates/add", methods=["GET", "POST"])
+@login_required
+@spa_required
 def add_email_template_disabled():
 
 
@@ -2153,6 +2660,8 @@ def add_email_template_disabled():
 
 
 #@app.route("/email-templates/edit/<int:email_template_id>", methods=["GET", "POST"])
+@login_required
+@spa_required
 def edit_email_template_DISABLED(email_template_id):
 
     spa_id = current_spa_id()
@@ -2265,6 +2774,8 @@ def edit_email_template_DISABLED(email_template_id):
 
 
 @app.route("/email-templates/activate/<int:email_template_id>", methods=["POST"])
+@login_required
+@spa_required
 def activate_email_template(email_template_id):
     spa_id = current_spa_id()
 
@@ -2332,6 +2843,8 @@ def activate_email_template(email_template_id):
 
 
 @app.route("/email-templates/delete/<int:email_template_id>", methods=["POST"])
+@login_required
+@spa_required
 def delete_email_template(email_template_id):
 
     spa_id = current_spa_id()
@@ -2374,6 +2887,10 @@ def delete_email_template(email_template_id):
 
 
 @app.route("/email-templates/preview/<int:email_template_id>")
+@login_required
+@spa_required
+@login_required
+@spa_required
 def preview_email_template(email_template_id):
     spa_id = current_spa_id()
 
@@ -2425,6 +2942,8 @@ def preview_email_template(email_template_id):
 
 
 @app.route("/gift-certificates/email/<int:gift_cert_id>", methods=["POST"])
+@login_required
+@spa_required
 def send_gift_certificate_email(gift_cert_id):
     spa_id = current_spa_id()
     spa_name = get_spa_name(spa_id)
@@ -2554,6 +3073,8 @@ def send_gift_certificate_email(gift_cert_id):
 
 
 @app.route("/general-email", methods=["GET", "POST"])
+@login_required
+@spa_required
 def general_email():
     spa_id = current_spa_id()
 
@@ -2655,6 +3176,8 @@ def general_email():
 
 
 @app.route("/general-email/preview", methods=["GET"])
+@login_required
+@spa_required
 def general_email_preview():
     spa_id = current_spa_id()
 
@@ -2741,6 +3264,8 @@ def general_email_preview():
 
 
 @app.route("/general-email/send", methods=["POST"])
+@login_required
+@spa_required
 def general_email_send():
     spa_id = current_spa_id()
     spa_name = get_spa_name(spa_id)
@@ -2751,6 +3276,15 @@ def general_email_send():
     print("GENERAL EMAIL SEND HIT", flush=True)
     print("TEMPLATE ID:", template_id, flush=True)
     print("CLIENT IDS:", client_ids, flush=True)
+
+    print("MAILGUN DOMAIN:", MAILGUN_DOMAIN, flush=True)
+    print("MAILGUN FROM:", MAILGUN_FROM, flush=True)
+    print(
+        "MAILGUN KEY STARTS:",
+        MAILGUN_API_KEY[:4] if MAILGUN_API_KEY else None,
+        flush=True
+    )
+
 
     if not template_id:
         flash("Please select an email template.", "error")
@@ -2881,6 +3415,8 @@ def general_email_send():
 
 
 @app.route("/email-history")
+@login_required
+@spa_required
 def email_history():
     spa_id = current_spa_id()
 
@@ -2927,6 +3463,8 @@ def email_history():
 
 
 @app.route("/email-history/clear", methods=["POST"])
+@login_required
+@spa_required
 def clear_email_history():
     spa_id = current_spa_id()
 
@@ -2971,6 +3509,8 @@ def clear_email_history():
 #   -------------------------------------
 
 @app.route("/birthday-offers/send-one/<int:client_id>", methods=["POST"])
+@login_required
+@spa_required
 def send_one_birthday_offer_email(client_id):
     spa_id = current_spa_id()
     spa_name = get_spa_name(spa_id)
@@ -3074,6 +3614,8 @@ def send_one_birthday_offer_email(client_id):
 #   --------------------------------------
 
 @app.route("/birthday-offers/send-all", methods=["POST"])
+@login_required
+@spa_required
 def send_all_birthday_offer_emails():
     spa_id = current_spa_id()
     spa_name = get_spa_name(spa_id)
@@ -3213,6 +3755,8 @@ def send_all_birthday_offer_emails():
 #   --------------------------------------
 
 @app.route("/email-templates/add", methods=["GET", "POST"])
+@login_required
+@spa_required
 def add_email_template():
     spa_id = current_spa_id()
 
@@ -3270,6 +3814,8 @@ def add_email_template():
 
 
 @app.route("/email-templates/edit/<int:template_id>", methods=["GET", "POST"])
+@login_required
+@spa_required
 def edit_email_template(template_id):
     spa_id = current_spa_id()
 
@@ -3343,6 +3889,8 @@ def edit_email_template(template_id):
 #   --------------------------------------
 
 @app.route("/loan_contributions/export/csv")
+@login_required
+@spa_required
 def export_loan_contributions_csv():
     spa_id = current_spa_id()
 
@@ -3397,6 +3945,8 @@ def export_loan_contributions_csv():
 #   --------------------------------------
 
 @app.route("/loan_contributions/export/excel")
+@login_required
+@spa_required
 def export_loan_contributions_excel():
     spa_id = current_spa_id()
 
@@ -3488,6 +4038,8 @@ def export_loan_contributions_excel():
 
 
 @app.route("/funding")
+@login_required
+@spa_required
 def funding_home():
     spa_id = current_spa_id()
     conn = get_db_connection()
@@ -3559,6 +4111,8 @@ def funding_home():
                     
                       
 @app.route("/owner_contributions/add", methods=["GET", "POST"])
+@login_required
+@spa_required
 def add_owner_contribution():
     spa_id = current_spa_id()
 
@@ -3609,6 +4163,8 @@ def add_owner_contribution():
                     
                     
 @app.route("/owner_reimbursements/add", methods=["GET", "POST"])
+@login_required
+@spa_required
 def add_owner_reimbursement():
     spa_id = current_spa_id()
         
@@ -3670,6 +4226,8 @@ def add_owner_reimbursement():
                     
                     
 @app.route("/loans")
+@login_required
+@spa_required
 def loans_home():
     spa_id = current_spa_id()
     conn = get_db_connection()
@@ -3757,6 +4315,8 @@ def loans_home():
                     
         
 @app.route("/business_loans/add", methods=["GET", "POST"])
+@login_required
+@spa_required
 def add_business_loan(): 
     spa_id = current_spa_id()
             
@@ -3821,6 +4381,8 @@ def add_business_loan():
                     
                     
 @app.route("/loan_payments/add", methods=["GET", "POST"])
+@login_required
+@spa_required
 def add_loan_payment():
     spa_id = current_spa_id()
     conn = get_db_connection()
@@ -3913,6 +4475,8 @@ def add_loan_payment():
 
 
 @app.route("/owner_contributions/edit/<int:owner_contribution_id>", methods=["GET", "POST"])
+@login_required
+@spa_required
 def edit_owner_contribution(owner_contribution_id):
     spa_id = current_spa_id()
     conn = get_db_connection()
@@ -3998,6 +4562,8 @@ def edit_owner_contribution(owner_contribution_id):
 
 
 @app.route("/owner_contributions/delete/<int:owner_contribution_id>", methods=["POST"])
+@login_required
+@spa_required
 def delete_owner_contribution(owner_contribution_id):
     spa_id = current_spa_id()
     conn = get_db_connection()
@@ -4039,6 +4605,8 @@ def delete_owner_contribution(owner_contribution_id):
                      
 
 @app.route("/owner_reimbursements/edit/<int:owner_reimbursement_id>", methods=["GET", "POST"])
+@login_required
+@spa_required
 def edit_owner_reimbursement(owner_reimbursement_id):
     spa_id = current_spa_id()
     conn = get_db_connection()
@@ -4122,6 +4690,8 @@ def edit_owner_reimbursement(owner_reimbursement_id):
 
 
 @app.route("/owner_reimbursements/delete/<int:owner_reimbursement_id>", methods=["POST"])
+@login_required
+@spa_required
 def delete_owner_reimbursement(owner_reimbursement_id):
     spa_id = current_spa_id()
     conn = get_db_connection()
@@ -4160,6 +4730,8 @@ def delete_owner_reimbursement(owner_reimbursement_id):
 #   --------------------------------
 
 @app.route("/business_loans/edit/<int:loan_id>", methods=["GET", "POST"])
+@login_required
+@spa_required
 def edit_business_loan(loan_id):
     spa_id = current_spa_id()
     conn = get_db_connection()
@@ -4258,6 +4830,8 @@ def edit_business_loan(loan_id):
 
 
 @app.route("/business_loans/delete/<int:loan_id>", methods=["POST"])
+@login_required
+@spa_required
 def delete_business_loan(loan_id):
     spa_id = current_spa_id()
     conn = get_db_connection()
@@ -4303,6 +4877,8 @@ def delete_business_loan(loan_id):
 
 
 @app.route("/client_management")
+@login_required
+@spa_required
 def client_management():
     spa_id = current_spa_id()
     search = request.args.get("search", "").strip()
@@ -4417,6 +4993,8 @@ def client_management():
 #  -----------------------------------
 
 @app.route("/schedule_appointment_start", methods=["GET", "POST"])
+@login_required
+@spa_required
 def schedule_appointment_start():
     spa_id = current_spa_id()
 
@@ -4493,6 +5071,8 @@ def schedule_appointment_start():
 #  ------------------------------------------
 
 @app.route("/income")
+@login_required
+@spa_required
 def income_home():
     spa_id = current_spa_id()
 
@@ -4561,6 +5141,8 @@ def income_home():
 
 
 @app.route("/client_forms/<int:client_id>", methods=["GET", "POST"])
+@login_required
+@spa_required
 def client_forms(client_id):
     spa_id = current_spa_id()
     appointment_id = request.args.get("appointment_id") or request.form.get("appointment_id")
@@ -4743,6 +5325,8 @@ def client_forms(client_id):
 
 
 @app.route("/gift_certificates")
+@login_required
+@spa_required
 def gift_certificates_home():
     spa_id = current_spa_id()
     spa_now = get_spa_now()
@@ -4869,6 +5453,8 @@ def gift_certificates_home():
 
 
 @app.route("/add_gift_certificate", methods=["GET", "POST"])
+@login_required
+@spa_required
 def add_gift_certificate():
     spa_id = current_spa_id()
     conn = get_db_connection()
@@ -4972,6 +5558,8 @@ def add_gift_certificate():
 
 
 @app.route("/edit_gift_certificate/<int:certificate_id>", methods=["GET", "POST"])
+@login_required
+@spa_required
 def edit_gift_certificate(certificate_id):
     spa_id = current_spa_id()
     conn = get_db_connection()
@@ -5112,6 +5700,8 @@ def edit_gift_certificate(certificate_id):
 
 
 @app.route("/redeem_gift_certificate/<int:certificate_id>", methods=["GET", "POST"])
+@login_required
+@spa_required
 def redeem_gift_certificate(certificate_id):
     spa_id = current_spa_id()
     conn = get_db_connection()
@@ -5206,6 +5796,8 @@ def redeem_gift_certificate(certificate_id):
 
 
 @app.route("/gift_certificate_reminders")
+@login_required
+@spa_required
 def gift_certificate_reminders():
     spa_id = current_spa_id()
     active_status_id = get_status_id("Active")
@@ -5308,6 +5900,8 @@ def gift_certificate_reminders():
 
 
 @app.route("/gift_certificate_reminder_history")
+@login_required
+@spa_required
 def gift_certificate_reminder_history():
     spa_id = current_spa_id()
     print("DEBUG current spa_id:", spa_id)
@@ -5372,7 +5966,9 @@ def gift_certificate_reminder_history():
 from datetime import date
 
 @app.route("/clients")
-def clients_home():
+@login_required
+@spa_required
+def clients():
     spa_id = current_spa_id()
 
     conn = get_db_connection()
@@ -5459,6 +6055,8 @@ def clients_home():
 
 
 @app.route("/edit-client-full/<int:client_id>", methods=["GET", "POST"])
+@login_required
+@spa_required
 def edit_client_full(client_id):
     spa_id = current_spa_id()
 
@@ -5825,6 +6423,8 @@ def edit_client_full(client_id):
 
 
 @app.route("/birthday_offers_home")
+@login_required
+@spa_required
 def birthday_offers_home():
     spa_id = current_spa_id()
     spa_now = get_spa_now()
@@ -5932,6 +6532,8 @@ def birthday_offers_home():
 
 
 #@app.route("/birthday-offers/mark-sent", methods=["POST"])
+@login_required
+@spa_required
 def mark_birthday_offer_sent_disabled():
     spa_id = current_spa_id()
     client_id = request.form.get("client_id")
@@ -6043,6 +6645,8 @@ def mark_birthday_offer_sent_disabled():
 
 
 @app.route("/birthday-offers/send/<int:client_id>", methods=["POST"])
+@login_required
+@spa_required
 def send_birthday_offer(client_id):
 
     spa_id = current_spa_id()
@@ -6217,30 +6821,6 @@ ClearSkin Spa
 
 
 
-
-
-
-
-
-
-
-#   ----------------------------------------------------------------------------
-#
-#
-#
-#
-#
-#
-#   ALL ROUTES ABOVE HAVE BEEN CHECKED FOR SAFE MULTI-SPA USE
-#
-#
-#
-#
-#  ----------------------------------------------------------------------------
-
-
-
-
 #  ------------------------------------------
 #      EMPLOYEES  
 #
@@ -6257,13 +6837,18 @@ ClearSkin Spa
 
 #  ------------------------------------------
 #      EMPLOYEES   HOME PAGE
+#
+#
+#   ROUTE GOOD
 #  ------------------------------------------
 
 
 
 @app.route("/employees")
+@login_required
+@spa_required
 def employees_home():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -6323,7 +6908,7 @@ def employees_home():
 #
 #   EMPLOYEE PAY SUMMARY
 #
-#
+#   route good
 #   ---------------------------------------
 
 
@@ -6331,8 +6916,10 @@ def employees_home():
 from datetime import date
 
 @app.route("/employee_pay_summary")
+@login_required
+@spa_required
 def employee_pay_summary():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
 
     today = date.today()
     first_day = today.replace(day=1)
@@ -6389,8 +6976,10 @@ def employee_pay_summary():
 
 
 @app.route("/add_employee_compensation", methods=["GET", "POST"])
+@login_required
+@spa_required
 def add_employee_compensation():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -6502,7 +7091,11 @@ def add_employee_compensation():
 #   -------------------------------
 
 @app.route("/employee_admin")
+@login_required
+@spa_required
 def employee_admin():
+    spa_id = current_spa_id()
+
     return render_template("employee_admin.html")
 
 
@@ -6577,13 +7170,15 @@ def get_employee_compensation_history_data(spa_id, employee_id="", start_date=""
 #   -------------------------------
 #  
 #  COMPENSATION TYPES
-#   
+#               route good 4/27
 #   -------------------------------
 
 
 @app.route("/compensation_types")
+@login_required
+@spa_required
 def compensation_types_report():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -6612,14 +7207,16 @@ def compensation_types_report():
 #   -------------------------------
 #  
 #   ADD   COMPENSATION TYPE
-#   
+#              route good 4/27
 #   -------------------------------
 
 
 
 @app.route("/add_compensation_type", methods=["GET", "POST"])
+@login_required
+@spa_required
 def add_compensation_type():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
 
     if request.method == "POST":
         compensation_type_name = (request.form.get("compensation_type_name") or "").strip()
@@ -6664,7 +7261,6 @@ def add_compensation_type():
 
 
 
-
 #   -------------------------------
 #  
 #    EDIT COMPENSATION  TYPE
@@ -6673,8 +7269,10 @@ def add_compensation_type():
 
 
 @app.route("/edit_compensation_type/<int:compensation_type_id>", methods=["GET", "POST"])
+@login_required
+@spa_required
 def edit_compensation_type(compensation_type_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -6742,13 +7340,15 @@ def edit_compensation_type(compensation_type_id):
 #   -------------------------------
 #  
 #     TOGGLE  COMPENSATION TYPE
-#   
+#   route good 4/27   
 #   -------------------------------
 
 
 @app.route("/toggle_compensation_type/<int:compensation_type_id>", methods=["POST"])
+@login_required
+@spa_required
 def toggle_compensation_type(compensation_type_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -6777,14 +7377,16 @@ def toggle_compensation_type(compensation_type_id):
 #   -------------------------------
 #
 #  EMPLOYEE COMPENSATION REPORT
-#
+#   route good 4/27
 #   -------------------------------
 
 
 
 @app.route("/employee_compensation_report")
+@login_required
+@spa_required
 def employee_compensation_report():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     today = date.today()
     first_day = today.replace(day=1)
 
@@ -6899,15 +7501,17 @@ def employee_compensation_report():
 #
 #     EMPLOYEE COMPENSATION HISTORY
 #
-#
+#  route good 4/27
 #   --------------------------------
 
 
 
 
 @app.route("/employee_compensation_history")
+@login_required
+@spa_required
 def employee_compensation_history():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
 
     today = date.today()
     first_day = today.replace(day=1)
@@ -6962,13 +7566,15 @@ def employee_compensation_history():
 #
 #    
 #
-#
+#  route good 4/27
 #   -----------------------------------------
 
 
 @app.route("/delete_employee_compensation/<int:compensation_id>", methods=["POST"])
+@login_required
+@spa_required
 def delete_employee_compensation(compensation_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -7016,14 +7622,16 @@ def delete_employee_compensation(compensation_id):
 #           
 #
 #
-#
+#  route good 4/27
 #   -----------------------------------------
 
 
 
 @app.route("/edit_employee_compensation/<int:compensation_id>", methods=["GET", "POST"])
+@login_required
+@spa_required
 def edit_employee_compensation(compensation_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -7176,8 +7784,10 @@ def edit_employee_compensation(compensation_id):
 
 
 @app.route("/export_employee_compensation_history_csv")
+@login_required
+@spa_required
 def export_employee_compensation_history_csv():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
 
     today = date.today()
     first_day = today.replace(day=1)
@@ -7243,14 +7853,16 @@ def export_employee_compensation_history_csv():
 #   EXPORT EMPLOYEE COMPENSATION HISTORY
 #
 #            EXPORT TO EXCEL
-#
+#   route good 4/27
 #   ---------------------------------------
 
 
 
 @app.route("/export_employee_compensation_history_excel")
+@login_required
+@spa_required
 def export_employee_compensation_history_excel():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
 
     today = date.today()
     first_day = today.replace(day=1)
@@ -7319,10 +7931,12 @@ def export_employee_compensation_history_excel():
 #
 #
 #
-#   spa_id good   route good 4/22
+#   spa_id good   route good 4/27
 #  ------------------------------------------
 
 @app.route("/employees/add", methods=["GET", "POST"])
+@login_required
+@spa_required
 def add_employee():
     spa_id = current_spa_id()
     conn = get_db_connection()
@@ -7444,11 +8058,14 @@ def add_employee():
 
 #  ------------------------------------------
 #          EDIT EMPLOYEE
+# route good 4/27
 #  ------------------------------------------
 
 @app.route("/employees/edit/<int:employee_id>", methods=["GET", "POST"])
+@login_required
+@spa_required
 def edit_employee(employee_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -7501,6 +8118,7 @@ def edit_employee(employee_id):
                 pay_rate = %s,
                 notes = %s
             WHERE employee_id = %s
+              AND spa_id = %
         """, (
             first_name,
             last_name,
@@ -7562,6 +8180,7 @@ def edit_employee(employee_id):
             created_at
         FROM employees
         WHERE employee_id = %s
+          AND spa_id = %s
     """, (employee_id,))
     employee = cur.fetchone()
 
@@ -7584,11 +8203,14 @@ def edit_employee(employee_id):
             
 #  ------------------------------------------
 #            DELETE EMPLOYEE
+#  good 4/27
 #  ------------------------------------------
             
 @app.route("/employees/delete/<int:employee_id>", methods=["POST"])
+@login_required
+@spa_required
 def delete_employee(employee_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -7616,11 +8238,14 @@ def delete_employee(employee_id):
     
 #  ------------------------------------------
 #      EXPENSES  HOME
+# good 4/27
 #  ------------------------------------------
 
 @app.route("/expenses")
+@login_required
+@spa_required
 def expenses_home():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -7637,6 +8262,7 @@ def expenses_home():
             notes,
             created_at
         FROM expenses
+        WHERE spa_id = %s
         ORDER BY expense_date DESC, expense_id DESC
         LIMIT 25
     """)
@@ -7645,14 +8271,16 @@ def expenses_home():
     cur.execute("""
         SELECT COALESCE(SUM(amount), 0)
         FROM expenses
-        WHERE expense_date = CURRENT_DATE
+        WHERE spa_id =%s
+           ANDexpense_date = CURRENT_DATE
     """)
     today_total = cur.fetchone()[0]
 
     cur.execute("""
         SELECT COALESCE(SUM(amount), 0)
         FROM expenses
-        WHERE DATE_TRUNC('month', expense_date) = DATE_TRUNC('month', CURRENT_DATE)
+        WHERE spa_id = %s
+           AND DATE_TRUNC('month', expense_date) = DATE_TRUNC('month', CURRENT_DATE)
     """)
     month_total = cur.fetchone()[0]
 
@@ -7668,11 +8296,13 @@ def expenses_home():
         
 #  ------------------------------------------
 #      ADD  EXPENSES
+#
+#    good 4/27
 #  ------------------------------------------
 
 @app.route("/expenses/add", methods=["GET", "POST"])
 def add_expense(): 
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()  
             
@@ -7740,6 +8370,7 @@ def add_expense():
     cur.execute("""
         SELECT expense_cat_name
         FROM expense_categories
+        WHERE spa_id = %s
         ORDER BY expense_cat_name ASC
     """)
     categories = cur.fetchall()
@@ -7747,6 +8378,7 @@ def add_expense():
     cur.execute("""
         SELECT payment_method
         FROM payment_methods
+        WHERE spa_id =%s
         ORDER BY payment_method ASC
     """)
     payment_methods = cur.fetchall()
@@ -7768,11 +8400,14 @@ def add_expense():
         
 #  ------------------------------------------
 #      EXPENSE REPORT
+#  good 4/27
 #  ------------------------------------------
 
 @app.route("/expenses/report", methods=["GET"])
+@login_required
+@spa_required 
 def expense_report():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     start_date = request.args.get("start_date", "").strip()
     end_date = request.args.get("end_date", "").strip()
     category = request.args.get("category", "").strip()
@@ -7805,7 +8440,8 @@ def expense_report():
             notes,
             created_at
         FROM expenses
-        WHERE 1=1
+        WHERE spa_id =%s
+           AND  1=1
     """
     params = []
 
@@ -7836,7 +8472,8 @@ def expense_report():
     total_query = """
         SELECT COALESCE(SUM(amount), 0)
         FROM expenses
-        WHERE 1=1
+        WHERE spa_id = %s  
+        AND 1=1
     """
     total_params = []
 
@@ -7867,7 +8504,8 @@ def expense_report():
             category,
             COALESCE(SUM(amount), 0)
         FROM expenses
-        WHERE 1=1
+        WHERE spa_id = %s 
+        AND 1=1
     """
     category_totals_params = []
 
@@ -7919,11 +8557,14 @@ def expense_report():
 
 #  ------------------------------------------
 #         EDIT EXPENSES
+#  good 4/27/26
 #  ------------------------------------------
             
 @app.route("/expenses/edit/<int:expense_id>", methods=["GET", "POST"])
+@login_required
+@spa_required 
 def edit_expense(expense_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -7947,7 +8588,8 @@ def edit_expense(expense_id):
                 payment_method = %s,
                 receipt_file = %s,
                 notes = %s
-            WHERE expense_id = %s
+            WHERE spa_id =%s
+               AND expense_id = %s
         """, (
             expense_date,
             vendor_name,
@@ -7980,7 +8622,8 @@ def edit_expense(expense_id):
             notes,
             created_at
         FROM expenses
-        WHERE expense_id = %s
+        WHERE spa_id =%s
+           AND expense_id = %s
     """, (expense_id,))
     expense = cur.fetchone()
 
@@ -8013,11 +8656,16 @@ def edit_expense(expense_id):
 
 #  ------------------------------------------
 #         DELETE EXPENSES
+#
+#
+#   good 4/27/26
 #  ------------------------------------------
             
 @app.route("/expenses/delete/<int:expense_id>", methods=["POST"])
+@login_required
+@spa_required
 def delete_expense(expense_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -8040,8 +8688,10 @@ import csv
 import io
 
 @app.route("/export_expense_report_csv")
+@login_required
+@spa_required
 def export_expense_report_csv():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
 
@@ -8058,7 +8708,8 @@ def export_expense_report_csv():
             payment_method,
             notes
         FROM expenses
-        WHERE 1=1
+        WHERE spa_id =%s
+           AND 1=1
     """
     params = []
 
@@ -8120,8 +8771,10 @@ from io import BytesIO
 from collections import defaultdict
 
 @app.route("/export_expense_report_xlsx")
+@login_required
+@spa_required
 def export_expense_report_xlsx():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
 
@@ -8138,7 +8791,8 @@ def export_expense_report_xlsx():
             payment_method,
             notes
         FROM expenses
-        WHERE 1=1
+        WHERE spa_id =%s
+           AND 1=1
     """
     params = []
 
@@ -8292,6 +8946,8 @@ def export_expense_report_xlsx():
 
 
 @app.route("/add_income/<int:appointment_id>", methods=["GET", "POST"])
+@login_required
+@spa_required
 def add_income(appointment_id):
     spa_id = current_spa_id()
     selected_date = request.args.get("date") or request.form.get("date") or ""
@@ -8563,14 +9219,16 @@ def add_income(appointment_id):
 #  --------------------------
 #
 #     EDIT  INCOME
-#
+#good 4/27
 #  ------------------------
 
 
 
 @app.route("/edit_income/<int:income_id>", methods=["GET", "POST"])
+@login_required
+@spa_required
 def edit_income(income_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -8754,13 +9412,15 @@ def edit_income(income_id):
 #  --------------------------
 #     INCOME EXPORT TO CSV      
 # ROUTE: income_report/csv    
-#
+#  good 4/27
 #  ------------------------
 
 
 @app.route("/income_report/csv")
+@login_required
+@spa_required
 def income_report_csv():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     today = date.today()
     first_day = today.replace(day=1)
 
@@ -8794,6 +9454,7 @@ def income_report_csv():
             COALESCE(i.total_amount, 0.00) AS total_amount,
             COALESCE(i.notes, '') AS notes
         FROM income i
+        WHERE spa_id = %s
         LEFT JOIN clients c ON i.client_id = c.client_id
         LEFT JOIN employees e ON i.employee_id = e.employee_id
         {filter_sql}
@@ -8845,13 +9506,15 @@ def income_report_csv():
 # INCOME EXPORT TO EXCEL
 #  ROUTE: income_report/excel
 #
-#
+#  good 4/27
 #  ----------------------
 
 
 @app.route("/income_report/excel")
+@login_required
+@spa_required
 def income_report_excel():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     today = date.today()
     first_day = today.replace(day=1)
 
@@ -8885,6 +9548,7 @@ def income_report_excel():
             COALESCE(i.total_amount, 0.00) AS total_amount,
             COALESCE(i.notes, '') AS notes
         FROM income i
+        WHERE spa_id = %s
         LEFT JOIN clients c ON i.client_id = c.client_id
         LEFT JOIN employees e ON i.employee_id = e.employee_id
         {filter_sql}
@@ -8939,11 +9603,14 @@ def income_report_excel():
 #  --------------------------
 #
 #     DELETE  INCOME
-#
+#   4/27
 #  ------------------------
 
 @app.route("/delete_income/<int:income_id>", methods=["POST"])
+@login_required
+@spa_required
 def delete_income(income_id):
+    spa_id = current_spa_id()
     start_date = request.form.get("start_date", "").strip()
     end_date = request.form.get("end_date", "").strip()
     income_type = request.form.get("income_type", "").strip()
@@ -8975,7 +9642,7 @@ def delete_income(income_id):
 #
 #  INCOME REPORT
 #
-#
+#   4/27
 #  --------------------------
 
 
@@ -8987,8 +9654,10 @@ from db import get_db_connection
 
 
 @app.route("/income_report")
+@login_required
+@spa_required
 def income_report():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     today = date.today()
     first_day = today.replace(day=1)
 
@@ -9046,6 +9715,7 @@ def income_report():
             COALESCE(SUM(processing_fee_amount), 0.00) AS total_processing_fees,
             COALESCE(SUM(net_received), 0.00) AS total_net_received
         FROM income
+        WHERE spa_id = %s
         {filter_sql}
         GROUP BY income_type
         ORDER BY gross_collected DESC
@@ -9063,6 +9733,7 @@ def income_report():
             COALESCE(SUM(processing_fee_amount), 0.00) AS total_processing_fees,
             COALESCE(SUM(net_received), 0.00) AS total_net_received
         FROM income
+        WHERE spa_id = %s
         {filter_sql}
         GROUP BY payment_method
         ORDER BY gross_collected DESC
@@ -9078,6 +9749,7 @@ def income_report():
             COALESCE(SUM(processing_fee_amount), 0.00) AS total_processing_fees,
             COALESCE(SUM(net_received), 0.00) AS total_net_received
         FROM income i
+        WHERE spa_id = %s
         LEFT JOIN credit_processors cp
             ON i.credit_processor_id = cp.credit_processor_id
         {filter_sql.replace("spa_id", "i.spa_id").replace("income_date", "i.income_date").replace("income_type", "i.income_type")}
@@ -9107,6 +9779,7 @@ def income_report():
             COALESCE(i.net_received, 0.00) AS net_received,
             COALESCE(i.notes, '') AS notes
         FROM income i
+        WHERE spa_id = %s
         LEFT JOIN clients c ON i.client_id = c.client_id
         LEFT JOIN employees e ON i.employee_id = e.employee_id
         LEFT JOIN credit_processors cp ON i.credit_processor_id = cp.credit_processor_id
@@ -9141,7 +9814,7 @@ def income_report():
 
 #  -----------------------------
 #     ADD GENERAL INCOME
-#     
+#    4/27 
 #  -----------------------------
 
 from flask import render_template, request, redirect, url_for, flash
@@ -9150,8 +9823,10 @@ from db import get_db_connection
 
 
 @app.route("/add_general_income", methods=["GET", "POST"])
+@login_required
+@spa_required
 def add_general_income():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -9159,6 +9834,7 @@ def add_general_income():
     cur.execute("""
         SELECT client_id, first_name, last_name
         FROM clients
+        WHERE spa_id = %s    
         ORDER BY last_name, first_name
     """)
     clients = cur.fetchall()
@@ -9166,6 +9842,7 @@ def add_general_income():
     cur.execute("""
         SELECT income_type_name
         FROM income_types
+        WHERE spa_id = %s
         ORDER BY income_type_name
     """)
     income_types = cur.fetchall()
@@ -9173,6 +9850,7 @@ def add_general_income():
     cur.execute("""
         SELECT payment_method
         FROM payment_methods
+        WHERE spa_id = %s
         ORDER BY payment_method
     """)
     payment_methods = cur.fetchall()
@@ -9318,8 +9996,10 @@ from datetime import timedelta, datetime
 from flask import render_template, request, redirect, url_for
 
 @app.route("/calendar")
+@login_required
+@spa_required
 def calendar_view():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     week_start_str = request.args.get("week_start")
     goto_date = request.args.get("goto_date")
     start_date = request.args.get("start_date")
@@ -9365,8 +10045,13 @@ def calendar_view():
                 a.status,
                 a.appointment_id
             FROM appointments a
-            JOIN clients c ON a.client_id = c.client_id
-            LEFT JOIN services s ON a.service_id = s.service_id
+            WHERE spa_id = %s
+            JOIN clients c 
+                ON a.client_id = c.client_id
+                AND a.spa_id = c.spa_id
+            LEFT JOIN services s 
+                ON a.service_id = s.service_id
+                AND a.spa_id = s.spa_id
             WHERE a.spa_id = %s
               AND a.appointment_date BETWEEN %s AND %s
             ORDER BY a.appointment_date, a.appointment_time
@@ -9433,6 +10118,7 @@ def calendar_view():
     """, (spa_id, today, today, now_time))
     overdue_count = cur.fetchone()[0]
 
+
     cur.close()
     conn.close()
 
@@ -9459,6 +10145,117 @@ def calendar_view():
     )
 
 
+#  -----------------------------
+#
+#
+#   MODAL QUICK RESCHEDULE
+#
+#  -----------------------------
+
+
+@app.route("/quick_reschedule_appointment/<int:appointment_id>", methods=["POST"])
+@login_required
+@spa_required
+def quick_reschedule_appointment(appointment_id):
+    spa_id = current_spa_id()
+
+    appointment_date = request.form.get("appointment_date")
+    appointment_time = request.form.get("appointment_time")
+
+    if not appointment_date or not appointment_time:
+        flash("Date and time are required to reschedule.", "error")
+        return redirect(url_for("calendar_view"))
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE appointments
+        SET appointment_date = %s,
+            appointment_time = %s
+        WHERE appointment_id = %s
+          AND spa_id = %s
+    """, (appointment_date, appointment_time, appointment_id, spa_id))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    flash("Appointment rescheduled successfully.", "success")
+    return redirect(url_for("calendar_view"))
+
+
+
+
+
+
+
+
+
+#  -----------------------------
+#
+#      APPOINTMENT DETAILS
+#     
+#
+#  -----------------------------
+
+
+@app.route("/appointment-details/<int:appointment_id>")
+@login_required
+@spa_required
+def appointment_details(appointment_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            a.appointment_id,
+            a.appointment_date,
+            a.appointment_time,
+            a.status,
+            c.first_name,
+            c.last_name,
+            c.phone,
+            c.email,
+            s.service_name,
+            a.notes
+        FROM appointments a
+        JOIN clients c
+            ON a.client_id = c.client_id
+           AND a.spa_id = c.spa_id
+        LEFT JOIN services s
+            ON a.service_id = s.service_id
+           AND a.spa_id = s.spa_id
+        WHERE a.appointment_id = %s
+          AND a.spa_id = %s
+    """, (appointment_id, spa_id))
+
+    appt = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if not appt:
+        return {"error": "Appointment not found."}, 404
+
+    return {
+        "appointment_id": appt[0],
+        "appointment_date": appt[1].strftime("%Y-%m-%d") if appt[1] else "",
+        "start_time": appt[2].strftime("%I:%M %p") if appt[2] else "",
+        "raw_time": appt[2].strftime("%H:%M") if appt[2] else "",
+        "status": appt[3] or "",
+        "client_name": f"{appt[4]} {appt[5]}",
+        "phone": appt[6] or "",
+        "email": appt[7] or "",
+        "service_name": appt[8] or "",
+        "provider_name": "",
+        "notes": appt[9] or ""
+    }
+
+
+
 
 
 
@@ -9468,7 +10265,7 @@ def calendar_view():
 #     
 #     
 #     DAILY SCHEDULE
-#  
+#  4/27
 #  -----------------------------
 
 
@@ -9476,8 +10273,10 @@ def calendar_view():
 from datetime import datetime, date
 
 @app.route("/daily_schedule")
+@login_required
+@spa_required
 def daily_schedule():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     selected_date = request.args.get("date")
 
     if selected_date:
@@ -9533,7 +10332,7 @@ def daily_schedule():
 #    
 #
 #     DASHBOARD
-#
+#    4/27
 #  -----------------------------
 
 
@@ -9546,8 +10345,14 @@ from datetime import date, timedelta
 
 
 @app.route("/dashboard")
+@login_required
+@spa_required
 def dashboard():
-    spa_id = get_current_spa_id()
+
+    if session.get("role") == "master_admin":
+       return redirect(url_for("feedback_admin"))
+
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -9781,8 +10586,10 @@ def dashboard():
 from datetime import date, datetime, timedelta
 
 @app.route("/reports")
+@login_required
+@spa_required
 def reports():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -9810,7 +10617,8 @@ def reports():
         FROM appointments a
         JOIN clients c ON a.client_id = c.client_id
         LEFT JOIN services s ON a.service_id = s.service_id
-        WHERE a.appointment_date = %s
+        WHERE spa_id = %s
+          AND a.appointment_date = %s
           AND a.status = 'completed'
         ORDER BY a.appointment_time
     """, (today,))
@@ -9824,7 +10632,8 @@ def reports():
             COUNT(*) FILTER (WHERE status = 'completed') AS completed_count,
             COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled_count
         FROM appointments
-        WHERE appointment_date BETWEEN %s AND %s
+        WHERE spa_id = %s
+           AND appointment_date BETWEEN %s AND %s
     """, (week_start, week_end))
     weekly_totals = cur.fetchone()
     if not weekly_totals:
@@ -9837,7 +10646,8 @@ def reports():
             COUNT(*) AS total_booked
         FROM appointments a
         LEFT JOIN services s ON a.service_id = s.service_id
-        WHERE a.status IN ('booked', 'completed')
+        WHERE spa_id = %s
+           AND a.status IN ('booked', 'completed')
         GROUP BY COALESCE(s.service_name, 'Unknown Service')
         ORDER BY total_booked DESC, service_name ASC
         LIMIT 10
@@ -9848,7 +10658,8 @@ def reports():
     cur.execute("""
         SELECT COUNT(*)
         FROM appointments
-        WHERE status = 'cancelled'
+        WHERE spa_id = %s
+           AND status = 'cancelled'
     """)
     cancelled_result = cur.fetchone()
     cancelled_count = cancelled_result[0] if cancelled_result else 0
@@ -9857,7 +10668,8 @@ def reports():
     cur.execute("""
         SELECT COALESCE(SUM(price_at_booking), 0)
         FROM appointments
-        WHERE appointment_date = %s
+        WHERE spa_id = %s
+          AND appointment_date = %s
           AND status = 'completed'
     """, (today,))
     daily_revenue = cur.fetchone()[0] or 0
@@ -9866,7 +10678,8 @@ def reports():
     cur.execute("""
         SELECT COALESCE(SUM(price_at_booking), 0)
         FROM appointments
-        WHERE appointment_date BETWEEN %s AND %s
+        WHERE spa_id = %s
+          AND appointment_date BETWEEN %s AND %s
           AND status = 'completed'
     """, (week_start, week_end))
     weekly_revenue = cur.fetchone()[0] or 0
@@ -9875,7 +10688,8 @@ def reports():
     cur.execute("""
         SELECT COALESCE(SUM(price_at_booking), 0)
         FROM appointments
-        WHERE appointment_date >= %s
+        WHERE spa_id = %s
+          AND appointment_date >= %s
           AND appointment_date < %s
           AND status = 'completed'
     """, (month_start, next_month_start))
@@ -9885,7 +10699,8 @@ def reports():
     cur.execute("""
         SELECT COUNT(*)
         FROM appointments
-        WHERE appointment_date >= %s
+        WHERE spa_id = %s
+          AND appointment_date >= %s
           AND appointment_date < %s
           AND status = 'completed'
     """, (month_start, next_month_start))
@@ -9895,7 +10710,8 @@ def reports():
     cur.execute("""
         SELECT COALESCE(AVG(price_at_booking), 0)
         FROM appointments
-        WHERE appointment_date >= %s
+        WHERE spa_id = %s
+          AND appointment_date >= %s
           AND appointment_date < %s
           AND status = 'completed'
           AND price_at_booking IS NOT NULL
@@ -9910,7 +10726,8 @@ def reports():
             COALESCE(SUM(a.price_at_booking), 0) AS total_revenue
         FROM appointments a
         LEFT JOIN services s ON a.service_id = s.service_id
-        WHERE a.appointment_date >= %s
+        WHERE spa_id = %s
+          AND a.appointment_date >= %s
           AND a.appointment_date < %s
           AND a.status = 'completed'
         GROUP BY COALESCE(s.service_name, 'Unknown Service')
@@ -9943,14 +10760,16 @@ def reports():
 #  -------------------------
 #
 #    REPORTS BY DATE/RANGE
-#
+#   4/27
 #  ------------------------
 
 from datetime import datetime
 
 @app.route("/reports/range", methods=["GET", "POST"])
+@login_required
+@spa_required
 def reports_range():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -10008,7 +10827,8 @@ def reports_range():
                 COUNT(*) FILTER (WHERE status = 'completed') AS completed_count,
                 COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled_count
             FROM appointments
-            WHERE appointment_date BETWEEN %s AND %s
+            WHERE spa_id = %s
+               AND appointment_date BETWEEN %s AND %s
         """, (start_date, end_date))
         totals = cur.fetchone() or (0, 0, 0, 0)
 
@@ -10016,7 +10836,8 @@ def reports_range():
         cur.execute("""
             SELECT COALESCE(SUM(price_at_booking), 0)
             FROM appointments
-            WHERE appointment_date BETWEEN %s AND %s
+            WHERE spa_id = %s
+              AND appointment_date BETWEEN %s AND %s
               AND status = 'completed'
         """, (start_date, end_date))
         total_revenue = cur.fetchone()[0] or 0
@@ -10025,7 +10846,8 @@ def reports_range():
         cur.execute("""
             SELECT COALESCE(AVG(price_at_booking), 0)
             FROM appointments
-            WHERE appointment_date BETWEEN %s AND %s
+            WHERE spa_id = %s
+              AND appointment_date BETWEEN %s AND %s
               AND status = 'completed'
               AND price_at_booking IS NOT NULL
         """, (start_date, end_date))
@@ -10038,7 +10860,8 @@ def reports_range():
                 COUNT(*) AS total_booked
             FROM appointments a
             LEFT JOIN services s ON a.service_id = s.service_id
-            WHERE a.appointment_date BETWEEN %s AND %s
+            WHERE spa_id = %s
+              AND a.appointment_date BETWEEN %s AND %s
               AND a.status IN ('booked', 'completed')
             GROUP BY COALESCE(s.service_name, 'Unknown Service')
             ORDER BY total_booked DESC, service_name ASC
@@ -10054,7 +10877,8 @@ def reports_range():
                 COALESCE(SUM(a.price_at_booking), 0) AS total_revenue
             FROM appointments a
             LEFT JOIN services s ON a.service_id = s.service_id
-            WHERE a.appointment_date BETWEEN %s AND %s
+            WHERE spa_id = %s
+              AND a.appointment_date BETWEEN %s AND %s
               AND a.status = 'completed'
             GROUP BY COALESCE(s.service_name, 'Unknown Service')
             ORDER BY total_revenue DESC, service_name ASC
@@ -10089,6 +10913,16 @@ def reports_range():
 #
 #     CLIENT HEALTH PROFILE
 #
+#  >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+#
+#
+#      Rick finish Spa_id checks here
+#
+#   >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>..
+#   >>>>>>>>>>>>>>>>>>>>>>>>>>>>.
+#    >>>>>>>>>>>>>>>>>>>>>>
+#
+#
 #  -----------------------------
 
 
@@ -10097,7 +10931,7 @@ def reports_range():
 def client_health_profile(client_id):
     appointment_id = request.args.get("appointment_id") or request.form.get("appointment_id")
     selected_date = request.args.get("date") or request.form.get("date")
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -10317,6 +11151,8 @@ from datetime import date
 
 
 @app.route("/appointments")
+@login_required
+@spa_required
 def appointments():
     spa_id = current_spa_id()
 
@@ -11722,7 +12558,7 @@ def add_new_client_step2():
 
 @app.route("/edit_client/<int:client_id>", methods=["GET", "POST"])
 def edit_client(client_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -11995,7 +12831,7 @@ def edit_client(client_id):
 
 @app.route("/delete_client/<int:client_id>", methods=["POST"])
 def delete_client(client_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -12037,7 +12873,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 def get_current_spa_timezone():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -12078,7 +12914,7 @@ def get_utc_now():
 @app.route("/admin")
 def admin():
 
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -12121,7 +12957,7 @@ def admin():
 
 @app.route("/skin_types", methods=["GET", "POST"])
 def skin_types():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -12156,7 +12992,7 @@ def skin_types():
 
 @app.route("/delete_skin_type/<int:skin_type_id>", methods=["POST"])
 def delete_skin_type(skin_type_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -12179,7 +13015,7 @@ def delete_skin_type(skin_type_id):
 
 @app.route("/fitzpatrick_types", methods=["GET", "POST"])
 def fitzpatrick_types():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -12219,7 +13055,7 @@ def fitzpatrick_types():
 
 @app.route("/delete_fitzpatrick_types/<int:fitzpatrick_id>", methods=["POST"])
 def delete_fitzpatrick_types(fitzpatrick_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
         
@@ -12245,7 +13081,7 @@ def delete_fitzpatrick_types(fitzpatrick_id):
 
 @app.route("/edit_fitzpatrick_types/<int:fitzpatrick_id>", methods=["GET", "POST"])
 def edit_fitzpatrick_types(fitzpatrick_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -12335,7 +13171,7 @@ def referral_sources():
 
 @app.route("/delete_referral_source/<int:referral_source_id>", methods=["POST"])
 def delete_referral_source(referral_source_id):
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -12358,7 +13194,7 @@ def delete_referral_source(referral_source_id):
 
 @app.route("/cancel_new_client")
 def cancel_new_client():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     session.pop("new_client_step1", None)
     session.pop("new_client_step2", None)
     return redirect(url_for("home"))
@@ -12368,7 +13204,7 @@ def cancel_new_client():
 
 @app.route("/clear_new_client")
 def clear_new_client():
-    spa_id = get_current_spa_id()
+    spa_id = current_spa_id()
     session.pop("new_client_step1", None)
     session.pop("new_client_step2", None)
     return redirect(url_for("add_new_client"))

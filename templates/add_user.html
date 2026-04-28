@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}Add User{% endblock %}
+
+{% block content %}
+
+<h1>Add User</h1>
+
+<form method="POST">
+
+    <label>First Name</label><br>
+    <input type="text" name="first_name"><br><br>
+
+    <label>Last Name</label><br>
+    <input type="text" name="last_name"><br><br>
+
+    <label>Email</label><br>
+    <input type="email" name="email" required><br><br>
+
+    <label>Username</label><br>
+    <input type="text" name="username" required><br><br>
+
+    <label>Password</label><br>
+    <input type="password" name="password" required><br><br>
+
+    <label>Role</label><br>
+    <select name="role">
+        <option value="staff">Staff</option>
+        <option value="manager">Manager</option>
+        <option value="admin">Admin</option>
+    </select><br><br>
+
+    <button type="submit" class="btn">Create User</button>
+    <a class="btn" href="{{ url_for('dashboard') }}">Cancel</a>
+
+</form>
+
+{% endblock %}

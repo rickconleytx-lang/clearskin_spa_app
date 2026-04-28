@@ -17,6 +17,15 @@
         <img src="{{ url_for('static', filename='images/smallbanner.png') }}" alt="Banner">
     </div>
 
+    <div class="header-bar">
+
+    <div class="header-right">
+      <h1>{{ spa_name }}</h1>
+    </div>
+</div>
+
+
+
     <!-- Navigation -->
     <nav class="main-nav">
         <a class="nav-btn" href="{{ url_for('home') }}">Control Panel</a>
@@ -24,6 +33,12 @@
         <a class="nav-btn" href="{{ url_for('calendar_view') }}">Calendar</a>
         <a class="nav-btn" href="{{ url_for('appointments') }}">Appointments</a>      
         <a class="nav-btn" href="{{ url_for('client_management') }}">Client Management</a>
+    {% if session.get("user_id") %}
+        <a class="btn" href="{{ url_for('logout') }}">Logout</a>
+    {% else %}
+        <a class="btn" href="{{ url_for('login') }}">Login</a>
+    {% endif %}     
+
     <div style="margin-top: 10px; margin-bottom: 10px;">
          <a class="btn" href="{{ url_for('feedback', page=path) }}">Report Issue</a>
     </div>

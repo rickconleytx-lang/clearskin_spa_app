@@ -75,7 +75,7 @@
                     <td>{{ appt[5]|title }}</td>
                     <td>
                         <a href="{{ url_for('edit_appointment', appointment_id=appt[6]) }}" class="btn btn-sm">Edit</a>
-                        <a href="{{ url_for('add_income', appointment_id=appt[6]) }}" class="btn btn-sm" style="background: green; color: white;">
+                        <a href="{{ url_for('add_income', appointment_id=appt[6], date=appt[0].strftime('%Y-%m-%d')) }}" class="btn btn-sm" style="background: green; color: white;">
                             Add Payment
                         </a>
                     </td>
@@ -158,18 +158,19 @@ Note: To book a new appointment, please click on the Date Number in calendar bel
                             {% set is_future = (appt[0] > today) or (appt[0] == today and appt[1] > now_time) %}
 
                             <div class="calendar-event {{ appt[5] }}{% if appt[5] == 'booked' and is_past %} overdue{% endif %}">
-                                <a href="{{ url_for('edit_appointment', appointment_id=appt[6]) }}" class="calendar-event-link">
-                                    <strong>{{ appt[1].strftime('%I:%M %p') }}</strong><br>
-                                    {{ appt[2] }} {{ appt[3] }}<br>
-                                    <small>{{ appt[4] or 'Service' }}</small><br>
-                                    <small>Status: {{ appt[5]|title }}</small>
-                                </a>
+                       
 
-                                <div style="margin-top: 8px;">
 
-                                   <a class="btn" href="{{ url_for('edit_appointment', appointment_id=appt[6]) }}">
-                                       Edit
-                                   </a>
+                                    <button type="button"
+                                            class="calendar-event-link"
+                                            onclick="openAppointmentModal({{ appt[6] }})">
+                                        <strong>{{ appt[1].strftime('%I:%M %p') }}</strong><br>
+                                        {{ appt[2] }} {{ appt[3] }}<br>
+                                        <small>{{ appt[4] or 'Service' }}</small><br>
+                                        <small>Status: {{ appt[5]|title }}</small>
+                                    </button>
+
+                                    <div style="margin-top: 8px;">
 
                                     <a href="{{ url_for('add_income', appointment_id=appt[6], date=selected_date) }}"
                                         class="btn btn-sm"
@@ -212,4 +213,244 @@ Note: To book a new appointment, please click on the Date Number in calendar bel
         </div>
     {% endfor %}
 </div>
+
+
+<div id="appointmentModal" class="modal-overlay" style="display:none;">
+    <div class="modal-box">
+        <h2 id="modalClientName"></h2>
+
+        <p><strong>Phone:</strong> 📞 <a id="modalPhoneLink"></a></p>
+        <p><strong>Email:</strong> ✉️ <a id="modalEmailLink"></a></p>
+        <p><strong>Date:</strong> <span id="modalDate"></span></p>
+        <p><strong>Time:</strong> <span id="modalTime"></span></p>
+        <p><strong>Service:</strong> <span id="modalService"></span></p>
+        <p><strong>Status:</strong> <span id="modalStatus" class="status-badge"></span></p>
+        <p><strong>Appointment Notes:</strong></p>
+        <div id="modalNotes"
+            style="background:#f7f7f7; padding:10px; border-radius:8px; white-space:pre-wrap;">
+        </div>
+
+ 
+    <hr>
+
+    <h3>Quick Reschedule</h3>
+
+    <form method="POST" id="modalRescheduleForm">
+        <label>New Date</label><br>
+        <input type="date" name="appointment_date" id="modalRescheduleDate" required><br><br>
+
+        <label>New Time</label><br>
+        <input type="time" name="appointment_time" id="modalRescheduleTime" required><br><br>
+
+        <button type="submit"
+            class="btn"
+            style="background: #4a7c59; color: white;"
+            onclick="return confirm('Reschedule this appointment?')">
+        Reschedule
+    </button>
+</form>    
+
+
+    <div class="form-buttons">
+            <a id="modalEditBtn" class="btn">Edit Appointment</a>
+            <a id="modalPaymentBtn" class="btn">Finish Session</a>
+            <a id="modalWrapUpBtn" class="btn">Wrap-Up</a>
+
+            <form method="POST" id="modalCompleteForm" style="display:inline;">
+                <button type="submit" class="btn" style="background: orange;"
+                        onclick="return confirm('Mark this appointment complete?')">
+                    Mark Complete
+                </button>
+            </form>
+
+            <form method="POST" id="modalCancelForm" style="display:inline;">
+                <button type="submit" class="btn" style="background: #cc0000; color: white;"
+                        onclick="return confirm('Cancel this appointment?')">
+                    Cancel
+                </button>
+            </form>
+
+            <button type="button" class="btn" onclick="closeAppointmentModal()">Close</button>
+        </div>
+    </div>
+</div>
+
+<style>
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.45);
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+}
+
+.modal-box {
+    background: white;
+    padding: 25px;
+    border-radius: 10px;
+    width: 500px;
+    max-width: 90%;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+}
+
+.calendar-event-link {
+    display: block;
+    width: 100%;
+    border: none;
+    background: transparent;
+    text-align: left;
+    color: inherit;
+    cursor: pointer;
+    padding: 0;
+    font: inherit;
+}
+
+.calendar-event-link:hover {
+    text-decoration: underline;
+}
+
+.status-badge {
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+}
+</style>
+
+<script>
+function setText(id, value) {
+    const el = document.getElementById(id);
+    if (el) {
+        el.innerText = value || "";
+    }
+}
+
+function openAppointmentModal(appointmentId) {
+    fetch(`/appointment-details/${appointmentId}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                alert(data.error);
+                return;
+            }
+
+            setText("modalClientName", data.client_name);
+            setText("modalDate", data.appointment_date);
+            setText("modalTime", data.start_time);
+            setText("modalService", data.service_name);
+            setText("modalNotes", data.notes || "No appointment notes entered.");
+
+            const phoneLink = document.getElementById("modalPhoneLink");
+            if (phoneLink) {
+                phoneLink.innerText = data.phone || "";
+                phoneLink.href = data.phone ? `tel:${data.phone}` : "#";
+            }
+
+            const emailLink = document.getElementById("modalEmailLink");
+            if (emailLink) {
+                emailLink.innerText = data.email || "";
+                emailLink.href = data.email ? `mailto:${data.email}` : "#";
+            }
+
+            const statusEl = document.getElementById("modalStatus");
+            if (statusEl) {
+                statusEl.innerText = data.status || "";
+                statusEl.className = "status-badge " + (data.status || "");
+            }
+
+
+            const status = (data.status || "").toLowerCase();
+
+            const completeForm = document.getElementById("modalCompleteForm");
+            if (completeForm) {
+                completeForm.style.display = status === "booked" ? "inline" : "none";
+            }
+
+            const cancelForm = document.getElementById("modalCancelForm");
+            if (cancelForm) {
+                cancelForm.style.display = status === "booked" ? "inline" : "none";
+            }
+
+            const rescheduleForm = document.getElementById("modalRescheduleForm");
+            if (rescheduleForm) {
+                rescheduleForm.action = `/quick_reschedule_appointment/${appointmentId}`;
+            }
+
+            const rescheduleDate = document.getElementById("modalRescheduleDate");
+            if (rescheduleDate) {
+                rescheduleDate.value = data.appointment_date || "";
+            }
+
+            const rescheduleTime = document.getElementById("modalRescheduleTime");
+            if (rescheduleTime && data.raw_time) {
+                rescheduleTime.value = data.raw_time;
+            } 
+
+            document.getElementById("modalEditBtn").href = `/edit_appointment/${appointmentId}`;
+            document.getElementById("modalPaymentBtn").href = `/add_income/${appointmentId}`;
+            document.getElementById("modalWrapUpBtn").href = `/post_appointment_wrap_up/${appointmentId}`;
+
+            document.getElementById("modalCompleteForm").action = `/complete_appointment/${appointmentId}`;
+            document.getElementById("modalCancelForm").action = `/cancel_appointment/${appointmentId}`;
+
+            document.getElementById("appointmentModal").style.display = "flex";
+        })
+        .catch(error => {
+            console.error(error);
+            alert("modal error");
+        });
+}
+
+function closeAppointmentModal() {
+    document.getElementById("appointmentModal").style.display = "none";
+}
+
+window.onclick = function(event) {
+    const modal = document.getElementById("appointmentModal");
+    if (event.target === modal) {
+        modal.style.display = "none";
+    }
+};
+
+
+document.addEventListener("keydown", function(e) {
+    if (e.key === "Escape") {
+        closeAppointmentModal();
+    }
+});
+
+function setupModalFormSafety() {
+    const completeForm = document.getElementById("modalCompleteForm");
+    const cancelForm = document.getElementById("modalCancelForm");
+
+    if (completeForm) {
+        completeForm.addEventListener("submit", function(e) {
+            const btn = completeForm.querySelector("button");
+            if (btn) {
+                btn.disabled = true;
+                btn.innerText = "Working...";
+            }
+            closeAppointmentModal();
+        });
+    }
+
+    if (cancelForm) {
+        cancelForm.addEventListener("submit", function(e) {
+            const btn = cancelForm.querySelector("button");
+            if (btn) {
+                btn.disabled = true;
+                btn.innerText = "Working...";
+            }
+            closeAppointmentModal();
+        });
+    }
+}
+
+setupModalFormSafety();
+
+
+
+
+</script>
+
 {% endblock %}

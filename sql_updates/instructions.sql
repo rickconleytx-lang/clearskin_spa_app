@@ -59,7 +59,7 @@ STEPS
 UPLOADING ALL TO RENDER
 
 git add .
-    git commit -m "Add Credit Processor tables"
+    git commit -m "Add email campaigns"
     git push
 
 
@@ -67,3 +67,8 @@ git add .
  git add .
     git commit -m "Added Mailgun email, feedback form cleaned up routes"
     git push
+
+git add .
+    git commit -m "Added emails""
+    git push
+
