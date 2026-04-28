@@ -8945,12 +8945,16 @@ def export_expense_report_xlsx():
 #  ------------------------------------------
 
 
+
 @app.route("/add_income/<int:appointment_id>", methods=["GET", "POST"])
 @login_required
 @spa_required
 def add_income(appointment_id):
     spa_id = current_spa_id()
     selected_date = request.args.get("date") or request.form.get("date") or ""
+
+    def money_value(field_name):
+        return float(request.form.get(field_name) or 0)
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -8967,11 +8971,19 @@ def add_income(appointment_id):
         FROM appointments a
         JOIN clients c
             ON a.client_id = c.client_id
+           AND c.spa_id = a.spa_id
         WHERE a.appointment_id = %s
           AND a.spa_id = %s
     """, (appointment_id, spa_id))
     appt = cur.fetchone()
 
+    if not appt:
+        cur.close()
+        conn.close()
+        flash("Appointment not found.", "error")
+        if selected_date:
+            return redirect(url_for("daily_schedule", date=selected_date))
+        return redirect(url_for("appointments"))
 
     cur.execute("""
         SELECT employee_id,
@@ -8982,7 +8994,6 @@ def add_income(appointment_id):
     """, (spa_id,))
     employees = cur.fetchall()
 
-
     cur.execute("""
         SELECT credit_processor_id, credit_processor_name
         FROM credit_processors
@@ -8992,17 +9003,6 @@ def add_income(appointment_id):
     """, (spa_id,))
     credit_processors = cur.fetchall()
 
-    if not appt:
-        cur.close()
-        conn.close()
-        flash("Appointment not found.", "error")
-        if selected_date:
-            return redirect(url_for("daily_schedule", date=selected_date))
-        return redirect(url_for("appointments"))
-
-
-    credit_balance = 0.00
-
     cur.execute("""
         SELECT COALESCE(SUM(amount), 0.00)
         FROM client_credit_transactions
@@ -9011,33 +9011,26 @@ def add_income(appointment_id):
     """, (spa_id, appt[1]))
     credit_balance = float(cur.fetchone()[0] or 0.00)
 
-
     if request.method == "POST":
         income_date = request.form.get("income_date")
         income_type = request.form.get("income_type")
         description = request.form.get("description")
 
-        service_amount = float(request.form.get("service_amount") or 0)
-        retail_amount = float(request.form.get("retail_amount") or 0)
-        tax_amount = float(request.form.get("tax_amount") or 0)
-        tip_amount = float(request.form.get("tip_amount") or 0)
-        credit_applied = float(request.form.get("credit_applied") or 0)
+        service_amount = money_value("service_amount")
+        retail_amount = money_value("retail_amount")
+        tax_amount = money_value("tax_amount")
+        tip_amount = money_value("tip_amount")
+        credit_applied = money_value("credit_applied")
+
         total_amount = round(service_amount + retail_amount + tax_amount + tip_amount, 2)
+        discountable_total = round(service_amount + retail_amount, 2)
+
         payment_method = request.form.get("payment_method", "").strip()
         credit_processor_id = request.form.get("credit_processor_id") or None
         processor_payment_id = request.form.get("processor_payment_id") or None
-
-
-            # Refresh available credit
-        cur.execute("""
-            SELECT COALESCE(SUM(amount), 0.00)
-            FROM client_credit_transactions
-            WHERE spa_id = %s
-              AND client_id = %s
-        """, (spa_id, appt[1]))
-        credit_balance = float(cur.fetchone()[0] or 0.00)
-
-        discountable_total = round(service_amount + retail_amount, 2)
+        employee_id = request.form.get("employee_id") or None
+        notes = request.form.get("notes") or ""
+        visit_id = None
 
         if credit_applied < 0:
             flash("Credit applied cannot be negative.", "error")
@@ -9055,8 +9048,63 @@ def add_income(appointment_id):
             flash("Credit applied cannot exceed service and retail total.", "error")
             cur.close()
             conn.close()
-            return redirect(url_for("add_income", appointment_id=appointment_id, date=selected_date))       
+            return redirect(url_for("add_income", appointment_id=appointment_id, date=selected_date))
 
+        if employee_id:
+            cur.execute("""
+                SELECT employee_id
+                FROM employees
+                WHERE employee_id = %s
+                  AND spa_id = %s
+            """, (employee_id, spa_id))
+
+            if not cur.fetchone():
+                flash("Invalid employee selected.", "error")
+                cur.close()
+                conn.close()
+                return redirect(url_for("add_income", appointment_id=appointment_id, date=selected_date))
+
+        processing_fee_amount = 0.00
+        net_received = total_amount
+        processor_percentage_fee = 0.00
+        processor_flat_fee = 0.00
+        processor_additional_fee = 0.00
+
+        card_based_methods = ["card", "credit card", "apple pay", "google pay", "square"]
+
+        if payment_method.lower() in card_based_methods and credit_processor_id:
+            cur.execute("""
+                SELECT percentage_fee, flat_fee, additional_fee
+                FROM credit_processors
+                WHERE credit_processor_id = %s
+                  AND spa_id = %s
+                  AND is_active = TRUE
+            """, (credit_processor_id, spa_id))
+
+            processor_row = cur.fetchone()
+
+            if not processor_row:
+                flash("Invalid credit processor selected.", "error")
+                cur.close()
+                conn.close()
+                return redirect(url_for("add_income", appointment_id=appointment_id, date=selected_date))
+
+            processor_percentage_fee = float(processor_row[0] or 0)
+            processor_flat_fee = float(processor_row[1] or 0)
+            processor_additional_fee = float(processor_row[2] or 0)
+
+            processing_fee_amount = round(
+                (total_amount * (processor_percentage_fee / 100))
+                + processor_flat_fee
+                + processor_additional_fee,
+                2
+            )
+
+            net_received = round(total_amount - processing_fee_amount, 2)
+
+        elif payment_method.lower() not in card_based_methods:
+            credit_processor_id = None
+            processor_payment_id = None
 
         if credit_applied > 0:
             cur.execute("""
@@ -9082,59 +9130,6 @@ def add_income(appointment_id):
                 f"Client credit applied to income for appointment {appt[0]}."
             ))
 
-        print("DEBUG payment_method:", payment_method)
-        print("DEBUG credit_processor_id:", credit_processor_id)
-        print("DEBUG processor_payment_id:", processor_payment_id)
-        print("DEBUG total_amount:", total_amount)
-
-        processing_fee_amount = 0.00
-        net_received = total_amount
-        processor_percentage_fee = 0.00
-        processor_flat_fee = 0.00
-        processor_additional_fee = 0.00
-
-        card_based_methods = ["card", "credit card", "apple pay", "google pay", "square"]
-
-        if payment_method.lower() in card_based_methods:
-            print("DEBUG entered fee calculation block")
-
-            if credit_processor_id:
-                cur.execute("""
-                    SELECT percentage_fee, flat_fee, additional_fee
-                    FROM credit_processors
-                    WHERE credit_processor_id = %s
-                      AND spa_id = %s
-                      AND is_active = TRUE
-                """, (credit_processor_id, spa_id))
-
-                processor_row = cur.fetchone()
-                print("DEBUG processor_row:", processor_row)
-
-                if processor_row:
-                    processor_percentage_fee = float(processor_row[0] or 0)
-                    processor_flat_fee = float(processor_row[1] or 0)
-                    processor_additional_fee = float(processor_row[2] or 0)
-
-                    processing_fee_amount = round(
-                        (total_amount * (processor_percentage_fee / 100))
-                        + processor_flat_fee
-                        + processor_additional_fee,
-                        2
-                    )
-
-                    net_received = round(
-                        total_amount - processing_fee_amount,
-                        2
-                    )
-            else:
-                credit_processor_id = None
-
-        visit_id = None
-        employee_id = request.form.get("employee_id") or None
-        processor_payment_id = request.form.get("processor_payment_id") or None
-        notes = request.form.get("notes") or ""
-
-   
         cur.execute("""
             INSERT INTO income (
                 income_date,
@@ -9166,8 +9161,8 @@ def add_income(appointment_id):
             )
         """, (
             income_date,
-            appt[1],   # client_id
-            appt[0],   # appointment_id
+            appt[1],
+            appt[0],
             visit_id,
             income_type,
             description,
@@ -9189,7 +9184,6 @@ def add_income(appointment_id):
             processor_additional_fee
         ))
 
-
         conn.commit()
         cur.close()
         conn.close()
@@ -9200,7 +9194,6 @@ def add_income(appointment_id):
             appointment_id=appt[0],
             date=selected_date
         ))
-
 
     cur.close()
     conn.close()
@@ -9213,6 +9206,11 @@ def add_income(appointment_id):
         employees=employees,
         credit_balance=credit_balance
     )
+
+
+
+
+
 
 
 
@@ -9715,7 +9713,6 @@ def income_report():
             COALESCE(SUM(processing_fee_amount), 0.00) AS total_processing_fees,
             COALESCE(SUM(net_received), 0.00) AS total_net_received
         FROM income
-        WHERE spa_id = %s
         {filter_sql}
         GROUP BY income_type
         ORDER BY gross_collected DESC
@@ -9733,7 +9730,6 @@ def income_report():
             COALESCE(SUM(processing_fee_amount), 0.00) AS total_processing_fees,
             COALESCE(SUM(net_received), 0.00) AS total_net_received
         FROM income
-        WHERE spa_id = %s
         {filter_sql}
         GROUP BY payment_method
         ORDER BY gross_collected DESC
@@ -9749,7 +9745,6 @@ def income_report():
             COALESCE(SUM(processing_fee_amount), 0.00) AS total_processing_fees,
             COALESCE(SUM(net_received), 0.00) AS total_net_received
         FROM income i
-        WHERE spa_id = %s
         LEFT JOIN credit_processors cp
             ON i.credit_processor_id = cp.credit_processor_id
         {filter_sql.replace("spa_id", "i.spa_id").replace("income_date", "i.income_date").replace("income_type", "i.income_type")}
@@ -9779,7 +9774,6 @@ def income_report():
             COALESCE(i.net_received, 0.00) AS net_received,
             COALESCE(i.notes, '') AS notes
         FROM income i
-        WHERE spa_id = %s
         LEFT JOIN clients c ON i.client_id = c.client_id
         LEFT JOIN employees e ON i.employee_id = e.employee_id
         LEFT JOIN credit_processors cp ON i.credit_processor_id = cp.credit_processor_id
@@ -9836,7 +9830,7 @@ def add_general_income():
         FROM clients
         WHERE spa_id = %s    
         ORDER BY last_name, first_name
-    """)
+    """, (spa_id,))
     clients = cur.fetchall()
 
     cur.execute("""
@@ -9844,7 +9838,7 @@ def add_general_income():
         FROM income_types
         WHERE spa_id = %s
         ORDER BY income_type_name
-    """)
+    """, (spa_id,))
     income_types = cur.fetchall()
 
     cur.execute("""
@@ -9852,7 +9846,7 @@ def add_general_income():
         FROM payment_methods
         WHERE spa_id = %s
         ORDER BY payment_method
-    """)
+    """, (spa_id,))
     payment_methods = cur.fetchall()
 
     if request.method == "POST":
