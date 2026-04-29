@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}{{ config["title"] }}{% endblock %}
+
+{% block content %}
+
+<h1>{{ config["title"] }}</h1>
+
+<div class="form-buttons">
+    <a href="{{ url_for('admin') }}" class="btn">Back to Admin</a>
+</div>
+
+<form method="POST" style="margin-bottom: 25px;">
+    <label>{{ config["label"] }}</label><br>
+    <input type="text" name="value" required><br><br>
+
+    {% if config.get("extra_value") %}
+        <label>{{ config.get("extra_label", "Extra Value") }}</label><br>
+        <input type="text" name="extra_value"><br><br>
+    {% endif %}
+
+    <button type="submit" class="btn">Add</button>
+</form>
+
+{% if rows %}
+<table>
+    <thead>
+        <tr>
+            <th>{{ config["label"] }}</th>
+
+            {% if config.get("extra_value") %}
+                <th>{{ config.get("extra_label", "Extra Value") }}</th>
+            {% endif %}
+
+            <th>Action</th>
+        </tr>
+    </thead>
+
+    <tbody>
+        {% for row in rows %}
+        <tr>
+            <td>{{ row[1] }}</td>
+
+            {% if config.get("extra_value") %}
+                <td>{{ row[2] }}</td>
+            {% endif %}
+
+            <td>
+                <form method="POST"
+                      action="{{ url_for('delete_dropdown_item', dropdown_key=dropdown_key, item_id=row[0]) }}"
+                      onsubmit="return confirm('Delete this item?');">
+                    <button type="submit" class="btn btn-danger">Delete</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No items found.</p>
+{% endif %}
+
+{% endblock %}

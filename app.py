@@ -64,6 +64,25 @@ def current_spa_id():
     return spa_id
 
 
+#   ---------------------
+#
+#  MASTER ADMIN ACCESS 
+#
+#
+#   --------------------
+
+
+
+def is_master_admin():
+    return session.get("role") == "master_admin"
+
+
+def current_spa_filter():
+    if is_master_admin():
+        return "", ()
+    return " AND spa_id = %s ", (current_spa_id(),)
+
+
 
 
 
@@ -191,25 +210,12 @@ def current_spa_id():
 
 
 
-
-
-
-
-
-
-
-
 def get_spa_today():
     return get_spa_now().date()
 
 
-
-
-
 def get_spa_current_time():
     return get_spa_now().time()
-
-
 
 
 
@@ -259,10 +265,6 @@ def login_required(f):
 
 
 
-
-
-
-
 def master_admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -293,8 +295,6 @@ def clean_user_role(role):
 def require_master_admin():
     if session.get("role") != "master_admin":
         abort(403)
-
-
 
 
 
@@ -844,8 +844,37 @@ def home():
 
 
 
-
 DROPDOWN_CONFIG = {
+    "skin_types": {
+        "title": "Skin Types",
+        "table": "skin_types",
+        "pk": "skin_type_id",
+        "value": "skin_type_name",
+        "label": "Skin Type Name",
+        "spa_scoped": True
+    },
+
+    "referral_sources": {
+        "title": "Referral Sources",
+        "table": "referral_sources",
+        "pk": "referral_source_id",
+        "value": "referral_source_name",
+        "label": "Referral Source Name",
+        "spa_scoped": True
+    },
+
+    "fitzpatrick_types": {
+        "title": "Fitzpatrick Types",
+        "table": "fitzpatrick_types",
+        "pk": "fitzpatrick_id",
+        "value": "fitzpatrick_level",
+        "extra_value": "description",
+        "label": "Fitzpatrick Level",
+        "extra_label": "Description",
+        "spa_scoped": True
+    },
+
+
     "appointment_status": {
         "title": "Appointment Status",
         "table": "appointment_status",
@@ -855,23 +884,29 @@ DROPDOWN_CONFIG = {
         "spa_scoped": True
     },
 
-       "referral_sources": {
-    "title": "Referral Sources",
-    "table": "referral_sources",
-    "pk": "referral_source_id",
-    "value": "referral_source_name",
-    "label": "Referral Source Name",
-    "spa_scoped": True
-   },
+    "referral_sources": {
+        "title": "Referral Sources",
+        "table": "referral_sources",
+        "pk": "referral_source_id",
+        "value": "referral_source_name",
+        "label": "Referral Source Name",
+        "spa_scoped": True
+    },
 
     "client_form_names": {
         "title": "Client Form Names",
         "table": "client_form_names",
-        "pk": "form_type",
+        "pk": "form_type",   # <-- fix this
         "value": "form_type_name",
         "label": "Form Type Name",
         "spa_scoped": True
     },
+
+
+#  ---------
+#  clean up the following
+#   --------
+
 
     "expense_categories": {
         "title": "Expense Categories",
@@ -1014,74 +1049,81 @@ DROPDOWN_CONFIG = {
 
 
 
-from psycopg2 import sql
-
-@app.route("/admin/dropdowns/<dropdown_key>", methods=["GET", "POST"])
+@app.route("/dropdowns/<dropdown_key>", methods=["GET", "POST"])
+@login_required
+@spa_required
 def manage_dropdown(dropdown_key):
     spa_id = current_spa_id()
 
-    if dropdown_key not in DROPDOWN_CONFIG:
-        flash("Invalid dropdown selection.", "error")
+    config = DROPDOWN_CONFIG.get(dropdown_key)
+
+    if not config:
+        flash("Invalid dropdown selected.", "error")
         return redirect(url_for("admin"))
 
-    config = DROPDOWN_CONFIG[dropdown_key]
+    table = config["table"]
+    pk = config["pk"]
+    value_col = config["value"]
+    extra_col = config.get("extra_value")
+    spa_scoped = config.get("spa_scoped", True)
 
     conn = get_db_connection()
     cur = conn.cursor()
 
     if request.method == "POST":
-        new_value = request.form.get("new_value", "").strip()
+        value = request.form.get("value", "").strip()
+        extra_value = request.form.get("extra_value", "").strip() if extra_col else None
 
-        if new_value:
-            try:
-                cur.execute(
-                    sql.SQL("""
-                        INSERT INTO {table} (spa_id, {value_col})
-                        VALUES (%s, %s)
-                    """).format(
-                        table=sql.Identifier(config["table"]),
-                        value_col=sql.Identifier(config["value"])
-                    ),
-                    (spa_id, new_value)
-                )
-                conn.commit()
-                flash(f'{config["title"]} added successfully.', "success")
-            except Exception as e:
-                conn.rollback()
-                flash(f"Error adding item: {e}", "error")
+        if not value:
+            flash(f"{config['label']} is required.", "error")
+            cur.close()
+            conn.close()
+            return redirect(url_for("manage_dropdown", dropdown_key=dropdown_key))
+
+        if extra_col:
+            cur.execute(f"""
+                INSERT INTO {table} (spa_id, {value_col}, {extra_col})
+                VALUES (%s, %s, %s)
+            """, (spa_id, value, extra_value))
         else:
-            flash("Value cannot be blank.", "error")
+            cur.execute(f"""
+                INSERT INTO {table} (spa_id, {value_col})
+                VALUES (%s, %s)
+            """, (spa_id, value))
 
+        conn.commit()
         cur.close()
         conn.close()
+
+        flash(f"{config['title']} item added.", "success")
         return redirect(url_for("manage_dropdown", dropdown_key=dropdown_key))
 
-    cur.execute(
-        sql.SQL("""
-            SELECT {pk_col}, {value_col}
+    if extra_col:
+        cur.execute(f"""
+            SELECT {pk}, {value_col}, {extra_col}
             FROM {table}
             WHERE spa_id = %s
             ORDER BY {value_col}
-        """).format(
-            pk_col=sql.Identifier(config["pk"]),
-            value_col=sql.Identifier(config["value"]),
-            table=sql.Identifier(config["table"])
-        ),
-        (spa_id,)
-    )
+        """, (spa_id,))
+    else:
+        cur.execute(f"""
+            SELECT {pk}, {value_col}
+            FROM {table}
+            WHERE spa_id = %s
+            ORDER BY {value_col}
+        """, (spa_id,))
+
     rows = cur.fetchall()
 
     cur.close()
     conn.close()
 
     return render_template(
-        "dropdown_generic.html",
+        "manage_dropdown.html",
         dropdown_key=dropdown_key,
-        title=config["title"],
-        label=config["label"],
+        config=config,
         rows=rows
     )
-
 
 
 
@@ -1099,47 +1141,40 @@ def manage_dropdown(dropdown_key):
 #  ------------------------------
 
 
-@app.route("/admin/dropdowns/<dropdown_key>/delete/<path:item_id>", methods=["POST"])
+@app.route("/dropdowns/<dropdown_key>/delete/<int:item_id>", methods=["POST"])
+@login_required
+@spa_required
 def delete_dropdown_item(dropdown_key, item_id):
     spa_id = current_spa_id()
 
-    if dropdown_key not in DROPDOWN_CONFIG:
-        flash("Invalid dropdown selection.", "error")
+    config = DROPDOWN_CONFIG.get(dropdown_key)
+
+    if not config:
+        flash("Invalid dropdown selected.", "error")
         return redirect(url_for("admin"))
 
-    config = DROPDOWN_CONFIG[dropdown_key]
+    table = config["table"]
+    pk = config["pk"]
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    try:
-        cur.execute(
-            sql.SQL("""
-                DELETE FROM {table}
-                WHERE {pk_col} = %s
-                  AND spa_id = %s
-            """).format(
-                table=sql.Identifier(config["table"]),
-                pk_col=sql.Identifier(config["pk"])
-            ),
-            (item_id, spa_id)
-        )
-        conn.commit()
+    cur.execute(f"""
+        DELETE FROM {table}
+        WHERE {pk} = %s
+          AND spa_id = %s
+    """, (item_id, spa_id))
 
-        if cur.rowcount == 0:
-            flash("Item not found.", "error")
-        else:
-            flash("Item deleted successfully.", "success")
+    if cur.rowcount == 0:
+        flash("Item not found or not authorized.", "error")
+    else:
+        flash("Item deleted.", "success")
 
-    except Exception as e:
-        conn.rollback()
-        flash(f"Error deleting item: {e}", "error")
-
+    conn.commit()
     cur.close()
     conn.close()
 
     return redirect(url_for("manage_dropdown", dropdown_key=dropdown_key))
-
 
 
 
@@ -1242,6 +1277,14 @@ def business_financing_home():
     return render_template("business_financing_home.html")
      
 
+
+
+
+
+
+@app.route("/email_template_form1")
+def email_template_form1():
+    return render_template("email_template_form.html")
 
 
 #   -----------------------
@@ -1540,19 +1583,6 @@ def add_user():
             conn.close()
 
     return render_template("add_user.html")
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -4918,6 +4948,7 @@ def client_management():
 
             FROM clients c
             WHERE c.spa_id = %s
+              AND c.active_client = TRUE
               AND (
                    LOWER(c.first_name) LIKE %s
                    OR LOWER(c.last_name) LIKE %s
@@ -4963,6 +4994,7 @@ def client_management():
 
             FROM clients c
             WHERE c.spa_id = %s
+            AND c.active_client = TRUE
             ORDER BY c.last_name, c.first_name
         """, (
             today,
@@ -8241,16 +8273,20 @@ def delete_employee(employee_id):
 # good 4/27
 #  ------------------------------------------
 
+
+
+
 @app.route("/expenses")
 @login_required
 @spa_required
 def expenses_home():
     spa_id = current_spa_id()
+
     conn = get_db_connection()
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT 
+        SELECT
             expense_id,
             expense_date,
             vendor_name,
@@ -8265,23 +8301,23 @@ def expenses_home():
         WHERE spa_id = %s
         ORDER BY expense_date DESC, expense_id DESC
         LIMIT 25
-    """)
+    """, (spa_id,))
     expenses = cur.fetchall()
 
     cur.execute("""
         SELECT COALESCE(SUM(amount), 0)
         FROM expenses
-        WHERE spa_id =%s
-           ANDexpense_date = CURRENT_DATE
-    """)
+        WHERE spa_id = %s
+          AND expense_date = CURRENT_DATE
+    """, (spa_id,))
     today_total = cur.fetchone()[0]
 
     cur.execute("""
         SELECT COALESCE(SUM(amount), 0)
         FROM expenses
         WHERE spa_id = %s
-           AND DATE_TRUNC('month', expense_date) = DATE_TRUNC('month', CURRENT_DATE)
-    """)
+          AND DATE_TRUNC('month', expense_date) = DATE_TRUNC('month', CURRENT_DATE)
+    """, (spa_id,))
     month_total = cur.fetchone()[0]
 
     cur.close()
@@ -8293,6 +8329,25 @@ def expenses_home():
         today_total=today_total,
         month_total=month_total
     )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
         
 #  ------------------------------------------
 #      ADD  EXPENSES
@@ -9417,25 +9472,31 @@ def edit_income(income_id):
 @app.route("/income_report/csv")
 @login_required
 @spa_required
-def income_report_csv():
+def income_report_csv(): 
     spa_id = current_spa_id()
+    role = session.get("role")
+
     today = date.today()
     first_day = today.replace(day=1)
-
+            
     start_date = request.args.get("start_date", first_day.strftime("%Y-%m-%d"))
     end_date = request.args.get("end_date", today.strftime("%Y-%m-%d"))
     income_type = request.args.get("income_type", "").strip()
-
+            
     conn = get_db_connection()
     cur = conn.cursor()
 
-    filter_sql = "WHERE i.spa_id = %s AND i.income_date BETWEEN %s AND %s"
-    params = [spa_id, start_date, end_date]
+    filter_sql = "WHERE i.income_date BETWEEN %s AND %s"
+    params = [start_date, end_date]
+
+    if role != "master_admin":
+        filter_sql += " AND i.spa_id = %s"
+        params.append(spa_id)
 
     if income_type:
         filter_sql += " AND i.income_type = %s"
         params.append(income_type)
-
+        
     cur.execute(f"""
         SELECT
             i.income_id,
@@ -9452,21 +9513,24 @@ def income_report_csv():
             COALESCE(i.total_amount, 0.00) AS total_amount,
             COALESCE(i.notes, '') AS notes
         FROM income i
-        WHERE spa_id = %s
-        LEFT JOIN clients c ON i.client_id = c.client_id
-        LEFT JOIN employees e ON i.employee_id = e.employee_id
+        LEFT JOIN clients c 
+            ON i.client_id = c.client_id
+           AND i.spa_id = c.spa_id
+        LEFT JOIN employees e 
+            ON i.employee_id = e.employee_id
+           AND i.spa_id = e.spa_id
         {filter_sql}
         ORDER BY i.income_date DESC, i.income_id DESC
     """, params)
-
+            
     rows = cur.fetchall()
-
+    
     cur.close()
     conn.close()
-
+        
     output = io.StringIO()
     writer = csv.writer(output)
-
+        
     writer.writerow([
         "Income ID",
         "Income Date",
@@ -9477,23 +9541,22 @@ def income_report_csv():
         "Payment Method",
         "Service Amount",
         "Tip Amount",
-        "Retail Amount",
+        "Retail Amount",  
         "Tax Amount",
         "Total Amount",
         "Notes"
-    ])
+    ])      
 
     for row in rows:
         writer.writerow(row)
 
     output.seek(0)
-
+    
     return Response(
         output.getvalue(),
         mimetype="text/csv",
         headers={"Content-Disposition": "attachment; filename=income_report.csv"}
     )
-
 
 
 
@@ -9513,19 +9576,25 @@ def income_report_csv():
 @spa_required
 def income_report_excel():
     spa_id = current_spa_id()
+    role = session.get("role")
+
     today = date.today()
     first_day = today.replace(day=1)
-
+        
     start_date = request.args.get("start_date", first_day.strftime("%Y-%m-%d"))
     end_date = request.args.get("end_date", today.strftime("%Y-%m-%d"))
     income_type = request.args.get("income_type", "").strip()
-
+    
     conn = get_db_connection()
     cur = conn.cursor()
+    
+    filter_sql = "WHERE i.income_date BETWEEN %s AND %s"
+    params = [start_date, end_date]
 
-    filter_sql = "WHERE i.spa_id = %s AND i.income_date BETWEEN %s AND %s"
-    params = [spa_id, start_date, end_date]
-
+    if role != "master_admin":
+        filter_sql += " AND i.spa_id = %s"
+        params.append(spa_id)
+        
     if income_type:
         filter_sql += " AND i.income_type = %s"
         params.append(income_type)
@@ -9546,29 +9615,32 @@ def income_report_excel():
             COALESCE(i.total_amount, 0.00) AS total_amount,
             COALESCE(i.notes, '') AS notes
         FROM income i
-        WHERE spa_id = %s
-        LEFT JOIN clients c ON i.client_id = c.client_id
-        LEFT JOIN employees e ON i.employee_id = e.employee_id
+        LEFT JOIN clients c 
+            ON i.client_id = c.client_id
+           AND i.spa_id = c.spa_id
+        LEFT JOIN employees e 
+            ON i.employee_id = e.employee_id
+           AND i.spa_id = e.spa_id
         {filter_sql}
         ORDER BY i.income_date DESC, i.income_id DESC
     """, params)
 
-    rows = cur.fetchall()
-
-    cur.close()
+    rows = cur.fetchall()   
+            
+    cur.close()   
     conn.close()
-
+    
     wb = Workbook()
     ws = wb.active
     ws.title = "Income Report"
-
+     
     ws.append([
         "Income ID",
         "Income Date",
         "Client Name",
         "Employee",
         "Income Type",
-        "Description",
+        "Description",    
         "Payment Method",
         "Service Amount",
         "Tip Amount",
@@ -9580,18 +9652,17 @@ def income_report_excel():
 
     for row in rows:
         ws.append(list(row))
-
+    
     output = io.BytesIO()
     wb.save(output)
     output.seek(0)
-
+    
     return send_file(
         output,
         as_attachment=True,
         download_name="income_report.xlsx",
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
-
 
 
 
@@ -9640,7 +9711,7 @@ def delete_income(income_id):
 #
 #  INCOME REPORT
 #
-#   4/27
+#   4/28
 #  --------------------------
 
 
@@ -9652,42 +9723,70 @@ from db import get_db_connection
 
 
 @app.route("/income_report")
-@login_required
+@login_required  
 @spa_required
 def income_report():
     spa_id = current_spa_id()
+    role = session.get("role")
+
     today = date.today()
     first_day = today.replace(day=1)
-
+        
     start_date = request.args.get("start_date") or first_day.strftime("%Y-%m-%d")
     end_date = request.args.get("end_date") or today.strftime("%Y-%m-%d")
     income_type = request.args.get("income_type", "").strip()
-
-    conn = get_db_connection()
+        
+    conn = get_db_connection() 
     cur = conn.cursor()
 
-    # Get distinct income types for dropdown
-    cur.execute("""
-        SELECT DISTINCT income_type
-        FROM income
-        WHERE spa_id = %s
-          AND income_type IS NOT NULL
-          AND income_type <> ''
-        ORDER BY income_type
-    """, (spa_id,))
+    # Income type dropdown
+    if role == "master_admin":
+        cur.execute("""
+            SELECT DISTINCT income_type
+            FROM income
+            WHERE income_type IS NOT NULL
+              AND income_type <> ''
+            ORDER BY income_type
+        """)
+    else:
+        cur.execute("""
+            SELECT DISTINCT income_type
+            FROM income
+            WHERE spa_id = %s
+              AND income_type IS NOT NULL
+              AND income_type <> ''
+            ORDER BY income_type
+        """, (spa_id,))
+
     income_type_options = [row[0] for row in cur.fetchall()]
 
-    # Build filter
-    filter_sql = "WHERE spa_id = %s AND income_date BETWEEN %s AND %s"
-    params = [spa_id, start_date, end_date]
+    # Base filters
+    filter_sql = "WHERE income_date BETWEEN %s AND %s"
+    params = [start_date, end_date]
+
+    if role != "master_admin":
+        filter_sql += " AND spa_id = %s"
+        params.append(spa_id)
 
     if income_type:
         filter_sql += " AND income_type = %s"
         params.append(income_type)
 
+    # Alias version for joined income queries
+    filter_sql_i = "WHERE i.income_date BETWEEN %s AND %s"
+    params_i = [start_date, end_date]
+
+    if role != "master_admin":
+        filter_sql_i += " AND i.spa_id = %s"
+        params_i.append(spa_id)
+
+    if income_type:
+        filter_sql_i += " AND i.income_type = %s"
+        params_i.append(income_type)
+
     # Summary totals
     cur.execute(f"""
-        SELECT
+        SELECT    
             COUNT(*) AS total_entries,
             COALESCE(SUM(service_amount), 0.00) AS total_services,
             COALESCE(SUM(retail_amount), 0.00) AS total_retail,
@@ -9718,7 +9817,7 @@ def income_report():
         ORDER BY gross_collected DESC
     """, params)
     income_type_breakdown = cur.fetchall()
-
+        
     # Payment method breakdown
     cur.execute(f"""
         SELECT
@@ -9727,7 +9826,7 @@ def income_report():
             COALESCE(SUM(service_amount + retail_amount), 0.00) AS spa_income,
             COALESCE(SUM(tip_amount), 0.00) AS total_tips,
             COALESCE(SUM(total_amount), 0.00) AS gross_collected,
-            COALESCE(SUM(processing_fee_amount), 0.00) AS total_processing_fees,
+            COALESCE(SUM(processing_fee_amount), 0.00) AS total_processing_fees, 
             COALESCE(SUM(net_received), 0.00) AS total_net_received
         FROM income
         {filter_sql}
@@ -9735,32 +9834,33 @@ def income_report():
         ORDER BY gross_collected DESC
     """, params)
     payment_breakdown = cur.fetchall()
-
-    # Credit processor breakdown
+    
+    # Credit processor breakdown   
     cur.execute(f"""
         SELECT
             COALESCE(cp.credit_processor_name, 'None') AS credit_processor_name,
             COUNT(*) AS entry_count,
-            COALESCE(SUM(total_amount), 0.00) AS gross_collected,
-            COALESCE(SUM(processing_fee_amount), 0.00) AS total_processing_fees,
-            COALESCE(SUM(net_received), 0.00) AS total_net_received
+            COALESCE(SUM(i.total_amount), 0.00) AS gross_collected,
+            COALESCE(SUM(i.processing_fee_amount), 0.00) AS total_processing_fees,
+            COALESCE(SUM(i.net_received), 0.00) AS total_net_received
         FROM income i
         LEFT JOIN credit_processors cp
             ON i.credit_processor_id = cp.credit_processor_id
-        {filter_sql.replace("spa_id", "i.spa_id").replace("income_date", "i.income_date").replace("income_type", "i.income_type")}
+           AND i.spa_id = cp.spa_id
+        {filter_sql_i}
         GROUP BY cp.credit_processor_name
         ORDER BY total_processing_fees DESC, gross_collected DESC
-    """, params)
+    """, params_i)
     processor_breakdown = cur.fetchall()
-
+    
     # Detailed report rows
     cur.execute(f"""
-        SELECT
+        SELECT    
             i.income_id,
             i.income_date,
             COALESCE(c.first_name || ' ' || c.last_name, 'No Client') AS client_name,
             COALESCE(e.first_name || ' ' || e.last_name, 'Unassigned') AS employee_name,
-            COALESCE(i.income_type, '') AS income_type,
+            COALESCE(i.income_type, '') AS income_type,  
             COALESCE(i.description, '') AS description,
             COALESCE(i.payment_method, '') AS payment_method,
             COALESCE(cp.credit_processor_name, '') AS credit_processor_name,
@@ -9774,17 +9874,23 @@ def income_report():
             COALESCE(i.net_received, 0.00) AS net_received,
             COALESCE(i.notes, '') AS notes
         FROM income i
-        LEFT JOIN clients c ON i.client_id = c.client_id
-        LEFT JOIN employees e ON i.employee_id = e.employee_id
-        LEFT JOIN credit_processors cp ON i.credit_processor_id = cp.credit_processor_id
-        {filter_sql.replace("spa_id", "i.spa_id").replace("income_date", "i.income_date").replace("income_type", "i.income_type")}
+        LEFT JOIN clients c 
+            ON i.client_id = c.client_id
+           AND i.spa_id = c.spa_id
+        LEFT JOIN employees e 
+            ON i.employee_id = e.employee_id
+           AND i.spa_id = e.spa_id
+        LEFT JOIN credit_processors cp 
+            ON i.credit_processor_id = cp.credit_processor_id
+           AND i.spa_id = cp.spa_id
+        {filter_sql_i}
         ORDER BY i.income_date DESC, i.income_id DESC
-    """, params)
+    """, params_i)
     income_rows = cur.fetchall()
-
+        
     cur.close()
     conn.close()
-
+    
     return render_template(
         "income_report.html",
         start_date=start_date,
@@ -9805,10 +9911,9 @@ def income_report():
 
 
 
-
 #  -----------------------------
 #     ADD GENERAL INCOME
-#    4/27 
+#    4/28 
 #  -----------------------------
 
 from flask import render_template, request, redirect, url_for, flash
@@ -9818,20 +9923,28 @@ from db import get_db_connection
 
 @app.route("/add_general_income", methods=["GET", "POST"])
 @login_required
-@spa_required
+@spa_required  
 def add_general_income():
     spa_id = current_spa_id()
+    role = session.get("role")
+
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Load dropdowns / clients for form display
-    cur.execute("""
-        SELECT client_id, first_name, last_name
-        FROM clients
-        WHERE spa_id = %s    
-        ORDER BY last_name, first_name
-    """, (spa_id,))
-    clients = cur.fetchall()
+    if role == "master_admin":
+        cur.execute("""
+            SELECT client_id, first_name, last_name 
+            FROM clients
+            ORDER BY last_name, first_name
+        """)
+    else:
+        cur.execute("""
+            SELECT client_id, first_name, last_name 
+            FROM clients
+            WHERE spa_id = %s
+            ORDER BY last_name, first_name
+        """, (spa_id,))
+    clients = cur.fetchall()   
 
     cur.execute("""
         SELECT income_type_name
@@ -9882,52 +9995,52 @@ def add_general_income():
             flash("Income date is required.", "error")
             cur.close()
             conn.close()
-            return render_template(
-                "add_general_income.html",
-                clients=clients,
-                income_types=income_types,
-                payment_methods=payment_methods
-            )
+            return render_template("add_general_income.html", clients=clients, income_types=income_types, payment_methods=payment_methods)
 
-        if not income_type:
+        if not income_type:   
             flash("Income type is required.", "error")
             cur.close()
             conn.close()
-            return render_template(
-                "add_general_income.html",
-                clients=clients,
-                income_types=income_types,
-                payment_methods=payment_methods
-            )
+            return render_template("add_general_income.html", clients=clients, income_types=income_types, payment_methods=payment_methods)
 
         if not payment_method:
             flash("Payment method is required.", "error")
             cur.close()
-            conn.close()
-            return render_template(
-                "add_general_income.html",
-                clients=clients,
-                income_types=income_types,
-                payment_methods=payment_methods
-            )
+            conn.close() 
+            return render_template("add_general_income.html", clients=clients, income_types=income_types, payment_methods=payment_methods)
 
         if total_amount < 0:
             flash("Total amount cannot be negative.", "error")
             cur.close()
             conn.close()
-            return render_template(
-                "add_general_income.html",
-                clients=clients,
-                income_types=income_types,
-                payment_methods=payment_methods
-            )
+            return render_template("add_general_income.html", clients=clients, income_types=income_types, payment_methods=payment_methods)
 
-        # Optional client_id handling
         if client_id == "":
             client_id = None
 
+        # Safety check: client must belong to this spa
+        if client_id:
+            cur.execute("""
+                SELECT client_id
+                FROM clients
+                WHERE client_id = %s
+                  AND spa_id = %s
+            """, (client_id, spa_id))
+
+            if not cur.fetchone():
+                flash("Selected client does not belong to this spa.", "error")
+                cur.close()
+                conn.close()
+                return render_template(
+                    "add_general_income.html",
+                    clients=clients,
+                    income_types=income_types,
+                    payment_methods=payment_methods
+                )
+
         cur.execute("""
             INSERT INTO income (
+                spa_id,
                 income_date,
                 client_id,
                 appointment_id,
@@ -9935,18 +10048,19 @@ def add_general_income():
                 income_type,
                 description,
                 service_amount,
-                retail_amount,
+                retail_amount,  
                 tax_amount,
                 total_amount,
                 payment_method,
-                square_payment_id,
+                square_payment_id, 
                 notes
             )
-            VALUES (%s, %s, NULL, NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, NULL, NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
+            spa_id,
             income_date,
             client_id,
-            income_type,
+            income_type,   
             description,
             service_amount,
             retail_amount,
@@ -9955,25 +10069,24 @@ def add_general_income():
             payment_method,
             square_payment_id,
             notes
-        ))
-
+        ))   
+    
         conn.commit()
         flash("General income entry added successfully.", "success")
-
+            
         cur.close()
         conn.close()
         return redirect(url_for("add_general_income"))
-
+                
     cur.close()
     conn.close()
-
+             
     return render_template(
         "add_general_income.html",
         clients=clients,
         income_types=income_types,
         payment_methods=payment_methods
     )
-
 
 
 
@@ -9987,28 +10100,29 @@ def add_general_income():
 
 
 from datetime import timedelta, datetime
-from flask import render_template, request, redirect, url_for
+from flask import render_template, request, redirect
+
 
 @app.route("/calendar")
-@login_required
+@login_required  
 @spa_required
 def calendar_view():
     spa_id = current_spa_id()
+    role = session.get("role")
+
     week_start_str = request.args.get("week_start")
     goto_date = request.args.get("goto_date")
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
-
+        
     spa_now = get_spa_now()
     today = spa_now.date()
     now_time = spa_now.time()
     current_timezone = get_current_spa_timezone()
-
-    # Find current week's Sunday
+    
     today_days_since_sunday = (today.weekday() + 1) % 7
     current_week_start = today - timedelta(days=today_days_since_sunday)
-
-    # Determine which week to display
+        
     if goto_date:
         selected_date = datetime.strptime(goto_date, "%Y-%m-%d").date()
         days_since_sunday = (selected_date.weekday() + 1) % 7
@@ -10019,41 +10133,55 @@ def calendar_view():
         start_of_week = current_week_start
 
     week_days = [start_of_week + timedelta(days=i) for i in range(7)]
-
+            
     prev_week_start = start_of_week - timedelta(days=7)
     next_week_start = start_of_week + timedelta(days=7)
 
     conn = get_db_connection()
     cur = conn.cursor()
-
+                    
     filtered_appointments = []
 
+    # Base spa filters
+    filter_sql = "WHERE a.appointment_date BETWEEN %s AND %s"
+    week_params = [week_days[0], week_days[-1]]
+
+    if role != "master_admin":
+        filter_sql += " AND a.spa_id = %s"
+        week_params.append(spa_id)
+
     if start_date and end_date:
-        cur.execute("""
-            SELECT
+        date_filter_sql = "WHERE a.appointment_date BETWEEN %s AND %s"
+        date_params = [start_date, end_date]
+
+        if role != "master_admin":
+            date_filter_sql += " AND a.spa_id = %s"
+            date_params.append(spa_id)
+
+        cur.execute(f"""
+            SELECT     
                 a.appointment_date,
                 a.appointment_time,
                 c.first_name,
                 c.last_name,
                 s.service_name,
-                a.status,
-                a.appointment_id
+                a.status,   
+                a.appointment_id  
             FROM appointments a
-            WHERE spa_id = %s
-            JOIN clients c 
+            JOIN clients c
                 ON a.client_id = c.client_id
-                AND a.spa_id = c.spa_id
-            LEFT JOIN services s 
+               AND a.spa_id = c.spa_id
+            LEFT JOIN services s
                 ON a.service_id = s.service_id
-                AND a.spa_id = s.spa_id
-            WHERE a.spa_id = %s
-              AND a.appointment_date BETWEEN %s AND %s
+               AND a.spa_id = s.spa_id
+            {date_filter_sql}
             ORDER BY a.appointment_date, a.appointment_time
-        """, (spa_id, start_date, end_date))
-        filtered_appointments = cur.fetchall()
+        """, date_params)
 
+        filtered_appointments = cur.fetchall()
+            
     # Show booked appointments for the displayed week
-    cur.execute("""
+    cur.execute(f"""
         SELECT
             a.appointment_date,
             a.appointment_time,
@@ -10061,29 +10189,23 @@ def calendar_view():
             c.last_name,
             s.service_name,
             a.status,
-            a.appointment_id
+            a.appointment_id 
         FROM appointments a
-        JOIN clients c ON a.client_id = c.client_id
-        LEFT JOIN services s ON a.service_id = s.service_id
-        WHERE a.spa_id = %s
-          AND a.appointment_date BETWEEN %s AND %s
+        JOIN clients c
+            ON a.client_id = c.client_id
+           AND a.spa_id = c.spa_id
+        LEFT JOIN services s
+            ON a.service_id = s.service_id
+           AND a.spa_id = s.spa_id
+        {filter_sql}
         ORDER BY a.appointment_date, a.appointment_time
-    """, (spa_id, week_days[0], week_days[-1]))
-    appointments = cur.fetchall()
+    """, week_params)
 
+    appointments = cur.fetchall()
+    
     # Next booked appointment banner
-    cur.execute("""
-        SELECT
-            c.first_name,
-            c.last_name,
-            a.appointment_date,
-            a.appointment_time,
-            s.service_name
-        FROM appointments a
-        JOIN clients c ON a.client_id = c.client_id
-        LEFT JOIN services s ON a.service_id = s.service_id
-        WHERE a.spa_id = %s
-          AND a.status = 'booked'
+    next_filter_sql = """
+        WHERE a.status = 'booked'
           AND (
                 a.appointment_date > %s
                 OR (
@@ -10091,17 +10213,37 @@ def calendar_view():
                     AND a.appointment_time >= %s
                 )
               )
+    """
+    next_params = [today, today, now_time]
+
+    if role != "master_admin":
+        next_filter_sql += " AND a.spa_id = %s"
+        next_params.append(spa_id)
+
+    cur.execute(f"""
+        SELECT
+            c.first_name,
+            c.last_name,
+            a.appointment_date,
+            a.appointment_time,
+            s.service_name
+        FROM appointments a
+        JOIN clients c
+            ON a.client_id = c.client_id
+           AND a.spa_id = c.spa_id
+        LEFT JOIN services s
+            ON a.service_id = s.service_id
+           AND a.spa_id = s.spa_id
+        {next_filter_sql}
         ORDER BY a.appointment_date, a.appointment_time
         LIMIT 1
-    """, (spa_id, today, today, now_time))
-    next_appt = cur.fetchone()
+    """, next_params)
 
+    next_appt = cur.fetchone()
+        
     # Overdue booked appointment count
-    cur.execute("""
-        SELECT COUNT(*)
-        FROM appointments
-        WHERE spa_id = %s
-          AND status = 'booked'
+    overdue_filter_sql = """
+        WHERE status = 'booked'
           AND (
                 appointment_date < %s
                 OR (
@@ -10109,23 +10251,33 @@ def calendar_view():
                     AND appointment_time < %s
                 )
               )
-    """, (spa_id, today, today, now_time))
-    overdue_count = cur.fetchone()[0]
+    """
+    overdue_params = [today, today, now_time]
 
+    if role != "master_admin":
+        overdue_filter_sql += " AND spa_id = %s"
+        overdue_params.append(spa_id)
 
+    cur.execute(f"""
+        SELECT COUNT(*)
+        FROM appointments
+        {overdue_filter_sql}
+    """, overdue_params)
+
+    overdue_count = cur.fetchone()[0]  
+                
     cur.close()
     conn.close()
-
+              
     formatted_spa_time = spa_now.strftime("%A, %B %d, %Y %I:%M %p")
-
-
+        
     return render_template(
         "calendar.html",
         week_days=week_days,
         appointments=appointments,
         today=today,
         now_time=now_time,
-        spa_now=spa_now,
+        spa_now=spa_now, 
         formatted_spa_time=formatted_spa_time,
         current_timezone=current_timezone,
         next_appt=next_appt,
@@ -10139,11 +10291,17 @@ def calendar_view():
     )
 
 
+
+
+
+
+
+
 #  -----------------------------
 #
 #
 #   MODAL QUICK RESCHEDULE
-#
+#  4/28
 #  -----------------------------
 
 
@@ -10152,32 +10310,46 @@ def calendar_view():
 @spa_required
 def quick_reschedule_appointment(appointment_id):
     spa_id = current_spa_id()
-
+    role = session.get("role")
+        
     appointment_date = request.form.get("appointment_date")
     appointment_time = request.form.get("appointment_time")
-
+        
     if not appointment_date or not appointment_time:
         flash("Date and time are required to reschedule.", "error")
         return redirect(url_for("calendar_view"))
-
+        
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute("""
-        UPDATE appointments
-        SET appointment_date = %s,
-            appointment_time = %s
-        WHERE appointment_id = %s
-          AND spa_id = %s
-    """, (appointment_date, appointment_time, appointment_id, spa_id))
+    if role == "master_admin":
+        cur.execute("""
+            UPDATE appointments
+            SET appointment_date = %s,
+                appointment_time = %s
+            WHERE appointment_id = %s
+        """, (appointment_date, appointment_time, appointment_id))
+    else:
+        cur.execute("""
+            UPDATE appointments
+            SET appointment_date = %s,
+                appointment_time = %s
+            WHERE appointment_id = %s
+              AND spa_id = %s
+        """, (appointment_date, appointment_time, appointment_id, spa_id))
 
     conn.commit()
+
+    # Optional but recommended: check if anything was updated
+    if cur.rowcount == 0:
+        flash("Appointment not found or not authorized.", "error")
+    else:
+        flash("Appointment rescheduled successfully.", "success")
+
     cur.close()
     conn.close()
 
-    flash("Appointment rescheduled successfully.", "success")
     return redirect(url_for("calendar_view"))
-
 
 
 
@@ -10190,7 +10362,7 @@ def quick_reschedule_appointment(appointment_id):
 #
 #      APPOINTMENT DETAILS
 #     
-#
+#  4/28 cleaned
 #  -----------------------------
 
 
@@ -10199,10 +10371,10 @@ def quick_reschedule_appointment(appointment_id):
 @spa_required
 def appointment_details(appointment_id):
     spa_id = current_spa_id()
-
+        
     conn = get_db_connection()
     cur = conn.cursor()
-
+    
     cur.execute("""
         SELECT
             a.appointment_id,
@@ -10225,15 +10397,15 @@ def appointment_details(appointment_id):
         WHERE a.appointment_id = %s
           AND a.spa_id = %s
     """, (appointment_id, spa_id))
-
+   
     appt = cur.fetchone()
-
+    
     cur.close()
     conn.close()
 
     if not appt:
         return {"error": "Appointment not found."}, 404
-
+    
     return {
         "appointment_id": appt[0],
         "appointment_date": appt[1].strftime("%Y-%m-%d") if appt[1] else "",
@@ -10247,7 +10419,6 @@ def appointment_details(appointment_id):
         "provider_name": "",
         "notes": appt[9] or ""
     }
-
 
 
 
@@ -10271,17 +10442,26 @@ from datetime import datetime, date
 @spa_required
 def daily_schedule():
     spa_id = current_spa_id()
-    selected_date = request.args.get("date")
+    role = session.get("role")
 
+    selected_date = request.args.get("date")
+    
     if selected_date:
         display_date = datetime.strptime(selected_date, "%Y-%m-%d").date()
     else:
         display_date = get_spa_today()
-
+        
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute("""
+    filter_sql = "WHERE a.appointment_date = %s"
+    params = [display_date]
+
+    if role != "master_admin":
+        filter_sql += " AND a.spa_id = %s"
+        params.append(spa_id)
+            
+    cur.execute(f"""
         SELECT
             a.appointment_id,
             a.client_id,
@@ -10296,26 +10476,24 @@ def daily_schedule():
         FROM appointments a
         JOIN clients c
             ON a.client_id = c.client_id
-           AND a.spa_id = c.spa_id
+           AND a.spa_id = c.spa_id 
         LEFT JOIN services s
             ON a.service_id = s.service_id
            AND a.spa_id = s.spa_id
-        WHERE a.appointment_date = %s
-          AND a.spa_id = %s
+        {filter_sql}
         ORDER BY a.appointment_time
-    """, (display_date, spa_id))
+    """, params)
 
     appointments = cur.fetchall()
-
+        
     cur.close()
     conn.close()
-
-    return render_template(
+            
+    return render_template(   
         "daily_schedule.html",
         appointments=appointments,
         display_date=display_date
-    )
-
+    ) 
 
 
 
@@ -10326,7 +10504,7 @@ def daily_schedule():
 #    
 #
 #     DASHBOARD
-#    4/27
+#    4/28 cleaned
 #  -----------------------------
 
 
@@ -10389,7 +10567,9 @@ def dashboard():
     cur.execute("""
         SELECT COUNT(*)
         FROM client_birthday_offers cbo
-        JOIN clients c ON c.client_id = cbo.client_id
+        JOIN clients c 
+            ON c.client_id = cbo.client_id
+           AND c.spa_id = cbo.spa_id
         WHERE c.spa_id = %s
           AND cbo.offer_sent = FALSE
           AND cbo.birthday_year = %s
@@ -10421,8 +10601,12 @@ def dashboard():
             a.appointment_time,
             s.service_name
         FROM appointments a
-        JOIN clients c ON a.client_id = c.client_id
-        LEFT JOIN services s ON a.service_id = s.service_id
+        JOIN clients c 
+            ON a.client_id = c.client_id
+           AND a.spa_id = c.spa_id
+        LEFT JOIN services s 
+            ON a.service_id = s.service_id
+           AND a.spa_id = s.spa_id
         WHERE a.spa_id = %s
           AND a.status = 'booked'
           AND (
@@ -10573,7 +10757,7 @@ def dashboard():
 #  ------------------------------
 #
 #       REPORTS
-#
+#   4/28 clean
 #  -----------------------------
 
 
@@ -10584,154 +10768,169 @@ from datetime import date, datetime, timedelta
 @spa_required
 def reports():
     spa_id = current_spa_id()
+    role = session.get("role")
+
     conn = get_db_connection()
     cur = conn.cursor()
-
+        
     today = date.today()
     week_start = today - timedelta(days=today.weekday())
     week_end = week_start + timedelta(days=6)
     month_start = today.replace(day=1)
-
+            
     if today.month == 12:
         next_month_start = date(today.year + 1, 1, 1)
     else:
         next_month_start = date(today.year, today.month + 1, 1)
 
+    spa_filter = ""
+    spa_params = []
+
+    if role != "master_admin":
+        spa_filter = " AND a.spa_id = %s"
+        spa_params = [spa_id]
+
     # Today's completed appointments
-    cur.execute("""
-        SELECT 
+    cur.execute(f"""
+        SELECT
             a.appointment_id,
             c.first_name,
             c.last_name,
             s.service_name,
             a.appointment_date,
-            a.appointment_time,
+            a.appointment_time,  
             a.room_number,
             a.price_at_booking
         FROM appointments a
-        JOIN clients c ON a.client_id = c.client_id
-        LEFT JOIN services s ON a.service_id = s.service_id
-        WHERE spa_id = %s
-          AND a.appointment_date = %s
+        JOIN clients c 
+            ON a.client_id = c.client_id
+           AND a.spa_id = c.spa_id
+        LEFT JOIN services s 
+            ON a.service_id = s.service_id
+           AND a.spa_id = s.spa_id
+        WHERE a.appointment_date = %s
           AND a.status = 'completed'
+          {spa_filter}
         ORDER BY a.appointment_time
-    """, (today,))
+    """, [today] + spa_params)
     daily_completed = cur.fetchall() or []
 
     # Weekly totals
-    cur.execute("""
+    cur.execute(f"""
         SELECT
             COUNT(*) AS total_appointments,
             COUNT(*) FILTER (WHERE status = 'booked') AS booked_count,
             COUNT(*) FILTER (WHERE status = 'completed') AS completed_count,
             COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled_count
-        FROM appointments
-        WHERE spa_id = %s
-           AND appointment_date BETWEEN %s AND %s
-    """, (week_start, week_end))
-    weekly_totals = cur.fetchone()
-    if not weekly_totals:
-        weekly_totals = (0, 0, 0, 0)
-
+        FROM appointments a
+        WHERE a.appointment_date BETWEEN %s AND %s
+          {spa_filter}
+    """, [week_start, week_end] + spa_params)
+    weekly_totals = cur.fetchone() or (0, 0, 0, 0)
+    
     # Most booked services
-    cur.execute("""
+    cur.execute(f"""
         SELECT
             COALESCE(s.service_name, 'Unknown Service') AS service_name,
             COUNT(*) AS total_booked
         FROM appointments a
-        LEFT JOIN services s ON a.service_id = s.service_id
-        WHERE spa_id = %s
-           AND a.status IN ('booked', 'completed')
+        LEFT JOIN services s 
+            ON a.service_id = s.service_id
+           AND a.spa_id = s.spa_id
+        WHERE a.status IN ('booked', 'completed')
+          {spa_filter}
         GROUP BY COALESCE(s.service_name, 'Unknown Service')
         ORDER BY total_booked DESC, service_name ASC
         LIMIT 10
-    """)
+    """, spa_params)
     most_booked_services = cur.fetchall() or []
 
     # Cancelled appointments count
-    cur.execute("""
+    cur.execute(f"""
         SELECT COUNT(*)
-        FROM appointments
-        WHERE spa_id = %s
-           AND status = 'cancelled'
-    """)
+        FROM appointments a
+        WHERE a.status = 'cancelled'
+          {spa_filter}
+    """, spa_params)
     cancelled_result = cur.fetchone()
     cancelled_count = cancelled_result[0] if cancelled_result else 0
-
+    
     # Daily revenue
-    cur.execute("""
-        SELECT COALESCE(SUM(price_at_booking), 0)
-        FROM appointments
-        WHERE spa_id = %s
-          AND appointment_date = %s
-          AND status = 'completed'
-    """, (today,))
+    cur.execute(f"""
+        SELECT COALESCE(SUM(a.price_at_booking), 0)
+        FROM appointments a
+        WHERE a.appointment_date = %s
+          AND a.status = 'completed'
+          {spa_filter}
+    """, [today] + spa_params)
     daily_revenue = cur.fetchone()[0] or 0
-
+        
     # Weekly revenue
-    cur.execute("""
-        SELECT COALESCE(SUM(price_at_booking), 0)
-        FROM appointments
-        WHERE spa_id = %s
-          AND appointment_date BETWEEN %s AND %s
-          AND status = 'completed'
-    """, (week_start, week_end))
+    cur.execute(f"""
+        SELECT COALESCE(SUM(a.price_at_booking), 0)
+        FROM appointments a
+        WHERE a.appointment_date BETWEEN %s AND %s
+          AND a.status = 'completed'
+          {spa_filter}
+    """, [week_start, week_end] + spa_params)
     weekly_revenue = cur.fetchone()[0] or 0
-
+        
     # Monthly revenue
-    cur.execute("""
-        SELECT COALESCE(SUM(price_at_booking), 0)
-        FROM appointments
-        WHERE spa_id = %s
-          AND appointment_date >= %s
-          AND appointment_date < %s
-          AND status = 'completed'
-    """, (month_start, next_month_start))
+    cur.execute(f"""
+        SELECT COALESCE(SUM(a.price_at_booking), 0)
+        FROM appointments a
+        WHERE a.appointment_date >= %s
+          AND a.appointment_date < %s
+          AND a.status = 'completed'
+          {spa_filter}
+    """, [month_start, next_month_start] + spa_params)
     monthly_revenue = cur.fetchone()[0] or 0
-
+        
     # Monthly completed count
-    cur.execute("""
+    cur.execute(f"""
         SELECT COUNT(*)
-        FROM appointments
-        WHERE spa_id = %s
-          AND appointment_date >= %s
-          AND appointment_date < %s
-          AND status = 'completed'
-    """, (month_start, next_month_start))
+        FROM appointments a
+        WHERE a.appointment_date >= %s
+          AND a.appointment_date < %s
+          AND a.status = 'completed'
+          {spa_filter}
+    """, [month_start, next_month_start] + spa_params)
     monthly_completed_count = cur.fetchone()[0] or 0
-
+        
     # Average ticket this month
-    cur.execute("""
-        SELECT COALESCE(AVG(price_at_booking), 0)
-        FROM appointments
-        WHERE spa_id = %s
-          AND appointment_date >= %s
-          AND appointment_date < %s
-          AND status = 'completed'
-          AND price_at_booking IS NOT NULL
-    """, (month_start, next_month_start))
+    cur.execute(f"""
+        SELECT COALESCE(AVG(a.price_at_booking), 0)
+        FROM appointments a
+        WHERE a.appointment_date >= %s
+          AND a.appointment_date < %s
+          AND a.status = 'completed'
+          AND a.price_at_booking IS NOT NULL
+          {spa_filter}
+    """, [month_start, next_month_start] + spa_params)
     average_ticket = cur.fetchone()[0] or 0
-
+        
     # Revenue by service for current month
-    cur.execute("""
+    cur.execute(f"""
         SELECT
             COALESCE(s.service_name, 'Unknown Service') AS service_name,
             COUNT(*) AS completed_count,
             COALESCE(SUM(a.price_at_booking), 0) AS total_revenue
         FROM appointments a
-        LEFT JOIN services s ON a.service_id = s.service_id
-        WHERE spa_id = %s
-          AND a.appointment_date >= %s
+        LEFT JOIN services s 
+            ON a.service_id = s.service_id
+           AND a.spa_id = s.spa_id
+        WHERE a.appointment_date >= %s
           AND a.appointment_date < %s
           AND a.status = 'completed'
+          {spa_filter}
         GROUP BY COALESCE(s.service_name, 'Unknown Service')
         ORDER BY total_revenue DESC, service_name ASC
-    """, (month_start, next_month_start))
+    """, [month_start, next_month_start] + spa_params)
     revenue_by_service = cur.fetchall() or []
-
+        
     cur.close()
     conn.close()
-
+          
     return render_template(
         "reports.html",
         today=today,
@@ -10744,17 +10943,24 @@ def reports():
         cancelled_count=cancelled_count,
         daily_revenue=daily_revenue,
         weekly_revenue=weekly_revenue,
-        monthly_revenue=monthly_revenue,
+        monthly_revenue=monthly_revenue,   
         monthly_completed_count=monthly_completed_count,
         average_ticket=average_ticket,
         revenue_by_service=revenue_by_service
     )
 
 
+
+
+
+
+
+
+
 #  -------------------------
 #
 #    REPORTS BY DATE/RANGE
-#   4/27
+#   4/28 cleaned
 #  ------------------------
 
 from datetime import datetime
@@ -10764,16 +10970,17 @@ from datetime import datetime
 @spa_required
 def reports_range():
     spa_id = current_spa_id()
+    role = session.get("role")
+
     conn = get_db_connection()
     cur = conn.cursor()
-
+        
     today = date.today()
-
+        
     preset = request.form.get("preset") or request.args.get("preset")
     start_date = request.form.get("start_date") or request.args.get("start_date")
     end_date = request.form.get("end_date") or request.args.get("end_date")
-
-    # Quick preset buttons
+        
     if preset == "today":
         start_date = today.strftime("%Y-%m-%d")
         end_date = today.strftime("%Y-%m-%d")
@@ -10790,106 +10997,117 @@ def reports_range():
             next_month_start = date(today.year + 1, 1, 1)
         else:
             next_month_start = date(today.year, today.month + 1, 1)
-        month_end = next_month_start - timedelta(days=1)
 
+        month_end = next_month_start - timedelta(days=1)
         start_date = month_start.strftime("%Y-%m-%d")
         end_date = month_end.strftime("%Y-%m-%d")
 
     elif preset == "last_30":
         start_date = (today - timedelta(days=29)).strftime("%Y-%m-%d")
         end_date = today.strftime("%Y-%m-%d")
-
+        
     formatted_start = None
     formatted_end = None
-
+        
     if start_date and end_date:
         try:
             formatted_start = datetime.strptime(start_date, "%Y-%m-%d").strftime("%B %d, %Y")
             formatted_end = datetime.strptime(end_date, "%Y-%m-%d").strftime("%B %d, %Y")
-        except:
+        except ValueError:
             formatted_start = start_date
             formatted_end = end_date
-
+     
     report_data = None
-
+            
     if start_date and end_date:
+        spa_filter = ""
+        spa_params = []
+
+        if role != "master_admin":
+            spa_filter = " AND a.spa_id = %s"
+            spa_params = [spa_id]
+
         # Totals
-        cur.execute("""
+        cur.execute(f"""
             SELECT
                 COUNT(*) AS total_appointments,
                 COUNT(*) FILTER (WHERE status = 'booked') AS booked_count,
                 COUNT(*) FILTER (WHERE status = 'completed') AS completed_count,
                 COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled_count
-            FROM appointments
-            WHERE spa_id = %s
-               AND appointment_date BETWEEN %s AND %s
-        """, (start_date, end_date))
+            FROM appointments a
+            WHERE a.appointment_date BETWEEN %s AND %s
+              {spa_filter}
+        """, [start_date, end_date] + spa_params)
         totals = cur.fetchone() or (0, 0, 0, 0)
 
         # Revenue
-        cur.execute("""
-            SELECT COALESCE(SUM(price_at_booking), 0)
-            FROM appointments
-            WHERE spa_id = %s
-              AND appointment_date BETWEEN %s AND %s
-              AND status = 'completed'
-        """, (start_date, end_date))
+        cur.execute(f"""
+            SELECT COALESCE(SUM(a.price_at_booking), 0)
+            FROM appointments a
+            WHERE a.appointment_date BETWEEN %s AND %s
+              AND a.status = 'completed'
+              {spa_filter}
+        """, [start_date, end_date] + spa_params)
         total_revenue = cur.fetchone()[0] or 0
-
+    
         # Average ticket
-        cur.execute("""
-            SELECT COALESCE(AVG(price_at_booking), 0)
-            FROM appointments
-            WHERE spa_id = %s
-              AND appointment_date BETWEEN %s AND %s
-              AND status = 'completed'
-              AND price_at_booking IS NOT NULL
-        """, (start_date, end_date))
+        cur.execute(f"""
+            SELECT COALESCE(AVG(a.price_at_booking), 0)
+            FROM appointments a
+            WHERE a.appointment_date BETWEEN %s AND %s
+              AND a.status = 'completed'
+              AND a.price_at_booking IS NOT NULL
+              {spa_filter}
+        """, [start_date, end_date] + spa_params)
         average_ticket = cur.fetchone()[0] or 0
-
+    
         # Most booked services
-        cur.execute("""
+        cur.execute(f"""
             SELECT
                 COALESCE(s.service_name, 'Unknown Service') AS service_name,
                 COUNT(*) AS total_booked
-            FROM appointments a
-            LEFT JOIN services s ON a.service_id = s.service_id
-            WHERE spa_id = %s
-              AND a.appointment_date BETWEEN %s AND %s
+            FROM appointments a 
+            LEFT JOIN services s 
+                ON a.service_id = s.service_id
+               AND a.spa_id = s.spa_id
+            WHERE a.appointment_date BETWEEN %s AND %s   
               AND a.status IN ('booked', 'completed')
-            GROUP BY COALESCE(s.service_name, 'Unknown Service')
+              {spa_filter}
+            GROUP BY COALESCE(s.service_name, 'Unknown Service')   
             ORDER BY total_booked DESC, service_name ASC
             LIMIT 10
-        """, (start_date, end_date))
+        """, [start_date, end_date] + spa_params)
         most_booked_services = cur.fetchall() or []
 
-        # Revenue by service
-        cur.execute("""
+        # Revenue by service 
+        cur.execute(f"""
             SELECT
                 COALESCE(s.service_name, 'Unknown Service') AS service_name,
                 COUNT(*) AS completed_count,
                 COALESCE(SUM(a.price_at_booking), 0) AS total_revenue
             FROM appointments a
-            LEFT JOIN services s ON a.service_id = s.service_id
-            WHERE spa_id = %s
-              AND a.appointment_date BETWEEN %s AND %s
+            LEFT JOIN services s 
+                ON a.service_id = s.service_id
+               AND a.spa_id = s.spa_id
+            WHERE a.appointment_date BETWEEN %s AND %s
               AND a.status = 'completed'
+              {spa_filter}
             GROUP BY COALESCE(s.service_name, 'Unknown Service')
             ORDER BY total_revenue DESC, service_name ASC
-        """, (start_date, end_date))
+        """, [start_date, end_date] + spa_params)
         revenue_by_service = cur.fetchall() or []
-
+    
         report_data = {
-            "totals": totals,
+            "totals": totals,  
             "total_revenue": total_revenue,
             "average_ticket": average_ticket,
             "most_booked_services": most_booked_services,
             "revenue_by_service": revenue_by_service
         }
-
+                
     cur.close()
     conn.close()
-
+            
     return render_template(
         "reports_range.html",
         start_date=start_date,
@@ -10902,33 +11120,55 @@ def reports_range():
 
 
 
+
+
+
+
+
+
 #  -----------------------------
 #     CLIENT SECTION
 #
 #     CLIENT HEALTH PROFILE
 #
-#  >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-#
-#
-#      Rick finish Spa_id checks here
-#
-#   >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>..
-#   >>>>>>>>>>>>>>>>>>>>>>>>>>>>.
-#    >>>>>>>>>>>>>>>>>>>>>>
-#
-#
+#  4/28 clean
 #  -----------------------------
 
 
-
 @app.route("/client_health_profile/<int:client_id>", methods=["GET", "POST"])
+@login_required
+@spa_required
 def client_health_profile(client_id):
+    spa_id = current_spa_id()
+    role = session.get("role")
+
     appointment_id = request.args.get("appointment_id") or request.form.get("appointment_id")
     selected_date = request.args.get("date") or request.form.get("date")
-    spa_id = current_spa_id()
-
+    
     conn = get_db_connection()
     cur = conn.cursor()
+
+    client_filter = "WHERE client_id = %s"
+    client_params = [client_id]
+
+    if role != "master_admin":
+        client_filter += " AND spa_id = %s"
+        client_params.append(spa_id)
+
+    cur.execute(f"""
+        SELECT client_id, first_name, last_name, spa_id
+        FROM clients
+        {client_filter}
+    """, client_params)
+    client = cur.fetchone()
+
+    if not client:
+        cur.close()
+        conn.close()
+        flash("Client not found or not authorized.", "error")
+        return redirect(url_for("clients_home"))
+
+    client_spa_id = client[3]
 
     if request.method == "POST":
         sex = request.form.get("sex") or None
@@ -10940,30 +11180,32 @@ def client_health_profile(client_id):
         medications = request.form.get("medications")
         current_medical_conditions = request.form.get("current_medical_conditions")
         past_medical_treatments = request.form.get("past_medical_treatments")
-
+        
         recent_injections = "recent_injections" in request.form
         recent_laser = "recent_laser" in request.form
         pregnant = "pregnant" in request.form
-        nursing = "nursing" in request.form
+        nursing = "nursing" in request.form  
         using_retinol = "using_retinol" in request.form
         using_accutane = "using_accutane" in request.form
-
+        
         sun_exposure_level = request.form.get("sun_exposure_level")
         last_facial_date = request.form.get("last_facial_date") or None
-
+        
         notes1 = request.form.get("notes1")
         notes2 = request.form.get("notes2")
         notes3 = request.form.get("notes3")
-
+        
         cur.execute("""
             SELECT health_profile_id
             FROM client_health_profile
             WHERE client_id = %s
-        """, (client_id,))
-        existing_profile = cur.fetchone()
+              AND spa_id = %s
+        """, (client_id, client_spa_id))
 
+        existing_profile = cur.fetchone()
+        
         if existing_profile:
-            cur.execute("""
+            cur.execute(""" 
                 UPDATE client_health_profile
                 SET
                     sex = %s,
@@ -10984,36 +11226,24 @@ def client_health_profile(client_id):
                     sun_exposure_level = %s,
                     last_facial_date = %s,
                     notes1 = %s,
-                    notes2 = %s,
+                    notes2 = %s,      
                     notes3 = %s,
                     last_updated = CURRENT_DATE
                 WHERE client_id = %s
+                  AND spa_id = %s
             """, (
-                sex,
-                skin_type_id,
-                fitzpatrick_id,
-                skin_concerns,
-                skin_conditions,
-                allergies,
-                medications,
-                current_medical_conditions,
-                past_medical_treatments,
-                recent_injections,
-                recent_laser,
-                pregnant,
-                nursing,
-                using_retinol,
-                using_accutane,
-                sun_exposure_level,
-                last_facial_date,
-                notes1,
-                notes2,
-                notes3,
-                client_id
+                sex, skin_type_id, fitzpatrick_id, skin_concerns,
+                skin_conditions, allergies, medications,
+                current_medical_conditions, past_medical_treatments,
+                recent_injections, recent_laser, pregnant, nursing,
+                using_retinol, using_accutane, sun_exposure_level,
+                last_facial_date, notes1, notes2, notes3,
+                client_id, client_spa_id
             ))
         else:
             cur.execute("""
                 INSERT INTO client_health_profile (
+                    spa_id,
                     client_id,
                     sex,
                     skin_type_id,
@@ -11026,7 +11256,7 @@ def client_health_profile(client_id):
                     past_medical_treatments,
                     recent_injections,
                     recent_laser,
-                    pregnant,
+                    pregnant,   
                     nursing,
                     using_retinol,
                     using_accutane,
@@ -11034,96 +11264,75 @@ def client_health_profile(client_id):
                     last_facial_date,
                     notes1,
                     notes2,
-                    notes3
+                    notes3   
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
-                client_id,
-                sex,
-                skin_type_id,
-                fitzpatrick_id,
-                skin_concerns,
-                skin_conditions,
-                allergies,
-                medications,
-                current_medical_conditions,
-                past_medical_treatments,
-                recent_injections,
-                recent_laser,
-                pregnant,
-                nursing,
-                using_retinol,
-                using_accutane,
-                sun_exposure_level,
-                last_facial_date,
-                notes1,
-                notes2,
-                notes3
+                client_spa_id, client_id, sex, skin_type_id, fitzpatrick_id,
+                skin_concerns, skin_conditions, allergies, medications,
+                current_medical_conditions, past_medical_treatments,
+                recent_injections, recent_laser, pregnant, nursing,
+                using_retinol, using_accutane, sun_exposure_level,
+                last_facial_date, notes1, notes2, notes3
             ))
-
+                
         conn.commit()
         cur.close()
         conn.close()
-
+                
         flash("Pre-session intake saved successfully.", "success")
-
-        if appointment_id:
-            return redirect(
-                url_for(
-                    "post_appointment_wrap_up",
-                    appointment_id=appointment_id,
-                    date=selected_date
-                )
-            )
-
+                
+        if appointment_id:   
+            return redirect(url_for(
+                "post_appointment_wrap_up",
+                appointment_id=appointment_id,
+                date=selected_date
+            ))
+                
         return redirect(url_for("clients_home"))
-
-    cur.execute("""
-        SELECT client_id, first_name, last_name
-        FROM clients
-        WHERE client_id = %s
-    """, (client_id,))
-    client = cur.fetchone()
-
+                    
     cur.execute("""
         SELECT sex_type_id, sex_type
         FROM sex
         ORDER BY sex_type
     """)
     sex_options = cur.fetchall()
-
+                    
     cur.execute("""
         SELECT skin_type_id, skin_type_name
         FROM skin_types
+        WHERE spa_id = %s
         ORDER BY skin_type_name
-    """)
+    """, (client_spa_id,))
     skin_types = cur.fetchall()
-
+                    
     cur.execute("""
         SELECT fitzpatrick_id, fitzpatrick_level, description
         FROM fitzpatrick_types
         ORDER BY fitzpatrick_id
     """)
     fitzpatrick_types = cur.fetchall()
-
+            
     cur.execute("""
         SELECT *
         FROM client_health_profile
         WHERE client_id = %s
-    """, (client_id,))
-    profile = cur.fetchone()
+          AND spa_id = %s
+    """, (client_id, client_spa_id))
 
+    profile = cur.fetchone()
+                
     cur.close()
     conn.close()
-
+                
     return render_template(
         "client_health_profile.html",
-        client=client,
+        client=client,   
         appointment_id=appointment_id,
-        selected_date=selected_date,
+        selected_date=selected_date,  
         profile=profile,
-        sex_options=sex_options,
-        skin_types=skin_types,
+        sex_options=sex_options,   
+        skin_types=skin_types,      
         fitzpatrick_types=fitzpatrick_types
     )
 
@@ -11137,6 +11346,7 @@ def client_health_profile(client_id):
 #      APPOINTMEENTS
 #
 #    spa_id good
+#   4/28 cleaned
 #  -----------------------------------
 
 
@@ -11149,21 +11359,22 @@ from datetime import date
 @spa_required
 def appointments():
     spa_id = current_spa_id()
-
+    role = session.get("role")
+    
     start_date = request.args.get("start_date", "").strip()
     end_date = request.args.get("end_date", "").strip()
     show_all = request.args.get("show_all", "").strip()
     today_str = date.today().isoformat()
-
+    
     conn = get_db_connection()
     cur = conn.cursor()
-
+    
     query = """
         SELECT
             a.appointment_id,
-            a.client_id,
+            a.client_id, 
             c.first_name,
-            c.last_name,
+            c.last_name,   
             s.service_name,
             a.appointment_date,
             a.appointment_time,
@@ -11176,26 +11387,31 @@ def appointments():
         LEFT JOIN service_name_types s
             ON a.service_id = s.service_type_id
            AND a.spa_id = s.spa_id
-        WHERE a.spa_id = %s
+        WHERE 1=1
     """
-    params = [spa_id]
 
+    params = []
+
+    if role != "master_admin":
+        query += " AND a.spa_id = %s"
+        params.append(spa_id)
+                
     if show_all != "1":
         if start_date and end_date:
             query += " AND a.appointment_date BETWEEN %s AND %s"
             params.extend([start_date, end_date])
         else:
             query += " AND a.appointment_date = %s"
-            params.append(today_str)
-
+            params.append(today_str)  
+        
     query += " ORDER BY a.appointment_date, a.appointment_time"
-
+        
     cur.execute(query, tuple(params))
     appointments = cur.fetchall()
-
+     
     cur.close()
     conn.close()
-
+        
     return render_template(
         "appointments.html",
         appointments=appointments,
@@ -11212,34 +11428,33 @@ def appointments():
 
 
 
-
 #  --------------------
 #   ADD APPOINTMENT
 #
 #
 #
-#    spa_id good
+#    4/28
 #  ---------------------
 
 
 @app.route("/add_appointment", methods=["GET", "POST"])
+@login_required
+@spa_required
 def add_appointment():
     spa_id = current_spa_id()
+
     client_id = request.args.get("client_id") or request.form.get("client_id") or ""
-    client_search = (request.args.get("client_search") or request.form.get("client_search") or "").strip()
     selected_date = request.args.get("selected_date") or request.form.get("selected_date") or ""
-
-    conn = get_db_connection()
+            
+    conn = get_db_connection() 
     cur = conn.cursor()
-
+            
     if request.method == "POST":
-        print("FORM KEYS:", list(request.form.keys()))
-
         client_id = (request.form.get("client_id") or "").strip()
-        service_type_id = (request.form.get("service_type_id") or "").strip()
+        service_id = (request.form.get("service_type_id") or "").strip()
         appointment_date = (request.form.get("appointment_date") or "").strip()
         appointment_time = (request.form.get("appointment_time") or "").strip()
-        status = (request.form.get("status") or "").strip()
+        status = (request.form.get("status") or "booked").strip()
         notes = (request.form.get("notes") or "").strip()
         incoming_booking_id = (request.form.get("incoming_booking_id") or "").strip()
 
@@ -11248,28 +11463,27 @@ def add_appointment():
             cur.close()
             conn.close()
             return redirect(url_for("add_appointment", selected_date=selected_date))
-
-        if not service_type_id:
-            flash("Service was not submitted. Hard refresh the page and try again.", "error")
+     
+        if not service_id:
+            flash("Service is required.", "error")
             cur.close()
             conn.close()
             return redirect(url_for("add_appointment", selected_date=selected_date))
-
+            
         if not appointment_date or not appointment_time:
             flash("Appointment date and time are required.", "error")
             cur.close()
             conn.close()
             return redirect(url_for("add_appointment", selected_date=selected_date))
-
+    
         cur.execute("""
             SELECT 1
             FROM clients
             WHERE client_id = %s
               AND spa_id = %s
         """, (client_id, spa_id))
-        valid_client = cur.fetchone()
 
-        if not valid_client:
+        if not cur.fetchone():
             flash("Invalid client selected.", "error")
             cur.close()
             conn.close()
@@ -11280,20 +11494,19 @@ def add_appointment():
             FROM service_name_types
             WHERE service_type_id = %s
               AND spa_id = %s
-        """, (service_type_id, spa_id))
-        valid_service = cur.fetchone()
+        """, (service_id, spa_id))
 
-        if not valid_service:
+        if not cur.fetchone():
             flash("Invalid service selected.", "error")
             cur.close()
             conn.close()
             return redirect(url_for("add_appointment", selected_date=selected_date))
-
+    
         cur.execute("""
             INSERT INTO appointments (
                 spa_id,
-                client_id,
-                service_type_id,
+                client_id,   
+                service_id,
                 appointment_date,
                 appointment_time,
                 status,
@@ -11303,37 +11516,37 @@ def add_appointment():
         """, (
             spa_id,
             client_id,
-            service_type_id,
+            service_id,
             appointment_date,
             appointment_time,
             status,
             notes
         ))
-
+        
         if incoming_booking_id:
             cur.execute("""
-                UPDATE incoming_square_bookings
+                UPDATE incoming_square_bookings  
                 SET status = 'imported',
                     reviewed_at = CURRENT_TIMESTAMP
                 WHERE incoming_booking_id = %s
                   AND spa_id = %s
             """, (incoming_booking_id, spa_id))
-            session.pop("incoming_booking_data", None)
 
-        conn.commit()
+            session.pop("incoming_booking_data", None)
+            
+        conn.commit()   
         cur.close()
         conn.close()
-
+        
         return redirect(url_for("daily_schedule", date=appointment_date))
-
-    client_id = request.args.get("client_id", "")
+            
     incoming_booking_id = request.args.get("incoming_booking_id", "")
     prefill_date = request.args.get("appointment_date", "") or selected_date
     prefill_time = request.args.get("appointment_time", "")
     prefill_service_name = request.args.get("service_name", "")
-
+            
     client_search = request.args.get("client_search", "").strip()
-
+              
     if client_search:
         cur.execute("""
             SELECT client_id, first_name, last_name
@@ -11351,19 +11564,20 @@ def add_appointment():
             LIMIT 25
         """, (spa_id,))
 
-    clients = cur.fetchall()
-
+    clients = cur.fetchall() 
+            
     cur.execute("""
         SELECT service_type_id, service_name
         FROM service_name_types
         WHERE spa_id = %s
         ORDER BY service_name
     """, (spa_id,))
-    service_types = cur.fetchall()
 
+    service_types = cur.fetchall()
+                
     cur.close()
     conn.close()
-
+                
     return render_template(
         "add_appointment.html",
         clients=clients,
@@ -11385,31 +11599,41 @@ def add_appointment():
 
 
 
-
 #  ---------------------
 #
 #   EDIT  APPOINTMENT
 #
 #
 #    spa_id good
-#
+#  4/28 cleaned
 #  -------------------- 
 
 
 @app.route("/edit_appointment/<int:appointment_id>", methods=["GET", "POST"])
+@login_required
+@spa_required
 def edit_appointment(appointment_id):
     spa_id = current_spa_id()
+    role = session.get("role")
+
     conn = get_db_connection()
     cur = conn.cursor()
 
+    filter_sql = "WHERE appointment_id = %s"
+    params = [appointment_id]
+
+    if role != "master_admin":
+        filter_sql += " AND spa_id = %s"
+        params.append(spa_id)
+             
     if request.method == "POST":
         appointment_date = request.form["appointment_date"]
         appointment_time = request.form["appointment_time"]
         duration = request.form["duration"]
         room_number = request.form["room_number"]
         notes = request.form["notes"]
-
-        cur.execute("""
+            
+        cur.execute(f"""
             UPDATE appointments
             SET appointment_date = %s,
                 appointment_time = %s,
@@ -11417,51 +11641,46 @@ def edit_appointment(appointment_id):
                 room_number = %s,
                 notes = %s,
                 updated_at = CURRENT_TIMESTAMP
-            WHERE appointment_id = %s
-              AND spa_id = %s
+            {filter_sql}
         """, (
             appointment_date,
             appointment_time,
             duration,
             room_number,
             notes,
-            appointment_id,
-            spa_id
+            *params
         ))
-
+    
         if cur.rowcount == 0:
             conn.rollback()
             cur.close()
             conn.close()
-            flash("Appointment not found.", "error")
+            flash("Appointment not found or not authorized.", "error")
             return redirect(url_for("appointments"))
-
+        
         conn.commit()
         cur.close()
         conn.close()
-
+        
         return redirect(url_for("daily_schedule", date=appointment_date))
-
-    # GET (load existing data)
-    cur.execute("""
+        
+    cur.execute(f"""
         SELECT appointment_id, appointment_date, appointment_time,
                duration_minutes, room_number, notes
         FROM appointments
-        WHERE appointment_id = %s
-          AND spa_id = %s
-    """, (appointment_id, spa_id))
+        {filter_sql}
+    """, params)
 
     appt = cur.fetchone()
 
     cur.close()
     conn.close()
-
+ 
     if not appt:
-        flash("Appointment not found.", "error")
+        flash("Appointment not found or not authorized.", "error")
         return redirect(url_for("appointments"))
 
     return render_template("edit_appointment.html", appt=appt)
-
 
 
 
@@ -11475,37 +11694,46 @@ def edit_appointment(appointment_id):
 #
 #
 #   spa_id good  
+#   4/28
 #  --------------------
 
+
 @app.route("/delete_appointment/<int:appointment_id>", methods=["POST"])
+@login_required
+@spa_required
 def delete_appointment(appointment_id):
     spa_id = current_spa_id()
-
+    role = session.get("role")
+    
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # get date before deleting for redirect
-    cur.execute("""
+    filter_sql = "WHERE appointment_id = %s"
+    params = [appointment_id]
+
+    if role != "master_admin":
+        filter_sql += " AND spa_id = %s"
+        params.append(spa_id)
+        
+    cur.execute(f"""
         SELECT appointment_date
         FROM appointments
-        WHERE appointment_id = %s
-          AND spa_id = %s
-    """, (appointment_id, spa_id))
+        {filter_sql}
+    """, params)
 
     appt = cur.fetchone()
-
+        
     if not appt:
         cur.close()
         conn.close()
-        flash("Appointment not found.", "error")
+        flash("Appointment not found or not authorized.", "error")
         return redirect(url_for("appointments"))
 
-    cur.execute("""
+    cur.execute(f"""
         DELETE FROM appointments
-        WHERE appointment_id = %s
-          AND spa_id = %s
-    """, (appointment_id, spa_id))
-
+        {filter_sql}
+    """, params)
+    
     conn.commit()
     cur.close()
     conn.close()
@@ -11514,44 +11742,66 @@ def delete_appointment(appointment_id):
 
     return redirect(url_for("appointments", date=appt[0]))
 
+
+
+
+
+
+
+
+
+
+
+
 #  ---------------------
 #
 #   CANCEL APPOINTMENT
 #       spa_id good
+#  4/28
 #  --------------------
 
 
 
 @app.route("/cancel_appointment/<int:appointment_id>", methods=["POST"])
+@login_required
+@spa_required
 def cancel_appointment(appointment_id):
     spa_id = current_spa_id()
+    role = session.get("role")
+
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Only allow cancelling future appointments for this spa
-    cur.execute("""
+    filter_sql = """
+        WHERE appointment_id = %s
+          AND (appointment_date + appointment_time) > CURRENT_TIMESTAMP
+    """
+    params = [appointment_id]
+
+    if role != "master_admin":
+        filter_sql += " AND spa_id = %s"
+        params.append(spa_id)
+        
+    cur.execute(f"""
         UPDATE appointments
         SET status = 'cancelled',
             updated_at = CURRENT_TIMESTAMP
-        WHERE appointment_id = %s
-          AND spa_id = %s
-          AND (appointment_date + appointment_time) > CURRENT_TIMESTAMP
-    """, (appointment_id, spa_id))
-
+        {filter_sql}
+    """, params)
+    
     if cur.rowcount == 0:
         conn.rollback()
         cur.close()
         conn.close()
         flash("Appointment not found or can no longer be cancelled.", "error")
         return redirect(url_for("calendar_view", offset=0))
-
+        
     conn.commit()
     cur.close()
     conn.close()
-
+        
     flash("Appointment cancelled.", "warning")
     return redirect(url_for("calendar_view", offset=0))
-
 
 
 
@@ -11564,127 +11814,148 @@ def cancel_appointment(appointment_id):
 #   RESCHEDULE   APPOINTMENT
 #  
 #  spa_id good
+#   4/28
 #  -----------------
 
 
 
 @app.route("/reschedule_appointment/<int:appointment_id>", methods=["GET", "POST"])
+@login_required
+@spa_required
 def reschedule_appointment(appointment_id):
     spa_id = current_spa_id()
-
+    role = session.get("role")
+        
     conn = get_db_connection()
     cur = conn.cursor()
 
+    appt_filter = "WHERE appointment_id = %s"
+    appt_params = [appointment_id]
+
+    if role != "master_admin":
+        appt_filter += " AND spa_id = %s"
+        appt_params.append(spa_id)
+    
     if request.method == "POST":
-        service_type_id = (request.form.get("service_type_id") or "").strip()
+        service_id = (request.form.get("service_type_id") or "").strip()
         appointment_date = (request.form.get("appointment_date") or "").strip()
         appointment_time = (request.form.get("appointment_time") or "").strip()
         status = (request.form.get("status") or "").strip()
         notes = (request.form.get("notes") or "").strip()
         original_date = (request.form.get("original_date") or "").strip()
-
-        if not service_type_id or not appointment_date or not appointment_time or not status:
+    
+        if not service_id or not appointment_date or not appointment_time or not status:
             flash("Please complete all required fields.", "error")
             cur.close()
             conn.close()
             return redirect(url_for("reschedule_appointment", appointment_id=appointment_id))
 
-        # Validate service belongs to this spa
+        if role == "master_admin":
+            cur.execute("""
+                SELECT spa_id
+                FROM appointments
+                WHERE appointment_id = %s
+            """, (appointment_id,))
+            appt_spa = cur.fetchone()
+
+            if not appt_spa:
+                flash("Appointment not found.", "error")
+                cur.close()
+                conn.close()
+                return redirect(url_for("appointments"))
+
+            service_spa_id = appt_spa[0]
+        else:
+            service_spa_id = spa_id
+    
         cur.execute("""
             SELECT 1
             FROM service_name_types
             WHERE service_type_id = %s
               AND spa_id = %s
-        """, (service_type_id, spa_id))
-        valid_service = cur.fetchone()
+        """, (service_id, service_spa_id))
 
-        if not valid_service:
+        if not cur.fetchone():
             flash("Invalid service selected.", "error")
             cur.close()
             conn.close()
             return redirect(url_for("reschedule_appointment", appointment_id=appointment_id))
 
-        cur.execute("""
+        cur.execute(f"""
             UPDATE appointments
             SET
-                service_type_id = %s,
+                service_id = %s,
                 appointment_date = %s,
                 appointment_time = %s,
                 status = %s,
                 notes = %s,
                 updated_at = CURRENT_TIMESTAMP
-            WHERE appointment_id = %s
-              AND spa_id = %s
+            {appt_filter}
         """, (
-            service_type_id,
+            service_id,
             appointment_date,
             appointment_time,
             status,
             notes,
-            appointment_id,
-            spa_id
+            *appt_params
         ))
 
         if cur.rowcount == 0:
             conn.rollback()
             cur.close()
             conn.close()
-            flash("Appointment not found.", "error")
+            flash("Appointment not found or not authorized.", "error")
             return redirect(url_for("appointments"))
 
         conn.commit()
         cur.close()
         conn.close()
-
+    
         flash("Appointment rescheduled successfully.", "success")
-
-        if appointment_date:
-            return redirect(url_for("daily_schedule", date=appointment_date))
-
-        if original_date:
-            return redirect(url_for("daily_schedule", date=original_date))
-
-        return redirect(url_for("appointments"))
-
-    cur.execute("""
+        return redirect(url_for("daily_schedule", date=appointment_date or original_date))
+        
+    cur.execute(f"""
         SELECT
             a.appointment_id,
             a.client_id,
             c.first_name,
             c.last_name,
-            a.service_type_id,
+            a.service_id,
             a.appointment_date,
             a.appointment_time,
             a.status,
-            a.notes
+            a.notes,
+            a.spa_id
         FROM appointments a
-        JOIN clients c
-          ON a.client_id = c.client_id
-         AND a.spa_id = c.spa_id
-        WHERE a.appointment_id = %s
-          AND a.spa_id = %s
-    """, (appointment_id, spa_id))
-
+        JOIN clients c 
+            ON a.client_id = c.client_id
+           AND a.spa_id = c.spa_id   
+        {appt_filter}
+    """, appt_params)
+        
     appointment = cur.fetchone()
-
+        
     if not appointment:
         cur.close()
         conn.close()
-        flash("Appointment not found.", "error")
+        flash("Appointment not found or not authorized.", "error")
         return redirect(url_for("appointments"))
 
+    appointment_spa_id = appointment[9]
+        
     cur.execute("""
         SELECT service_type_id, service_name
         FROM service_name_types
         WHERE spa_id = %s
         ORDER BY service_name
-    """, (spa_id,))
-    service_types = cur.fetchall()
+    """, (appointment_spa_id,))
 
+    service_types = cur.fetchall()
+                
     cur.close()
     conn.close()
-
-    return render_template(
+        
+    return render_template( 
         "reschedule_appointment.html",
         appointment=appointment,
         service_types=service_types
@@ -11699,59 +11970,76 @@ def reschedule_appointment(appointment_id):
 
 
 
-
 #  -----------------
 #
 #     COMPLETE APPOINTMENT
 #
-#     spa_id good
+#     4/28  good
 #  -----------------
 
 
 
 @app.route("/complete_appointment/<int:appointment_id>", methods=["POST"])
+@login_required
+@spa_required
 def complete_appointment(appointment_id):
     spa_id = current_spa_id()
+    role = session.get("role")
+
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute("""
+    filter_sql = "WHERE appointment_id = %s"
+    params = [appointment_id]
+
+    if role != "master_admin":
+        filter_sql += " AND spa_id = %s"
+        params.append(spa_id)
+    
+    cur.execute(f"""
         SELECT appointment_date
         FROM appointments
-        WHERE appointment_id = %s
-          AND spa_id = %s
-    """, (appointment_id, spa_id))
-    appt = cur.fetchone()
+        {filter_sql}
+    """, params)
 
+    appt = cur.fetchone()
+        
     if not appt:
         cur.close()
         conn.close()
-        flash("Appointment not found.", "error")
+        flash("Appointment not found or not authorized.", "error")
         return redirect(url_for("appointments"))
 
-    cur.execute("""
+    complete_filter_sql = """
+        WHERE appointment_id = %s
+          AND (appointment_date + appointment_time) <= CURRENT_TIMESTAMP
+    """
+    complete_params = [appointment_id]
+
+    if role != "master_admin":
+        complete_filter_sql += " AND spa_id = %s"
+        complete_params.append(spa_id)
+
+    cur.execute(f"""
         UPDATE appointments
         SET status = 'completed',
             updated_at = CURRENT_TIMESTAMP
-        WHERE appointment_id = %s
-          AND spa_id = %s
-          AND (appointment_date + appointment_time) <= CURRENT_TIMESTAMP
-    """, (appointment_id, spa_id))
+        {complete_filter_sql}
+    """, complete_params)
 
     if cur.rowcount == 0:
         conn.rollback()
-        cur.close()
+        cur.close() 
         conn.close()
         flash("Appointment cannot be completed yet.", "error")
         return redirect(url_for("daily_schedule", date=appt[0]))
-
+        
     conn.commit()
     cur.close()
     conn.close()
-
+    
     flash("Appointment marked completed.", "success")
     return redirect(url_for("daily_schedule", date=appt[0]))
-
 
 
 
@@ -11763,39 +12051,51 @@ def complete_appointment(appointment_id):
 #  ------------------
 #     
 #   COMPLETE OVERDUE APPOINTMENTS 
-#    spa_id good
+#   4/28  spa_id good
 #  -----------------
 
 
 
 @app.route("/complete_overdue_appointments", methods=["POST"])
+@login_required
+@spa_required
 def complete_overdue_appointments():
     spa_id = current_spa_id()
+    role = session.get("role")
+
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute("""
+    filter_sql = """
+        WHERE status = 'booked'
+          AND (appointment_date + appointment_time) < CURRENT_TIMESTAMP
+    """
+
+    params = []
+
+    if role != "master_admin":
+        filter_sql += " AND spa_id = %s"
+        params.append(spa_id)
+        
+    cur.execute(f"""
         UPDATE appointments
         SET status = 'completed',
             updated_at = CURRENT_TIMESTAMP
-        WHERE spa_id = %s
-          AND status = 'booked'
-          AND (appointment_date + appointment_time) < CURRENT_TIMESTAMP
-    """, (spa_id,))
-
+        {filter_sql}
+    """, params)
+    
     updated_count = cur.rowcount
-
-    conn.commit()
+    
+    conn.commit()   
     cur.close()
     conn.close()
-
+        
     if updated_count:
         flash(f"{updated_count} overdue appointment(s) marked completed.", "success")
     else:
         flash("No overdue appointments to complete.", "info")
-
+        
     return redirect(url_for("calendar_view", offset=0))
-
 
 
 
@@ -11808,41 +12108,52 @@ def complete_overdue_appointments():
 #    POST APPOINTMENT WRAP UP
 #
 #
-#     spa_id good
+#  4/28     spa_id good
 #   ---------------------------
 
 
 @app.route("/post_appointment_wrap_up/<int:appointment_id>", methods=["GET", "POST"])
+@login_required
+@spa_required
 def post_appointment_wrap_up(appointment_id):
     spa_id = current_spa_id()
+    role = session.get("role")
     selected_date = request.args.get("date") or request.form.get("date") or ""
-
+            
     conn = get_db_connection()
     cur = conn.cursor()
 
+    appt_filter = "WHERE a.appointment_id = %s"
+    appt_params = [appointment_id]
+
+    if role != "master_admin":
+        appt_filter += " AND a.spa_id = %s"
+        appt_params.append(spa_id)
+                
     if request.method == "POST":
         treatment_notes = request.form.get("treatment_notes", "")
         products_used = request.form.get("products_used", "")
         home_care_advice = request.form.get("home_care_advice", "")
         provider_notes = request.form.get("provider_notes", "")
 
-        # Validate appointment belongs to this spa
-        cur.execute("""
-            SELECT 1
-            FROM appointments
-            WHERE appointment_id = %s
-              AND spa_id = %s
-        """, (appointment_id, spa_id))
-        valid_appointment = cur.fetchone()
+        cur.execute(f"""   
+            SELECT a.spa_id, a.client_id, a.appointment_date
+            FROM appointments a
+            {appt_filter}
+        """, appt_params)
 
+        valid_appointment = cur.fetchone()
+            
         if not valid_appointment:
             cur.close()
             conn.close()
-            flash("Appointment not found.", "error")
+            flash("Appointment not found or not authorized.", "error")
             if selected_date:
                 return redirect(url_for("daily_schedule", date=selected_date))
             return redirect(url_for("appointments"))
 
+        appointment_spa_id, referred_client_id, completed_date = valid_appointment
+            
         cur.execute("""
             INSERT INTO appointment_wrap_up (
                 spa_id,
@@ -11860,112 +12171,109 @@ def post_appointment_wrap_up(appointment_id):
                 home_care_advice = EXCLUDED.home_care_advice,
                 provider_notes = EXCLUDED.provider_notes
         """, (
-            spa_id,
+            appointment_spa_id,
             appointment_id,
             treatment_notes,
             products_used,
             home_care_advice,
             provider_notes
         ))
-
+        
         cur.execute("""
             UPDATE appointments
-            SET status = 'Completed',
+            SET status = 'completed',
                 updated_at = CURRENT_TIMESTAMP
             WHERE appointment_id = %s
               AND spa_id = %s
-        """, (appointment_id, spa_id))
+        """, (appointment_id, appointment_spa_id))
 
-        # Award referral credit if this client was referred and has now completed an appointment
         cur.execute("""
             SELECT
-                a.client_id,
-                a.appointment_date
-            FROM appointments a
-            WHERE a.appointment_id = %s
-              AND a.spa_id = %s
-        """, (appointment_id, spa_id))
-        appointment_info = cur.fetchone()
+                referral_id,
+                referrer_type,
+                referrer_client_id,
+                reward_amount,
+                credit_earned
+            FROM referrals
+            WHERE spa_id = %s
+              AND referred_client_id = %s
+            ORDER BY referral_id DESC
+            LIMIT 1
+        """, (appointment_spa_id, referred_client_id))
 
-        if appointment_info:
-            referred_client_id, completed_date = appointment_info
-
-            cur.execute("""
-                SELECT
-                    referral_id,
-                    referrer_type,
-                    referrer_client_id,
-                    reward_amount,
-                    credit_earned
-                FROM referrals
-                WHERE spa_id = %s
-                  AND referred_client_id = %s
-                ORDER BY referral_id DESC
-                LIMIT 1
-            """, (spa_id, referred_client_id))
-            referral_row = cur.fetchone()
-
-            if referral_row:
-                referral_id, referrer_type, referrer_client_id, reward_amount, credit_earned = referral_row
-
-                if not credit_earned:
+        referral_row = cur.fetchone()
+            
+        if referral_row:
+            referral_id, referrer_type, referrer_client_id, reward_amount, credit_earned = referral_row
+            
+            if not credit_earned:
+                cur.execute("""
+                    UPDATE referrals
+                    SET credit_earned = TRUE,
+                        first_completed_appointment_date = %s
+                    WHERE referral_id = %s
+                      AND spa_id = %s
+                """, (completed_date, referral_id, appointment_spa_id))
+                
+                if referrer_type == "Client" and referrer_client_id:
                     cur.execute("""
-                        UPDATE referrals
-                        SET credit_earned = TRUE,
-                            first_completed_appointment_date = %s
-                        WHERE referral_id = %s
-                          AND spa_id = %s
-                    """, (completed_date, referral_id, spa_id))
-
-                    # Only create a credit transaction if the referrer is an existing client
-                    if referrer_type == "Client" and referrer_client_id:
-                        cur.execute("""
-                            INSERT INTO client_credit_transactions (
-                                spa_id,
-                                client_id,
-                                source_type,
-                                source_id,
-                                transaction_date,
-                                transaction_type,
-                                amount,
-                                notes
-                            )
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                        """, (
+                        INSERT INTO client_credit_transactions (
                             spa_id,
-                            referrer_client_id,
-                            "Referral",
-                            referral_id,
-                            completed_date,
-                            "Earned",
-                            reward_amount,
-                            f"Referral credit earned when referred client {referred_client_id} completed first appointment."
-                        ))
-
+                            client_id,
+                            source_type,
+                            source_id,
+                            transaction_date,
+                            transaction_type,
+                            amount,
+                            notes
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        appointment_spa_id,
+                        referrer_client_id,
+                        "Referral",
+                        referral_id,
+                        completed_date,
+                        "Earned",
+                        reward_amount,
+                        f"Referral credit earned when referred client {referred_client_id} completed first appointment."
+                    ))
+              
         conn.commit()
         cur.close()
         conn.close()
-
+        
         flash("Wrap-Up was saved successfully.", "success")
         return redirect(url_for("post_appointment_wrap_up_saved", appointment_id=appointment_id))
-
-    cur.execute("""
+                
+    cur.execute(f"""
         SELECT
-            a.appointment_id,
+            a.appointment_id,  
             a.appointment_date,
             a.appointment_time,
             c.client_id,
-            c.first_name,
-            c.last_name
+            c.first_name,   
+            c.last_name,
+            a.spa_id
         FROM appointments a
         JOIN clients c
             ON a.client_id = c.client_id
            AND a.spa_id = c.spa_id
-        WHERE a.appointment_id = %s
-          AND a.spa_id = %s
-    """, (appointment_id, spa_id))
-    appointment = cur.fetchone()
+        {appt_filter}
+    """, appt_params)
 
+    appointment = cur.fetchone()
+                            
+    if not appointment:
+        cur.close()
+        conn.close()
+        flash("Appointment not found or not authorized.", "error")
+        if selected_date:
+            return redirect(url_for("daily_schedule", date=selected_date))
+        return redirect(url_for("appointments"))
+
+    appointment_spa_id = appointment[6]
+                
     cur.execute("""
         SELECT
             treatment_notes,
@@ -11975,18 +12283,13 @@ def post_appointment_wrap_up(appointment_id):
         FROM appointment_wrap_up
         WHERE appointment_id = %s
           AND spa_id = %s
-    """, (appointment_id, spa_id))
-    wrap_up = cur.fetchone()
+    """, (appointment_id, appointment_spa_id))
 
+    wrap_up = cur.fetchone()
+                    
     cur.close()
     conn.close()
-
-    if not appointment:
-        flash("Appointment not found.", "error")
-        if selected_date:
-            return redirect(url_for("daily_schedule", date=selected_date))
-        return redirect(url_for("appointments"))
-
+                    
     return render_template(
         "post_appointment_wrap_up.html",
         appointment=appointment,
@@ -12004,7 +12307,7 @@ def post_appointment_wrap_up(appointment_id):
 #  ----------------------------
 #      POST APPOINTMENT SAVED
 #    
-#   
+#   4/28
 #   ---------------------------
 
 
@@ -12028,52 +12331,61 @@ def post_appointment_wrap_up_saved(appointment_id):
 #    Client History
 #
 #  spa_id safe
-#
+# 4/28
 #  -----------------
 
 
-
-
-
-
 @app.route("/client_history")
+@login_required
+@spa_required
 def client_history():
     spa_id = current_spa_id()
+    role = session.get("role")
+
     search = request.args.get("search", "").strip()
 
     conn = get_db_connection()
     cur = conn.cursor()
 
+    query = """
+        SELECT client_id, first_name, last_name
+        FROM clients
+        WHERE 1=1
+    """
+    params = []
+
+    if role != "master_admin":
+        query += " AND spa_id = %s"
+        params.append(spa_id)
+
     if search:
-        cur.execute("""
-            SELECT client_id, first_name, last_name
-            FROM clients
-            WHERE spa_id = %s
-              AND (
-                   LOWER(first_name) LIKE %s
-                   OR LOWER(last_name) LIKE %s
-                   OR phone LIKE %s
-              )
-            ORDER BY last_name, first_name
-        """, (spa_id, f"%{search.lower()}%", f"%{search.lower()}%", f"%{search}%"))
-    else:
-        cur.execute("""
-            SELECT client_id, first_name, last_name
-            FROM clients
-            WHERE spa_id = %s
-            ORDER BY last_name, first_name
-        """, (spa_id,))
+        query += """
+            AND (
+                LOWER(first_name) LIKE %s  
+                OR LOWER(last_name) LIKE %s
+                OR phone LIKE %s
+            )
+        """
+        params.extend([
+            f"%{search.lower()}%",
+            f"%{search.lower()}%",
+            f"%{search}%"
+        ])
 
+    query += " ORDER BY last_name, first_name"
+
+    cur.execute(query, params)
     rows = cur.fetchall()
-
+        
     cur.close()
     conn.close()
-
+        
     return render_template(
         "client_history.html",
-        rows=rows,
+        rows=rows,      
         search=search
     )
+
 
 
 
@@ -12087,44 +12399,54 @@ def client_history():
 #
 #
 #   Spa_id good
-#
+#  4/28
 #  -----------------
 
 
 @app.route("/client_history/<int:client_id>")
+@login_required
+@spa_required
 def client_history_detail(client_id):
     spa_id = current_spa_id()
+    role = session.get("role")
+
     conn = get_db_connection()
     cur = conn.cursor()
-    
-    # Get client (protected by spa_id)
-    cur.execute("""
-        SELECT client_id, first_name, last_name, phone, email, birth_date
-        FROM clients
-        WHERE client_id = %s
-          AND spa_id = %s
-    """, (client_id, spa_id))
-    client = cur.fetchone()
 
-    # 🚨 Safety: prevent invalid or cross-spa access
+    client_filter = "WHERE client_id = %s"
+    client_params = [client_id]
+
+    if role != "master_admin":
+        client_filter += " AND spa_id = %s"
+        client_params.append(spa_id)
+    
+    cur.execute(f"""
+        SELECT client_id, first_name, last_name, phone, email, birth_date, spa_id
+        FROM clients
+        {client_filter}
+    """, client_params)
+
+    client = cur.fetchone()
+        
     if not client:
         cur.close()
         conn.close()
         return "Client not found", 404
 
-    # Appointment history
-    cur.execute("""  
+    client_spa_id = client[6]
+        
+    cur.execute("""
         SELECT
             a.appointment_id,
             a.appointment_date,
             a.appointment_time,
             s.service_name,
-            a.duration_minutes,
+            a.duration_minutes, 
             a.room_number,
             a.status,
-            a.notes,
-            aw.treatment_notes,
-            aw.products_used, 
+            a.notes,   
+            aw.treatment_notes,   
+            aw.products_used,
             aw.home_care_advice,
             aw.provider_notes
         FROM appointments a
@@ -12138,12 +12460,13 @@ def client_history_detail(client_id):
           AND a.spa_id = %s
         ORDER BY a.appointment_date DESC NULLS LAST,
                  a.appointment_time DESC NULLS LAST
-    """, (client_id, spa_id))
+    """, (client_id, client_spa_id))
+
     rows = cur.fetchall()
-        
+     
     cur.close()
     conn.close()
-            
+
     return render_template(
         "client_history_detail.html",
         rows=rows,
@@ -12152,35 +12475,47 @@ def client_history_detail(client_id):
 
 
 
-
 #  ------------------
 #    Client History Detail page 2
 #
 #
 #    spa_id good
-#
+#  4/28
 #  -----------------
 
 
 @app.route("/client_history_two/<int:client_id>")
+@login_required
+@spa_required
 def client_history_detail_two(client_id):
     spa_id = current_spa_id()
+    role = session.get("role")
+
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute("""
-        SELECT client_id, first_name, last_name, phone, email, birth_date
-        FROM clients
-        WHERE client_id = %s
-          AND spa_id = %s
-    """, (client_id, spa_id))
-    client = cur.fetchone()
+    client_filter = "WHERE client_id = %s"
+    client_params = [client_id]
 
+    if role != "master_admin":
+        client_filter += " AND spa_id = %s"
+        client_params.append(spa_id)
+            
+    cur.execute(f"""
+        SELECT client_id, first_name, last_name, phone, email, birth_date, spa_id
+        FROM clients
+        {client_filter}
+    """, client_params)
+
+    client = cur.fetchone()
+    
     if not client:
         cur.close()
         conn.close()
         return "Client not found", 404
 
+    client_spa_id = client[6]
+    
     cur.execute("""
         SELECT
             a.appointment_id,
@@ -12206,19 +12541,19 @@ def client_history_detail_two(client_id):
           AND a.spa_id = %s
         ORDER BY a.appointment_date DESC NULLS LAST,
                  a.appointment_time DESC NULLS LAST
-    """, (client_id, spa_id))
+    """, (client_id, client_spa_id))
+
     rows = cur.fetchall()
 
     cur.close()
     conn.close()
-
+    
     return render_template(
         "client_history_detail_two.html",
         rows=rows,
         client=client,
         client_id=client_id
     )
-
 
 
 
@@ -12230,18 +12565,20 @@ def client_history_detail_two(client_id):
 #
 #    spa_id good
 #
-#
+#   4/28
 #  --------------------------------
 
 
 @app.route("/add_new_client", methods=["GET", "POST"])
+@login_required
+@spa_required
 def add_new_client():
     spa_id = current_spa_id()
     selected_date = request.args.get("selected_date") or request.form.get("selected_date") or ""
-
+    
     conn = get_db_connection()
     cur = conn.cursor()
-
+            
     cur.execute("""
         SELECT spa_location_id, location_name
         FROM spa_locations
@@ -12249,11 +12586,12 @@ def add_new_client():
           AND is_active = TRUE
         ORDER BY location_name
     """, (spa_id,))
-    locations = cur.fetchall()
 
+    locations = cur.fetchall()
+        
     cur.close()
     conn.close()
-
+            
     if request.method == "POST":
         session["new_client_step1"] = {
             "first_name": request.form.get("first_name", "").strip(),
@@ -12274,11 +12612,11 @@ def add_new_client():
             "ok_to_email": "ok_to_email" in request.form,
             "preferred_contact_method": request.form.get("preferred_contact_method", "").strip()
         }
-
+    
         return redirect(url_for("add_new_client_step2", selected_date=selected_date))
-
+    
     step1_data = session.get("new_client_step1", {})
-
+    
     if not step1_data:
         incoming_booking_data = session.get("incoming_booking_data", {})
         if incoming_booking_data:
@@ -12301,7 +12639,7 @@ def add_new_client():
                 "ok_to_email": True,
                 "preferred_contact_method": ""
             }
-
+    
     return render_template(
         "add_new_client.html",
         selected_date=selected_date,
@@ -12314,28 +12652,24 @@ def add_new_client():
 
 
 
-
 #  ---------------------------------
 #   ADD NEW CLIENT STEP 2  
 #         PAGE 2
 #
 #    spa_id good
-#
+#  4/28
 #  --------------------------------
 
 
 @app.route("/add_new_client_step2", methods=["GET", "POST"])
+@login_required
+@spa_required
 def add_new_client_step2():
     spa_id = current_spa_id()
     selected_date = request.args.get("selected_date") or request.form.get("selected_date") or ""
-
+            
     step1 = session.get("new_client_step1")
     if not step1:
-        return redirect(url_for("add_new_client"))
-
-    if step1.get("spa_id") and step1.get("spa_id") != spa_id:
-        session.pop("new_client_step1", None)
-        session.pop("new_client_step2", None)
         return redirect(url_for("add_new_client"))
 
     if request.method == "POST":
@@ -12368,6 +12702,10 @@ def add_new_client_step2():
             cur = conn.cursor()
 
             try:
+                referred_by_value = None
+                if step2.get("referrer_type") == "Client" and step2.get("referred_by"):
+                    referred_by_value = step2.get("referred_by")
+
                 cur.execute("""
                     INSERT INTO clients (
                         spa_id,
@@ -12425,7 +12763,7 @@ def add_new_client_step2():
                     step1.get("preferred_contact_method") or None,
                     step2.get("emergency_contact_name", ""),
                     step2.get("emergency_contact_phone", ""),
-                    step2.get("referred_by") if step2.get("referrer_type") == "Client" and step2.get("referred_by") else None,
+                    referred_by_value,
                     step2.get("notes_one", ""),
                     step2.get("notes_two", ""),
                     step2.get("notes_three", ""),
@@ -12443,32 +12781,40 @@ def add_new_client_step2():
 
                 if referrer_type == "Client" and referred_by:
                     cur.execute("""
-                        INSERT INTO referrals (
+                        SELECT 1
+                        FROM clients
+                        WHERE client_id = %s
+                          AND spa_id = %s
+                    """, (referred_by, spa_id))
+
+                    if cur.fetchone():
+                        cur.execute("""
+                            INSERT INTO referrals (
+                                spa_id,
+                                referred_client_id,
+                                referrer_type,
+                                referrer_client_id,
+                                referral_date
+                            )
+                            VALUES (%s, %s, %s, %s, CURRENT_DATE)
+                        """, (
                             spa_id,
-                            referred_client_id,
-                            referrer_type,
-                            referrer_client_id,
-                            referral_date
-                        )
-                        VALUES (%s, %s, %s, %s, CURRENT_DATE)
-                    """, (
-                        spa_id,
-                        new_client_id,
-                        "Client",
-                        int(referred_by)
-                    ))
+                            new_client_id,
+                            "Client",
+                            int(referred_by)
+                        ))
 
                 elif referrer_type == "Non-Client" and referrer_name:
                     cur.execute("""
                         INSERT INTO referrals (
-                            spa_id,
+                            spa_id, 
                             referred_client_id,
                             referrer_type,
                             referrer_name,
                             referrer_business_name,
                             referrer_phone,
                             referrer_email,
-                            referral_date
+                            referral_date  
                         )
                         VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_DATE)
                     """, (
@@ -12476,9 +12822,9 @@ def add_new_client_step2():
                         new_client_id,
                         "Non-Client",
                         referrer_name,
-                        referrer_business_name if referrer_business_name else None,
-                        referrer_phone if referrer_phone else None,
-                        referrer_email if referrer_email else None
+                        referrer_business_name or None,
+                        referrer_phone or None,
+                        referrer_email or None
                     ))
 
                 conn.commit()
@@ -12487,7 +12833,7 @@ def add_new_client_step2():
                 cur.close()
                 conn.close()
 
-            flash("Client added successfully!")
+            flash("Client added successfully!", "success")
 
             session.pop("new_client_step1", None)
             session.pop("new_client_step2", None)
@@ -12524,6 +12870,7 @@ def add_new_client_step2():
           AND active_client = TRUE
         ORDER BY last_name, first_name
     """, (spa_id,))
+
     clients_for_referral = cur.fetchall()
 
     cur.close()
@@ -12543,19 +12890,70 @@ def add_new_client_step2():
 
 
 
-
 #  -----------------
 #   EDIT CLIENT
-#
+#  4/28
 #  ----------------
 
 
 @app.route("/edit_client/<int:client_id>", methods=["GET", "POST"])
+@login_required
+@spa_required
 def edit_client(client_id):
     spa_id = current_spa_id()
+    role = session.get("role")
 
     conn = get_db_connection()
     cur = conn.cursor()
+
+    client_filter = "WHERE c.client_id = %s"
+    client_params = [client_id]
+
+    if role != "master_admin":
+        client_filter += " AND c.spa_id = %s"
+        client_params.append(spa_id)
+
+    cur.execute(f"""
+        SELECT
+            c.client_id,
+            c.first_name,
+            c.last_name,
+            c.phone,
+            c.email,
+            c.birth_date,
+            c.address,
+            c.city,
+            c.state,
+            c.zip,
+            c.spa_location_id,
+            c.preferred_location_id,
+            c.client_status,
+            c.preferred_language,
+            c.ok_to_call,
+            c.ok_to_text,
+            c.ok_to_email,
+            c.preferred_contact_method,
+            c.emergency_contact_name,
+            c.emergency_contact_phone,
+            c.referred_by,
+            c.notes_one,
+            c.notes_two,
+            c.notes_three,
+            c.active_client,
+            c.spa_id
+        FROM clients c
+        {client_filter}
+    """, tuple(client_params))
+
+    client = cur.fetchone()
+
+    if not client:
+        cur.close()
+        conn.close()
+        flash("Client not found or not authorized.", "error")
+        return redirect(url_for("client_history"))
+
+    client_spa_id = client[25]
 
     # Load active locations for dropdowns
     cur.execute("""
@@ -12564,7 +12962,8 @@ def edit_client(client_id):
         WHERE spa_id = %s
           AND is_active = TRUE
         ORDER BY location_name
-    """, (spa_id,))
+    """, (client_spa_id,))
+
     locations = cur.fetchall()
 
     if request.method == "POST":
@@ -12593,6 +12992,7 @@ def edit_client(client_id):
         notes_one = request.form.get("notes_one", "").strip()
         notes_two = request.form.get("notes_two", "").strip()
         notes_three = request.form.get("notes_three", "").strip()
+
         active_client = True if request.form.get("active_client") == "true" else False
 
         cur.execute("""
@@ -12650,98 +13050,58 @@ def edit_client(client_id):
             notes_three,
             active_client,
             client_id,
-            spa_id
+            client_spa_id
         ))
 
         conn.commit()
         cur.close()
         conn.close()
 
-        flash("Client updated successfully!")
+        flash("Client updated successfully!", "success")
         return redirect(url_for("client_history"))
-
-    cur.execute("""
-        SELECT
-            first_name,
-            last_name,
-            phone,
-            email,
-            birth_date,
-            address,
-            city,
-            state,
-            zip,
-            spa_location_id,
-            preferred_location_id,
-            client_status,
-            preferred_language,
-            ok_to_call,
-            ok_to_text,
-            ok_to_email,
-            preferred_contact_method,
-            emergency_contact_name,
-            emergency_contact_phone,
-            referred_by,
-            notes_one,
-            notes_two,
-            notes_three,
-            active_client
-        FROM clients
-        WHERE client_id = %s
-          AND spa_id = %s
-    """, (client_id, spa_id))
-
-    client = cur.fetchone()
-
 
     # --- CLIENT SUMMARY DATA ---
 
-    # Total visits
     cur.execute("""
         SELECT COUNT(*)
         FROM appointments
         WHERE client_id = %s
           AND spa_id = %s
-          AND status = 'completed'
-    """, (client_id, spa_id))
+          AND LOWER(status) = 'completed'
+    """, (client_id, client_spa_id))
     total_visits = cur.fetchone()[0]
 
-    # Total revenue
     cur.execute("""
         SELECT COALESCE(SUM(total_amount), 0)
         FROM income
         WHERE client_id = %s
           AND spa_id = %s
-    """, (client_id, spa_id))
+    """, (client_id, client_spa_id))
     total_revenue = cur.fetchone()[0]
 
-    # Last visit
     cur.execute("""
         SELECT appointment_date
         FROM appointments
         WHERE client_id = %s
           AND spa_id = %s
-          AND status = 'completed'
+          AND LOWER(status) = 'completed'
         ORDER BY appointment_date DESC
         LIMIT 1
-    """, (client_id, spa_id))
+    """, (client_id, client_spa_id))
     last_visit = cur.fetchone()
 
-    # Next appointment
     cur.execute("""
         SELECT appointment_date, appointment_time
         FROM appointments
         WHERE client_id = %s
           AND spa_id = %s
-          AND status = 'booked'
+          AND LOWER(status) = 'booked'
           AND appointment_date >= CURRENT_DATE
         ORDER BY appointment_date, appointment_time
         LIMIT 1
-    """, (client_id, spa_id))
+    """, (client_id, client_spa_id))
     next_appt = cur.fetchone()
 
-
-    # --- RECENT APPOINTMENT HISTORY ---
     cur.execute("""
         SELECT
             appointment_id,
@@ -12751,44 +13111,40 @@ def edit_client(client_id):
             room_number,
             status,
             booking_channel,
-            price_at_booking,            
+            price_at_booking,
             notes
         FROM appointments
         WHERE client_id = %s
           AND spa_id = %s
         ORDER BY appointment_date DESC, appointment_time DESC
         LIMIT 10
-    """, (client_id, spa_id))
+    """, (client_id, client_spa_id))
     recent_appointments = cur.fetchall()
 
-    # Lifetime value from appointments
     cur.execute("""
         SELECT COALESCE(SUM(price_at_booking), 0)
         FROM appointments
         WHERE client_id = %s
           AND spa_id = %s
-          AND status = 'completed'
-    """, (client_id, spa_id))
+          AND LOWER(status) = 'completed'
+    """, (client_id, client_spa_id))
     lifetime_value = cur.fetchone()[0]
 
-
-    # Average ticket from completed appointments
     cur.execute("""
         SELECT COALESCE(AVG(price_at_booking), 0)
         FROM appointments
         WHERE client_id = %s
           AND spa_id = %s
           AND LOWER(status) = 'completed'
-    """, (client_id, spa_id))
+    """, (client_id, client_spa_id))
     average_ticket = cur.fetchone()[0]
-
 
     cur.execute("""
         SELECT COALESCE(SUM(amount), 0.00)
         FROM client_credit_transactions
         WHERE client_id = %s
           AND spa_id = %s
-    """, (client_id, spa_id))
+    """, (client_id, client_spa_id))
     credit_balance = cur.fetchone()[0]
 
     cur.close()
@@ -12811,6 +13167,117 @@ def edit_client(client_id):
 
 
 
+#   ---------------------------
+#
+#    DEACTIVATE CLIENT
+#
+#
+#   4/28
+#   --------------------------
+
+
+
+@app.route("/clients/deactivate/<int:client_id>", methods=["POST"])
+@login_required
+@spa_required
+def deactivate_client(client_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE clients
+        SET active_client = FALSE
+        WHERE client_id = %s
+          AND spa_id = %s
+    """, (client_id, spa_id))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    flash("Client has been deactivated.", "success")
+    return redirect(url_for("client_management", show_all=1))
+
+
+
+
+#   ---------------------------
+#           
+#    INACTIVATE CLIENT
+#           
+#           
+#   4/28
+#   --------------------------
+
+
+@app.route("/clients/inactive")
+@login_required
+@spa_required
+def inactive_clients():
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            client_id,
+            first_name,
+            last_name,
+            phone,
+            email,
+            birth_date,
+            client_status
+        FROM clients
+        WHERE spa_id = %s
+          AND active_client = FALSE
+        ORDER BY last_name, first_name
+    """, (spa_id,))
+
+    rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template("inactive_clients.html", rows=rows)
+
+
+
+#   ---------------------------
+#    
+#    RE - ACTIVATE CLIENT
+#           
+#   
+#   4/28
+#   --------------------------
+
+
+@app.route("/clients/reactivate/<int:client_id>", methods=["POST"])
+@login_required
+@spa_required
+def reactivate_client(client_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE clients
+        SET active_client = TRUE
+        WHERE client_id = %s
+          AND spa_id = %s
+    """, (client_id, spa_id))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    flash("Client has been reactivated.", "success")
+    return redirect(url_for("inactive_clients"))
+
+
 
 
 
@@ -12820,26 +13287,46 @@ def edit_client(client_id):
 #  -----------------------
 #
 #  DELETE CLIENT
-#
+# 4/28
+#  this is not used
 #  -----------------------
 
+
 @app.route("/delete_client/<int:client_id>", methods=["POST"])
+@login_required
+@spa_required
 def delete_client(client_id):
     spa_id = current_spa_id()
+    role = session.get("role")
+
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute("DELETE FROM clients WHERE client_id = %s", (client_id,))
-    flash("Client deleted successfully!")
+    filter_sql = "WHERE client_id = %s"
+    params = [client_id]
+
+    if role != "master_admin":
+        filter_sql += " AND spa_id = %s"
+        params.append(spa_id)
+
+    cur.execute(f"""
+        DELETE FROM clients
+        {filter_sql}
+    """, params)
+
+    if cur.rowcount == 0:
+        conn.rollback()
+        cur.close()
+        conn.close()
+        flash("Client not found or not authorized.", "error")
+        return redirect(url_for("client_history"))
 
     conn.commit()
     cur.close()
     conn.close()
 
+    flash("Client deleted successfully!", "success")
     return redirect(url_for("client_history"))
-
-
-
 
 
 
@@ -12858,7 +13345,7 @@ def delete_client(client_id):
 
 #  -----------------
 #    TIME ZONES
-#
+# 4/28 good
 #  ----------------
 
 
@@ -12866,30 +13353,34 @@ def delete_client(client_id):
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-def get_current_spa_timezone():
-    spa_id = current_spa_id()
+def get_current_spa_timezone(spa_id=None):
+    if not spa_id:
+        spa_id = current_spa_id()
 
     conn = get_db_connection()
-    cur = conn.cursor()
-
+    cur = conn.cursor()   
+    
     cur.execute("""
         SELECT timezone_name
         FROM spas
         WHERE spa_id = %s
     """, (spa_id,))
     row = cur.fetchone()
-
+    
     cur.close()
     conn.close()
-
+    
     if row and row[0]:
         return row[0]
-
+    
     return "America/Chicago"
 
 
-def get_spa_now():
-    timezone_name = get_current_spa_timezone()
+
+
+
+def get_spa_now(spa_id=None):
+    timezone_name = get_current_spa_timezone(spa_id)
     return datetime.now(ZoneInfo(timezone_name))
 
 
@@ -12900,42 +13391,27 @@ def get_utc_now():
 #   ---------------------------------
 #
 #    ADMIN PAGE
-#
+#   4/28 good
 #   --------------------------------
 
 
 
 @app.route("/admin")
+@login_required
+@spa_required
 def admin():
-
     spa_id = current_spa_id()
 
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    cur.execute("""
-        SELECT timezone_name
-        FROM spas
-        WHERE spa_id = %s
-    """, (spa_id,))
-    row = cur.fetchone()
-
-    cur.close()
-    conn.close()
-
-    current_timezone = row[0] if row and row[0] else "America/Chicago"
+    current_timezone = get_current_spa_timezone(spa_id)
     utc_now = get_utc_now()
-    spa_now = datetime.now(ZoneInfo(current_timezone))
+    spa_now = get_spa_now(spa_id)
 
-
- 
     return render_template(
         "admin.html",
         current_timezone=current_timezone,
         utc_now=utc_now,
         spa_now=spa_now
-    )      
-
+    )
 
 
 
@@ -12947,32 +13423,43 @@ def admin():
 #  SKIN TYPES   DROP DOWN
 #
 #   DROP DOWN
-#  -------------
+#  4/28 multi spa safe
+#  -----------------------
+
 
 @app.route("/skin_types", methods=["GET", "POST"])
+@login_required
+@spa_required
 def skin_types():
     spa_id = current_spa_id()
+
     conn = get_db_connection()
     cur = conn.cursor()
 
     if request.method == "POST":
-        skin_type_name = request.form["skin_type_name"]
+        skin_type_name = request.form["skin_type_name"].strip()
 
         cur.execute("""
-            INSERT INTO skin_types (skin_type_name)
-            VALUES (%s)
-        """, (skin_type_name,))
-        conn.commit()
+            INSERT INTO skin_types (
+                spa_id,
+                skin_type_name
+            )
+            VALUES (%s, %s)
+        """, (spa_id, skin_type_name))
 
+        conn.commit()
+    
         cur.close()
         conn.close()
         return redirect(url_for("skin_types"))
-
+        
     cur.execute("""
         SELECT skin_type_id, skin_type_name
         FROM skin_types
-        ORDER BY skin_type_id
-    """)
+        WHERE spa_id = %s
+        ORDER BY skin_type_name
+    """, (spa_id,))
+
     skin_types_list = cur.fetchall()
 
     cur.close()
@@ -12980,60 +13467,99 @@ def skin_types():
 
     return render_template("skin_types.html", skin_types=skin_types_list)
 
+
+
+
+
+
+
+
+
+
+
+
 #  ---------------------
 #  DELETE SKIN TYPE
+#
+#
+#  4/28 multi safe
 #  ---------------------
 
 @app.route("/delete_skin_type/<int:skin_type_id>", methods=["POST"])
+@login_required
+@spa_required
 def delete_skin_type(skin_type_id):
     spa_id = current_spa_id()
+
     conn = get_db_connection()
     cur = conn.cursor()
-
+ 
     cur.execute("""
         DELETE FROM skin_types
         WHERE skin_type_id = %s
-    """, (skin_type_id,))
-    conn.commit()
+          AND spa_id = %s
+    """, (skin_type_id, spa_id))
 
+    if cur.rowcount == 0:
+        flash("Skin type not found or not authorized.", "error")
+    else:
+        flash("Skin type deleted.", "success")
+
+    conn.commit()
     cur.close()
     conn.close()
 
     return redirect(url_for("skin_types"))
 
+
+
+
+
+
+
 #  -------------------
 #
 #  FITZPATRICK DROP DOWN
-#
+# 4/28 multi safe
 #  ------------------
 
+
 @app.route("/fitzpatrick_types", methods=["GET", "POST"])
+@login_required
+@spa_required
 def fitzpatrick_types():
     spa_id = current_spa_id()
+
     conn = get_db_connection()
     cur = conn.cursor()
 
     if request.method == "POST":
-        fitzpatrick_level = request.form["fitzpatrick_level"]
-        description = request.form["description"]
-
+        fitzpatrick_level = request.form["fitzpatrick_level"].strip()
+        description = request.form["description"].strip()
+          
         cur.execute("""
-            INSERT INTO fitzpatrick_types (fitzpatrick_level, description)
-            VALUES (%s, %s)
-        """, (fitzpatrick_level, description))
-
+            INSERT INTO fitzpatrick_types (
+                spa_id,
+                fitzpatrick_level,
+                description
+            )
+            VALUES (%s, %s, %s)
+        """, (spa_id, fitzpatrick_level, description))
+    
         conn.commit()
         cur.close()
         conn.close()
-
-        flash("Fitzpatrick type added successfully.")
+    
+        flash("Fitzpatrick type added successfully.", "success")
         return redirect(url_for("fitzpatrick_types"))
-
+    
     cur.execute("""
         SELECT fitzpatrick_id, fitzpatrick_level, description
         FROM fitzpatrick_types
-        ORDER BY fitzpatrick_id
-    """)
+        WHERE spa_id = %s
+        ORDER BY fitzpatrick_level
+    """, (spa_id,))
+
     fitzpatrick_types = cur.fetchall()
 
     cur.close()
@@ -13041,117 +13567,166 @@ def fitzpatrick_types():
 
     return render_template("fitzpatrick_types.html", fitzpatrick_types=fitzpatrick_types)
 
+
+
+
+
+
+
+
+
+
+
 #  ----------------------
 #
 #    DELETE FITZPATRICK TYPE
-#
+# 4/28 multi safe
 #  ---------------------
 
+
 @app.route("/delete_fitzpatrick_types/<int:fitzpatrick_id>", methods=["POST"])
+@login_required
+@spa_required
 def delete_fitzpatrick_types(fitzpatrick_id):
     spa_id = current_spa_id()
+
     conn = get_db_connection()
     cur = conn.cursor()
-        
+    
     cur.execute("""
         DELETE FROM fitzpatrick_types
         WHERE fitzpatrick_id = %s
-    """, (fitzpatrick_id,))
-                
+          AND spa_id = %s
+    """, (fitzpatrick_id, spa_id))
+
+    if cur.rowcount == 0:
+        flash("Fitzpatrick type not found or not authorized.", "error")
+    else:
+        flash("Fitzpatrick type deleted successfully!", "success")
+    
     conn.commit()
     cur.close()
     conn.close()
-
-    flash("Fitzpatrick type deleted successfully!")
+    
     return redirect(url_for("fitzpatrick_types"))
+
+
+
+
 
 
 
 #  -----------------------
 #
 #    EDIT FITZPATRICK TYPE
-#
+#  4/28 multi safe
 #  -----------------------
 
+
 @app.route("/edit_fitzpatrick_types/<int:fitzpatrick_id>", methods=["GET", "POST"])
+@login_required
+@spa_required
 def edit_fitzpatrick_types(fitzpatrick_id):
     spa_id = current_spa_id()
+
     conn = get_db_connection()
-    cur = conn.cursor()
+    cur = conn.cursor()   
 
     if request.method == "POST":
-        fitzpatrick_level = request.form["fitzpatrick_level"]
-        description = request.form["description"]
-
+        fitzpatrick_level = request.form["fitzpatrick_level"].strip()
+        description = request.form["description"].strip()
+    
         cur.execute("""
             UPDATE fitzpatrick_types
             SET fitzpatrick_level = %s,
                 description = %s
             WHERE fitzpatrick_id = %s
-        """, (fitzpatrick_level, description, fitzpatrick_id))
+              AND spa_id = %s
+        """, (fitzpatrick_level, description, fitzpatrick_id, spa_id))
+    
+        if cur.rowcount == 0:
+            flash("Fitzpatrick type not found or not authorized.", "error")
+        else:
+            flash("Fitzpatrick type updated successfully.", "success")
 
         conn.commit()
         cur.close()
         conn.close()
-
+        
         return redirect(url_for("fitzpatrick_types"))
-
+            
     cur.execute("""
         SELECT fitzpatrick_id, fitzpatrick_level, description
         FROM fitzpatrick_types
         WHERE fitzpatrick_id = %s
-    """, (fitzpatrick_id,))
-    fitzpatrick = cur.fetchone()
+          AND spa_id = %s
+    """, (fitzpatrick_id, spa_id))
 
+    fitzpatrick = cur.fetchone()
+   
     cur.close()
     conn.close()
 
-    flash("Fitzpatrick type updated successfully.")
-    return redirect(url_for("fitzpatrick_types"))
+    if not fitzpatrick:
+        flash("Fitzpatrick type not found or not authorized.", "error")
+        return redirect(url_for("fitzpatrick_types"))
+    
+    return render_template(
+        "edit_fitzpatrick_types.html",
+        fitzpatrick=fitzpatrick
+    )
 
 
-    return render_template("edit_fitzpatrick_types.html", fitzpatrick=fitzpatrick)
+
 
 
 #  -----------------------
 #     	DROP DOWN
 #  
 #    REFERRAL SOURCES
+#
+#  4/28/26 multi safe
 #  -----------------------
 
-
 @app.route("/referral_sources", methods=["GET", "POST"])
-def referral_sources():
+@login_required
+@spa_required
+def referral_sources():   
     spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
-    
+
     if request.method == "POST":
         referral_source_name = request.form["referral_source_name"].strip()
-
+    
         cur.execute("""
             INSERT INTO referral_sources (spa_id, referral_source_name)
             VALUES (%s, %s)
         """, (spa_id, referral_source_name))
-        conn.commit()
 
+        conn.commit()
         cur.close()
         conn.close()
-        return redirect(url_for("referral_sources"))
 
+        flash("Referral source added.", "success")
+        return redirect(url_for("referral_sources"))
+            
     cur.execute("""
         SELECT referral_source_id, referral_source_name
         FROM referral_sources
         WHERE spa_id = %s
-        ORDER BY referral_source_id
+        ORDER BY referral_source_name
     """, (spa_id,))
-    referral_sources_list = cur.fetchall()
 
+    referral_sources_list = cur.fetchall()
+            
     cur.close()
     conn.close()
 
-    return render_template("referral_sources.html", referral_sources=referral_sources_list)
-
+    return render_template(
+        "referral_sources.html",
+        referral_sources=referral_sources_list
+    )
 
 
 
@@ -13160,49 +13735,64 @@ def referral_sources():
 #  --------------------
 #
 #   DELETE REFERRAL SOURCE
-#
+#  4/28/26  good
 #  -------------------
 
 @app.route("/delete_referral_source/<int:referral_source_id>", methods=["POST"])
+@login_required
+@spa_required
 def delete_referral_source(referral_source_id):
     spa_id = current_spa_id()
+
     conn = get_db_connection()
     cur = conn.cursor()
-
+        
     cur.execute("""
         DELETE FROM referral_sources
         WHERE referral_source_id = %s
-    """, (referral_source_id,))
-    conn.commit()
+          AND spa_id = %s
+    """, (referral_source_id, spa_id))
 
+    if cur.rowcount == 0:
+        flash("Referral source not found or not authorized.", "error")
+    else:
+        flash("Referral source deleted.", "success")
+
+    conn.commit()
     cur.close()
-    conn.close()
+    conn.close()   
 
     return redirect(url_for("referral_sources"))
 
 
 
+
+
+
+
 #  -------------------
 #   CLEARS ADD NEW FORM
+#
+#  good
 #  ------------------
 
+
 @app.route("/cancel_new_client")
+@login_required
+@spa_required
 def cancel_new_client():
-    spa_id = current_spa_id()
     session.pop("new_client_step1", None)
     session.pop("new_client_step2", None)
     return redirect(url_for("home"))
-
-
-
+    
 
 @app.route("/clear_new_client")
-def clear_new_client():
-    spa_id = current_spa_id()
+@login_required
+@spa_required
+def clear_new_client():  
     session.pop("new_client_step1", None)
     session.pop("new_client_step2", None)
     return redirect(url_for("add_new_client"))
-
 
 
 

@@ -6,137 +6,64 @@
 
 <div class="client-edit-page">
 
+    <div class="summary-bar">
+
+        <div class="summary-card">
+            <span class="summary-label">Total Visits</span>
+            <span class="summary-value">{{ total_visits }}</span>
+        </div>
+
+        <div class="summary-card">
+            <span class="summary-label">Total Revenue</span>
+            <span class="summary-value">${{ "%.2f"|format(total_revenue or 0) }}</span>
+        </div>
+
+        <div class="summary-card">
+            <span class="summary-label">Last Visit</span>
+            <span class="summary-value">
+                {{ last_visit[0] if last_visit else '—' }}
+            </span>
+        </div>
+
+        <div class="summary-card">
+            <span class="summary-label">Lifetime Value</span>
+            <span class="summary-value">${{ "%.2f"|format(lifetime_value or 0) }}</span>
+        </div>
+
+        <div class="summary-card">
+            <span class="summary-label">Next Appointment</span>
+            <span class="summary-value">
+                {{ next_appt[0] if next_appt else '—' }}
+            </span>
+        </div>
+
+        <div class="summary-card">
+            <span class="summary-label">Average Ticket</span>
+            <span class="summary-value">${{ "%.2f"|format(average_ticket or 0) }}</span>
+        </div>
+
+        <div class="summary-card">
+            <span class="summary-label">Available Credit</span>
+            <span class="summary-value">${{ "%.2f"|format(credit_balance or 0) }}</span>
+        </div>
+
+    </div>
+
     <div class="page-header">
-
-        <div class="summary-bar">
-
-
-    <! -- ROW 1 --->
-    <div class="summary-card">
-        <span class="summary-label">Total Visits</span>
-        <span class="summary-value">{{ total_visits }}</span>
-    </div>
-
-
-    <div class="summary-card">
-        <span class="summary-label">Total Revenue</span>
-        <span class="summary-value">${{ "%.2f"|format(total_revenue or 0) }}</span>
-    </div>
-
-
-    <! --- ROW 2 --->
-
-    <div class="summary-card">
-        <span class="summary-label">Last Visit</span>
-        <span class="summary-value">
-            {{ last_visit[0].strftime('%m/%d/%Y') if last_visit else '—' }}
-        </span>
-    </div>
-
-
-    <div class="summary-card">
-        <span class="summary-label">Lifetime Value</span>
-        <span class="summary-value">${{ "%.2f"|format(lifetime_value or 0) }}</span>
-    </div>
-
-
-
-    <!  ---  ROW 3  --->
-
-
-    <div class="summary-card">
-        <span class="summary-label">Next Appointment</span>
-        <span class="summary-value">
-            {% if next_appt %}
-                {{ next_appt[0].strftime('%m/%d/%Y') }}
-            {% else %}
-                —
-            {% endif %}
-        </span>
-    </div>
-
-
-    <div class="summary-card">
-        <span class="summary-label">Average Ticket</span>
-        <span class="summary-value">${{ "%.2f"|format(average_ticket or 0) }}</span>
-    </div>
-
-    <div class="dashboard-card">
-        <h3>Available Credit</h3>
-        <p><strong>Available Credit:</strong> ${{ '%.2f'|format(credit_balance or 0) }}</p>
-
-        {% if credit_balance and credit_balance > 0 %}
-            <p style="color: green;">Client has available credit to apply to next service</p>
-        {% endif %}
-
-        </p>
-    </div>
-
-</div>
-
-
-
-<div class="history-card">
-    <div class="card-header">
-        <h2>Recent Appointments</h2>
-        <p>Last 10 appointments for this client.</p>
-    </div>
-
-    <div class="card-body">
-        {% if recent_appointments %}
-            <div class="table-wrap">
-                <table class="history-table">
-                    <thead>
-                        <tr>
-                            <th>Date</th>
-                            <th>Time</th>
-                            <th>Duration</th>
-                            <th>Room</th>
-                            <th>Status</th>
-                            <th>Channel</th>
-                            <th>Price</th>
-                            <th>Notes</th>
-                            <th>Open</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for appt in recent_appointments %}
-                            <tr>
-                                <td>{{ appt[1].strftime('%m/%d/%Y') if appt[1] else '' }}</td>
-                                <td>{{ appt[2].strftime('%I:%M %p') if appt[2] else '' }}</td>
-                                <td>{{ appt[3] or '' }} min</td>
-                                <td>{{ appt[4] or '' }}</td>
-                                <td>
-                                    <span class="status-pill status-{{ (appt[5] or 'unknown')|lower }}">
-                                        {{ appt[5] or 'Unknown' }}
-                                    </span>
-                                </td>
-                                <td>{{ appt[6] or '' }}</td>
-                                <td>${{ "%.2f" |format(appt[7] or 0) }}
-                                <td class="notes-cell">{{ appt[8] or '' }}</td>
-                                <td>
-                                    <a class="table-link" href="{{ url_for('edit_appointment', appointment_id=appt[0]) }}">
-                                        Open
-                                    </a>
-                                </td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        {% else %}
-            <p class="empty-state">No appointments found for this client.</p>
-        {% endif %}
-    </div>
-</div>
-
-
-
-
         <div>
             <h1>Edit Client</h1>
             {% if client %}
-                <p class="page-subtitle">Update profile details for <strong>{{ client[0] }} {{ client[1] }}</strong></p>
+                <p class="page-subtitle">
+                    Update profile details for
+                    <strong>
+                        {{ client[1] }} {{ client[2] }}
+                        {% if not client[24] %}
+                            <span style="color: #c0392b; font-weight: 600; margin-left: 8px;">
+                                (Inactive)
+                            </span>
+                        {% endif %}
+                    </strong>
+                </p>
             {% endif %}
         </div>
 
@@ -146,9 +73,75 @@
         </div>
     </div>
 
+    <div class="history-card">
+        <div class="card-header">
+            <h2>Recent Appointments</h2>
+            <p>Last 10 appointments for this client.</p>
+        </div>
+
+        <div class="card-body">
+            {% if recent_appointments %}
+                <div class="table-wrap">
+                    <table class="history-table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Time</th>
+                                <th>Duration</th>
+                                <th>Room</th>
+                                <th>Status</th>
+                                <th>Channel</th>
+                                <th>Price</th>
+                                <th>Notes</th>
+                                <th>Open</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for appt in recent_appointments %}
+                                <tr>
+                                    <td>{{ appt[1] if appt[1] else '' }}</td>
+                                    <td>{{ appt[2] if appt[2] else '' }}</td>
+                                    <td>{{ appt[3] or '' }} min</td>
+                                    <td>{{ appt[4] or '' }}</td>
+                                    <td>
+                                        <span class="status-pill status-{{ (appt[5] or 'unknown')|lower }}">
+                                            {{ appt[5] or 'Unknown' }}
+                                        </span>
+                                    </td>
+                                    <td>{{ appt[6] or '' }}</td>
+                                    <td>${{ "%.2f"|format(appt[7] or 0) }}</td>
+                                    <td class="notes-cell">{{ appt[8] or '' }}</td>
+                                    <td>
+                                        <a class="table-link" href="{{ url_for('edit_appointment', appointment_id=appt[0]) }}">
+                                            Open
+                                        </a>
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p class="empty-state">No appointments found for this client.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if client and client[24] %}
+        <div class="danger-zone">
+            <h3>Deactivate Client</h3>
+            <p>This will hide the client from active client lists but will not delete their history.</p>
+
+            <form method="POST"
+                  action="{{ url_for('deactivate_client', client_id=client[0]) }}"
+                  onsubmit="return confirm('Deactivate this client? They will be hidden from active client lists but not deleted.');">
+                <button type="submit" class="btn btn-danger">Deactivate Client</button>
+            </form>
+        </div>
+    {% endif %}
+
     <form method="POST" id="edit-client-form">
 
-        <!-- BASIC INFORMATION -->
         <div class="form-card">
             <div class="card-header">
                 <h2>Basic Information</h2>
@@ -159,47 +152,45 @@
                 <div class="form-row two-col">
                     <div class="form-group">
                         <label>First Name</label>
-                        <input type="text" name="first_name" value="{{ client[0] if client else '' }}" required>
+                        <input type="text" name="first_name" value="{{ client[1] if client else '' }}" required>
                     </div>
 
                     <div class="form-group">
                         <label>Last Name</label>
-                        <input type="text" name="last_name" value="{{ client[1] if client else '' }}" required>
+                        <input type="text" name="last_name" value="{{ client[2] if client else '' }}" required>
                     </div>
                 </div>
 
                 <div class="form-row two-col">
                     <div class="form-group">
                         <label>Phone</label>
-                        <input type="text" name="phone" value="{{ client[2] if client else '' }}">
+                        <input type="text" name="phone" value="{{ client[3] if client else '' }}">
                     </div>
 
                     <div class="form-group">
                         <label>Email</label>
-                        <input type="email" name="email" value="{{ client[3] if client else '' }}">
+                        <input type="email" name="email" value="{{ client[4] if client else '' }}">
                     </div>
                 </div>
 
                 <div class="form-row two-col">
                     <div class="form-group">
                         <label>Birth Date</label>
-                        <input type="date" name="birth_date" value="{{ client[4].strftime('%Y-%m-%d') if client and client[4] else '' }}">
+                        <input type="date" name="birth_date" value="{{ client[5] if client and client[5] else '' }}">
                     </div>
 
                     <div class="form-group">
                         <label>Client Status</label>
                         <select name="client_status">
-                            <option value="Current" {% if client and client[11] == 'Current' %}selected{% endif %}>Current</option>
-                            <option value="Inactive" {% if client and client[11] == 'Inactive' %}selected{% endif %}>Inactive</option>
-                            <option value="Prospect" {% if client and client[11] == 'Prospect' %}selected{% endif %}>Prospect</option>
-                            <option value="Former" {% if client and client[11] == 'Former' %}selected{% endif %}>Former</option>
+                            <option value="Current" {% if client and client[12] == 'Current' %}selected{% endif %}>Current</option>
+                            <option value="Previous" {% if client and client[12] == 'Previous' %}selected{% endif %}>Previous</option>
+                            <option value="Prior Spa Client" {% if client and client[12] == 'Prior Spa Client' %}selected{% endif %}>Prior Spa Client</option>
                         </select>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- ADDRESS -->
         <div class="form-card">
             <div class="card-header">
                 <h2>Address</h2>
@@ -209,29 +200,28 @@
             <div class="card-body">
                 <div class="form-group">
                     <label>Address</label>
-                    <input type="text" name="address" value="{{ client[5] if client else '' }}">
+                    <input type="text" name="address" value="{{ client[6] if client else '' }}">
                 </div>
 
                 <div class="form-row three-col">
                     <div class="form-group">
                         <label>City</label>
-                        <input type="text" name="city" value="{{ client[6] if client else '' }}">
+                        <input type="text" name="city" value="{{ client[7] if client else '' }}">
                     </div>
 
                     <div class="form-group">
                         <label>State</label>
-                        <input type="text" name="state" value="{{ client[7] if client else '' }}">
+                        <input type="text" name="state" value="{{ client[8] if client else '' }}">
                     </div>
 
                     <div class="form-group">
                         <label>Zip</label>
-                        <input type="text" name="zip" value="{{ client[8] if client else '' }}">
+                        <input type="text" name="zip" value="{{ client[9] if client else '' }}">
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- LOCATION -->
         <div class="form-card">
             <div class="card-header">
                 <h2>Location Preferences</h2>
@@ -245,7 +235,7 @@
                         <select name="spa_location_id">
                             <option value="">-- Select Location --</option>
                             {% for location in locations %}
-                                <option value="{{ location[0] }}" {% if client and client[9] == location[0] %}selected{% endif %}>
+                                <option value="{{ location[0] }}" {% if client and client[10] == location[0] %}selected{% endif %}>
                                     {{ location[1] }}
                                 </option>
                             {% endfor %}
@@ -257,7 +247,7 @@
                         <select name="preferred_location_id">
                             <option value="">-- Select Preferred Location --</option>
                             {% for location in locations %}
-                                <option value="{{ location[0] }}" {% if client and client[10] == location[0] %}selected{% endif %}>
+                                <option value="{{ location[0] }}" {% if client and client[11] == location[0] %}selected{% endif %}>
                                     {{ location[1] }}
                                 </option>
                             {% endfor %}
@@ -267,7 +257,6 @@
             </div>
         </div>
 
-        <!-- COMMUNICATION -->
         <div class="form-card">
             <div class="card-header">
                 <h2>Communication Preferences</h2>
@@ -278,40 +267,39 @@
                 <div class="form-row two-col">
                     <div class="form-group">
                         <label>Preferred Language</label>
-                        <input type="text" name="preferred_language" value="{{ client[12] if client and client[12] else '' }}">
+                        <input type="text" name="preferred_language" value="{{ client[13] if client and client[13] else '' }}">
                     </div>
 
                     <div class="form-group">
                         <label>Preferred Contact Method</label>
                         <select name="preferred_contact_method">
                             <option value="">Select Method</option>
-                            <option value="Phone" {% if client and client[16] == 'Phone' %}selected{% endif %}>Phone</option>
-                            <option value="Text" {% if client and client[16] == 'Text' %}selected{% endif %}>Text</option>
-                            <option value="Email" {% if client and client[16] == 'Email' %}selected{% endif %}>Email</option>
+                            <option value="Phone" {% if client and client[17] == 'Phone' %}selected{% endif %}>Phone</option>
+                            <option value="Text" {% if client and client[17] == 'Text' %}selected{% endif %}>Text</option>
+                            <option value="Email" {% if client and client[17] == 'Email' %}selected{% endif %}>Email</option>
                         </select>
                     </div>
                 </div>
 
                 <div class="checkbox-grid">
                     <label class="checkbox-card">
-                        <input type="checkbox" name="ok_to_call" {% if client and client[13] %}checked{% endif %}>
+                        <input type="checkbox" name="ok_to_call" {% if client and client[14] %}checked{% endif %}>
                         <span>OK to Call</span>
                     </label>
 
                     <label class="checkbox-card">
-                        <input type="checkbox" name="ok_to_text" {% if client and client[14] %}checked{% endif %}>
+                        <input type="checkbox" name="ok_to_text" {% if client and client[15] %}checked{% endif %}>
                         <span>OK to Text</span>
                     </label>
 
                     <label class="checkbox-card">
-                        <input type="checkbox" name="ok_to_email" {% if client and client[15] %}checked{% endif %}>
+                        <input type="checkbox" name="ok_to_email" {% if client and client[16] %}checked{% endif %}>
                         <span>OK to Email</span>
                     </label>
                 </div>
             </div>
         </div>
 
-        <!-- EMERGENCY / REFERRAL -->
         <div class="form-card">
             <div class="card-header">
                 <h2>Emergency Contact & Referral</h2>
@@ -322,23 +310,22 @@
                 <div class="form-row two-col">
                     <div class="form-group">
                         <label>Emergency Contact Name</label>
-                        <input type="text" name="emergency_contact_name" value="{{ client[17] if client else '' }}">
+                        <input type="text" name="emergency_contact_name" value="{{ client[18] if client else '' }}">
                     </div>
 
                     <div class="form-group">
                         <label>Emergency Contact Phone</label>
-                        <input type="text" name="emergency_contact_phone" value="{{ client[18] if client else '' }}">
+                        <input type="text" name="emergency_contact_phone" value="{{ client[19] if client else '' }}">
                     </div>
                 </div>
 
                 <div class="form-group">
                     <label>Referred By</label>
-                    <input type="text" name="referred_by" value="{{ client[19] if client else '' }}">
+                    <input type="text" name="referred_by" value="{{ client[20] if client else '' }}">
                 </div>
             </div>
         </div>
 
-        <!-- NOTES -->
         <div class="form-card">
             <div class="card-header">
                 <h2>Notes</h2>
@@ -348,22 +335,21 @@
             <div class="card-body">
                 <div class="form-group">
                     <label>Notes One</label>
-                    <textarea name="notes_one" rows="4">{{ client[20] if client else '' }}</textarea>
+                    <textarea name="notes_one" rows="4">{{ client[21] if client else '' }}</textarea>
                 </div>
 
                 <div class="form-group">
                     <label>Notes Two</label>
-                    <textarea name="notes_two" rows="4">{{ client[21] if client else '' }}</textarea>
+                    <textarea name="notes_two" rows="4">{{ client[22] if client else '' }}</textarea>
                 </div>
 
                 <div class="form-group">
                     <label>Notes Three</label>
-                    <textarea name="notes_three" rows="4">{{ client[22] if client else '' }}</textarea>
+                    <textarea name="notes_three" rows="4">{{ client[23] if client else '' }}</textarea>
                 </div>
             </div>
         </div>
 
-        <!-- ACTIVE STATUS -->
         <div class="form-card">
             <div class="card-header">
                 <h2>Account Status</h2>
@@ -375,8 +361,8 @@
                     <div class="form-group status-group">
                         <label>Active Client</label>
                         <select name="active_client">
-                            <option value="true" {% if client and client[23] %}selected{% endif %}>Yes</option>
-                            <option value="false" {% if client and not client[23] %}selected{% endif %}>No</option>
+                            <option value="true" {% if client and client[24] %}selected{% endif %}>Yes</option>
+                            <option value="false" {% if client and not client[24] %}selected{% endif %}>No</option>
                         </select>
                     </div>
                 </div>
@@ -398,6 +384,42 @@
         padding: 10px 0 30px 0;
     }
 
+    .summary-bar {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+        margin-bottom: 22px;
+    }
+
+    .summary-card,
+    .danger-zone,
+    .history-card,
+    .form-card,
+    .page-header {
+        background: #fff;
+        border: 1px solid #e3e3e3;
+        border-radius: 14px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
+    }
+
+    .summary-card {
+        padding: 16px 18px;
+    }
+
+    .summary-label {
+        display: block;
+        color: #666;
+        font-size: 0.9rem;
+        margin-bottom: 6px;
+    }
+
+    .summary-value {
+        display: block;
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: #222;
+    }
+
     .page-header {
         display: flex;
         justify-content: space-between;
@@ -406,10 +428,6 @@
         flex-wrap: wrap;
         margin-bottom: 24px;
         padding: 20px 24px;
-        background: #fff;
-        border: 1px solid #e3e3e3;
-        border-radius: 14px;
-        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
     }
 
     .page-header h1 {
@@ -430,13 +448,26 @@
         flex-wrap: wrap;
     }
 
+    .history-card,
+    .danger-zone,
     .form-card {
-        background: #fff;
-        border: 1px solid #e3e3e3;
-        border-radius: 14px;
-        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
         margin-bottom: 22px;
         overflow: hidden;
+    }
+
+    .danger-zone {
+        padding: 18px 22px;
+        border-color: #e5b8b8;
+        background: #fffafa;
+    }
+
+    .danger-zone h3 {
+        margin: 0 0 6px 0;
+    }
+
+    .danger-zone p {
+        margin: 0 0 12px 0;
+        color: #666;
     }
 
     .card-header {
@@ -503,15 +534,6 @@
         font-size: 0.98rem;
         box-sizing: border-box;
         background: #fff;
-        transition: border-color 0.2s ease, box-shadow 0.2s ease;
-    }
-
-    .form-group input:focus,
-    .form-group select:focus,
-    .form-group textarea:focus {
-        outline: none;
-        border-color: #888;
-        box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.06);
     }
 
     .form-group textarea {
@@ -553,7 +575,37 @@
         justify-content: flex-end;
     }
 
+    .table-wrap {
+        overflow-x: auto;
+    }
+
+    .history-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .history-table th,
+    .history-table td {
+        padding: 10px;
+        border-bottom: 1px solid #eee;
+        text-align: left;
+    }
+
+    .notes-cell {
+        max-width: 260px;
+        white-space: normal;
+    }
+
+    .empty-state {
+        color: #666;
+        margin: 0;
+    }
+
     @media (max-width: 900px) {
+        .summary-bar {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
         .two-col,
         .three-col,
         .checkbox-grid {
@@ -568,6 +620,12 @@
         .bottom-actions {
             width: 100%;
             justify-content: flex-start;
+        }
+    }
+
+    @media (max-width: 600px) {
+        .summary-bar {
+            grid-template-columns: 1fr;
         }
     }
 </style>

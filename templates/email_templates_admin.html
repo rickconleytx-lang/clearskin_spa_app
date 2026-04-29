@@ -3,12 +3,8 @@
 {% block title %}Email Templates{% endblock %}
 
 {% block content %}
-<h1>Email Templates</h1>
+<h1>Email Templates Home</h1>
 
-<div class="form-buttons">
-    <a href="{{ url_for('general_email') }}" class="btn">Back to Email Campaign</a>
-    <a href="{{ url_for('add_email_template') }}" class="btn">Add Email Template</a>
-</div>
 
 {% if templates %}
 <table>
