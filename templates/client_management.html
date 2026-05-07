@@ -5,6 +5,8 @@
 {% block title %}Client Management{% endblock %}
 
 {% block content %}
+<div class="client-management-page">
+
 
 <h1>Client Management</h1>
 Sequence of steps for Adding New Client, Add the Appointment, Gather and Enter health history information, Pre-Session and Post Session Wrap-up.
@@ -21,6 +23,7 @@ For any other Client related action, please search for Client's Name, then use a
 <br>
     <a class="btn" href="{{ url_for('help_client_management_page') }}"> 
         Page Help
+    </a>
 
     <a class="btn" href="{{ url_for('add_new_client') }}">
         Add New Client
@@ -53,7 +56,7 @@ For any other Client related action, please search for Client's Name, then use a
     <thead>
         <tr>
             <th>Client</th>
-            <th>Phone</th>
+            <th>Phone / SMS</th>
             <th>Email</th>
             <th>Birth Date</th>
             <th>Last Visit</th>
@@ -61,37 +64,65 @@ For any other Client related action, please search for Client's Name, then use a
             <th>Actions</th>
         </tr>
     </thead>
+
     <tbody>
         {% for row in rows %}
         <tr>
             <td>{{ row[2] }}, {{ row[1] }}</td>
-            <td>{{ row[3] or '' }}</td>
-            <td>{{ row[4] or '' }}</td>
+
+            <td>
+                {{ row[3] or '' }}<br>
+
+                {% if row[8] and row[9] and not row[10] %}
+                    <span class="badge badge-success">SMS OK</span>
+                {% elif row[10] %}
+                    <span class="badge badge-danger">SMS Out</span>
+                {% else %}
+                    <span class="badge badge-warning">SMS ?</span>
+                {% endif %}
+            </td>
+
+            <td>
+                {{ row[4] or '' }}<br>
+
+                {% if row[11] and row[12] and not row[13] %}
+                    <span class="badge badge-success">Email OK</span>
+                {% elif row[13] %}
+                    <span class="badge badge-danger">Email Out</span>
+                {% else %}
+                    <span class="badge badge-warning">Email ?</span>
+                {% endif %}
+            </td>
+
             <td>{{ row[5] or '' }}</td>
             <td>{{ row[6] or '' }}</td>
+
             <td>
                 {% if row[7] %}
                     <span style="color: green;">{{ row[7] }}</span>
                 {% else %}
                     <span style="color: #999;">None Scheduled</span>
-                 {% endif %}
-             </td>
+                {% endif %}
+            </td>
+
             <td>
                 <a class="btn" href="{{ url_for('add_appointment', client_id=row[0]) }}">
-                    Add Appointment
+                    Add Appt
                 </a>
 
                 <a class="btn" href="{{ url_for('client_health_profile', client_id=row[0]) }}">
-                    Health / Intake
+                    Health-Intake
                 </a>
 
                 <a class="btn" href="{{ url_for('client_history_detail', client_id=row[0]) }}">
                     Visit Summaries
                 </a>
+
                 <br>
 
                 <a class="btn" href="{{ url_for('edit_client', client_id=row[0]) }}">
-                    Client FULL Summary & Edit
+                    FULL Summary-Edit
+                </a>
 
                 <a class="btn" href="{{ url_for('edit_client_full', client_id=row[0]) }}">
                     Full Record
@@ -99,8 +130,11 @@ For any other Client related action, please search for Client's Name, then use a
 
                 <a class="btn" href="{{ url_for('client_forms', client_id=row[0]) }}">
                     Forms
-                </a>  
+                </a>
 
+                <a class="btn" href="{{ url_for('client_messaging_settings', client_id=row[0]) }}">
+                    SMS Settings
+                </a>
             </td>
         </tr>
         {% endfor %}

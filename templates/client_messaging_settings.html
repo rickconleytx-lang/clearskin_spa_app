@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block title %}Messaging Settings{% endblock %}
+
+{% block content %}
+
+<h1>Messaging Settings</h1>
+
+{% if client %}
+    <h3>{{ client[1] }} {{ client[2] }}</h3>
+{% endif %}
+
+<form method="POST">
+
+    <div class="form-group">
+        <label>
+            <input type="checkbox" name="ok_to_text"
+                   {% if client[5] %}checked{% endif %}>
+            Allow SMS (Text Messages)
+        </label>
+    </div>
+
+    <div class="form-group">
+        <label>
+            <input type="checkbox" name="ok_to_email"
+                   {% if client[6] %}checked{% endif %}>
+            Allow Email
+        </label>
+    </div>
+
+    <div class="form-group">
+        <label>
+            <input type="checkbox" name="ok_to_call"
+                   {% if client[7] %}checked{% endif %}>
+            Allow Phone Calls
+        </label>
+    </div>
+
+    <button type="submit" class="btn">Save Settings</button>
+</form>
+
+<hr>
+
+<h2>SMS Consent History</h2>
+
+{% if sms_logs %}
+<table>
+    <thead>
+        <tr>
+            <th>Phone</th>
+            <th>Consent</th>
+            <th>Method</th>
+            <th>Notes</th>
+            <th>Date</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for log in sms_logs %}
+        <tr>
+            <td>{{ log[0] }}</td>
+            <td>{{ "Yes" if log[1] else "No" }}</td>
+            <td>{{ log[2] }}</td>
+            <td>{{ log[3] }}</td>
+            <td>{{ log[4] }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No SMS history.</p>
+{% endif %}
+
+<hr>
+
+<h2>Email Consent History</h2>
+
+{% if email_logs %}
+<table>
+    <thead>
+        <tr>
+            <th>Email</th>
+            <th>Consent</th>
+            <th>Method</th>
+            <th>Date</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for log in email_logs %}
+        <tr>
+            <td>{{ log[0] }}</td>
+            <td>{{ "Yes" if log[1] else "No" }}</td>
+            <td>{{ log[2] }}</td>
+            <td>{{ log[3] }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No Email history.</p>
+{% endif %}
+
+{% endblock %}

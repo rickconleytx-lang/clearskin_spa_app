@@ -29,14 +29,22 @@
                required>
     </div>
 
+
     <div class="form-group">
         <label for="template_type">Template Type</label>
         <select id="template_type" name="template_type" required>
             <option value="">Select Type</option>
-            <option value="Birthday" {% if template and template[2] == "Birthday" %}selected{% endif %}>Birthday</option>
-            <option value="Gift Certificate" {% if template and template[2] == "Gift Certificate" %}selected{% endif %}>Gift Certificate</option>
-            <option value="Promotion" {% if template and template[2] == "Promotion" %}selected{% endif %}>Promotion</option>
-            <option value="Reminder" {% if template and template[2] == "Reminder" %}selected{% endif %}>Reminder</option>
+
+            <!-- EMAIL -->
+            <option value="Birthday" {% if template and template[2] == "Birthday" %}selected{% endif %}>Birthday (Email)</option>
+            <option value="Gift Certificate" {% if template and template[2] == "Gift Certificate" %}selected{% endif %}>Gift Certificate (Email)</option>
+            <option value="Promotion" {% if template and template[2] == "Promotion" %}selected{% endif %}>Promotion (Email)</option>
+            <option value="Reminder" {% if template and template[2] == "Reminder" %}selected{% endif %}>Reminder (Email)</option>
+
+            <!-- SMS -->
+            <option value="SMS_Birthday" {% if template and template[2] == "SMS_Birthday" %}selected{% endif %}>Birthday (SMS)</option>
+            <option value="SMS_Promotion" {% if template and template[2] == "SMS_Promotion" %}selected{% endif %}>Promotion (SMS)</option>
+            <option value="SMS_Reminder" {% if template and template[2] == "SMS_Reminder" %}selected{% endif %}>Reminder (SMS)</option>
         </select>
     </div>
 
@@ -56,6 +64,11 @@
                   rows="14"
                   required>{{ template[4] if template else '' }}</textarea>
     </div>
+
+    <div id="sms-counter" style="display:none;">
+        <div id="char-count">0 / 160 characters</div>
+    </div>
+
 
     <div class="form-group">
 <br>
@@ -181,16 +194,44 @@ Active Template
   
 </div>
 
-
-
-
 <script>
 function copyPlaceholder(text) {
     navigator.clipboard.writeText(text).then(function() {
         alert(text + " copied");
     });
 }
+
+document.addEventListener("DOMContentLoaded", function () {
+    const textarea = document.getElementById('body_text');
+    const counter = document.getElementById('char-count');
+    const wrapper = document.getElementById('sms-counter');
+    const typeSelect = document.getElementById('template_type');
+
+    function updateCount() {
+        const length = textarea.value.length;
+        counter.textContent = `${length} / 160 characters`;
+        counter.style.color = length > 160 ? 'red' : '#555';
+    }
+
+    function checkTemplateType() {
+        const isSMS = typeSelect.value.startsWith("SMS");
+
+        if (isSMS) {
+            wrapper.style.display = 'block';
+            updateCount();
+        } else {
+            wrapper.style.display = 'none';
+        }
+    }
+
+    textarea.addEventListener('input', updateCount);
+    typeSelect.addEventListener('change', checkTemplateType);
+
+    checkTemplateType();
+});
 </script>
+
+
 
 
 {% endblock %}

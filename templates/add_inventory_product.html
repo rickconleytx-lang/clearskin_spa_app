@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+
+{% block title %}Add Inventory Product{% endblock %}
+
+{% block content %}
+
+<div class="form-page">
+
+    <div class="page-header">
+        <div>
+            <h1>Add Inventory Product</h1>
+            <p class="page-subtitle">
+                Add a new retail or backbar inventory item
+            </p>
+        </div>
+
+        <div class="form-buttons">
+            <a href="{{ url_for('inventory_home') }}" class="btn btn-secondary">
+                Back to Inventory
+            </a>
+        </div>
+    </div>
+
+    <form method="POST" class="styled-form">
+
+        <div class="form-grid two-column">
+
+            <div class="form-group">
+                <label for="sku">SKU *</label>
+                <input type="text" id="sku" name="sku" required>
+            </div>
+
+            <div class="form-group">
+                <label for="product_name">Product Name *</label>
+                <input type="text" id="product_name" name="product_name" required>
+            </div>
+
+            <div class="form-group">
+                <label for="vendor_company">Vendor / Company</label>
+                <input type="text" id="vendor_company" name="vendor_company">
+            </div>
+
+            <div class="form-group">
+                <label for="product_category">Product Category</label>
+                <input type="text" id="product_category" name="product_category">
+            </div>
+
+            <div class="form-group">
+                <label for="product_sub_category">Product Sub Category</label>
+                <input type="text" id="product_sub_category" name="product_sub_category">
+            </div>
+
+            <div class="form-group">
+                <label for="expire_date">Expire Date</label>
+                <input type="date" id="expire_date" name="expire_date">
+            </div>
+
+            <div class="form-group">
+                <label for="wholesale_cost">Wholesale Cost</label>
+                <input type="number"
+                       step="0.01"
+                       id="wholesale_cost"
+                       name="wholesale_cost"
+                       value="0.00">
+            </div>
+
+            <div class="form-group">
+                <label for="suggested_retail">Suggested Retail</label>
+                <input type="number"
+                       step="0.01"
+                       id="suggested_retail"
+                       name="suggested_retail"
+                       value="0.00">
+            </div>
+
+            <div class="form-group">
+                <label for="initial_quantity">Initial Quantity</label>
+                <input type="number"
+                       id="initial_quantity"
+                       name="initial_quantity"
+                       value="0">
+            </div>
+
+        </div>
+
+        <div class="form-group">
+            <label for="note">Notes</label>
+            <textarea id="note"
+                      name="note"
+                      rows="4"></textarea>
+        </div>
+
+        <div class="form-buttons">
+            <button type="submit" class="btn">
+                Save Product
+            </button>
+        </div>
+
+    </form>
+
+</div>
+
+{% endblock %}

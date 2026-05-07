@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+
+{% block title %}Inventory Product Detail{% endblock %}
+
+{% block content %}
+
+<div class="report-page">
+
+    <div class="report-header">
+        <div>
+            <h1>{{ product[2] }}</h1>
+            <p class="report-subtitle">
+                SKU: {{ product[1] }}
+                {% if product[3] %}
+                    · {{ product[3] }}
+                {% endif %}
+            </p>
+        </div>
+
+        <div class="form-buttons">
+            <a href="{{ url_for('inventory_home') }}" class="btn btn-secondary">
+                Back to Inventory
+            </a>
+
+            <a href="{{ url_for('add_inventory_stock', product_id=product[0]) }}" class="btn">
+                Add Stock
+            </a>
+
+            <a href="{{ url_for('record_inventory_sold', product_id=product[0]) }}" class="btn">
+                Sold
+            </a>
+
+            <a href="{{ url_for('adjust_inventory_stock', product_id=product[0]) }}" class="btn">
+                Adjust
+            </a>
+
+
+            <form method="POST"
+                 action="{{ url_for('deactivate_inventory_product', product_id=product[0]) }}"
+                 onsubmit="return confirm('Deactivate this product? It will be hidden from active inventory but history will be kept.');">
+               <button type="submit" class="btn btn-danger">
+                   Deactivate Product
+               </button>
+            </form>
+
+
+
+        </div>
+    </div>
+
+    <div class="summary-cards">
+        <div class="summary-card">
+            <h3>In Stock</h3>
+            <p>{{ totals[6] }}</p>
+        </div>
+
+        <div class="summary-card">
+            <h3>Total Added</h3>
+            <p>{{ totals[0] }}</p>
+        </div>
+
+        <div class="summary-card">
+            <h3>Total Sold</h3>
+            <p>{{ totals[1] }}</p>
+        </div>
+
+        <div class="summary-card">
+            <h3>Returned</h3>
+            <p>{{ totals[4] }}</p>
+        </div>
+
+        <div class="summary-card">
+            <h3>Expired</h3>
+            <p>{{ totals[2] }}</p>
+        </div>
+
+        <div class="summary-card">
+            <h3>Damaged</h3>
+            <p>{{ totals[3] }}</p>
+        </div>
+    </div>
+
+    <div class="report-section">
+        <h2>Product Details</h2>
+
+        <div class="table-wrap">
+            <table class="styled-report-table">
+                <tbody>
+                    <tr>
+                        <th>Product Name</th>
+                        <td>{{ product[2] }}</td>
+                    </tr>
+                    <tr>
+                        <th>SKU</th>
+                        <td>{{ product[1] }}</td>
+                    </tr>
+                    <tr>
+                        <th>Vendor / Company</th>
+                        <td>{{ product[3] or '—' }}</td>
+                    </tr>
+                    <tr>
+                        <th>Category</th>
+                        <td>{{ product[4] or '—' }}</td>
+                    </tr>
+                    <tr>
+                        <th>Sub Category</th>
+                        <td>{{ product[5] or '—' }}</td>
+                    </tr>
+                    <tr>
+                        <th>Wholesale Cost</th>
+                        <td>${{ '%.2f'|format(product[6]) }}</td>
+                    </tr>
+                    <tr>
+                        <th>Suggested Retail</th>
+                        <td>${{ '%.2f'|format(product[7]) }}</td>
+                    </tr>
+                    <tr>
+                        <th>Inventory Value</th>
+                        <td>${{ '%.2f'|format(totals[6] * product[6]) }}</td>
+                    </tr>
+                    <tr>
+                        <th>Expire Date</th>
+                        <td>{{ product[8].strftime('%Y-%m-%d') if product[8] else '—' }}</td>
+                    </tr>
+                    <tr>
+                        <th>Date Added</th>
+                        <td>{{ product[10].strftime('%Y-%m-%d') if product[10] else '—' }}</td>
+                    </tr>
+                    <tr>
+                        <th>Notes</th>
+                        <td>{{ product[9] or '—' }}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="report-section detail-section">
+        <h2>Movement History</h2>
+
+        <div class="table-wrap">
+            <table class="styled-report-table wide-report-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Movement Type</th>
+                        <th>Quantity</th>
+                        <th>Note</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+                    {% if movement_rows %}
+                        {% for row in movement_rows %}
+                        <tr>
+                            <td>{{ row[0].strftime('%Y-%m-%d %I:%M %p') if row[0] else '' }}</td>
+                            <td>
+                                {% if row[1] == 'added' %}
+                                    <span class="badge badge-success">Added</span>
+                                {% elif row[1] == 'sold' %}
+                                    <span class="badge badge-danger">Sold</span>
+                                {% elif row[1] == 'returned' %}
+                                    <span class="badge badge-success">Returned</span>
+                                {% elif row[1] in ['expired', 'damaged'] %}
+                                    <span class="badge badge-warning">{{ row[1]|title }}</span>
+                                {% else %}
+                                    <span class="badge badge-warning">{{ row[1]|title }}</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ row[2] }}</td>
+                            <td>{{ row[3] or '—' }}</td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="4" class="no-data">
+                                No movement history found for this product.
+                            </td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+{% endblock %}

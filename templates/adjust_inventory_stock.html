@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}Adjust Inventory{% endblock %}
+
+{% block content %}
+
+<div class="form-page">
+
+    <div class="page-header">
+        <div>
+            <h1>Adjust Inventory</h1>
+            <p class="page-subtitle">
+                {{ product[2] }}{% if product[1] %} · SKU: {{ product[1] }}{% endif %}
+            </p>
+        </div>
+
+        <div class="form-buttons">
+            <a href="{{ url_for('inventory_home') }}" class="btn btn-secondary">
+                Back to Inventory
+            </a>
+        </div>
+    </div>
+
+    <form method="POST" class="styled-form">
+
+        <div class="form-grid two-column">
+
+            <div class="form-group">
+                <label>Product</label>
+                <input type="text" value="{{ product[2] }}" readonly>
+            </div>
+
+            <div class="form-group">
+                <label>Vendor / Company</label>
+                <input type="text" value="{{ product[3] or '' }}" readonly>
+            </div>
+
+            <div class="form-group">
+                <label for="movement_type">Adjustment Type *</label>
+                <select id="movement_type" name="movement_type" required>
+                    <option value="">Select Type</option>
+                    <option value="adjustment">Manual Adjustment / Correction</option>
+                    <option value="expired">Expired</option>
+                    <option value="damaged">Damaged</option>
+                    <option value="returned">Returned</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="quantity">Quantity *</label>
+                <input type="number"
+                       id="quantity"
+                       name="quantity"
+                       min="1"
+                       value="1"
+                       required>
+            </div>
+
+        </div>
+
+        <div class="form-group">
+            <label for="note">Note</label>
+            <textarea id="note"
+                      name="note"
+                      rows="4"
+                      placeholder="Example: Physical count correction, expired product, damaged item..."></textarea>
+        </div>
+
+        <div class="form-buttons">
+            <button type="submit" class="btn">
+                Save Adjustment
+            </button>
+        </div>
+
+    </form>
+
+</div>
+
+{% endblock %}

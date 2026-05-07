@@ -49,14 +49,40 @@
         {{ start_date }} through {{ end_date }}
     </div>
 
+
     <div class="summary-cards">
+        <div class="summary-card">
+            <h3>Services Billed</h3>
+            <p>${{ '%.2f'|format(services_billed_total) }}</p>
+        </div>
+
         <div class="summary-card">
             <h3>Tips Earned</h3>
             <p>${{ '%.2f'|format(tips_earned_total) }}</p>
         </div>
 
         <div class="summary-card">
-            <h3>Total Compensation Paid</h3>
+            <h3>Tip Payouts Paid</h3>
+            <p>${{ '%.2f'|format(tip_payouts_paid_total) }}</p>
+        </div>
+
+        <div class="summary-card">
+            <h3>Owner Draws Paid</h3>
+            <p>${{ '%.2f'|format(owner_draws_paid_total) }}</p>
+        </div>
+
+        <div class="summary-card">
+            <h3>Bonus Paid</h3>
+            <p>${{ '%.2f'|format(bonus_paid_total) }}</p>
+        </div>
+
+        <div class="summary-card">
+            <h3>Std Compedsation Paid</h3>
+            <p>${{ '%.2f'|format(extra_pay_paid_total) }}</p>
+        </div>
+
+        <div class="summary-card">
+            <h3>Total Paid</h3>
             <p>${{ '%.2f'|format(total_comp_paid) }}</p>
         </div>
 
@@ -64,37 +90,60 @@
             <h3>Outstanding Tips</h3>
             <p>${{ '%.2f'|format(outstanding_tips) }}</p>
         </div>
+
+        <div class="summary-card">
+            <h3>Net Cash Taken</h3>
+            <p>${{ '%.2f'|format(total_comp_paid) }}</p>
+        </div>
+
     </div>
+
 
     <div class="report-section">
         <h2>Employee Summary</h2>
         <div class="table-wrap">
             <table class="styled-report-table wide-report-table">
-                <thead>
+
+            <thead>
+                <tr>
+                    <th>Employee</th>
+                    <th>Services Billed</th>
+                    <th>Tips Earned</th>
+                    <th>Commission Earned</th>
+                    <th>Tip Payouts</th>
+                    <th>Owner Draws</th>
+                    <th>Bonus</th>
+                    <th>Extra Pay</th>
+                    <th>Total Paid</th>
+                    <th>Outstanding Tips</th>
+                    <th>Net Balance</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% if summary_rows %}
+                    {% for row in summary_rows %}
                     <tr>
-                        <th>Employee</th>
-                        <th>Tips Earned</th>
-                        <th>Total Compensation Paid</th>
-                        <th>Outstanding Balance</th>
+                        <td>{{ row[1] }}</td>
+                        <td class="amount-cell">${{ '%.2f'|format(row[2]) }}</td>
+                        <td class="amount-cell">${{ '%.2f'|format(row[3]) }}</td>
+                        <td class="amount-cell">${{ '%.2f'|format(row[4]) }}</td>
+                        <td class="amount-cell">${{ '%.2f'|format(row[5]) }}</td>
+                        <td class="amount-cell">${{ '%.2f'|format(row[6]) }}</td>
+                        <td class="amount-cell">${{ '%.2f'|format(row[7]) }}</td>
+                        <td class="amount-cell">${{ '%.2f'|format(row[8]) }}</td>
+                        <td class="amount-cell">${{ '%.2f'|format(row[9]) }}</td>
+                        <td class="amount-cell total-highlight">${{ '%.2f'|format(row[10]) }}</td>
+                        <td class="amount-cell total-highlight">${{ '%.2f'|format(row[11]) }}</td>
                     </tr>
-                </thead>
-                <tbody>
-                    {% if summary_rows %}
-                        {% for row in summary_rows %}
-                        <tr>
-                            <td>{{ row[1] }}</td>
-                            <td class="amount-cell">${{ '%.2f'|format(row[2]) }}</td>
-                            <td class="amount-cell">${{ '%.2f'|format(row[3]) }}</td>
-                            <td class="amount-cell total-highlight">${{ '%.2f'|format(row[4]) }}</td>
-                        </tr>
-                        {% endfor %}
-                    {% else %}
-                        <tr>
-                            <td colspan="4" class="no-data">No compensation data found for this date range.</td>
-                        </tr>
-                    {% endif %}
-                </tbody>
+                    {% endfor %}
+                {% else %}
+                    <tr>
+                        <td colspan="11" class="no-data">No compensation data found for this date range.</td>
+                    </tr>
+                {% endif %}
+            </tbody>
             </table>
+
         </div>
     </div>
 

@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Inventory Product{% endblock %}
+
+{% block content %}
+
+<div class="form-page">
+
+    <div class="page-header">
+        <div>
+            <h1>Edit Inventory Product</h1>
+            <p class="page-subtitle">
+                {{ product[4] }}{% if product[1] %} · SKU: {{ product[1] }}{% endif %}
+            </p>
+        </div>
+
+        <div class="form-buttons">
+            <a href="{{ url_for('inventory_product_detail', product_id=product[0]) }}" class="btn btn-secondary">
+                Back to Product
+            </a>
+
+            <a href="{{ url_for('inventory_home') }}" class="btn btn-secondary">
+                Back to Inventory
+            </a>
+        </div>
+    </div>
+
+    <form method="POST" class="styled-form">
+
+        <div class="form-grid two-column">
+
+            <div class="form-group">
+                <label for="sku">SKU *</label>
+                <input type="text"
+                       id="sku"
+                       name="sku"
+                       value="{{ product[1] }}"
+                       required>
+            </div>
+
+            <div class="form-group">
+                <label for="product_name">Product Name *</label>
+                <input type="text"
+                       id="product_name"
+                       name="product_name"
+                       value="{{ product[4] }}"
+                       required>
+            </div>
+
+            <div class="form-group">
+                <label for="vendor_company">Vendor / Company</label>
+                <input type="text"
+                       id="vendor_company"
+                       name="vendor_company"
+                       value="{{ product[3] or '' }}">
+            </div>
+
+            <div class="form-group">
+                <label for="product_category">Product Category</label>
+                <input type="text"
+                       id="product_category"
+                       name="product_category"
+                       value="{{ product[5] or '' }}">
+            </div>
+
+            <div class="form-group">
+                <label for="product_sub_category">Product Sub Category</label>
+                <input type="text"
+                       id="product_sub_category"
+                       name="product_sub_category"
+                       value="{{ product[6] or '' }}">
+            </div>
+
+            <div class="form-group">
+                <label for="expire_date">Expire Date</label>
+                <input type="date"
+                       id="expire_date"
+                       name="expire_date"
+                       value="{{ product[2].strftime('%Y-%m-%d') if product[2] else '' }}">
+            </div>
+
+            <div class="form-group">
+                <label for="wholesale_cost">Wholesale Cost</label>
+                <input type="number"
+                       step="0.01"
+                       id="wholesale_cost"
+                       name="wholesale_cost"
+                       value="{{ '%.2f'|format(product[7]) }}">
+            </div>
+
+            <div class="form-group">
+                <label for="suggested_retail">Suggested Retail</label>
+                <input type="number"
+                       step="0.01"
+                       id="suggested_retail"
+                       name="suggested_retail"
+                       value="{{ '%.2f'|format(product[8]) }}">
+            </div>
+
+            <div class="form-group">
+                <label>
+                    <input type="checkbox"
+                           name="active"
+                           {% if product[10] %}checked{% endif %}>
+                    Active Product
+                </label>
+            </div>
+
+        </div>
+
+        <div class="form-group">
+            <label for="note">Notes</label>
+            <textarea id="note"
+                      name="note"
+                      rows="4">{{ product[9] or '' }}</textarea>
+        </div>
+
+        <div class="form-buttons">
+            <button type="submit" class="btn">
+                Save Changes
+            </button>
+        </div>
+
+    </form>
+
+</div>
+
+{% endblock %}

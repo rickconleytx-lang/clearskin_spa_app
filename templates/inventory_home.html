@@ -1,0 +1,120 @@
+\{% extends "base.html" %}
+
+{% block title %}Inventory{% endblock %}
+
+{% block content %}
+
+<div class="report-page">
+
+    <div class="report-header">
+        <div>
+            <h1>Inventory</h1>
+            <p class="report-subtitle">Track products, stock levels, and inventory value</p>
+        </div>
+
+        <div class="form-buttons">
+            <a href="{{ url_for('add_inventory_product') }}" class="btn"> 
+                Add Product
+            </a>
+            
+            <a href="{{ url_for('inventory_scan') }}" class="btn btn-secondary">
+                Scan SKU
+             </a>
+        </div>
+
+        
+
+
+
+    </div>
+
+    <div class="report-section">
+        <h2>Product Inventory</h2>
+
+        <div class="table-wrap">
+            <table class="styled-report-table wide-report-table">
+                <thead>
+                    <tr>
+                        <th>SKU</th>
+                        <th>Product</th>
+                        <th>Vendor</th>
+                        <th>Category</th>
+                        <th>Sub Category</th>
+                        <th>Cost</th>
+                        <th>Retail</th>
+                        <th>Expire Date</th>
+                        <th>Added</th>
+                        <th>Sold</th>
+                        <th>In Stock</th>
+                        <th>Value</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+                    {% if inventory_rows %}
+                        {% for row in inventory_rows %}
+                        <tr>
+                            <td>{{ row[1] }}</td>
+                            <td><strong>{{ row[2] }}</strong></td>
+                            <td>{{ row[3] or '—' }}</td>
+                            <td>{{ row[4] or '—' }}</td>
+                            <td>{{ row[5] or '—' }}</td>
+                            <td class="amount-cell">${{ '%.2f'|format(row[6]) }}</td>
+                            <td class="amount-cell">${{ '%.2f'|format(row[7]) }}</td>
+                            <td>{{ row[8].strftime('%Y-%m-%d') if row[8] else '—' }}</td>
+                            <td>{{ row[9] }}</td>
+                            <td>{{ row[10] }}</td>
+
+                            <td>
+                                {% if row[11] <= 0 %}
+                                    <span class="badge badge-danger">{{ row[11] }}</span>
+                                {% elif row[11] <= 2 %}
+                                    <span class="badge badge-warning">{{ row[11] }}</span>
+                                {% else %}
+                                    <span class="badge badge-success">{{ row[11] }}</span>
+                                {% endif %}
+                            </td>
+
+                            <td class="amount-cell">${{ '%.2f'|format(row[12]) }}</td>
+
+                            <td>
+                                <a href="{{ url_for('inventory_product_detail', product_id=row[0]) }}" class="btn btn-small">
+                                    View
+                                </a>
+
+                                <a href="{{ url_for('add_inventory_stock', product_id=row[0]) }}" class="btn btn-small">
+                                    Add Stock
+                                </a>
+
+                               <a href="(( url_for('record_inventory_sold', product_id=row[0]) }}" class="btn btn-small">
+                                   Sold
+                               </a>
+
+                               <a href="{{ url_for('edit_inventory_product', product_id=row[0]) }}" class="btn">
+                                   Edit Product
+                               </a>
+
+
+                               <a href="{{ url_for('adjust_inventory_stock', product_id=row[0]) }}" class="btn btn-small">
+                                   Adjust
+                               </a>
+
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="13" class="no-data">
+                                No inventory products found.
+                            </td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+{% endblock %}

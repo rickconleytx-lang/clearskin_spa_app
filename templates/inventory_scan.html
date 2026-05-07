@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}Scan Inventory SKU{% endblock %}
+
+{% block content %}
+
+<div class="form-page">
+
+    <div class="page-header">
+        <div>
+            <h1>Scan Inventory SKU</h1>
+            <p class="page-subtitle">
+                Use your iPhone camera to scan a product barcode
+            </p>
+        </div>
+
+        <div class="form-buttons">
+            <a href="{{ url_for('inventory_home') }}" class="btn btn-secondary">
+                Back to Inventory
+            </a>
+        </div>
+    </div>
+
+    <form method="POST"
+          enctype="multipart/form-data"
+          class="styled-form">
+
+        <div class="form-group">
+            <label for="barcode_image">
+                Scan Barcode / SKU
+            </label>
+
+            <input type="file"
+                   id="barcode_image"
+                   name="barcode_image"
+                   accept="image/*"
+                   capture="environment"
+                   required>
+        </div>
+
+        <div class="form-buttons">
+            <button type="submit" class="btn">
+                Scan Product
+            </button>
+        </div>
+
+    </form>
+
+</div>
+
+{% endblock %}

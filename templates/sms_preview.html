@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}SMS Preview{% endblock %}
+
+{% block content %}
+
+<h1>SMS Preview</h1>
+
+<div class="form-buttons">
+    <a href="{{ url_for('client_management') }}" class="btn">Back to Clients</a>
+</div>
+
+<div class="summary-card" style="margin-bottom: 20px;">
+    <p><strong>To:</strong> {{ client[1] }} {{ client[2] }}</p>
+    <p><strong>Phone:</strong> {{ client[3] }}</p>
+</div>
+
+<form method="POST">
+
+    <div class="form-group">
+        <label for="message_body">SMS Message</label>
+        <textarea
+            id="message_body"
+            name="message_body"
+            rows="5"
+            required>{{ message_body }}</textarea>
+    </div>
+
+    <div class="form-buttons">
+        <button type="submit" class="btn">Preview</button>
+
+        {% if message_body %}
+            <button type="submit" name="action" value="send" class="btn btn-primary">
+                Send / Log SMS
+            </button>
+        {% endif %}
+    </div>
+
+</form>
+
+{% if message_body %}
+    <div class="summary-card" style="margin-top: 25px;">
+        <h3>Preview</h3>
+
+        <p>To:{{ client[1] }} {{ client[2] }}</p>
+        <p>Phone: {{ client[3] }}</p>
+      
+        <hr>
+
+        <p style="white-space: pre-wrap;">{{ message_body }}</p>
+    </div>
+{% endif %}
+
+{% endblock %}

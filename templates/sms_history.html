@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+
+{% block title %}SMS History{% endblock %}
+
+{% block content %}
+
+<h1>SMS History</h1>
+
+{% if client is defined and client %}
+    <h3>{{ client[0] }} {{ client[1] }}</h3>
+{% else %}
+
+
+<form method="POST"
+      action="{{ url_for('refresh_all_sms_statuses') }}"
+      style="margin-bottom: 15px;">
+    <button type="submit" class="btn">Refresh All SMS Statuses</button>
+</form>
+
+
+
+    <h3>All SMS Activity</h3>
+{% endif %}
+
+<div class="form-buttons">
+    {% if client is defined and client %}
+        <a href="{{ url_for('client_management') }}" class="btn">Back to Clients</a>
+    {% else %}
+        <a href="{{ url_for('general_email') }}" class="btn">Back to Email / SMS Center</a>
+    {% endif %}
+</div>
+
+
+{% if sms_logs %}
+<table>
+    <thead>
+        <tr>
+            <th>Date</th>
+            <th>Client</th>
+            <th>Message</th>
+            <th>Status</th>
+            <th>Error</th>
+        </tr>
+    </thead>
+
+    <tbody>
+        {% for sms in sms_logs %}
+        <tr>
+
+           <td>
+               {{ sms[0].strftime('%m/%d/%Y %I:%M %p') if sms[0] else '' }}<br>
+
+               {% if sms[1] in ['inbound', 'incoming', 'reply'] %}
+                   <span class="badge badge-warning">IN</span>
+               {% else %}
+                   <span class="badge badge-success">OUT</span>
+               {% endif %}
+            </td>
+
+            <td>
+                <strong>{{ sms[2] }} {{ sms[3] }}</strong><br>
+                <span style="color: #666;">{{ sms[4] }}</span>
+            </td>
+
+            <td style="max-width: 420px; white-space: pre-wrap;">
+                {{ sms[5] }}
+            </td>
+
+            <td>
+                {% if sms[7] in ['delivered', 'sent', 'queued', 'accepted'] %}
+                    <span class="badge badge-success">{{ sms[7] }}</span>
+                {% elif sms[7] in ['failed', 'undelivered'] %}
+                    <span class="badge badge-danger">{{ sms[7] }}</span>
+                {% else %}
+                    <span class="badge badge-warning">{{ sms[7] or sms[6] or 'unknown' }}</span>
+                {% endif %}
+                            
+                {% if sms[7] in ['failed', 'undelivered'] %}
+                    <form method="POST"
+                        action="{{ url_for('resend_sms', sms_log_id=sms[10]) }}"
+                        style="margin-top: 6px;">
+                      <button type="submit" class="btn btn-small">
+                          Resend
+                      </button>
+                    </form>
+
+
+
+                    <a href="{{ url_for('sms_conversation', client_id=sms[10]) }}" class="btn">
+                        View Conversation
+                    </a>
+
+               {% endif %}
+            </td>
+
+            <td style="max-width: 300px; white-space: pre-wrap;">
+                {% if sms[8] or sms[9] %}
+                    <span class="badge badge-danger">{{ sms[8] or 'Error' }}</span><br>
+                    {{ sms[9] or '' }}
+                {% else %}
+                    <span style="color: #999;">None</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+    <p>No SMS messages found.</p>
+{% endif %}
+
+{% endblock %}

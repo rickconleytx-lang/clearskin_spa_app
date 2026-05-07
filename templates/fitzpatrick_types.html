@@ -4,6 +4,12 @@
 
 {% block content %}
 
+
+<a class="btn cancel-btn" href="{{ url_for('admin') }}">Back to Admin</a>
+
+<br>
+<br>
+
 <h1>Fitzpatrick Types</h1>
 
 <form method="POST" class="admin-form">
@@ -12,7 +18,6 @@
 
     <div class="admin-actions">
         <button type="submit">Add Fitzpatrick Type</button>
-        <a class="btn cancel-btn" href="{{ url_for('admin') }}">Back to Admin</a>
     </div>
 </form>
 

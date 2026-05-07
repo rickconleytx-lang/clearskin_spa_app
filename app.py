@@ -14,7 +14,7 @@ file_data = io.BytesIO()
 load_dotenv()
 from flask import abort
 from flask import g
-
+from twilio.rest import Client
 
 app = Flask(__name__)
 
@@ -22,6 +22,12 @@ app = Flask(__name__)
 MAILGUN_API_KEY = os.getenv("MAILGUN_API_KEY")
 MAILGUN_DOMAIN = os.getenv("MAILGUN_DOMAIN")
 MAILGUN_FROM = os.getenv("MAILGUN_FROM")
+
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
+TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
+
+TWILIO_PHONE_NUMBER = os.getenv("TWILIO_FROM_PHONE")
 
 app.secret_key = os.environ.get("SECRET_KEY", "local-dev-key")
 
@@ -41,6 +47,7 @@ print("GENERAL EMAIL SEND HIT", flush=True)
 print("MAILGUN DOMAIN:", MAILGUN_DOMAIN, flush=True)
 print("MAILGUN FROM:", MAILGUN_FROM, flush=True)
 print("MAILGUN KEY STARTS:", MAILGUN_API_KEY[:4] if MAILGUN_API_KEY else None, flush=True)
+
 
 
 
@@ -446,6 +453,9 @@ def internal_server_error(error):
 
 
 @app.route("/save_time_settings", methods=["POST"])
+@login_required
+@spa_required  
+
 def save_time_settings():
     spa_id = current_spa_id()
     
@@ -823,6 +833,9 @@ def test_email():
 #  ----------------------
 
 @app.route("/")
+@login_required
+@spa_required  
+
 def home():
     return render_template("home.html")
 
@@ -1191,62 +1204,102 @@ def delete_dropdown_item(dropdown_key, item_id):
 
 
 @app.route("/help")
+@login_required
+@spa_required  
+
 def help_page():
     return render_template("help.html")
 
 
 
 @app.route("/help_calendar")
+@login_required
+@spa_required  
+
 def help_calendar_page():   
     return render_template("help_calendar.html")
 
 
     
 @app.route("/help_appointments")
+@login_required
+@spa_required  
+
 def help_appointments_page():
     return render_template("help_appointments.html")
             
 
 
 @app.route("/help_client_management")
+
+@login_required
+@spa_required  
+
 def help_client_management_page():
     return render_template("help_client_management.html")
  
 
 @app.route("/help_add_new_client")
+@login_required
+@spa_required  
+
 def help_add_new_client_page():
     return render_template("help_add_new_client.html")
 
 
 
 @app.route("/help_clients")
+
+@login_required
+@spa_required  
+
 def help_clients_page():
     return render_template("help_clients.html")
 
 
 @app.route("/help_birthday_offer")
+
+@login_required
+@spa_required  
+
 def help_birthday_offer_page():
     return render_template("help_birthday_offer.html")
 
 
 
 @app.route("/help_income")
+
+@login_required
+@spa_required  
+
 def help_income_page():
     return render_template("help_income.html")
 
 
 
 @app.route("/help_gift_certs")
+
+@login_required
+@spa_required  
+
 def help_gift_certs_page():
     return render_template("help_gift_certs.html")
 
 
 @app.route("/help_expenses")
+
+@login_required
+@spa_required  
+
 def help_expenses_page():
     return render_template("help_expenses.html")
 
 
 @app.route("/help_admin")
+
+@login_required
+@spa_required  
+
 def help_admin_page():
     return render_template("help_admin.html")
 
@@ -1261,6 +1314,9 @@ def help_admin_page():
 #  ----------------------
 
 @app.route("/spa_management")
+@login_required
+@spa_required  
+
 def spa_management():
     return render_template("spa_management.html")
 
@@ -1273,6 +1329,9 @@ def spa_management():
 #  ----------------------
 
 @app.route("/business_financing_home")
+@login_required
+@spa_required  
+
 def business_financing_home():
     return render_template("business_financing_home.html")
      
@@ -1283,6 +1342,9 @@ def business_financing_home():
 
 
 @app.route("/email_template_form1")
+@login_required
+@spa_required  
+
 def email_template_form1():
     return render_template("email_template_form.html")
 
@@ -1294,6 +1356,9 @@ def email_template_form1():
 #  ----------------------
         
 @app.route("/accounting_home")
+@login_required
+@spa_required  
+
 def accounting_home():
     return render_template("accounting_home.html")
 
@@ -1308,11 +1373,17 @@ def accounting_home():
 #  ----------------------
             
 @app.route("/finance_home")
+@login_required
+@spa_required  
+
 def finance_home():
     return render_template("finance_home.html")
 
 
 @app.route("/birthday_offers1_home")
+@login_required
+@spa_required  
+
 def birthday_offers1_home():
     return render_template("birthday_offers1_home.html")
 
@@ -1424,6 +1495,9 @@ def logout():
 #   -------------------------
 
 @app.route("/add-spa", methods=["GET", "POST"])
+@login_required
+@spa_required  
+
 def add_spa():
     require_master_admin()
 
@@ -1524,6 +1598,8 @@ def add_spa():
 
 @app.route("/users/add", methods=["GET", "POST"])
 @login_required
+@spa_required
+
 def add_user():
     require_admin_or_master()
 
@@ -1886,6 +1962,9 @@ def reopen_feedback(feedback_id):
 #  ----------------------
 
 @app.route("/credit_processors")
+@login_required
+@spa_required  
+
 def credit_processors():
     spa_id = current_spa_id()
 
@@ -2130,11 +2209,138 @@ def sync_calendar():
 
 #   ------------------------------------------
 #
-#     Owner and Loan Funding
 #
-#       HELPERS
 #
 #   ------------------------------------------
+
+
+
+
+
+
+
+#   ----------------------------------------------
+#       
+#       
+#     SMS   HELPER
+#   
+#       
+#       
+#
+#   --------------------------------------------
+
+
+
+def get_sms_template(spa_id, template_type):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT body_text
+            FROM email_templates
+            WHERE spa_id = %s
+              AND template_type = %s
+              AND is_active = TRUE
+            LIMIT 1
+        """, (spa_id, template_type))
+
+        result = cur.fetchone()
+        return result[0] if result else None
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
+#   --------------------
+
+from twilio.rest import Client
+
+def send_sms(to_number, message):
+    client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+
+    return client.messages.create(
+        body=message,
+        from_=TWILIO_PHONE_NUMBER,
+        to=to_number
+    )
+
+
+
+ 
+
+#   ----------------------
+
+
+
+def send_sms_message(to_phone, message_body):
+    sms_enabled = os.getenv("SMS_ENABLED", "false").lower() == "true"
+
+    if not sms_enabled:
+        return {
+            "success": False,
+            "status": "logged",
+            "provider_message_id": None,
+            "twilio_status": None,
+            "twilio_error_code": None,
+            "twilio_error_message": "SMS sending disabled"
+        }
+
+    try:
+        account_sid = os.getenv("TWILIO_ACCOUNT_SID")
+        auth_token = os.getenv("TWILIO_AUTH_TOKEN")
+        from_phone = os.getenv("TWILIO_FROM_PHONE")
+    
+        client = Client(account_sid, auth_token)
+        
+        message = client.messages.create(
+            body=message_body,
+            from_=from_phone,
+            to=to_phone
+        )
+
+        return {
+            "success": True,
+            "status": "sent",  # your app-level status
+            "provider_message_id": message.sid,
+            "twilio_status": message.status,   # <-- NEW
+            "twilio_error_code": message.error_code,   # <-- NEW (usually None here)
+            "twilio_error_message": message.error_message  # <-- NEW (usually None here)
+        }
+            
+    except Exception as e:
+        return {   
+            "success": False,
+            "status": "failed",
+            "provider_message_id": None,
+            "twilio_status": None,
+            "twilio_error_code": None,
+            "twilio_error_message": str(e)
+        }
+
+
+
+#   ----------------------------
+#
+#              
+#   ---------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2320,6 +2526,1002 @@ def get_loan_contribution_rows(spa_id, start_date=None, end_date=None):
 
 
 
+#   ------------------------------------------------
+#
+#
+#           
+#     SMS     CAMPAIGNS
+#       
+      
+#   
+#   -----------------------------------------------
+
+
+
+
+#   --------------------------
+#
+#
+#     TWILIO WEBHOOK
+#
+#
+#
+#   ----------------------
+
+@app.route("/sms/webhook", methods=["POST"])
+def sms_webhook():
+    from_number = request.form.get("From")
+    body = request.form.get("Body", "").strip().lower()
+
+    if body in ["stop", "unsubscribe", "cancel"]:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # Get spa_id + client_id
+        cur.execute("""
+            SELECT spa_id, client_id
+            FROM clients
+            WHERE phone = %s
+        """, (from_number,))
+        
+        row = cur.fetchone()
+
+        if row:
+            spa_id, client_id = row
+
+            # Update client
+            cur.execute("""
+                UPDATE clients
+                SET
+                    ok_to_text = FALSE,
+                    sms_opt_in = FALSE,
+                    sms_opt_out = TRUE
+                WHERE phone = %s
+            """, (from_number,))
+
+            # Log it
+            cur.execute("""
+                INSERT INTO sms_consent_log (
+                    spa_id,
+                    client_id,
+                    phone_number,
+                    consent_given,
+                    consent_method,
+                    consent_text
+                )
+                VALUES (%s, %s, %s, FALSE, %s, %s)
+            """, (
+                spa_id,
+                client_id,
+                from_number,
+                "opt_out",
+                "User replied STOP"
+            ))
+
+            conn.commit()
+
+        cur.close()
+        conn.close()
+
+    return ("", 204)
+
+
+
+
+
+
+
+
+            
+#   ---------------------
+#
+#      SMS messaging settings
+#
+#
+#   ----------------------
+
+@app.route("/client/<int:client_id>/messaging-settings", methods=["GET", "POST"])
+@login_required
+@spa_required
+def client_messaging_settings(client_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            client_id,
+            first_name,
+            last_name,
+            phone,
+            email,
+            ok_to_text,
+            ok_to_email,
+            ok_to_call,
+            sms_opt_in,
+            sms_opt_out,
+            email_opt_in,
+            email_opt_out
+        FROM clients
+        WHERE client_id = %s
+          AND spa_id = %s
+    """, (client_id, spa_id))
+
+    client = cur.fetchone()
+
+    if not client:
+        cur.close()
+        conn.close()
+        flash("Client not found.", "error")
+        return redirect(url_for("clients"))
+
+    if request.method == "POST":
+        ok_to_text = request.form.get("ok_to_text") == "on"
+        ok_to_email = request.form.get("ok_to_email") == "on"
+        ok_to_call = request.form.get("ok_to_call") == "on"
+
+        phone = client[3]
+        email = client[4]
+
+        cur.execute("""
+            UPDATE clients
+            SET
+                ok_to_text = %s,
+                ok_to_email = %s,
+                ok_to_call = %s,
+                sms_opt_in = %s,
+                sms_opt_out = %s,
+                email_opt_in = %s,
+                email_opt_out = %s
+            WHERE client_id = %s
+              AND spa_id = %s
+        """, (
+            ok_to_text,
+            ok_to_email,
+            ok_to_call,
+            ok_to_text,
+            not ok_to_text,
+            ok_to_email,
+            not ok_to_email,
+            client_id,
+            spa_id
+        ))
+
+        if phone:
+            cur.execute("""
+                INSERT INTO sms_consent_log (
+                    spa_id,
+                    client_id,
+                    phone_number,
+                    consent_given,
+                    consent_method,
+                    consent_text
+                )
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (
+                spa_id,
+                client_id,
+                phone,
+                ok_to_text,
+                "manual_admin_update",
+                "Messaging preference updated by staff."
+            ))
+
+        if email:
+            cur.execute("""
+                INSERT INTO email_consent_log (
+                    spa_id,
+                    client_id,
+                    email,
+                    consent_given,
+                    consent_method
+                )
+                VALUES (%s, %s, %s, %s, %s)
+            """, (
+                spa_id,
+                client_id,
+                email,
+                ok_to_email,
+                "manual_admin_update"
+            ))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        flash("Messaging settings updated.", "success")
+        return redirect(url_for("client_messaging_settings", client_id=client_id))
+
+    cur.execute("""
+        SELECT
+            phone_number,
+            consent_given,
+            consent_method,
+            consent_text,
+            created_at
+        FROM sms_consent_log
+        WHERE spa_id = %s
+          AND client_id = %s
+        ORDER BY created_at DESC
+        LIMIT 20
+    """, (spa_id, client_id))
+
+    sms_logs = cur.fetchall()
+
+    cur.execute("""
+        SELECT
+            email,
+            consent_given,
+            consent_method,
+            created_at
+        FROM email_consent_log
+        WHERE spa_id = %s
+          AND client_id = %s
+        ORDER BY created_at DESC
+        LIMIT 20
+    """, (spa_id, client_id))
+
+    email_logs = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "client_messaging_settings.html",
+        client=client,
+        sms_logs=sms_logs,
+        email_logs=email_logs
+    )
+
+
+
+
+
+
+
+
+
+
+
+#   ---------------------
+#
+#         BIRTHDAY SMS
+#
+#
+#   ----------------------
+
+
+
+@app.route("/birthday-sms/send-month", methods=["POST"])
+@login_required
+@spa_required
+def send_birthday_sms_month():
+    spa_id = current_spa_id()
+    spa_now = get_spa_now()
+    today = spa_now.date()
+    campaign_year = today.year
+    campaign_month = today.month
+
+    spa_name = get_spa_name(spa_id)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            c.client_id,
+            c.first_name,
+            c.phone,
+            c.birth_date
+        FROM clients c
+        WHERE c.spa_id = %s
+          AND c.active_client = TRUE
+          AND c.phone IS NOT NULL
+          AND c.phone <> ''
+          AND c.birth_date IS NOT NULL
+          AND EXTRACT(MONTH FROM c.birth_date) = %s
+          AND c.ok_to_text = TRUE
+          AND c.sms_opt_in = TRUE
+          AND c.sms_opt_out = FALSE
+
+        ORDER BY EXTRACT(DAY FROM c.birth_date), c.first_name
+    """, (spa_id, campaign_month))
+
+    birthday_clients = cur.fetchall()
+
+    template_text = get_sms_template(spa_id, "SMS_Birthday")
+
+    for client in birthday_clients:
+        client_id = client[0]
+        first_name = client[1]
+        phone = client[2]
+
+        context = {
+            "first_name": first_name,
+            "spa_name": spa_name
+        }
+
+        message = render_email_template(template_text, context)
+
+        print("WOULD SEND SMS TO:", phone, message)
+
+        #send_sms(phone, message)
+
+    cur.close()
+    conn.close()
+
+    flash(f"Found {len(birthday_clients)} birthday SMS recipients.", "info")
+    return redirect(url_for("birthday_offers_home"))
+
+
+
+#   -------------------------
+#
+#   SMS PREVIEW
+#
+#
+#   -------------------------
+
+
+@app.route("/sms/preview/<int:client_id>", methods=["GET", "POST"])
+@login_required
+@spa_required
+def sms_preview(client_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT 
+            client_id,  
+            first_name, 
+            last_name, 
+            phone,
+            ok_to_text,
+            sms_opt_in,
+            sms_opt_out
+        FROM clients
+        WHERE client_id = %s
+          AND spa_id = %s
+          AND active_client = TRUE
+    """, (client_id, spa_id))
+
+    client = cur.fetchone()
+
+    if not client:
+        cur.close()
+        conn.close()
+        flash("Client not found.", "error")
+        return redirect(url_for("clients_home"))
+
+    message_body = request.form.get("message_body", "").strip()
+    action = request.form.get("action")
+
+    if request.method == "POST" and action == "send" and message_body:
+
+        if not client or not client[3]:
+            cur.close()
+            conn.close()
+            flash("Invalid client or missing phone.", "error")
+            return redirect(request.referrer or url_for("clients_home"))
+
+
+
+        if not client[4] or not client[5] or client[6]:
+            cur.close()
+            conn.close()
+            flash("SMS not sent. This client is opted out of SMS messaging.", "error")
+            return redirect(url_for("client_messaging_settings", client_id=client_id))
+
+            # Optional extra safety if you later pass more fields
+            # if sms_opt_out:
+            #     skip
+
+
+        result = send_sms_message(client[3], message_body)
+
+        status = result.get("status") or "failed"
+
+        cur.execute("""
+            INSERT INTO sms_log (
+                spa_id,
+                client_id,
+                phone_number,
+                message_body,
+                sms_type,
+                status,
+                provider_message_id,
+                twilio_error_code,
+                twilio_error_message,                
+                sent_at
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s,
+                CASE WHEN %s = 'sent' THEN CURRENT_TIMESTAMP ELSE NULL END
+            )
+        """, (
+            spa_id,
+            client[0],
+            client[3],
+            message_body,
+            "manual",
+            status,
+            result.get("sid"),
+            result.get("error_code"),
+            result.get("error_message"),
+            status
+        ))
+
+        conn.commit()
+
+        cur.close()
+        conn.close()
+
+        if result.get("status") == "sent":
+            flash("SMS sent successfully.", "success")
+        elif result.get("status") == "logged":
+            flash("SMS logged. Sending is currently disabled.", "success")
+        else:
+            flash("SMS failed to send.", "error")
+
+        return redirect(url_for("sms_history_all"))
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "sms_preview.html",
+        client=client,
+        message_body=message_body
+    )
+
+
+#   ------------------------
+#
+#    SMS CONVERSATION VIEW
+#
+#
+#  
+#   ---------------------
+          
+
+@app.route("/sms/conversation/<int:client_id>", methods=["GET", "POST"])
+@login_required
+@spa_required
+def sms_conversation(client_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT client_id, first_name, last_name, phone
+        FROM clients
+        WHERE client_id = %s
+          AND spa_id = %s
+    """, (client_id, spa_id))
+
+    client = cur.fetchone()
+
+    if not client:
+        cur.close()
+        conn.close()
+        flash("Client not found.", "error")
+        return redirect(url_for("sms_history"))
+
+
+    if request.method == "POST":
+        message_body = request.form.get("message_body", "").strip()
+
+        if not message_body:
+            flash("Message cannot be blank.", "error")
+            return redirect(url_for("sms_conversation", client_id=client_id))
+
+        if not client[3]:
+           flash("Client does not have a phone number.", "error")
+           return redirect(url_for("sms_conversation", client_id=client_id))
+
+        try:
+            send_sms(client[3], message_body)
+
+            cur.execute("""
+                INSERT INTO sms_log (
+                    spa_id,
+                    client_id,
+                    phone_number,
+                    message_body,
+                    sms_type,
+                    status,
+                    created_at,
+                    sent_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
+            """, (
+                spa_id,
+                client_id,
+                client[3],
+                message_body,
+                "outbound",
+                "sent"
+            ))
+
+            conn.commit()
+            flash("SMS sent.", "success")
+
+        except Exception as e:
+            conn.rollback()
+            flash(f"SMS send failed: {e}", "error")
+
+        return redirect(url_for("sms_conversation", client_id=client_id))
+
+
+    cur.execute("""
+        SELECT
+            created_at,
+            sms_type,
+            message_body,
+            status,
+            twilio_error_code,
+            twilio_error_message
+        FROM sms_log
+        WHERE client_id = %s
+          AND spa_id = %s
+        ORDER BY created_at ASC
+    """, (client_id, spa_id))
+
+    messages = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "sms_conversation.html",
+        client=client,
+        messages=messages
+    )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#   ------------------------
+#
+#    SMS HISTORY CLIENT ID
+#
+#
+#   not a dupe of route below
+#   ---------------------
+
+
+@app.route("/sms/history/<int:client_id>")
+@login_required
+@spa_required
+def sms_history(client_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Get client
+    cur.execute("""
+        SELECT first_name, last_name
+        FROM clients
+        WHERE client_id = %s
+          AND spa_id = %s
+    """, (client_id, spa_id))
+    
+    client = cur.fetchone()
+
+    if not client:
+        cur.close()
+        conn.close()
+        flash("Client not found.", "error")
+        return redirect(url_for("clients_home"))
+
+    # Get SMS logs
+    cur.execute("""
+        SELECT
+            sl.created_at,               -- 0
+            sl.sms_type,                 -- 1
+            c.first_name,                -- 2
+            c.last_name,                 -- 3
+            sl.phone_number,             -- 4
+            sl.message_body,             -- 5
+            sl.status,                   -- 6
+            sl.status,                   -- 7
+            sl.twilio_error_code,        -- 8
+            sl.twilio_error_message,     -- 9
+            sl.sms_log_id                -- 10
+        FROM sms_log sl
+        JOIN clients c
+            ON sl.client_id = c.client_id
+           AND sl.spa_id = c.spa_id
+        WHERE sl.spa_id = %s
+          AND sl.client_id = %s
+        ORDER BY sl.created_at DESC
+    """, (spa_id, client_id))
+
+    sms_log = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "sms_history.html",
+        client=client,
+        sms_logs=sms_log
+    )
+
+
+
+
+
+
+
+#   ----------------------------
+#
+#     SMS HISTORY ALL
+#
+#   not a dupe of route above
+#   ----------------------------
+            
+
+
+
+
+@app.route("/sms/history")
+@login_required
+@spa_required
+def sms_history_all():
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            s.created_at,               -- 0
+            s.sms_type,                 -- 1
+            c.first_name,               -- 2
+            c.last_name,                -- 3
+            s.phone_number,             -- 4
+            s.message_body,             -- 5
+            s.status,                   -- 6
+            s.status,                   -- 7  
+            s.twilio_error_code,        -- 8
+            s.twilio_error_message,     -- 9
+            s.sms_log_id                -- 10
+        FROM sms_log s
+        LEFT JOIN clients c
+            ON s.client_id = c.client_id
+           AND s.spa_id = c.spa_id
+        WHERE s.spa_id = %s
+        ORDER BY s.created_at DESC
+    """, (spa_id,))
+
+    sms_log = cur.fetchall()
+
+    print("sms log count =", len(sms_log))
+    print("sms_log =", sms_log)
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "sms_history.html",
+        sms_logs=sms_log,
+        client=None
+    )
+
+
+ 
+
+#   ----------------------------
+#
+#     SMS LOGS
+#
+#
+#   ----------------------------
+
+
+@app.route("/sms_logs/<int:sms_log_id>/refresh", methods=["POST"])
+@login_required
+@spa_required
+def refresh_sms_status(sms_log_id):
+    spa_id = current_spa_id()
+
+    account_sid = os.getenv("TWILIO_ACCOUNT_SID")
+    auth_token = os.getenv("TWILIO_AUTH_TOKEN")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        # 🔥 THIS is the query you’re asking about
+        cur.execute("""
+            SELECT provider_message_id
+            FROM sms_log
+            WHERE sms_log_id = %s
+              AND spa_id = %s
+        """, (sms_log_id, spa_id))
+
+        log = cur.fetchone()
+
+        if not log:
+            flash("SMS log not found.", "error")
+            return redirect(url_for("sms_history_all"))
+
+        provider_message_id = log[0]
+
+        if not provider_message_id:
+            flash("No Twilio SID found for this message.", "error")
+            return redirect(url_for("sms_history_all"))
+
+        client = Client(account_sid, auth_token)
+
+        msg = client.messages(provider_message_id).fetch()
+
+        twilio_status = msg.status
+        twilio_error_code = str(msg.error_code) if msg.error_code else None
+        twilio_error_message = msg.error_message if msg.error_message else None
+
+        cur.execute("""
+            UPDATE sms_log
+            SET status = %s,
+                twilio_error_code = %s,
+                twilio_error_message = %s
+            WHERE sms_log_id = %s
+              AND spa_id = %s
+        """, (
+            twilio_status,
+            twilio_error_code,
+            twilio_error_message,
+            sms_log_id,
+            spa_id
+        ))
+
+        conn.commit()
+
+        flash(f"SMS updated: {twilio_status}", "success")
+
+    except Exception as e:
+        conn.rollback()
+        flash(f"Error refreshing SMS: {e}", "error")
+
+    finally:
+        cur.close()
+        conn.close()
+
+    return redirect(url_for("sms_history_all"))
+
+
+
+
+
+
+#   ---------------------------
+#
+#  SMS REFRESH HISTORY ALL
+#
+#
+#
+#   --------------------------
+
+@app.route("/sms/refresh-all", methods=["POST"])
+@login_required
+@spa_required
+def refresh_all_sms_statuses():
+    spa_id = current_spa_id()
+
+    account_sid = os.getenv("TWILIO_ACCOUNT_SID")
+    auth_token = os.getenv("TWILIO_AUTH_TOKEN")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    updated_count = 0
+    skipped_count = 0
+
+    try:
+        cur.execute("""
+            SELECT sms_log_id, provider_message_id
+            FROM sms_log
+            WHERE spa_id = %s
+              AND provider_message_id IS NOT NULL
+              AND status NOT IN ('delivered', 'failed', 'undelivered')
+            ORDER BY created_at DESC
+        """, (spa_id,))
+
+        logs = cur.fetchall()
+
+        if not logs:
+            flash("No SMS messages found that need refreshing.", "info")
+            return redirect(url_for("sms_history_all"))
+
+        client = Client(account_sid, auth_token)
+
+        for sms_log_id, provider_message_id in logs:
+            try:
+                msg = client.messages(provider_message_id).fetch()
+
+                twilio_status = msg.status
+                twilio_error_code = str(msg.error_code) if msg.error_code else None
+                twilio_error_message = msg.error_message if msg.error_message else None
+
+                cur.execute("""
+                    UPDATE sms_log
+                    SET status = %s,
+                        twilio_error_code = %s,
+                        twilio_error_message = %s
+                    WHERE sms_log_id = %s
+                      AND spa_id = %s
+                """, (
+                    twilio_status,
+                    twilio_error_code,
+                    twilio_error_message,
+                    sms_log_id,
+                    spa_id
+                ))
+
+                updated_count += 1
+
+            except Exception:
+                skipped_count += 1
+
+        conn.commit()
+
+        flash(
+            f"SMS statuses refreshed. Updated: {updated_count}, skipped: {skipped_count}.",
+            "success"
+        )
+
+    except Exception as e:
+        conn.rollback()
+        flash(f"Bulk SMS refresh failed: {e}", "error")
+
+    finally:
+        cur.close()
+        conn.close()
+
+    return redirect(url_for("sms_history_all"))
+
+
+
+
+
+#   ------------------------------------------------
+#
+#
+#           
+#     SMS RESEND
+#
+#   
+#       
+#   -----------------------------------------------
+
+
+@app.route("/sms/resend/<int:sms_log_id>", methods=["POST"])
+@login_required
+@spa_required
+def resend_sms(sms_log_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            sms_log_id,
+            client_id,
+            phone_number,
+            message_body,
+            sms_type
+        FROM sms_log
+        WHERE sms_log_id = %s
+          AND spa_id = %s
+    """, (sms_log_id, spa_id))
+
+    old_sms = cur.fetchone()
+
+    if not old_sms:
+        cur.close()
+        conn.close()
+        flash("SMS log not found.", "error")
+        return redirect(url_for("sms_history_all"))
+
+    old_sms_log_id, client_id, phone_number, message_body, sms_type = old_sms
+
+    # Verify client still allows SMS
+    cur.execute("""
+        SELECT ok_to_text, sms_opt_in, sms_opt_out
+        FROM clients
+        WHERE client_id = %s
+          AND spa_id = %s
+          AND active_client = TRUE
+    """, (client_id, spa_id))
+
+    client = cur.fetchone()
+
+    if not client:
+        cur.close()
+        conn.close()
+        flash("Client not found or inactive.", "error")
+        return redirect(url_for("sms_history_all"))
+
+    ok_to_text, sms_opt_in, sms_opt_out = client
+
+    if not ok_to_text or not sms_opt_in or sms_opt_out:
+        cur.close()
+        conn.close()
+        flash("SMS not resent. Client is not opted in for SMS.", "error")
+        return redirect(url_for("sms_history", client_id=client_id))
+
+    try:
+        message = send_sms(phone_number, message_body)
+
+        cur.execute("""
+            INSERT INTO sms_log (
+                spa_id,
+                client_id,
+                phone_number,
+                message_body,
+                sms_type,
+                status,
+                provider_message_id,
+                created_at
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+        """, (
+            spa_id,
+            client_id,
+            phone_number,
+            message_body,
+            f"{sms_type or 'manual'}_resend",
+            message.status,
+            message.sid
+        ))
+
+        conn.commit()
+        flash("SMS resent successfully.", "success")
+
+    except Exception as e:
+        conn.rollback()
+        flash(f"SMS resend failed: {e}", "error")
+
+    finally:
+        cur.close()
+        conn.close()
+
+    return redirect(url_for("sms_history", client_id=client_id))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 #   ------------------------------------------------
@@ -2329,10 +3531,10 @@ def get_loan_contribution_rows(spa_id, start_date=None, end_date=None):
 #     EMAIL CAMPAIGNS
 #
 #
-# >>>>>>>>>>>>>>>>delete afte all works
+#
 #   -----------------------------------------------
 
-#def get_birthday_template(spa_id):
+def get_birthday_template(spa_id):
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -2340,36 +3542,30 @@ def get_loan_contribution_rows(spa_id, start_date=None, end_date=None):
         cur.execute("""
             SELECT subject_line, body_text
             FROM email_templates
-            WHERE spa_id = %s
+            WHERE spa_id = %s  
               AND template_type = 'Birthday'
               AND is_active = TRUE
             ORDER BY email_template_id DESC
             LIMIT 1
         """, (spa_id,))
 
-        template = cur.fetchone()
-        return template
+        return cur.fetchone()
 
     finally:
         cur.close()
         conn.close()
 
 
-
-
-
-
-def render_email_template(template_text, context):
+def render_email_template(template_text, context):  
     if not template_text:
         return ""
 
     rendered = template_text
+
     for key, value in context.items():
         rendered = rendered.replace(f"{{{key}}}", str(value or ""))
 
     return rendered
-
-
 
 
 
@@ -2386,7 +3582,7 @@ def render_email_template(template_text, context):
 
 
 
-#def build_birthday_email(first_name):
+def build_birthday_email(first_name):
     subject = "Happy Birthday from Your Spa!"
     body = (
         f"Hi {first_name},\n\n"
@@ -2418,7 +3614,6 @@ def render_email_template(template_text, context):
 @spa_required
 def send_birthday_emails_month():
 
-
     spa_id = current_spa_id()
     spa_now = get_spa_now()
     today = spa_now.date()
@@ -2430,107 +3625,97 @@ def send_birthday_emails_month():
     conn = get_db_connection()
     cur = conn.cursor()
 
-    try:
-        cur.execute("""
-            SELECT
-                c.client_id,
-                c.first_name,
-                c.email,
-                c.birth_date
-            FROM clients c
-            WHERE c.spa_id = %s
-              AND c.active_client = TRUE
-              AND c.email IS NOT NULL
-              AND c.email <> ''
-              AND c.birth_date IS NOT NULL
-              AND EXTRACT(MONTH FROM c.birth_date) = %s
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM birthday_email_log bel
-                  WHERE bel.spa_id = c.spa_id
-                    AND bel.client_id = c.client_id
-                    AND bel.campaign_year = %s
-              )
-            ORDER BY EXTRACT(DAY FROM c.birth_date), c.first_name
-        """, (spa_id, campaign_month, campaign_year))
+    # 🔍 Get eligible clients
+    cur.execute("""
+        SELECT
+            c.client_id,
+            c.first_name,
+            c.email,
+            c.birth_date
+        FROM clients c
+        WHERE c.spa_id = %s
+          AND c.active_client = TRUE
+          AND c.email IS NOT NULL
+          AND c.email <> ''
+          AND c.birth_date IS NOT NULL
+          AND EXTRACT(MONTH FROM c.birth_date) = %s
+          AND NOT EXISTS (
+              SELECT 1
+              FROM birthday_email_log bel
+              WHERE bel.spa_id = c.spa_id
+                AND bel.client_id = c.client_id
+                AND bel.campaign_year = %s
+          )
+        ORDER BY EXTRACT(DAY FROM c.birth_date), c.first_name
+    """, (spa_id, campaign_month, campaign_year))
 
-        birthday_clients = cur.fetchall()
-        print("SENDABLE MONTH CLIENTS:", birthday_clients)
+    birthday_clients = cur.fetchall()
+    print("SENDABLE MONTH CLIENTS:", birthday_clients)
 
-        template = get_email_template_by_type(spa_id, "Birthday")
+    # 🎯 Get template
+    template = get_birthday_template(spa_id)
 
-        if template:
-            template_subject, template_body = template
-        else:
-            template_subject = "{spa_name}, wishing you a Very Happy Birthday!"
-            template_body = (
-                "Hi {first_name},\n\n"
-                "Happy Birthday from all of us at {spa_name}.\n\n"
-                "We wanted to wish you a wonderful birthday month and thank you for being a valued client.\n\n"
-                "We have a special birthday offer available for you this month.\n\n"
-                "Warmly,\n"
-                "{spa_name}"
+    if template:
+        template_subject, template_body = template
+    else:
+        template_subject, template_body = build_birthday_email("{first_name}")
+
+    sent_count = 0
+    failed_count = 0
+
+    # 📧 Send emails
+    for client_id, first_name, email, birth_date in birthday_clients:
+        try:
+            context = {
+                "first_name": first_name,
+                "spa_name": spa_name,
+                "birth_month": birth_date.strftime("%B") if birth_date else "",
+                "expiration_date": "May 31, 2026" # or calculate dynamically
+            }
+
+            subject = render_email_template(template_subject, context)
+            body = render_email_template(template_body, context)
+
+            response = send_email(
+                to=email,
+                subject=subject,
+                text=body
             )
 
-        sent_count = 0
-        failed_count = 0
+            if response.status_code == 200:
+                cur.execute("""
+                    INSERT INTO birthday_email_log (
+                        spa_id,
+                        client_id,
+                        campaign_year
+                    )
+                    VALUES (%s, %s, %s)
+                """, (spa_id, client_id, campaign_year))
 
-        for client_id, first_name, email, birth_date in birthday_clients:
-            try:
-                context = {
-                    "first_name": first_name,
-                    "spa_name": spa_name,
-                    "birth_month": birth_date.strftime("%B") if birth_date else ""
-                }
-
-                subject = render_email_template(template_subject, context)
-                body = render_email_template(template_body, context)
-
-                response = send_email(
-                    to=email,
-                    subject=subject,
-                    text=body
-                )
-
-                if response.status_code == 200:
-                    cur.execute("""
-                        INSERT INTO birthday_email_log (
-                            spa_id,
-                            client_id,
-                            campaign_year
-                        )
-                        VALUES (%s, %s, %s)
-                    """, (spa_id, client_id, campaign_year))
-                    sent_count += 1
-                else:
-                    print("BIRTHDAY EMAIL FAILED:", response.status_code, response.text)
-                    failed_count += 1
-
-            except Exception as email_error:
-                print("BIRTHDAY EMAIL ERROR:", str(email_error))
+                sent_count += 1
+            else:
+                print("BIRTHDAY EMAIL FAILED:", response.status_code, response.text)
                 failed_count += 1
 
-        conn.commit()
+        except Exception as email_error:
+            print("BIRTHDAY EMAIL ERROR:", str(email_error))
+            failed_count += 1
 
-        if sent_count == 0:
-            flash("No birthday emails to send for this month.", "info")
-        elif failed_count == 0:
-            flash(f"Birthday month emails sent: {sent_count}.", "success")
-        else:
-            flash(f"Birthday month emails sent: {sent_count}. Failed: {failed_count}.", "warning")
+    # 💾 Commit AFTER loop
+    conn.commit()
 
-        return redirect(url_for("birthday_offers_home"))
+    # 🧾 User feedback
+    if sent_count == 0:
+        flash("No birthday emails to send for this month.", "info")
+    elif failed_count == 0:
+        flash(f"Birthday month emails sent: {sent_count}.", "success")
+    else:
+        flash(f"Birthday month emails sent: {sent_count}. Failed: {failed_count}.", "warning")
 
-    except Exception as db_error:
-        conn.rollback()
-        print("BIRTHDAY MONTH SEND ERROR:", str(db_error))
-        flash("There was a problem sending birthday month emails.", "error")
-        return redirect(url_for("birthday_offers_home"))
+    cur.close()
+    conn.close()
 
-    finally:
-        cur.close()
-        conn.close()
-
+    return redirect(url_for("birthday_offers_home"))
 
 
 
@@ -2834,7 +4019,8 @@ def activate_email_template(email_template_id):
                 updated_at = CURRENT_TIMESTAMP
             WHERE spa_id = %s
               AND template_type = %s
-        """, (spa_id, template_type))
+              AND email_template_id != %s
+        """, (spa_id, template_type, email_template_id))
 
         cur.execute("""
             UPDATE email_templates
@@ -2871,36 +4057,27 @@ def activate_email_template(email_template_id):
 #   ---------------------------------
 
 
-
-@app.route("/email-templates/delete/<int:email_template_id>", methods=["POST"])
+@app.route("/email-templates/delete/<int:template_id>", methods=["POST"])
 @login_required
 @spa_required
-def delete_email_template(email_template_id):
-
+def delete_email_template(template_id):
     spa_id = current_spa_id()
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    try:
-        cur.execute("""
-            DELETE FROM email_templates
-            WHERE email_template_id = %s
-              AND spa_id = %s
-        """, (email_template_id, spa_id))
+    # Make sure template belongs to this spa
+    cur.execute("""
+        DELETE FROM email_templates
+        WHERE email_template_id = %s
+          AND spa_id = %s
+    """, (template_id, spa_id))
 
-        conn.commit()
-        flash("Template deleted.", "success")
+    conn.commit()
+    cur.close()
+    conn.close()
 
-    except Exception as e:
-        conn.rollback()
-        print("DELETE TEMPLATE ERROR:", str(e))
-        flash("Could not delete template.", "error")
-
-    finally:
-        cur.close()
-        conn.close()
-
+    flash("Template deleted successfully.", "success")
     return redirect(url_for("email_templates_admin"))
 
 
@@ -3824,7 +5001,7 @@ def add_email_template():
         flash("Template added successfully.", "success")
         return redirect(url_for("email_templates_admin"))
 
-    return render_template("add_email_template.html")
+    return render_template("email_template_form.html")
 
 
 
@@ -3908,8 +5085,874 @@ def edit_email_template(template_id):
 
 
 
+#   --------------------------------------------------
+#
+#             >>>>>  INVENTORY   <<<<<<<<<<<<<<<
+#
+#
+#
+#
+#
+#
+#
+#   --------------------------------------------------
 
 
+@app.route("/inventory")
+@login_required
+@spa_required
+def inventory_home():
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            p.product_id,
+            p.sku,
+            p.product_name,
+            p.vendor_company,
+            p.product_category,
+            p.product_sub_category,
+            p.wholesale_cost,
+            p.suggested_retail,
+            p.expire_date,
+
+            COALESCE(SUM(CASE WHEN m.movement_type = 'added' THEN m.quantity ELSE 0 END), 0) AS total_added,
+            COALESCE(SUM(CASE WHEN m.movement_type = 'sold' THEN m.quantity ELSE 0 END), 0) AS total_sold,
+
+            COALESCE(SUM(
+                CASE
+                    WHEN m.movement_type = 'added' THEN m.quantity
+                    WHEN m.movement_type IN ('sold', 'expired', 'damaged') THEN -m.quantity
+                    WHEN m.movement_type = 'returned' THEN m.quantity
+                    WHEN m.movement_type = 'adjustment' THEN m.quantity
+                    ELSE 0
+                END
+            ), 0) AS total_in_stock,
+
+            COALESCE(SUM(
+                CASE
+                    WHEN m.movement_type = 'added' THEN m.quantity
+                    WHEN m.movement_type IN ('sold', 'expired', 'damaged') THEN -m.quantity
+                    WHEN m.movement_type = 'returned' THEN m.quantity
+                    WHEN m.movement_type = 'adjustment' THEN m.quantity
+                    ELSE 0
+                END
+            ), 0) * p.wholesale_cost AS inventory_value
+
+        FROM inventory_products p
+        LEFT JOIN inventory_movements m
+            ON p.product_id = m.product_id
+           AND m.spa_id = %s
+        WHERE p.spa_id = %s
+          AND p.active = TRUE
+        GROUP BY p.product_id
+        ORDER BY p.product_name
+    """, (spa_id, spa_id))
+
+    inventory_rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "inventory_home.html",
+        inventory_rows=inventory_rows
+    )
+
+
+
+
+
+
+
+
+            
+
+#   --------------------------------------
+#     >>  INVENTORY ADD
+#
+#   --------------------------------------
+
+
+@app.route("/inventory/add", methods=["GET", "POST"])
+@login_required
+@spa_required
+def add_inventory_product():
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    if request.method == "POST":
+
+        sku = request.form.get("sku", "").strip()
+        product_name = request.form.get("product_name", "").strip()
+        vendor_company = request.form.get("vendor_company", "").strip()
+        product_category = request.form.get("product_category", "").strip()
+        product_sub_category = request.form.get("product_sub_category", "").strip()
+
+        wholesale_cost = request.form.get("wholesale_cost") or 0
+        suggested_retail = request.form.get("suggested_retail") or 0
+
+        expire_date = request.form.get("expire_date") or None
+        note = request.form.get("note", "").strip()
+
+        initial_quantity = request.form.get("initial_quantity") or 0
+
+        if not sku:
+            flash("SKU is required.", "error")
+            return redirect(url_for("add_inventory_product"))
+
+        if not product_name:
+            flash("Product name is required.", "error")
+            return redirect(url_for("add_inventory_product"))
+
+        try:
+
+            cur.execute("""
+                SELECT product_id
+                FROM inventory_products
+                WHERE spa_id = %s
+                  AND sku = %s
+            """, (spa_id, sku))
+
+            existing = cur.fetchone()
+
+            if existing:
+                flash("SKU already exists.", "error")
+                cur.close()
+                conn.close()
+                return redirect(url_for("add_inventory_product"))
+
+            cur.execute("""
+                INSERT INTO inventory_products (
+                    spa_id,
+                    sku,
+                    expire_date,
+                    vendor_company,
+                    product_name,
+                    product_category,
+                    product_sub_category,
+                    wholesale_cost,
+                    suggested_retail,
+                    note
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING product_id
+            """, (
+                spa_id,
+                sku,
+                expire_date,
+                vendor_company if vendor_company else None,
+                product_name,
+                product_category if product_category else None,
+                product_sub_category if product_sub_category else None,
+                wholesale_cost,
+                suggested_retail,
+                note if note else None
+            ))
+
+            product_id = cur.fetchone()[0]
+
+            if int(initial_quantity) > 0:
+
+                cur.execute("""
+                    INSERT INTO inventory_movements (
+                        spa_id,
+                        product_id,
+                        movement_type,
+                        quantity,
+                        note
+                    )
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (
+                    spa_id,
+                    product_id,
+                    "added",
+                    initial_quantity,
+                    "Initial inventory entry"
+                ))
+
+            conn.commit()
+
+            flash("Inventory product added successfully.", "success")
+
+            return redirect(url_for("inventory_home"))
+
+        except Exception as e:
+            conn.rollback()
+            flash(f"Error adding inventory product: {e}", "error")
+
+        finally:
+            cur.close()
+            conn.close()
+
+    cur.close()
+    conn.close()
+
+    return render_template("add_inventory_product.html")
+
+
+
+
+
+
+#   --------------------------------------
+#       INVENTORY ADD STOCK
+#
+#   --------------------------------------   
+
+
+@app.route("/inventory/add_stock/<int:product_id>", methods=["GET", "POST"])
+@login_required
+@spa_required
+def add_inventory_stock(product_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT product_id, sku, product_name, vendor_company
+        FROM inventory_products
+        WHERE product_id = %s
+          AND spa_id = %s
+          AND active = TRUE
+    """, (product_id, spa_id))
+
+    product = cur.fetchone()
+
+    if not product:
+        cur.close()
+        conn.close()
+        flash("Inventory product not found.", "error")
+        return redirect(url_for("inventory_home"))
+
+    if request.method == "POST":
+        quantity = request.form.get("quantity") or 0
+        note = request.form.get("note", "").strip()
+
+        try:
+            quantity = int(quantity)
+
+            if quantity <= 0:
+                flash("Quantity must be greater than zero.", "error")
+                return redirect(url_for("add_inventory_stock", product_id=product_id))
+
+            cur.execute("""
+                INSERT INTO inventory_movements (
+                    spa_id,
+                    product_id,
+                    movement_type,
+                    quantity,
+                    note
+                )
+                VALUES (%s, %s, %s, %s, %s)
+            """, (
+                spa_id,
+                product_id,
+                "added",
+                quantity,
+                note if note else "Stock added"
+            ))
+
+            conn.commit()
+            flash("Stock added successfully.", "success")
+
+            return redirect(url_for("inventory_home"))
+
+        except Exception as e:
+            conn.rollback()
+            flash(f"Error adding stock: {e}", "error")
+
+        finally:
+            cur.close()
+            conn.close()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "add_inventory_stock.html",
+        product=product
+    )
+
+
+
+
+
+
+
+
+
+#   --------------------------------------
+#         INVENTORY SOLD    
+#
+#   --------------------------------------   
+
+
+@app.route("/inventory/sold/<int:product_id>", methods=["GET", "POST"])
+@login_required
+@spa_required
+def record_inventory_sold(product_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT product_id, sku, product_name, vendor_company
+        FROM inventory_products
+        WHERE product_id = %s
+          AND spa_id = %s
+          AND active = TRUE
+    """, (product_id, spa_id))
+
+    product = cur.fetchone()
+
+    if not product:
+        cur.close()
+        conn.close()
+        flash("Inventory product not found.", "error")
+        return redirect(url_for("inventory_home"))
+
+    if request.method == "POST":
+        quantity = request.form.get("quantity") or 0
+        note = request.form.get("note", "").strip()
+
+        try:
+            quantity = int(quantity)
+
+            if quantity <= 0:
+                flash("Quantity must be greater than zero.", "error")
+                return redirect(url_for("record_inventory_sold", product_id=product_id))
+
+            cur.execute("""
+                INSERT INTO inventory_movements (
+                    spa_id,
+                    product_id,
+                    movement_type,
+                    quantity,
+                    note
+                )
+                VALUES (%s, %s, %s, %s, %s)
+            """, (
+                spa_id,
+                product_id,
+                "sold",
+                quantity,
+                note if note else "Inventory sold"
+            ))
+
+            conn.commit()
+            flash("Inventory sale recorded.", "success")
+            return redirect(url_for("inventory_home"))
+
+        except Exception as e:
+            conn.rollback()
+            flash(f"Error recording sale: {e}", "error")
+
+        finally:
+            cur.close()
+            conn.close()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "record_inventory_sold.html",
+        product=product
+    )
+
+
+
+
+
+
+
+
+
+
+#   --------------------------------------
+#      INVENTORY ADJUSTMENTS
+#
+#   --------------------------------------   
+
+
+@app.route("/inventory/adjust/<int:product_id>", methods=["GET", "POST"])
+@login_required
+@spa_required
+def adjust_inventory_stock(product_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT product_id, sku, product_name, vendor_company
+        FROM inventory_products
+        WHERE product_id = %s
+          AND spa_id = %s
+          AND active = TRUE
+    """, (product_id, spa_id))
+
+    product = cur.fetchone()
+
+    if not product:
+        cur.close()
+        conn.close()
+        flash("Inventory product not found.", "error")
+        return redirect(url_for("inventory_home"))
+
+    if request.method == "POST":
+        movement_type = request.form.get("movement_type", "").strip()
+        quantity = request.form.get("quantity") or 0
+        note = request.form.get("note", "").strip()
+
+        allowed_types = ["adjustment", "expired", "damaged", "returned"]
+
+        if movement_type not in allowed_types:
+            flash("Invalid adjustment type.", "error")
+            return redirect(url_for("adjust_inventory_stock", product_id=product_id))
+
+        try:
+            quantity = int(quantity)
+
+            if quantity <= 0:
+                flash("Quantity must be greater than zero.", "error")
+                return redirect(url_for("adjust_inventory_stock", product_id=product_id))
+
+            cur.execute("""
+                INSERT INTO inventory_movements (
+                    spa_id,
+                    product_id,
+                    movement_type,
+                    quantity,
+                    note
+                )
+                VALUES (%s, %s, %s, %s, %s)
+            """, (
+                spa_id,
+                product_id,
+                movement_type,
+                quantity,
+                note if note else f"Inventory {movement_type}"
+            ))
+
+            conn.commit()
+            flash("Inventory adjustment recorded.", "success")
+            return redirect(url_for("inventory_home"))
+
+        except Exception as e:
+            conn.rollback()
+            flash(f"Error recording adjustment: {e}", "error")
+
+        finally:
+            cur.close()
+            conn.close()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "adjust_inventory_stock.html",
+        product=product
+    )
+
+
+
+
+
+
+
+
+#   --------------------------------------
+#      INVENTORY DETAILS
+#   
+#   --------------------------------------
+
+
+@app.route("/inventory/product/<int:product_id>")
+@login_required
+@spa_required
+def inventory_product_detail(product_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            product_id,
+            sku,
+            product_name,
+            vendor_company,
+            product_category,
+            product_sub_category,
+            wholesale_cost,
+            suggested_retail,
+            expire_date,
+            note,
+            date_added
+        FROM inventory_products
+        WHERE product_id = %s
+          AND spa_id = %s
+          AND active = TRUE
+    """, (product_id, spa_id))
+
+    product = cur.fetchone()
+
+    if not product:
+        cur.close()
+        conn.close()
+        flash("Inventory product not found.", "error")
+        return redirect(url_for("inventory_home"))
+
+    cur.execute("""
+        SELECT
+            COALESCE(SUM(CASE WHEN movement_type = 'added' THEN quantity ELSE 0 END), 0) AS total_added,
+            COALESCE(SUM(CASE WHEN movement_type = 'sold' THEN quantity ELSE 0 END), 0) AS total_sold,
+            COALESCE(SUM(CASE WHEN movement_type = 'expired' THEN quantity ELSE 0 END), 0) AS total_expired,
+            COALESCE(SUM(CASE WHEN movement_type = 'damaged' THEN quantity ELSE 0 END), 0) AS total_damaged,
+            COALESCE(SUM(CASE WHEN movement_type = 'returned' THEN quantity ELSE 0 END), 0) AS total_returned,
+            COALESCE(SUM(CASE WHEN movement_type = 'adjustment' THEN quantity ELSE 0 END), 0) AS total_adjusted,
+
+            COALESCE(SUM(
+                CASE
+                    WHEN movement_type = 'added' THEN quantity
+                    WHEN movement_type IN ('sold', 'expired', 'damaged') THEN -quantity
+                    WHEN movement_type IN ('returned', 'adjustment') THEN quantity
+                    ELSE 0
+                END
+            ), 0) AS total_in_stock
+        FROM inventory_movements
+        WHERE spa_id = %s
+          AND product_id = %s
+    """, (spa_id, product_id))
+
+    totals = cur.fetchone()
+
+    cur.execute("""
+        SELECT
+            movement_date,
+            movement_type,
+            quantity,
+            note
+        FROM inventory_movements
+        WHERE spa_id = %s
+          AND product_id = %s
+        ORDER BY movement_date DESC, movement_id DESC
+    """, (spa_id, product_id))
+
+    movement_rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "inventory_product_detail.html",
+        product=product,
+        totals=totals,
+        movement_rows=movement_rows
+    )
+
+
+
+
+
+
+
+
+#   --------------------------------------
+#         EDIT INVENTORY  PRODUCT   
+#   
+#   --------------------------------------
+
+
+@app.route("/inventory/edit/<int:product_id>", methods=["GET", "POST"])
+@login_required
+@spa_required
+def edit_inventory_product(product_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            product_id,
+            sku,
+            expire_date,
+            vendor_company,
+            product_name,
+            product_category,
+            product_sub_category,
+            wholesale_cost,
+            suggested_retail,
+            note,
+            active
+        FROM inventory_products
+        WHERE product_id = %s
+          AND spa_id = %s
+    """, (product_id, spa_id))
+
+    product = cur.fetchone()
+
+    if not product:
+        cur.close()
+        conn.close()
+        flash("Inventory product not found.", "error")
+        return redirect(url_for("inventory_home"))
+
+    if request.method == "POST":
+        sku = request.form.get("sku", "").strip()
+        product_name = request.form.get("product_name", "").strip()
+        vendor_company = request.form.get("vendor_company", "").strip()
+        product_category = request.form.get("product_category", "").strip()
+        product_sub_category = request.form.get("product_sub_category", "").strip()
+        wholesale_cost = request.form.get("wholesale_cost") or 0
+        suggested_retail = request.form.get("suggested_retail") or 0
+        expire_date = request.form.get("expire_date") or None
+        note = request.form.get("note", "").strip()
+        active = True if request.form.get("active") == "on" else False
+
+        if not sku:
+            flash("SKU is required.", "error")
+            return redirect(url_for("edit_inventory_product", product_id=product_id))
+
+        if not product_name:
+            flash("Product name is required.", "error")
+            return redirect(url_for("edit_inventory_product", product_id=product_id))
+
+        try:
+            cur.execute("""
+                UPDATE inventory_products
+                SET
+                    sku = %s,
+                    expire_date = %s,
+                    vendor_company = %s,
+                    product_name = %s,
+                    product_category = %s,
+                    product_sub_category = %s,
+                    wholesale_cost = %s,
+                    suggested_retail = %s,
+                    note = %s,
+                    active = %s
+                WHERE product_id = %s
+                  AND spa_id = %s
+            """, (
+                sku,
+                expire_date,
+                vendor_company if vendor_company else None,
+                product_name,
+                product_category if product_category else None,
+                product_sub_category if product_sub_category else None,
+                wholesale_cost,
+                suggested_retail,
+                note if note else None,
+                active,
+                product_id,
+                spa_id
+            ))
+
+            conn.commit()
+            flash("Inventory product updated successfully.", "success")
+            return redirect(url_for("inventory_product_detail", product_id=product_id))
+
+        except Exception as e:
+            conn.rollback()
+            flash(f"Error updating inventory product: {e}", "error")
+
+        finally:
+            cur.close()
+            conn.close()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "edit_inventory_product.html",
+        product=product
+    )
+
+
+
+
+
+
+
+
+
+
+
+#   --------------------------------------
+#   INVENTORY SCAN
+#   
+#   --------------------------------------
+
+
+
+@app.route("/inventory/scan", methods=["GET", "POST"])
+@login_required
+@spa_required
+def inventory_scan():
+    spa_id = current_spa_id()
+
+    if request.method == "POST":
+
+        if "barcode_image" not in request.files:
+            flash("No image uploaded.", "error")
+            return redirect(url_for("inventory_scan"))
+
+        file = request.files["barcode_image"]
+
+        if file.filename == "":
+            flash("No image selected.", "error")
+            return redirect(url_for("inventory_scan"))
+
+        try:
+            from pyzbar.pyzbar import decode
+            from PIL import Image
+            import io
+
+            image = Image.open(io.BytesIO(file.read()))
+
+            decoded_objects = decode(image)
+
+            if not decoded_objects:
+                flash("No barcode detected.", "error")
+                return redirect(url_for("inventory_scan"))
+
+            scanned_sku = decoded_objects[0].data.decode("utf-8").strip()
+
+            conn = get_db_connection()
+            cur = conn.cursor()
+
+            cur.execute("""
+                SELECT product_id
+                FROM inventory_products
+                WHERE spa_id = %s
+                  AND sku = %s
+                  AND active = TRUE
+            """, (spa_id, scanned_sku))
+
+            product = cur.fetchone()
+
+            cur.close()
+            conn.close()
+
+            if product:
+                flash(f"Product found: {scanned_sku}", "success")
+                return redirect(url_for(
+                    "inventory_product_detail",
+                    product_id=product[0]
+                ))
+
+            else:
+                flash(f"SKU not found: {scanned_sku}", "warning")
+                return redirect(url_for(
+                    "add_inventory_product"
+                ) + f"?sku={scanned_sku}")
+
+        except Exception as e:
+            flash(f"Scanner error: {e}", "error")
+            return redirect(url_for("inventory_scan"))
+
+    return render_template("inventory_scan.html")
+
+
+
+
+
+
+
+
+
+#   --------------------------------------
+#     DEACTIVATE PRODUCT
+#   
+#   --------------------------------------
+
+
+@app.route("/inventory/deactivate/<int:product_id>", methods=["POST"])
+@login_required
+@spa_required
+def deactivate_inventory_product(product_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE inventory_products
+        SET active = FALSE
+        WHERE product_id = %s
+          AND spa_id = %s
+    """, (product_id, spa_id))
+
+    conn.commit()
+
+    cur.close()
+    conn.close()
+
+    flash("Inventory product deactivated.", "success")
+    return redirect(url_for("inventory_home"))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#   --------------------------------------
+#   
+#   
+#   --------------------------------------
+
+
+
+
+
+
+
+
+#   --------------------------------------
+#   
+#   
+#   --------------------------------------
+
+
+
+
+
+
+#   --------------------------------------
+#   
+#   
+#   --------------------------------------
+
+
+
+
+
+
+
+
+#   --------------------------------------
+#    
+#
+#   --------------------------------------   
 
 
 
@@ -4946,6 +6989,13 @@ def client_management():
                       AND a2.appointment_date >= %s
                 ) AS next_visit_date
 
+                c.ok_to_text,
+                c.sms_opt_in,
+                c.sms_opt_out,
+                c.ok_to_email,
+                c.email_opt_in,
+                c.email_opt_out
+
             FROM clients c
             WHERE c.spa_id = %s
               AND c.active_client = TRUE
@@ -4990,7 +7040,14 @@ def client_management():
                     WHERE a2.client_id = c.client_id
                       AND a2.spa_id = c.spa_id
                       AND a2.appointment_date >= %s
-                ) AS next_visit_date
+                ) AS next_visit_date,
+
+                c.ok_to_text,
+                c.sms_opt_in,
+                c.sms_opt_out,
+                c.ok_to_email,
+                c.email_opt_in,
+                c.email_opt_out
 
             FROM clients c
             WHERE c.spa_id = %s
@@ -6051,7 +8108,19 @@ def clients():
     print("birthday_clients =", birthday_clients)
 
     cur.execute("""
-        SELECT client_id, first_name, last_name, phone, email, birth_date
+        SELECT 
+            client_id, 
+            first_name, 
+            last_name, 
+            phone, 
+            email, 
+            birth_date,
+            ok_to_text,
+            sms_opt_in,
+            sms_opt_out,
+            ok_to_email,
+            email_opt_in,
+            email_opt_out
         FROM clients
         WHERE spa_id = %s
         ORDER BY last_name, first_name
@@ -7428,57 +9497,102 @@ def employee_compensation_report():
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Total tips earned
+    # Summary totals from income
     cur.execute("""
-        SELECT COALESCE(SUM(tip_amount), 0.00)
+        SELECT
+            COALESCE(SUM(service_amount), 0.00) AS services_billed,
+            COALESCE(SUM(tip_amount), 0.00) AS tips_earned
         FROM income
         WHERE spa_id = %s
           AND income_date BETWEEN %s AND %s
     """, (spa_id, start_date, end_date))
-    tips_earned_total = cur.fetchone()[0]
 
-    # Total compensation paid
+    income_totals = cur.fetchone()
+    services_billed_total = income_totals[0]
+    tips_earned_total = income_totals[1]
+
+    # Summary totals from compensation payments
     cur.execute("""
-        SELECT COALESCE(SUM(ecl.amount), 0.00)
+        SELECT
+            COALESCE(SUM(CASE WHEN ct.compensation_type_name = 'Tip Payout' THEN ecl.amount ELSE 0 END), 0.00) AS tip_payouts_paid,
+            COALESCE(SUM(CASE WHEN ct.compensation_type_name IN ('Draw', 'Owner Draw') THEN ecl.amount ELSE 0 END), 0.00) AS owner_draws_paid,
+            COALESCE(SUM(CASE WHEN ct.compensation_type_name = 'Bonus' THEN ecl.amount ELSE 0 END), 0.00) AS bonus_paid,
+            COALESCE(SUM(CASE WHEN ct.compensation_type_name = 'Extra Pay' THEN ecl.amount ELSE 0 END), 0.00) AS extra_pay_paid,
+            COALESCE(SUM(ecl.amount), 0.00) AS total_comp_paid
         FROM employee_compensation ec
         JOIN employee_compensation_lines ecl
             ON ec.compensation_id = ecl.compensation_id
+        JOIN compensation_types ct
+            ON ecl.compensation_type_id = ct.compensation_type_id
         WHERE ec.spa_id = %s
           AND ec.compensation_date BETWEEN %s AND %s
     """, (spa_id, start_date, end_date))
-    total_comp_paid = cur.fetchone()[0]
 
-    outstanding_tips = tips_earned_total - total_comp_paid
+    comp_totals = cur.fetchone()
+    tip_payouts_paid_total = comp_totals[0]
+    owner_draws_paid_total = comp_totals[1]
+    bonus_paid_total = comp_totals[2]
+    extra_pay_paid_total = comp_totals[3]
+    total_comp_paid = comp_totals[4]
+
+    outstanding_tips = tips_earned_total - tip_payouts_paid_total
 
     # Employee summary
     cur.execute("""
         SELECT
             e.employee_id,
             e.first_name || ' ' || e.last_name AS employee_name,
+
+            COALESCE(inc.services_billed, 0.00) AS services_billed,
             COALESCE(inc.tips_earned, 0.00) AS tips_earned,
-            COALESCE(comp.total_comp_paid, 0.00) AS total_comp_paid,
-            COALESCE(inc.tips_earned, 0.00) - COALESCE(comp.total_comp_paid, 0.00) AS outstanding_balance
+
+            0.00 AS commission_earned,
+
+            COALESCE(comp.tip_payouts_paid, 0.00) AS tip_payouts_paid,
+            COALESCE(comp.owner_draws_paid, 0.00) AS owner_draws_paid,
+            COALESCE(comp.bonus_paid, 0.00) AS bonus_paid,
+            COALESCE(comp.extra_pay_paid, 0.00) AS extra_pay_paid,
+            COALESCE(comp.total_comp_paid, 0.00) AS total_paid,
+
+            COALESCE(inc.tips_earned, 0.00) - COALESCE(comp.tip_payouts_paid, 0.00) AS outstanding_tips,
+
+            (
+                0.00
+                + COALESCE(inc.tips_earned, 0.00)
+                - COALESCE(comp.tip_payouts_paid, 0.00)
+            ) AS net_balance
+
         FROM employees e
+
         LEFT JOIN (
             SELECT
                 employee_id,
+                COALESCE(SUM(service_amount), 0.00) AS services_billed,
                 COALESCE(SUM(tip_amount), 0.00) AS tips_earned
             FROM income
             WHERE spa_id = %s
               AND income_date BETWEEN %s AND %s
             GROUP BY employee_id
         ) inc ON e.employee_id = inc.employee_id
+
         LEFT JOIN (
             SELECT
                 ec.employee_id,
+                COALESCE(SUM(CASE WHEN ct.compensation_type_name = 'Tip Payout' THEN ecl.amount ELSE 0 END), 0.00) AS tip_payouts_paid,
+                COALESCE(SUM(CASE WHEN ct.compensation_type_name IN ('Draw', 'Owner Draw') THEN ecl.amount ELSE 0 END), 0.00) AS owner_draws_paid,
+                COALESCE(SUM(CASE WHEN ct.compensation_type_name = 'Bonus' THEN ecl.amount ELSE 0 END), 0.00) AS bonus_paid,
+                COALESCE(SUM(CASE WHEN ct.compensation_type_name = 'Extra Pay' THEN ecl.amount ELSE 0 END), 0.00) AS extra_pay_paid,
                 COALESCE(SUM(ecl.amount), 0.00) AS total_comp_paid
             FROM employee_compensation ec
             JOIN employee_compensation_lines ecl
                 ON ec.compensation_id = ecl.compensation_id
+            JOIN compensation_types ct
+                ON ecl.compensation_type_id = ct.compensation_type_id
             WHERE ec.spa_id = %s
               AND ec.compensation_date BETWEEN %s AND %s
             GROUP BY ec.employee_id
         ) comp ON e.employee_id = comp.employee_id
+
         WHERE e.spa_id = %s
         ORDER BY e.last_name, e.first_name
     """, (
@@ -7486,6 +9600,7 @@ def employee_compensation_report():
         spa_id, start_date, end_date,
         spa_id
     ))
+
     summary_rows = cur.fetchall()
 
     # Detailed ledger rows
@@ -7508,6 +9623,7 @@ def employee_compensation_report():
           AND ec.compensation_date BETWEEN %s AND %s
         ORDER BY ec.compensation_date DESC, ec.compensation_id DESC, ct.compensation_type_name
     """, (spa_id, start_date, end_date))
+
     ledger_rows = cur.fetchall()
 
     cur.close()
@@ -7519,11 +9635,15 @@ def employee_compensation_report():
         ledger_rows=ledger_rows,
         start_date=start_date,
         end_date=end_date,
+        services_billed_total=services_billed_total,
         tips_earned_total=tips_earned_total,
+        tip_payouts_paid_total=tip_payouts_paid_total,
+        owner_draws_paid_total=owner_draws_paid_total,
+        bonus_paid_total=bonus_paid_total,
+        extra_pay_paid_total=extra_pay_paid_total,
         total_comp_paid=total_comp_paid,
         outstanding_tips=outstanding_tips
     )
-
 
 
 

@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+
+{% block title %}SMS Conversation{% endblock %}
+
+{% block content %}
+
+<div class="conversation-page">
+
+    <div class="page-header">
+        <div>
+            <h1>SMS Conversation</h1>
+            <p class="page-subtitle">
+                {{ client[1] }} {{ client[2] }}
+                {% if client[3] %}
+                    · {{ client[3] }}
+                {% endif %}
+            </p>
+        </div>
+
+        <div class="form-buttons">
+            <a href="{{ url_for('sms_history', client_id=client[0]) }}" class="btn">Back to SMS History</a>
+            <a href="{{ url_for('sms_preview', client_id=client[0]) }}" class="btn">Send New SMS</a>
+        </div>
+    </div>
+
+    <div class="conversation-box">
+
+        {% if messages %}
+
+            {% for msg in messages %}
+                {% set created = msg[0] %}
+                {% set body = msg[1] %}
+                {% set status = msg[2] %}
+                {% set created_at = msg[3] %}
+
+                <div class="message-row {% if direction == 'outbound' %}outbound{% else %}inbound{% endif %}">
+                    <div class="message-bubble">
+
+                        <div class="message-body">
+                            {{ body }}
+                        </div>
+
+                        {% if msg[4] or msg[5] %}
+                            <div class="sms-error">
+                                Error {{ msg[4] }} {{ msg[5] }}
+                            </div>
+                         {% endif %}
+
+                        <div class="message-meta">
+                            {% if created_at %}
+                                {{ created_at.strftime("%m/%d/%Y %I:%M %p") }}
+                            {% endif %}
+
+                            {% if status %}
+                                <span class="sms-status status-{{ status|lower }}">
+                                    {{ status }}
+                                </span>
+                            {% endif %}
+                        </div>
+
+                    </div>
+                </div>
+            {% endfor %}
+
+        {% else %}
+
+            <div class="empty-state">
+                <p>No SMS messages found for this client yet.</p>
+            </div>
+
+        {% endif %}
+
+    </div>
+
+<form method="POST" class="sms-reply-box">
+    <textarea
+        name="message_body"
+        rows="3"
+        placeholder="Type your SMS message..."
+        required></textarea>
+
+    <button type="submit" class="btn">
+        Send SMS
+    </button>
+</form>
+
+
+</div>
+
+
+
+{% endblock %}
