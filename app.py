@@ -5781,6 +5781,7 @@ def inventory_home():
 @spa_required
 def add_inventory_product():
     spa_id = current_spa_id()
+    prefill_sku = request.args.get("sku", "").strip()
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -5821,7 +5822,7 @@ def add_inventory_product():
             existing = cur.fetchone()
 
             if existing:
-                flash("SKU already exists.", "error")
+                flash("SKU already exists. Opening existing product", "warning")
                 cur.close()
                 conn.close()
                 return redirect(url_for("add_inventory_product"))
@@ -5892,7 +5893,10 @@ def add_inventory_product():
     cur.close()
     conn.close()
 
-    return render_template("add_inventory_product.html")
+    return render_template(
+        "add_inventory_product.html",
+        prefill_sku=prefill_sku
+    )
 
 
 
