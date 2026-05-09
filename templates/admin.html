@@ -16,12 +16,44 @@
 
 <h1>Admin / Setup</h1>
 
+<h2>Custom Dropdown Labels</h2>
+
+<form method="POST" action="{{ url_for('update_dropdown_labels') }}">
+
+    <div class="form-group">
+        <label>Client Category 1 Label</label>
+        <input type="text"
+               name="skin_types"
+               value="{{ dropdown_labels.get('skin_types', 'Skin Types') }}">
+ 
+        <label>Client Category 2 Label</label>
+        <input type="text"
+               name="fitzpatrick_types"
+               value="{{ dropdown_labels.get('fitzpatrick_types', 'Fitzpatrick Types') }}">
+    </div>
+
+    <button type="submit" class="btn">
+        Save Labels
+    </button>
+
+</form>
+
+<br>
+
 <p>Select a table to manage:</p>
 
 <h2>Client / Profile Dropdowns</h2>
 <div class="admin-links">
-    <a class="btn" href="{{ url_for('skin_types') }}">Skin Types</a>
-    <a class="btn" href="{{ url_for('fitzpatrick_types') }}">Fitzpatrick Types</a>
+
+    <a class="btn" href="{{ url_for('skin_types') }}">
+        {{ dropdown_labels.get("skin_types", "Skin Type") }}
+    </a>
+
+
+    <a class="btn" href="{{ url_for('fitzpatrick_types') }}">
+        {{ dropdown_labels.get("fitzpatrick_types", "Fitzpatrick Type") }}
+    </a>
+
     <a class="btn" href="{{ url_for('manage_dropdown', dropdown_key='sex') }}">Sex</a>
     <a class="btn" href="{{ url_for('manage_dropdown', dropdown_key='referral_sources') }}">Referral Sources</a>
     <a class="btn" href="{{ url_for('manage_dropdown', dropdown_key='client_form_names') }}">Client Form Names</a>

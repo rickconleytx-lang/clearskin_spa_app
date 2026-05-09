@@ -1,4 +1,6 @@
-\{% extends "base.html" %}
+{% extends "base.html" %}
+{% from "components/cards.html" import section_card %}
+
 
 {% block title %}Inventory{% endblock %}
 
@@ -22,9 +24,34 @@
              </a>
         </div>
 
-        
+</div>
 
+    
+    <div class="narrow-cards">
+        {{ section_card("
+            Total Stock:",
+            "", 
+            total_stock|string
+         ) }}
 
+     <div class="summary-card">
+         <span class="summary-label">Total Stock</span>
+        <span class="summary-value">{{ total_stock }}</span>
+    </div>
+
+    <div class="summary-card">
+        <span class="summary-label">Wholesale Value</span>
+        <span class="summary-value">
+            ${{ "{:,.2f}".format(total_wholesale_value or 0) }}
+        </span>
+    </div>
+
+    <div class="summary-card">
+        <span class="summary-label">Retail Value</span>
+        <span class="summary-value">
+            ${{ "{:,.2f}".format(total_retail_value or 0) }}
+        </span>
+    </div>
 
     </div>
 
@@ -39,14 +66,15 @@
                         <th>Product</th>
                         <th>Vendor</th>
                         <th>Category</th>
-                        <th>Sub Category</th>
+                        <th>Sub Cat.</th>
                         <th>Cost</th>
                         <th>Retail</th>
-                        <th>Expire Date</th>
+                        <th>Expires</th>
                         <th>Added</th>
                         <th>Sold</th>
                         <th>In Stock</th>
-                        <th>Value</th>
+                        <th>W. Value</th>
+                        <th>R. Value</th>
                         <th>Action</th>
                     </tr>
                 </thead>
@@ -79,26 +107,13 @@
                             <td class="amount-cell">${{ '%.2f'|format(row[12]) }}</td>
 
                             <td>
+                                ${{ "{:,.2f}".format(row[13] or 0) }}
+                            </td>
+
+                            <td>
                                 <a href="{{ url_for('inventory_product_detail', product_id=row[0]) }}" class="btn btn-small">
                                     View
                                 </a>
-
-                                <a href="{{ url_for('add_inventory_stock', product_id=row[0]) }}" class="btn btn-small">
-                                    Add Stock
-                                </a>
-
-                               <a href="(( url_for('record_inventory_sold', product_id=row[0]) }}" class="btn btn-small">
-                                   Sold
-                               </a>
-
-                               <a href="{{ url_for('edit_inventory_product', product_id=row[0]) }}" class="btn">
-                                   Edit Product
-                               </a>
-
-
-                               <a href="{{ url_for('adjust_inventory_stock', product_id=row[0]) }}" class="btn btn-small">
-                                   Adjust
-                               </a>
 
                             </td>
                         </tr>

@@ -1,138 +1,56 @@
 {% extends "base.html" %}
+{% from "components/cards.html" import section_card %}
 
-{% block title %}Clear Skin Esthetics Database{% endblock %}
 
 {% block content %}
 
 
-<div style+"margin-bottom: 15px;">
-    <a href="{{ url_for('help_page') }}" class="btn">Help</a>
-    </a>
-
-
-</div>
-
-
-
-<div class="section-page">
-
-
-    <div class="section-header">
         <h1>Control Panel</h1>
-        <p class="section-subtitle">Quick access to all areas of the system.</p>
-    </div>
+        <h2>Quick access to all areas of the system.</h2>
+    
 
     <!-- 🔹 HEADER 1 -->
     <h2 style="margin-top: 25px;">Email Campaigns, Gift Certificates - Birthday Offers</h2>
-    <div class="section-card-grid">
 
-        <a class="section-card" href="{{ url_for('general_email') }}">
-            <h3>Email Campaigns</h3>
-            <p>Your Email Home Page.</p>
-        </a>
-
-        <a class="section-card" href="{{ url_for('gift_certificates_home') }}">
-            <h3>Gift Certificates</h3>
-            <p>Add New Gift Certificates when printed, update when sold and update when redeemed.</p>
-        </a>
-
-        <a class="section-card" href="{{ url_for('birthday_offers_home') }}">  
-            <h3>Birthday Celebrations</h3>
-            <p>View and manage upcoming Client Birthdays, Mark when you have sent client a Birthday Offer.</p>
-        </a>
-
+    <div class="narrow-cards">
+        {{ section_card("Email Campaigns", "Your Email Home Page",  url_for('general_email')) }}
+        {{ section_card("SMS Home", "Your starting point for SMS Messaging", url_for('sms_home')) }}
+        {{ section_card("Gift Certificates", "Add New Gift Certificates when printed, update when sold and redeemed", url_for('gift_certificates_home')) }}
+        {{ section_card("Birthday Celebrations", "View & manage Client Birthdays, Mark sent client a Birthday Offer", url_for('birthday_offers_home')) }}  
     </div>
 
     <!-- 🔹 HEADER 2 -->
     <h2 style="margin-top: 30px;">Accounting - Logistics - Human Resources</h2>
-    <div class="section-card-grid">
 
-        <a class="section-card" href="{{ url_for('accounting_home') }}">
-            <h3>Accounting</h3>
-            <p>Income, Expenses, Loans and Employees.</p>
-        </a>
-
-        <a class="section-card" href="{{ url_for('inventory_home') }}">
-            <h3>Inventory Home</h3>
-            <p>Logistics Department.</p>
-        </a>
-
-        <a class="section-card" href="{{ url_for('employees_home') }}">
-            <h3>Employees Home</h3>
-            <p>Corporate Human Resources Department.</p>
-        </a>
-
+    <div class="narrow-cards">
+        {{ section_card("Accounting", "Income, Expenses, Loans and Employees.", url_for('accounting_home')) }}
+        {{ section_card("Inventory Home", "Logistics Department",  url_for('inventory_home')) }}
+        {{ section_card("Employees Home", "Corporate Human Resources Department", url_for('employees_home')) }}
+        {{ section_card("Reserved", "Reserved", url_for('home')) }}
     </div>
 
     <!-- 🔹 HEADER 3 -->
     <h2 style="margin-top: 30px;">Admin - Spa Management</h2>
-    <div class="section-card-grid">
 
-        <a class="section-card" href="{{ url_for('admin') }}">
-            <h3>Admin</h3>
-            <p>Admin Home.</p>
-        </a>
-        
-        <a class="section-card" href="{{ url_for('spa_management') }}">
-            <h3>Spa Management</h3>
-            <p>Spa Management.</p> 
-        </a>
-
-        <a class="section-card" href="{{ url_for('home') }}">
-            <h3>Reserved</h3>
-            <p>Reserved.</p>
-        </a>
-
+    <div class="narrow-cards">
+        {{ section_card("Admin", "Admin Home", url_for('admin')) }}
+        {{ section_card("Spa Management", "Spa Management", url_for('spa_management')) }}
+        {{ section_card("SMS Home", "Reserved", url_for('sms_home')) }}
+        {{ section_card("Reserved", "Reserved", url_for('home')) }}
     </div>
 
 
 
-
-    <!-- 🔹 HEADER 4 -->
-    <h2 style="margin-top: 30px;">Future Features</h2>
-    <div class="section-card-grid">
-
-        <a class="section-card" href="{{ url_for('home') }}">
-            <h3>Reserved</h3>
-            <p>Reserved.</p>
-        </a>
-
-        <a class="section-card" href="{{ url_for('home') }}">
-            <h3>Reserved</h3>
-            <p>Reserved.</p>
-        </a>
-
-        <a class="section-card" href="{{ url_for('home') }}">
-            <h3>Future Features</h3>
-            <p>Reserved for future features.</p>
-        </a>
-        
-    </div>
-
-        <!-- 🔹 HEADER 5 -->
+        <!-- 🔹 HEADER 4 -->
     <h2 style="margin-top: 30px;">Future Section</h2>
-    <div class="section-card-grid">
 
-     <a class="section-card" href="{{ url_for('home') }}">
-            <h3>Reserved</h3>
-            <p>Reserved.</p>
-        </a>
-            
-        <a class="section-card" href="{{ url_for('home') }}">
-            <h3>Reserved</h3>
-            <p>Reserved.</p>
-        </a>
-            
-        <a class="section-card" href="{{ url_for('feedback_admin') }}">
-            <h3>Feedbacks</h3>
-            <p>Reserved for future features.</p>
-        </a>
-
+    <div class="narrow-cards">
+        {{ section_card("Reserved", "Reserved", url_for('home')) }}
+        {{ section_card("Reserved", "Reserved", url_for('home')) }}
+        {{ section_card("Feedbacks", "Feedbacks", url_for('feedback_admin')) }}
+        {{ section_card("Reserved", "Reserved", url_for('home')) }}
     </div>
 
          
-
-
-</div>
 
 {% endblock %}

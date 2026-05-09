@@ -9,43 +9,78 @@
     <div class="page-header">
         <div>
             <h1>Scan Inventory SKU</h1>
+
             <p class="page-subtitle">
                 Use your iPhone camera to scan a product barcode
             </p>
         </div>
 
         <div class="form-buttons">
-            <a href="{{ url_for('inventory_home') }}" class="btn btn-secondary">
+            <a href="{{ url_for('inventory_home') }}"
+               class="btn btn-secondary">
                 Back to Inventory
             </a>
         </div>
     </div>
 
-    <form method="POST"
-          enctype="multipart/form-data"
-          class="styled-form">
+    <div class="styled-form">
 
         <div class="form-group">
-            <label for="barcode_image">
-                Scan Barcode / SKU
-            </label>
 
-            <input type="file"
-                   id="barcode_image"
-                   name="barcode_image"
-                   accept="image/*"
-                   capture="environment"
-                   required>
-        </div>
-
-        <div class="form-buttons">
-            <button type="submit" class="btn">
+            <button type="button"
+                    class="btn"
+                    onclick="startScanner()">
                 Scan Product
             </button>
+
         </div>
 
-    </form>
+        <div class="form-group">
+
+            <video id="scanner-video"
+                   style="
+                        width:100%;
+                        max-width:450px;
+                        border-radius:12px;
+                        border:1px solid #ccc;
+                   ">
+            </video>
+
+        </div>
+
+    </div>
 
 </div>
+
+<script src="https://unpkg.com/@zxing/library@latest"></script>
+
+<script>
+
+function startScanner() {
+
+    const codeReader = new ZXing.BrowserBarcodeReader();
+
+    codeReader.decodeFromVideoDevice(
+        null,
+        'scanner-video',
+        (result, err) => {
+
+            if (result) {
+
+                const scannedSKU = result.text;
+
+                window.location.href =
+                    "/inventory/scan-result?sku=" +
+                    encodeURIComponent(scannedSKU);
+            }
+
+            if (err && !(err instanceof ZXing.NotFoundException)) {
+                console.error(err);
+            }
+        }
+    );
+}
+
+</script>
 
 {% endblock %}

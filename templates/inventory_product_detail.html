@@ -30,6 +30,10 @@
                 Sold
             </a>
 
+            <a href="{{ url_for('edit_inventory_product', product_id=product[0]) }}" class="btn">
+                Edit Product
+            </a>
+
             <a href="{{ url_for('adjust_inventory_stock', product_id=product[0]) }}" class="btn">
                 Adjust
             </a>

@@ -1083,6 +1083,16 @@ def manage_dropdown(dropdown_key):
     conn = get_db_connection()
     cur = conn.cursor()
 
+    cur.execute("""
+        SELECT dropdown_key, display_label
+        FROM spa_dropdown_labels
+        WHERE spa_id = %s
+    """, (spa_id,))
+
+    label_rows = cur.fetchall()
+    dropdown_labels = {row[0]: row[1] for row in label_rows}
+    current_label = dropdown_labels.get(dropdown_key, config["title"])
+
     if request.method == "POST":
         value = request.form.get("value", "").strip()
         extra_value = request.form.get("extra_value", "").strip() if extra_col else None
@@ -1135,7 +1145,8 @@ def manage_dropdown(dropdown_key):
         "manage_dropdown.html",
         dropdown_key=dropdown_key,
         config=config,
-        rows=rows
+        rows=rows,
+        dropdown_labels=dropdown_labels
     )
 
 
@@ -1188,6 +1199,60 @@ def delete_dropdown_item(dropdown_key, item_id):
     conn.close()
 
     return redirect(url_for("manage_dropdown", dropdown_key=dropdown_key))
+
+
+
+
+
+#  ---------------------
+#     
+#     UPDATE DROPDOWN LABELS
+#  
+#  -----------------
+
+
+@app.route("/update_dropdown_labels", methods=["POST"])
+@login_required
+@spa_required
+def update_dropdown_labels():
+    spa_id = current_spa_id()
+
+    skin_types = request.form.get("skin_types", "").strip()
+    fitzpatrick_types = request.form.get("fitzpatrick_types", "").strip()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    labels = [
+        ("skin_types", skin_types),
+        ("fitzpatrick_types", fitzpatrick_types)
+    ]
+
+    for key, label in labels:
+
+        cur.execute("""
+            INSERT INTO spa_dropdown_labels (
+                spa_id,
+                dropdown_key,
+                display_label
+            )
+            VALUES (%s, %s, %s)
+
+            ON CONFLICT (spa_id, dropdown_key)
+            DO UPDATE SET
+                display_label = EXCLUDED.display_label
+        """, (spa_id, key, label))
+
+    conn.commit()
+
+    cur.close()
+    conn.close()
+
+    flash("Dropdown labels updated.", "success")
+
+    return redirect(url_for("admin"))
+
+
 
 
 
@@ -3086,9 +3151,493 @@ def sms_conversation(client_id):
 
 
 
+                    
+#   ------------------------
+#
+#    SMS TEMPLATES 
+#
+#
+#   
+#   ---------------------
+
+
+@app.route("/sms/templates")
+@login_required
+@spa_required
+def sms_templates_admin():
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            sms_template_id,
+            template_name,
+            message_body,
+            active,
+            updated_at
+        FROM sms_templates
+        WHERE spa_id = %s
+        ORDER BY template_name
+    """, (spa_id,))
+
+    templates = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template("sms_templates_admin.html", templates=templates)
 
 
 
+
+                
+
+
+#   ------------------------
+#
+#   SMS TEMPLATES  ADD                
+#
+#
+#
+#   ---------------------
+
+@app.route("/sms/templates/add", methods=["GET", "POST"])
+@login_required
+@spa_required
+def add_sms_template():
+    spa_id = current_spa_id()
+
+    if request.method == "POST":
+        template_name = request.form.get("template_name", "").strip()
+        message_body = request.form.get("message_body", "").strip()
+
+        if not template_name or not message_body:
+            flash("Template name and message are required.", "error")
+            return redirect(url_for("add_sms_template"))
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            INSERT INTO sms_templates (
+                spa_id,
+                template_name,
+                message_body,
+                active,
+                created_at,
+                updated_at
+            )
+            VALUES (%s, %s, %s, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        """, (spa_id, template_name, message_body))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        flash("SMS template added successfully.", "success")
+        return redirect(url_for("sms_templates_admin"))
+
+    return render_template("sms_template_form.html", template=None)
+        
+                    
+                
+            
+            
+#   ------------------------
+#
+#  SMS TEMPLATES EDIT
+#
+#
+#       
+#   ---------------------
+        
+
+@app.route("/sms/templates/edit/<int:template_id>", methods=["GET", "POST"])
+@login_required
+@spa_required
+def edit_sms_template(template_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            sms_template_id,
+            template_name,
+            message_body,
+            active
+        FROM sms_templates
+        WHERE sms_template_id = %s
+          AND spa_id = %s
+    """, (template_id, spa_id))
+
+    template = cur.fetchone()
+
+    if not template:
+        cur.close()
+        conn.close()
+        flash("SMS template not found.", "error")
+        return redirect(url_for("sms_templates_admin"))
+
+    if request.method == "POST":
+        template_name = request.form.get("template_name", "").strip()
+        message_body = request.form.get("message_body", "").strip()
+        active = True if request.form.get("active") == "on" else False
+
+        if not template_name or not message_body:
+            flash("Template name and message are required.", "error")
+            return redirect(url_for("edit_sms_template", template_id=template_id))
+
+        cur.execute("""
+            UPDATE sms_templates
+            SET template_name = %s,
+                message_body = %s,
+                active = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE sms_template_id = %s
+              AND spa_id = %s
+        """, (template_name, message_body, active, template_id, spa_id))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        flash("SMS template updated successfully.", "success")
+        return redirect(url_for("sms_templates_admin"))
+
+    cur.close()
+    conn.close()
+
+    return render_template("sms_template_form.html", template=template)
+
+
+
+
+
+
+            
+            
+#   ------------------------
+#    SMS HOME
+#
+#
+#
+#       
+#   ---------------------
+        
+@app.route("/sms", methods=["GET"])
+@login_required
+@spa_required
+def sms_home():
+    spa_id = current_spa_id()
+
+    search = request.args.get("search", "").strip()
+    show_all = request.args.get("show_all")
+    template_id = request.args.get("template_id", "")
+    client_status = request.args.get("client_status", "")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Active SMS templates
+    cur.execute("""
+        SELECT sms_template_id, template_name
+        FROM sms_templates
+        WHERE spa_id = %s
+          AND active = TRUE
+        ORDER BY template_name
+    """, (spa_id,))
+    sms_templates = cur.fetchall()
+
+    # Client statuses
+    cur.execute("""
+        SELECT status_name
+        FROM client_statuses
+        WHERE spa_id = %s
+        ORDER BY status_name
+    """, (spa_id,))
+    client_statuses = cur.fetchall()
+
+    clients = []
+
+    if search or show_all:
+        query = """
+            SELECT
+                c.client_id,
+                c.first_name,
+                c.last_name,
+                c.phone,
+                cs.status_name
+            FROM clients c
+            LEFT JOIN client_statuses cs
+                ON c.client_status = cs.status_name
+            WHERE c.spa_id = %s
+              AND c.sms_opt_in = TRUE
+              AND c.active_client = TRUE
+              AND c.phone IS NOT NULL
+              AND TRIM(c.phone) <> ''
+        """
+
+        params = [spa_id]
+
+        if search:
+            query += """
+              AND (
+                   LOWER(c.first_name) LIKE %s
+                   OR LOWER(c.last_name) LIKE %s
+                   OR c.phone LIKE %s
+              )
+            """
+            params.extend([
+                f"%{search.lower()}%",
+                f"%{search.lower()}%",
+                f"%{search}%"
+            ])
+
+        if client_status:
+            query += " AND c.client_status = %s"
+            params.append(client_status)
+
+        query += " ORDER BY c.last_name, c.first_name"
+
+        cur.execute(query, params)
+        clients = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "sms_home.html",
+        sms_templates=sms_templates,
+        client_statuses=client_statuses,
+        clients=clients,
+        search=search,
+        show_all=show_all,
+        template_id=template_id,
+        client_status=client_status
+    )
+
+
+
+
+
+        
+#   ------------------------
+#
+#    SMS GROUP PREVIEW
+#               
+#
+#   
+#   ---------------------
+    
+
+@app.route("/sms/group-preview", methods=["POST"])
+@login_required
+@spa_required
+def sms_group_preview():
+    spa_id = current_spa_id()
+
+    template_id = request.form.get("template_id")
+    client_ids = [int(x) for x in request.form.getlist("client_ids")]
+
+    if not template_id:
+        flash("Please select an SMS template.", "error")
+        return redirect(url_for("sms_home"))
+
+    if not client_ids:
+        flash("Please select at least one client.", "error")
+        return redirect(url_for("sms_home"))
+
+    if len(client_ids) > 5:
+        flash("You can send SMS to a maximum of 5 clients at a time.", "error")
+        return redirect(url_for("sms_home"))
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT sms_template_id, template_name, message_body
+        FROM sms_templates
+        WHERE sms_template_id = %s
+          AND spa_id = %s
+          AND active = TRUE
+    """, (template_id, spa_id))
+    template = cur.fetchone()
+
+    if not template:
+        cur.close()
+        conn.close()
+        flash("SMS template not found or inactive.", "error")
+        return redirect(url_for("sms_home"))
+
+    cur.execute("""
+        SELECT client_id, first_name, last_name, phone
+        FROM clients
+        WHERE spa_id = %s
+          AND sms_opt_in = TRUE
+          AND active_client = TRUE
+          AND phone IS NOT NULL
+          AND TRIM(phone) <> ''
+          AND client_id = ANY(%s)
+        ORDER BY last_name, first_name
+    """, (spa_id, client_ids))
+
+    clients = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    if not clients:
+        flash("No eligible SMS clients found.", "error")
+        return redirect(url_for("sms_home"))
+
+    return render_template(
+        "sms_group_preview.html",
+        template=template,
+        clients=clients
+    )
+
+
+
+
+
+
+    
+#   ------------------------
+#
+#    SMS GROUP SEND
+#
+#
+#  
+#   ---------------------
+
+
+@app.route("/sms/group-send", methods=["POST"])
+@login_required
+@spa_required
+def sms_group_send():
+    spa_id = current_spa_id()
+
+    template_id = request.form.get("template_id")
+    client_ids = [int(x) for x in request.form.getlist("client_ids")]
+    message_body = request.form.get("message_body", "").strip()
+
+    if not template_id:
+        flash("SMS template is required.", "error")
+        return redirect(url_for("sms_home"))
+
+    if not client_ids:
+        flash("Please select at least one client.", "error")
+        return redirect(url_for("sms_home"))
+
+    if len(client_ids) > 5:
+        flash("You can send SMS to a maximum of 5 clients at a time.", "error")
+        return redirect(url_for("sms_home"))
+
+    if not message_body:
+        flash("SMS message cannot be blank.", "error")
+        return redirect(url_for("sms_home"))
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT client_id, first_name, last_name, phone
+        FROM clients
+        WHERE spa_id = %s
+          AND sms_opt_in = TRUE
+          AND active_client = TRUE
+          AND phone IS NOT NULL
+          AND TRIM(phone) <> ''
+          AND client_id = ANY(%s)
+        ORDER BY last_name, first_name
+    """, (spa_id, client_ids))
+
+    clients = cur.fetchall()
+
+    if not clients:
+        cur.close()
+        conn.close()
+        flash("No eligible SMS clients found.", "error")
+        return redirect(url_for("sms_home"))
+
+    sent_count = 0
+
+    for client in clients:
+        client_id = client[0]
+        phone = client[3]
+
+        # Later this can call your real Twilio send_sms() helper.
+        # For now, log as queued/manual/test depending on your current SMS setup.
+
+        cur.execute("""
+            INSERT INTO sms_messages (
+                spa_id,
+                client_id,
+                phone,
+                message_body,
+                status,
+                created_at
+            )
+            VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+        """, (
+            spa_id,
+            client_id,
+            phone,
+            message_body,
+            "queued"
+        ))
+
+        sent_count += 1
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    flash(f"SMS queued for {sent_count} client(s).", "success")
+    return redirect(url_for("sms_history_all"))
+
+
+
+
+
+
+
+
+
+
+
+
+    
+    
+#   ------------------------
+#       
+#    SMS                  
+#         
+#         
+#                            
+#   ---------------------
+          
+        
+    
+
+
+    
+    
+    
+#   ------------------------
+#       
+#    SMS                  
+#         
+#         
+#                            
+#   ---------------------
+          
+        
+    
 
 
 
@@ -4289,6 +4838,7 @@ def general_email():
     template_id = request.args.get("template_id", "")
     search = request.args.get("search", "").strip()
     show_all = request.args.get("show_all")
+    client_status_id = request.args.get("client_status_id", "")
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -4315,43 +4865,58 @@ def general_email():
         """, (spa_id, template_type))
         templates = cur.fetchall()
 
+    # Get client statuses for dropdown
+    cur.execute("""
+        SELECT client_status_id, status_name
+        FROM client_statuses
+        WHERE spa_id = %s
+        ORDER BY status_name
+    """, (spa_id,))
+    client_statuses = cur.fetchall()
+
     # Search clients
     clients = []
-    if search:
-        cur.execute("""
-            SELECT client_id, first_name, last_name, email
-            FROM clients
-            WHERE spa_id = %s
+
+    if search or show_all:
+        query = """
+            SELECT
+                c.client_id,
+                c.first_name,
+                c.last_name,
+                c.email,
+                cs.status_name
+            FROM clients c
+            LEFT JOIN client_statuses cs
+                ON c.client_status = cs.client_status_id
+            WHERE c.spa_id = %s
+              AND c.email IS NOT NULL
+              AND TRIM(c.email) <> ''
+        """
+
+        params = [spa_id]
+
+        if search:
+            query += """
               AND (
-                   LOWER(first_name) LIKE %s
-                   OR LOWER(last_name) LIKE %s
-                   OR email LIKE %s
+                   LOWER(c.first_name) LIKE %s
+                   OR LOWER(c.last_name) LIKE %s
+                   OR LOWER(c.email) LIKE %s
               )
-              AND email IS NOT NULL
-            ORDER BY last_name, first_name
-        """, (
-            spa_id,
-            f"%{search.lower()}%",
-            f"%{search.lower()}%",
-            f"%{search}%"
-        ))
+            """
+            params.extend([
+                f"%{search.lower()}%",
+                f"%{search.lower()}%",
+                f"%{search.lower()}%"
+            ])
+
+        if client_status_id:
+            query += " AND c.client_status = %s"
+            params.append(client_status_id)
+
+        query += " ORDER BY c.last_name, c.first_name"
+
+        cur.execute(query, params)
         clients = cur.fetchall()
-
-    
-    elif show_all:
-        cur.execute("""
-            SELECT client_id, first_name, last_name, email
-            FROM clients
-            WHERE spa_id = %s
-              AND email IS NOT NULL
-              AND TRIM(email) <> ''
-            ORDER BY last_name, first_name
-        """, (spa_id,))
-        clients = cur.fetchall()
-
-
-
-
 
     cur.close()
     conn.close()
@@ -4364,9 +4929,10 @@ def general_email():
         template_type=template_type,
         template_id=template_id,
         search=search,
-        show_all=show_all
+        show_all=show_all,
+        client_statuses=client_statuses,
+        client_status_id=client_status_id
     )
-
 
 
 
@@ -5140,7 +5706,30 @@ def inventory_home():
                     WHEN m.movement_type = 'adjustment' THEN m.quantity
                     ELSE 0
                 END
-            ), 0) * p.wholesale_cost AS inventory_value
+            ), 0) * p.wholesale_cost AS inventory_value,
+
+           
+           COALESCE(SUM(
+               CASE
+                   WHEN m.movement_type = 'added' THEN m.quantity
+                   WHEN m.movement_type IN ('sold', 'expired', 'damaged') THEN -m.quantity
+                   WHEN m.movement_type = 'returned' THEN m.quantity
+                   WHEN m.movement_type = 'adjustment' THEN m.quantity
+                   ELSE 0
+               END
+            ), 0) * p.suggested_retail AS inventory_retail_value,
+
+
+           COALESCE(SUM(
+               CASE
+                   WHEN m.movement_type = 'added' THEN m.quantity
+                   WHEN m.movement_type IN ('sold', 'expired', 'damaged') THEN -m.quantity
+                   WHEN m.movement_type = 'returned' THEN m.quantity
+                   WHEN m.movement_type = 'adjustment' THEN m.quantity
+                   ELSE 0
+               END
+           ), 0) * p.suggested_retail AS retail_value    
+
 
         FROM inventory_products p
         LEFT JOIN inventory_movements m
@@ -5154,12 +5743,22 @@ def inventory_home():
 
     inventory_rows = cur.fetchall()
 
+
+    total_stock = sum(row[11] for row in inventory_rows)
+
+    total_wholesale_value = sum(row[12] for row in inventory_rows)
+
+    total_retail_value = sum(row[13] for row in inventory_rows)
+
     cur.close()
     conn.close()
 
     return render_template(
         "inventory_home.html",
-        inventory_rows=inventory_rows
+        inventory_rows=inventory_rows,
+        total_stock=total_stock,
+        total_wholesale_value=total_wholesale_value,
+        total_retail_value=total_retail_value
     )
 
 
@@ -5794,74 +6393,57 @@ def edit_inventory_product(product_id):
 #   --------------------------------------
 
 
-
-@app.route("/inventory/scan", methods=["GET", "POST"])
+@app.route("/inventory/scan")
 @login_required
 @spa_required
 def inventory_scan():
-    spa_id = current_spa_id()
-
-    if request.method == "POST":
-
-        if "barcode_image" not in request.files:
-            flash("No image uploaded.", "error")
-            return redirect(url_for("inventory_scan"))
-
-        file = request.files["barcode_image"]
-
-        if file.filename == "":
-            flash("No image selected.", "error")
-            return redirect(url_for("inventory_scan"))
-
-        try:
-            from pyzbar.pyzbar import decode
-            from PIL import Image
-            import io
-
-            image = Image.open(io.BytesIO(file.read()))
-
-            decoded_objects = decode(image)
-
-            if not decoded_objects:
-                flash("No barcode detected.", "error")
-                return redirect(url_for("inventory_scan"))
-
-            scanned_sku = decoded_objects[0].data.decode("utf-8").strip()
-
-            conn = get_db_connection()
-            cur = conn.cursor()
-
-            cur.execute("""
-                SELECT product_id
-                FROM inventory_products
-                WHERE spa_id = %s
-                  AND sku = %s
-                  AND active = TRUE
-            """, (spa_id, scanned_sku))
-
-            product = cur.fetchone()
-
-            cur.close()
-            conn.close()
-
-            if product:
-                flash(f"Product found: {scanned_sku}", "success")
-                return redirect(url_for(
-                    "inventory_product_detail",
-                    product_id=product[0]
-                ))
-
-            else:
-                flash(f"SKU not found: {scanned_sku}", "warning")
-                return redirect(url_for(
-                    "add_inventory_product"
-                ) + f"?sku={scanned_sku}")
-
-        except Exception as e:
-            flash(f"Scanner error: {e}", "error")
-            return redirect(url_for("inventory_scan"))
-
     return render_template("inventory_scan.html")
+
+
+
+
+#   --------------------------------------
+#   INVENTORY SCAN  RESULT
+#
+#   --------------------------------------
+
+@app.route("/inventory/scan-result")
+@login_required
+@spa_required
+def inventory_scan_result():
+    spa_id = current_spa_id()
+    scanned_sku = request.args.get("sku", "").strip()
+
+    if not scanned_sku:
+        flash("No SKU scanned.", "error")
+        return redirect(url_for("inventory_scan"))
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT product_id
+        FROM inventory_products
+        WHERE spa_id = %s
+          AND sku = %s
+          AND active = TRUE
+    """, (spa_id, scanned_sku))
+
+    product = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if product:
+        flash(f"Product found: {scanned_sku}", "success")
+        return redirect(url_for(
+            "inventory_product_detail",
+            product_id=product[0]
+        ))
+
+    flash(f"SKU not found: {scanned_sku}", "warning")
+    return redirect(url_for("add_inventory_product") + f"?sku={scanned_sku}")
+
 
 
 
@@ -15526,13 +16108,28 @@ def admin():
     utc_now = get_utc_now()
     spa_now = get_spa_now(spa_id)
 
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT dropdown_key, display_label
+        FROM spa_dropdown_labels
+        WHERE spa_id = %s
+    """, (spa_id,))
+
+    label_rows = cur.fetchall()
+    dropdown_labels = {row[0]: row[1] for row in label_rows}
+
+    cur.close()
+    conn.close()
+    
     return render_template(
         "admin.html",
         current_timezone=current_timezone,
         utc_now=utc_now,
-        spa_now=spa_now
+        spa_now=spa_now,
+        dropdown_labels=dropdown_labels
     )
-
 
 
 

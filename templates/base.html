@@ -34,7 +34,10 @@
         <a class="nav-btn" href="{{ url_for('appointments') }}">Appointments</a>      
         <a class="nav-btn" href="{{ url_for('client_management') }}">Client Management</a>
     {% if session.get("user_id") %}
-        <a class="btn" href="{{ url_for('logout') }}">Logout</a>
+        <a class="btn" href="{{ url_for('logout') }}"
+                               onclick="return confirm('Are you sure you want to LOG OUT?')">
+                               Log out
+        </a>
     {% else %}
         <a class="btn" href="{{ url_for('login') }}">Login</a>
     {% endif %}     
