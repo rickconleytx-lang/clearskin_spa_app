@@ -4,10 +4,22 @@
 
 {% block content %}
 
+<div class="form-buttons">
+    <a href="javascript:history.back()" class="btn">
+        ← Back
+    </a>
+
+    <a href="{{ url_for('sms_home') }}" class="btn">
+    SMS Home
+</a>
+</div>
+
+
+
 <h1>Messaging Settings</h1>
 
 {% if client %}
-    <h3>{{ client[1] }} {{ client[2] }}</h3>
+    <h2>{{ client[1] }} {{ client[2] }}</h2>
 {% endif %}
 
 <form method="POST">

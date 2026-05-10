@@ -1,9 +1,18 @@
 {% extends "base.html" %}
 
 {% block content %}
+
+<div class="form-buttons">
+    <a href="javascript:history.back()" class="btn">
+        ← Back
+    </a>
+</div>
+
+
+
 <h1>Client Forms</h1>
 
-<h3>{{ client[2] }}, {{ client[1] }}</h3>
+<h2>{{ client[2] }}, {{ client[1] }}</h2>
 
 <div style="margin-bottom: 15px;">
     {% if selected_date %}

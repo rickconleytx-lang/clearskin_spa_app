@@ -4,16 +4,29 @@
 
 {% block content %}
 
+
 <h1>Client Full Record</h1>
 
 {% if client %}
-    <h3>{{ client[1] }} {{ client[2] }}</h3>
+    <h2>{{ client[1] }} {{ client[2] }}</h2>
 {% endif %}
 
+
+
+
 <div style="margin-bottom: 20px;">
-    <a class="btn" href="{{ url_for('client_management') }}">Back to Client Management</a>
+
+<div class="form-buttons">
+    <a href="javascript:history.back()" class="btn">
+        ← Back
+    </a>
+
     <button type="submit" class="btn btn-primary">Save Changes</button>
 </div>
+</div>
+
+
+
 
 
 <form method="POST">

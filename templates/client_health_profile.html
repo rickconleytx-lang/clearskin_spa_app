@@ -14,9 +14,10 @@
         </a>
     {% endif %}
 
-    <a href="{{ url_for('client_history', client_id=client[0]) }}" class="btn return-btn">
-        ← Return to Client History
-    </a>
+    <button type="button" onclick="history.back()" class="btn">
+        ←Back 
+    </button>
+
 </div>
 
 <form method="POST" action="{{ url_for('client_health_profile', client_id=client[0], date=selected_date) }}">

@@ -25,9 +25,9 @@ MAILGUN_FROM = os.getenv("MAILGUN_FROM")
 
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
-TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
+TWILIO_MESSAGING_SERVICE_SID = os.getenv("TWILIO_MESSAGING_SERVICE_SID")
+SMS_ENABLED = os.getenv("SMS_ENABLED", "false").lower() == "true"
 
-TWILIO_PHONE_NUMBER = os.getenv("TWILIO_FROM_PHONE")
 
 app.secret_key = os.environ.get("SECRET_KEY", "local-dev-key")
 
@@ -1311,7 +1311,9 @@ def help_client_management_page():
 def help_add_new_client_page():
     return render_template("help_add_new_client.html")
 
-
+#   ---------------------------
+#
+#   -------------------------
 
 @app.route("/help_clients")
 
@@ -1320,6 +1322,12 @@ def help_add_new_client_page():
 
 def help_clients_page():
     return render_template("help_clients.html")
+
+
+
+#   --------------------------- 
+#
+#   -------------------------
 
 
 @app.route("/help_birthday_offer")
@@ -1332,6 +1340,11 @@ def help_birthday_offer_page():
 
 
 
+#   --------------------------- 
+#
+#   -------------------------
+
+
 @app.route("/help_income")
 
 @login_required
@@ -1340,6 +1353,12 @@ def help_birthday_offer_page():
 def help_income_page():
     return render_template("help_income.html")
 
+
+
+
+#   --------------------------- 
+#
+#   -------------------------
 
 
 @app.route("/help_gift_certs")
@@ -1351,6 +1370,12 @@ def help_gift_certs_page():
     return render_template("help_gift_certs.html")
 
 
+
+#   --------------------------- 
+#
+#   -------------------------
+
+
 @app.route("/help_expenses")
 
 @login_required
@@ -1358,6 +1383,14 @@ def help_gift_certs_page():
 
 def help_expenses_page():
     return render_template("help_expenses.html")
+
+
+
+
+#   --------------------------- 
+#
+#   -------------------------
+
 
 
 @app.route("/help_admin")
@@ -1403,6 +1436,10 @@ def business_financing_home():
 
 
 
+#   --------------------------- 
+#
+#   -------------------------
+
 
 
 
@@ -1443,6 +1480,13 @@ def accounting_home():
 
 def finance_home():
     return render_template("finance_home.html")
+
+
+
+#   --------------------------- 
+#
+#   -------------------------
+
 
 
 @app.route("/birthday_offers1_home")
@@ -2338,10 +2382,15 @@ def send_sms(to_number, message):
  
 
 #   ----------------------
-
+#
+#   DEF  SMS SEND
+#
+#
+#   ----------------------
 
 
 def send_sms_message(to_phone, message_body):
+
     sms_enabled = os.getenv("SMS_ENABLED", "false").lower() == "true"
 
     if not sms_enabled:
@@ -2357,27 +2406,37 @@ def send_sms_message(to_phone, message_body):
     try:
         account_sid = os.getenv("TWILIO_ACCOUNT_SID")
         auth_token = os.getenv("TWILIO_AUTH_TOKEN")
-        from_phone = os.getenv("TWILIO_FROM_PHONE")
-    
+        messaging_service_sid = os.getenv("TWILIO_MESSAGING_SERVICE_SID")
+
+        if not messaging_service_sid:
+            return {
+                "success": False,
+                "status": "failed",
+                "provider_message_id": None,
+                "twilio_status": None,
+                "twilio_error_code": None,
+                "twilio_error_message": "Missing TWILIO_MESSAGING_SERVICE_SID"
+            }
+
         client = Client(account_sid, auth_token)
-        
+
         message = client.messages.create(
             body=message_body,
-            from_=from_phone,
+            messaging_service_sid=messaging_service_sid,
             to=to_phone
         )
 
         return {
             "success": True,
-            "status": "sent",  # your app-level status
+            "status": "sent",
             "provider_message_id": message.sid,
-            "twilio_status": message.status,   # <-- NEW
-            "twilio_error_code": message.error_code,   # <-- NEW (usually None here)
-            "twilio_error_message": message.error_message  # <-- NEW (usually None here)
+            "twilio_status": message.status,
+            "twilio_error_code": message.error_code,
+            "twilio_error_message": message.error_message
         }
-            
+
     except Exception as e:
-        return {   
+        return {
             "success": False,
             "status": "failed",
             "provider_message_id": None,
@@ -2385,6 +2444,11 @@ def send_sms_message(to_phone, message_body):
             "twilio_error_code": None,
             "twilio_error_message": str(e)
         }
+
+
+
+
+
 
 
 
@@ -11164,11 +11228,13 @@ def add_expense():
 #  good 4/27
 #  ------------------------------------------
 
+
 @app.route("/expenses/report", methods=["GET"])
 @login_required
-@spa_required 
+@spa_required
 def expense_report():
     spa_id = current_spa_id()
+
     start_date = request.args.get("start_date", "").strip()
     end_date = request.args.get("end_date", "").strip()
     category = request.args.get("category", "").strip()
@@ -11177,7 +11243,6 @@ def expense_report():
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Load category dropdown options
     cur.execute("""
         SELECT expense_cat_id, expense_cat_name
         FROM expense_categories
@@ -11185,9 +11250,6 @@ def expense_report():
     """)
     category_options = cur.fetchall()
 
-    # -----------------------------
-    # Main expense rows
-    # -----------------------------
     query = """
         SELECT
             expense_id,
@@ -11201,10 +11263,9 @@ def expense_report():
             notes,
             created_at
         FROM expenses
-        WHERE spa_id =%s
-           AND  1=1
+        WHERE spa_id = %s
     """
-    params = []
+    params = [spa_id]
 
     if start_date:
         query += " AND expense_date >= %s"
@@ -11222,21 +11283,17 @@ def expense_report():
         query += " AND vendor_name ILIKE %s"
         params.append(f"%{vendor_name}%")
 
-    query += " ORDER BY expense_date DESC, expense_id DESC"
+    query += " ORDER BY expense_date DESC, created_at DESC"
 
     cur.execute(query, tuple(params))
     expenses = cur.fetchall()
 
-    # -----------------------------
-    # Total amount
-    # -----------------------------
     total_query = """
         SELECT COALESCE(SUM(amount), 0)
         FROM expenses
-        WHERE spa_id = %s  
-        AND 1=1
+        WHERE spa_id = %s
     """
-    total_params = []
+    total_params = [spa_id]
 
     if start_date:
         total_query += " AND expense_date >= %s"
@@ -11257,18 +11314,14 @@ def expense_report():
     cur.execute(total_query, tuple(total_params))
     report_total = cur.fetchone()[0]
 
-    # -----------------------------
-    # Category totals
-    # -----------------------------
     category_totals_query = """
         SELECT
             category,
             COALESCE(SUM(amount), 0)
         FROM expenses
-        WHERE spa_id = %s 
-        AND 1=1
+        WHERE spa_id = %s
     """
-    category_totals_params = []
+    category_totals_params = [spa_id]
 
     if start_date:
         category_totals_query += " AND expense_date >= %s"
@@ -11313,6 +11366,23 @@ def expense_report():
         report_total=report_total,
         category_totals=category_totals
     )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

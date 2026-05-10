@@ -4,15 +4,15 @@
 
 {% block content %}
 
+
+
 <div class="form-buttons">
     <a href="javascript:history.back()" class="btn">
         ← Back
     </a>
 </div>
 
-
-
-<h1>Client Full Summary -  {{ client[1] }} {{ client[2] }}</h1>
+<h1>Client Full Summary</h1>
 
 <div class="client-edit-page">
 

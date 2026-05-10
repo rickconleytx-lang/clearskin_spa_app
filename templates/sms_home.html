@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "components/cards.html" import section_card %}
 
 {% block title %}SMS Home{% endblock %}
 
@@ -11,9 +12,19 @@
     Maximum 5 clients per SMS send.
 </p>
 
-<div class="form-buttons">
-    <a href="{{ url_for('sms_templates_admin') }}" class="btn">SMS Templates</a>
-    <a href="{{ url_for('sms_history_all') }}" class="btn">SMS History</a>
+<div class="narrow-cards">
+    {{ section_card("SMS Templates", "View and Add Templates",  url_for('sms_templates_admin')) }}
+    {{ section_card("SMS History", "View SMS History",  url_for('sms_history_all')) }}
+    {{ section_card(
+       "SMS Client Settings", 
+       "View and Edit SMS/Email Opt In/Out, <span style='color: red;'>Go To</span> Client Management",  
+       url_for('client_management')) }}
+
+    {{ section_card(
+        "SMS Message to Client",
+        "Another way to send SMS to one client - From Client Management - Client - Full Summary-Edit",  
+        url_for('client_management')) }}
+
 </div>
 
 <form method="GET">

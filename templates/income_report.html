@@ -5,7 +5,23 @@
 {% block content %}
 <div class="report-page">
 
-    <div class="report-header">
+
+    <div class="form-buttons">
+        <a href="javascript:history.back()" class="btn">
+            ← Back
+        </a>
+
+    <a href="{{ url_for('accounting_home') }}" class="btn">
+        Accounting Home
+    </a>
+
+
+    </div>
+
+
+ <div class="report-header">
+
+
         <div>
             <h1>Income Report</h1>
             <p class="report-subtitle">Financial summary and detailed income transactions</p>

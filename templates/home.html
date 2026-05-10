@@ -23,7 +23,7 @@
     <h2 style="margin-top: 30px;">Accounting - Logistics - Human Resources</h2>
 
     <div class="narrow-cards">
-        {{ section_card("Accounting", "Income, Expenses, Loans and Employees.", url_for('accounting_home')) }}
+        {{ section_card("Accounting", "Income, Expenses, and Loans.", url_for('accounting_home')) }}
         {{ section_card("Inventory Home", "Logistics Department",  url_for('inventory_home')) }}
         {{ section_card("Employees Home", "Corporate Human Resources Department", url_for('employees_home')) }}
         {{ section_card("Reserved", "Reserved", url_for('home')) }}
@@ -35,9 +35,10 @@
     <div class="narrow-cards">
         {{ section_card("Admin", "Admin Home", url_for('admin')) }}
         {{ section_card("Spa Management", "Spa Management", url_for('spa_management')) }}
-        {{ section_card("SMS Home", "Reserved", url_for('sms_home')) }}
+        {{ section_card("Reserved", "Reserved", url_for('home')) }}
         {{ section_card("Reserved", "Reserved", url_for('home')) }}
     </div>
+
 
 
 

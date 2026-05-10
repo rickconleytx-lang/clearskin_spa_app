@@ -8,6 +8,8 @@
 <h1>Expense Report</h1>
 
 <div class="narrow-cards">
+    {{ section_card("Back to Accounting Department", "Return to Accounting Department",  url_for('accounting_home')) }}
+
     {{ section_card("Back to Expenses", "Return to Expenses Home",  url_for('expenses_home')) }}
     {{ section_card("Export to CSV", "Exports the file in CSV format", 
             url_for('export_expense_report_csv',

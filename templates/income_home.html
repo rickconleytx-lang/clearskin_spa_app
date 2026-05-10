@@ -1,65 +1,54 @@
 {% extends "base.html" %}
+{% from "components/cards.html" import section_card %}
 
 {% block title %}Income{% endblock %}
 
 {% block content %}
+
 <div class="section-page">
+
     <div class="section-header">
-
-<a href="{{ url_for('help_income_page') }}" class="btn">Page Help</a>
-<br>
-<br>
-
+        <a href="{{ url_for('help_income_page') }}" class="btn">Page Help</a>
 
         <h1>Income Home</h1>
-        <p class="section-subtitle">Manage Income: General Income(Non Appointment related income), and Income Reports. <br>
-        <span style="color: red;">NOTE:</span> Please go to Calendar or Appointments to Add Income from an Appointment.</p>
-    <br>
 
+        <p class="section-subtitle">
+            Manage Income: General Income (Non Appointment related income), and Income Reports.
+            <br>
+            <span style="color: red;">NOTE:</span>
+            Please go to Calendar or Appointments to Add Income from an Appointment.
+        </p>
     </div>
 
-    <div class="section-card-grid">
-        <a class="section-card" href="{{ url_for('add_general_income') }}">
-            <h3>Add General Income</h3>
-            <p>Record income not tied to a client visit or appointment.</p>
-        </a>
+    <div class="narrow-cards">
 
-        <a class="section-card" href="{{ url_for('income_report') }}">
-            <h3>Income Report</h3>
-            <p>View income totals, breakdowns, and detailed transaction history.</p>
-        </a>
-
-        <a class="section-card" href="{{ url_for('gift_certificates_home') }}">
-            <h3>Gift Certificates</h3>
-            <p>Add New, View All and Delete a Gift Certificate.</p>
-        </a>
-
+       {{ section_card("Back to Accounting Department", "Income, Expenses, and Loans.", url_for('accounting_home')) }}
+       {{ section_card("Add General Income", "Record Income NOT tied to a Client visit or appointment.", url_for('add_general_income')) }}
+       {{ section_card("Income Report", "View Income totals, breakdown and detailed transaction history.", url_for('income_report')) }}
+       {{ section_card("Gift Certificates", "Add New, View All and Delete Gift Certificates.", url_for('gift_certificates_home')) }}
     </div>
 
     <div class="money-summary">
-    <div class="summary-card">
-        <h3>Total Income</h3>
-        <p>${{ "%.2f"|format(total_income) }}</p>
+
+        <div class="summary-card">
+            <h3>Total Income</h3>
+            <p>${{ "%.2f"|format(total_income) }}</p>
+        </div>
+
+        <div class="summary-card">
+            <h3>Total Expenses</h3>
+            <p>${{ "%.2f"|format(total_expenses) }}</p>
+        </div>
+
+        <div class="summary-card">
+            <h3>Difference</h3>
+            <p style="color: {{ 'green' if net_total >= 0 else 'red' }};">
+                ${{ "%.2f"|format(net_total) }}
+            </p>
+        </div>
+
     </div>
 
-    <div class="summary-card">
-        <h3>Total Expenses</h3>
-        <p>${{ "%.2f"|format(total_expenses) }}</p>
-    </div>
-
-    <div class="summary-card">
-        <h3>Difference</h3>
-        <p style="color: {{ 'green' if net_total >= 0 else 'red' }};">
-            ${{ "%.2f"|format(net_total) }}
-    </p>
-
 </div>
-
-</div>
-
-
 
 {% endblock %}
-
-
-

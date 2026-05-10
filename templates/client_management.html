@@ -7,6 +7,14 @@
 {% block content %}
 <div class="client-management-page">
 
+    <a class="btn" href="{{ url_for('help_client_management_page') }}">
+        Page Help
+    </a>
+    
+    <a class="btn" href="{{ url_for('add_new_client') }}">
+        Add New Client
+    </a>
+<br> <br>
 
 <h1>Client Management</h1>
 Sequence of steps for Adding New Client, Add the Appointment, Gather and Enter health history information, Pre-Session and Post Session Wrap-up.
@@ -17,17 +25,27 @@ Sequence of steps for Adding New Client, Add the Appointment, Gather and Enter h
     {{ section_card("4.  Wrap up the Session",
                     "Please <span style='color: red;'>CLICK HERE</span> and Go To Calendar, click on Finish Session, then enter payment and notes", url_for('calendar_view')) }}
 </div>
-<br><br>
-For any other Client related action, please search for Client's Name, then use an Action Button(Add Appointment, Health / Intake, Forms, Visit Summaries, Full Record, Edit) next to their record.
+
+<br>
+
+<p>
+For any other Client related action, please search for Client's Name, 
+then use an Action Button(Add Appointment, Health / Intake, Forms, 
+Visit Summaries, Full Record, Edit) next to their record.
+</p>
+
+<p>
+<span style="color: red;">Note: SMS/Email Opt In/Out:</span> Search Client below, then click on the Client's - SMS Settings button (far right).
+
+
 <div style="margin-bottom: 20px;">    
 <br>
-    <a class="btn" href="{{ url_for('help_client_management_page') }}"> 
-        Page Help
-    </a>
+
 
     <a class="btn" href="{{ url_for('add_new_client') }}">
         Add New Client
     </a>
+
 
 </div>
 

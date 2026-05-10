@@ -4,8 +4,12 @@
 <h1>Client History Detail</h1>
 
 <div class="nav-links" style="margin-bottom: 15px;">
-    <a class="btn" href="{{ url_for('home') }}">Home</a>
-    <a class="btn" href="{{ url_for('client_history') }}">Back to Client History</a>
+
+    <button type="button" onclick="history.back()" class="btn">
+        ← Back
+    </button>
+
+
     <a class="btn" href="{{ url_for('client_management') }}">Client Management</a>
     {% if client %}
         <a class="btn" href="{{ url_for('client_health_profile', client_id=client[0]) }}">Health Profile</a>
