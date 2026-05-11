@@ -21,12 +21,12 @@
 <form method="POST" action="{{ url_for('update_dropdown_labels') }}">
 
     <div class="form-group">
-        <label>Client Category 1 Label</label>
+        <label>Client Category 1 (Cat 1) Label</label>
         <input type="text"
                name="skin_types"
                value="{{ dropdown_labels.get('skin_types', 'Skin Types') }}">
  
-        <label>Client Category 2 Label</label>
+        <label>Client Category 2 (Cat 2) Label</label>
         <input type="text"
                name="fitzpatrick_types"
                value="{{ dropdown_labels.get('fitzpatrick_types', 'Fitzpatrick Types') }}">
@@ -44,12 +44,12 @@
 
 <h2>Client Categories / Profile Dropdowns</h2>
 <div class="admin-links">
-
+Cat 1
     <a class="btn" href="{{ url_for('skin_types') }}">
         {{ dropdown_labels.get("skin_types", "Skin Type") }}
     </a>
 
-
+Cat 2
     <a class="btn" href="{{ url_for('fitzpatrick_types') }}">
         {{ dropdown_labels.get("fitzpatrick_types", "Fitzpatrick Type") }}
     </a>

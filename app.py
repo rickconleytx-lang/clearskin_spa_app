@@ -2063,13 +2063,9 @@ def feedback_admin():
 #  ----------------------
 
 
-
-
-
 @app.route("/feedback/resolve/<int:feedback_id>", methods=["POST"])
+@login_required
 def resolve_feedback(feedback_id):
-    spa_id = current_spa_id()
-
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -2077,8 +2073,7 @@ def resolve_feedback(feedback_id):
         UPDATE user_feedback
         SET is_resolved = TRUE
         WHERE feedback_id = %s
-          AND spa_id = %s
-    """, (feedback_id, spa_id))
+    """, (feedback_id,))
 
     conn.commit()
     cur.close()
@@ -2086,6 +2081,8 @@ def resolve_feedback(feedback_id):
 
     flash("Feedback marked as resolved.", "success")
     return redirect(url_for("feedback_admin"))
+
+
 
 
 
@@ -3679,10 +3676,12 @@ def sms_group_preview():
 @login_required
 @spa_required
 def sms_group_send():
+    print("SMS GROUP SEND ROUTE HIT", flush=True)
+
     spa_id = current_spa_id()
 
     template_id = request.form.get("template_id")
-    client_ids = [int(x) for x in request.form.getlist("client_ids")]
+    client_ids = request.form.getlist("client_ids")
     message_body = request.form.get("message_body", "").strip()
 
     if not template_id:
@@ -3701,65 +3700,104 @@ def sms_group_send():
         flash("SMS message cannot be blank.", "error")
         return redirect(url_for("sms_home"))
 
+    client_ids = [int(x) for x in client_ids]
+
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute("""
-        SELECT client_id, first_name, last_name, phone
-        FROM clients
-        WHERE spa_id = %s
-          AND sms_opt_in = TRUE
-          AND active_client = TRUE
-          AND phone IS NOT NULL
-          AND TRIM(phone) <> ''
-          AND client_id = ANY(%s)
-        ORDER BY last_name, first_name
-    """, (spa_id, client_ids))
-
-    clients = cur.fetchall()
-
-    if not clients:
-        cur.close()
-        conn.close()
-        flash("No eligible SMS clients found.", "error")
-        return redirect(url_for("sms_home"))
-
     sent_count = 0
+    failed_count = 0
 
-    for client in clients:
-        client_id = client[0]
-        phone = client[3]
-
-        # Later this can call your real Twilio send_sms() helper.
-        # For now, log as queued/manual/test depending on your current SMS setup.
-
+    try:
         cur.execute("""
-            INSERT INTO sms_messages (
+            SELECT client_id, first_name, last_name, phone
+            FROM clients
+            WHERE spa_id = %s
+              AND sms_opt_in = TRUE
+              AND active_client = TRUE
+              AND phone IS NOT NULL
+              AND TRIM(phone) <> ''
+              AND client_id = ANY(%s)
+            ORDER BY last_name, first_name
+        """, (spa_id, client_ids))
+
+        clients = cur.fetchall()
+
+        if not clients:
+            flash("No eligible SMS clients found.", "error")
+            return redirect(url_for("sms_home"))
+
+        for client in clients:
+            client_id, first_name, last_name, phone = client
+
+            personalized_message = message_body
+            personalized_message = personalized_message.replace("{first_name}", first_name or "")
+            personalized_message = personalized_message.replace("{last_name}", last_name or "")
+
+            print("ABOUT TO SEND SMS TO:", phone, flush=True)
+
+            try:
+                result = send_sms_message(phone, personalized_message)
+                print("SMS SEND RESULT:", result, flush=True)
+
+                status = result.get("status")
+                provider_message_id = result.get("provider_message_id")
+                twilio_status = result.get("twilio_status")
+                twilio_error_code = result.get("twilio_error_code")
+                twilio_error_message = result.get("twilio_error_message")
+
+                if result.get("success"):
+                    sent_count += 1
+                else:
+                    failed_count += 1
+
+            except Exception as sms_error:
+                print("SMS SEND ERROR:", sms_error, flush=True)
+
+                status = "error"
+                provider_message_id = None
+                twilio_status = None
+                twilio_error_code = None
+                twilio_error_message = str(sms_error)
+                failed_count += 1
+
+            cur.execute("""
+                INSERT INTO sms_messages (
+                    spa_id,
+                    client_id,
+                    recipient_phone,
+                    message_body,
+                    message_type,
+                    direction,
+                    status,
+                    provider_message_id,
+                    twilio_status,
+                    twilio_error_code,
+                    twilio_error_message
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
                 spa_id,
                 client_id,
                 phone,
-                message_body,
+                personalized_message,
+                "group",
+                "outbound",
                 status,
-                created_at
-            )
-            VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-        """, (
-            spa_id,
-            client_id,
-            phone,
-            message_body,
-            "queued"
-        ))
+                provider_message_id,
+                twilio_status,
+                twilio_error_code,
+                twilio_error_message
+            ))
 
-        sent_count += 1
+        conn.commit()
 
-    conn.commit()
-    cur.close()
-    conn.close()
+        flash(f"SMS sent: {sent_count}. Failed: {failed_count}.", "success")
+        return redirect(url_for("sms_history_all"))
 
-    flash(f"SMS queued for {sent_count} client(s).", "success")
-    return redirect(url_for("sms_history_all"))
-
+    finally:
+        cur.close()
+        conn.close()
 
 
 
