@@ -57,18 +57,7 @@ print("MAILGUN KEY STARTS:", MAILGUN_API_KEY[:4] if MAILGUN_API_KEY else None, f
 #        HELPERS
 #  --------------------
 
-def current_spa_id():
-    from flask import g, session
 
-    if session.get("role") == "master_admin":
-        return None  # 👈 key fix
-
-    spa_id = getattr(g, "spa_id", None)
-
-    if not spa_id:
-        raise Exception("spa_id is missing")
-
-    return spa_id
 
 
 #   ---------------------
@@ -79,7 +68,6 @@ def current_spa_id():
 #   --------------------
 
 
-
 def is_master_admin():
     return session.get("role") == "master_admin"
 
@@ -88,6 +76,22 @@ def current_spa_filter():
     if is_master_admin():
         return "", ()
     return " AND spa_id = %s ", (current_spa_id(),)
+
+
+def current_spa_id():
+    from flask import g, session
+
+    if "user_id" not in session:
+        return None
+
+    if session.get("role") == "master_admin":
+        return None
+
+    return getattr(g, "spa_id", None)
+
+
+
+
 
 
 
@@ -225,9 +229,63 @@ def get_spa_current_time():
     return get_spa_now().time()
 
 
+#   -------------------------
+#
+#
+#   -------------------------        
+
+
+
+
+EMAIL_UNSUBSCRIBE_FOOTER = """
+
+--------------------------------------------------
+
+You are receiving emails from Clear Skin Esthetics.
+
+To unsubscribe from future marketing emails,
+reply UNSUBSCRIBE or contact our office directly.
+"""
+
+
+def add_email_footer(body):
+
+    body = (body or "").strip()
+
+    if "unsubscribe" in body.lower():
+        return body
+
+    return f"{body}{EMAIL_UNSUBSCRIBE_FOOTER}"
+
+
+def send_email(to_email, subject, body):
+
+    final_body = add_email_footer(body)
+
+    # existing Mailgun code below
+
+
+
+
+
+
+
+
 
 def send_email(to_email, subject, body):
     ...
+
+
+
+
+
+        
+#   -------------------------
+#
+#
+#   -------------------------
+
+
 
 
 def get_spa_name(spa_id):
@@ -257,7 +315,6 @@ def get_spa_name(spa_id):
 #   ---------------------------
 
 
-
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -267,7 +324,12 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-    return redirect(url_for("login", next=request.url))
+
+        
+#   -------------------------
+#
+#
+#   -------------------------
 
 
 
@@ -284,6 +346,11 @@ def master_admin_required(f):
 
 
 
+
+
+
+
+
 #   ---------------------------
 #
 #      ALLOWED USERS
@@ -291,7 +358,8 @@ def master_admin_required(f):
 #       
 #   ---------------------------
         
-ALLOWED_USER_ROLES = ["admin", "manager", "staff"]
+ALLOWED_USER_ROLES = ["master_admin", "admin", "manager", "staff"]
+
 
 def clean_user_role(role):
     if role not in ALLOWED_USER_ROLES:
@@ -304,7 +372,6 @@ def require_master_admin():
         abort(403)
 
 
-
 def require_admin_or_master():
     if session.get("role") not in ["admin", "master_admin"]:
         abort(403)
@@ -314,9 +381,10 @@ def current_user_role():
     return session.get("role")
 
 
-def require_master_admin():
-    if session.get("role") != "master_admin":
-        abort(403)
+
+
+
+
 
 
 
@@ -367,14 +435,19 @@ from functools import wraps
 def spa_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
+
+        if session.get("role") == "master_admin":
+            return f(*args, **kwargs)
+
         spa_id = current_spa_id()
 
         if not spa_id:
-            return redirect(url_for("feedback_admin"))
+            flash("No spa is assigned to this user.", "error")
+            return redirect(url_for("dashboard"))
 
         return f(*args, **kwargs)
-    return decorated_function
 
+    return decorated_function
 
 
 
@@ -1907,13 +1980,10 @@ def feedback():
 
 
 
-
 @app.route("/feedback-admin")
 @login_required
 @master_admin_required
 def feedback_admin():
-    spa_id = current_spa_id()
-
     feedback_type = (request.args.get("feedback_type") or "").strip()
     status = (request.args.get("status") or "open").strip()
 
@@ -1923,39 +1993,42 @@ def feedback_admin():
     cur.execute("""
         SELECT COUNT(*)
         FROM user_feedback
-        WHERE spa_id = %s
-          AND (is_resolved IS FALSE OR is_resolved IS NULL)
-    """, (spa_id,))
+        WHERE is_resolved IS FALSE OR is_resolved IS NULL
+    """)
     open_count = cur.fetchone()[0]
-    print("OPEN COUNT:", open_count)
 
     query = """
         SELECT
-            feedback_id,
-            user_name,
-            user_email,
-            page_name,
-            feedback_type,
-            severity,
-            expected_behavior,
-            message,
-            created_at,
-            is_resolved
-        FROM user_feedback
-        WHERE spa_id = %s
+            uf.feedback_id,
+            uf.user_name,
+            uf.user_email,
+            uf.page_name,
+            uf.feedback_type,
+            uf.severity,
+            uf.expected_behavior,
+            uf.message,
+            uf.created_at,
+            uf.is_resolved,
+            uf.spa_id,
+            s.spa_name
+        FROM user_feedback uf
+        LEFT JOIN spas s
+            ON uf.spa_id = s.spa_id
+        WHERE 1=1
     """
-    params = [spa_id]
+
+    params = []
 
     if feedback_type:
-        query += " AND feedback_type = %s"
+        query += " AND uf.feedback_type = %s"
         params.append(feedback_type)
 
     if status == "open":
-        query += " AND is_resolved = FALSE"
+        query += " AND (uf.is_resolved IS FALSE OR uf.is_resolved IS NULL)"
     elif status == "resolved":
-        query += " AND is_resolved = TRUE"
+        query += " AND uf.is_resolved IS TRUE"
 
-    query += " ORDER BY is_resolved ASC, created_at DESC"
+    query += " ORDER BY uf.is_resolved ASC, uf.created_at DESC"
 
     cur.execute(query, tuple(params))
     feedback_items = cur.fetchall()
@@ -1970,6 +2043,12 @@ def feedback_admin():
         selected_status=status,
         open_count=open_count
     )
+
+
+
+
+
+
 
 
 
@@ -2389,9 +2468,23 @@ def send_sms(to_number, message):
 #   ----------------------
 
 
+SMS_OPT_OUT_TEXT = "\n\nReply STOP to opt out."
+
+
+def add_sms_opt_out(message_body):
+    message_body = (message_body or "").strip()
+
+    if "reply stop" in message_body.lower():
+        return message_body
+
+    return f"{message_body}{SMS_OPT_OUT_TEXT}"
+
+
 def send_sms_message(to_phone, message_body):
 
     sms_enabled = os.getenv("SMS_ENABLED", "false").lower() == "true"
+
+    final_message_body = add_sms_opt_out(message_body)
 
     if not sms_enabled:
         return {
@@ -2400,7 +2493,8 @@ def send_sms_message(to_phone, message_body):
             "provider_message_id": None,
             "twilio_status": None,
             "twilio_error_code": None,
-            "twilio_error_message": "SMS sending disabled"
+            "twilio_error_message": "SMS sending disabled",
+            "final_message_body": final_message_body
         }
 
     try:
@@ -2415,13 +2509,14 @@ def send_sms_message(to_phone, message_body):
                 "provider_message_id": None,
                 "twilio_status": None,
                 "twilio_error_code": None,
-                "twilio_error_message": "Missing TWILIO_MESSAGING_SERVICE_SID"
+                "twilio_error_message": "Missing TWILIO_MESSAGING_SERVICE_SID",
+                "final_message_body": final_message_body
             }
 
         client = Client(account_sid, auth_token)
 
         message = client.messages.create(
-            body=message_body,
+            body=final_message_body,
             messaging_service_sid=messaging_service_sid,
             to=to_phone
         )
@@ -2432,7 +2527,8 @@ def send_sms_message(to_phone, message_body):
             "provider_message_id": message.sid,
             "twilio_status": message.status,
             "twilio_error_code": message.error_code,
-            "twilio_error_message": message.error_message
+            "twilio_error_message": message.error_message,
+            "final_message_body": final_message_body
         }
 
     except Exception as e:
@@ -2442,9 +2538,9 @@ def send_sms_message(to_phone, message_body):
             "provider_message_id": None,
             "twilio_status": None,
             "twilio_error_code": None,
-            "twilio_error_message": str(e)
+            "twilio_error_message": str(e),
+            "final_message_body": final_message_body
         }
-
 
 
 
@@ -4902,7 +4998,7 @@ def general_email():
     template_id = request.args.get("template_id", "")
     search = request.args.get("search", "").strip()
     show_all = request.args.get("show_all")
-    client_status_id = request.args.get("client_status_id", "")
+    client_status_id = request.args.get("client_status", "")
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -4951,7 +5047,7 @@ def general_email():
                 cs.status_name
             FROM clients c
             LEFT JOIN client_statuses cs
-                ON c.client_status = cs.client_status_id
+                ON c.client_status = cs.status_name
             WHERE c.spa_id = %s
               AND c.email IS NOT NULL
               AND TRIM(c.email) <> ''
@@ -5179,6 +5275,21 @@ def general_email_send():
 
             subject = render_email_template(subject_template, context)
             body = render_email_template(body_template, context)
+            
+            email_footer = f"""
+
+             ----------------------------------
+
+            You are receiving this email because you are a client of {spa_name}.
+
+            To unsubscribe from marketing emails, reply with:
+            UNSUBSCRIBE
+
+            {spa_name}
+            """
+
+            body = body + email_footer
+
 
             try:
                 response = send_email(
@@ -7637,7 +7748,7 @@ def client_management():
                     WHERE a2.client_id = c.client_id
                       AND a2.spa_id = c.spa_id
                       AND a2.appointment_date >= %s
-                ) AS next_visit_date
+                ) AS next_visit_date,
 
                 c.ok_to_text,
                 c.sms_opt_in,
