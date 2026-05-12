@@ -970,14 +970,6 @@ DROPDOWN_CONFIG = {
         "spa_scoped": True
     },
 
-    "referral_sources": {
-        "title": "Referral Sources",
-        "table": "referral_sources",
-        "pk": "referral_source_id",
-        "value": "referral_source_name",
-        "label": "Referral Source Name",
-        "spa_scoped": True
-    },
 
     "client_form_names": {
         "title": "Client Form Names",
@@ -1077,7 +1069,7 @@ DROPDOWN_CONFIG = {
         "spa_scoped": True
     },
 
-        "preferred_contact_methods": {
+    "preferred_contact_methods": {
         "title": "Preferred Contact Methods",
         "table": "preferred_contact_methods",
         "pk": "preferred_contact_method_id",
@@ -1086,7 +1078,7 @@ DROPDOWN_CONFIG = {
         "spa_scoped": True
     },
 
-        "preferred_languages": {
+    "preferred_languages": {
         "title": "Preferred Languages",
         "table": "preferred_languages",
         "pk": "preferred_language_id",
@@ -1098,6 +1090,64 @@ DROPDOWN_CONFIG = {
 
 
 }
+
+
+#   ------------------------------
+#
+#  Drop Down Helper
+#
+#
+#
+#   ------------------------------
+   
+
+
+def get_dropdown_options(config_key, spa_id):
+    config = DROPDOWN_CONFIG[config_key]
+
+    table = config["table"]
+    pk = config["pk"]
+    value = config["value"]
+
+    query = f"""
+        SELECT {pk}, {value}
+        FROM {table}
+    """
+
+    conditions = []
+
+    if config.get("spa_scoped"):
+        conditions.append("spa_id = %s")
+
+    if config.get("active_column"):
+        conditions.append(f"{config['active_column']} = TRUE")
+
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+
+    query += f" ORDER BY {value}"
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    params = [spa_id] if config.get("spa_scoped") else []
+
+    cur.execute(query, params)
+    rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return rows
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1628,7 +1678,7 @@ def login():
         flash("Logged in successfully.", "success")
 
 
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("home"))
 
     return render_template("login.html")
 
@@ -1657,6 +1707,24 @@ def logout():
     session.clear()
     flash("You have been logged out.", "success")
     return redirect(url_for("login"))
+
+
+
+
+#   -------------------------
+#  >>>>>>>>>>>>>>>>>>>>>>>>>>>>
+#     
+#        CLIENTS HOME
+#      TEMP FIX
+#   >>>>>>>>>>>>>>>>>>>>>>>>
+#   
+#   -------------------------
+
+@app.route("/clients")
+@login_required
+@spa_required
+def clients_home():
+    return redirect(url_for("client_management"))
 
 
 
@@ -3938,28 +4006,32 @@ def sms_history_all():
 
     cur.execute("""
         SELECT
-            s.created_at,               -- 0
-            s.sms_type,                 -- 1
-            c.first_name,               -- 2
-            c.last_name,                -- 3
-            s.phone_number,             -- 4
-            s.message_body,             -- 5
-            s.status,                   -- 6
-            s.status,                   -- 7  
-            s.twilio_error_code,        -- 8
-            s.twilio_error_message,     -- 9
-            s.sms_log_id                -- 10
-        FROM sms_log s
+            sm.created_at,               -- 0
+            sm.message_type,             -- 1
+            c.first_name,                -- 2
+            c.last_name,                 -- 3
+            sm.recipient_phone,          -- 4
+            sm.message_body,             -- 5
+            sm.status,                   -- 6
+            sm.twilio_status,            -- 7  
+            sm.twilio_error_code,        -- 8
+            sm.twilio_error_message,     -- 9
+            sm.sms_message_id            -- 10
+        FROM sms_messages sm
         LEFT JOIN clients c
-            ON s.client_id = c.client_id
-           AND s.spa_id = c.spa_id
-        WHERE s.spa_id = %s
-        ORDER BY s.created_at DESC
+            ON sm.client_id = c.client_id
+           AND sm.spa_id = c.spa_id
+        WHERE sm.spa_id = %s
+        ORDER BY sm.created_at DESC
     """, (spa_id,))
 
     sms_log = cur.fetchall()
 
-    print("sms log count =", len(sms_log))
+    print("SMS HISTORY USING sms_messages", flush=True)
+    print("sms_messages count =", len(sms_log), flush=True)
+    print("sms_messages =", sms_log, flush=True)
+
+    print("sms messages count =", len(sms_log))
     print("sms_log =", sms_log)
 
     cur.close()
@@ -7873,6 +7945,13 @@ def client_management():
 
 
 
+
+
+
+
+
+
+
 #  --------------------------------------
 #
 #  SCHEDULE APPOINTMENT START
@@ -7880,16 +7959,24 @@ def client_management():
 #  spa id and route good
 #  -----------------------------------
 
+
+#  --------------------------------------
+#
+#  SCHEDULE APPOINTMENT START
+#
+#  spa id and route good
+#  -----------------------------------
+
+
+
 @app.route("/schedule_appointment_start", methods=["GET", "POST"])
 @login_required
 @spa_required
 def schedule_appointment_start():
     spa_id = current_spa_id()
 
-    conn = get_db_connection()
-    cur = conn.cursor()
-
     clients = []
+    searched = False
 
     selected_date = request.args.get("selected_date") \
         or request.form.get("selected_date") \
@@ -7899,8 +7986,12 @@ def schedule_appointment_start():
     birth_date = ""
 
     if request.method == "POST":
+        searched = True
         last_name = request.form.get("last_name", "").strip()
         birth_date = request.form.get("birth_date", "").strip()
+
+        conn = get_db_connection()
+        cur = conn.cursor()
 
         query = """
             SELECT
@@ -7911,6 +8002,7 @@ def schedule_appointment_start():
                 phone
             FROM clients
             WHERE spa_id = %s
+              AND active_client = TRUE
         """
         params = [spa_id]
 
@@ -7928,18 +8020,17 @@ def schedule_appointment_start():
             cur.execute(query, tuple(params))
             clients = cur.fetchall()
 
-    cur.close()
-    conn.close()
+        cur.close()
+        conn.close()
 
     return render_template(
         "schedule_appointment_start.html",
         clients=clients,
+        searched=searched,
         selected_date=selected_date,
         last_name=last_name,
         birth_date=birth_date
     )
-
-
 
 
 
@@ -14431,7 +14522,7 @@ def add_appointment():
             INSERT INTO appointments (
                 spa_id,
                 client_id,   
-                service_id,
+                service_type_id,
                 appointment_date,
                 appointment_time,
                 status,
@@ -14470,26 +14561,48 @@ def add_appointment():
     prefill_time = request.args.get("appointment_time", "")
     prefill_service_name = request.args.get("service_name", "")
             
+
     client_search = request.args.get("client_search", "").strip()
-              
+
     if client_search:
         cur.execute("""
             SELECT client_id, first_name, last_name
             FROM clients
             WHERE spa_id = %s
+              AND active_client = TRUE
               AND last_name ILIKE %s
             ORDER BY last_name, first_name
         """, (spa_id, f"%{client_search}%"))
+
+        clients = cur.fetchall()
+
+        if len(clients) == 1:
+            client_id = clients[0][0]
+
+        elif len(clients) == 0:
+            cur.close()
+            conn.close()
+
+            flash("No client found. Please add the client first.", "warning")
+
+            return redirect(url_for(
+                "add_new_client", 
+                selected_date=selected_date 
+            ))
+
     else:
+
         cur.execute("""
             SELECT client_id, first_name, last_name
             FROM clients
             WHERE spa_id = %s
+              AND active_client = TRUE
             ORDER BY last_name, first_name
             LIMIT 25
         """, (spa_id,))
 
-    clients = cur.fetchall() 
+        clients = cur.fetchall()              
+
             
     cur.execute("""
         SELECT service_type_id, service_name
@@ -15514,8 +15627,6 @@ def add_new_client():
 
     locations = cur.fetchall()
         
-    cur.close()
-    conn.close()
             
     if request.method == "POST":
         session["new_client_step1"] = {
@@ -15565,11 +15676,48 @@ def add_new_client():
                 "preferred_contact_method": ""
             }
     
+
+    cur.execute("""
+        SELECT preferred_language_id, language_name
+        FROM preferred_languages
+        WHERE spa_id = %s
+          AND is_active = TRUE
+        ORDER BY language_name
+    """, (spa_id,))
+    preferred_languages = cur.fetchall()
+
+
+    cur.execute("""
+        SELECT preferred_contact_method_id, method_name
+        FROM preferred_contact_methods
+        WHERE spa_id = %s
+          AND is_active = TRUE
+        ORDER BY method_name
+    """, (spa_id,))
+    preferred_contact_methods = cur.fetchall()
+
+
+    cur.execute("""
+        SELECT client_status_id, status_name
+        FROM client_statuses
+        WHERE spa_id = %s
+          AND is_active = TRUE
+        ORDER BY status_name
+    """, (spa_id,))
+    client_statuses = cur.fetchall()
+
+
+    cur.close()
+    conn.close()
+
     return render_template(
         "add_new_client.html",
         selected_date=selected_date,
         step1_data=step1_data,
-        locations=locations
+        locations=locations,
+        preferred_languages=preferred_languages,
+        preferred_contact_methods=preferred_contact_methods,
+        client_statuses=client_statuses
     )
 
 

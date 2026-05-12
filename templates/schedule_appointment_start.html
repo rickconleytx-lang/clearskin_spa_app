@@ -66,12 +66,18 @@
             {% endfor %}
         </tbody>
     </table>
-{% elif request.method == "POST" %}
+
+
+
+{% elif searched %}
     <p>No matching clients found.</p>
 
     <a href="{{ url_for('add_new_client', selected_date=selected_date) }}" class="btn btn-primary">
         Add New Client
     </a>
 {% endif %}
+
+
+
 
 {% endblock %}

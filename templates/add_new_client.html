@@ -1,33 +1,32 @@
 {% extends "base.html" %}
-    
+
 {% block title %}Add New Client - Page 1{% endblock %}
-    
+
 {% block content %}
-       
+
 <a href="{{ url_for('help_add_new_client_page') }}" class="btn">Page Help</a>
-<br>
-<br>
+<br><br>
 
 <h1>Add New Client - Page 1</h1>
-        
+
 <form method="POST">
 
     <input type="hidden" name="selected_date" value="{{ selected_date }}">
-        
+
     <div class="form-buttons">
         <button type="submit">Next Page</button>
-        
+
         <button type="reset"
-            onclick="return confirm('Are you sure you want to clear this form?')">
+                onclick="return confirm('Are you sure you want to clear this form?')">
             Clear Form
         </button>
-        
+
         <a href="{{ url_for('cancel_new_client') }}" class="btn cancel-btn"
            onclick="return confirm('Are you sure you want to cancel? Any unsaved information will be lost.')">
-           Cancel
+            Cancel
         </a>
     </div>
-        
+
     <span style="color: red; font-size: x-small;">* Required Field</span>
 
     <p>
@@ -53,9 +52,10 @@
     <p>
         <label>Birth Date:</label><br>
         <input type="text"
-                name="birth_date" 
-                placeholder="mm/dd/yyyy"
-                pattern="\d{2}/\d{2}/\d{4}">
+               name="birth_date"
+               value="{{ step1_data.get('birth_date', '') }}"
+               placeholder="mm/dd/yyyy"
+               pattern="\d{2}/\d{2}/\d{4}">
     </p>
 
     <p>
@@ -67,12 +67,12 @@
         <label>City:</label><br>
         <input type="text" name="city" value="{{ step1_data.get('city', '') }}">
     </p>
-        
+
     <p>
         <label>State:</label><br>
         <input type="text" name="state" value="{{ step1_data.get('state', 'TX') }}">
     </p>
-    
+
     <p>
         <label>Zip:</label><br>
         <input type="text" name="zip" value="{{ step1_data.get('zip', '') }}">
@@ -109,18 +109,13 @@
     <p>
         <label>Client Status:</label><br>
         <select name="client_status">
-            <option value="Current"
-                {% if step1_data.get('client_status', 'Current') == 'Current' %}selected{% endif %}>
-                Current
-            </option>
-            <option value="Previous"
-                {% if step1_data.get('client_status', '') == 'Previous' %}selected{% endif %}>
-                Previous
-            </option>
-            <option value="Prior Spa Client"
-                {% if step1_data.get('client_status', '') == 'Prior Spa Client' %}selected{% endif %}>
-                Prior Spa Client
-            </option>
+            <option value="">Select Status</option>
+            {% for status in client_statuses %}
+                <option value="{{ status[1] }}"
+                    {% if step1_data.get('client_status', '') == status[1] %}selected{% endif %}>
+                    {{ status[1] }}
+                </option>
+            {% endfor %}
         </select>
     </p>
 
@@ -128,14 +123,12 @@
         <label>Preferred Language:</label><br>
         <select name="preferred_language">
             <option value="">Select Language</option>
-            <option value="English"
-                {% if step1_data.get('preferred_language', '') == 'English' %}selected{% endif %}>
-                English
-            </option>
-            <option value="Spanish"
-                {% if step1_data.get('preferred_language', '') == 'Spanish' %}selected{% endif %}>
-                Spanish
-            </option>
+            {% for language in preferred_languages %}
+                <option value="{{ language[1] }}"
+                    {% if step1_data.get('preferred_language', '') == language[1] %}selected{% endif %}>
+                    {{ language[1] }}
+                </option>
+            {% endfor %}
         </select>
     </p>
 
@@ -143,22 +136,12 @@
         <label>Preferred Contact Method:</label><br>
         <select name="preferred_contact_method">
             <option value="">Select Method</option>
-            <option value="Phone"
-                {% if step1_data.get('preferred_contact_method', '') == 'Phone' %}selected{% endif %}>
-                Phone
-            </option>
-            <option value="Email"
-                {% if step1_data.get('preferred_contact_method', '') == 'Email' %}selected{% endif %}>
-                Email
-            </option>
-            <option value="Text"
-                {% if step1_data.get('preferred_contact_method', '') == 'Text' %}selected{% endif %}>
-                Text
-            </option>
-            <option value="Email/Text"
-                {% if step1_data.get('preferred_contact_method', '') == 'Email/Text' %}selected{% endif %}>
-                Email/Text
-            </option>
+            {% for method in preferred_contact_methods %}
+                <option value="{{ method[1] }}"
+                    {% if step1_data.get('preferred_contact_method', '') == method[1] %}selected{% endif %}>
+                    {{ method[1] }}
+                </option>
+            {% endfor %}
         </select>
     </p>
 
@@ -167,24 +150,25 @@
 
         <label>
             <input type="checkbox" name="ok_to_call" value="true"
-                {% if step1_data.get('ok_to_call', True) %}checked{% endif %}>
+                {% if step1_data.get('ok_to_call', False) %}checked{% endif %}>
             OK to Call
         </label>
         <br>
 
         <label>
             <input type="checkbox" name="ok_to_text" value="true"
-                {% if step1_data.get('ok_to_text', True) %}checked{% endif %}>
+                {% if step1_data.get('ok_to_text', False) %}checked{% endif %}>
             OK to Text
         </label>
         <br>
 
         <label>
             <input type="checkbox" name="ok_to_email" value="true"
-                {% if step1_data.get('ok_to_email', True) %}checked{% endif %}>
+                {% if step1_data.get('ok_to_email', False) %}checked{% endif %}>
             OK to Email
         </label>
     </p>
-        
+
 </form>
+
 {% endblock %}
