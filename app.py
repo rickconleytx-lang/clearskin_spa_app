@@ -937,7 +937,9 @@ DROPDOWN_CONFIG = {
         "pk": "skin_type_id",
         "value": "skin_type_name",
         "label": "Skin Type Name",
-        "spa_scoped": True
+        "spa_scoped": True,
+        "active_column": "is_active",
+        "order_by": "skin_type_name"
     },
 
     "referral_sources": {
@@ -946,7 +948,9 @@ DROPDOWN_CONFIG = {
         "pk": "referral_source_id",
         "value": "referral_source_name",
         "label": "Referral Source Name",
-        "spa_scoped": True
+        "spa_scoped": True,
+        "active_column": "is_active",
+        "order_by": "referral_source_name"
     },
 
     "fitzpatrick_types": {
@@ -957,7 +961,9 @@ DROPDOWN_CONFIG = {
         "extra_value": "description",
         "label": "Fitzpatrick Level",
         "extra_label": "Description",
-        "spa_scoped": True
+        "spa_scoped": True,
+        "active_column": "is_active",
+        "order_by": "fitzpatrick_level"
     },
 
 
@@ -967,7 +973,9 @@ DROPDOWN_CONFIG = {
         "pk": "status_id",
         "value": "status_name",
         "label": "Status Name",
-        "spa_scoped": True
+        "spa_scoped": True,
+        "active_column": "is_active",
+        "order_by": "status_name"
     },
 
 
@@ -977,7 +985,9 @@ DROPDOWN_CONFIG = {
         "pk": "form_type",   # <-- fix this
         "value": "form_type_name",
         "label": "Form Type Name",
-        "spa_scoped": True
+        "spa_scoped": True,
+        "active_column": "is_active",
+        "order_by": "form_type_name"
     },
 
 
@@ -992,63 +1002,86 @@ DROPDOWN_CONFIG = {
         "pk": "expense_cat_id",
         "value": "expense_cat_name",
         "label": "Expense Category Name",
-        "spa_scoped": True
+        "spa_scoped": True,
+        "active_column": "is_active",
+        "order_by": "expense_cat_name"
     },
+
     "income_types": {
         "title": "Income Types",
         "table": "income_types",
         "pk": "income_type_id",
         "value": "income_type_name",
         "label": "Income Type Name",
-        "spa_scoped": True
+        "spa_scoped": True,
+        "active_column": "is_active",
+        "order_by": "income_type_name"
     },
+
     "payment_methods": {
         "title": "Payment Methods",
         "table": "payment_methods",
         "pk": "payment_method_id",
         "value": "payment_method",
         "label": "Payment Method",
-        "spa_scoped": True
+        "spa_scoped": True,
+        "active_column": "is_active",
+        "order_by": "payment_method"
     },
+
     "service_name_types": {
         "title": "Service Name Types",
         "table": "service_name_types",
         "pk": "service_type_id",
         "value": "service_name",
         "label": "Service Name",
-        "spa_scoped": True 
+        "spa_scoped": True,
+        "active_column": "is_active",
+        "order_by": "service_name" 
     },
+
     "sex": {
         "title": "Sex",
         "table": "sex",
         "pk": "sex_type_id",
         "value": "sex_type",
         "label": "Sex Type",
-        "spa_scoped": True
+        "spa_scoped": True,
+        "active_column": "is_active",
+        "order_by": "sex_type"
     },
+
     "treatment_rooms": {
         "title": "Treatment Rooms",
         "table": "treatment_rooms",
         "pk": "room_id",
         "value": "room_name",
         "label": "Room Name",
-        "spa_scoped": True
+        "spa_scoped": True,
+        "active_column": "is_active",
+        "order_by": "room_name"
     },
+
     "vendor_name": {
         "title": "Vendor Name",
         "table": "vendor_name",
         "pk": "vendor_id",
         "value": "vendors_name",
         "label": "Vendor Name",
-        "spa_scoped": True
+        "spa_scoped": True,
+        "active_column": "is_active",
+        "order_by": "vendors_name"
     },
+
     "compensation_types": {
         "title": "Compensation Types",
         "table": "compensation_types", 
         "pk": "compensation_type_id",
         "value": "compensation_type_name",
         "label": "Compensation Type",
-        "spa_scoped": True
+        "spa_scoped": True,
+        "active_column": "is_active",
+        "order_by": "compensation_type_name"
     },
 
     "spa_locations": {
@@ -1057,7 +1090,9 @@ DROPDOWN_CONFIG = {
         "pk": "spa_location_id",
         "value": "location_name",
         "label": "Spa Locations",
-        "spa_scoped": True
+        "spa_scoped": True,
+        "active_column": "is_active",
+        "order_by": "location_name"
     },
 
     "client_statuses": {
@@ -1066,7 +1101,9 @@ DROPDOWN_CONFIG = {
         "pk": "client_status_id",
         "value": "status_name",
         "label": "Client Statuses",    
-        "spa_scoped": True
+        "spa_scoped": True,
+        "active_column": "is_active",
+        "order_by": "status_name"
     },
 
     "preferred_contact_methods": {
@@ -1075,7 +1112,9 @@ DROPDOWN_CONFIG = {
         "pk": "preferred_contact_method_id",
         "value": "method_name", 
         "label": "Preferred Contact Methods",
-        "spa_scoped": True
+        "spa_scoped": True,
+        "active_column": "is_active",
+        "order_by": "method_name"
     },
 
     "preferred_languages": {
@@ -1084,7 +1123,9 @@ DROPDOWN_CONFIG = {
         "pk": "preferred_language_id",
         "value": "language_name",   
         "label": "Preferred Languages",
-        "spa_scoped": True
+        "spa_scoped": True,
+        "active_column": "is_active",
+        "order_by": "language_name"
     }
 
 
@@ -1101,13 +1142,13 @@ DROPDOWN_CONFIG = {
 #   ------------------------------
    
 
-
 def get_dropdown_options(config_key, spa_id):
     config = DROPDOWN_CONFIG[config_key]
 
     table = config["table"]
     pk = config["pk"]
     value = config["value"]
+    order_by = config.get("order_by", value)
 
     query = f"""
         SELECT {pk}, {value}
@@ -1115,9 +1156,11 @@ def get_dropdown_options(config_key, spa_id):
     """
 
     conditions = []
+    params = []
 
     if config.get("spa_scoped"):
         conditions.append("spa_id = %s")
+        params.append(spa_id)
 
     if config.get("active_column"):
         conditions.append(f"{config['active_column']} = TRUE")
@@ -1125,12 +1168,10 @@ def get_dropdown_options(config_key, spa_id):
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
 
-    query += f" ORDER BY {value}"
+    query += f" ORDER BY {order_by}"
 
     conn = get_db_connection()
     cur = conn.cursor()
-
-    params = [spa_id] if config.get("spa_scoped") else []
 
     cur.execute(query, params)
     rows = cur.fetchall()
@@ -1139,7 +1180,6 @@ def get_dropdown_options(config_key, spa_id):
     conn.close()
 
     return rows
-
 
 
 
@@ -8645,7 +8685,7 @@ def edit_gift_certificate(certificate_id):
         return redirect(url_for("gift_certificates_home"))
 
     cur.execute("""
-        SELECT gift_certificate_status_id, status_name
+v        SELECT gift_certificate_status_id, status_name
         FROM gift_certificate_statuses
         WHERE spa_id = %s
         ORDER BY gift_certificate_status_id
@@ -14401,7 +14441,7 @@ def appointments():
             ON a.client_id = c.client_id
            AND a.spa_id = c.spa_id
         LEFT JOIN service_name_types s
-            ON a.service_id = s.service_type_id
+            ON a.service_type_id = s.service_type_id
            AND a.spa_id = s.spa_id
         WHERE 1=1
     """
@@ -14467,7 +14507,7 @@ def add_appointment():
             
     if request.method == "POST":
         client_id = (request.form.get("client_id") or "").strip()
-        service_id = (request.form.get("service_type_id") or "").strip()
+        service_type_id = (request.form.get("service_type_id") or "").strip()
         appointment_date = (request.form.get("appointment_date") or "").strip()
         appointment_time = (request.form.get("appointment_time") or "").strip()
         status = (request.form.get("status") or "booked").strip()
@@ -14480,7 +14520,7 @@ def add_appointment():
             conn.close()
             return redirect(url_for("add_appointment", selected_date=selected_date))
      
-        if not service_id:
+        if not service_type_id:
             flash("Service is required.", "error")
             cur.close()
             conn.close()
@@ -14510,7 +14550,7 @@ def add_appointment():
             FROM service_name_types
             WHERE service_type_id = %s
               AND spa_id = %s
-        """, (service_id, spa_id))
+        """, (service_type_id, spa_id))
 
         if not cur.fetchone():
             flash("Invalid service selected.", "error")
@@ -14532,7 +14572,7 @@ def add_appointment():
         """, (
             spa_id,
             client_id,
-            service_id,
+            service_type_id,
             appointment_date,
             appointment_time,
             status,
@@ -14603,15 +14643,7 @@ def add_appointment():
 
         clients = cur.fetchall()              
 
-            
-    cur.execute("""
-        SELECT service_type_id, service_name
-        FROM service_name_types
-        WHERE spa_id = %s
-        ORDER BY service_name
-    """, (spa_id,))
-
-    service_types = cur.fetchall()
+    service_types = get_dropdown_options("service_name_types", spa_id)            
                 
     cur.close()
     conn.close()
@@ -14875,14 +14907,14 @@ def reschedule_appointment(appointment_id):
         appt_params.append(spa_id)
     
     if request.method == "POST":
-        service_id = (request.form.get("service_type_id") or "").strip()
+        service_type_id = (request.form.get("service_type_id") or "").strip()
         appointment_date = (request.form.get("appointment_date") or "").strip()
         appointment_time = (request.form.get("appointment_time") or "").strip()
         status = (request.form.get("status") or "").strip()
         notes = (request.form.get("notes") or "").strip()
         original_date = (request.form.get("original_date") or "").strip()
     
-        if not service_id or not appointment_date or not appointment_time or not status:
+        if not service_type_id or not appointment_date or not appointment_time or not status:
             flash("Please complete all required fields.", "error")
             cur.close()
             conn.close()
@@ -14911,7 +14943,7 @@ def reschedule_appointment(appointment_id):
             FROM service_name_types
             WHERE service_type_id = %s
               AND spa_id = %s
-        """, (service_id, service_spa_id))
+        """, (service_type_id, service_spa_id))
 
         if not cur.fetchone():
             flash("Invalid service selected.", "error")
@@ -14922,7 +14954,7 @@ def reschedule_appointment(appointment_id):
         cur.execute(f"""
             UPDATE appointments
             SET
-                service_id = %s,
+                service_type_id = %s,
                 appointment_date = %s,
                 appointment_time = %s,
                 status = %s,
@@ -14930,7 +14962,7 @@ def reschedule_appointment(appointment_id):
                 updated_at = CURRENT_TIMESTAMP
             {appt_filter}
         """, (
-            service_id,
+            service_type_id,
             appointment_date,
             appointment_time,
             status,
@@ -14958,7 +14990,7 @@ def reschedule_appointment(appointment_id):
             a.client_id,
             c.first_name,
             c.last_name,
-            a.service_id,
+            a.service_type_id,
             a.appointment_date,
             a.appointment_time,
             a.status,
@@ -15676,35 +15708,10 @@ def add_new_client():
                 "preferred_contact_method": ""
             }
     
-
-    cur.execute("""
-        SELECT preferred_language_id, language_name
-        FROM preferred_languages
-        WHERE spa_id = %s
-          AND is_active = TRUE
-        ORDER BY language_name
-    """, (spa_id,))
-    preferred_languages = cur.fetchall()
-
-
-    cur.execute("""
-        SELECT preferred_contact_method_id, method_name
-        FROM preferred_contact_methods
-        WHERE spa_id = %s
-          AND is_active = TRUE
-        ORDER BY method_name
-    """, (spa_id,))
-    preferred_contact_methods = cur.fetchall()
-
-
-    cur.execute("""
-        SELECT client_status_id, status_name
-        FROM client_statuses
-        WHERE spa_id = %s
-          AND is_active = TRUE
-        ORDER BY status_name
-    """, (spa_id,))
-    client_statuses = cur.fetchall()
+    locations = get_dropdown_options("spa_locations", spa_id)
+    client_statuses = get_dropdown_options("client_statuses", spa_id)
+    preferred_languages = get_dropdown_options("preferred_languages", spa_id)
+    preferred_contact_methods = get_dropdown_options("preferred_contact_methods", spa_id)
 
 
     cur.close()
@@ -16530,7 +16537,8 @@ def skin_types():
         cur.execute("""
             INSERT INTO skin_types (
                 spa_id,
-                skin_type_name
+                skin_type_name,
+                is_active
             )
             VALUES (%s, %s)
         """, (spa_id, skin_type_name))
@@ -16545,6 +16553,7 @@ def skin_types():
         SELECT skin_type_id, skin_type_name
         FROM skin_types
         WHERE spa_id = %s
+          AND is_active = TRUE
         ORDER BY skin_type_name
     """, (spa_id,))
 
@@ -16630,6 +16639,7 @@ def fitzpatrick_types():
                 spa_id,
                 fitzpatrick_level,
                 description
+                is_active
             )
             VALUES (%s, %s, %s)
         """, (spa_id, fitzpatrick_level, description))
@@ -16645,6 +16655,7 @@ def fitzpatrick_types():
         SELECT fitzpatrick_id, fitzpatrick_level, description
         FROM fitzpatrick_types
         WHERE spa_id = %s
+          AND is_active = TRUE
         ORDER BY fitzpatrick_level
     """, (spa_id,))
 
@@ -16682,7 +16693,8 @@ def delete_fitzpatrick_types(fitzpatrick_id):
     cur = conn.cursor()
     
     cur.execute("""
-        DELETE FROM fitzpatrick_types
+        UPDATE fitzpatrick_types
+        SET is_active = FALSE
         WHERE fitzpatrick_id = %s
           AND spa_id = %s
     """, (fitzpatrick_id, spa_id))
@@ -16690,7 +16702,7 @@ def delete_fitzpatrick_types(fitzpatrick_id):
     if cur.rowcount == 0:
         flash("Fitzpatrick type not found or not authorized.", "error")
     else:
-        flash("Fitzpatrick type deleted successfully!", "success")
+        flash("Fitzpatrick type deactivated successfully!", "success")
     
     conn.commit()
     cur.close()
@@ -16748,6 +16760,7 @@ def edit_fitzpatrick_types(fitzpatrick_id):
         FROM fitzpatrick_types
         WHERE fitzpatrick_id = %s
           AND spa_id = %s
+          AND is_active = TRUE
     """, (fitzpatrick_id, spa_id))
 
     fitzpatrick = cur.fetchone()
@@ -16779,17 +16792,21 @@ def edit_fitzpatrick_types(fitzpatrick_id):
 @app.route("/referral_sources", methods=["GET", "POST"])
 @login_required
 @spa_required
-def referral_sources():   
+def referral_sources():
     spa_id = current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
     if request.method == "POST":
         referral_source_name = request.form["referral_source_name"].strip()
-    
+
         cur.execute("""
-            INSERT INTO referral_sources (spa_id, referral_source_name)
-            VALUES (%s, %s)
+            INSERT INTO referral_sources (
+                spa_id,
+                referral_source_name,
+                is_active
+            )
+            VALUES (%s, %s, TRUE)
         """, (spa_id, referral_source_name))
 
         conn.commit()
@@ -16798,16 +16815,17 @@ def referral_sources():
 
         flash("Referral source added.", "success")
         return redirect(url_for("referral_sources"))
-            
+
     cur.execute("""
         SELECT referral_source_id, referral_source_name
         FROM referral_sources
         WHERE spa_id = %s
+          AND is_active = TRUE
         ORDER BY referral_source_name
     """, (spa_id,))
 
     referral_sources_list = cur.fetchall()
-            
+
     cur.close()
     conn.close()
 
@@ -16815,7 +16833,6 @@ def referral_sources():
         "referral_sources.html",
         referral_sources=referral_sources_list
     )
-
 
 
 
@@ -16836,7 +16853,8 @@ def delete_referral_source(referral_source_id):
     cur = conn.cursor()
         
     cur.execute("""
-        DELETE FROM referral_sources
+        UPDATE referral_sources
+        SET is_active = FALSE
         WHERE referral_source_id = %s
           AND spa_id = %s
     """, (referral_source_id, spa_id))
@@ -16844,7 +16862,7 @@ def delete_referral_source(referral_source_id):
     if cur.rowcount == 0:
         flash("Referral source not found or not authorized.", "error")
     else:
-        flash("Referral source deleted.", "success")
+        flash("Referral source deactivated.", "success")
 
     conn.commit()
     cur.close()

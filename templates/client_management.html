@@ -17,14 +17,18 @@
 <br> <br>
 
 <h1>Client Management</h1>
-Sequence of steps for Adding New Client, Add the Appointment, Gather and Enter health history information, Pre-Session and Post Session Wrap-up.
-<div class="narrow-cards">
-    {{ section_card("1.  Client Books", "Search for name, then-<br> Add Appointment.<br> No Record - Add New Client") }}
-    {{ section_card("2.  Enter/Review Health/Intake Record", "Search Name below, then click on Health/Intake") }}
-    {{ section_card("3.  Verify & Update", "Search for Client below, Open Health/Intake,  discuss with client and  make necessary updates") }}
-    {{ section_card("4.  Wrap up the Session",
-                    "Please <span style='color: red;'>CLICK HERE</span> and Go To Calendar, click on Finish Session, then enter payment and notes", url_for('calendar_view')) }}
+Sequence of steps for Adding New Client: Add the Appointment, Gather and Enter health history information, Pre-Session and Post Session Wrap-up.<br> <br>
+    1.  Add the Appointment: <br>Client Books, Search for name, then: Add Appointment. No Record - Add New Client<br><br>
+    2.  Gather and Enter health history information: <br>Enter/Review Health/Intake Record", "Search Name below, then click on Health/Intake, or Full Summary-Edit<br><br>
+    3.  Pre-Session: <br>Verify & Update", "Search for Client below, Open Health/Intake or Full Summary-Edit,  discuss with client and  make necessary updates<br><br>
+    4.  Post Session Wrap-up:<br> Wrap up the Session,
+                    "Please <span style='color: red;'>CLICK HERE></span> 
+                        <a class="btn" href="{{ url_for('calendar_view') }}">
+                            Go To Calendar
+                       </a> , then click on the calendar appointment to open the Module and click on Finish Session, then enter payment and notes"
+
 </div>
+
 
 <br>
 
