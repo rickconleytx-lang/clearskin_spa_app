@@ -383,6 +383,46 @@ def current_user_role():
 
 
 
+#   ---------------------------
+#
+#      SMS EMAIL CONSENT RECORD
+#
+#
+#   ---------------------------
+
+def add_consent_record(
+    cur,
+    spa_id,
+    client_id,
+    consent_type,
+    consent_status,
+    consent_source="Admin Updated",
+    consent_note=None,
+    updated_by=None
+):
+    cur.execute("""
+        INSERT INTO consent_records (
+            spa_id,
+            client_id,
+            consent_type,
+            consent_status,
+            consent_source,
+            consent_note,
+            updated_by
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+    """, (
+        spa_id,
+        client_id,
+        consent_type,
+        consent_status,
+        consent_source,
+        consent_note,
+        updated_by
+    ))
+
+
+
 
 
 
@@ -5976,6 +6016,282 @@ def edit_email_template(template_id):
 
 
 
+
+
+            
+#   --------------------------------------------------
+#
+#   >>>>>  CLIENT CONTACT PREFERENCES   <<<<<<<<<<<<<<<
+#
+#
+#
+#       
+#
+#
+#           
+#   --------------------------------------------------
+
+
+@app.route("/client-contact-preferences")
+@login_required
+@spa_required
+def client_contact_preferences():
+    spa_id = current_spa_id()
+
+    search = request.args.get("search", "").strip()
+    filter_status = request.args.get("filter_status", "").strip()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    query = """
+        SELECT
+            client_id,
+            first_name,
+            last_name,
+            phone,
+            email,
+            ok_to_text,
+            ok_to_email,
+            ok_to_call
+        FROM clients
+        WHERE spa_id = %s
+          AND active_client = TRUE
+    """
+
+    params = [spa_id]
+
+    if search:
+        query += """
+            AND (
+                first_name ILIKE %s OR
+                last_name ILIKE %s OR
+                phone ILIKE %s OR
+                email ILIKE %s
+            )
+        """
+        like_search = f"%{search}%"
+        params.extend([like_search, like_search, like_search, like_search])
+
+    if filter_status == "sms_yes":
+        query += " AND ok_to_text = TRUE"
+    elif filter_status == "sms_no":
+        query += " AND COALESCE(ok_to_text, FALSE) = FALSE"
+    elif filter_status == "email_yes":
+        query += " AND ok_to_email = TRUE"
+    elif filter_status == "email_no":
+        query += " AND COALESCE(ok_to_email, FALSE) = FALSE"
+    elif filter_status == "missing_phone":
+        query += " AND (phone IS NULL OR phone = '')"
+    elif filter_status == "missing_email":
+        query += " AND (email IS NULL OR email = '')"
+
+    query += " ORDER BY last_name, first_name"
+
+    cur.execute(query, params)
+    clients = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "client_contact_preferences.html",
+        clients=clients,
+        search=search,
+        filter_status=filter_status
+    )
+
+
+
+#   -------------------------------
+#
+#   EDIT PREFERENCES
+#
+#
+#   ------------------------------
+
+
+@app.route("/client-contact-preferences/edit/<int:client_id>", methods=["GET", "POST"])
+@login_required
+@spa_required
+def edit_client_contact_preferences(client_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    if request.method == "POST":
+        ok_to_text = request.form.get("ok_to_text") == "on"
+        ok_to_email = request.form.get("ok_to_email") == "on"
+        ok_to_call = request.form.get("ok_to_call") == "on"
+
+        cur.execute("""
+            SELECT ok_to_text, ok_to_email, ok_to_call
+            FROM clients
+            WHERE client_id = %s
+              AND spa_id = %s
+        """, (client_id, spa_id))
+
+        old_prefs = cur.fetchone()
+
+        if not old_prefs:
+            cur.close()
+            conn.close()
+            flash("Client not found.", "error")
+            return redirect(url_for("client_contact_preferences"))
+
+        old_text = old_prefs[0]
+        old_email = old_prefs[1]
+        old_call = old_prefs[2]
+
+        cur.execute("""
+            UPDATE clients
+            SET ok_to_text = %s,
+                ok_to_email = %s,
+                ok_to_call = %s
+            WHERE client_id = %s
+              AND spa_id = %s
+        """, (ok_to_text, ok_to_email, ok_to_call, client_id, spa_id))
+
+        updated_by = session.get("user_id")
+
+        if old_text != ok_to_text:
+            add_consent_record(
+                cur, spa_id, client_id,
+                "SMS", ok_to_text,
+                "Admin Updated",
+                "SMS consent updated from contact preferences page.",
+                updated_by
+            )
+
+        if old_email != ok_to_email:
+            add_consent_record(
+                cur, spa_id, client_id,
+                "Email", ok_to_email,
+                "Admin Updated",
+                "Email consent updated from contact preferences page.",
+                updated_by
+            )
+
+        if old_call != ok_to_call:
+            add_consent_record(
+                cur, spa_id, client_id,
+                "Phone", ok_to_call,
+                "Admin Updated",
+                "Phone contact consent updated from contact preferences page.",
+                updated_by
+            )
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        flash("Contact preferences updated.", "success")
+        return redirect(url_for("client_contact_preferences"))
+
+    cur.execute("""
+        SELECT
+            client_id,
+            first_name,
+            last_name,
+            phone,
+            email,
+            ok_to_text,
+            ok_to_email,
+            ok_to_call
+        FROM clients
+        WHERE client_id = %s
+          AND spa_id = %s
+          AND active_client = TRUE
+    """, (client_id, spa_id))
+
+    client = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if not client:
+        flash("Client not found.", "error")
+        return redirect(url_for("client_contact_preferences"))
+
+    return render_template(
+        "edit_client_contact_preferences.html",
+        client=client
+    )
+
+
+
+
+
+
+
+
+#   -----------------------------------
+#
+#   CLIENT CONSENT HISTORY
+#
+#
+#   ------------------------------------
+
+
+
+@app.route("/client-consent-history/<int:client_id>")
+@login_required
+@spa_required
+def client_consent_history(client_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT first_name, last_name
+        FROM clients
+        WHERE client_id = %s
+          AND spa_id = %s
+    """, (client_id, spa_id))
+
+    client = cur.fetchone()
+
+    if not client:
+        cur.close()
+        conn.close()
+        flash("Client not found.", "error")
+        return redirect(url_for("client_contact_preferences"))
+
+    cur.execute("""
+        SELECT
+            consent_type,
+            consent_status,
+            consent_source,
+            consent_note,
+            created_at
+        FROM consent_records
+        WHERE client_id = %s
+          AND spa_id = %s
+        ORDER BY created_at DESC
+    """, (client_id, spa_id))
+
+    records = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "client_consent_history.html",
+        client=client,
+        records=records
+    )
+
+
+
+
+
+
+
+
+
+
 #   --------------------------------------------------
 #
 #             >>>>>  INVENTORY   <<<<<<<<<<<<<<<
@@ -8199,7 +8515,7 @@ def client_forms(client_id):
             FROM form_types
             WHERE form_type_id = %s
               AND spa_id = %s
-              AND active = TRUE
+              AND is_active = TRUE
         """, (form_type_id, spa_id))
         valid_form_type = cur.fetchone()
 
@@ -8276,14 +8592,11 @@ def client_forms(client_id):
             )
         )
 
-    cur.execute("""
-        SELECT form_type_id, form_name
-        FROM form_types
-        WHERE spa_id = %s
-          AND active = TRUE
-        ORDER BY form_name
-    """, (spa_id,))
-    form_types = cur.fetchall()
+    form_types = get_dropdown_options(
+        "client_form_names",
+        spa_id
+    )
+
 
     cur.execute("""
         SELECT client_id, first_name, last_name

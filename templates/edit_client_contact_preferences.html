@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>Edit Contact Preferences</h1>
+
+<div class="card">
+    <p><strong>Client:</strong> {{ client[1] }} {{ client[2] }}</p>
+    <p><strong>Phone:</strong> {{ client[3] or "-" }}</p>
+    <p><strong>Email:</strong> {{ client[4] or "-" }}</p>
+</div>
+
+<form method="POST" class="styled-form">
+
+    <div class="form-group checkbox-row">
+        <label>
+            <input type="checkbox" name="ok_to_text" {% if client[5] %}checked{% endif %}>
+            OK to Text / SMS
+        </label>
+    </div>
+
+    <div class="form-group checkbox-row">
+        <label>
+            <input type="checkbox" name="ok_to_email" {% if client[6] %}checked{% endif %}>
+            OK to Email
+        </label>
+    </div>
+
+    <div class="form-group checkbox-row">
+        <label>
+            <input type="checkbox" name="ok_to_call" {% if client[7] %}checked{% endif %}>
+            OK to Call
+        </label>
+    </div>
+
+    <button type="submit" class="btn">Save Preferences</button>
+    <a href="{{ url_for('client_contact_preferences') }}" class="btn secondary">Cancel</a>
+
+</form>
+
+{% endblock %}

@@ -15,10 +15,7 @@
 <div class="narrow-cards">
     {{ section_card("SMS Templates", "View and Add Templates",  url_for('sms_templates_admin')) }}
     {{ section_card("SMS History", "View SMS History",  url_for('sms_history_all')) }}
-    {{ section_card(
-       "SMS Client Settings", 
-       "View and Edit SMS/Email Opt In/Out, <span style='color: red;'>Go To</span> Client Management",  
-       url_for('client_management')) }}
+    {{ section_card("SMS and Email Preferences", "View and Manage Client Contact Preferences", url_for('client_contact_preferences')) }}
 
     {{ section_card(
         "SMS Message to Client",

@@ -2168,3 +2168,46 @@ td:nth-child(3) {
     width: 220px;
     white-space: nowrap;
 }
+
+
+.badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-align: center;
+    min-width: 85px;
+}
+
+.badge.success {
+    background: #d1fae5;
+    color: #065f46;
+    border: 1px solid #10b981;
+}
+
+.badge.danger {
+    background: #fee2e2;
+    color: #991b1b;
+    border: 1px solid #ef4444;
+}
+
+.badge.missing {
+    background: #f3f4f6;
+    color: #6b7280;
+    border: 1px solid #d1d5db;
+}
+
+.styled-table thead th {
+    position: sticky;
+    top: 0;
+    background: #ffffff;
+    color: #111827;
+    z-index: 10;
+}
+
+.table-container {
+    overflow-x: auto;
+    max-height: 75vh;
+}
+

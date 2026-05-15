@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+
+
+<h1>Client Contact Preferences</h1>
+
+<form method="GET" class="filter-form">
+    <input type="text"
+           name="search"
+           placeholder="Search name, phone, or email"
+           value="{{ search }}">
+
+    <select name="filter_status">
+        <option value="">All Clients</option>
+        <option value="sms_yes" {% if filter_status == "sms_yes" %}selected{% endif %}>SMS Opted In</option>
+        <option value="sms_no" {% if filter_status == "sms_no" %}selected{% endif %}>SMS Opted Out</option>
+        <option value="email_yes" {% if filter_status == "email_yes" %}selected{% endif %}>Email Opted In</option>
+        <option value="email_no" {% if filter_status == "email_no" %}selected{% endif %}>Email Opted Out</option>
+        <option value="missing_phone" {% if filter_status == "missing_phone" %}selected{% endif %}>Missing Phone</option>
+        <option value="missing_email" {% if filter_status == "missing_email" %}selected{% endif %}>Missing Email</option>
+    </select>
+
+    <button type="submit" class="btn">Filter</button>
+    <a href="{{ url_for('client_contact_preferences') }}" class="btn secondary">Clear</a>
+</form>
+
+<div class="table-container">
+
+<table class="styled-table">
+    <thead>
+        <tr>
+            <th>Client</th>
+            <th>Phone</th>
+            <th>Email</th>
+            <th>SMS</th>
+            <th>Email Opt-In</th>
+            <th>Phone Contact</th>
+            <th>Action</th>
+        </tr>
+    </thead>
+
+    <tbody>
+        {% for c in clients %}
+        <tr>
+            <td>{{ c[1] }} {{ c[2] }}</td>
+
+            <td>
+                {% if c[3] %}
+                    {{ c[3] }}
+                {% else %}
+                    <span class="badge missing">Missing</span>
+                {% endif %}
+            </td> 
+
+            <td>
+                {% if c[4] %}
+                    {{ c[4] }}
+                {% else %}
+                    <span class="badge missing">Missing</span>
+                {% endif %}
+            </td>   
+
+
+            <td>
+                {% if c[5] %}
+                    <span class="badge success">Opted In</span>
+                {% else %}
+                    <span class="badge danger">Opted Out</span>
+                {% endif %}
+            </td>
+
+            <td>
+                {% if c[6] %}
+                    <span class="badge success">Opted In</span>
+                {% else %}
+                    <span class="badge danger">Opted Out</span>
+                {% endif %}
+            </td>
+
+            <td>
+                {% if c[7] %}
+                    <span class="badge success">Allowed</span>
+                {% else %}
+                    <span class="badge danger">No</span>
+                {% endif %}
+            </td>
+
+            <td>
+                <a class="btn small"
+                   href="{{ url_for('edit_client_contact_preferences', client_id=c[0]) }}">
+                    Edit
+                </a>
+
+                <a class="btn small secondary"
+                    href="{{ url_for('client_consent_history', client_id=c[0]) }}">
+                    History
+                 </a>
+
+
+            </td>
+        </tr>
+        {% else %}
+        <tr>
+            <td colspan="7">No clients found.</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+</div>
+
+{% endblock %}
