@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div class="page-card">
+
+<div class="form-buttons">
+    <a href="javascript:history.back()" class="btn">
+        ← Back
+    </a>
+</div>
+
+
+
+    <h1>{{ page[0] }}</h1>
+
+    <div class="help-content">
+        {{ page[1] | replace('\n', '<br>') | safe }}
+    </div>
+
+    {% if page_key == "sms_email_terms" %}
+        <hr>
+
+        <form method="POST" action="{{ url_for('sms_email_terms') }}">
+
+            <label>
+                <input type="checkbox"
+                       name="agree_terms"
+                       required>
+                I agree to the SMS and Email Terms and Conditions.
+            </label>
+
+            <br><br>
+
+            <button type="submit">
+                Accept Terms
+            </button>
+
+        </form>
+    {% endif %}
+
+</div>
+
+{% endblock %}

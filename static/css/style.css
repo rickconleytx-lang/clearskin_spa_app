@@ -2211,3 +2211,34 @@ td:nth-child(3) {
     max-height: 75vh;
 }
 
+.help-content h1,
+.help-content h2,
+.help-content h3,
+.help-content h4 {
+    margin-top: 1rem;
+    margin-bottom: 0.35rem;
+    line-height: 1.2;
+}
+
+.help-content p {
+    margin-top: 0;
+    margin-bottom: 0.75rem;
+    line-height: 1.5;
+}
+
+.help-content ul,
+.help-content ol {
+    margin-top: 0.25rem;
+    margin-bottom: 0.75rem;
+    padding-left: 1.5rem;
+}
+
+.help-content img {
+    max-width: 100%;
+    border-radius: 10px;
+    margin: 0.5rem 0;
+}
+
+.help-content {
+    font-size: 1rem;
+}

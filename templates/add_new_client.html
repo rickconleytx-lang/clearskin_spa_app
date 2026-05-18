@@ -4,7 +4,12 @@
 
 {% block content %}
 
-<a href="{{ url_for('help_add_new_client_page') }}" class="btn">Page Help</a>
+<a href="{{ url_for('view_help_page', page_key='add_new_client') }}"
+   class="btn">
+   Page Help
+</a>
+
+
 <br><br>
 
 <h1>Add New Client - Page 1</h1>
@@ -14,7 +19,13 @@
     <input type="hidden" name="selected_date" value="{{ selected_date }}">
 
     <div class="form-buttons">
-        <button type="submit">Next Page</button>
+        <button type="submit" name="action" value="next">
+            Next Page
+        </button>
+
+        <button type="submit" name="action" value="save">
+            Save Client
+        </button>
 
         <button type="reset"
                 onclick="return confirm('Are you sure you want to clear this form?')">
@@ -26,6 +37,7 @@
             Cancel
         </a>
     </div>
+
 
     <span style="color: red; font-size: x-small;">* Required Field</span>
 
@@ -46,7 +58,7 @@
 
     <p>
         <label>Email:<span style="color: red;">*</span></label><br>
-        <input type="email" name="email" value="{{ step1_data.get('email', '') }}" required>
+        <input type="email" name="email" value="{{ step1_data.get('email', '') }}">
     </p>
 
     <p>
@@ -78,9 +90,6 @@
         <input type="text" name="zip" value="{{ step1_data.get('zip', '') }}">
     </p>
 
-    <hr>
-
-    <p>
         <label>Spa Location:</label><br>
         <select name="spa_location_id">
             <option value="">Select Location</option>
@@ -90,12 +99,12 @@
                     {{ location[1] }}
                 </option>
             {% endfor %}
-        </select>
+        </select>   
     </p>
-
+    
     <p>
         <label>Preferred Location:</label><br>
-        <select name="preferred_location_id">
+        <select name="preferred_location_id">   
             <option value="">Select Preferred Location</option>
             {% for location in locations %}
                 <option value="{{ location[0] }}"
@@ -105,8 +114,8 @@
             {% endfor %}
         </select>
     </p>
-
-    <p>
+        
+    <p>   
         <label>Client Status:</label><br>
         <select name="client_status">
             <option value="">Select Status</option>
@@ -118,7 +127,7 @@
             {% endfor %}
         </select>
     </p>
-
+    
     <p>
         <label>Preferred Language:</label><br>
         <select name="preferred_language">
@@ -131,7 +140,7 @@
             {% endfor %}
         </select>
     </p>
-
+        
     <p>
         <label>Preferred Contact Method:</label><br>
         <select name="preferred_contact_method">
@@ -144,30 +153,25 @@
             {% endfor %}
         </select>
     </p>
-
+       
     <p>
         <label>Contact Permissions:</label><br>
-
+    
         <label>
             <input type="checkbox" name="ok_to_call" value="true"
                 {% if step1_data.get('ok_to_call', False) %}checked{% endif %}>
             OK to Call
         </label>
         <br>
-
+       
         <label>
             <input type="checkbox" name="ok_to_text" value="true"
                 {% if step1_data.get('ok_to_text', False) %}checked{% endif %}>
             OK to Text
         </label>
         <br>
+    <hr>
 
-        <label>
-            <input type="checkbox" name="ok_to_email" value="true"
-                {% if step1_data.get('ok_to_email', False) %}checked{% endif %}>
-            OK to Email
-        </label>
-    </p>
 
 </form>
 

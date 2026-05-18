@@ -35,21 +35,34 @@
     <div class="narrow-cards">
         {{ section_card("Admin", "Admin Home", url_for('admin')) }}
         {{ section_card("Spa Management", "Spa Management", url_for('spa_management')) }}
-        {{ section_card("Reserved", "Reserved", url_for('home')) }}
-        {{ section_card("Reserved", "Reserved", url_for('home')) }}
+
+        {{ section_card(
+            "Terms and Conditions", 
+            "Peach Suite Pro - Terms and Conditions", 
+            url_for('view_help_page', page_key='sms_email_terms')
+         ) }}
+
+
+         {{ section_card(
+            "Privacy Policy",
+            "Peach Suite Pro - Privacy Policy",
+            url_for('view_help_page', page_key='privacy')
+         ) }}
+
     </div>
-
-
-
 
         <!-- 🔹 HEADER 4 -->
     <h2 style="margin-top: 30px;">Future Section</h2>
 
     <div class="narrow-cards">
         {{ section_card("Reserved", "Reserved", url_for('home')) }}
-        {{ section_card("Reserved", "Reserved", url_for('home')) }}
         {{ section_card("Feedbacks", "Feedbacks", url_for('feedback_admin')) }}
-        {{ section_card("Reserved", "Reserved", url_for('home')) }}
+        {{ section_card("Create New Help Page", "Create a New Help Page", url_for('new_help_page')) }}
+        {{ section_card(
+            "Edit Existing Help Page",  
+            "Edit an existing Help Page, then change page in address", 
+            url_for('edit_help_page', page_key='calendar') 
+         ) }}
     </div>
 
          

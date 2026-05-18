@@ -1,4 +1,4 @@
-k{% extends "base.html" %}
+{% extends "base.html" %}
 
 {% block title %}Client History{% endblock %}
 
@@ -9,6 +9,7 @@ k{% extends "base.html" %}
 <div style="margin-bottom: 15px;">
     <a href="{{ url_for('clients_home') }}" class="btn">Clients Home</a>
     <a href="{{ url_for('client_management') }}" class="btn">Client Management</a>
+    <a  href="{{ url_for('add_new_client') }}" class="btn">Add New Client</a>
 </div>
 
 <form method="GET" style="margin-bottom: 20px;">

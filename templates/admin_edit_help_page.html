@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>Edit Help Page</h1>
+
+<form method="POST" class="styled-form">
+
+    <div class="form-group">
+        <label for="page_key">Page Key</label>
+        <input type="text"
+               id="page_key"
+               name="page_key"
+               value="{{ page_key }}"
+               required>
+    </div>
+
+    <div class="form-group">
+        <label for="title">Help Page Title</label>
+        <input type="text"
+               id="title"
+               name="title"
+               value="{{ page[1] if page else '' }}"
+               required>
+    </div>
+
+    <div class="form-group">
+        <label for="content">Help Page Content</label>
+
+        <textarea id="content"
+                  name="content"
+                  rows="25"
+                  style="width: 100%;"
+                  required>{{ page[2] if page else '' }}</textarea>
+    </div>
+
+    <div class="form-group">
+        <label>
+            <input type="checkbox"
+                   name="is_active"
+                   {% if not page or page[3] %}checked{% endif %}>
+            Active
+        </label>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Save Help Page</button>
+
+</form>
+
+{% endblock %}

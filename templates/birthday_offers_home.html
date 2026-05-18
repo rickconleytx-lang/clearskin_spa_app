@@ -4,7 +4,12 @@
 
 {% block content %}
 
-<a href="{{ url_for('help_birthday_offer_page') }}" class="btn">Page Help</a>
+
+<a href="{{ url_for('view_help_page', page_key='birthday_offers') }}"
+   class="btn">
+   Page Help
+</a>
+
 
 <form method="POST"
       action="{{ url_for('send_all_birthday_offer_emails') }}"

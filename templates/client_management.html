@@ -7,25 +7,16 @@
 {% block content %}
 <div class="client-management-page">
 
-    <a class="btn" href="{{ url_for('help_client_management_page') }}">
+    <a href="{{ url_for('view_help_page', page_key='client_Management') }}"
+        class="btn">
         Page Help
     </a>
+
     
     <a class="btn" href="{{ url_for('add_new_client') }}">
         Add New Client
     </a>
 <br> <br>
-
-<h1>Client Management</h1>
-Sequence of steps for Adding New Client: Add the Appointment, Gather and Enter health history information, Pre-Session and Post Session Wrap-up.<br> <br>
-    1.  Add the Appointment: <br>Client Books, Search for name, then: Add Appointment. No Record - Add New Client<br><br>
-    2.  Gather and Enter health history information: <br>Enter/Review Health/Intake Record", "Search Name below, then click on Health/Intake, or Full Summary-Edit<br><br>
-    3.  Pre-Session: <br>Verify & Update", "Search for Client below, Open Health/Intake or Full Summary-Edit,  discuss with client and  make necessary updates<br><br>
-    4.  Post Session Wrap-up:<br> Wrap up the Session,
-                    "Please <span style='color: red;'>CLICK HERE></span> 
-                        <a class="btn" href="{{ url_for('calendar_view') }}">
-                            Go To Calendar
-                       </a> , then click on the calendar appointment to open the Module and click on Finish Session, then enter payment and notes"
 
 </div>
 
@@ -33,8 +24,7 @@ Sequence of steps for Adding New Client: Add the Appointment, Gather and Enter h
 <br>
 
 <p>
-For any other Client related action, please search for Client's Name, 
-then use an Action Button(Add Appointment, Health / Intake, Forms, 
+Please search for Client's Name, then use an Action Button(Add Appointment, Health / Intake, Forms, 
 Visit Summaries, Full Record, Edit) next to their record.
 </p>
 

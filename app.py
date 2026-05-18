@@ -463,6 +463,41 @@ def load_spa():
 
 
 
+
+#   ----------------------
+#
+#    DEF SMS EMAIL TERMS ACCEPTED
+#
+#   ---------------------
+
+def sms_email_terms_accepted(spa_id):
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT owner_agreed_sms_email_terms
+        FROM spas
+        WHERE spa_id = %s
+    """, (spa_id,))
+
+    row = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    return bool(row and row[0])
+
+
+
+
+
+
+
+
+
+
+
 #   ----------------------
 #
 #    DEF SPA REQUIRES
@@ -1614,12 +1649,57 @@ def help_admin_page():
 #               
 #  ----------------------
 
+
+
 @app.route("/spa_management")
 @login_required
-@spa_required  
-
+@spa_required
 def spa_management():
-    return render_template("spa_management.html")
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT *
+        FROM spas
+        WHERE spa_id = %s
+    """, (spa_id,))
+
+    spa = cur.fetchone()
+
+    cur.execute("""
+        SELECT
+            owner_agreed_sms_email_terms,
+            owner_agreed_sms_email_terms_at,
+            owner_agreed_sms_email_terms_version
+        FROM spas
+        WHERE spa_id = %s
+    """, (spa_id,))
+
+    terms_status = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "spa_management.html",
+        spa=spa,
+        terms_status=terms_status
+    )
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1666,6 +1746,30 @@ def email_template_form1():
 
 def accounting_home():
     return render_template("accounting_home.html")
+
+
+
+
+
+
+
+#   -----------------------
+#
+#     TERMS & Conditions
+#        PRIVACY
+#  ----------------------
+
+
+                
+@app.route("/terms")
+def terms():
+    return redirect(url_for("view_help_page", page_key="terms"))
+
+@app.route("/privacy")
+def privacy():
+    return redirect(url_for("view_help_page", page_key="privacy"))
+
+
 
 
 
@@ -1989,6 +2093,259 @@ def add_user():
             conn.close()
 
     return render_template("add_user.html")
+
+
+
+
+
+
+                    
+                    
+#   -------------------------
+#
+#
+#        HELP
+#
+#
+#
+#   -------------------------
+            
+
+@app.route("/admin/help-pages/new", methods=["GET", "POST"])
+@app.route("/admin/help-pages/edit/<page_key>", methods=["GET", "POST"])
+@login_required
+@spa_required
+def edit_help_page(page_key=None):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    if request.method == "POST":
+
+        if not page_key:
+            page_key = request.form.get("page_key", "").strip()
+
+        title = request.form.get("title", "").strip()
+        content = request.form.get("content", "").strip()
+        is_active = request.form.get("is_active") == "on"
+
+        cur.execute("""
+            SELECT help_page_id
+            FROM help_pages
+            WHERE page_key = %s
+              AND spa_id = %s
+        """, (page_key, spa_id))
+
+        existing = cur.fetchone()
+
+        if existing:
+            cur.execute("""
+                UPDATE help_pages
+                SET title = %s,
+                    content = %s,
+                    is_active = %s
+                WHERE page_key = %s
+                  AND spa_id = %s
+            """, (title, content, is_active, page_key, spa_id))
+        else:
+            cur.execute("""
+                INSERT INTO help_pages
+                    (spa_id, page_key, title, content, is_active)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (spa_id, page_key, title, content, is_active))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        flash("Help page saved.", "success")
+        return redirect(url_for("edit_help_page", page_key=page_key))
+
+    cur.execute("""
+        SELECT page_key, title, content, is_active
+        FROM help_pages
+        WHERE page_key = %s
+          AND spa_id = %s
+    """, (page_key, spa_id))
+
+    page = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "admin_edit_help_page.html",
+        page=page,
+        page_key=page_key
+    )
+
+
+
+
+#   -------------------------
+#  
+#  
+#       HELP PUBLIC
+#   
+#   
+#   
+#   -------------------------
+
+
+
+@app.route("/help/<page_key>")
+@login_required
+@spa_required
+def view_help_page(page_key):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT title, content
+        FROM help_pages
+        WHERE page_key = %s
+          AND is_active = TRUE
+    """, (page_key,))
+
+    page = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if not page:
+        flash("Help page not found.", "warning")
+        return redirect(url_for("dashboard"))
+
+    return render_template(
+        "help_page.html", 
+        page=page,
+        page_key=page_key
+    )
+
+
+
+
+
+
+#   -------------------------
+#
+#
+#       HELP PAGE
+#
+#
+#
+#   -------------------------
+        
+
+
+
+@app.route("/page_help")
+@login_required
+@spa_required
+def page_help():
+    return redirect(url_for("view_help_page", page_key="calendar"))
+
+
+
+
+@app.route("/admin/help-pages/new", methods=["GET"])
+@login_required
+@spa_required
+def new_help_page():
+
+    return render_template(
+        "admin_edit_help_page.html",
+        page=None,
+        page_key=""
+    )
+
+
+
+
+
+#   -------------------------
+#  
+#  
+#    SMS Email TERMS
+#   
+#   
+#   
+#   -------------------------
+
+
+@app.route("/sms-email-terms", methods=["GET", "POST"])
+@login_required
+@spa_required
+def sms_email_terms():
+
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Load help page content
+    cur.execute("""
+        SELECT title, content
+        FROM help_pages
+        WHERE page_key = %s
+          AND spa_id = %s
+          AND is_active = TRUE
+    """, ("sms_email_terms", spa_id))
+
+    page = cur.fetchone()
+
+    if not page:
+        cur.close()
+        conn.close()
+
+        flash("Terms page not found.", "warning")
+        return redirect(url_for("dashboard"))
+
+    if request.method == "POST":
+
+        agreed = "agree_terms" in request.form
+
+        if not agreed:
+            flash("You must agree to continue.", "warning")
+
+            cur.close()
+            conn.close()
+
+            return render_template(
+                "help_page.html",
+                page=page,
+                page_key="sms_email_terms"
+            )
+
+        cur.execute("""
+            UPDATE spas
+            SET owner_agreed_sms_email_terms = TRUE,
+                owner_agreed_sms_email_terms_at = NOW(),
+                owner_agreed_sms_email_terms_version = %s
+            WHERE spa_id = %s
+        """, ("v1.0", spa_id))
+
+        conn.commit()
+
+        cur.close()
+        conn.close()
+
+        flash("Terms accepted successfully.", "success")
+
+        return redirect(url_for("dashboard"))
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "help_page.html",
+        page=page,
+        page_key="sms_email_terms"
+    )
+
+
+
 
 
 
@@ -2996,6 +3353,13 @@ def sms_webhook():
 def client_messaging_settings(client_id):
     spa_id = current_spa_id()
 
+    if not sms_email_terms_accepted(spa_id):
+        flash(
+            "You must accept the SMS and Email Terms and Conditions before using messaging features.",
+            "warning"
+        )
+        return redirect(url_for("sms_email_terms"))
+
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -3173,6 +3537,16 @@ def send_birthday_sms_month():
     campaign_year = today.year
     campaign_month = today.month
 
+
+    spa_id = current_spa_id()
+
+    if not sms_email_terms_accepted(spa_id):
+        flash(
+            "You must accept the SMS and Email Terms and Conditions before using messaging features.",
+            "warning"
+        )
+        return redirect(url_for("sms_email_terms"))
+
     spa_name = get_spa_name(spa_id)
 
     conn = get_db_connection()
@@ -3239,6 +3613,15 @@ def send_birthday_sms_month():
 @spa_required
 def sms_preview(client_id):
     spa_id = current_spa_id()
+
+
+    if not sms_email_terms_accepted(spa_id):
+        flash(
+            "You must accept the SMS and Email Terms and Conditions before using messaging features.",
+            "warning"
+        )
+        return redirect(url_for("sms_email_terms"))
+
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -3362,6 +3745,12 @@ def sms_preview(client_id):
 def sms_conversation(client_id):
     spa_id = current_spa_id()
 
+    if not sms_email_terms_accepted(spa_id):
+        flash(
+            "You must accept the SMS and Email Terms and Conditions before using messaging features.",
+            "warning"
+        )
+        return redirect(url_for("sms_email_terms"))
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -3745,6 +4134,13 @@ def sms_home():
 def sms_group_preview():
     spa_id = current_spa_id()
 
+    if not sms_email_terms_accepted(spa_id):
+        flash(
+            "You must accept the SMS and Email Terms and Conditions before using messaging features.",
+            "warning"
+        )
+        return redirect(url_for("sms_email_terms"))
+
     template_id = request.form.get("template_id")
     client_ids = [int(x) for x in request.form.getlist("client_ids")]
 
@@ -3827,6 +4223,14 @@ def sms_group_send():
     print("SMS GROUP SEND ROUTE HIT", flush=True)
 
     spa_id = current_spa_id()
+
+    if not sms_email_terms_accepted(spa_id):
+        flash(
+            "You must accept the SMS and Email Terms and Conditions before using messaging features.",
+            "warning"
+        )
+        return redirect(url_for("sms_email_terms"))
+
 
     template_id = request.form.get("template_id")
     client_ids = request.form.getlist("client_ids")
@@ -4316,6 +4720,13 @@ def refresh_all_sms_statuses():
 def resend_sms(sms_log_id):
     spa_id = current_spa_id()
 
+    if not sms_email_terms_accepted(spa_id):
+        flash(
+            "You must accept the SMS and Email Terms and Conditions before using messaging features.",
+            "warning"
+        )
+        return redirect(url_for("sms_email_terms"))
+
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -4518,6 +4929,14 @@ def send_birthday_emails_month():
     today = spa_now.date()
     campaign_year = today.year
     campaign_month = today.month
+
+    if not sms_email_terms_accepted(spa_id):
+        flash(
+            "You must accept the SMS and Email Terms and Conditions before using messaging features.",
+            "warning"
+        )
+        return redirect(url_for("sms_email_terms"))
+
 
     spa_name = get_spa_name(spa_id)
 
@@ -4893,6 +5312,13 @@ def edit_email_template_DISABLED(email_template_id):
 def activate_email_template(email_template_id):
     spa_id = current_spa_id()
 
+    if not sms_email_terms_accepted(spa_id):
+        flash(
+            "You must accept the SMS and Email Terms and Conditions before using messaging features.",
+            "warning"
+        )
+        return redirect(url_for("sms_email_terms"))
+
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -5054,6 +5480,14 @@ def send_gift_certificate_email(gift_cert_id):
     spa_id = current_spa_id()
     spa_name = get_spa_name(spa_id)
 
+
+    if not sms_email_terms_accepted(spa_id):
+        flash(
+            "You must accept the SMS and Email Terms and Conditions before using messaging features.",
+            "warning"
+        )
+        return redirect(url_for("sms_email_terms"))
+
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -5183,6 +5617,14 @@ def send_gift_certificate_email(gift_cert_id):
 @spa_required
 def general_email():
     spa_id = current_spa_id()
+
+    if not sms_email_terms_accepted(spa_id):
+        flash(
+            "You must accept the SMS and Email Terms and Conditions before using messaging features.",
+            "warning"
+        )
+        return redirect(url_for("sms_email_terms"))
+
 
     template_type = request.args.get("template_type", "")
     template_id = request.args.get("template_id", "")
@@ -5391,6 +5833,15 @@ def general_email_preview():
 @spa_required
 def general_email_send():
     spa_id = current_spa_id()
+
+    if not sms_email_terms_accepted(spa_id):
+        flash(
+            "You must accept the SMS and Email Terms and Conditions before using messaging features.",
+            "warning"
+        )
+        return redirect(url_for("sms_email_terms"))
+
+
     spa_name = get_spa_name(spa_id)
 
     template_id = request.form.get("template_id")
@@ -5651,6 +6102,15 @@ def clear_email_history():
 @spa_required
 def send_one_birthday_offer_email(client_id):
     spa_id = current_spa_id()
+
+    if not sms_email_terms_accepted(spa_id):
+        flash(
+            "You must accept the SMS and Email Terms and Conditions before using messaging features.",
+            "warning"
+        )
+        return redirect(url_for("sms_email_terms"))
+
+
     spa_name = get_spa_name(spa_id)
     today = get_spa_today()
 
@@ -5759,6 +6219,13 @@ def send_all_birthday_offer_emails():
     spa_name = get_spa_name(spa_id)
     today = get_spa_today()
     end_date = today + timedelta(days=45)
+
+    if not sms_email_terms_accepted(spa_id):
+        flash(
+            "You must accept the SMS and Email Terms and Conditions before using messaging features.",
+            "warning"
+        )
+        return redirect(url_for("sms_email_terms"))
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -15973,8 +16440,11 @@ def add_new_client():
     locations = cur.fetchall()
         
             
+
     if request.method == "POST":
-        session["new_client_step1"] = {
+        action = request.form.get("action", "next")
+
+        step1_data = {
             "first_name": request.form.get("first_name", "").strip(),
             "last_name": request.form.get("last_name", "").strip(),
             "phone": request.form.get("phone", "").strip(),
@@ -15993,9 +16463,101 @@ def add_new_client():
             "ok_to_email": "ok_to_email" in request.form,
             "preferred_contact_method": request.form.get("preferred_contact_method", "").strip()
         }
-    
-        return redirect(url_for("add_new_client_step2", selected_date=selected_date))
-    
+
+        if action == "next":
+            session["new_client_step1"] = step1_data
+            return redirect(url_for("add_new_client_step2", selected_date=selected_date))    
+
+
+ 
+
+        if action == "save":
+            try:
+                cur.execute("""
+                    INSERT INTO clients (
+                        spa_id,
+                        first_name,
+                        last_name,
+                        phone,
+                        email,
+                        birth_date,
+                        address,
+                        city,
+                        state,
+                        zip,
+                        spa_location_id,
+                        preferred_location_id,
+                        client_status,
+                        preferred_language,
+                    	ok_to_call,
+                    	ok_to_text,
+                    	ok_to_email,
+                    	preferred_contact_method,
+                    	emergency_contact_name,
+                    	emergency_contact_phone,
+                    	referred_by,
+                    	notes_one,
+                    	notes_two,
+                    	notes_three,
+                    	active_client
+                    )   
+                    VALUES (
+                        %s, %s, %s, %s, %s,
+                    	%s, %s, %s, %s, %s,
+                    	%s, %s, %s, %s, %s,
+                    	%s, %s, %s, %s, %s,
+                    	%s, %s, %s, %s, %s
+                    )
+                    RETURNING client_id
+                """, (
+                    spa_id,
+                    step1_data.get("first_name", ""),
+                    step1_data.get("last_name", ""),
+                    step1_data.get("phone", ""),
+                    step1_data.get("email", ""),
+                    step1_data.get("birth_date") or None,
+                    step1_data.get("address", ""),
+                    step1_data.get("city", ""),
+                    step1_data.get("state", ""),
+                    step1_data.get("zip", ""),
+                    step1_data.get("spa_location_id") or None,
+                    step1_data.get("preferred_location_id") or None,
+                    step1_data.get("client_status", "Current"),
+                    step1_data.get("preferred_language") or None,
+                    step1_data.get("ok_to_call", True),
+                    step1_data.get("ok_to_text", True),
+                    step1_data.get("ok_to_email", True),
+                    step1_data.get("preferred_contact_method") or None,
+                    "",
+                    "",
+                    None,
+                    "",
+                    "",
+                    "",
+                    True
+                ))
+
+                new_client_id = cur.fetchone()[0]
+                conn.commit()
+
+            finally:
+                cur.close()
+                conn.close()
+
+            flash("Client added successfully!", "success")
+
+            session.pop("new_client_step1", None)
+            session.pop("new_client_step2", None)
+
+            if selected_date:
+                return redirect(url_for(
+                    "add_appointment",
+                    client_id=new_client_id,
+                    selected_date=selected_date
+                ))
+
+            return redirect(url_for("client_history"))    
+
     step1_data = session.get("new_client_step1", {})
     
     if not step1_data:

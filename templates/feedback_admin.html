@@ -1,9 +1,26 @@
 {% extends "base.html" %}
+{% from "components/cards.html" import section_card %}
 
 {% block title %}Feedback Admin{% endblock %}
 
 {% block content %}
+
 <h1>Feedback Admin</h1>
+
+
+    <div class="narrow-cards">
+        {{ section_card("Reserved", "Reserved", url_for('home')) }}
+        {{ section_card("Reserved", "Reserved", url_for('home')) }}
+
+        {{ section_card("Create New Help Page", "Create a New Help Pages", url_for('new_help_page')) }}
+
+        {{ section_card(
+            "Edit Existing Help Page",
+            "Edit an existing Help Page, then change page in address",
+            url_for('edit_help_page', page_key='calendar')
+         ) }}
+    </div>
+
 
 <div class="form-buttons" style="margin-bottom: 15px;">
     <span style="margin-right: 10px;"><strong>Current Spa:</strong> {{ active_spa_id }}</span>
