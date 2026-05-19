@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+
+{% block title %}Reminder Queue{% endblock %}
+
+{% block content %}
+
+<form method="POST" action="{{ url_for('generate_appointment_reminders') }}">
+    <button type="submit">
+        Generate Appointment Reminders
+    </button>
+</form>
+
+<br>
+
+<form method="POST" action="{{ url_for('generate_after_appointment_followups') }}">
+    <button type="submit">
+        Generate After Appointment Follow-Ups
+    </button>
+</form>
+
+<br>
+
+<br>
+<form method="POST" action="{{ url_for('send_pending_reminders') }}">
+    <button type="submit"
+            onclick="return confirm('Send all pending reminders now?')">
+        Send Pending Reminders
+    </button>
+</form>
+
+<br>
+
+<form method="POST"
+      action="{{ url_for('retry_failed_reminders') }}"
+      style="display:inline;">
+
+    <button type="submit"
+            onclick="return confirm('Retry all failed reminders?')">
+
+        Retry Failed
+
+    </button>
+
+</form>
+
+
+
+
+<br>
+
+<br>
+
+
+
+<h1>Reminder Queue</h1>
+
+
+<div class="summary-cards">
+
+    <div class="summary-card">
+        <strong>Pending</strong><br>
+        {{ status_counts.get('pending', 0) }}
+    </div>
+
+    <div class="summary-card">
+        <strong>Sent</strong><br>
+        {{ status_counts.get('sent', 0) }}
+    </div>
+
+    <div class="summary-card">
+        <strong>Failed</strong><br>
+        {{ status_counts.get('failed', 0) }}
+    </div>
+
+    <div class="summary-card">
+        <strong>Skipped</strong><br>
+        {{ status_counts.get('skipped', 0) }}
+    </div>
+
+</div>
+
+<br>
+
+<a href="{{ url_for('reminder_queue') }}" class="btn">All</a>
+<a href="{{ url_for('reminder_queue', status='pending') }}" class="btn">Pending</a>
+<a href="{{ url_for('reminder_queue', status='sent') }}" class="btn">Sent</a>
+<a href="{{ url_for('reminder_queue', status='failed') }}" class="btn">Failed</a>
+<a href="{{ url_for('reminder_queue', status='skipped') }}" class="btn">Skipped</a>
+
+<br><br>
+
+
+<table class="styled-table">
+    <thead>
+        <tr>
+            <th>Client</th>
+            <th>Type</th>
+            <th>Method</th>
+            <th>Scheduled For</th>
+            <th>Status</th>
+            <th>Message</th>
+            <th>Sent At</th>
+            <th>Error</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+
+    <tbody>
+        {% for r in reminders %}
+            <tr>
+                <td>{{ r[10] }} {{ r[11] }}</td>
+                <td>{{ r[1] }}</td>
+                <td>{{ r[2] }}</td>
+                <td>{{ r[6] }}</td>
+
+                <td>
+                    {% if r[7] == "pending" %}
+                        <span class="status-badge pending">Pending</span>
+                    {% elif r[7] == "sent" %}
+                        <span class="status-badge sent">Sent</span>
+                    {% elif r[7] == "failed" %}
+                        <span class="status-badge failed">Failed</span>
+                    {% elif r[7] == "skipped" %}
+                        <span class="status-badge skipped">Skipped</span>
+                    {% else %}
+                        <span class="status-badge">{{ r[7] }}</span>
+                    {% endif %}
+                </td>
+
+                <td>{{ r[5] }}</td>
+                <td>{{ r[8] or "" }}</td>
+                <td>{{ r[9] or "" }}</td>
+
+
+                <td>
+                    {% if r[7] == "pending" or r[7] == "failed" %}
+                         <form method="POST"
+                               action="{{ url_for('send_one_reminder', reminder_id=r[0]) }}"
+                               style="display:inline;">
+
+                             <button type="submit"
+                                     onclick="return confirm('Send this reminder now?')">
+                                 Send One
+                              </button>
+                         </form>
+                    {% else %}
+                        —
+                    {% endif %}
+                </td>
+
+            </tr>
+        {% else %}
+            <tr>
+                <td colspan="9">No reminders in queue.</td>
+            </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% endblock %}

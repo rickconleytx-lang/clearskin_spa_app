@@ -15,18 +15,22 @@
     <div class="narrow-cards">
         {{ section_card("Email Campaigns", "Your Email Home Page",  url_for('general_email')) }}
         {{ section_card("SMS Home", "Your starting point for SMS Messaging", url_for('sms_home')) }}
+        {{ section_card("Reminder Queue", "Email & SMS Reminder Queue", url_for('reminder_queue')) }}
         {{ section_card("SMS and Email Preferences", "View and Manage Client Contact Preferences", url_for('client_contact_preferences')) }}
+<br>
         {{ section_card("Birthday Celebrations", "View & manage Client Birthdays, Mark sent client a Birthday Offer", url_for('birthday_offers_home')) }}  
+        {{ section_card("Gift Certificates", "Add New Gift Certificates when printed, update when sold and redeemed", url_for('gift_certificates_home' )) }}
+
     </div>
 
     <!-- 🔹 HEADER 2 -->
     <h2 style="margin-top: 30px;">Accounting - Logistics - Human Resources</h2>
 
     <div class="narrow-cards">
-        {{ section_card("Accounting", "Income, Expenses, and Loans.", url_for('accounting_home')) }}
+        {{ section_card("Accounting", "Income Expenses and Loans", url_for('accounting_home')) }}
         {{ section_card("Inventory Home", "Logistics Department",  url_for('inventory_home')) }}
         {{ section_card("Employees Home", "Corporate Human Resources Department", url_for('employee_admin')) }}
-        {{ section_card("Gift Certificates", "Add New Gift Certificates when printed, update when sold and redeemed", url_for('gift_certificates_home')) }}
+        {{ section_card("Reserved", "Blank", url_for('home')) }}
     </div>
 
     <!-- 🔹 HEADER 3 -->
@@ -55,7 +59,7 @@
     <h2 style="margin-top: 30px;">Future Section</h2>
 
     <div class="narrow-cards">
-        {{ section_card("Reserved", "Reserved", url_for('home')) }}
+        {{ section_card("Reminder Queue", "Email & SMS Reminder Queue", url_for('reminder_queue')) }}
         {{ section_card("Feedbacks", "Feedbacks", url_for('feedback_admin')) }}
         {{ section_card("Create New Help Page", "Create a New Help Page", url_for('new_help_page')) }}
         {{ section_card(

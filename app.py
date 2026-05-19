@@ -490,7 +490,24 @@ def sms_email_terms_accepted(spa_id):
 
 
 
+        
+#   ----------------------
+#       
+#    SMS PLACEHOLDERS
+#    
+#   ---------------------
+    
+def apply_sms_placeholders(message, data):
+    if not message:
+        return ""
 
+    for key, value in data.items():
+        message = message.replace(
+            "{" + key + "}",
+            str(value or "")
+        )
+
+    return message
 
 
 
@@ -2919,8 +2936,6 @@ def sync_calendar():
 #
 #   --------------------------------------------
 
-
-
 def get_sms_template(spa_id, template_type):
     conn = get_db_connection()
     cur = conn.cursor()
@@ -3650,6 +3665,18 @@ def sms_preview(client_id):
         return redirect(url_for("clients_home"))
 
     message_body = request.form.get("message_body", "").strip()
+
+    message_body = apply_sms_placeholders(message_body, {
+        "first_name": first_name,
+        "last_name": last_name,
+        "phone": phone_number,
+        "email": email,
+        "spa_name": spa_name,
+        "appointment_date": appointment_date,
+        "appointment_time": appointment_time,
+        "service_name": service_name
+    })
+
     action = request.form.get("action")
 
     if request.method == "POST" and action == "send" and message_body:
@@ -3860,6 +3887,12 @@ def sms_conversation(client_id):
 @spa_required
 def sms_templates_admin():
     spa_id = current_spa_id()
+    if not sms_email_terms_accepted(spa_id):
+        flash(
+            "You must accept the SMS and Email Terms and Conditions before using messaging features",
+            "warning"
+        )
+        return redirect(url_for("sms_email_terms"))
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -4027,6 +4060,12 @@ def edit_sms_template(template_id):
 @spa_required
 def sms_home():
     spa_id = current_spa_id()
+    if not sms_email_terms_accepted(spa_id):
+        flash(
+            "You must accept the SMS and Email Terms and Conditions before using messaging features",
+            "warning"
+        )
+        return redirect(url_for("sms_email_terms"))
 
     search = request.args.get("search", "").strip()
     show_all = request.args.get("show_all")
@@ -4282,9 +4321,12 @@ def sms_group_send():
         for client in clients:
             client_id, first_name, last_name, phone = client
 
-            personalized_message = message_body
-            personalized_message = personalized_message.replace("{first_name}", first_name or "")
-            personalized_message = personalized_message.replace("{last_name}", last_name or "")
+            personalized_message = apply_sms_placeholders(message_body, {
+                "first_name": first_name,
+                "last_name": last_name,
+                "phone": phone 
+            })            
+
 
             print("ABOUT TO SEND SMS TO:", phone, flush=True)
 
@@ -6336,6 +6378,608 @@ def send_all_birthday_offer_emails():
     finally:
         cur.close()
         conn.close()
+
+
+
+
+#   --------------------------------------
+#
+#
+#   SMS EMAIL REMINDER QUEUE
+#
+#
+#   --------------------------------------
+
+@app.route("/reminder_queue")
+@login_required
+@spa_required
+def reminder_queue():
+    spa_id = current_spa_id()
+    status_filter = request.args.get("status", "").strip()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    query = """
+        SELECT
+            rq.reminder_id,
+            rq.reminder_type,
+            rq.send_method,
+            rq.recipient_phone,
+            rq.recipient_email,
+            rq.message_body,
+            rq.scheduled_for,
+            rq.status,
+            rq.sent_at,
+            rq.error_message,
+            c.first_name,
+            c.last_name
+        FROM reminder_queue rq
+        LEFT JOIN clients c
+            ON rq.client_id = c.client_id
+           AND rq.spa_id = c.spa_id
+        WHERE rq.spa_id = %s
+    """
+
+    params = [spa_id]
+
+    if status_filter:
+        query += " AND rq.status = %s"
+        params.append(status_filter)
+
+    query += """
+        ORDER BY
+            rq.status,
+            rq.scheduled_for ASC,
+            rq.created_at DESC
+    """
+
+    cur.execute(query, params)
+    reminders = cur.fetchall()
+
+    cur.execute("""
+        SELECT status, COUNT(*)
+        FROM reminder_queue
+        WHERE spa_id = %s
+        GROUP BY status
+    """, (spa_id,))
+
+    status_counts = dict(cur.fetchall())
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "reminder_queue.html",
+        reminders=reminders,
+        status_filter=status_filter,
+        status_counts=status_counts
+    )
+
+
+
+
+
+
+#   --------------------------------------
+#
+#
+#   REMINDER QUEUE GENERATE APPOINTMENTS
+#               
+#
+#   --------------------------------------
+
+
+@app.route("/reminder_queue/generate-appointments", methods=["POST"])
+@login_required
+@spa_required
+def generate_appointment_reminders():
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                a.appointment_id,
+                a.client_id,
+                a.appointment_date,
+                a.appointment_time,
+                c.first_name,
+                c.last_name,
+                c.phone,
+                c.ok_to_text
+            FROM appointments a
+            JOIN clients c
+                ON a.client_id = c.client_id
+               AND a.spa_id = c.spa_id
+            WHERE a.spa_id = %s
+              AND a.appointment_date >= CURRENT_DATE
+              AND a.appointment_date <= CURRENT_DATE + INTERVAL '7 days'
+            ORDER BY a.appointment_date, a.appointment_time
+        """, (spa_id,))
+
+        appointments = cur.fetchall()
+
+        created_count = 0
+        skipped_count = 0
+
+        for appt in appointments:
+            (
+                appointment_id,
+                client_id,
+                appointment_date,
+                appointment_time,
+                first_name,
+                last_name,
+                phone,
+                ok_to_text
+            ) = appt
+
+            if not phone or not ok_to_text:
+                skipped_count += 1
+                continue
+
+            cur.execute("""
+                SELECT 1
+                FROM reminder_queue
+                WHERE spa_id = %s
+                  AND appointment_id = %s
+                  AND reminder_type = 'appointment_reminder'
+                  AND send_method = 'sms'
+                  AND status IN ('pending', 'sent')
+            """, (spa_id, appointment_id))
+
+            existing = cur.fetchone()
+
+            if existing:
+                skipped_count += 1
+                continue
+
+            message_body = apply_sms_placeholders(
+                "Hi {first_name}, this is Clear Skin Esthetics. This is a reminder of your appointment on {appointment_date} at {appointment_time}. Reply STOP to opt out.",
+                {
+                    "first_name": first_name,
+                    "last_name": last_name,
+                    "appointment_date": appointment_date,
+                    "appointment_time": appointment_time
+                }
+            )
+
+            cur.execute("""
+                INSERT INTO reminder_queue (
+                    spa_id,
+                    client_id,
+                    appointment_id,
+                    reminder_type,
+                    send_method,
+                    recipient_phone,
+                    message_body,
+                    scheduled_for,
+                    status
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s,
+                        (%s::date + %s::time - INTERVAL '24 hours'),
+                        'pending')
+            """, (
+                spa_id,
+                client_id,
+                appointment_id,
+                "appointment_reminder",
+                "sms",
+                phone,
+                message_body,
+                appointment_date,
+                appointment_time
+            ))
+
+            created_count += 1
+
+        conn.commit()
+
+        flash(
+            f"Appointment reminders generated: {created_count}. Skipped: {skipped_count}.",
+            "success"
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    return redirect(url_for("reminder_queue"))
+
+
+
+
+
+
+#   --------------------------------------
+#
+#                   
+#   REMINDER QUEUE SEND PENDING
+#                   
+#
+#   --------------------------------------
+
+@app.route("/reminder_queue/send-pending", methods=["POST"])
+@login_required
+@spa_required
+def send_pending_reminders():
+    spa_id = current_spa_id()
+
+    if not sms_email_terms_accepted(spa_id):
+        flash(
+            "You must accept the SMS and Email Terms and Conditions before using messaging features.",
+            "warning"
+        )
+        return redirect(url_for("sms_email_terms"))
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    sent_count = 0
+    failed_count = 0
+    skipped_count = 0
+
+    try:
+        cur.execute("""
+            SELECT
+                reminder_id,
+                send_method,
+                recipient_phone,
+                recipient_email,
+                message_body
+            FROM reminder_queue
+            WHERE spa_id = %s
+              AND status = 'pending'
+              AND scheduled_for <= NOW()
+            ORDER BY scheduled_for ASC
+        """, (spa_id,))
+
+        reminders = cur.fetchall()
+
+        for reminder in reminders:
+            reminder_id, send_method, recipient_phone, recipient_email, message_body = reminder
+
+            if send_method == "sms":
+                if not recipient_phone:
+                    cur.execute("""
+                        UPDATE reminder_queue
+                        SET status = 'skipped',
+                            error_message = %s
+                        WHERE reminder_id = %s
+                          AND spa_id = %s
+                    """, ("Missing phone number", reminder_id, spa_id))
+                    skipped_count += 1
+                    continue
+
+                result = send_sms_message(recipient_phone, message_body)
+
+                if result.get("success"):
+                    cur.execute("""
+                        UPDATE reminder_queue
+                        SET status = 'sent',
+                            sent_at = NOW(),
+                            error_message = NULL
+                        WHERE reminder_id = %s
+                          AND spa_id = %s
+                    """, (reminder_id, spa_id))
+                    sent_count += 1
+                else:
+                    cur.execute("""
+                        UPDATE reminder_queue
+                        SET status = 'failed',
+                            error_message = %s
+                        WHERE reminder_id = %s
+                          AND spa_id = %s
+                    """, (
+                        result.get("twilio_error_message") or "SMS send failed",
+                        reminder_id,
+                        spa_id
+                    ))
+                    failed_count += 1
+
+            else:
+                cur.execute("""
+                    UPDATE reminder_queue
+                    SET status = 'skipped',
+                        error_message = %s
+                    WHERE reminder_id = %s
+                      AND spa_id = %s
+                """, ("Unsupported send method", reminder_id, spa_id))
+                skipped_count += 1
+
+        conn.commit()
+
+        flash(
+            f"Pending reminders processed. Sent: {sent_count}. Failed: {failed_count}. Skipped: {skipped_count}.",
+            "success"
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    return redirect(url_for("reminder_queue"))
+
+
+
+                
+                    
+                        
+                        
+                            
+#   --------------------------------------
+#
+#
+#   REMINDER QUEUE RETRY-FAILED
+#
+#               
+#   --------------------------------------
+                  
+@app.route("/reminder_queue/retry-failed", methods=["POST"])
+@login_required
+@spa_required
+def retry_failed_reminders():
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            UPDATE reminder_queue
+            SET status = 'pending',
+                error_message = NULL
+            WHERE spa_id = %s
+              AND status = 'failed'
+        """, (spa_id,))
+
+        updated_count = cur.rowcount
+
+        conn.commit()
+
+        flash(
+            f"Failed reminders reset to pending: {updated_count}.",
+            "success"
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    return redirect(url_for("reminder_queue"))
+
+
+
+#   --------------------------------------
+#
+#   
+#   REMINDER QUEUE SEND ONE
+#
+#   
+#   --------------------------------------
+
+@app.route("/reminder_queue/send-one/<int:reminder_id>", methods=["POST"])
+@login_required
+@spa_required
+def send_one_reminder(reminder_id):
+    spa_id = current_spa_id()
+
+    if not sms_email_terms_accepted(spa_id):
+        flash(
+            "You must accept the SMS and Email Terms and Conditions before using messaging features.",
+            "warning"
+        )
+        return redirect(url_for("sms_email_terms"))
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                reminder_id,
+                send_method,
+                recipient_phone,
+                recipient_email,
+                message_body,
+                status
+            FROM reminder_queue
+            WHERE reminder_id = %s
+              AND spa_id = %s
+        """, (reminder_id, spa_id))
+
+        reminder = cur.fetchone()
+
+        if not reminder:
+            flash("Reminder not found.", "warning")
+            return redirect(url_for("reminder_queue"))
+
+        reminder_id, send_method, recipient_phone, recipient_email, message_body, status = reminder
+
+        if status == "sent":
+            flash("This reminder has already been sent.", "warning")
+            return redirect(url_for("reminder_queue"))
+
+        if send_method == "sms":
+            result = send_sms_message(recipient_phone, message_body)
+
+            if result.get("success"):
+                cur.execute("""
+                    UPDATE reminder_queue
+                    SET status = 'sent',
+                        sent_at = NOW(),
+                        error_message = NULL
+                    WHERE reminder_id = %s
+                      AND spa_id = %s
+                """, (reminder_id, spa_id))
+
+                conn.commit()
+                flash("Reminder sent successfully.", "success")
+            else:
+                cur.execute("""
+                    UPDATE reminder_queue
+                    SET status = 'failed',
+                        error_message = %s
+                    WHERE reminder_id = %s
+                      AND spa_id = %s
+                """, (
+                    result.get("twilio_error_message") or "SMS send failed",
+                    reminder_id,
+                    spa_id
+                ))
+
+                conn.commit()
+                flash("Reminder failed to send.", "danger")
+
+        else:
+            flash("Only SMS reminders are supported right now.", "warning")
+
+    finally:
+        cur.close()
+        conn.close()
+
+    return redirect(url_for("reminder_queue"))
+
+
+
+
+
+#   --------------------------------------
+#
+#
+#   REMINDER QUEUE > AFTER APPOINTMENT
+#
+#
+#   --------------------------------------
+        
+
+@app.route("/reminder_queue/generate-after-appointments", methods=["POST"])
+@login_required
+@spa_required
+def generate_after_appointment_followups():
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                a.appointment_id,
+                a.client_id,
+                a.appointment_date,
+                a.appointment_time,
+                c.first_name,
+                c.last_name,
+                c.phone,
+                c.ok_to_text
+            FROM appointments a
+            JOIN clients c
+                ON a.client_id = c.client_id
+               AND a.spa_id = c.spa_id
+            WHERE a.spa_id = %s
+              AND a.appointment_date <= CURRENT_DATE
+              AND a.appointment_date >= CURRENT_DATE - INTERVAL '7 days'
+            ORDER BY a.appointment_date DESC, a.appointment_time DESC
+        """, (spa_id,))
+
+        appointments = cur.fetchall()
+
+        created_count = 0
+        skipped_count = 0
+
+        for appt in appointments:
+            (
+                appointment_id,
+                client_id,
+                appointment_date,
+                appointment_time,
+                first_name,
+                last_name,
+                phone,
+                ok_to_text
+            ) = appt
+
+            if not phone or not ok_to_text:
+                skipped_count += 1
+                continue
+
+            cur.execute("""
+                SELECT 1
+                FROM reminder_queue
+                WHERE spa_id = %s
+                  AND appointment_id = %s
+                  AND reminder_type = 'after_appointment_followup'
+                  AND send_method = 'sms'
+                  AND status IN ('pending', 'sent')
+            """, (spa_id, appointment_id))
+
+            existing = cur.fetchone()
+
+            if existing:
+                skipped_count += 1
+                continue
+
+            message_body = apply_sms_placeholders(
+                "Hi {first_name}, thank you for visiting Clear Skin Esthetics. We hope you enjoyed your appointment. Please contact us if you have any questions about your aftercare. Reply STOP to opt out.",
+                {
+                    "first_name": first_name,
+                    "last_name": last_name,
+                    "appointment_date": appointment_date,
+                    "appointment_time": appointment_time
+                }
+            )
+
+            cur.execute("""
+                INSERT INTO reminder_queue (
+                    spa_id,
+                    client_id,
+                    appointment_id,
+                    reminder_type,
+                    send_method,
+                    recipient_phone,
+                    message_body,
+                    scheduled_for,
+                    status
+                )
+                VALUES (
+                    %s, %s, %s, %s, %s, %s, %s,
+                    (%s::date + %s::time + INTERVAL '2 hours'),
+                    'pending'
+                )
+            """, (
+                spa_id,
+                client_id,
+                appointment_id,
+                "after_appointment_followup",
+                "sms",
+                phone,
+                message_body,
+                appointment_date,
+                appointment_time
+            ))
+
+            created_count += 1
+
+        conn.commit()
+
+        flash(
+            f"After appointment follow-ups generated: {created_count}. Skipped: {skipped_count}.",
+            "success"
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    return redirect(url_for("reminder_queue"))
+
+
+
+
 
 
 
