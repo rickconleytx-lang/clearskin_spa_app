@@ -20,6 +20,17 @@
 
 <br>
 
+<form method="POST"
+      action="{{ url_for('create_birthday_reminders') }}"
+      style="display:inline;">
+    <button type="submit"
+            onclick="return confirm('Create birthday reminders for today?')">
+        Create Birthday Reminders
+    </button>
+</form>
+
+
+<br>
 <br>
 <form method="POST" action="{{ url_for('send_pending_reminders') }}">
     <button type="submit"
@@ -132,7 +143,8 @@
                 <td>{{ r[9] or "" }}</td>
 
 
-                <td>
+                <td class="table-actions">
+
                     {% if r[7] == "pending" or r[7] == "failed" %}
                          <form method="POST"
                                action="{{ url_for('send_one_reminder', reminder_id=r[0]) }}"
@@ -146,7 +158,23 @@
                     {% else %}
                         —
                     {% endif %}
-                </td>
+
+                    {% if r[7] == 'pending' %}
+
+                    <form method="POST"
+                        action="{{ url_for('cancel_reminder', reminder_id=r[0]) }}"
+                        style="display:inline;">
+                      <button type="submit" class="table-action-btn warning-btn">
+                          Cancel
+                      </button>
+                    </form>
+
+                    {% elif r[7] == "cancelled" %}
+                        <span class="status-badge cancelled">Cancelled</span>
+               
+                    {% endif %}
+
+                </td> 
 
             </tr>
         {% else %}

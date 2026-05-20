@@ -2285,3 +2285,8 @@ td:nth-child(3) {
     background: #e2e3e5;
     color: #383d41;
 }
+
+.status-badge.cancelled {
+    background: #777;
+    color: white;
+}

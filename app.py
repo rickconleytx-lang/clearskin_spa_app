@@ -6626,6 +6626,8 @@ def send_pending_reminders():
         cur.execute("""
             SELECT
                 reminder_id,
+                client_id,
+                reminder_type,
                 send_method,
                 recipient_phone,
                 recipient_email,
@@ -6640,7 +6642,9 @@ def send_pending_reminders():
         reminders = cur.fetchall()
 
         for reminder in reminders:
-            reminder_id, send_method, recipient_phone, recipient_email, message_body = reminder
+            reminder_id, client_id, reminder_type, send_method, recipient_phone, recipient_email, message_body = reminder
+
+            result = send_sms_message(recipient_phone, message_body)
 
             if send_method == "sms":
                 if not recipient_phone:
@@ -6978,10 +6982,112 @@ def generate_after_appointment_followups():
     return redirect(url_for("reminder_queue"))
 
 
+            
+            
+        
+            
+                
+                
+#   --------------------------------------
+#
+#
+#   REMINDER QUEUE DELETE/CANCEL
+#
+#
+#   --------------------------------------
+                    
+
+@app.route("/reminders/cancel/<int:reminder_id>", methods=["POST"])
+@login_required
+@spa_required
+def cancel_reminder(reminder_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE reminder_queue
+        SET status = 'cancelled'
+        WHERE reminder_id = %s
+          AND spa_id = %s
+          AND status = 'pending'
+    """, (reminder_id, spa_id))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    flash("Reminder cancelled.", "success")
+    return redirect(url_for("reminder_queue"))
 
 
 
 
+
+#   --------------------------------------
+#
+#
+#   REMINDER QUEUE > BIRTHDAY REMINDER
+#
+#           
+#   --------------------------------------
+
+
+@app.route("/reminders/create-birthday-reminders", methods=["POST"])
+@login_required
+@spa_required
+def create_birthday_reminders():
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT client_id, first_name, last_name, phone, birth_date
+        FROM clients
+        WHERE spa_id = %s
+          AND active_client = TRUE
+          AND ok_to_text = TRUE
+          AND birth_date IS NOT NULL
+          AND EXTRACT(MONTH FROM birth_date) = EXTRACT(MONTH FROM CURRENT_DATE)
+          AND EXTRACT(DAY FROM birth_date) = EXTRACT(DAY FROM CURRENT_DATE)
+    """, (spa_id,))
+
+    clients = cur.fetchall()
+
+    created_count = 0
+
+    for client in clients:
+        client_id = client[0]
+        first_name = client[1]
+        phone = client[3]
+
+        message_body = f"Happy Birthday {first_name}! Clear Skin Esthetics hopes you have a wonderful day!"
+
+        cur.execute("""
+            INSERT INTO reminder_queue
+                (spa_id, client_id, reminder_type, send_method, recipient_phone, message_body, scheduled_for, status)
+            VALUES
+                (%s, %s, %s, %s, %s, %s, NOW(), %s)
+        """, (
+            spa_id,
+            client_id,
+            "birthday",
+            "sms",
+            phone,
+            message_body,
+            "pending"
+        ))
+
+        created_count += 1
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    flash(f"{created_count} birthday reminder(s) added to the queue.", "success")
+    return redirect(url_for("reminder_queue"))
 
 
 
