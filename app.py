@@ -6644,8 +6644,6 @@ def send_pending_reminders():
         for reminder in reminders:
             reminder_id, client_id, reminder_type, send_method, recipient_phone, recipient_email, message_body = reminder
 
-            result = send_sms_message(recipient_phone, message_body)
-
             if send_method == "sms":
                 if not recipient_phone:
                     cur.execute("""
@@ -6669,6 +6667,35 @@ def send_pending_reminders():
                         WHERE reminder_id = %s
                           AND spa_id = %s
                     """, (reminder_id, spa_id))
+
+
+                    cur.execute("""
+                        INSERT INTO sms_log (
+                            spa_id,
+                            client_id,
+                            phone_number,
+                            message_body,
+                            sms_type,
+                            status,
+                            provider_message_id,
+                            twilio_error_code,
+                            twilio_error_message,
+                            created_at,
+                            sent_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, (
+                    spa_id,
+                    client_id,
+                    recipient_phone,
+                    message_body,
+                    reminder_type,
+                    "sent",
+                    result.get("sid"),
+                    result.get("error_code"),
+                    result.get("error_message")
+                ))
+
                     sent_count += 1
                 else:
                     cur.execute("""
@@ -6765,6 +6792,7 @@ def retry_failed_reminders():
 #   
 #   --------------------------------------
 
+
 @app.route("/reminder_queue/send-one/<int:reminder_id>", methods=["POST"])
 @login_required
 @spa_required
@@ -6785,6 +6813,8 @@ def send_one_reminder(reminder_id):
         cur.execute("""
             SELECT
                 reminder_id,
+                client_id,
+                reminder_type,
                 send_method,
                 recipient_phone,
                 recipient_email,
@@ -6801,13 +6831,35 @@ def send_one_reminder(reminder_id):
             flash("Reminder not found.", "warning")
             return redirect(url_for("reminder_queue"))
 
-        reminder_id, send_method, recipient_phone, recipient_email, message_body, status = reminder
+        (
+            reminder_id,
+            client_id,
+            reminder_type,
+            send_method,
+            recipient_phone,
+            recipient_email,
+            message_body,
+            status
+        ) = reminder
 
         if status == "sent":
             flash("This reminder has already been sent.", "warning")
             return redirect(url_for("reminder_queue"))
 
         if send_method == "sms":
+            if not recipient_phone:
+                cur.execute("""
+                    UPDATE reminder_queue
+                    SET status = 'skipped',
+                        error_message = %s
+                    WHERE reminder_id = %s
+                      AND spa_id = %s
+                """, ("Missing phone number", reminder_id, spa_id))
+
+                conn.commit()
+                flash("Reminder skipped: missing phone number.", "warning")
+                return redirect(url_for("reminder_queue"))
+
             result = send_sms_message(recipient_phone, message_body)
 
             if result.get("success"):
@@ -6820,8 +6872,38 @@ def send_one_reminder(reminder_id):
                       AND spa_id = %s
                 """, (reminder_id, spa_id))
 
+                cur.execute("""
+                    INSERT INTO sms_messages (
+                        spa_id,
+                        client_id,
+                        recipient_phone,
+                        message_body,
+                        message_type,
+                        direction,
+                        status,
+                        provider_message_id,
+                        twilio_status,
+                        twilio_error_code,
+                        twilio_error_message
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    spa_id,
+                    client_id,
+                    recipient_phone,
+                    message_body,
+                    reminder_type,
+                    "outbound",
+                    "sent",
+                    result.get("sid"),
+                    result.get("status"),
+                    result.get("error_code"),
+                    result.get("error_message")
+                ))
+
                 conn.commit()
                 flash("Reminder sent successfully.", "success")
+
             else:
                 cur.execute("""
                     UPDATE reminder_queue
@@ -6846,6 +6928,12 @@ def send_one_reminder(reminder_id):
         conn.close()
 
     return redirect(url_for("reminder_queue"))
+
+
+
+
+
+
 
 
 
