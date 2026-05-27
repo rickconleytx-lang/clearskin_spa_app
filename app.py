@@ -6,6 +6,9 @@ import os
 from decimal import Decimal
 import csv
 import io
+import imaplib
+import email
+from email.header import decode_header
 from openpyxl import Workbook
 from dotenv import load_dotenv
 from openpyxl.styles import Font
@@ -3017,7 +3020,31 @@ def godaddy_imports():
 
 
 
+        
+            
+           
+        
+#   ----------------------------------------------
+#
+#
+#       GMAIL BOOKING POLL    MANUAL
+#
+#             
+#
+#
+#   --------------------------------------------
+    
 
+@app.route("/test-gmail-booking-poll")
+@login_required
+@spa_required
+def test_gmail_booking_poll():
+    # later this will:
+    # 1. connect to Gmail
+    # 2. find GoDaddy booking emails
+    # 3. read email body
+    # 4. call import_godaddy_booking(body, spa_id, subject)
+    return "Gmail booking poll test route ready."
 
 
 
@@ -3720,6 +3747,143 @@ def test_godaddy_create_appointment():
     result = import_godaddy_booking(body, spa_id)
 
     return f"<pre>{result}</pre>"
+
+
+
+
+
+
+
+
+
+#   --------------------------
+#
+#           
+#     GMAIL TEST
+#
+#           
+#
+#   ----------------------
+        
+def poll_gmail_for_godaddy_bookings(spa_id):
+    gmail_user = os.getenv("GMAIL_BOOKING_EMAIL")
+    gmail_pass = os.getenv("GMAIL_BOOKING_APP_PASSWORD")
+
+    mail = imaplib.IMAP4_SSL("imap.gmail.com")
+    mail.login(gmail_user, gmail_pass)
+    mail.select("inbox")
+
+    status, messages = mail.search(
+        None,
+        '(UNSEEN FROM "donotreply@email.ola.godaddy.com" SUBJECT "Booking Confirmed")'
+    )
+
+    email_ids = messages[0].split()
+
+    if not email_ids:
+        mail.logout()
+        return {"status": "no_emails_found"}
+
+    results = []
+
+    # process newest 10 only
+    for email_id in email_ids[-10:]:
+        status, msg_data = mail.fetch(email_id, "(RFC822)")
+        raw_email = msg_data[0][1]
+
+        email_message = email.message_from_bytes(raw_email)
+
+        subject, encoding = decode_header(email_message["Subject"])[0]
+
+        if isinstance(subject, bytes):
+            subject = subject.decode(encoding or "utf-8")
+
+        body = ""
+
+        if email_message.is_multipart():
+            for part in email_message.walk():
+                content_type = part.get_content_type()
+                content_disposition = str(part.get("Content-Disposition"))
+
+                if content_type == "text/plain" and "attachment" not in content_disposition:
+                    body = part.get_payload(decode=True).decode(errors="ignore")
+                    break
+        else:
+            body = email_message.get_payload(decode=True).decode(errors="ignore")
+
+        if not body:
+            results.append({
+                "email_id": email_id.decode(),
+                "status": "no_body",
+                "subject": subject
+            })
+
+            mail.store(email_id, "+FLAGS", "\\Seen")
+
+            continue
+
+
+        try:
+            result = import_godaddy_booking(
+                body, 
+                spa_id, 
+                subject
+            )
+
+        except KeyError as e:
+            results.append({
+                "email_id": email_id.decode(),
+                "subject": subject,
+                "status": "parse_failed",
+                "missing_field": str(e)
+            })
+            continue
+
+
+        results.append({
+            "email_id": email_id.decode(),
+            "subject": subject,
+            "result": result
+        })
+
+    mail.logout()
+
+    return {
+        "status": "completed",
+        "processed_count": len(results),
+        "results": results
+    }
+
+
+    
+
+
+
+
+
+
+
+#   ------------------------
+#
+#   TEST GMAIL
+#
+#
+#
+#
+#   ------------------------
+
+
+
+
+
+@app.route("/test-gmail-import")
+@login_required
+@spa_required
+def test_gmail_import():
+    spa_id = current_spa_id()
+    return poll_gmail_for_godaddy_bookings(spa_id)
+
+
 
 
 
@@ -17205,6 +17369,16 @@ def reschedule_appointment(appointment_id):
         flash("Appointment rescheduled successfully.", "success")
         return redirect(url_for("daily_schedule", date=appointment_date or original_date))
         
+
+    select_filter = "WHERE a.appointment_id = %s"
+    select_params = [appointment_id]
+
+    if role != "master_admin":
+        select_filter += " AND a.spa_id = %s"
+        select_params.append(spa_id)
+
+
+
     cur.execute(f"""
         SELECT
             a.appointment_id,
@@ -17221,8 +17395,8 @@ def reschedule_appointment(appointment_id):
         JOIN clients c 
             ON a.client_id = c.client_id
            AND a.spa_id = c.spa_id   
-        {appt_filter}
-    """, appt_params)
+        {select_filter}
+    """, select_params)
         
     appointment = cur.fetchone()
         
@@ -19258,6 +19432,20 @@ def scheduled_generate_birthdays():
     print(f"Birthday reminders created: {created_count}", flush=True)
 
 
+#   ---------------------------
+#
+#
+#
+#    SCHEDULER
+#
+#
+#
+#   ----------------------------
+
+
+
+
+
 def start_scheduler():
     scheduler = BackgroundScheduler()
 
@@ -19277,6 +19465,15 @@ def start_scheduler():
         id="birthday_reminders_job",
         replace_existing=True
     )
+
+    scheduler.add_job(
+        lambda: poll_gmail_for_godaddy_bookings(1),
+        "interval",
+        minutes=5,
+        id="poll_gmail_godaddy_bookings",
+        replace_existing=True
+    )
+
 
     scheduler.start()
     print("Scheduler started.", flush=True)
