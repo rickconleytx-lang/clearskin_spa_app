@@ -19546,9 +19546,11 @@ def test_godaddy_secure_post():
     return response.get_data(as_text=True)
 
 
+
+
+
+if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or os.environ.get("RENDER"):
+    start_scheduler()
+
 if __name__ == "__main__":
-    if os.environ.get("WERKZEUG_RUN_MAIN") == "true":
-        start_scheduler()
-
     app.run(debug=True, port=5001)
-
