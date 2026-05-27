@@ -12,6 +12,16 @@
 
 <br>
 
+<form method="POST"
+      action="{{ url_for('run_daily_birthday_job') }}"
+      style="display:inline;">
+    <button type="submit"
+            onclick="return confirm('Run daily birthday job now?')">
+        Run Daily Birthday Job
+    </button>
+</form>
+<br><br>
+
 <form method="POST" action="{{ url_for('generate_after_appointment_followups') }}">
     <button type="submit">
         Generate After Appointment Follow-Ups

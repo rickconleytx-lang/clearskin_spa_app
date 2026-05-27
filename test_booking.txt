@@ -1,0 +1,20 @@
+Order # C-Test-RAW-001
+subtotal	$180.00
+Tax 0.000%	$0.00
+Order Total	$180.00
+Total includes Tax
+ 	 
+Paid at checkout	$0.00
+Customer
+Name:	Camryn Conley
+Phone:	214-912-0700
+Email:	camrynconleytx@gmail.com
+Booking
+What:	Refresh Facial
+When:	Wednesday, May 27, 2026 at 07:30PM (1 hour)
+(GMT-05:00) Central Time (US & Canada)
+Manage appointment
+Where:	5810 Long Prairie Rd	
+Suite 34	
+Flower Mound, TX 75028
+Payment status:	Not paid yet

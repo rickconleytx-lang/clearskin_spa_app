@@ -64,13 +64,13 @@
                         <th>Sub Cat.</th>
                         <th>Cost</th>
                         <th>Retail</th>
-                        <th>Expires</th>
                         <th>Added</th>
                         <th>Sold</th>
                         <th>In Stock</th>
+                        <th>Action</th>                      
                         <th>W. Value</th>
                         <th>R. Value</th>
-                        <th>Action</th>
+                        <th>Expires</th> 
                     </tr>
                 </thead>
 
@@ -85,18 +85,24 @@
                             <td>{{ row[5] or '—' }}</td>
                             <td class="amount-cell">${{ '%.2f'|format(row[6]) }}</td>
                             <td class="amount-cell">${{ '%.2f'|format(row[7]) }}</td>
-                            <td>{{ row[8].strftime('%Y-%m-%d') if row[8] else '—' }}</td>
+                            <td>{{ row[8] }}</td>
                             <td>{{ row[9] }}</td>
-                            <td>{{ row[10] }}</td>
+                            <td>
+                                {% if row[10] <= 0 %}
+                                    <span class="badge badge-danger">{{ row[10] }}</span>
+                                {% elif row[10] <= 2 %}
+                                    <span class="badge badge-warning">{{ row[10] }}</span>
+                                {% else %}
+                                    <span class="badge badge-success">{{ row[10] }}</span>
+                                {% endif %}
+                            </td>
+
 
                             <td>
-                                {% if row[11] <= 0 %}
-                                    <span class="badge badge-danger">{{ row[11] }}</span>
-                                {% elif row[11] <= 2 %}
-                                    <span class="badge badge-warning">{{ row[11] }}</span>
-                                {% else %}
-                                    <span class="badge badge-success">{{ row[11] }}</span>
-                                {% endif %}
+                                <a href="{{ url_for('inventory_product_detail', product_id=row[0]) }}" class="btn">
+                                    View
+                                </a>
+                                
                             </td>
 
                             <td class="amount-cell">${{ '%.2f'|format(row[12]) }}</td>
@@ -104,13 +110,8 @@
                             <td>
                                 ${{ "{:,.2f}".format(row[13] or 0) }}
                             </td>
+                            <td>{{ row[8].strftime('%Y-%m-%d') if row[8] else '—' }}</td>
 
-                            <td>
-                                <a href="{{ url_for('inventory_product_detail', product_id=row[0]) }}" class="btn btn-small">
-                                    View
-                                </a>
-
-                            </td>
                         </tr>
                         {% endfor %}
                     {% else %}

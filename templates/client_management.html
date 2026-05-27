@@ -60,10 +60,17 @@ Visit Summaries, Full Record, Edit) next to their record.
     <button type="submit" class="btn">Search</button>
     <button type="submit" name="show_all" value="1" class="btn">Show All</button>
     <a href="{{ url_for('client_management') }}" class="btn">Clear</a>
+<br>
+
+{% if record_count is defined %}
+    <div class="record-count">
+        {{ record_count }} record(s) returned
+    </div>
+{% endif %}
 
 </form>
 
-{% if rows %}
+{% if clients %}
 <table>
     <thead>
         <tr>
@@ -78,7 +85,7 @@ Visit Summaries, Full Record, Edit) next to their record.
     </thead>
 
     <tbody>
-        {% for row in rows %}
+        {% for row in clients %}
         <tr>
             <td>{{ row[2] }}, {{ row[1] }}</td>
 
