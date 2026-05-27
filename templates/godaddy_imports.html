@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>GoDaddy Booking Imports</h1>
+
+<p>Bookings imported from GoDaddy emails.</p>
+
+<table>
+    <thead>
+        <tr>
+            <th>Date</th>
+            <th>Time</th>
+            <th>Client</th>
+            <th>Phone</th>
+            <th>Email</th>
+            <th>Service</th>
+            <th>Order ID</th>
+            <th>Status</th>
+            <th>Appointment</th>
+            <th>raw_email</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in imports %}
+        <tr>
+            <td>{{ row[1] }}</td>
+            <td>{{ row[2] }}</td>
+            <td>{{ row[3] }} {{ row[4] }}</td>
+            <td>{{ row[5] }}</td>
+            <td>{{ row[6] }}</td>
+            <td>{{ row[7] }}</td>
+            <td>{{ row[8] }}</td>
+            <td>{{ row[9] }}</td>
+            <td>
+                <a class="btn" href="{{ url_for('calendar_view') }}">
+                    View Calendar
+                </a>
+            </td>
+            <td>
+                <a class="btn" href="{{ url_for('godaddy_import_raw', appointment_id=row[0]) }}">
+                    View Raw
+                </a>
+            </td>
+        </tr>
+        {% else %}
+        <tr>
+            <td colspan="9">No GoDaddy bookings imported yet.</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% endblock %}

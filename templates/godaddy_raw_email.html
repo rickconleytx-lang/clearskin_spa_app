@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>GoDaddy Raw Email</h1>
+
+<p><strong>Subject:</strong> {{ subject or "No subject saved" }}</p>
+
+<pre style="white-space: pre-wrap; background: #f7f7f7; padding: 20px; border-radius: 8px;">
+{{ body or "No email body saved" }}
+</pre>
+
+<a href="{{ url_for('godaddy_imports') }}" class="btn">Back to Imports</a>
+
+{% endblock %}

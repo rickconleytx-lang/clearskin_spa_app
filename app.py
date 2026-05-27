@@ -1,10 +1,11 @@
 from flask import Flask, render_template, request, Response, send_file, redirect, url_for, session, flash
 from datetime import date, timedelta, datetime
 from psycopg2 import sql
+from apscheduler.schedulers.background import BackgroundScheduler
+import os
 from decimal import Decimal
 import csv
 import io
-import os
 from openpyxl import Workbook
 from dotenv import load_dotenv
 from openpyxl.styles import Font
@@ -442,7 +443,14 @@ def add_consent_record(
 
 @app.before_request
 def load_spa():
-    if request.endpoint in ("login", "logout", "static"):
+
+    if request.endpoint in (
+        "login",  
+        "logout", 
+        "static",
+        "mailgun_godaddy_booking",
+        "godaddy_booking_intake"
+     ):
         return
 
     if "user_id" not in session:
@@ -2921,6 +2929,199 @@ def sync_calendar():
 #   ------------------------------------------
 
 
+            
+#   ------------------------------------------
+#     MAILGUN INCOMING MAIL
+#
+#     MAILGUN GODADDY BOOKING
+#   ------------------------------------------
+    
+    
+@app.route("/mailgun/godaddy-booking", methods=["POST"])
+def mailgun_godaddy_booking():
+    subject = request.form.get("subject", "")
+
+    body = (
+        request.form.get("stripped-text")
+        or request.form.get("body-plain")
+        or request.form.get("body")
+    )
+
+    if not body:
+        return {"error": "No email body received"}, 400
+
+    spa_id = 1
+
+    result = import_godaddy_booking(body, spa_id, subject)
+
+    return result, 200
+
+
+
+
+
+
+
+
+#   ----------------------------------------------
+#     
+#   
+#    GoDaddy IMPORTS
+#
+#
+#
+#
+#   --------------------------------------------
+        
+
+@app.route("/godaddy-imports")
+@login_required
+@spa_required
+def godaddy_imports():
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            a.appointment_id,
+            a.appointment_date,
+            a.appointment_time,
+            c.first_name,
+            c.last_name,
+            c.phone,
+            c.email,
+            a.external_service_name,
+            a.external_order_id,
+            a.status,
+            a.notes
+        FROM appointments a
+        JOIN clients c
+            ON a.client_id = c.client_id
+           AND a.spa_id = c.spa_id
+        WHERE a.spa_id = %s
+          AND a.external_source = 'godaddy'
+        ORDER BY a.appointment_date DESC, a.appointment_time DESC
+    """, (spa_id,))
+
+    imports = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template("godaddy_imports.html", imports=imports)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
+    
+            
+    
+        
+#   ----------------------------------------------   
+#
+#
+#    GoDaddy WebHook Parser
+#
+#
+#
+#
+#   --------------------------------------------
+    
+
+import re
+from datetime import datetime
+
+def parse_godaddy_booking_email(body):
+    data = {}
+
+    order_match = re.search(r"Order #\s+(.+)", body)
+    if order_match:
+        data["order_number"] = order_match.group(1).strip()
+
+    name_match = re.search(r"Name:\s*(.+)", body)
+    if name_match:
+        data["customer_name"] = name_match.group(1).strip()
+
+    phone_match = re.search(r"Phone:\s*(.+)", body)
+    if phone_match:
+        data["phone"] = phone_match.group(1).strip()
+
+    email_match = re.search(r"Email:\s*(.+)", body)
+    if email_match:
+        data["email"] = email_match.group(1).strip()
+
+    service_match = re.search(r"What:\s*(.+)", body)
+    if service_match:
+        data["service"] = service_match.group(1).strip()
+
+    when_match = re.search(r"When:\s*(.+?)\s*\((\d+)\s*hour", body)
+    if when_match:
+        raw_when = when_match.group(1).strip()
+        duration_hours = int(when_match.group(2))
+
+        dt = datetime.strptime(raw_when, "%A, %B %d, %Y at %I:%M%p")
+
+        data["appointment_datetime"] = dt
+        data["duration_minutes"] = duration_hours * 60
+
+    payment_match = re.search(r"Payment status:\s*(.+)", body)
+    if payment_match:
+        data["payment_status"] = payment_match.group(1).strip()
+
+    return data
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#   ------------------------------------------
+#           
+#   
+#       
+#   ------------------------------------------
+
 
 
 
@@ -3268,13 +3469,277 @@ def get_loan_contribution_rows(spa_id, start_date=None, end_date=None):
 
 
 
+
+
+            
+#   ------------------------------------------------
+#
+#    >>>>>>>>>>>>  GO DADDY  <<<<<<<<<<<<<<<<<
+#
+#    GoDaddy Parser   
+#
+#    
+#
+#   -----------------------------------------------
+
+@app.route("/test-godaddy-parser")
+def test_godaddy_parser():
+
+    with open("test_booking.txt", "r") as f:
+        body = f.read()
+
+    booking = parse_godaddy_booking_email(body)
+
+    return f"""
+    <pre>
+    {booking}
+    </pre>
+    """
+
+
+
+
+
+
+
+
+#   ------------------------------------------------
+#
+#    >>>>>>>>>>>>  GO DADDY  <<<<<<<<<<<<<<<<<
+#
+#    GoDaddy TEST CREATE APPOINTMENT
+#           
+#      GODADDY IMPORT
+#           
+#   -----------------------------------------------
+
+def import_godaddy_booking(body, spa_id, subject=""):
+    booking = parse_godaddy_booking_email(body)
+    from datetime import datetime
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # 1. Prevent duplicate appointment
+    cur.execute("""
+        SELECT appointment_id
+        FROM appointments
+        WHERE spa_id = %s
+          AND external_source = %s
+          AND external_order_id = %s
+    """, (spa_id, "godaddy", booking["order_number"]))
+
+    existing = cur.fetchone()
+
+    if existing:
+        cur.close()
+        conn.close()
+        return {
+            "status": "duplicate",
+            "message": "This GoDaddy booking was already imported.",
+            "order_number": booking["order_number"]
+        }
+
+    # 2. Find existing client by email first
+    client = None
+
+    if booking.get("email"):
+        cur.execute("""
+            SELECT client_id
+            FROM clients
+            WHERE spa_id = %s
+              AND LOWER(email) = LOWER(%s)
+            LIMIT 1
+        """, (spa_id, booking["email"]))
+
+        client = cur.fetchone()
+
+    # If no email match, try phone
+    if not client and booking.get("phone"):
+        cur.execute("""
+            SELECT client_id
+            FROM clients
+            WHERE spa_id = %s
+              AND phone = %s
+            LIMIT 1
+        """, (spa_id, booking["phone"]))
+
+        client = cur.fetchone()
+
+    # 3. Create client if not found
+    if client:
+        client_id = client[0]
+    else:
+        name_parts = booking["customer_name"].split(" ", 1)
+        first_name = name_parts[0]
+        last_name = name_parts[1] if len(name_parts) > 1 else ""
+
+        cur.execute("""
+            INSERT INTO clients (
+                spa_id,
+                first_name,
+                last_name,
+                phone,
+                email
+            )
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING client_id
+        """, (
+            spa_id,
+            first_name,
+            last_name,
+            booking["phone"],
+            booking["email"]
+        ))
+
+        client_id = cur.fetchone()[0]
+
+    # 4. Insert appointment
+    cur.execute("""
+        INSERT INTO appointments (
+            spa_id,
+            client_id,
+            appointment_date,
+            appointment_time,
+            duration_minutes,
+            external_service_name,
+            status,
+            notes,
+            external_source,
+            external_order_id,
+            external_email_subject,
+            external_email_body,
+            imported_at
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    """, (
+        spa_id,
+        client_id,
+        booking["appointment_datetime"].date(),
+        booking["appointment_datetime"].time(),
+        booking["duration_minutes"],
+        booking["service"],
+        "Scheduled",
+        f"Imported from GoDaddy. Service: {booking['service']}. Payment status: {booking['payment_status']}",
+        "godaddy",
+        booking["order_number"],
+        subject,
+        body,
+        datetime.now()
+    ))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return {
+        "status": "imported",
+        "message": "GoDaddy booking imported successfully.",
+        "order_number": booking["order_number"],
+        "client_id": client_id
+    }
+
+
+
+
+
+
+
+
+#   ------------------------------------------------
+#     
+#     
+#     VIEW RAW GODADDY EMAILS
+#     
+#   
+#   
+#   
+#   -----------------------------------------------
+
+@app.route("/godaddy-imports/<int:appointment_id>/raw")
+@login_required
+@spa_required
+def godaddy_import_raw(appointment_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT external_email_subject, external_email_body
+        FROM appointments
+        WHERE appointment_id = %s
+          AND spa_id = %s
+          AND external_source = 'godaddy'
+    """, (appointment_id, spa_id))
+
+    row = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if not row:
+        return "Raw email not found.", 404
+
+    return render_template(
+        "godaddy_raw_email.html",
+        subject=row[0],
+        body=row[1]
+    )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@app.route("/test-godaddy-create-appointment")
+@login_required
+@spa_required
+def test_godaddy_create_appointment():
+    spa_id = current_spa_id()
+
+    with open("test_booking.txt", "r") as f:
+        body = f.read()
+
+    result = import_godaddy_booking(body, spa_id)
+
+    return f"<pre>{result}</pre>"
+
+
+
+
+
+
+
+
+
+
+
+
+
 #   ------------------------------------------------
 #
 #
 #           
 #     SMS     CAMPAIGNS
 #       
-      
+#      
 #   
 #   -----------------------------------------------
 
@@ -7118,8 +7583,84 @@ def cancel_reminder(reminder_id):
 #
 #   REMINDER QUEUE > BIRTHDAY REMINDER
 #
-#           
+#     AND   DEF         
 #   --------------------------------------
+
+def generate_birthday_reminders(spa_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    created_count = 0
+
+    try:
+        cur.execute("""
+            SELECT client_id, first_name, last_name, phone, birth_date
+            FROM clients
+            WHERE spa_id = %s
+              AND active_client = TRUE
+              AND ok_to_text = TRUE
+              AND birth_date IS NOT NULL
+              AND EXTRACT(MONTH FROM birth_date) = EXTRACT(MONTH FROM CURRENT_DATE)
+              AND EXTRACT(DAY FROM birth_date) = EXTRACT(DAY FROM CURRENT_DATE)
+        """, (spa_id,))
+
+        clients = cur.fetchall()
+
+        for client in clients:
+            client_id = client[0]
+            first_name = client[1]
+            phone = client[3]
+
+            cur.execute("""
+                SELECT reminder_id
+                FROM reminder_queue
+                WHERE spa_id = %s
+                  AND client_id = %s
+                  AND reminder_type = 'birthday'
+                  AND DATE(scheduled_for) = CURRENT_DATE
+                  AND status IN ('pending', 'sent')
+            """, (spa_id, client_id))
+
+            existing = cur.fetchone()
+
+            if existing:
+                continue
+
+            message_body = f"Happy Birthday {first_name}! Clear Skin Esthetics hopes you have a wonderful day!"
+
+            cur.execute("""
+                INSERT INTO reminder_queue
+                    (spa_id, client_id, reminder_type, send_method, recipient_phone, message_body, scheduled_for, status)
+                VALUES
+                    (%s, %s, %s, %s, %s, %s, NOW(), %s)
+            """, (
+                spa_id,
+                client_id,
+                "birthday",
+                "sms",
+                phone,
+                message_body,
+                "pending"
+            ))
+
+            created_count += 1
+
+        conn.commit()
+        return created_count
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
+
+
+
+
+
+
 
 
 @app.route("/reminders/create-birthday-reminders", methods=["POST"])
@@ -7127,6 +7668,11 @@ def cancel_reminder(reminder_id):
 @spa_required
 def create_birthday_reminders():
     spa_id = current_spa_id()
+
+    created_count = generate_birthday_reminders(spa_id)
+
+    flash(f"{created_count} birthday reminder(s) added to the queue.", "success")
+    return redirect(url_for("reminder_queue"))
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -7147,9 +7693,26 @@ def create_birthday_reminders():
     created_count = 0
 
     for client in clients:
+
         client_id = client[0]
         first_name = client[1]
         phone = client[3]
+
+
+        cur.execute("""
+            SELECT reminder_id
+            FROM reminder_queue
+            WHERE spa_id = %s
+              AND client_id = %s
+              AND reminder_type = 'birthday'
+              AND DATE(scheduled_for) = CURRENT_DATE
+              AND status IN ('pending', 'sent')
+        """, (spa_id, client_id))
+
+        existing = cur.fetchone()
+
+        if existing:
+            continue
 
         message_body = f"Happy Birthday {first_name}! Clear Skin Esthetics hopes you have a wonderful day!"
 
@@ -7176,6 +7739,38 @@ def create_birthday_reminders():
 
     flash(f"{created_count} birthday reminder(s) added to the queue.", "success")
     return redirect(url_for("reminder_queue"))
+
+
+
+
+
+          
+#   --------------------------------------
+#
+#
+#   RUN DAILY BIRTHDAY > > AUTOMATION<<<
+#
+#   
+#   --------------------------------------
+    
+
+@app.route("/reminders/run-daily-birthday-job", methods=["POST"])
+@login_required
+@spa_required
+def run_daily_birthday_job():
+    spa_id = current_spa_id()
+
+    created_count = generate_birthday_reminders(spa_id)
+
+    flash(f"Daily birthday job complete. {created_count} reminder(s) added.", "success")
+    return redirect(url_for("reminder_queue"))
+
+
+
+
+
+
+
 
 
 
@@ -9494,6 +10089,7 @@ def client_management():
     cur = conn.cursor()
 
     rows = []
+    record_count = 0
 
     if search:
         cur.execute("""
@@ -9547,6 +10143,7 @@ def client_management():
         ))
 
         rows = cur.fetchall()
+        record_count = len(rows)
 
     elif show_all:
         cur.execute("""
@@ -9592,14 +10189,17 @@ def client_management():
         ))
 
         rows = cur.fetchall()
+        record_count = len(rows)
 
     cur.close()
     conn.close()
 
     return render_template(
         "client_management.html",
-        rows=rows,
-        search=search
+        clients=rows,
+        record_count=record_count,
+        search=search,
+        show_all=show_all
     )
 
 
@@ -14838,7 +15438,7 @@ def calendar_view():
                 a.appointment_time,
                 c.first_name,
                 c.last_name,
-                s.service_name,
+                COALESCE(s.service_name, a.external_service_name) AS service_name,
                 a.status,   
                 a.appointment_id  
             FROM appointments a
@@ -14861,7 +15461,7 @@ def calendar_view():
             a.appointment_time,
             c.first_name,
             c.last_name,
-            s.service_name,
+            COALESCE(s.service_name, a.external_service_name) AS service_name,
             a.status,
             a.appointment_id 
         FROM appointments a
@@ -15034,6 +15634,9 @@ def quick_reschedule_appointment(appointment_id):
 
 #  -----------------------------
 #
+#   MODAL ROUTE
+#
+#
 #      APPOINTMENT DETAILS
 #     
 #  4/28 cleaned
@@ -15059,7 +15662,7 @@ def appointment_details(appointment_id):
             c.last_name,
             c.phone,
             c.email,
-            s.service_name,
+            COALESCE(s.service_name, a.external_service_name) AS service_name,
             a.notes
         FROM appointments a
         JOIN clients c
@@ -16049,7 +16652,7 @@ def appointments():
             a.client_id, 
             c.first_name,
             c.last_name,   
-            s.service_name,
+            COALESCE(s.service_name, a.external_service_name) AS service_name,
             a.appointment_date,
             a.appointment_time,
             a.status,
@@ -18623,6 +19226,132 @@ def clear_new_client():
 #    END   END   END   END   END
 #  --------------------------------
 
+def scheduled_send_pending_reminders():
+    print("Running scheduled reminder queue...", flush=True)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT COUNT(*)
+            FROM reminder_queue
+            WHERE status = 'pending'
+              AND scheduled_for <= NOW()
+        """)
+        count = cur.fetchone()[0]
+
+        print(f"Pending reminders ready to send: {count}", flush=True)
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def scheduled_generate_birthdays():
+    print("Running scheduled birthday generator...", flush=True)
+
+    spa_id = 1
+
+    created_count = generate_birthday_reminders(spa_id)
+
+    print(f"Birthday reminders created: {created_count}", flush=True)
+
+
+def start_scheduler():
+    scheduler = BackgroundScheduler()
+
+    scheduler.add_job(
+        scheduled_send_pending_reminders,
+        "interval",
+        minutes=1,
+        id="send_pending_reminders_job",
+        replace_existing=True
+    )
+
+    scheduler.add_job(
+        scheduled_generate_birthdays,
+        "cron",
+        hour=8,
+        minute=0,
+        id="birthday_reminders_job",
+        replace_existing=True
+    )
+
+    scheduler.start()
+    print("Scheduler started.", flush=True)
+
+
+#   -------------------
+#
+#  GO DADDY
+#
+#
+#
+#
+#   -------------------
+
+
+@app.route("/test-godaddy-post")
+@login_required
+@spa_required
+def test_godaddy_post():
+    with open("test_booking.txt", "r") as f:
+        body = f.read()
+
+    with app.test_client() as client:
+        response = client.post(
+            "/godaddy-booking-intake",
+            data={"body": body}
+        )
+
+    return response.get_data(as_text=True)
+
+
+
+
+
+@app.route("/godaddy-booking-intake", methods=["POST"])
+def godaddy_booking_intake():
+
+    secret = request.headers.get("X-Webhook-Secret")
+
+    if secret != os.getenv("GODADDY_WEBHOOK_SECRET"):
+        return {"error": "Unauthorized"}, 401
+
+    body = request.form.get("body") or request.get_data(as_text=True)
+
+    if not body:
+        return {"error": "No booking body received"}, 400
+
+    spa_id = 1
+
+    result = import_godaddy_booking(body, spa_id)
+
+    return result, 200
+
+
+
+@app.route("/test-secure")
+def test_godaddy_secure_post():
+    with open("test_booking.txt", "r") as f:
+        body = f.read()
+
+    with app.test_client() as client:
+        response = client.post(
+            "/godaddy-booking-intake",
+            data={"body": body},
+            headers={
+                "X-Webhook-Secret": os.getenv("GODADDY_WEBHOOK_SECRET")
+            }
+        )
+
+    return response.get_data(as_text=True)
+
 
 if __name__ == "__main__":
+    if os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        start_scheduler()
+
     app.run(debug=True, port=5001)
+
