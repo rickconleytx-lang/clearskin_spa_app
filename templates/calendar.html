@@ -255,12 +255,23 @@ Note: To book a new appointment, please click on the Date Number in calendar bel
         Reschedule
     </button>
 </form>    
-
-
+            
     <div class="form-buttons">
+            <a
+                id="godaddyImportBtn"
+                class="btn"
+                target="_blank"
+                style="display:none;"
+            >
+                View GoDaddy Import
+            </a>
+
+
             <a id="modalEditBtn" class="btn">Edit Appointment</a>
             <a id="modalPaymentBtn" class="btn">Finish Session</a>
             <a id="modalWrapUpBtn" class="btn">Wrap-Up</a>
+     
+
 
             <form method="POST" id="modalCompleteForm" style="display:inline;">
                 <button type="submit" class="btn" style="background: orange;"
@@ -335,6 +346,8 @@ function openAppointmentModal(appointmentId) {
     fetch(`/appointment-details/${appointmentId}`)
         .then(response => response.json())
         .then(data => {
+           
+            console.log("appointment data:", data); 
             if (data.error) {
                 alert(data.error);
                 return;
@@ -399,6 +412,18 @@ function openAppointmentModal(appointmentId) {
             document.getElementById("modalCompleteForm").action = `/complete_appointment/${appointmentId}`;
             document.getElementById("modalCancelForm").action = `/cancel_appointment/${appointmentId}`;
 
+            const godaddyBtn = document.getElementById("godaddyImportBtn");
+
+            if (godaddyBtn) {
+                if ((data.external_source || "").toLowerCase() === "godaddy") {
+                    godaddyBtn.style.display = "inline-block";
+                    godaddyBtn.href = `/godaddy-imports/${appointmentId}/raw`;
+                } else {
+                    godaddyBtn.style.display = "none";
+                    godaddyBtn.removeAttribute("href");
+                }
+            }
+
             document.getElementById("appointmentModal").style.display = "flex";
         })
         .catch(error => {
@@ -440,6 +465,7 @@ function setupModalFormSafety() {
         });
     }
 
+    
     if (cancelForm) {
         cancelForm.addEventListener("submit", function(e) {
             const btn = cancelForm.querySelector("button");

@@ -15827,7 +15827,8 @@ def appointment_details(appointment_id):
             c.phone,
             c.email,
             COALESCE(s.service_name, a.external_service_name) AS service_name,
-            a.notes
+            a.notes,
+            a.external_source
         FROM appointments a
         JOIN clients c
             ON a.client_id = c.client_id
@@ -15858,7 +15859,8 @@ def appointment_details(appointment_id):
         "email": appt[7] or "",
         "service_name": appt[8] or "",
         "provider_name": "",
-        "notes": appt[9] or ""
+        "notes": appt[9] or "",
+        "external_source": appt[10] or ""
     }
 
 
