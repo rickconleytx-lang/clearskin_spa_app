@@ -281,9 +281,105 @@ def send_email(to_email, subject, body):
 
 
 
-
-
+    
         
+    
+#   -------------------------
+#   AUDIT HELPERS
+#
+#   -------------------------
+    
+def log_audit(
+    cur,
+    spa_id,
+    user_id,
+    action_type,
+    table_name=None,
+    record_id=None,
+    old_value=None,
+    new_value=None,
+    notes=None
+):
+    cur.execute("""
+        INSERT INTO audit_log (
+            spa_id,
+            user_id,
+            action_type,
+            table_name,
+            record_id,
+            old_value,
+            new_value,
+            notes
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+    """, (
+        spa_id,
+        user_id,
+        action_type,
+        table_name,
+        record_id,
+        old_value,
+        new_value,
+        notes
+    ))
+
+
+def log_appointment_history(
+    cur,
+    spa_id,
+    appointment_id,
+    client_id,
+    user_id,
+    action_type,
+    old_date=None,
+    old_time=None,
+    new_date=None,
+    new_time=None,
+    old_status=None,
+    new_status=None,
+    notes=None
+):
+    cur.execute("""
+        INSERT INTO appointment_history (
+            spa_id,
+            appointment_id,
+            client_id,
+            user_id,
+            action_type,
+            old_date,
+            old_time,
+            new_date,
+            new_time,
+            old_status,
+            new_status,
+            notes
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    """, (
+        spa_id,
+        appointment_id,
+        client_id,
+        user_id,
+        action_type,
+        old_date,
+        old_time,
+        new_date,
+        new_time,
+        old_status,
+        new_status,
+        notes
+    ))
+        
+
+
+      
+
+
+
+
+
+
+  
 #   -------------------------
 #
 #
@@ -16885,6 +16981,7 @@ def appointments():
 @spa_required
 def add_appointment():
     spa_id = current_spa_id()
+    user_id = current_user.user_id
 
     client_id = request.args.get("client_id") or request.form.get("client_id") or ""
     selected_date = request.args.get("selected_date") or request.form.get("selected_date") or ""
@@ -16956,6 +17053,7 @@ def add_appointment():
                 notes
             )
             VALUES (%s, %s, %s, %s, %s, %s, %s)
+            RETURNING appointment_id
         """, (
             spa_id,
             client_id,
@@ -16965,7 +17063,34 @@ def add_appointment():
             status,
             notes
         ))
-        
+
+        appointment_id = cur.fetchone()[0]
+
+        log_audit(
+            cur,
+            spa_id=spa_id,
+            user_id=current_user.user_id,
+            action_type="appointment_created",
+            table_name="appointments",
+            record_id=appointment_id,
+            new_value=f"{appointment_date} {appointment_time}",
+            notes="Appointment created"
+        )
+
+        log_appointment_history(
+            cur,
+            spa_id=spa_id,
+            appointment_id=appointment_id,
+            client_id=client_id,
+            user_id=current_user.user_id,
+            action_type="created",
+            new_date=appointment_date,
+            new_time=appointment_time,
+            new_status=status,
+            notes="Appointment created"
+        )
+
+
         if incoming_booking_id:
             cur.execute("""
                 UPDATE incoming_square_bookings  
@@ -17071,6 +17196,7 @@ def add_appointment():
 @spa_required
 def edit_appointment(appointment_id):
     spa_id = current_spa_id()
+    user_id = current_user.user_id
     role = session.get("role")
 
     conn = get_db_connection()
@@ -17090,6 +17216,26 @@ def edit_appointment(appointment_id):
         room_number = request.form["room_number"]
         notes = request.form["notes"]
             
+        
+        cur.execute("""
+            SELECT
+                client_id,
+                appointment_date,
+                appointment_time,
+                status
+            FROM appointments
+            WHERE appointment_id = %s
+              AND spa_id = %s
+        """, (appointment_id, spa_id))
+
+        old_appt = cur.fetchone()
+
+        client_id = old_appt[0]
+
+        old_date = old_appt[1]
+        old_time = old_appt[2]
+        old_status = old_appt[3]
+
         cur.execute(f"""
             UPDATE appointments
             SET appointment_date = %s,
@@ -17107,6 +17253,35 @@ def edit_appointment(appointment_id):
             notes,
             *params
         ))
+
+        log_audit(
+            cur,
+            spa_id=spa_id,
+            user_id=current_user.user_id,
+            action_type="appointment_updated",
+            table_name="appointments",
+            record_id=appointment_id,
+            old_value=f"{old_date} {old_time}",
+            new_value=f"{appointment_date} {appointment_time}",
+            notes="Appointment updated"
+        )
+
+        log_appointment_history(
+            cur,
+            spa_id=spa_id,
+            appointment_id=appointment_id,
+            client_id=client_id,
+            user_id=current_user.user_id,
+            action_type="rescheduled",
+            old_date=old_date,
+            old_time=old_time,
+            new_date=appointment_date,
+            new_time=appointment_time,
+            old_status=old_status,
+            new_status=old_status,
+            notes="Appointment edited"
+        )
+
     
         if cur.rowcount == 0:
             conn.rollback()
@@ -17160,6 +17335,7 @@ def edit_appointment(appointment_id):
 @spa_required
 def delete_appointment(appointment_id):
     spa_id = current_spa_id()
+    user_id = current_user.user_id
     role = session.get("role")
     
     conn = get_db_connection()
