@@ -2238,31 +2238,29 @@ def add_user():
 @app.route("/admin/help-pages/new", methods=["GET", "POST"])
 @app.route("/admin/help-pages/edit/<page_key>", methods=["GET", "POST"])
 @login_required
-@spa_required
+@master_admin_required
 def edit_help_page(page_key=None):
-    spa_id = current_spa_id()
-
+        
     conn = get_db_connection()
     cur = conn.cursor()
 
     if request.method == "POST":
-
+        
         if not page_key:
             page_key = request.form.get("page_key", "").strip()
-
+        
         title = request.form.get("title", "").strip()
         content = request.form.get("content", "").strip()
         is_active = request.form.get("is_active") == "on"
-
+    
         cur.execute("""
             SELECT help_page_id
             FROM help_pages
             WHERE page_key = %s
-              AND spa_id = %s
-        """, (page_key, spa_id))
-
-        existing = cur.fetchone()
-
+        """, (page_key,))
+    
+        existing = cur.fetchone()   
+        
         if existing:
             cur.execute("""
                 UPDATE help_pages
@@ -2270,40 +2268,37 @@ def edit_help_page(page_key=None):
                     content = %s,
                     is_active = %s
                 WHERE page_key = %s
-                  AND spa_id = %s
-            """, (title, content, is_active, page_key, spa_id))
+            """, (title, content, is_active, page_key))
         else:
             cur.execute("""
                 INSERT INTO help_pages
-                    (spa_id, page_key, title, content, is_active)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (spa_id, page_key, title, content, is_active))
-
+                    (page_key, title, content, is_active)
+                VALUES (%s, %s, %s, %s)
+            """, (page_key, title, content, is_active))
+ 
         conn.commit()
         cur.close()
         conn.close()
 
         flash("Help page saved.", "success")
         return redirect(url_for("edit_help_page", page_key=page_key))
-
+    
     cur.execute("""
         SELECT page_key, title, content, is_active
         FROM help_pages
         WHERE page_key = %s
-          AND spa_id = %s
-    """, (page_key, spa_id))
-
+    """, (page_key,))  
+        
     page = cur.fetchone()
-
+    
     cur.close()
     conn.close()
-
+        
     return render_template(
         "admin_edit_help_page.html",
         page=page,
         page_key=page_key
     )
-
 
 
 
@@ -2318,35 +2313,36 @@ def edit_help_page(page_key=None):
 
 
 
-@app.route("/help/<page_key>")
+@app.route("/help/<page_key>")  
 @login_required
 @spa_required
 def view_help_page(page_key):
     conn = get_db_connection()
     cur = conn.cursor()
-
+        
     cur.execute("""
         SELECT title, content
         FROM help_pages
         WHERE page_key = %s
           AND is_active = TRUE
+        ORDER BY help_page_id DESC
+        LIMIT 1
     """, (page_key,))
-
+              
     page = cur.fetchone()
-
+    
     cur.close()
     conn.close()
-
+        
     if not page:
         flash("Help page not found.", "warning")
         return redirect(url_for("dashboard"))
-
+                    
     return render_template(
-        "help_page.html", 
+        "help_page.html",
         page=page,
         page_key=page_key
     )
-
 
 
 
@@ -15759,17 +15755,16 @@ def calendar_view():
     filter_sql = "WHERE a.appointment_date BETWEEN %s AND %s"
     week_params = [week_days[0], week_days[-1]]
 
-    if role != "master_admin":
-        filter_sql += " AND a.spa_id = %s"
-        week_params.append(spa_id)
+
+    filter_sql += " AND a.spa_id = %s"
+    week_params.append(spa_id)
 
     if start_date and end_date:
         date_filter_sql = "WHERE a.appointment_date BETWEEN %s AND %s"
         date_params = [start_date, end_date]
 
-        if role != "master_admin":
-            date_filter_sql += " AND a.spa_id = %s"
-            date_params.append(spa_id)
+        date_filter_sql += " AND a.spa_id = %s"
+        date_params.append(spa_id)
 
         cur.execute(f"""
             SELECT     
@@ -15829,9 +15824,8 @@ def calendar_view():
     """
     next_params = [today, today, now_time]
 
-    if role != "master_admin":
-        next_filter_sql += " AND a.spa_id = %s"
-        next_params.append(spa_id)
+    next_filter_sql += " AND a.spa_id = %s"
+    next_params.append(spa_id)
 
     cur.execute(f"""
         SELECT
@@ -15867,9 +15861,8 @@ def calendar_view():
     """
     overdue_params = [today, today, now_time]
 
-    if role != "master_admin":
-        overdue_filter_sql += " AND spa_id = %s"
-        overdue_params.append(spa_id)
+    overdue_filter_sql += " AND spa_id = %s"
+    overdue_params.append(spa_id)
 
     cur.execute(f"""
         SELECT COUNT(*)
