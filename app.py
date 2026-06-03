@@ -186,6 +186,49 @@ def inject_spa_name():
 
 
 
+
+
+
+#   --------------------------
+#
+#  GODADDY IMPORT ALERT
+#
+#   --------------------------
+
+@app.context_processor
+def inject_godaddy_import_alert():
+    if "user_id" not in session or "spa_id" not in session:
+        return {}
+
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT COUNT(*)
+        FROM appointments
+        WHERE spa_id = %s
+          AND external_source = 'godaddy'
+          AND COALESCE(import_reviewed, FALSE) = FALSE
+    """, (spa_id,))
+
+    godaddy_unreviewed_count = cur.fetchone()[0]
+
+    cur.close()
+    conn.close()
+
+    return {
+        "godaddy_unreviewed_count": godaddy_unreviewed_count
+    }
+
+
+
+
+
+
+
+
 #   --------------------------
 #
 #
