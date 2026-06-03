@@ -18275,6 +18275,103 @@ def post_appointment_wrap_up_saved(appointment_id):
 
 
 
+
+
+
+
+
+
+                        
+                        
+                        
+                        
+#  ----------------------------
+#      APPOINTMENT HISTORY
+#
+#   6/2/26
+#   ---------------------------
+            
+        
+@app.route("/appointment_history/<int:appointment_id>")
+@login_required
+@spa_required
+def appointment_history(appointment_id):
+    spa_id = current_spa_id()
+    role = session.get("role")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    filter_sql = "WHERE a.appointment_id = %s"
+    params = [appointment_id]
+
+    if role != "master_admin":
+        filter_sql += " AND a.spa_id = %s"
+        params.append(spa_id)
+
+    cur.execute(f"""
+        SELECT
+            a.appointment_id,
+            a.appointment_date,
+            a.appointment_time,
+            a.status,
+            c.first_name,
+            c.last_name
+        FROM appointments a
+        JOIN clients c
+            ON a.client_id = c.client_id
+           AND a.spa_id = c.spa_id
+        {filter_sql}
+    """, params)
+
+    appointment = cur.fetchone()
+
+    if not appointment:
+        cur.close()
+        conn.close()
+        flash("Appointment not found or not authorized.", "error")
+        return redirect(url_for("appointments"))
+
+    cur.execute("""
+        SELECT
+            ah.action_type,
+            ah.old_date,
+            ah.old_time,
+            ah.new_date,
+            ah.new_time,
+            ah.old_status,
+            ah.new_status,
+            ah.notes,
+            ah.created_at,
+            u.username
+        FROM appointment_history ah
+        LEFT JOIN users u
+            ON ah.user_id = u.user_id
+        WHERE ah.appointment_id = %s
+        ORDER BY ah.created_at DESC
+    """, (appointment_id,))
+
+    history_rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "appointment_history.html",
+        appointment=appointment,
+        history_rows=history_rows
+    )
+        
+            
+
+
+
+
+
+
+
+
+
 #  ------------------
 #      CLIENT SECTION
 #

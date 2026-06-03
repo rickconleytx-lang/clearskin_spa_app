@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>Appointment History</h1>
+
+<div class="card">
+    <h2>
+        {{ appointment[4] }} {{ appointment[5] }}
+    </h2>
+
+    <p>
+        <strong>Appointment:</strong>
+        {{ appointment[1] }} at {{ appointment[2] }}
+    </p>
+
+    <p>
+        <strong>Current Status:</strong>
+        {{ appointment[3] }}
+    </p>
+</div>
+
+<br>
+
+<a href="{{ url_for('appointments') }}" class="btn">Back to Appointments</a>
+
+<br><br>
+
+{% if history_rows %}
+<table>
+    <thead>
+        <tr>
+            <th>Date/Time</th>
+            <th>Action</th>
+            <th>Old</th>
+            <th>New</th>
+            <th>User</th>
+            <th>Notes</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in history_rows %}
+        <tr>
+            <td>{{ row[8] }}</td>
+            <td>{{ row[0]|replace("_", " ")|title }}</td>
+            <td>
+                {% if row[1] or row[2] or row[5] %}
+                    {{ row[1] or "" }} {{ row[2] or "" }}<br>
+                    {{ row[5] or "" }}
+                {% else %}
+                    —
+                {% endif %}
+            </td>
+            <td>
+                {% if row[3] or row[4] or row[6] %}
+                    {{ row[3] or "" }} {{ row[4] or "" }}<br>
+                    {{ row[6] or "" }}
+                {% else %}
+                    —
+                {% endif %}
+            </td>
+            <td>{{ row[9] or "System/User" }}</td>
+            <td>{{ row[7] or "" }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No history found for this appointment.</p>
+{% endif %}
+
+{% endblock %}

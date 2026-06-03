@@ -17,7 +17,7 @@
 <div class="narrow-cards">
     {{ section_card("Calendar", "Go to Calendar",  url_for('calendar_view')) }}
     {{ section_card("GoDaddy Imports", "View and Manage your GoDaddy Appointment Imports", url_for('godaddy_imports')) }}
-    {{ section_card("3.  empty", "Reserved", url_for('help_appointments_page')) }}
+    {{ section_card("3, empty", "Reserved", url_for('help_appointments_page')) }}
     {{ section_card("4.  empty", "Reserved", url_for('help_appointments_page')) }}
 </div>
 
@@ -104,6 +104,10 @@
                             <a href="{{ url_for('add_income', appointment_id=row[0]) }}" class="btn">
                                 Add Income
                             </a>
+
+                            <a href="{{ url_for('appointment_history', appointment_id=row[0]) }}" class="btn">History</a>
+
+
 
                             {% if row[7] != 'cancelled' %}
                             <form method="POST"
