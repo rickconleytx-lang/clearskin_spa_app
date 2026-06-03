@@ -19,6 +19,7 @@
             <th>Status</th>
             <th>Appointment</th>
             <th>raw_email</th>
+            <th>Actions</th>
         </tr>
     </thead>
     <tbody>
@@ -42,10 +43,24 @@
                     View Raw
                 </a>
             </td>
+
+            <td>
+                {% if not row[11] %}
+                    <form method="POST"
+                        action="{{ url_for('mark_godaddy_import_reviewed', appointment_id=row[0]) }}">
+                      <button type="submit" class="btn">
+                          Mark Reviewed
+                      </button>
+                    </form>
+                {% else %}
+                    ✓ Reviewed
+                {% endif %}
+            </td>
+
         </tr>
         {% else %}
         <tr>
-            <td colspan="9">No GoDaddy bookings imported yet.</td>
+            <td colspan="11">No GoDaddy bookings imported yet.</td>
         </tr>
         {% endfor %}
     </tbody>

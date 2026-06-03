@@ -3185,7 +3185,8 @@ def godaddy_imports():
             a.external_service_name,
             a.external_order_id,
             a.status,
-            a.notes
+            a.notes,
+        COALESCE(a.import_reviewed, FALSE) AS import_reviewed
         FROM appointments a
         JOIN clients c
             ON a.client_id = c.client_id
@@ -3907,20 +3908,15 @@ def godaddy_import_raw(appointment_id):
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+#   --------------------------
+#
+#   
+#     GODADDY CREATE APPOINTMENT
+#
+#   
+#
+#   ----------------------
+        
 
 @app.route("/test-godaddy-create-appointment")
 @login_required
@@ -3934,6 +3930,53 @@ def test_godaddy_create_appointment():
     result = import_godaddy_booking(body, spa_id)
 
     return f"<pre>{result}</pre>"
+
+
+
+
+
+
+#   --------------------------
+#
+#   
+#     GODADDY IMPORTS REVIEWED
+#
+#   
+#
+#   ----------------------
+        
+@app.route("/godaddy-imports/reviewed/<int:appointment_id>", methods=["POST"])
+@login_required
+@spa_required
+def mark_godaddy_import_reviewed(appointment_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE appointments
+        SET import_reviewed = TRUE
+        WHERE appointment_id = %s
+          AND spa_id = %s
+          AND external_source = 'godaddy'
+    """, (appointment_id, spa_id))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    flash("GoDaddy import marked as reviewed.", "success")
+    return redirect(url_for("godaddy_imports"))
+
+
+
+
+
+
+
+
+
 
 
 
