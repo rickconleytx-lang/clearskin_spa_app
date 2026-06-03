@@ -1,4 +1,4 @@
-'<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -18,13 +18,6 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="PeachSuite Pro">
 
-    {% if godaddy_unreviewed_count and godaddy_unreviewed_count > 0 %}
-        <div class="alert alert-warning">
-            {{ godaddy_unreviewed_count }} appointment(s) imported from GoDaddy need review.
-            <a href="{{ url_for('calendar_view') }}">View Calendar</a>
-        </div>
-    {% endif %}
-
 
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
@@ -40,11 +33,18 @@
     </div>
 
     <div class="header-bar">
-
     <div class="header-right">
       <h1>{{ spa_name }}</h1>
     </div>
-</div>
+    </div>
+
+
+    {% if godaddy_unreviewed_count and godaddy_unreviewed_count > 0 %}
+        <div class="alert alert-warning">
+            {{ godaddy_unreviewed_count }} appointment(s) imported from GoDaddy need review.
+            <a href="{{ url_for('calendar_view') }}">View Calendar</a>
+        </div>
+    {% endif %}
 
 
 
