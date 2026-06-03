@@ -15835,15 +15835,15 @@ def calendar_view():
 #
 #
 #   MODAL QUICK RESCHEDULE
-#  4/28
+#  6/2/26
 #  -----------------------------
-
 
 @app.route("/quick_reschedule_appointment/<int:appointment_id>", methods=["POST"])
 @login_required
 @spa_required
 def quick_reschedule_appointment(appointment_id):
     spa_id = current_spa_id()
+    user_id = session.get("user_id")
     role = session.get("role")
         
     appointment_date = request.form.get("appointment_date")
@@ -15851,38 +15851,95 @@ def quick_reschedule_appointment(appointment_id):
         
     if not appointment_date or not appointment_time:
         flash("Date and time are required to reschedule.", "error")
-        return redirect(url_for("calendar_view"))
+        return redirect(url_for("calendar_view"))   
         
     conn = get_db_connection()
     cur = conn.cursor()
 
-    if role == "master_admin":
-        cur.execute("""
-            UPDATE appointments
-            SET appointment_date = %s,
-                appointment_time = %s
-            WHERE appointment_id = %s
-        """, (appointment_date, appointment_time, appointment_id))
-    else:
-        cur.execute("""
-            UPDATE appointments
-            SET appointment_date = %s,
-                appointment_time = %s
-            WHERE appointment_id = %s
-              AND spa_id = %s
-        """, (appointment_date, appointment_time, appointment_id, spa_id))
+    filter_sql = "WHERE appointment_id = %s"
+    params = [appointment_id]
+
+    if role != "master_admin":
+        filter_sql += " AND spa_id = %s"
+        params.append(spa_id)
+
+    cur.execute(f"""
+        SELECT spa_id, client_id, appointment_date, appointment_time, status
+        FROM appointments
+        {filter_sql}
+    """, params)
+
+    old_appt = cur.fetchone()
+
+    if not old_appt:
+        cur.close()
+        conn.close()
+        flash("Appointment not found or not authorized.", "error")
+        return redirect(url_for("calendar_view"))
+
+    appointment_spa_id = old_appt[0]
+    client_id = old_appt[1]
+    old_date = old_appt[2]
+    old_time = old_appt[3]
+    old_status = old_appt[4]
+        
+    cur.execute(f"""
+        UPDATE appointments
+        SET appointment_date = %s,
+            appointment_time = %s,
+            updated_at = CURRENT_TIMESTAMP
+        {filter_sql}
+    """, (
+        appointment_date,
+        appointment_time,
+        *params
+    ))
+
+    if cur.rowcount == 0:
+        conn.rollback()
+        cur.close()
+        conn.close()
+        flash("Appointment not found or not authorized.", "error")
+        return redirect(url_for("calendar_view"))
+
+    action_type = "rescheduled"
+
+    if str(old_date) == appointment_date and str(old_time)[:5] == appointment_time[:5]:
+        action_type = "updated"
+
+    log_audit(
+        cur,
+        spa_id=appointment_spa_id,
+        user_id=user_id,
+        action_type=f"appointment_{action_type}",
+        table_name="appointments",
+        record_id=appointment_id,
+        old_value=f"{old_date} {old_time} {old_status}",
+        new_value=f"{appointment_date} {appointment_time} {old_status}",
+        notes="Appointment quick rescheduled" if action_type == "rescheduled" else "Appointment quick updated"
+    )
+
+    log_appointment_history(
+        cur,
+        spa_id=appointment_spa_id,
+        appointment_id=appointment_id,
+        client_id=client_id,
+        user_id=user_id,
+        action_type=action_type,
+        old_date=old_date,
+        old_time=old_time,
+        new_date=appointment_date,
+        new_time=appointment_time,
+        old_status=old_status,
+        new_status=old_status,
+        notes="Appointment quick rescheduled" if action_type == "rescheduled" else "Appointment quick updated"
+    )
 
     conn.commit()
-
-    # Optional but recommended: check if anything was updated
-    if cur.rowcount == 0:
-        flash("Appointment not found or not authorized.", "error")
-    else:
-        flash("Appointment rescheduled successfully.", "success")
-
     cur.close()
     conn.close()
-
+    
+    flash("Appointment rescheduled successfully.", "success")
     return redirect(url_for("calendar_view"))
 
 
@@ -16980,8 +17037,8 @@ def appointments():
 @login_required
 @spa_required
 def add_appointment():
+    user_id = session.get("user_id")
     spa_id = current_spa_id()
-    user_id = current_user.user_id
 
     client_id = request.args.get("client_id") or request.form.get("client_id") or ""
     selected_date = request.args.get("selected_date") or request.form.get("selected_date") or ""
@@ -17069,7 +17126,7 @@ def add_appointment():
         log_audit(
             cur,
             spa_id=spa_id,
-            user_id=current_user.user_id,
+            user_id=user_id,
             action_type="appointment_created",
             table_name="appointments",
             record_id=appointment_id,
@@ -17082,7 +17139,7 @@ def add_appointment():
             spa_id=spa_id,
             appointment_id=appointment_id,
             client_id=client_id,
-            user_id=current_user.user_id,
+            user_id=user_id,
             action_type="created",
             new_date=appointment_date,
             new_time=appointment_time,
@@ -17196,7 +17253,7 @@ def add_appointment():
 @spa_required
 def edit_appointment(appointment_id):
     spa_id = current_spa_id()
-    user_id = current_user.user_id
+    user_id = session.get("user_id")
     role = session.get("role")
 
     conn = get_db_connection()
@@ -17257,7 +17314,7 @@ def edit_appointment(appointment_id):
         log_audit(
             cur,
             spa_id=spa_id,
-            user_id=current_user.user_id,
+            user_id=user_id,
             action_type="appointment_updated",
             table_name="appointments",
             record_id=appointment_id,
@@ -17271,7 +17328,7 @@ def edit_appointment(appointment_id):
             spa_id=spa_id,
             appointment_id=appointment_id,
             client_id=client_id,
-            user_id=current_user.user_id,
+            user_id=user_id,
             action_type="rescheduled",
             old_date=old_date,
             old_time=old_time,
@@ -17335,46 +17392,75 @@ def edit_appointment(appointment_id):
 @spa_required
 def delete_appointment(appointment_id):
     spa_id = current_spa_id()
-    user_id = current_user.user_id
+    user_id = session.get("user_id")
     role = session.get("role")
     
     conn = get_db_connection()
     cur = conn.cursor()
-
+    
     filter_sql = "WHERE appointment_id = %s"
     params = [appointment_id]
-
+    
     if role != "master_admin":
         filter_sql += " AND spa_id = %s"
         params.append(spa_id)
-        
+    
     cur.execute(f"""
-        SELECT appointment_date
+        SELECT client_id, appointment_date, appointment_time, status
         FROM appointments
         {filter_sql}
     """, params)
-
+            
     appt = cur.fetchone()
-        
+
     if not appt:
         cur.close()
         conn.close()
         flash("Appointment not found or not authorized.", "error")
         return redirect(url_for("appointments"))
 
-    cur.execute(f"""
+    client_id = appt[0]
+    old_date = appt[1]
+    old_time = appt[2]
+    old_status = appt[3]
+
+    log_audit(
+        cur,
+        spa_id=spa_id,
+        user_id=user_id,
+        action_type="appointment_deleted",
+        table_name="appointments",
+        record_id=appointment_id,
+        old_value=f"{old_date} {old_time} {old_status}",
+        new_value=None,
+        notes="Appointment deleted"
+    )
+
+    log_appointment_history(
+        cur,
+        spa_id=spa_id,
+        appointment_id=appointment_id,
+        client_id=client_id,
+        user_id=user_id,
+        action_type="deleted",
+        old_date=old_date,
+        old_time=old_time,
+        old_status=old_status,
+        notes="Appointment deleted"
+    )
+
+    cur.execute(f"""   
         DELETE FROM appointments
         {filter_sql}
     """, params)
-    
+
     conn.commit()
     cur.close()
     conn.close()
-
+    
     flash("Appointment deleted successfully.", "success")
-
-    return redirect(url_for("appointments", date=appt[0]))
-
+    
+    return redirect(url_for("appointments", date=old_date))
 
 
 
@@ -17394,27 +17480,47 @@ def delete_appointment(appointment_id):
 #  --------------------
 
 
-
 @app.route("/cancel_appointment/<int:appointment_id>", methods=["POST"])
-@login_required
+@login_required 
 @spa_required
 def cancel_appointment(appointment_id):
     spa_id = current_spa_id()
+    user_id = session.get("user_id")
     role = session.get("role")
-
+    
     conn = get_db_connection()
     cur = conn.cursor()
-
+    
     filter_sql = """
         WHERE appointment_id = %s
           AND (appointment_date + appointment_time) > CURRENT_TIMESTAMP
     """
     params = [appointment_id]
-
+        
     if role != "master_admin":
         filter_sql += " AND spa_id = %s"
         params.append(spa_id)
-        
+
+    cur.execute(f"""
+        SELECT client_id, appointment_date, appointment_time, status
+        FROM appointments
+        {filter_sql}
+    """, params)
+
+    appt = cur.fetchone()
+
+    if not appt:
+        conn.rollback()
+        cur.close()
+        conn.close()   
+        flash("Appointment not found or can no longer be cancelled.", "error")
+        return redirect(url_for("calendar_view", offset=0))
+
+    client_id = appt[0]
+    old_date = appt[1]
+    old_time = appt[2]
+    old_status = appt[3]
+
     cur.execute(f"""
         UPDATE appointments
         SET status = 'cancelled',
@@ -17425,17 +17531,44 @@ def cancel_appointment(appointment_id):
     if cur.rowcount == 0:
         conn.rollback()
         cur.close()
-        conn.close()
+        conn.close()   
         flash("Appointment not found or can no longer be cancelled.", "error")
         return redirect(url_for("calendar_view", offset=0))
-        
+
+    log_audit(
+        cur,
+        spa_id=spa_id,
+        user_id=user_id,
+        action_type="appointment_cancelled",
+        table_name="appointments",
+        record_id=appointment_id,
+        old_value=old_status,
+        new_value="cancelled",
+        notes="Appointment cancelled"
+    )
+
+    log_appointment_history(
+        cur,
+        spa_id=spa_id,
+        appointment_id=appointment_id,
+        client_id=client_id,
+        user_id=user_id,
+        action_type="cancelled",
+        old_date=old_date,
+        old_time=old_time,
+        new_date=old_date,
+        new_time=old_time,
+        old_status=old_status,
+        new_status="cancelled",
+        notes="Appointment cancelled"
+    )
+    
     conn.commit()
     cur.close()
     conn.close()
         
     flash("Appointment cancelled.", "warning")
     return redirect(url_for("calendar_view", offset=0))
-
 
 
 
@@ -17457,6 +17590,7 @@ def cancel_appointment(appointment_id):
 @spa_required
 def reschedule_appointment(appointment_id):
     spa_id = current_spa_id()
+    user_id = session.get("user_id")
     role = session.get("role")
         
     conn = get_db_connection()
@@ -17501,6 +17635,26 @@ def reschedule_appointment(appointment_id):
         else:
             service_spa_id = spa_id
     
+
+        cur.execute(f"""
+            SELECT client_id, appointment_date, appointment_time, status
+            FROM appointments
+            {appt_filter}
+        """, appt_params)
+
+        old_appt = cur.fetchone()
+
+        if not old_appt:
+            cur.close()
+            conn.close()
+            flash("Appointment not found or not authorized.", "error")
+            return redirect(url_for("appointments"))
+
+        client_id = old_appt[0]
+        old_date = old_appt[1]
+        old_time = old_appt[2]
+        old_status = old_appt[3]
+
         cur.execute("""
             SELECT 1
             FROM service_name_types
@@ -17539,6 +17693,44 @@ def reschedule_appointment(appointment_id):
             conn.close()
             flash("Appointment not found or not authorized.", "error")
             return redirect(url_for("appointments"))
+
+
+        action_type = "rescheduled"
+
+        if str(old_date) == appointment_date and str(old_time)[:5] == appointment_time[:5]:
+            action_type = "updated"
+        else:
+            action_type = "rescheduled"
+
+
+        log_audit(
+            cur,
+            spa_id=service_spa_id,
+            user_id=user_id,
+            action_type=f"appointment_{action_type}",
+            table_name="appointments",
+            record_id=appointment_id,
+            old_value=f"{old_date} {old_time} {old_status}",
+            new_value=f"{appointment_date} {appointment_time} {status}",
+            notes="Appointment rescheduled" if action_type == "rescheduled" else "Appointment updated"
+        )
+
+        log_appointment_history(
+            cur,
+            spa_id=service_spa_id,
+            appointment_id=appointment_id,
+            client_id=client_id,
+            user_id=user_id,
+            action_type=action_type,
+            old_date=old_date,
+            old_time=old_time,
+            new_date=appointment_date,
+            new_time=appointment_time,
+            old_status=old_status,
+            new_status=status,
+            notes="Appointment rescheduled" if action_type == "rescheduled" else "Appointment updated"
+        )
+
 
         conn.commit()
         cur.close()
@@ -17617,34 +17809,33 @@ def reschedule_appointment(appointment_id):
 #
 #     COMPLETE APPOINTMENT
 #
-#     4/28  good
+#     6/2/26  good
 #  -----------------
-
-
 
 @app.route("/complete_appointment/<int:appointment_id>", methods=["POST"])
 @login_required
 @spa_required
 def complete_appointment(appointment_id):
     spa_id = current_spa_id()
+    user_id = session.get("user_id")
     role = session.get("role")
 
     conn = get_db_connection()
     cur = conn.cursor()
-
+            
     filter_sql = "WHERE appointment_id = %s"
     params = [appointment_id]
 
     if role != "master_admin":
         filter_sql += " AND spa_id = %s"
-        params.append(spa_id)
-    
+        params.append(spa_id) 
+            
     cur.execute(f"""
-        SELECT appointment_date
+        SELECT client_id, appointment_date, appointment_time, status
         FROM appointments
         {filter_sql}
     """, params)
-
+          
     appt = cur.fetchone()
         
     if not appt:
@@ -17653,36 +17844,71 @@ def complete_appointment(appointment_id):
         flash("Appointment not found or not authorized.", "error")
         return redirect(url_for("appointments"))
 
+    client_id = appt[0]
+    old_date = appt[1]
+    old_time = appt[2]
+    old_status = appt[3]
+            
     complete_filter_sql = """
         WHERE appointment_id = %s
           AND (appointment_date + appointment_time) <= CURRENT_TIMESTAMP
     """
     complete_params = [appointment_id]
-
+    
     if role != "master_admin":
         complete_filter_sql += " AND spa_id = %s"
         complete_params.append(spa_id)
-
+    
     cur.execute(f"""
         UPDATE appointments
         SET status = 'completed',
             updated_at = CURRENT_TIMESTAMP
         {complete_filter_sql}
     """, complete_params)
-
+        
     if cur.rowcount == 0:
         conn.rollback()
-        cur.close() 
+        cur.close()
         conn.close()
         flash("Appointment cannot be completed yet.", "error")
-        return redirect(url_for("daily_schedule", date=appt[0]))
+        return redirect(url_for("daily_schedule", date=old_date))
+
+    log_audit(
+        cur,
+        spa_id=spa_id,
+        user_id=user_id,
+        action_type="appointment_completed",
+        table_name="appointments",
+        record_id=appointment_id,
+        old_value=old_status,
+        new_value="completed",
+        notes="Appointment completed"
+    )
+
+    log_appointment_history(
+        cur,
+        spa_id=spa_id,
+        appointment_id=appointment_id,
+        client_id=client_id,
+        user_id=user_id,
+        action_type="completed",
+        old_date=old_date,
+        old_time=old_time,
+        new_date=old_date,
+        new_time=old_time,
+        old_status=old_status,
+        new_status="completed",
+        notes="Appointment completed"
+    )
         
     conn.commit()
     cur.close()
     conn.close()
-    
+
     flash("Appointment marked completed.", "success")
-    return redirect(url_for("daily_schedule", date=appt[0]))
+    return redirect(url_for("daily_schedule", date=old_date))
+
+
 
 
 
@@ -17694,9 +17920,8 @@ def complete_appointment(appointment_id):
 #  ------------------
 #     
 #   COMPLETE OVERDUE APPOINTMENTS 
-#   4/28  spa_id good
+#   6/2/26  spa_id good
 #  -----------------
-
 
 
 @app.route("/complete_overdue_appointments", methods=["POST"])
@@ -17704,32 +17929,78 @@ def complete_appointment(appointment_id):
 @spa_required
 def complete_overdue_appointments():
     spa_id = current_spa_id()
+    user_id = session.get("user_id")
     role = session.get("role")
-
-    conn = get_db_connection()
+        
+    conn = get_db_connection() 
     cur = conn.cursor()
-
+     
     filter_sql = """
         WHERE status = 'booked'
           AND (appointment_date + appointment_time) < CURRENT_TIMESTAMP
     """
-
+        
     params = []
-
+    
     if role != "master_admin":
         filter_sql += " AND spa_id = %s"
         params.append(spa_id)
-        
+
+    cur.execute(f"""
+        SELECT appointment_id, spa_id, client_id, appointment_date, appointment_time, status
+        FROM appointments
+        {filter_sql}
+    """, params)
+
+    overdue_appointments = cur.fetchall()
+
     cur.execute(f"""
         UPDATE appointments
         SET status = 'completed',
             updated_at = CURRENT_TIMESTAMP
         {filter_sql}
     """, params)
-    
+
     updated_count = cur.rowcount
-    
-    conn.commit()   
+
+    if updated_count:
+        for appt in overdue_appointments:
+            appt_id = appt[0]
+            appt_spa_id = appt[1]
+            client_id = appt[2]
+            old_date = appt[3]
+            old_time = appt[4]
+            old_status = appt[5]
+
+            log_audit(
+                cur,
+                spa_id=appt_spa_id,
+                user_id=user_id,
+                action_type="appointment_completed_overdue",
+                table_name="appointments",
+                record_id=appt_id,
+                old_value=old_status,
+                new_value="completed",
+                notes="Overdue appointment marked completed"
+            )
+
+            log_appointment_history(
+                cur,
+                spa_id=appt_spa_id,
+                appointment_id=appt_id,
+                client_id=client_id,
+                user_id=user_id,
+                action_type="completed_overdue",
+                old_date=old_date,
+                old_time=old_time,
+                new_date=old_date,
+                new_time=old_time,
+                old_status=old_status,
+                new_status="completed",
+                notes="Overdue appointment marked completed"
+            )
+
+    conn.commit()
     cur.close()
     conn.close()
         
@@ -17737,9 +18008,8 @@ def complete_overdue_appointments():
         flash(f"{updated_count} overdue appointment(s) marked completed.", "success")
     else:
         flash("No overdue appointments to complete.", "info")
-        
-    return redirect(url_for("calendar_view", offset=0))
 
+    return redirect(url_for("calendar_view", offset=0))
 
 
 
@@ -17760,6 +18030,7 @@ def complete_overdue_appointments():
 @spa_required
 def post_appointment_wrap_up(appointment_id):
     spa_id = current_spa_id()
+    user_id = session.get("user_id")
     role = session.get("role")
     selected_date = request.args.get("date") or request.form.get("date") or ""
             
@@ -17780,7 +18051,7 @@ def post_appointment_wrap_up(appointment_id):
         provider_notes = request.form.get("provider_notes", "")
 
         cur.execute(f"""   
-            SELECT a.spa_id, a.client_id, a.appointment_date
+            SELECT a.spa_id, a.client_id, a.appointment_date, appointment_time, a.status
             FROM appointments a
             {appt_filter}
         """, appt_params)
@@ -17795,7 +18066,7 @@ def post_appointment_wrap_up(appointment_id):
                 return redirect(url_for("daily_schedule", date=selected_date))
             return redirect(url_for("appointments"))
 
-        appointment_spa_id, referred_client_id, completed_date = valid_appointment
+        appointment_spa_id, referred_client_id, completed_date, appointment_time, old_status  = valid_appointment
             
         cur.execute("""
             INSERT INTO appointment_wrap_up (
@@ -17829,6 +18100,42 @@ def post_appointment_wrap_up(appointment_id):
             WHERE appointment_id = %s
               AND spa_id = %s
         """, (appointment_id, appointment_spa_id))
+
+
+        if cur.rowcount == 0:
+            conn.rollback()
+            cur.close()
+            conn.close()
+            flash("Appointment could not be marked completed.", "error")
+            return redirect(url_for("appointments"))
+
+        log_audit(
+            cur,
+            spa_id=appointment_spa_id,
+            user_id=user_id,
+            action_type="appointment_wrap_up_saved",
+            table_name="appointments",
+            record_id=appointment_id,
+            old_value=old_status,
+            new_value="completed",
+            notes="Post appointment wrap-up saved and appointment marked completed"
+        )
+
+        log_appointment_history(
+            cur,
+            spa_id=appointment_spa_id,
+            appointment_id=appointment_id,
+            client_id=referred_client_id,
+            user_id=user_id,
+            action_type="wrap_up_saved",
+            old_date=completed_date,
+            old_time=appointment_time,
+            new_date=completed_date,
+            new_time=appointment_time,
+            old_status=old_status,
+            new_status="completed",
+            notes="Post appointment wrap-up saved"
+        )        
 
         cur.execute("""
             SELECT

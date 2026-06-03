@@ -12,7 +12,7 @@
     <input type="time" name="appointment_time" value="{{ appt[2].strftime('%H:%M') }}" required>
 
     <label>Duration (minutes) <span style="color: red;">*</span></label>
-    <input type="text" name="duration" value="{{ appt[3] }}" required>
+    <input type="text" name="duration" value="{{ appt[3] or 60 }}" min="1" required>
 
     <label>Room</label>
     <input type="text" name="room_number" value="{{ appt[4] or 1 }}">
