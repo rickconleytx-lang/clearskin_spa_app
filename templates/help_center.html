@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div class="page-card">
+
+    <h1>Help Center</h1>
+
+    <p>
+        Browse help topics below.
+    </p>
+
+    <div class="narrow-cards">
+
+        {% for page in pages %}
+            <div class="card">
+
+                <h3>{{ page[1] }}</h3>
+
+                <a href="{{ url_for('help_page', page_key=page[0]) }}"
+                   class="btn">
+                    Open Help
+                </a>
+
+            </div>
+        {% endfor %}
+
+    </div>
+
+</div>
+
+{% endblock %}

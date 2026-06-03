@@ -8,6 +8,8 @@
     <a href="javascript:history.back()" class="btn">
         ← Back
     </a>
+    <button onclick="window.print()" class="btn">Print</button> 
+   
 </div>
 
 
@@ -15,7 +17,7 @@
     <h1>{{ page[0] }}</h1>
 
     <div class="help-content">
-        {{ page[1] | replace('\n', '<br>') | safe }}
+        {{ page[1] | safe }}
     </div>
 
     {% if page_key == "sms_email_terms" %}

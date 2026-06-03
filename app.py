@@ -2388,6 +2388,58 @@ def new_help_page():
 
 
 
+
+
+
+
+
+    
+#   -------------------------
+#
+#
+#    HELP
+#
+#               
+#
+#   -------------------------
+    
+
+
+
+@app.route("/help")
+@login_required
+@spa_required
+def help_center():
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            page_key,
+            title
+        FROM help_pages
+        WHERE spa_id = %s
+          AND is_active = TRUE
+        ORDER BY title
+    """, (spa_id,))
+
+    pages = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "help_center.html",
+        pages=pages
+    )
+
+
+
+
+
+
 #   -------------------------
 #  
 #  
