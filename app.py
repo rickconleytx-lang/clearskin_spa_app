@@ -10919,6 +10919,32 @@ def gift_certificates_home():
     """, (spa_id, today, today))
     expiring_gc_count = cur.fetchone()[0] or 0
 
+    cur.execute("""
+        SELECT
+            COUNT(*) FILTER (
+                WHERE gcs.status_name = 'Active'
+                  AND gc.amount_paid > 0
+            ) AS issued_count,
+
+            COUNT(*) FILTER (
+                WHERE gcs.status_name = 'Printed'
+            ) AS on_hand_count,
+
+            COALESCE(SUM(gc.remaining_balance) FILTER (
+                WHERE gcs.status_name = 'Active'
+                  AND gc.amount_paid > 0
+                  AND gc.is_redeemed = FALSE
+                  AND gc.remaining_balance > 0
+            ), 0) AS issued_not_redeemed_value
+
+        FROM gift_certificates gc
+        JOIN gift_certificate_statuses gcs
+          ON gc.gift_certificate_status_id = gcs.gift_certificate_status_id
+         AND gc.spa_id = gcs.spa_id
+        WHERE gc.spa_id = %s
+    """, (spa_id,))
+
+    gift_certificate_summary = cur.fetchone()
 
     cur.execute(query, params)
     gift_certificates = cur.fetchall()
@@ -10932,7 +10958,8 @@ def gift_certificates_home():
         certificate_search=certificate_search,
         sort_by=sort_by,
         filter_by=filter_by,
-        expiring_gc_count=expiring_gc_count
+        expiring_gc_count=expiring_gc_count,
+        gift_certificate_summary=gift_certificate_summary
     )
 
 
