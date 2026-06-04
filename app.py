@@ -14076,6 +14076,7 @@ def add_expense():
             
         cur.execute("""
             INSERT INTO expenses (
+                spa_id,
                 expense_date,
                 vendor_name,
                 category,
@@ -14085,8 +14086,9 @@ def add_expense():
                 receipt_file,
                 notes
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
+            spa_id,
             expense_date,
             vendor_name,
             category,  
@@ -14116,7 +14118,7 @@ def add_expense():
         FROM expense_categories
         WHERE spa_id = %s
         ORDER BY expense_cat_name ASC
-    """)
+    """, (spa_id,))
     categories = cur.fetchall()
         
     cur.execute("""
@@ -14124,7 +14126,7 @@ def add_expense():
         FROM payment_methods
         WHERE spa_id =%s
         ORDER BY payment_method ASC
-    """)
+    """, (spa_id,))
     payment_methods = cur.fetchall()
             
     cur.close()
