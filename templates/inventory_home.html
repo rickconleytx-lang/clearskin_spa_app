@@ -87,13 +87,14 @@
                             <td class="amount-cell">${{ '%.2f'|format(row[7]) }}</td>
                             <td>{{ row[8] }}</td>
                             <td>{{ row[9] }}</td>
+                            <td>{{ row[10] }}</td>
                             <td>
-                                {% if row[10] <= 0 %}
-                                    <span class="badge badge-danger">{{ row[10] }}</span>
+                                {% if row[11] <= 0 %}
+                                    <span class="badge badge-danger">{{ row[11] }}</span>
                                 {% elif row[10] <= 2 %}
-                                    <span class="badge badge-warning">{{ row[10] }}</span>
+                                    <span class="badge badge-warning">{{ row[11] }}</span>
                                 {% else %}
-                                    <span class="badge badge-success">{{ row[10] }}</span>
+                                    <span class="badge badge-success">{{ row[11] }}</span>
                                 {% endif %}
                             </td>
 
