@@ -1,0 +1,27 @@
+<form method="POST">
+
+
+<h2>Update Feedback</h2>
+
+<label>
+    <input type="checkbox"
+           name="is_resolved"
+           {% if feedback.is_resolved %}checked{% endif %}>
+    Resolved
+</label>
+
+<br><br>
+
+<label>Action Taken</label>
+
+<textarea
+    name="action_taken_note"
+    rows="5"
+    style="width:100%;"
+>{{ feedback[11]  or '' }}</textarea>
+
+<br><br>
+
+<button type="submit" class="btn">
+    Save
+</button>

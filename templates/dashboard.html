@@ -69,9 +69,24 @@
         <h3>Revenue Today</h3>
         <p>${{ '%.2f' |format(revenue_today) }}</p>
     </div>
-
-
 </div>
+
+
+<div class="summary-card">
+    <h3>YTD Income</h3>
+    <p>${{ "{:,.2f}".format(ytd_income or 0) }}</p>
+</div>
+
+<div class="summary-card">
+    <h3>YTD Expenses</h3>
+    <p>${{ "{:,.2f}".format(ytd_expenses or 0) }}</p>
+</div>
+
+<div class="summary-card">
+    <h3>YTD Employee Compensation</h3>
+    <p>${{ "{:,.2f}".format(ytd_employee_compensation or 0) }}</p>
+</div>
+
 
 <br>
 

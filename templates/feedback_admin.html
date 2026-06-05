@@ -76,6 +76,7 @@
                 <th>Expected Behavior</th>
                 <th>Message</th>
                 <th>Status</th>
+                <th>Action Taken</th>
                 <th>Action</th>
             </tr>
         </thead>
@@ -88,7 +89,7 @@
 
                 <td>
                     {% if item[3] %}
-                        {{ item[3].split('?')[0].rstrip('/').split('/')[-1].replace('-', ' ').title() if item[3].split('?')[0].rstrip('/').split('/')[-1] else 'Home' }}
+                        {{ item[3].split('?')[0].rstrip('/').split('/')[-1].replace('-', ' ').title() if item[3].split('?')[0].rstrip('/') else 'Home' }}
                     {% else %}
                         Home
                     {% endif %}
@@ -97,16 +98,16 @@
                 <td>{{ item[4] }}</td>
 
                 <td>
-                    {% if item[7] == "High" or item[7] == "5" %}
-                        <span style="color:red; font-weight:bold;">{{ item[7] }}</span>
+                    {% if item[5] == "High" or item[5] == "5" %}
+                        <span style="color:red; font-weight:bold;">{{ item[5] }}</span>
                     {% else %}
-                        {{ item[7] or '' }}
+                        {{ item[5] or '' }}
                     {% endif %}
                 </td>
 
                 <td style="max-width: 250px; white-space: pre-wrap;">{{ item[6] or '' }}</td>
 
-                <td style="max-width: 350px; white-space: pre-wrap;">{{ item[5] or '' }}</td>
+                <td style="max-width: 350px; white-space: pre-wrap;">{{ item[7] or '' }}</td>
 
                 <td>
                     {% if item[9] %}
@@ -116,21 +117,27 @@
                     {% endif %}
                 </td>
 
-                <td>
-                    {% if not item[9] %}
-                        <form method="POST" action="{{ url_for('resolve_feedback', feedback_id=item[0]) }}">
-                            <button type="submit" class="btn">Resolve</button>
-                        </form>
-                    {% else %}
-                        <form method="POST" action="{{ url_for('reopen_feedback', feedback_id=item[0]) }}">
-                            <button type="submit" class="btn">Reopen</button>
-                </form>
-            {% endif %}
-        </td>
-    </tr>
+                <td style="max-width: 300px; white-space: pre-wrap;">
+                    {{ item[12] or '' }}
+                </td>
 
+                <td>
+                    <a href="{{ url_for('edit_feedback', feedback_id=item[0]) }}" class="btn">
+                        Update
+                     </a>
+
+                     {% if item[9] %}
+                         <form method="POST"
+                             action="{{ url_for('reopen_feedback', feedback_id=item[0]) }}"
+                             style="display:inline;">
+                           <button type="submit" class="btn">Reopen</button>
+                         </form>
+                     {% endif %}
+                </td>
+            </tr>
             {% endfor %}
-        </tbody>
+</tbody>
+
     </table>
 {% else %}
     <p>No feedback found.</p>

@@ -2730,7 +2730,8 @@ def feedback_admin():
             uf.created_at,
             uf.is_resolved,
             uf.spa_id,
-            s.spa_name
+            s.spa_name,
+            uf.action_taken_note
         FROM user_feedback uf
         LEFT JOIN spas s
             ON uf.spa_id = s.spa_id
@@ -2763,6 +2764,103 @@ def feedback_admin():
         selected_status=status,
         open_count=open_count
     )
+
+
+
+
+
+
+
+
+
+
+
+
+#   -----------------------
+#
+#    FEEDBACK EDIT
+#
+#
+#
+#                           
+#
+#  ----------------------
+            
+
+@app.route("/feedback/edit/<int:feedback_id>", methods=["GET", "POST"])
+@login_required
+@master_admin_required
+def edit_feedback(feedback_id):
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    if request.method == "POST":
+
+        is_resolved = request.form.get("is_resolved") == "on"
+        action_taken_note = request.form.get(
+            "action_taken_note", ""
+        ).strip()
+
+        cur.execute("""
+            UPDATE user_feedback
+            SET is_resolved = %s,
+                action_taken_note = %s
+            WHERE feedback_id = %s
+        """, (
+            is_resolved,
+            action_taken_note,
+            feedback_id
+        ))
+
+        conn.commit()
+
+        cur.close()
+        conn.close()
+
+        flash("Feedback updated.", "success")
+        return redirect(url_for("feedback_admin"))
+
+
+    cur.execute("""
+        SELECT
+            feedback_id,
+            user_name,
+            user_email,
+            page_name,
+            feedback_type,
+            severity,
+            expected_behavior,
+            message,
+            created_at,
+            is_resolved,
+            spa_id,
+            action_taken_note
+        FROM user_feedback
+        WHERE feedback_id = %s
+    """, (feedback_id,))
+
+    feedback = cur.fetchone()
+
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "edit_feedback.html",
+        feedback=feedback
+    )
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -16286,6 +16384,7 @@ def dashboard():
 
     spa_now = get_spa_now()
     today = spa_now.date()
+    year_start = date(today.year, 1, 1)
     now_time = spa_now.time()
 
     # Safe defaults
@@ -16419,6 +16518,37 @@ def dashboard():
     """, (spa_id,))
     completed_count = cur.fetchone()[0] or 0
 
+
+    cur.execute("""
+        SELECT COALESCE(SUM(total_amount), 0)
+        FROM income
+        WHERE spa_id = %s
+          AND income_date BETWEEN %s AND %s
+    """, (spa_id, year_start, today))
+
+    ytd_income = cur.fetchone()[0]
+
+
+    cur.execute("""
+        SELECT COALESCE(SUM(amount), 0)
+        FROM expenses
+        WHERE spa_id = %s
+          AND expense_date BETWEEN %s AND %s
+    """, (spa_id, year_start, today))
+
+    ytd_expenses = cur.fetchone()[0]
+
+
+    cur.execute("""
+        SELECT COALESCE(SUM(amount), 0)
+        FROM employee_compensation
+        WHERE spa_id = %s
+          AND compensation_date BETWEEN %s AND %s
+    """, (spa_id, year_start, today))
+
+    ytd_employee_compensation = cur.fetchone()[0]
+
+
     # Today's appointment table
     cur.execute("""
         SELECT
@@ -16483,6 +16613,9 @@ def dashboard():
 
     return render_template(
         "dashboard.html",
+        ytd_income=ytd_income,
+        ytd_expenses=ytd_expenses,
+        ytd_employee_compensation=ytd_employee_compensation,
         birthday_alert_count=birthday_alert_count,
         expiring_gc_count=expiring_gc_count,
         next_appt=next_appt,
