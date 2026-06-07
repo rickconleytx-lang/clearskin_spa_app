@@ -5,7 +5,7 @@
 
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <title>{% block title %}Peach Suite Pro{% endblock %}</title>
+    <title>{% block title %}Peach Suite Pro | Just Peachy Data{% endblock %}</title>
 
     <link rel="apple-touch-icon"
         href="{{ url_for('static', filename='apple-touch-icon.png') }}">
@@ -88,10 +88,63 @@
 
     </div>
 
-    <div class="footer-note">
-        Peach Suite Pro
-        <span>&#169</span>2026 Just Peachy Data LLC.   All rights reserved. 2026
+
+<footer class="site-footer">
+
+    <a href="https://peachsuitepro.com"
+       target="_blank"
+       rel="noopener noreferrer"
+       class="footer-brand">
+
+        <img src="{{ url_for('static', filename='apple-touch-icon.png') }}"
+             alt="{{ product_name }}"
+             class="footer-icon">
+
+        <span class="footer-title">
+            {{ product_name }}
+        </span>
+
+    </a>
+
+    <div class="footer-version">
+        Version {{ app_version }}
     </div>
+
+    <div class="footer-tagline">
+        Business Management Software for Modern Spas
+    </div>
+
+    <div class="footer-company">
+        © {{ current_year }} {{ company_name }}
+    </div>
+
+    <div class="footer-motto">
+        {{ tagline }}
+    </div>
+
+    <div class="footer-links">
+        <a href="/privacy">Privacy Policy</a>
+        <span>•</span>
+
+        <a href="/terms">Terms of Service</a>
+        <span>•</span>
+
+        <a href="/help">Help Center</a>
+        <span>•</span>
+
+        <a href="{{ url_for('view_help_page', page_key='release_notes') }}">
+            Release Notes
+        </a>
+
+        <a href="https://peachsuitepro.com"
+           target="_blank"
+           rel="noopener noreferrer">
+            Visit PeachSuitePro.com
+        </a>
+    </div>
+
+</footer>
+
 
 </body>
 </html>

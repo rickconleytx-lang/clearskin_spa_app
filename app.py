@@ -22,6 +22,16 @@ from twilio.rest import Client
 
 app = Flask(__name__)
 
+# --------------------------------------------------
+# Application Branding
+# --------------------------------------------------
+
+app.config["PRODUCT_NAME"] = "Peach Suite Pro"
+app.config["COMPANY_NAME"] = "Just Peachy Data LLC"
+app.config["APP_VERSION"] = "1.0 Beta"
+app.config["TAGLINE"] = "Helping Your Business Bear Fruit™"
+
+
 # Mailgun config
 MAILGUN_API_KEY = os.getenv("MAILGUN_API_KEY")
 MAILGUN_DOMAIN = os.getenv("MAILGUN_DOMAIN")
@@ -41,7 +51,6 @@ from functools import wraps
 
 
 
-
 print("APP.PY LOADED - SWITCH TEST VERSION", flush=True)
 
 print("APP FILE LOADED")
@@ -51,6 +60,28 @@ print("GENERAL EMAIL SEND HIT", flush=True)
 print("MAILGUN DOMAIN:", MAILGUN_DOMAIN, flush=True)
 print("MAILGUN FROM:", MAILGUN_FROM, flush=True)
 print("MAILGUN KEY STARTS:", MAILGUN_API_KEY[:4] if MAILGUN_API_KEY else None, flush=True)
+
+
+
+
+# ==========================================================
+# PEACH SUITE PRO APPLICATION SETTINGS
+# ==========================================================
+
+
+
+@app.context_processor
+def inject_branding():
+    return {
+        "product_name": app.config["PRODUCT_NAME"],
+        "company_name": app.config["COMPANY_NAME"],
+        "app_version": app.config["APP_VERSION"],
+        "tagline": app.config["TAGLINE"],
+        "current_year": datetime.now().year
+    }
+
+
+
 
 
 
@@ -1665,146 +1696,8 @@ def update_dropdown_labels():
 
 
 
-#  ---------------------
-#
-#     HELP PAGES
-#
-#  -----------------
 
 
-
-@app.route("/help")
-@login_required
-@spa_required  
-
-def help_page():
-    return render_template("help.html")
-
-
-
-@app.route("/help_calendar")
-@login_required
-@spa_required  
-
-def help_calendar_page():   
-    return render_template("help_calendar.html")
-
-
-    
-@app.route("/help_appointments")
-@login_required
-@spa_required  
-
-def help_appointments_page():
-    return render_template("help_appointments.html")
-            
-
-
-@app.route("/help_client_management")
-
-@login_required
-@spa_required  
-
-def help_client_management_page():
-    return render_template("help_client_management.html")
- 
-
-@app.route("/help_add_new_client")
-@login_required
-@spa_required  
-
-def help_add_new_client_page():
-    return render_template("help_add_new_client.html")
-
-#   ---------------------------
-#
-#   -------------------------
-
-@app.route("/help_clients")
-
-@login_required
-@spa_required  
-
-def help_clients_page():
-    return render_template("help_clients.html")
-
-
-
-#   --------------------------- 
-#
-#   -------------------------
-
-
-@app.route("/help_birthday_offer")
-
-@login_required
-@spa_required  
-
-def help_birthday_offer_page():
-    return render_template("help_birthday_offer.html")
-
-
-
-#   --------------------------- 
-#
-#   -------------------------
-
-
-@app.route("/help_income")
-
-@login_required
-@spa_required  
-
-def help_income_page():
-    return render_template("help_income.html")
-
-
-
-
-#   --------------------------- 
-#
-#   -------------------------
-
-
-@app.route("/help_gift_certs")
-
-@login_required
-@spa_required  
-
-def help_gift_certs_page():
-    return render_template("help_gift_certs.html")
-
-
-
-#   --------------------------- 
-#
-#   -------------------------
-
-
-@app.route("/help_expenses")
-
-@login_required
-@spa_required  
-
-def help_expenses_page():
-    return render_template("help_expenses.html")
-
-
-
-
-#   --------------------------- 
-#
-#   -------------------------
-
-
-
-@app.route("/help_admin")
-
-@login_required
-@spa_required  
-
-def help_admin_page():
-    return render_template("help_admin.html")
 
 
 
@@ -2443,26 +2336,42 @@ def new_help_page():
 #   -------------------------
     
 
-
-
 @app.route("/help")
 @login_required
 @spa_required
 def help_center():
-    spa_id = current_spa_id()
+
+    search = request.args.get("search", "").strip()
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute("""
-        SELECT
-            page_key,
-            title
-        FROM help_pages
-        WHERE spa_id = %s
-          AND is_active = TRUE
-        ORDER BY title
-    """, (spa_id,))
+    if search:
+        search_term = f"%{search}%"
+
+        cur.execute("""
+            SELECT
+                page_key,
+                title
+            FROM help_pages
+            WHERE is_active = TRUE
+              AND (
+                    page_key ILIKE %s
+                 OR title ILIKE %s
+                 OR content ILIKE %s
+              )
+            ORDER BY title
+        """, (search_term, search_term, search_term))
+
+    else:
+        cur.execute("""
+            SELECT
+                page_key,
+                title
+            FROM help_pages
+            WHERE is_active = TRUE
+            ORDER BY title
+        """)
 
     pages = cur.fetchall()
 
@@ -2471,8 +2380,10 @@ def help_center():
 
     return render_template(
         "help_center.html",
-        pages=pages
+        pages=pages,
+        search=search
     )
+
 
 
 
@@ -2945,6 +2856,15 @@ def reopen_feedback(feedback_id):
 
 
 
+#   -----------------------  
+#
+#    
+#           
+#
+#
+#     
+#       
+#  ----------------------     
 
 
 

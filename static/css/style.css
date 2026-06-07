@@ -2303,3 +2303,177 @@ td:nth-child(3) {
 .help-image:hover {
     box-shadow: 0 2px 8px rgba(0,0,0,.2);
 }
+
+
+.site-footer {
+    margin-top: 40px;
+    padding: 20px 10px;
+    text-align: center;
+    border-top: 1px solid #e5e5e5;
+    background: #fafafa;
+}
+
+.footer-logo {
+    font-size: 1.3rem;
+    font-weight: bold;
+    color: #e67e22;
+    margin-bottom: 4px;
+}
+
+.footer-tagline {
+    font-size: 0.95rem;
+    color: #555;
+    margin-bottom: 10px;
+}
+
+.footer-company,
+.footer-motto {
+    font-size: 0.8rem;
+    color: #888;
+}
+
+.site-footer {
+    margin-top: 40px;
+    padding: 20px;
+    text-align: center;
+    border-top: 1px solid #e5e5e5;
+    background: #fafafa;
+}
+
+.footer-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    text-decoration: none;
+    margin-bottom: 8px;
+}
+
+.footer-brand:hover {
+    opacity: .85;
+}
+
+.footer-icon {
+    width: 40px;
+    height: 40px;
+}
+
+.footer-title {
+    font-size: 1.35rem;
+    font-weight: bold;
+    color: #e67e22;
+}
+
+.footer-tagline {
+    color: #555;
+    margin-top: 5px;
+    margin-bottom: 12px;
+}
+
+.footer-company,
+.footer-motto {
+    color: #888;
+    font-size: .85rem;
+}
+
+.footer-version {
+    font-size: .75rem;
+    color: #aaa;
+    margin-bottom: 8px;
+}
+
+.site-footer {
+    margin-top: 40px;
+    padding: 20px;
+    text-align: center;
+    border-top: 1px solid #e5e5e5;
+    background: #fafafa;
+    box-shadow: 0 -2px 8px rgba(0,0,0,.05);
+}
+
+.footer-icon {
+    width: 42px;
+    height: 42px;
+    transition: transform .2s ease;
+}
+
+.footer-brand:hover .footer-icon {
+    transform: rotate(5deg) scale(1.08);
+}
+
+
+.site-footer {
+    margin-top: 40px;
+    padding: 20px;
+    text-align: center;
+    border-top: 1px solid #e5e5e5;
+    background-color: #fafafa;
+    box-shadow: 0 -2px 8px rgba(0,0,0,.05);
+}
+
+.footer-brand {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    text-decoration: none;
+    margin-bottom: 8px;
+}
+
+.footer-brand:hover {
+    opacity: .85;
+}
+
+.footer-icon {
+    width: 42px;
+    height: 42px;
+    transition: transform .2s ease;
+}
+
+.footer-brand:hover .footer-icon {
+    transform: rotate(5deg) scale(1.08);
+}
+
+.footer-title {
+    font-size: 1.35rem;
+    font-weight: bold;
+    color: #e67e22;
+}
+
+.footer-version {
+    margin-top: 6px;
+    font-size: .80rem;
+    color: #999;
+}
+
+.footer-tagline {
+    margin-top: 8px;
+    margin-bottom: 12px;
+    font-size: .95rem;
+    color: #555;
+}
+
+.footer-company,
+.footer-motto {
+    font-size: .82rem;
+    color: #888;
+}
+
+.footer-links {
+    margin-top: 15px;
+    font-size: .85rem;
+}
+
+.footer-links a {
+    color: #777;
+    text-decoration: none;
+    margin: 0 5px;
+}
+
+.footer-links a:hover {
+    color: #e67e22;
+    text-decoration: underline;
+}
+
+.footer-links span {
+    color: #bbb;
+}

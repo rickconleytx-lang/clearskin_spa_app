@@ -4,7 +4,27 @@
 
 <div class="page-card">
 
-    <h1>Help Center</h1>
+<h1>🍑 Help Center</h1>
+
+<div class="record-count">
+    {{ pages|length }} help topic(s) found
+</div>
+
+
+<form method="GET" style="margin-bottom:20px;">
+
+    <input type="text"
+           name="search"
+           value="{{ search or '' }}"
+           placeholder="Search Help Topics">
+
+    <button class="btn">Search</button>
+
+    <a href="{{ url_for('help_center') }}" class="btn">
+        Clear
+    </a>
+
+</form>
 
     <p>
         Browse help topics below.
@@ -17,7 +37,7 @@
 
                 <h3>{{ page[1] }}</h3>
 
-                <a href="{{ url_for('help_page', page_key=page[0]) }}"
+                <a href="{{ url_for('view_help_page', page_key=page[0]) }}"
                    class="btn">
                     Open Help
                 </a>
@@ -28,5 +48,18 @@
     </div>
 
 </div>
+
+
+<hr>
+
+<p style="text-align:center;color:#777;font-size:.9em;">
+
+Can't find what you're looking for?
+
+Browse all topics or use the search box above.
+
+</p>
+
+
 
 {% endblock %}
