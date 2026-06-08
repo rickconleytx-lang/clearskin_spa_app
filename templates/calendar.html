@@ -22,48 +22,78 @@
 
 <br>
 
-<div style="text-align:center; margin-bottom:20px;">
-
-    <img src="{{ url_for('static', filename='images/peach_suite_calendar.png') }}"
-         alt="Peach Suite Pro Calendar"
-         style="width:40%; max-width:500px; height:auto; border-radius:12px;">
-
-</div>
-
 
 <h1>Weekly Calendar</h1>
 
-<div style="margin-bottom: 15px;">
-    <a class="btn" href="{{ url_for('calendar_view', week_start=current_week_start.strftime('%Y-%m-%d')) }}#week-view">Today</a>
+<div style="display: flex; flex-direction: row; justify-content: space-between; align-items: flex-start; gap: 25px; width: 100%;">
 
-    <a class="btn" href="{{ url_for('calendar_view', week_start=prev_week_start.strftime('%Y-%m-%d')) }}#week-view">Previous Week</a>
+    <!-- LEFT SIDE -->
+    <div style="flex: 1; min-width: 0;">
 
-    <a class="btn" href="{{ url_for('calendar_view', week_start=next_week_start.strftime('%Y-%m-%d')) }}#week-view">Next Week</a>
+        <div style="margin-bottom: 15px;">
+            <a class="btn" href="{{ url_for('calendar_view', week_start=current_week_start.strftime('%Y-%m-%d')) }}#week-view">Today</a>
 
-    <a class="btn" href="{{ url_for('calendar_view', week_start=current_week_start.strftime('%Y-%m-%d')) }}#week-view">Current Week</a>
+            <a class="btn" href="{{ url_for('calendar_view', week_start=prev_week_start.strftime('%Y-%m-%d')) }}#week-view">Previous Week</a>
 
-    <form method="GET" action="{{ url_for('calendar_view') }}" style="display:inline-block; margin-left: 10px;">
-        <input type="date" name="goto_date" value="{{ goto_date if goto_date else '' }}">
-        <button type="submit" class="btn">Go To Date</button>
-    </form>
+            <a class="btn" href="{{ url_for('calendar_view', week_start=next_week_start.strftime('%Y-%m-%d')) }}#week-view">Next Week</a>
+
+            <a class="btn" href="{{ url_for('calendar_view', week_start=current_week_start.strftime('%Y-%m-%d')) }}#week-view">Current Week</a>
+
+            <form method="GET" action="{{ url_for('calendar_view') }}" style="display:inline-block; margin-left:10px;">
+                <input type="date" name="goto_date" value="{{ goto_date if goto_date else '' }}">
+                <button type="submit" class="btn">Go To Date</button>
+            </form>
+        </div>
+
+        <div style="margin-bottom:20px;">
+            <form method="GET" action="{{ url_for('calendar_view') }}">
+                <label for="start_date"><strong>Search Appointments From:</strong></label>
+                <input type="date" id="start_date" name="start_date" value="{{ request.args.get('start_date', '') }}">
+
+                <label for="end_date" style="margin-left:10px;"><strong>To:</strong></label>
+                <input type="date" id="end_date" name="end_date" value="{{ request.args.get('end_date', '') }}">
+
+                <button type="submit" class="btn">Search</button>
+                <a class="btn" href="{{ url_for('calendar_view', offset=offset) }}">Clear</a>
+            </form>
+        </div>
+       
+        {% if overdue_count > 0 %}
+        <div class="next-appointment"
+             style="background-color:#ffe5e5; border-left:5px solid #cc0000; margin-top:15px;">
+
+            <strong>Overdue Booked Appointments:</strong> {{ overdue_count }}
+        </div>
+
+        <div style="margin-top:10px;">
+            <form method="POST"
+                  action="{{ url_for('complete_overdue_appointments') }}"
+                  style="display:inline;">
+
+                <button type="submit"
+                        class="btn"
+                        style="background:#cc0000;"
+                        onclick="return confirm('Mark all overdue booked appointments as complete?')">
+
+                    Mark All Overdue Complete
+
+                </button>
+            </form>
+        </div>
+        {% endif %}
+
+    </div>
+
+
+    <!-- RIGHT SIDE IMAGE -->
+    <div style="width: 260px; flex-shrink: 0; text-align: right;">
+        <img src="{{ url_for('static', filename='images/ps_calendar.png') }}"
+             alt="Peach Suite Pro Calendar"
+             style="width: 260px; height: auto; border-radius: 12px;">
+    </div>
+
 </div>
 
-
-<div style="margin-bottom: 20px;">
-    <form method="GET" action="{{ url_for('calendar_view') }}">
-        <label for="start_date"><strong>Search Appointments From:</strong></label>
-        <input type="date" id="start_date" name="start_date" value="{{ request.args.get('start_date', '') }}">
-
-        <label for="end_date" style="margin-left: 10px;"><strong>To:</strong></label>
-        <input type="date" id="end_date" name="end_date" value="{{ request.args.get('end_date', '') }}">
-         
-        <button type="submit" class="btn">Search</button>
-        <a class="btn" href="{{ url_for('calendar_view', offset=offset) }}">Clear</a>
-     
-    </form>
-
-
-</div>
 
 {% if filtered_appointments is defined and request.args.get('start_date') and request.args.get('end_date') %}
     <h3>Appointments in Selected Date Range</h3>
@@ -106,21 +136,6 @@
 {% endif %}
 
 
-{% if overdue_count > 0 %}
-<div class="next-appointment" style="background-color: #ffe5e5; border-left: 5px solid #cc0000;">
-    <strong>Overdue Booked Appointments:</strong> {{ overdue_count }}
-</div>
-
-<br>
-
-<div style="margin-bottom: 20px;">
-    <form method="POST" action="{{ url_for('complete_overdue_appointments') }}" style="display:inline;">
-        <button type="submit" class="btn" style="background: #cc0000;" onclick="return confirm('Mark all overdue booked appointments as completed?');">
-            Mark All Overdue Complete
-        </button>
-    </form>
-</div>
-{% endif %}
 
 {% if next_appt %}
 <div class="next-appointment">

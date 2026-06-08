@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>Daily Change Log</h1>
+
+<form method="POST">
+
+    <label>Title</label><br>
+    <input type="text" name="log_title" style="width:60%;" placeholder="Example: Calendar and layout updates">
+    <br><br>
+
+    <label>What changed today?</label><br>
+    <textarea name="log_notes" rows="10" style="width:80%;" required></textarea>
+    <br><br>
+
+    <button type="submit" class="btn">Save Log</button>
+    <a href="{{ url_for('log_it_report') }}" class="btn">View Log Report</a>
+
+</form>
+
+{% endblock %}

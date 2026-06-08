@@ -4,27 +4,51 @@
 
 <div class="page-card">
 
+
+<a href="{{ url_for('home') }}" class="btn">
+    Home
+</a>
+
 <h1>🍑 Help Center</h1>
 
-<div class="record-count">
-    {{ pages|length }} help topic(s) found
+<h2>Find answers and learn how to use Peach Suite Pro.</h2>
+
+<div style="text-align:center; margin:30px 0;">
+
+    <img src="{{ url_for('static', filename='images/ps_help_center_banner.png') }}"
+         alt="Peach Suite Pro Help Center"
+         style="width:85%; max-width:1000px; height:auto; border-radius:12px;">
+
 </div>
 
+<p>
+    Browse help topics below.
+</p>
 
-<form method="GET" style="margin-bottom:20px;">
+<div class="narrow-cards">
+    ...
+</div>
+        <div class="record-count">
+            {{ pages|length }} help topic(s) found
+        </div>
 
-    <input type="text"
-           name="search"
-           value="{{ search or '' }}"
-           placeholder="Search Help Topics">
 
-    <button class="btn">Search</button>
+        <form method="GET" style="margin-bottom:20px;">
 
-    <a href="{{ url_for('help_center') }}" class="btn">
-        Clear
-    </a>
+            <input type="text"
+               name="search"
+               value="{{ search or '' }}"
+               placeholder="Search Help Topics">
 
-</form>
+        <button class="btn">Search</button>
+
+        <a href="{{ url_for('help_center') }}" class="btn">
+            Clear
+        </a>
+
+    </form>
+
+    </div>
 
     <p>
         Browse help topics below.
@@ -51,6 +75,12 @@
 
 
 <hr>
+
+
+
+
+
+
 
 <p style="text-align:center;color:#777;font-size:.9em;">
 

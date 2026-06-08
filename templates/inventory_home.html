@@ -14,41 +14,54 @@
             <p class="report-subtitle">Track products, stock levels, and inventory value</p>
         </div>
 
-        <div class="form-buttons">
-            <a href="{{ url_for('add_inventory_product') }}" class="btn"> 
-                Add Product
-            </a>
+     
+
+        <div style="display: flex; flex-direction: row; justify-content: space-between; align-items: flex-start; gap: 25px; width: 100%;">
+    
+            <!-- LEFT SIDE -->
+            <div style="flex: 1; min-width: 0;">
             
-            <a href="{{ url_for('inventory_scan') }}" class="btn btn-secondary">
-                Scan SKU
-             </a>
+                <div class="form-buttons">
+                    <a href="{{ url_for('add_inventory_product') }}" class="btn"> 
+                       Add Product
+                    </a>
+            
+                    <a href="{{ url_for('inventory_scan') }}" class="btn btn-secondary">
+                        Scan SKU
+                    </a>
+                </div>
+    
+                <div class="narrow-cards">
+
+                    <div class="summary-card">
+                        <span class="summary-label">Total Stock</span>
+                        <span class="summary-value">{{ total_stock }}</span>
+                    </div>
+
+                    <div class="summary-card">
+                        <span class="summary-label">Wholesale Value</span>
+                        <span class="summary-value">
+                            ${{ "{:,.2f}".format(total_wholesale_value or 0) }}
+                        </span>
+                    </div>
+
+                    <div class="summary-card">
+                        <span class="summary-label">Retail Value</span>
+                        <span class="summary-value">
+                            ${{ "{:,.2f}".format(total_retail_value or 0) }}
+                        </span>
+                    </div>
+            </div>
         </div>
 
+        <!-- RIGHT SIDE IMAGE -->
+        <div style="width: 260px; flex-shrink: 0; text-align: right;">
+            <img src="{{ url_for('static', filename='images/ps_inventory.png') }}"
+                alt="Peach Suite Pro Calendar"   
+                style="width: 260px; height: auto; border-radius: 12px;">
+        </div>
+    </div>  
 </div>
-
-    
-    <div class="narrow-cards">
-
-     <div class="summary-card">
-         <span class="summary-label">Total Stock</span>
-        <span class="summary-value">{{ total_stock }}</span>
-    </div>
-
-    <div class="summary-card">
-        <span class="summary-label">Wholesale Value</span>
-        <span class="summary-value">
-            ${{ "{:,.2f}".format(total_wholesale_value or 0) }}
-        </span>
-    </div>
-
-    <div class="summary-card">
-        <span class="summary-label">Retail Value</span>
-        <span class="summary-value">
-            ${{ "{:,.2f}".format(total_retail_value or 0) }}
-        </span>
-    </div>
-
-    </div>
 
     <div class="report-section">
         <h2>Product Inventory</h2>

@@ -2476,6 +2476,67 @@ def sms_email_terms():
 
 
 
+                    
+#   ------------------------- 
+#
+#
+#    DAILY BUILD LOG
+#
+#
+#
+#   -------------------------
+
+@app.route('/log-it', methods=['GET', 'POST'])
+@login_required
+@master_admin_required
+def log_it():
+    if request.method == 'POST':
+        log_title = request.form.get('log_title')
+        log_notes = request.form.get('log_notes')
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO developer_change_log
+                (log_title, log_notes)
+            VALUES (%s, %s)
+        """, (log_title, log_notes))
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        flash("Daily change log saved successfully.", "success")
+        return redirect(url_for('log_it_report'))
+
+    return render_template('log_it.html')
+
+
+@app.route('/log-it-report')
+@login_required
+@master_admin_required
+def log_it_report():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT log_id, log_date, log_title, log_notes, created_at
+        FROM developer_change_log
+        ORDER BY log_date DESC, created_at DESC
+    """)
+    logs = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    return render_template('log_it_report.html', logs=logs)
+
+
+
+
+
+
+
+
+
+
 
 
 

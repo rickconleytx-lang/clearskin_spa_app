@@ -2477,3 +2477,56 @@ td:nth-child(3) {
 .footer-links span {
     color: #bbb;
 }
+
+
+.page-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 25px;
+    margin-bottom: 20px;
+}
+
+.page-top-content {
+    flex: 1;
+}
+
+.page-top-image {
+    width: 260px;
+    text-align: right;
+}
+
+.page-top-image img {
+    width: 100%;
+    height: auto;
+    border-radius: 12px;
+}
+
+.module-image {
+    width: 260px;
+    height: auto;
+    border-radius: 12px;
+}
+
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 25px;
+    margin-bottom: 20px;
+}
+
+.page-content {
+    flex: 1;
+}
+
+.module-image {
+    width: 260px;
+    height: auto;
+    border-radius: 12px;
+}
+
+.page-card {
+    margin-bottom: 15px;
+}
+

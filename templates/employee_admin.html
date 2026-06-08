@@ -8,12 +8,35 @@
 
 <h1>Employee Admin</h1>
 
-<div class="narrow-cards">
-    {{ section_card("Back to Employees Home", "Back to Employees Home Page",  url_for('employees_home')) }}
-    {{ section_card("Add New Employee", "Add a New Employee",  url_for('add_employee')) }}
-    {{ section_card("Compensation Report", "Provides an Employee Compensation Summary and Compensation Ledger", url_for('employee_compensation_report')) }}
-    {{ section_card("Manage Compensation Types", "Add/Edit/Deactivate Compensation Categories",  url_for('compensation_types_report')) }}
+<div style="display: flex; flex-direction: row; justify-content: space-between; align-items: flex-start; gap: 25px; width: 100%;">
+            
+    <!-- LEFT SIDE -->
+    <div style="flex: 1; min-width: 0;">
+        
+        <div class="narrow-cards">
+            {{ section_card("Back to Employees Home", "Back to Employees Home Page",  url_for('employees_home')) }}
+            {{ section_card("Add New Employee", "Add a New Employee",  url_for('add_employee')) }}
+        </div>
+
+<br>
+<br>
+<br>
+        <div class="narrow-cards">
+            {{ section_card("Compensation Report", "Provides an Employee Compensation Summary and Compensation Ledger", url_for('employee_compensation_report')) }}
+            {{ section_card("Manage Compensation Types", "Add/Edit/Deactivate Compensation Categories",  url_for('compensation_types_report')) }}
+        </div>
+
+
+        </div>
+                
+        <!-- RIGHT SIDE IMAGE -->
+        <div style="width: 260px; flex-shrink: 0; text-align: right;">
+            <img src="{{ url_for('static', filename='images/ps_hr.png') }}"
+                 alt="Peach Suite Pro Calendar"
+                 style="width: 260px; height: auto; border-radius: 12px;">
+        </div>
 </div>
+
 
 
 {% endblock %}

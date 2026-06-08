@@ -20,55 +20,68 @@
 
 </div>
 
+<h1>Client Management</h1>
 
-<br>
+<div style="display:flex; flex-direction:row; justify-content:space-between; align-items:flex-start; gap:25px; width:100%;">
 
-<p>
-Please search for Client's Name, then use an Action Button(Add Appointment, Health / Intake, Forms, 
-Visit Summaries, Full Record, Edit) next to their record.
-</p>
-
-<p>
-<span style="color: red;">Note: SMS/Email Opt In/Out:</span> Search Client below, then click on the Client's - SMS Settings button (far right).
+    <!-- LEFT SIDE -->
+    <div style="flex:1; min-width:0;">
 
 
-<div style="margin-bottom: 20px;">    
-<br>
+        <p>
+            Please search for Client's Name, then use an Action Button
+            (Add Appointment, Health / Intake, Forms, Visit Summaries, Full Record, Edit) 
+            next to their record.
+        </p>
+
+        <p>
+            <span style="color: red;">Note: SMS/Email Opt In/Out:</span> 
+            Search Client below, then click on the Client's - SMS Settings button (far right).
 
 
-    <a class="btn" href="{{ url_for('add_new_client') }}">
-        Add New Client
-    </a>
+        <div style="margin-bottom: 20px;">    
+            <a class="btn" href="{{ url_for('add_new_client') }}">
+                Add New Client
+            </a>
+        </div>
 
+        <p style="margin-bottom: 15px;">
+            Search by first name, last name, or phone number to quickly access client records.
+        </p>
+
+        <form method="GET" style="margin-bottom: 20px;">
+            <label for="search">Search Client</label><br>
+
+            <input
+                type="text"
+                id="search"
+                name="search"
+                value="{{ search or '' }}"
+                placeholder="Search by first name, last name, or phone"
+            >
+
+            <button type="submit" class="btn">Search</button>
+            <button type="submit" name="show_all" value="1" class="btn">Show All</button>
+            <a href="{{ url_for('client_management') }}" class="btn">Clear</a>
+
+            {% if record_count is defined %}
+                <div class="record-count">
+                    {{ record_count }} record(s) returned
+                </div>
+           {% endif %}
+
+        </form>
+    </div>
+
+        <!-- RIGHT SIDE IMAGE -->
+    <div style="width:260px; flex-shrink:0; text-align:right;">
+        <img src="{{ url_for('static', filename='images/ps_client_management.png') }}"
+             alt="Peach Suite Pro Client Management"
+             style="width:260px; height:auto; border-radius:12px;">
+    </div>
 
 </div>
 
-<p style="margin-bottom: 15px;">
-    Search by first name, last name, or phone number to quickly access client records.
-</p>
-
-<form method="GET" style="margin-bottom: 20px;">
-    <label for="search">Search Client</label><br>
-    <input
-        type="text"
-        id="search"
-        name="search"
-        value="{{ search or '' }}"
-        placeholder="Search by first name, last name, or phone"
-    >
-
-    <button type="submit" class="btn">Search</button>
-    <button type="submit" name="show_all" value="1" class="btn">Show All</button>
-    <a href="{{ url_for('client_management') }}" class="btn">Clear</a>
-<br>
-
-{% if record_count is defined %}
-    <div class="record-count">
-        {{ record_count }} record(s) returned
-    </div>
-{% endif %}
-
-</form>
 
 {% if clients %}
 <table>

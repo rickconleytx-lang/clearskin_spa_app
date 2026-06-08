@@ -44,50 +44,67 @@
 {% endif %}
 <br>
 <br>
-<div class="dashboard-cards">
-    <div class="dashboard-card">
-        <h3>Today's Appointments</h3>
-        <p>{{ today_count }}</p>
+
+<div style="display: flex; flex-direction: row; justify-content: space-between; align-items: flex-start; gap: 25px; width: 100%;">
+
+    <!-- LEFT SIDE -->
+    <div style="flex: 1; min-width: 0;">
+    
+
+
+        <div class="dashboard-cards">
+            <div class="dashboard-card">
+                <h3>Today's Appointments</h3>
+                <p>{{ today_count }}</p>
+            </div>
+
+            <div class="dashboard-card">
+                <h3>Upcoming Appointments</h3>
+                <p>{{ upcoming_count }}</p>
+            </div>
+
+            <div class="dashboard-card">
+                <h3>Completed Appointments</h3>
+                <p>{{ completed_count }}</p>
+            </div>
+        </div>
+
+            <div class="dashboard-cards">
+                <div class="dashboard-card">
+                    <h3>Total Clients</h3>
+                    <p>{{ total_clients }}</p>
+                </div>
+
+            <div class="dashboard-card">
+                <h3>Revenue Today</h3>
+                <p>${{ '%.2f' |format(revenue_today) }}</p>
+            </div>
+        </div>
+
+        <div class="summary-card">
+            <h3>YTD Income</h3>
+            <p>${{ "{:,.2f}".format(ytd_income or 0) }}</p>
+        </div>
+
+        <div class="summary-card">
+            <h3>YTD Expenses</h3>
+            <p>${{ "{:,.2f}".format(ytd_expenses or 0) }}</p>
+        </div>
+
+        <div class="summary-card">
+            <h3>YTD Employee Compensation</h3>
+            <p>${{ "{:,.2f}".format(ytd_employee_compensation or 0) }}</p>
+        </div>
     </div>
 
-    <div class="dashboard-card">
-        <h3>Upcoming Appointments</h3>
-        <p>{{ upcoming_count }}</p>
-    </div>
-
-    <div class="dashboard-card">
-        <h3>Completed Appointments</h3>
-        <p>{{ completed_count }}</p>
-    </div>
-
-    <div class="dashboard-card">
-        <h3>Total Clients</h3>
-        <p>{{ total_clients }}</p>
-    </div>
-
-    <div class="dashboard-card">
-        <h3>Revenue Today</h3>
-        <p>${{ '%.2f' |format(revenue_today) }}</p>
+    <!-- RIGHT SIDE IMAGE -->
+    <div style="width: 260px; flex-shrink: 0; text-align: right;">
+        <img src="{{ url_for('static', filename='images/ps_dashboard.png') }}"
+             alt="Peach Suite Pro Calendar"
+             style="width: 260px; height: auto; border-radius: 12px;">
     </div>
 </div>
-
-
-<div class="summary-card">
-    <h3>YTD Income</h3>
-    <p>${{ "{:,.2f}".format(ytd_income or 0) }}</p>
-</div>
-
-<div class="summary-card">
-    <h3>YTD Expenses</h3>
-    <p>${{ "{:,.2f}".format(ytd_expenses or 0) }}</p>
-</div>
-
-<div class="summary-card">
-    <h3>YTD Employee Compensation</h3>
-    <p>${{ "{:,.2f}".format(ytd_employee_compensation or 0) }}</p>
-</div>
-
-
+                
 <br>
 
 <div class="dashboard-section">
