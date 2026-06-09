@@ -11,64 +11,81 @@
     emails is a violation of the Terms of Agreement.
 </p>
 
-<div class="narrow-cards">
-    {{ section_card("Email History", "Review your Email Send History", url_for('email_history')) }}
-    {{ section_card("Email Templates", "Manage Email Templates", url_for('email_templates_admin')) }}
-    {{ section_card("Add New Template", "Add New Email Template", url_for('add_email_template')) }}
-    {{ section_card("SMS and Email Preferences", "View and Manage Client Contact Preferences", url_for('client_contact_preferences')) }}
+
+
+<div style="display: flex; flex-direction: row; justify-content: space-between; align-items: flex-start; gap:25px: width:100%;">
+
+    <!-- LEFT SIDE -->
+    <div style="flex: 1; min-width: 0;">
+
+        <div class="narrow-cards">
+            {{ section_card("Email History", "Review your Email Send History", url_for('email_history')) }}
+            {{ section_card("Email Templates", "Manage Email Templates", url_for('email_templates_admin')) }}
+        </div>
+<br>
+<br>
+        <div class="narrow-cards">
+            {{ section_card("Add New Template", "Add New Email Template", url_for('add_email_template')) }}
+            {{ section_card("SMS and Email Preferences", "View and Manage Client Contact Preferences", url_for('client_contact_preferences')) }}
+        </div>
+        
+        <form method="GET">
+
+             <label>Email Type</label><br>
+             <select name="template_type" onchange="this.form.submit()">
+                <option value="">Select Type</option>
+                    {% for t in template_types %}
+                <option value="{{ t[0] }}" {% if t[0] == template_type %}selected{% endif %}>
+                    {{ t[0] }}
+                </option>
+                    {% endfor %}
+             </select>
+
+
+             <label>Template</label><br>
+             <select name="template_id">
+                 <option value="">Select Template</option>
+                     {% for t in templates %}
+                 <option value="{{ t[0] }}" {% if template_id|string == t[0]|string %}selected{% endif %}>
+                     {{ t[1] }}
+                 </option>
+                    {% endfor %}
+             </select>
+
+
+             <label>Client Status</label><br>
+             <select name="client_status_id">
+                 <option value="">All Statuses</option>
+                     {% for status in client_statuses %}
+                         <option value="{{ status[0] }}"
+                             {% if client_status_id and client_status_id|int == status[0] %}
+                                 selected
+                             {% endif %}
+                      >
+                             {{ status[1] }}
+                         </option>
+                     {% endfor %}
+             </select>
+
+
+             <label>Search Clients</label><br>
+             <input type="text" name="search" value="{{ search or '' }}">
+
+
+             <button type="submit" class="btn">Search</button>
+             <button type="submit" name="show_all" value="1" class="btn">Show All Clients</button>
+        </form>
+
+    </div>
+
+        <!-- RIGHT SIDE IMAGE -->
+    <div style="width: 260px; flex-shrink: 0; text-align: right;">
+        <img src="{{ url_for('static', filename='images/ps_sms_email.png') }}"
+             alt="Peach Suite Pro Calendar"
+             style="width: 260px; height: auto; border-radius: 12px;">
+    </div>
 </div>
 
-<form method="GET">
-
-    <label>Email Type</label><br>
-    <select name="template_type" onchange="this.form.submit()">
-        <option value="">Select Type</option>
-        {% for t in template_types %}
-            <option value="{{ t[0] }}" {% if t[0] == template_type %}selected{% endif %}>
-                {{ t[0] }}
-            </option>
-        {% endfor %}
-    </select>
-
-    <br><br>
-
-    <label>Template</label><br>
-    <select name="template_id">
-        <option value="">Select Template</option>
-        {% for t in templates %}
-            <option value="{{ t[0] }}" {% if template_id|string == t[0]|string %}selected{% endif %}>
-                {{ t[1] }}
-            </option>
-        {% endfor %}
-    </select>
-
-    <br><br>
-
-    <label>Client Status</label><br>
-    <select name="client_status_id">
-        <option value="">All Statuses</option>
-        {% for status in client_statuses %}
-            <option value="{{ status[0] }}"
-                {% if client_status_id and client_status_id|int == status[0] %}
-                    selected
-                {% endif %}
-            >
-                {{ status[1] }}
-            </option>
-        {% endfor %}
-    </select>
-
-    <br><br>
-
-    <label>Search Clients</label><br>
-    <input type="text" name="search" value="{{ search or '' }}">
-
-    <br><br>
-
-    <button type="submit" class="btn">Search</button>
-    <button type="submit" name="show_all" value="1" class="btn">Show All Clients</button>
-
-</form>
 
 <hr>
 

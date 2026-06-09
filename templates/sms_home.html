@@ -6,11 +6,6 @@
 {% block content %}
 
 
-<img src="{{ url_for('static',
-                     filename='images/marketing/peach_suite_pro_sms_logo.png') }}"
-     alt="SMS Messaging"
-     style="width:25%;"
-     class="feature-image">
 <h1>SMS Messaging Home</h1>
 
 <p>
@@ -18,57 +13,78 @@
     Maximum 5 clients per SMS send.
 </p>
 
-<div class="narrow-cards">
-    {{ section_card("SMS Templates", "View and Add Templates",  url_for('sms_templates_admin')) }}
-    {{ section_card("SMS History", "View SMS History",  url_for('sms_history_all')) }}
-    {{ section_card("SMS and Email Preferences", "View and Manage Client Contact Preferences", url_for('client_contact_preferences')) }}
 
-    {{ section_card(
-        "SMS Message to Client",
-        "Another way to send SMS to one client - From Client Management - Client - Full Summary-Edit",  
-        url_for('client_management')) }}
+<div style="display:flex; flex-direction:row; justify-content:space-between; align-items:flex-start; gap:25px; width:100%;">
+            
+    <!-- LEFT SIDE -->
+    <div style="flex:1; min-width:0;">
 
+        <div class="narrow-cards">
+        {{ section_card("SMS Templates", "View and Add Templates",  url_for('sms_templates_admin')) }}
+        {{ section_card("SMS History", "View SMS History",  url_for('sms_history_all')) }}
+    </div>
+
+<br>
+<br>
+
+    <div class="narrow-cards">
+        {{ section_card("SMS and Email Preferences", "View and Manage Client Contact Preferences", url_for('client_contact_preferences')) }}
+
+        {{ section_card(
+            "SMS Message to Client",
+            "Another way to send SMS to one client - From Client Management - Client - Full Summary-Edit",  
+            url_for('client_management')) }}
+    </div>
+
+    <form method="GET">
+
+        <label>SMS Template</label><br>
+        <select name="template_id">
+            <option value="">Select Template</option>
+            {% for t in sms_templates %}
+                <option value="{{ t[0] }}" {% if template_id|string == t[0]|string %}selected{% endif %}>
+                    {{ t[1] }}
+                </option>
+            {% endfor %}
+        </select>
+
+<br><br>
+
+        <label>Client Status</label><br>
+        <select name="client_status_id">
+            <option value="">All Statuses</option>
+            {% for status in client_statuses %}
+                <option value="{{ status[0] }}"
+                    {% if client_status  == status[0] %}
+                        selected
+                    {% endif %}
+                >
+                    {{ status[0] }}
+                </option>
+            {% endfor %}
+        </select>
+
+     <br><br>
+
+        <label>Search Clients</label><br>
+        <input type="text" name="search" value="{{ search or '' }}">
+
+    <br><br>
+
+        <button type="submit" class="btn">Search</button>
+        <button type="submit" name="show_all" value="1" class="btn">Show All Eligible Clients</button>
+
+    </form>
+
+    </div>
+
+            <!-- RIGHT SIDE IMAGE -->
+    <div style="width: 260px; flex-shrink: 0; text-align: right;">
+        <img src="{{ url_for('static', filename='images/ps_sms_email.png') }}"
+             alt="Peach Suite Pro Calendar"  
+             style="width: 260px; height: auto; border-radius: 12px;">
+    </div>
 </div>
-
-<form method="GET">
-
-    <label>SMS Template</label><br>
-    <select name="template_id">
-        <option value="">Select Template</option>
-        {% for t in sms_templates %}
-            <option value="{{ t[0] }}" {% if template_id|string == t[0]|string %}selected{% endif %}>
-                {{ t[1] }}
-            </option>
-        {% endfor %}
-    </select>
-
-    <br><br>
-
-    <label>Client Status</label><br>
-    <select name="client_status_id">
-        <option value="">All Statuses</option>
-        {% for status in client_statuses %}
-            <option value="{{ status[0] }}"
-                {% if client_status  == status[0] %}
-                    selected
-                {% endif %}
-            >
-                {{ status[0] }}
-            </option>
-        {% endfor %}
-    </select>
-
-    <br><br>
-
-    <label>Search Clients</label><br>
-    <input type="text" name="search" value="{{ search or '' }}">
-
-    <br><br>
-
-    <button type="submit" class="btn">Search</button>
-    <button type="submit" name="show_all" value="1" class="btn">Show All Eligible Clients</button>
-
-</form>
 
 <hr>
 

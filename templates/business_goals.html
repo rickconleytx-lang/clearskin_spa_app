@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>Business Goals</h1>
+
+<p>
+    Set performance goals for revenue, clients, operations, and inventory.
+    These goals will later power dashboard color coding, alerts, and the Morning Briefing.
+</p>
+
+<form method="POST">
+
+    <h2>Revenue Goals</h2>
+
+    <label>Daily Revenue Goal</label><br>
+    <input type="number" step="0.01" name="daily_revenue_goal" value="{{ goals[0] if goals else 0 }}"><br><br>
+
+    <label>Weekly Revenue Goal</label><br>
+    <input type="number" step="0.01" name="weekly_revenue_goal" value="{{ goals[1] if goals else 0 }}"><br><br>
+
+    <label>Monthly Revenue Goal</label><br>
+    <input type="number" step="0.01" name="monthly_revenue_goal" value="{{ goals[2] if goals else 0 }}"><br><br>
+
+    <label>Average Ticket Goal</label><br>
+    <input type="number" step="0.01" name="average_ticket_goal" value="{{ goals[3] if goals else 0 }}"><br><br>
+
+
+    <h2>Client Goals</h2>
+
+    <label>New Clients Goal</label><br>
+    <input type="number" name="new_clients_goal" value="{{ goals[4] if goals else 0 }}"><br><br>
+
+
+    <h2>Operational Goals</h2>
+
+    <label>Completion Rate Goal (%)</label><br>
+    <input type="number" step="0.01" name="completion_rate_goal" value="{{ goals[5] if goals else 95 }}"><br><br>
+
+    <label>Maximum Cancellation Rate (%)</label><br>
+    <input type="number" step="0.01" name="cancellation_rate_goal" value="{{ goals[6] if goals else 5 }}"><br><br>
+
+    <label>Maximum No Shows</label><br>
+    <input type="number" name="no_show_goal" value="{{ goals[7] if goals else 2 }}"><br><br>
+
+
+    <h2>Alert Settings</h2>
+
+    <label>Inactive Client Alert After Days</label><br>
+    <input type="number" name="inactive_client_days" value="{{ goals[8] if goals else 90 }}"><br><br>
+
+    <label>Low Inventory Threshold</label><br>
+    <input type="number" name="low_inventory_threshold" value="{{ goals[9] if goals else 5 }}"><br><br>
+
+    <button type="submit" class="btn">Save Business Goals</button>
+    <a href="{{ url_for('spa_management') }}" class="btn">Back to Spa Management</a>
+
+</form>
+
+{% endblock %}

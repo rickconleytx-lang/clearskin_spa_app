@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
-<h1>Reports Month</h1>
+<h1>Business Summary Dashboard</h1>
 
 <div style="margin-bottom: 20px;">
     <a class="btn" href="{{ url_for('reports') }}">Standard Reports</a>
@@ -9,7 +9,120 @@
     <button type="button" class="btn" onclick="window.print()">Print Report</button>
 </div>
 
+<div class="health-container">
+
+    <div class="health-card">
+        <div class="dashboard-card {{ business_health_class }}">
+            <h2>🍑 Business Health</h2>
+            <p style="font-size: 42px; font-weight: bold; margin: 10px 0;">
+                {{ business_health_score }} / 100
+            </p>
+            <h3>{{ business_health_label }}</h3>
+        </div>
+    </div>
+
+    <div class="health-table">
+        <h2>Business Performance</h2>
+
+        <table class="business-health-table">
+            <thead>
+                <tr>
+                    <th></th>
+                    <th>Metric</th>
+                    <th>Current</th>
+                    <th>Goal</th>
+                    <th>Progress</th>
+                </tr>
+            </thead>
+
+            <tbody>
+
+                <tr>
+                    <td>{% if weekly_revenue_progress >= 100 %}🟢{% elif weekly_revenue_progress >= 75 %}🟡{% else %}🔴{% endif %}</td>
+                    <td>Weekly Revenue</td>
+                    <td>${{ '%.2f'|format(weekly_revenue) }}</td>
+                    <td>${{ '%.2f'|format(weekly_revenue_goal) }}</td>
+                    <td>{{ weekly_revenue_progress }}%</td>
+                </tr>
+
+                <tr>
+                    <td>{% if monthly_revenue_progress >= 100 %}🟢{% elif monthly_revenue_progress >= 75 %}🟡{% else %}🔴{% endif %}</td>
+                    <td>Monthly Revenue</td>
+                    <td>${{ '%.2f'|format(monthly_revenue) }}</td>
+                    <td>${{ '%.2f'|format(monthly_revenue_goal) }}</td>
+                    <td>{{ monthly_revenue_progress }}%</td>
+                </tr>
+
+                <tr>
+                    <td>{% if average_ticket_progress >= 100 %}🟢{% elif average_ticket_progress >= 75 %}🟡{% else %}🔴{% endif %}</td>
+                    <td>Average Ticket</td>
+                    <td>${{ '%.2f'|format(average_ticket) }}</td>
+                    <td>${{ '%.2f'|format(average_ticket_goal) }}</td>
+                    <td>{{ average_ticket_progress }}%</td>
+                </tr>
+
+                <tr>
+                    <td>{% if new_clients_progress >= 100 %}🟢{% elif new_clients_progress >= 75 %}🟡{% else %}🔴{% endif %}</td>
+                    <td>New Clients</td>
+                    <td>{{ new_clients_month }}</td>
+                    <td>{{ new_clients_goal }}</td>
+                    <td>{{ new_clients_progress }}%</td>
+                </tr>
+
+                <tr>
+                    <td>{% if completion_rate >= 95 %}🟢{% elif completion_rate >= 85 %}🟡{% else %}🔴{% endif %}</td>
+                    <td>Completion Rate</td>
+                    <td>{{ '%.1f'|format(completion_rate) }}%</td>
+                    <td>{{ '%.1f'|format(completion_rate_goal) }}%</td>
+                    <td>{{ completion_rate_progress }}%</td>
+                </tr>
+
+                <tr>
+                    <td>{% if cancellation_rate <= cancellation_rate_goal %}🟢{% elif cancellation_rate <= (cancellation_rate_goal * 150 / 100) %}🟡{% else %}🔴{% endif %}</td>
+                    <td>Cancellation Rate</td>
+                    <td>{{ '%.1f'|format(cancellation_rate) }}%</td>
+                    <td>≤ {{ '%.1f'|format(cancellation_rate_goal) }}%</td>
+                    <td></td>
+                </tr>
+
+                <tr>
+                    <td>{% if no_shows_month <= no_show_goal %}🟢{% elif no_shows_month <= (no_show_goal + 3) %}🟡{% else %}🔴{% endif %}</td>
+                    <td>No Shows</td>
+                    <td>{{ no_shows_month }}</td>
+                    <td>≤ {{ no_show_goal }}</td>
+                    <td></td>
+                </tr>
+
+            </tbody>
+        </table>
+    </div>
+
+</div>
+
+
+<div class="dashboard-cards">
+
+    <div class="dashboard-card">
+        <h3>Income Report</h3>
+        <p>Detailed income records and exports.</p>
+        <a class="btn" href="{{ url_for('income_report') }}">Open</a>
+    </div>
+
+    <div class="dashboard-card">
+        <h3>Expense Report</h3>
+        <p>Detailed expense records and exports.</p>
+        <a class="btn" href="{{ url_for('expense_report') }}">Open</a>
+    </div>
+
+
+</div>
+
 <br>
+
+
+
+<br>
+<h3>Appointments</h3>
 
 <div class="dashboard-cards">
     <div class="dashboard-card">
@@ -33,26 +146,95 @@
     </div>
 </div>
 
+
+
 <br>
+<h3>Revenue</h3>
 
 <div class="dashboard-cards">
-    <div class="dashboard-card">
+    <div class="dashboard-card
+        {% if daily_revenue_goal > 0 and daily_revenue >= daily_revenue_goal %}
+            kpi-green
+        {% elif daily_revenue_goal > 0 and daily_revenue >= (daily_revenue_goal * 75 / 100) %}
+            kpi-yellow
+        {% elif daily_revenue_goal > 0 %}
+            kpi-red
+        {% else %}
+            kpi-neutral
+        {% endif %}
+    ">
         <h3>Daily Revenue</h3>
         <p>${{ '%.2f'|format(daily_revenue) }}</p>
+        {% if daily_revenue_goal > 0 %}
+            <small>Goal: ${{ '%.2f'|format(daily_revenue_goal) }}</small>
+        {% endif %}
     </div>
 
-    <div class="dashboard-card">
+
+    <div class="dashboard-card
+        {% if weekly_revenue_goal > 0 and weekly_revenue >= weekly_revenue_goal %}
+            kpi-green
+        {% elif weekly_revenue_goal > 0 and weekly_revenue >= (weekly_revenue_goal * 75 / 100) %}
+            kpi-yellow
+        {% elif weekly_revenue_goal > 0 %}
+            kpi-red
+        {% else %}
+            kpi-neutral
+        {% endif %}
+    ">
         <h3>Weekly Revenue</h3>
         <p>${{ '%.2f'|format(weekly_revenue) }}</p>
+        {% if weekly_revenue_goal > 0 %}
+            <small>Goal: ${{ '%.2f'|format(weekly_revenue_goal) }}</small>
+        {% endif %}
     </div>
 
-    <div class="dashboard-card">
+
+    <div class="dashboard-card
+        {% if monthly_revenue_goal > 0 and monthly_revenue >= monthly_revenue_goal %}
+            kpi-green
+        {% elif monthly_revenue_goal > 0 and monthly_revenue >= (monthly_revenue_goal * 75 / 100) %}
+            kpi-yellow
+        {% elif monthly_revenue_goal > 0 %}
+            kpi-red
+        {% else %}
+            kpi-neutral
+        {% endif %}
+    ">
         <h3>Monthly Revenue</h3>
         <p>${{ '%.2f'|format(monthly_revenue) }}</p>
+        {% if monthly_revenue_goal > 0 %}
+            <small>Goal: ${{ '%.2f'|format(monthly_revenue_goal) }}</small>
+        {% endif %}
     </div>
+
+
+    <div class="dashboard-card
+        {% if average_ticket_goal > 0 and average_ticket >= average_ticket_goal %}
+            kpi-green
+        {% elif average_ticket_goal > 0 and average_ticket >= (average_ticket_goal * 75 / 100) %}
+            kpi-yellow
+        {% elif average_ticket_goal > 0 %}
+            kpi-red
+        {% else %}
+            kpi-neutral
+        {% endif %}
+    ">
+        <h3>Average Ticket</h3>
+        <p>${{ '%.2f'|format(average_ticket) }}</p>
+        {% if average_ticket_goal > 0 %}
+            <small>Goal: ${{ '%.2f'|format(average_ticket_goal) }}</small>
+        {% endif %}
+    </div>
+
+
 </div>
 
 <br>
+
+
+<h3>Operational Metrics</h3>
+
 
 <div class="dashboard-cards">
     <div class="dashboard-card">
@@ -60,13 +242,224 @@
         <p>{{ monthly_completed_count }}</p>
     </div>
 
-    <div class="dashboard-card">
-        <h3>Average Ticket</h3>
-        <p>${{ '%.2f'|format(average_ticket) }}</p>
+    <div class="dashboard-card
+        {% if upcoming_appointments_7_days >= 20 %}
+        kpi-green
+    {% elif upcoming_appointments_7_days >= 10 %}
+        kpi-yellow
+    {% else %}
+        kpi-red
+    {% endif %}
+">
+        <h3>Upcoming Appointments</h3>
+        <p>{{ upcoming_appointments_7_days }}</p>
+        <small>Next 7 days</small>
     </div>
+
+
+    <div class="dashboard-card
+        {% if no_shows_month <= no_show_goal %}
+            kpi-green
+        {% elif no_shows_month <= (no_show_goal + 3) %}
+            kpi-yellow
+        {% else %}
+            kpi-red
+        {% endif %}
+    ">
+        <h3>No Shows This Month</h3>
+        <p>{{ no_shows_month }}</p>
+        <small>Goal: ≤ {{ no_show_goal }}</small>
+    </div>
+
+
+    <div class="dashboard-card
+        {% if cancellation_rate <= cancellation_rate_goal %}
+            kpi-green
+        {% elif cancellation_rate <= (cancellation_rate_goal * 150 / 100) %}
+            kpi-yellow
+        {% else %}
+            kpi-red
+        {% endif %}
+    ">
+        <h3>Cancellation Rate</h3>
+        <p>{{ '%.1f'|format(cancellation_rate) }}%</p>
+        <small>Goal: ≤ {{ '%.1f'|format(cancellation_rate_goal) }}%</small>
+    </div>
+
+
+    <div class="dashboard-card
+        {% if completion_rate >= completion_rate_goal %}
+            kpi-green
+        {% elif completion_rate >= (completion_rate_goal * 95 / 100) %}
+            kpi-yellow
+        {% else %}
+            kpi-red
+        {% endif %}
+    ">
+        <h3>Completion Rate</h3>
+        <p>{{ '%.1f'|format(completion_rate) }}%</p>
+        <small>Goal: {{ '%.1f'|format(completion_rate_goal) }}%</small>
+    </div>
+
 </div>
 
 <br>
+
+
+<h3>Client Insights</h3>
+
+<div class="dashboard-cards">
+    <div class="dashboard-card">
+        <h3>Total Clients</h3>
+        <p>{{ total_clients }}</p>
+    </div>
+
+    <div class="dashboard-card
+        {% if new_clients_goal > 0 and new_clients_month >= new_clients_goal %}
+            kpi-green
+        {% elif new_clients_goal > 0 and new_clients_month >= (new_clients_goal * 75 / 100) %}
+            kpi-yellow
+        {% elif new_clients_goal > 0 %}
+            kpi-red
+        {% else %}
+            kpi-neutral
+        {% endif %}
+    ">
+        <h3>New Clients</h3>
+        <p>{{ new_clients_month }}</p>
+        {% if new_clients_goal > 0 %}
+            <small>Goal: {{ new_clients_goal }}</small>
+        {% endif %}
+    </div>
+
+    <div class="dashboard-card">
+        <h3>Returning Clients</h3>
+        <p>{{ returning_clients }}</p>
+    </div>
+
+    <div class="dashboard-card">
+        <h3>Active Clients</h3>
+        <p>{{ active_clients }}</p>
+    </div>
+
+    <div class="dashboard-card">
+        <h3>Upcoming Birthdays</h3>
+        <p>{{ upcoming_birthdays }}</p>
+    </div>
+
+</div>
+
+</div>
+
+<br>
+
+<br>
+
+<h2>Goal Progress</h2>
+
+<div class="progress-wrap">
+
+    <div class="progress-row">
+        <div class="progress-label">
+            <span>Daily Revenue</span>
+            <span>{{ daily_revenue_progress }}%</span>
+        </div>
+        <div class="progress-bar-bg">
+            <div class="progress-bar-fill
+                {% if daily_revenue_progress >= 100 %}progress-green
+                {% elif daily_revenue_progress >= 75 %}progress-yellow
+                {% else %}progress-red
+                {% endif %}"
+                style="width: {% if daily_revenue_progress < 5 %}5{% elif dailyy_revenue_progress > 100 %}100{% else %}{{ daily_revenue_progress }}{% endif %}%;"
+            </div>
+        </div>
+    </div>
+
+    <div class="progress-row">
+        <div class="progress-label">
+            <span>Weekly Revenue</span>
+            <span>{{ weekly_revenue_progress }}%</span>
+        </div>
+        <div class="progress-bar-bg">
+            <div class="progress-bar-fill
+                {% if weekly_revenue_progress >= 100 %}progress-green
+                {% elif weekly_revenue_progress >= 75 %}progress-yellow
+                {% else %}progress-red
+                {% endif %}"
+                style="width: {% if weekly_revenue_progress < 5 %}5{% elif weekly_revenue_progress > 100 %}100{% else %}{{ weekly_revenue_progress }}{% endif %}%;"
+            </div>
+        </div>
+    </div>
+
+    <div class="progress-row">
+        <div class="progress-label">
+            <span>Monthly Revenue</span>
+            <span>{{ monthly_revenue_progress }}%</span>
+        </div>
+        <div class="progress-bar-bg">
+            <div class="progress-bar-fill
+                {% if monthly_revenue_progress >= 100 %}progress-green
+                {% elif monthly_revenue_progress >= 75 %}progress-yellow
+                {% else %}progress-red
+                {% endif %}"
+                style="width: {% if monthly_revenue_progress < 5 %}5{% elif monthly_revenue_progress > 100 %}100{% else %}{{ monthly_revenue_progress }}{% endif %}%;"
+            </div>
+        </div>
+    </div>
+
+    <div class="progress-row">
+        <div class="progress-label">
+            <span>Average Ticket</span>
+            <span>{{ average_ticket_progress }}%</span>
+        </div>
+        <div class="progress-bar-bg">
+            <div class="progress-bar-fill
+                {% if average_ticket_progress >= 100 %}progress-green
+                {% elif average_ticket_progress >= 75 %}progress-yellow
+                {% else %}progress-red
+                {% endif %}"
+                style="width: {% if average_ticket_progress < 5 %}5{% elif average_ticket_progress > 100 %}100{% else %}{{ average_ticket_progress }}{% endif %}%;"
+            </div>
+        </div>
+    </div>
+
+    <div class="progress-row">
+        <div class="progress-label">
+            <span>New Clients</span>
+            <span>{{ new_clients_progress }}%</span>
+        </div>
+        <div class="progress-bar-bg">
+            <div class="progress-bar-fill
+                {% if new_clients_progress >= 100 %}progress-green
+                {% elif new_clients_progress >= 75 %}progress-yellow
+                {% else %}progress-red
+                {% endif %}"
+                style="width: {% if new_clients_progress < 5 %}5{% elif new_clients_progress > 100 %}100{% else %}{{ new_clients_progress }}{% endif %}%;"
+            </div>
+        </div>
+    </div>
+
+    <div class="progress-row">
+        <div class="progress-label">
+            <span>Completion Rate</span>
+            <span>{{ completion_rate_progress }}%</span>
+        </div>
+        <div class="progress-bar-bg">
+            <div class="progress-bar-fill
+                {% if completion_rate_progress >= 100 %}progress-green
+                {% elif completion_rate_progress >= 95 %}progress-yellow
+                {% else %}progress-red
+                {% endif %}"
+                style="width: {% if completion_rate_progress < 5 %}5{% elif completion_rate_progress > 100 %}100{% else %}{{ completion_rate_progress }}{% endif %}%;"
+            </div>
+        </div>
+    </div>
+
+</div>
+
+
+
+
 
 <h2>Today's Completed Appointments</h2>
 
@@ -123,6 +516,8 @@
 
 <br>
 
+
+
 <h2>Most Booked Services</h2>
 
 {% if most_booked_services %}
@@ -131,6 +526,8 @@
         <tr>
             <th>Service</th>
             <th>Total Bookings</th>
+            <th>Total Revenue</th>
+            <th>Average Ticket</th>
         </tr>
     </thead>
     <tbody>
@@ -138,6 +535,8 @@
         <tr>
             <td>{{ row[0] }}</td>
             <td>{{ row[1] }}</td>
+            <td>${{ '%.2f'|format(row[2] or 0) }}</td>
+            <td>${{ '%.2f'|format(row[3] or 0) }}</td>
         </tr>
         {% endfor %}
     </tbody>
@@ -172,5 +571,107 @@
 {% else %}
 <p>No completed service revenue data for this month.</p>
 {% endif %}
+
+
+<br>
+
+<h2>Top 10 Clients (This Month)</h2>
+
+{% if top_clients %}
+<table>
+    <thead>
+        <tr>
+            <th>Client</th>
+            <th>Visits</th>
+            <th>Total Revenue</th>
+        </tr>
+    </thead>
+
+    <tbody>
+
+    {% for row in top_clients %}
+
+        <tr>
+
+            <td>
+                <a href="{{ url_for('edit_client', client_id=row[0]) }}">
+                    {{ row[1] }} {{ row[2] }}
+            </td>
+
+            <td>
+                {{ row[3] }}
+            </td>
+
+            <td>
+                ${{ '%.2f'|format(row[4]) }}
+            </td>
+
+        </tr>
+
+    {% endfor %}
+
+    </tbody>
+
+</table>
+
+{% else %}
+
+<p>No completed appointments this month.</p>
+
+{% endif %}
+
+
+<br>
+
+<h2>Revenue by Day of Week This Month</h2>
+
+{% if revenue_by_day %}
+<table>
+    <thead>
+        <tr>
+            <th>Day</th>
+            <th>Completed Appointments</th>
+            <th>Total Revenue</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in revenue_by_day %}
+        <tr>
+            <td>{{ row[0].strip() }}</td>
+            <td>{{ row[2] }}</td>
+            <td>${{ '%.2f'|format(row[3] or 0) }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No revenue by day data available this month.</p>
+{% endif %}
+
+<br>
+
+<h2>Peak Appointment Hours This Month</h2>
+
+{% if peak_hours %}
+<table>
+    <thead>
+        <tr>
+            <th>Hour</th>
+            <th>Total Appointments</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in peak_hours %}
+        <tr>
+            <td>{{ row[0] }}</td>
+            <td>{{ row[1] }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No appointment hour data available this month.</p>
+{% endif %}
+
 
 {% endblock %}

@@ -13,7 +13,19 @@
 <h1>Spa Management</h1>
 
 
+<div style="text-align:center; margin:30px 0;">
+
+    <img src="{{ url_for('static', filename='images/ps_spa_management.png') }}"
+         alt="Peach Suite Pro Help Center"
+         style="width:50%; max-width:1000px; height:auto; border-radius:12px;">
+
+</div>
+
+
+
+
 <div class="narrow-cards">
+    {{ section_card("Business Goals", "Your Business Goals", url_for('business_goals')) }}
     {{ section_card("Credit Processors", "Credit Card processors (Square)",  url_for('credit_processors')) }}
     {{ section_card("Business Loans", "Company Financing", url_for('loans_home')) }}
     {{ section_card("Owner Financing", "Ownder Funding Section", url_for('funding_home')) }}

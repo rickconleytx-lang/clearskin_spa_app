@@ -257,6 +257,36 @@ def inject_godaddy_import_alert():
 
 
 
+####################################
+###################################
+
+
+#   -------------------------- 
+#   
+#    PROGRESS  PERCENT   
+#
+#   -------------------------- 
+
+
+def progress_percent(actual, goal):
+    actual = float(actual or 0)
+    goal = float(goal or 0)
+
+    if goal <= 0:
+        return 0
+
+    return min(round((actual / goal) * 100, 1), 150)
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2917,15 +2947,27 @@ def reopen_feedback(feedback_id):
 
 
 
+
+
+
+
+
+
+
+
+
 #   -----------------------  
 #
 #    
-#           
+#     
 #
 #
 #     
 #       
 #  ----------------------     
+
+
+
 
 
 
@@ -5177,7 +5219,6 @@ def sms_group_preview():
         template=template,
         clients=clients
     )
-
 
 
 
@@ -8385,6 +8426,152 @@ def edit_email_template(template_id):
         template=template
    )
 
+    
+
+
+
+
+
+
+
+
+
+
+
+    
+#   --------------------------------------------------
+#     
+#   >>>>>  BUSINESS GOALS   <<<<<<<<<<<<<<<
+#       
+#   
+#       
+#           
+#
+#
+#
+#   --------------------------------------------------
+
+
+
+
+@app.route("/spa-management/business-goals", methods=["GET", "POST"])
+@login_required
+@spa_required
+def business_goals():
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    if request.method == "POST":
+        daily_revenue_goal = request.form.get("daily_revenue_goal") or 0
+        weekly_revenue_goal = request.form.get("weekly_revenue_goal") or 0
+        monthly_revenue_goal = request.form.get("monthly_revenue_goal") or 0
+        average_ticket_goal = request.form.get("average_ticket_goal") or 0
+
+        new_clients_goal = request.form.get("new_clients_goal") or 0
+        completion_rate_goal = request.form.get("completion_rate_goal") or 95
+        cancellation_rate_goal = request.form.get("cancellation_rate_goal") or 5
+        no_show_goal = request.form.get("no_show_goal") or 2
+
+        inactive_client_days = request.form.get("inactive_client_days") or 90
+        low_inventory_threshold = request.form.get("low_inventory_threshold") or 5
+
+        cur.execute("""
+            INSERT INTO spa_business_goals (
+                spa_id,
+                daily_revenue_goal,
+                weekly_revenue_goal,
+                monthly_revenue_goal,
+                average_ticket_goal,
+                new_clients_goal,
+                completion_rate_goal,
+                cancellation_rate_goal,
+                no_show_goal,
+                inactive_client_days,
+                low_inventory_threshold,
+                updated_at
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+            ON CONFLICT (spa_id)
+            DO UPDATE SET
+                daily_revenue_goal = EXCLUDED.daily_revenue_goal,
+                weekly_revenue_goal = EXCLUDED.weekly_revenue_goal,
+                monthly_revenue_goal = EXCLUDED.monthly_revenue_goal,
+                average_ticket_goal = EXCLUDED.average_ticket_goal,
+                new_clients_goal = EXCLUDED.new_clients_goal,
+                completion_rate_goal = EXCLUDED.completion_rate_goal,
+                cancellation_rate_goal = EXCLUDED.cancellation_rate_goal,
+                no_show_goal = EXCLUDED.no_show_goal,
+                inactive_client_days = EXCLUDED.inactive_client_days,
+                low_inventory_threshold = EXCLUDED.low_inventory_threshold,
+                updated_at = CURRENT_TIMESTAMP
+        """, (
+            spa_id,
+            daily_revenue_goal,
+            weekly_revenue_goal,
+            monthly_revenue_goal,
+            average_ticket_goal,
+            new_clients_goal,
+            completion_rate_goal,
+            cancellation_rate_goal,
+            no_show_goal,
+            inactive_client_days,
+            low_inventory_threshold
+        ))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        flash("Business goals updated successfully.", "success")
+        return redirect(url_for("business_goals"))
+
+    cur.execute("""
+        SELECT
+            daily_revenue_goal,
+            weekly_revenue_goal,
+            monthly_revenue_goal,
+            average_ticket_goal,
+            new_clients_goal,
+            completion_rate_goal,
+            cancellation_rate_goal,
+            no_show_goal,
+            inactive_client_days,
+            low_inventory_threshold
+        FROM spa_business_goals
+        WHERE spa_id = %s
+    """, (spa_id,))
+
+    goals = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    return render_template("business_goals.html", goals=goals)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
 
 
 
@@ -15639,7 +15826,7 @@ def income_report():
             COALESCE(i.income_type, '') AS income_type,  
             COALESCE(i.description, '') AS description,
             COALESCE(i.payment_method, '') AS payment_method,
-            COALESCE(cp.credit_processor_name, '') AS credit_processor_name,
+v            COALESCE(cp.credit_processor_name, '') AS credit_processor_name,
             COALESCE(i.processor_payment_id, '') AS processor_payment_id,
             COALESCE(i.service_amount, 0.00) AS service_amount,
             COALESCE(i.tip_amount, 0.00) AS tip_amount,
@@ -16642,6 +16829,48 @@ def reports():
 
     conn = get_db_connection()
     cur = conn.cursor()
+
+        # Business goals
+    cur.execute("""
+        SELECT
+            daily_revenue_goal,
+            weekly_revenue_goal,
+            monthly_revenue_goal,
+            average_ticket_goal,
+            new_clients_goal,
+            completion_rate_goal,
+            cancellation_rate_goal,
+            no_show_goal,
+            inactive_client_days,
+            low_inventory_threshold
+        FROM spa_business_goals
+        WHERE spa_id = %s
+    """, (spa_id,))
+
+    goals = cur.fetchone()
+
+    if goals:
+        daily_revenue_goal = goals[0] or 0
+        weekly_revenue_goal = goals[1] or 0
+        monthly_revenue_goal = goals[2] or 0
+        average_ticket_goal = goals[3] or 0
+        new_clients_goal = goals[4] or 0
+        completion_rate_goal = goals[5] or 95
+        cancellation_rate_goal = goals[6] or 5
+        no_show_goal = goals[7] or 2
+        inactive_client_days = goals[8] or 90
+        low_inventory_threshold = goals[9] or 5
+    else:
+        daily_revenue_goal = 0
+        weekly_revenue_goal = 0
+        monthly_revenue_goal = 0
+        average_ticket_goal = 0
+        new_clients_goal = 0
+        completion_rate_goal = 95
+        cancellation_rate_goal = 5
+        no_show_goal = 2
+        inactive_client_days = 90
+        low_inventory_threshold = 5
         
     today = date.today()
     week_start = today - timedelta(days=today.weekday())
@@ -16698,13 +16927,22 @@ def reports():
     """, [week_start, week_end] + spa_params)
     weekly_totals = cur.fetchone() or (0, 0, 0, 0)
     
-    # Most booked services
+
+    # Most booked services with revenue and average ticket
     cur.execute(f"""
         SELECT
             COALESCE(s.service_name, 'Unknown Service') AS service_name,
-            COUNT(*) AS total_booked
+            COUNT(*) AS total_booked,
+            COALESCE(SUM(CASE 
+                WHEN a.status = 'completed' THEN a.price_at_booking 
+                ELSE 0 
+            END), 0) AS total_revenue,
+            COALESCE(AVG(CASE 
+                WHEN a.status = 'completed' THEN a.price_at_booking 
+                ELSE NULL 
+            END), 0) AS average_ticket
         FROM appointments a
-        LEFT JOIN services s 
+        LEFT JOIN services s
             ON a.service_id = s.service_id
            AND a.spa_id = s.spa_id
         WHERE a.status IN ('booked', 'completed')
@@ -16714,6 +16952,7 @@ def reports():
         LIMIT 10
     """, spa_params)
     most_booked_services = cur.fetchall() or []
+
 
     # Cancelled appointments count
     cur.execute(f"""
@@ -16779,6 +17018,128 @@ def reports():
     """, [month_start, next_month_start] + spa_params)
     average_ticket = cur.fetchone()[0] or 0
         
+
+        # Total clients
+    client_spa_filter = ""
+    client_spa_params = []
+
+    if role != "master_admin":
+        client_spa_filter = "WHERE spa_id = %s"
+        client_spa_params = [spa_id]
+
+    cur.execute(f"""
+        SELECT COUNT(*)
+        FROM clients
+        {client_spa_filter}
+    """, client_spa_params)
+    total_clients = cur.fetchone()[0] or 0
+
+
+    # New clients this month
+    if role != "master_admin":
+        cur.execute("""
+            SELECT COUNT(*)
+            FROM clients
+            WHERE spa_id = %s
+              AND created_at >= %s
+              AND created_at < %s
+        """, [spa_id, month_start, next_month_start])
+    else:
+        cur.execute("""
+            SELECT COUNT(*)
+            FROM clients
+            WHERE created_at >= %s
+              AND created_at < %s
+        """, [month_start, next_month_start])
+
+    new_clients_month = cur.fetchone()[0] or 0
+
+
+    # Returning clients this month
+    cur.execute(f"""
+        SELECT COUNT(DISTINCT a.client_id)
+        FROM appointments a
+        WHERE a.appointment_date >= %s
+          AND a.appointment_date < %s
+          AND a.status = 'completed'
+          {spa_filter}
+    """, [month_start, next_month_start] + spa_params)
+    returning_clients = cur.fetchone()[0] or 0
+
+
+    # YTD Revenue
+    year_start = date(today.year, 1, 1)
+
+    cur.execute(f"""
+        SELECT COALESCE(SUM(a.price_at_booking), 0)
+        FROM appointments a
+        WHERE a.appointment_date >= %s
+          AND a.appointment_date <= %s
+          AND a.status = 'completed'
+          {spa_filter}
+    """, [year_start, today] + spa_params)
+    ytd_revenue = cur.fetchone()[0] or 0
+
+
+        # Upcoming appointments - next 7 days
+    next_7_days = today + timedelta(days=7)
+
+    cur.execute(f"""
+        SELECT COUNT(*)
+        FROM appointments a
+        WHERE a.appointment_date > %s
+          AND a.appointment_date <= %s
+          AND a.status = 'booked'
+          {spa_filter}
+    """, [today, next_7_days] + spa_params)
+    upcoming_appointments_7_days = cur.fetchone()[0] or 0
+
+
+    # No shows this month
+    cur.execute(f"""
+        SELECT COUNT(*)
+        FROM appointments a
+        WHERE a.appointment_date >= %s
+          AND a.appointment_date < %s
+          AND a.status = 'no show'
+          {spa_filter}
+    """, [month_start, next_month_start] + spa_params)
+    no_shows_month = cur.fetchone()[0] or 0
+
+
+    # Cancellation rate this month
+    cur.execute(f"""
+        SELECT COUNT(*)
+        FROM appointments a
+        WHERE a.appointment_date >= %s
+          AND a.appointment_date < %s
+          {spa_filter}
+    """, [month_start, next_month_start] + spa_params)
+    total_month_appointments = cur.fetchone()[0] or 0
+
+    cur.execute(f"""
+        SELECT COUNT(*)
+        FROM appointments a
+        WHERE a.appointment_date >= %s
+          AND a.appointment_date < %s
+          AND a.status = 'cancelled'
+          {spa_filter}
+    """, [month_start, next_month_start] + spa_params)
+    cancelled_month = cur.fetchone()[0] or 0
+
+    cancellation_rate = (
+        cancelled_month / total_month_appointments * 100
+        if total_month_appointments > 0 else 0
+    )
+
+
+    # Completion rate this month
+    completion_rate = (
+        monthly_completed_count / total_month_appointments * 100
+        if total_month_appointments > 0 else 0
+    )
+
+
     # Revenue by service for current month
     cur.execute(f"""
         SELECT
@@ -16797,7 +17158,194 @@ def reports():
         ORDER BY total_revenue DESC, service_name ASC
     """, [month_start, next_month_start] + spa_params)
     revenue_by_service = cur.fetchall() or []
-        
+
+
+
+    # Top 10 Clients by Revenue (Current Month)
+    cur.execute(f"""
+        SELECT
+            c.client_id,
+            c.first_name,
+            c.last_name,
+            COUNT(a.appointment_id) AS visits,
+            COALESCE(SUM(a.price_at_booking), 0) AS total_revenue
+        FROM appointments a
+        JOIN clients c
+            ON a.client_id = c.client_id
+           AND a.spa_id = c.spa_id
+        WHERE a.status = 'completed'
+          AND a.appointment_date >= %s
+          AND a.appointment_date < %s
+          {spa_filter}
+        GROUP BY
+            c.client_id,
+            c.first_name,
+            c.last_name
+        ORDER BY
+            total_revenue DESC,
+            visits DESC,
+            c.last_name
+        LIMIT 10
+    """, [month_start, next_month_start] + spa_params)
+
+    top_clients = cur.fetchall() or []
+
+    # Revenue by Day of Week - Current Month
+    cur.execute(f"""
+        SELECT
+            TO_CHAR(a.appointment_date, 'Day') AS day_name,
+            EXTRACT(DOW FROM a.appointment_date) AS day_number,
+            COUNT(*) AS completed_count,
+            COALESCE(SUM(a.price_at_booking), 0) AS total_revenue
+        FROM appointments a
+        WHERE a.appointment_date >= %s
+          AND a.appointment_date < %s
+          AND a.status = 'completed'
+          {spa_filter}
+        GROUP BY day_name, day_number
+        ORDER BY day_number
+    """, [month_start, next_month_start] + spa_params)
+    revenue_by_day = cur.fetchall() or []
+
+
+    # Peak Appointment Hours - Current Month
+    cur.execute(f"""
+        SELECT
+            TO_CHAR(a.appointment_time, 'HH12:00 AM') AS appointment_hour,
+            COUNT(*) AS total_appointments
+        FROM appointments a
+        WHERE a.appointment_date >= %s
+          AND a.appointment_date < %s
+          AND a.status IN ('booked', 'completed')
+          AND a.appointment_time IS NOT NULL
+          {spa_filter}
+        GROUP BY TO_CHAR(a.appointment_time, 'HH12:00 AM'),
+                 EXTRACT(HOUR FROM a.appointment_time)
+        ORDER BY EXTRACT(HOUR FROM a.appointment_time)
+    """, [month_start, next_month_start] + spa_params)
+    peak_hours = cur.fetchall() or []
+
+
+
+    # Goal progress percentages
+    weekly_revenue_progress = progress_percent(
+        weekly_revenue,
+        weekly_revenue_goal
+    )
+
+
+
+    daily_revenue_progress = progress_percent(daily_revenue, daily_revenue_goal)
+    weekly_revenue_progress = progress_percent(weekly_revenue, weekly_revenue_goal)
+    monthly_revenue_progress = progress_percent(monthly_revenue, monthly_revenue_goal)
+    average_ticket_progress = progress_percent(average_ticket, average_ticket_goal)
+    new_clients_progress = progress_percent(new_clients_month, new_clients_goal)
+    completion_rate_progress = progress_percent(completion_rate, completion_rate_goal)
+
+
+
+    ############################################################
+    # BUSINESS GOAL PROGRESS
+    ############################################################
+
+    daily_revenue_progress = progress_percent(
+        daily_revenue,
+        daily_revenue_goal
+    )
+
+    weekly_revenue_progress = progress_percent(
+        weekly_revenue,
+        weekly_revenue_goal
+    )
+
+    monthly_revenue_progress = progress_percent(
+        monthly_revenue,
+        monthly_revenue_goal
+    )
+
+    average_ticket_progress = progress_percent(
+        average_ticket,
+        average_ticket_goal
+    )
+
+    new_clients_progress = progress_percent(
+        new_clients_month,
+        new_clients_goal
+    )
+
+    completion_rate_progress = progress_percent(
+        completion_rate,
+        completion_rate_goal
+    )
+
+
+
+     ############################################################
+     # BUSINESS HEALTH SCORE
+     ############################################################
+
+    def score_from_progress(progress, max_points):
+        progress = float(progress or 0)
+
+        if progress >= 100:
+            return max_points
+        elif progress >= 75:
+            return round(max_points * 0.75, 1)
+        elif progress >= 50:
+            return round(max_points * 0.50, 1)
+        else:
+            return round(max_points * 0.25, 1)
+
+
+    weekly_revenue_score = score_from_progress(weekly_revenue_progress, 20)
+    monthly_revenue_score = score_from_progress(monthly_revenue_progress, 20)
+    average_ticket_score = score_from_progress(average_ticket_progress, 20)
+    new_clients_score = score_from_progress(new_clients_progress, 15)
+
+    if completion_rate >= 95:
+        completion_score = 15
+    elif completion_rate >= 85:
+        completion_score = 10
+    else:
+        completion_score = 5
+
+    if cancellation_rate <= 5:
+        cancellation_score = 5
+    elif cancellation_rate <= 10:
+        cancellation_score = 3
+    else:
+        cancellation_score = 1
+
+    if no_shows_month <= 2:
+        no_show_score = 5
+    elif no_shows_month <= 4:
+        no_show_score = 3
+    else:
+        no_show_score = 1
+
+    business_health_score = round(
+        weekly_revenue_score
+        + monthly_revenue_score
+        + average_ticket_score
+        + new_clients_score
+        + completion_score
+        + cancellation_score
+        + no_show_score
+    )
+
+    if business_health_score >= 90:
+        business_health_label = "Excellent"
+        business_health_class = "kpi-green"
+    elif business_health_score >= 75:
+        business_health_label = "Good"
+        business_health_class = "kpi-yellow"
+    elif business_health_score >= 60:
+        business_health_label = "Needs Attention"
+        business_health_class = "kpi-yellow"
+    else:
+        business_health_label = "Critical"
+        business_health_class = "kpi-red"
+
     cur.close()
     conn.close()
           
@@ -16816,7 +17364,44 @@ def reports():
         monthly_revenue=monthly_revenue,   
         monthly_completed_count=monthly_completed_count,
         average_ticket=average_ticket,
-        revenue_by_service=revenue_by_service
+        total_clients=total_clients,
+        new_clients_month=new_clients_month,
+        returning_clients=returning_clients,
+        ytd_revenue=ytd_revenue,
+        revenue_by_service=revenue_by_service,
+        upcoming_appointments_7_days=upcoming_appointments_7_days,
+        no_shows_month=no_shows_month,
+        cancellation_rate=cancellation_rate,
+        completion_rate=completion_rate,
+        top_clients=top_clients,
+        revenue_by_day=revenue_by_day,
+        peak_hours=peak_hours,
+        daily_revenue_goal=daily_revenue_goal,
+        weekly_revenue_goal=weekly_revenue_goal,
+        monthly_revenue_goal=monthly_revenue_goal,
+        average_ticket_goal=average_ticket_goal,
+        new_clients_goal=new_clients_goal,
+        completion_rate_goal=completion_rate_goal,
+        cancellation_rate_goal=cancellation_rate_goal,
+        no_show_goal=no_show_goal,
+        inactive_client_days=inactive_client_days,
+        low_inventory_threshold=low_inventory_threshold,
+        daily_revenue_progress=daily_revenue_progress,
+        weekly_revenue_progress=weekly_revenue_progress,
+        monthly_revenue_progress=monthly_revenue_progress,
+        average_ticket_progress=average_ticket_progress,
+        new_clients_progress=new_clients_progress,
+        completion_rate_progress=completion_rate_progress,
+        business_health_score=business_health_score,
+        business_health_label=business_health_label,
+        business_health_class=business_health_class,
+        weekly_revenue_score=weekly_revenue_score,
+        monthly_revenue_score=monthly_revenue_score,
+        average_ticket_score=average_ticket_score,
+        new_clients_score=new_clients_score,
+        completion_score=completion_score,
+        cancellation_score=cancellation_score,
+        no_show_score=no_show_score
     )
 
 

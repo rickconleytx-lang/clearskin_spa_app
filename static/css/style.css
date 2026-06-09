@@ -2530,3 +2530,163 @@ td:nth-child(3) {
     margin-bottom: 15px;
 }
 
+.kpi-green {
+    border-left: 6px solid #28a745;
+}
+
+.kpi-yellow {
+    border-left: 6px solid #ffc107;
+}
+
+.kpi-red {
+    border-left: 6px solid #dc3545;
+}
+
+.kpi-neutral {
+    border-left: 6px solid #ccc;
+}
+
+.progress-wrap {
+    margin: 20px 0;
+}
+
+.progress-row {
+    margin-bottom: 14px;
+}
+
+.progress-label {
+    display: flex;
+    justify-content: space-between;
+    font-weight: bold;
+    margin-bottom: 4px;
+}
+
+.progress-bar-bg {
+    width: 100%;
+    height: 18px;
+    background: #e9ecef;
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.progress-bar-fill {
+    height: 100%;
+    border-radius: 12px;
+}
+
+.progress-green {
+    background: #28a745;
+}
+
+.progress-yellow {
+    background: #ffc107;
+}
+
+.progress-red {
+    background: #dc3545;
+}
+
+.status-dot {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+}
+
+.green {
+    background: #28a745;
+}
+
+.yellow {
+    background: #ffc107;
+}
+
+.red {
+    background: #dc3545;
+}
+
+.business-health-table {
+    width: auto;
+    border-collapse: collapse;
+    margin-top: 15px;
+}
+
+.business-health-table th,
+.business-health-table td {
+    padding: 6px 10px;
+    white-space: nowrap;
+}
+
+.business-health-table th {
+    text-align: left;
+    font-weight: bold;
+    border-bottom: 2px solid #ddd;
+}
+
+.business-health-table td:first-child {
+    width: 35px;
+    text-align: center;
+}
+
+.business-health-table td:nth-child(2) {
+    width: 220px;
+}
+
+.business-health-table td:nth-child(3) {
+    width: 100px;
+    text-align: right;
+}
+
+.business-health-table td:nth-child(4) {
+    width: 100px;
+    text-align: right;
+}
+
+.business-health-table td:nth-child(2) {
+    min-width: 180px;
+}
+
+.health-container {
+    display: flex;
+    gap: 25px;
+    align-items: flex-start;
+    margin-bottom: 30px;
+    flex-wrap: wrap;
+}
+
+.health-card {
+    width: 260px;
+    flex-shrink: 0;
+}
+
+.health-table {
+    flex: 1;
+}
+
+.business-health-table {
+    width: auto;
+    border-collapse: collapse;
+    margin-top: 10px;
+}
+
+.business-health-table th,
+.business-health-table td {
+    padding: 6px 10px;
+    white-space: nowrap;
+}
+
+.business-health-table th {
+    text-align: left;
+    border-bottom: 2px solid #ddd;
+}
+
+.business-health-table td:first-child {
+    width: 30px;
+    text-align: center;
+}
+
+.business-health-table td:nth-child(3),
+.business-health-table td:nth-child(4),
+.business-health-table td:nth-child(5) {
+    text-align: right;
+}

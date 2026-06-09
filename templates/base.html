@@ -50,11 +50,18 @@
 
     <!-- Navigation -->
     <nav class="main-nav">
-        <a class="nav-btn" href="{{ url_for('home') }}">Control Panel</a>
+        <a class="nav-btn" href="{{ url_for('home') }}">
+            Control<br> Panel
+        </a>
+        <a class="nav-btn" href="{{ url_for('reports') }}">
+            🍑 Business<br> Summary
+        </a> 
         <a class="nav-btn" href="{{ url_for('dashboard') }}">Dashboard</a>
         <a class="nav-btn" href="{{ url_for('calendar_view') }}">Calendar</a>
         <a class="nav-btn" href="{{ url_for('appointments') }}">Appointments</a>      
-        <a class="nav-btn" href="{{ url_for('client_management') }}">Client Management</a>
+        <a class="nav-btn" href="{{ url_for('client_management') }}">
+            Client<br> Management
+        </a>
     {% if session.get("user_id") %}
         <a class="btn" href="{{ url_for('logout') }}"
                                onclick="return confirm('Are you sure you want to LOG OUT?')">
