@@ -17346,6 +17346,19 @@ def reports():
         business_health_label = "Critical"
         business_health_class = "kpi-red"
 
+    cur.execute("""
+        SELECT COALESCE(SUM(price_at_booking), 0)
+        FROM appointments
+        WHERE appointment_date = %s
+          AND status IN ('booked', 'completed')
+          AND spa_id = %s
+    """, (today, spa_id))
+
+    expected_revenue = cur.fetchone()[0] or 0
+        
+
+
+
     cur.close()
     conn.close()
           
@@ -17401,7 +17414,12 @@ def reports():
         new_clients_score=new_clients_score,
         completion_score=completion_score,
         cancellation_score=cancellation_score,
-        no_show_score=no_show_score
+        no_show_score=no_show_score,
+        # appointments_today=appointments_today,
+        # expected_revenue=expected_revenue,
+        # birthdays_today=birthdays_today,
+        # business_alerts=business_alerts,
+        # opportunity=opportunity
     )
 
 
