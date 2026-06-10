@@ -128,6 +128,206 @@ def current_spa_id():
 
 
 
+#   ---------------------
+#
+#  
+#
+#  
+#   --------------------
+
+    
+
+############################################################
+# EXECUTIVE DASHBOARD DATA
+############################################################
+        
+def get_dashboard_data(spa_id):
+    
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    dashboard = {}
+    
+    from datetime import date, timedelta
+    
+    
+    today = date.today()
+    
+    cur.execute("""
+    SELECT COUNT(*)
+    FROM appointments
+    WHERE appointment_date=%s
+    AND spa_id=%s
+    AND status IN ('booked','completed')
+    """,(today,spa_id))  
+ 
+    dashboard["appointments_today"] = cur.fetchone()[0] or 0
+
+        # Expected revenue today
+    cur.execute("""
+        SELECT COALESCE(SUM(price_at_booking), 0)
+        FROM appointments
+        WHERE appointment_date = %s
+          AND spa_id = %s
+          AND status IN ('booked', 'completed')
+    """, (today, spa_id))
+
+    dashboard["expected_revenue"] = cur.fetchone()[0] or 0
+
+
+    cur.execute("""
+        SELECT COUNT(*)
+        FROM clients
+        WHERE spa_id = %s
+    """, (spa_id,))
+
+    dashboard["total_clients"]  = cur.fetchone()[0] or 0
+
+
+    #####################################################
+    
+    #   TODAY
+
+    ####################################################
+
+
+
+
+    # Birthdays today
+    cur.execute("""
+        SELECT COUNT(*)
+        FROM clients
+        WHERE spa_id = %s
+          AND birth_date IS NOT NULL
+          AND EXTRACT(MONTH FROM birth_date) = EXTRACT(MONTH FROM CURRENT_DATE)
+          AND EXTRACT(DAY FROM birth_date) = EXTRACT(DAY FROM CURRENT_DATE)
+    """, (spa_id,))
+
+    dashboard["birthdays_today"] = cur.fetchone()[0] or 0
+
+
+
+    # Completed appointments today
+    cur.execute("""
+        SELECT COUNT(*)
+        FROM appointments
+        WHERE appointment_date=%s
+          AND spa_id=%s
+          AND status='completed'
+    """,(today,spa_id))
+
+    dashboard["completed_today"] = cur.fetchone()[0] or 0
+
+
+
+    # Upcoming appointments tomorrow
+    tomorrow = today + timedelta(days=1)
+
+    cur.execute("""
+        SELECT COUNT(*)
+        FROM appointments
+        WHERE appointment_date = %s
+          AND spa_id = %s
+          AND status IN ('booked', 'completed')
+    """, (tomorrow, spa_id))
+
+    dashboard["appointments_tomorrow"] = cur.fetchone()[0] or 0
+ 
+
+    # Cancelled appointments today
+    cur.execute("""
+        SELECT COUNT(*)
+        FROM appointments
+        WHERE appointment_date=%s
+          AND spa_id=%s
+          AND status='cancelled'
+    """,(today,spa_id))
+
+    dashboard["cancelled_today"] = cur.fetchone()[0] or 0
+
+
+    # No shows today
+    cur.execute("""
+        SELECT COUNT(*)
+        FROM appointments
+        WHERE appointment_date=%s
+          AND spa_id=%s
+          AND status='no show'
+    """,(today,spa_id))
+
+    dashboard["no_shows_today"] = cur.fetchone()[0] or 0
+
+
+
+
+    # Next appointment today
+    cur.execute("""
+        SELECT
+            a.appointment_time,
+            c.first_name,
+            c.last_name
+        FROM appointments a
+        JOIN clients c
+          ON a.client_id = c.client_id
+         AND a.spa_id = c.spa_id
+        WHERE a.appointment_date = %s
+          AND a.spa_id = %s
+          AND a.status = 'booked'
+          AND a.appointment_time >= CURRENT_TIME
+        ORDER BY a.appointment_time
+        LIMIT 1
+    """, (today, spa_id))
+
+    dashboard["next_appointment"] = cur.fetchone()
+
+
+
+
+
+
+
+
+
+   #####################################################
+    
+    #   WEEK
+    
+   #################################################### 
+ 
+
+
+
+    #####################################################
+    
+    #   MONTH
+    
+    #################################################### 
+ 
+
+    #####################################################
+    
+    #   ALERTS
+    
+    #################################################### 
+ 
+
+    ############################################################
+    # BUSINESS HEALTH
+    ############################################################
+
+
+    dashboard["business_health_score"] = 0
+    dashboard["business_health_label"] = "Temp Data - Not Calculated"
+    dashboard["business_health_class"] = "kpi-neutral"
+
+
+
+    cur.close()
+    conn.close()
+    
+    return dashboard
+    
+    
 
 
 
@@ -344,16 +544,17 @@ def get_spa_current_time():
 
 
 
+##########################################
+#ENGLISH   EMAIL_UNSUBSCRIBE_FOOTER = """
 
-EMAIL_UNSUBSCRIBE_FOOTER = """
+#########################################
 
---------------------------------------------------
+# You are receiving emails from Peach Suite Pro.
+#
+#To unsubscribe from future marketing emails,
+#reply UNSUBSCRIBE or contact our office directly.
+#"""
 
-You are receiving emails from Clear Skin Esthetics.
-
-To unsubscribe from future marketing emails,
-reply UNSUBSCRIBE or contact our office directly.
-"""
 
 
 def add_email_footer(body):
@@ -375,17 +576,44 @@ def send_email(to_email, subject, body):
 
 
 
+#########################################
 
+#  SPANISH EMAIL UNSUBSCRIBE FOOTER
 
+#########################################
 
-
-
-def send_email(to_email, subject, body):
-    ...
+#Está recibiendo correos electrónicos de Peach Suite Pro.
+#
+#Para cancelar su suscripción a futuros correos promocionales,
+#responda con la palabra UNSUBSCRIBE o comuníquese directamente con nuestra oficina.    
 
 
 
     
+def add_spanish_email_footer(body):
+    
+    body = (body or "").strip()
+    
+    if "unsubscribe" in body.lower():
+        return body
+    
+    return f"{body}{EMAIL_UNSUBSCRIBE_FOOTER}"
+    
+    
+def send_email(to_email, subject, body):
+    
+    final_body = add_email_footer(body)  
+            
+    # existing Mailgun code below
+            
+
+
+
+######################################
+
+def send_email(to_email, subject, body):
+    ...
+
         
     
 #   -------------------------
@@ -3514,12 +3742,12 @@ def send_sms(to_number, message):
 
  
 
-#   ----------------------
+###############################  
 #
 #   DEF  SMS SEND
+#                 SMS OPT OUT
 #
-#
-#   ----------------------
+##############################3
 
 
 SMS_OPT_OUT_TEXT = "\n\nReply STOP to opt out."
@@ -16799,10 +17027,37 @@ def dashboard():
 
 
 
+        
+#  ------------------------------
+#       
+#      MORNING BRIEFING
+#  
+#  -----------------------------
+   
+@app.route("/morning_briefing")
+@login_required
+@spa_required
+def morning_briefing():
 
+    spa_id = session["spa_id"]
 
+    # New helper
+    dashboard = get_dashboard_data(spa_id)
 
+    # Temporary placeholder until Business Health is rebuilt
+    business_health = {
+        "score": None,
+        "label": "Not Calculated"
+    }
 
+    today = date.today()
+
+    return render_template(
+        "morning_briefing.html",
+        dashboard=dashboard,
+        business_health=business_health,
+        today=today
+    )
 
 
 
@@ -16825,6 +17080,7 @@ from datetime import date, datetime, timedelta
 @spa_required
 def reports():
     spa_id = current_spa_id()
+    dashboard = get_dashboard_data(spa_id)
     role = session.get("role")
 
     conn = get_db_connection()
@@ -17415,6 +17671,7 @@ def reports():
         completion_score=completion_score,
         cancellation_score=cancellation_score,
         no_show_score=no_show_score,
+        dashboard=dashboard,
         # appointments_today=appointments_today,
         # expected_revenue=expected_revenue,
         # birthdays_today=birthdays_today,

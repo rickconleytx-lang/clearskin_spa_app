@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+
+
+<div class="dashboard-card">
+        
+    <h2>🍑 Business Health</h2>
+    
+    <h1>{{ business_health.score if business_health.score is not none else 0 }}/100</h1>
+
+    <h3>{{ business_health.label }}</h3>
+       
+</div>
+
+
+<h2>🌅 Daily Briefing</h2>
+
+<div class="dashboard-card">
+
+    <h2>Good Morning!</h2>
+
+    <p><strong>{{ today.strftime('%A, %B %d, %Y') }}</strong></p>
+
+    <hr>
+
+    <p>
+        📅 Appointments Today:
+        <strong>{{ dashboard.appointments_today }}</strong>
+    </p>
+
+    <p>
+        💰 Expected Revenue:
+        <strong>${{ '%.2f'|format(dashboard.expected_revenue) }}</strong>
+    </p>
+
+    <p>
+        🎂 Birthdays Today:
+        <strong>{{ dashboard.birthdays_today }}</strong>
+    </p>
+
+
+    <p>
+        📅 Appointments Tomorrow:
+        <strong>{{ dashboard.appointments_tomorrow }}</strong>
+    </p>
+
+
+    {% if dashboard.next_appointment %}
+    <p>
+        ⏰ Next Appointment:
+        <strong>
+            {{ dashboard.next_appointment[0] }}
+            —
+            {{ dashboard.next_appointment[1] }} {{ dashboard.next_appointment[2] }}
+        </strong>
+    </p>
+
+
+    {% else %}
+    <p>
+        ⏰ Next Appointment:
+        <strong>None remaining today</strong>
+    </p>
+    {% endif %}
+
+
+</div>
+
+
+
+<br>
+
+<a class="btn" href="{{ url_for('reports') }}">View Executive Dashboard</a>
+<a class="btn" href="{{ url_for('calendar_view') }}">Go to Calendar</a>
+
+{% endblock %}
+
+

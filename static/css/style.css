@@ -2751,3 +2751,15 @@ td:nth-child(3) {
     transform: translateY(-1px);
     transition: 0.2s ease;
 }
+
+.dashboard-card h1 {
+    font-weight: 500;
+}
+
+.dashboard-card h2 {
+    font-weight: 600;
+}
+
+.dashboard-card h3 {
+    font-weight: 400;
+}
