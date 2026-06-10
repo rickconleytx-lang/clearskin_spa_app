@@ -546,73 +546,63 @@ def get_spa_current_time():
 
 ##########################################
 #ENGLISH   EMAIL_UNSUBSCRIBE_FOOTER = """
-
+#SPANISH
 #########################################
 
-# You are receiving emails from Peach Suite Pro.
-#
-#To unsubscribe from future marketing emails,
-#reply UNSUBSCRIBE or contact our office directly.
-#"""
+EMAIL_UNSUBSCRIBE_FOOTER_EN = """
+
+----------------------------------------
+
+You are receiving emails from Peach Suite Pro.
+
+To unsubscribe from future marketing emails,
+reply UNSUBSCRIBE or contact our office directly.
+"""
+
+EMAIL_UNSUBSCRIBE_FOOTER_ES = """
+
+----------------------------------------
+
+Usted está recibiendo correos electrónicos de Peach Suite Pro.
+
+Para cancelar la suscripción a futuros correos electrónicos de marketing,
+responda UNSUBSCRIBE o comuníquese directamente con nuestra oficina.
+"""
 
 
 
-def add_email_footer(body):
+def add_email_footer(body, language="English"):
 
     body = (body or "").strip()
 
     if "unsubscribe" in body.lower():
         return body
 
-    return f"{body}{EMAIL_UNSUBSCRIBE_FOOTER}"
+    if language == "Spanish":
+        return f"{body}{EMAIL_UNSUBSCRIBE_FOOTER_ES}"
+
+    return f"{body}{EMAIL_UNSUBSCRIBE_FOOTER_EN}"
+
 
 
 def send_email(to_email, subject, body):
 
-    final_body = add_email_footer(body)
+    final_body = add_email_footer(body, spa_name)
 
     # existing Mailgun code below
 
 
 
 
-#########################################
-
-#  SPANISH EMAIL UNSUBSCRIBE FOOTER
-
-#########################################
-
-#Está recibiendo correos electrónicos de Peach Suite Pro.
-#
-#Para cancelar su suscripción a futuros correos promocionales,
-#responda con la palabra UNSUBSCRIBE o comuníquese directamente con nuestra oficina.    
 
 
 
-    
-def add_spanish_email_footer(body):
-    
-    body = (body or "").strip()
-    
-    if "unsubscribe" in body.lower():
-        return body
-    
-    return f"{body}{EMAIL_UNSUBSCRIBE_FOOTER}"
-    
-    
-def send_email(to_email, subject, body):
-    
-    final_body = add_email_footer(body)  
-            
-    # existing Mailgun code below
-            
 
 
 
-######################################
 
-def send_email(to_email, subject, body):
-    ...
+
+
 
         
     
@@ -1397,7 +1387,10 @@ def match_existing_client_booking(incoming_booking_id):
 import os
 import requests
 
-def send_email(to, subject, text):
+def send_email(to, subject, body):
+
+    final_body = add_email_footer(body)
+
     mailgun_api_key = os.environ.get("MAILGUN_API_KEY", "").strip()
     mailgun_domain = os.environ.get("MAILGUN_DOMAIN", "").strip()
     mailgun_from = os.environ.get("MAILGUN_FROM", "").strip()
@@ -1409,25 +1402,13 @@ def send_email(to, subject, text):
             "from": mailgun_from,
             "to": [to],
             "subject": subject,
-            "text": text
+            "text": final_body
         },
         timeout=20
     )
+
     return response
 
-
-
-
-@app.route("/test-email")
-def test_email():
-    resp = send_email(
-        to="your_real_email@gmail.com",
-        subject="Mailgun Test from App",
-        text="If you got this, the app integration works."
-    )
-    print("MAILGUN STATUS:", resp.status_code)
-    print("MAILGUN BODY:", resp.text)
-    return "EMAIL ROUTE RAN"
 
 
 #  ----------------------
@@ -3750,7 +3731,10 @@ def send_sms(to_number, message):
 ##############################3
 
 
-SMS_OPT_OUT_TEXT = "\n\nReply STOP to opt out."
+
+SMS_OPT_OUT_TEXT_EN = "\n\nReply STOP to opt out."
+SMS_OPT_OUT_TEXT_ES = "\n\nResponda STOP para cancelar los mensajes."
+
 
 
 def add_sms_opt_out(message_body):
@@ -7166,26 +7150,12 @@ def general_email_send():
             subject = render_email_template(subject_template, context)
             body = render_email_template(body_template, context)
             
-            email_footer = f"""
-
-             ----------------------------------
-
-            You are receiving this email because you are a client of {spa_name}.
-
-            To unsubscribe from marketing emails, reply with:
-            UNSUBSCRIBE
-
-            {spa_name}
-            """
-
-            body = body + email_footer
-
 
             try:
                 response = send_email(
                     to=email,
                     subject=subject,
-                    text=body
+                    body=body
                 )
 
                 print("MAILGUN STATUS:", response.status_code, flush=True)
@@ -7409,7 +7379,7 @@ def send_one_birthday_offer_email(client_id):
         subject = render_email_template(subject_template, context)
         body = render_email_template(body_template, context)
 
-        response = send_email(to=email, subject=subject, text=body)
+        response = send_email(to=email, subject=subject, body=body)
 
         if response.status_code == 200:
             cur.execute("""
@@ -7547,7 +7517,7 @@ def send_all_birthday_offer_emails():
             subject = render_email_template(subject_template, context)
             body = render_email_template(body_template, context)
 
-            response = send_email(to=email, subject=subject, text=body)
+            response = send_email(to=email, subject=subject, body=body)
 
             if response.status_code == 200:
                 cur.execute("""
