@@ -152,6 +152,19 @@ def get_dashboard_data(spa_id):
     
     
     today = date.today()
+    # Month boundaries
+    month_start = today.replace(day=1)
+
+    if month_start.month == 12:
+        next_month_start = month_start.replace(
+            year=month_start.year + 1,
+            month=1
+        )
+    else:
+        next_month_start = month_start.replace(
+            month=month_start.month + 1
+       )    
+
     
     cur.execute("""
     SELECT COUNT(*)
@@ -302,6 +315,30 @@ def get_dashboard_data(spa_id):
     #   MONTH
     
     #################################################### 
+
+    # No Shows This Month
+    cur.execute("""
+        SELECT COUNT(*)
+        FROM appointments
+        WHERE appointment_date >= %s
+          AND appointment_date < %s
+          AND status = 'no show'
+          AND spa_id = %s
+    """, (
+        month_start,
+        next_month_start,
+        spa_id
+    ))
+
+    dashboard["no_shows_month"] = cur.fetchone()[0] or 0    
+
+
+
+
+
+
+
+
  
 
     #####################################################
