@@ -140,6 +140,18 @@ def current_spa_id():
 ############################################################
 # EXECUTIVE DASHBOARD DATA
 ############################################################
+
+# ============================================================
+# 🍑 MASTER DASHBOARD DATA HELPER
+#
+# Used by:
+#   - Morning Briefing
+#   - Business Summary
+#   - Future Home Page
+#   - Future Reports Center
+#
+# Add new dashboard metrics here.
+# =======================================================
         
 def get_dashboard_data(spa_id):
     
@@ -152,6 +164,8 @@ def get_dashboard_data(spa_id):
     
     
     today = date.today()
+    week_start = today - timedelta(days=today.weekday())
+    week_end = week_start + timedelta(days=6)
     # Month boundaries
     month_start = today.replace(day=1)
 
@@ -295,7 +309,16 @@ def get_dashboard_data(spa_id):
 
 
 
+     # Daily Revenue
+    cur.execute("""
+        SELECT COALESCE(SUM(price_at_booking), 0)
+        FROM appointments
+        WHERE appointment_date = %s
+        AND status = 'completed'
+        AND spa_id = %s
+    """, (today, spa_id))
 
+    dashboard["daily_revenue"] = cur.fetchone()[0] or 0   
 
 
 
@@ -306,8 +329,40 @@ def get_dashboard_data(spa_id):
     #   WEEK
     
    #################################################### 
- 
 
+    # Weekly Appointment Totals
+    cur.execute("""
+        SELECT
+            COUNT(*) AS total_appointments,
+            COUNT(*) FILTER (WHERE status = 'booked') AS booked_count,
+            COUNT(*) FILTER (WHERE status = 'completed') AS completed_count,
+            COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled_count
+        FROM appointments
+        WHERE appointment_date BETWEEN %s AND %s
+            AND spa_id = %s
+    """, (week_start, week_end, spa_id))
+
+    weekly_totals = cur.fetchone() or (0, 0, 0, 0)
+
+    dashboard["weekly_totals"] = weekly_totals
+    dashboard["weekly_total_appointments"] = weekly_totals[0]
+    dashboard["weekly_booked_count"] = weekly_totals[1]
+    dashboard["weekly_completed_count"] = weekly_totals[2]
+    dashboard["weekly_cancelled_count"] = weekly_totals[3]
+
+
+
+    # Weekly revenue
+    cur.execute(f"""
+        SELECT COALESCE(SUM(a.price_at_booking), 0)
+        FROM appointments a
+        WHERE a.appointment_date BETWEEN %s AND %s
+          AND a.status = 'completed'
+          AND a.spa_id = %s
+    """, [week_start, week_end, spa_id])
+    weekly_revenue = cur.fetchone()[0] or 0
+
+    dashboard["weekly_revenue"] = weekly_revenue
 
 
     #####################################################
@@ -324,7 +379,7 @@ def get_dashboard_data(spa_id):
           AND appointment_date < %s
           AND status = 'no show'
           AND spa_id = %s
-    """, (
+        """, (
         month_start,
         next_month_start,
         spa_id
@@ -334,9 +389,71 @@ def get_dashboard_data(spa_id):
 
 
 
+    # New Clients This Month
+    cur.execute("""
+        SELECT COUNT(*)
+        FROM clients
+        WHERE spa_id = %s
+        AND created_at >= %s
+        AND created_at < %s
+    """, (spa_id, month_start, next_month_start))
+
+    dashboard["new_clients_month"] = cur.fetchone()[0] or 0
+
+
+    # Monthly revenue
+    cur.execute(f"""
+        SELECT COALESCE(SUM(a.price_at_booking), 0)
+        FROM appointments a
+        WHERE a.appointment_date >= %s
+        AND a.appointment_date < %s
+        AND a.status = 'completed'
+        AND a.spa_id = %s
+    """, (month_start, next_month_start, spa_id))
+
+    monthly_revenue = cur.fetchone()[0] or 0
+
+    dashboard["monthly_revenue"] = monthly_revenue
 
 
 
+    # Average ticket this month
+    cur.execute("""
+        SELECT COALESCE(AVG(a.price_at_booking), 0)
+        FROM appointments a
+        WHERE a.appointment_date >= %s
+        AND a.appointment_date < %s
+        AND a.status = 'completed'
+        AND a.price_at_booking IS NOT NULL
+        AND a.spa_id = %s
+    """, (month_start, next_month_start, spa_id))
+
+    average_ticket = cur.fetchone()[0] or 0
+
+    dashboard["average_ticket"] = average_ticket
+
+
+
+
+
+
+    #####################################################
+        
+    #   ALL TIME.... NOT WEEK, MONTH OR YEAR
+          
+    ####################################################
+
+ 
+
+    # Cancelled Appointments (All Time)
+    cur.execute("""
+    SELECT COUNT(*)
+    FROM appointments
+    WHERE status = 'cancelled'
+      AND spa_id = %s
+    """, (spa_id,))
+
+    dashboard["cancelled_count"] = cur.fetchone()[0] or 0
 
 
  
@@ -17282,7 +17399,7 @@ def reports():
     average_ticket = cur.fetchone()[0] or 0
         
 
-        # Total clients
+    # Total clients
     client_spa_filter = ""
     client_spa_params = []
 
@@ -17344,7 +17461,7 @@ def reports():
     ytd_revenue = cur.fetchone()[0] or 0
 
 
-        # Upcoming appointments - next 7 days
+    # Upcoming appointments - next 7 days
     next_7_days = today + timedelta(days=7)
 
     cur.execute(f"""
