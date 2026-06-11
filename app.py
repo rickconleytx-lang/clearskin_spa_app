@@ -38,9 +38,6 @@ MAILGUN_API_KEY = os.getenv("MAILGUN_API_KEY")
 MAILGUN_DOMAIN = os.getenv("MAILGUN_DOMAIN")
 MAILGUN_FROM = os.getenv("MAILGUN_FROM")
 
-TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
-TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
-TWILIO_MESSAGING_SERVICE_SID = os.getenv("TWILIO_MESSAGING_SERVICE_SID")
 SMS_ENABLED = os.getenv("SMS_ENABLED", "false").lower() == "true"
 
 
@@ -3866,48 +3863,6 @@ def get_sms_template(spa_id, template_type):
 from services.sms_service import send_sms_telnyx
 
 
-def send_sms_message(to_phone, message_body):
-
-    sms_enabled = os.getenv("SMS_ENABLED", "false").lower() == "true"
-
-    final_message_body = add_sms_opt_out(message_body)
-
-    if not sms_enabled:
-        return {
-            "success": False,
-            "status": "logged",
-            "provider_message_id": None,
-            "twilio_status": None,
-            "twilio_error_code": None,
-            "twilio_error_message": "SMS sending disabled",
-            "final_message_body": final_message_body
-        }
-
-    try:
-        result = send_sms_telnyx(to_phone, final_message_body)
-
-        message_data = result.get("data", result)
-
-        return {
-            "success": True,
-            "status": "sent",
-            "provider_message_id": message_data.get("id"),
-            "twilio_status": message_data.get("record_type", "sent"),
-            "twilio_error_code": None,
-            "twilio_error_message": None,
-            "final_message_body": final_message_body
-        }
-
-    except Exception as e:
-        return {
-            "success": False,
-            "status": "failed",
-            "provider_message_id": None,
-            "twilio_status": None,
-            "twilio_error_code": None,
-            "twilio_error_message": str(e),
-            "final_message_body": final_message_body
-        }
 
 
  
@@ -3946,9 +3901,9 @@ def send_sms_message(to_phone, message_body):
             "success": False,
             "status": "logged",
             "provider_message_id": None,
-            "twilio_status": None,
-            "twilio_error_code": None,
-            "twilio_error_message": "SMS sending disabled",
+            "provider_status": None,
+            "provider_error_code": None,
+            "provider_error_message": "SMS sending disabled",
             "final_message_body": final_message_body
         }
 
@@ -3963,9 +3918,9 @@ def send_sms_message(to_phone, message_body):
             "success": True,
             "status": "sent",
             "provider_message_id": message_data.get("id"),
-            "twilio_status": message_data.get("record_type", "accepted"),
-            "twilio_error_code": None,
-            "twilio_error_message": None,
+            "provider_status": message_data.get("record_type", "accepted"),
+            "provider_error_code": None,
+            "provider_error_message": None,
             "final_message_body": final_message_body
         }
 
@@ -3974,9 +3929,9 @@ def send_sms_message(to_phone, message_body):
             "success": False,
             "status": "failed",
             "provider_message_id": None,
-            "twilio_status": None,
-            "twilio_error_code": None,
-            "twilio_error_message": str(e),
+            "provider_status": None,
+            "provider_error_code": None,
+            "provider_error_message": str(e),
             "final_message_body": final_message_body
         }
 
@@ -4647,9 +4602,9 @@ def test_gmail_import():
 #   --------------------------
 #
 #
-#     TWILIO WEBHOOK
+#     SMS WEBHOOK
 #
-#
+#.  LEGACY TWILIO WEBHOOK
 #
 #   ----------------------
 
@@ -5698,9 +5653,9 @@ def sms_group_send():
 
                 status = result.get("status")
                 provider_message_id = result.get("provider_message_id")
-                twilio_status = result.get("twilio_status")
-                twilio_error_code = result.get("twilio_error_code")
-                twilio_error_message = result.get("twilio_error_message")
+                provider_status = result.get("provider_status")
+                provider_error_code = result.get("provider_error_code")
+                provider_error_message = result.get("provider_error_message")
 
                 if result.get("success"):
                     sent_count += 1
@@ -5712,9 +5667,9 @@ def sms_group_send():
 
                 status = "error"
                 provider_message_id = None
-                twilio_status = None
-                twilio_error_code = None
-                twilio_error_message = str(sms_error)
+                provider_status = None
+                provider_error_code = None
+                provider_error_message = str(sms_error)
                 failed_count += 1
 
             cur.execute("""
@@ -5741,9 +5696,9 @@ def sms_group_send():
                 "outbound",
                 status,
                 provider_message_id,
-                twilio_status,
-                twilio_error_code,
-                twilio_error_message
+                provider_status,
+                provider_error_code,
+                provider_error_message
             ))
 
         conn.commit()
@@ -5754,6 +5709,7 @@ def sms_group_send():
     finally:
         cur.close()
         conn.close()
+
 
 
 
@@ -5948,6 +5904,9 @@ def sms_history_all():
 def refresh_sms_status(sms_log_id):
     spa_id = current_spa_id()
 
+    flash("SMS status refresh is not available after migrating to Telnyx. Status updates will be handled by Telnyx webhooks.", "info")
+    return redirect(url_for("sms_history_all"))
+
     account_sid = os.getenv("TWILIO_ACCOUNT_SID")
     auth_token = os.getenv("TWILIO_AUTH_TOKEN")
 
@@ -6030,6 +5989,9 @@ def refresh_sms_status(sms_log_id):
 @spa_required
 def refresh_all_sms_statuses():
     spa_id = current_spa_id()
+
+    flash("SMS status refresh is not available after migrating to Telnyx. Status updates will be handled by Telnyx webhooks.", "info")
+    return redirect(url_for("sms_history_all"))
 
     account_sid = os.getenv("TWILIO_ACCOUNT_SID")
     auth_token = os.getenv("TWILIO_AUTH_TOKEN")
