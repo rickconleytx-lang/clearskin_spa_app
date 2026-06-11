@@ -18,6 +18,7 @@ file_data = io.BytesIO()
 load_dotenv()
 from flask import abort
 from flask import g
+from services.sms_service import send_sms_telnyx
 from twilio.rest import Client
 
 app = Flask(__name__)
@@ -3862,17 +3863,51 @@ def get_sms_template(spa_id, template_type):
 
 #   --------------------
 
-from twilio.rest import Client
+from services.sms_service import send_sms_telnyx
 
-def send_sms(to_number, message):
-    client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
-    return client.messages.create(
-        body=message,
-        from_=TWILIO_PHONE_NUMBER,
-        to=to_number
-    )
+def send_sms_message(to_phone, message_body):
 
+    sms_enabled = os.getenv("SMS_ENABLED", "false").lower() == "true"
+
+    final_message_body = add_sms_opt_out(message_body)
+
+    if not sms_enabled:
+        return {
+            "success": False,
+            "status": "logged",
+            "provider_message_id": None,
+            "twilio_status": None,
+            "twilio_error_code": None,
+            "twilio_error_message": "SMS sending disabled",
+            "final_message_body": final_message_body
+        }
+
+    try:
+        result = send_sms_telnyx(to_phone, final_message_body)
+
+        message_data = result.get("data", result)
+
+        return {
+            "success": True,
+            "status": "sent",
+            "provider_message_id": message_data.get("id"),
+            "twilio_status": message_data.get("record_type", "sent"),
+            "twilio_error_code": None,
+            "twilio_error_message": None,
+            "final_message_body": final_message_body
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "status": "failed",
+            "provider_message_id": None,
+            "twilio_status": None,
+            "twilio_error_code": None,
+            "twilio_error_message": str(e),
+            "final_message_body": final_message_body
+        }
 
 
  
@@ -3897,7 +3932,7 @@ def add_sms_opt_out(message_body):
     if "reply stop" in message_body.lower():
         return message_body
 
-    return f"{message_body}{SMS_OPT_OUT_TEXT}"
+    return f"{message_body}{SMS_OPT_OUT_TEXT_EN}"
 
 
 def send_sms_message(to_phone, message_body):
@@ -3918,36 +3953,19 @@ def send_sms_message(to_phone, message_body):
         }
 
     try:
-        account_sid = os.getenv("TWILIO_ACCOUNT_SID")
-        auth_token = os.getenv("TWILIO_AUTH_TOKEN")
-        messaging_service_sid = os.getenv("TWILIO_MESSAGING_SERVICE_SID")
+        result = send_sms_telnyx(to_phone, final_message_body)
 
-        if not messaging_service_sid:
-            return {
-                "success": False,
-                "status": "failed",
-                "provider_message_id": None,
-                "twilio_status": None,
-                "twilio_error_code": None,
-                "twilio_error_message": "Missing TWILIO_MESSAGING_SERVICE_SID",
-                "final_message_body": final_message_body
-            }
+        print("TELNYX RESULT:", result, flush=True)
 
-        client = Client(account_sid, auth_token)
-
-        message = client.messages.create(
-            body=final_message_body,
-            messaging_service_sid=messaging_service_sid,
-            to=to_phone
-        )
+        message_data = result.get("data", result)
 
         return {
             "success": True,
             "status": "sent",
-            "provider_message_id": message.sid,
-            "twilio_status": message.status,
-            "twilio_error_code": message.error_code,
-            "twilio_error_message": message.error_message,
+            "provider_message_id": message_data.get("id"),
+            "twilio_status": message_data.get("record_type", "accepted"),
+            "twilio_error_code": None,
+            "twilio_error_message": None,
             "final_message_body": final_message_body
         }
 
@@ -3961,7 +3979,6 @@ def send_sms_message(to_phone, message_body):
             "twilio_error_message": str(e),
             "final_message_body": final_message_body
         }
-
 
 
 
