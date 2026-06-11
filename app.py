@@ -1022,7 +1022,9 @@ def load_spa():
         "logout", 
         "static",
         "mailgun_godaddy_booking",
-        "godaddy_booking_intake"
+        "godaddy_booking_intake",
+        "telnyx_sms_webhook"
+
      ):
         return
 
@@ -1282,6 +1284,17 @@ def switch_spa(spa_id):
 
 
 
+#  -------------------------
+#
+#   TELNYX WEBHOOK
+#                  
+#  -------------------------
+
+
+@app.route("/webhooks/telnyx/sms", methods=["POST"])
+def telnyx_sms_webhook():
+    from services.telnyx_webhook import process_telnyx_webhook
+    return process_telnyx_webhook()
 
 
 
