@@ -169,42 +169,43 @@ def get_messaging_onboarding(spa_id):
 #
 ######################################
 
-
-        
-def save_messaging_onboarding(
-        spa_id,
-        legal_business_name,
-        dba_name,
-        ein,
-        business_type,
-        industry,
-        years_in_business,
-        owner_name,
-        owner_email,
-        owner_phone,
-        business_address1,
-        business_address2,
-        city,
-        state,
-        postal_code,
-        country
-): 
-
-
+def save_messaging_onboarding(spa_id, **fields):
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute("""
-        SELECT onboarding_id
-        FROM messaging_onboarding
-        WHERE spa_id = %s
-    """, (spa_id,))
+    allowed_fields = [
+        "legal_business_name",
+        "dba_name",
+        "ein",
+        "business_type",
+        "industry",
+        "years_in_business",
 
-    existing = cur.fetchone()
- 
+        "owner_name",
+        "owner_email",
+        "owner_phone",
+        "business_address1",
+        "business_address2",
+        "city",
+        "state",
+        "postal_code",
+        "country",
 
-    conn = get_db_connection()
-    cur = conn.cursor()
+        "website_url",
+        "privacy_policy_url",
+        "terms_url",
+        "sms_policy_url",
+        "opt_in_method",
+        "consent_language",
+        "sample_message_1",
+        "sample_message_2",
+    ]
+
+    clean_fields = {
+        key: value
+        for key, value in fields.items()
+        if key in allowed_fields
+    }
 
     cur.execute("""
         SELECT onboarding_id
@@ -215,97 +216,131 @@ def save_messaging_onboarding(
     existing = cur.fetchone()
 
     if existing:
+        if clean_fields:
+            set_clause = ", ".join(
+                [f"{key} = %s" for key in clean_fields.keys()]
+            )
 
-        cur.execute("""
-            UPDATE messaging_onboarding
-            SET
-                legal_business_name=%s,
-                dba_name=%s,
-                ein=%s,
-                business_type=%s,
-                industry=%s,
-                years_in_business=%s,
-                owner_name=%s,
-                owner_email=%s,
-                owner_phone=%s,
-                business_address1=%s,
-                business_address2=%s,
-                city=%s,
-                state=%s,
-                postal_code=%s,
-                country=%s,
-                updated_at=CURRENT_TIMESTAMP
-            WHERE spa_id=%s
-        """, (
-            legal_business_name,
-            dba_name,
-            ein,
-            business_type,
-            industry,
-            years_in_business,
-            owner_name,
-            owner_email,
-            owner_phone,
-            business_address1,
-            business_address2,
-            city,
-            state,
-            postal_code,
-            country,
-            spa_id
-        ))
+            values = list(clean_fields.values())
+            values.append(spa_id)
+
+            cur.execute(f"""
+                UPDATE messaging_onboarding
+                SET {set_clause}
+                WHERE spa_id = %s
+            """, values)
 
     else:
+        columns = ["spa_id"] + list(clean_fields.keys())
+        placeholders = ["%s"] * len(columns)
+        values = [spa_id] + list(clean_fields.values())
 
-        cur.execute("""
+        cur.execute(f"""
             INSERT INTO messaging_onboarding
-            (
-                spa_id,
-                legal_business_name,
-                dba_name,
-                ein,
-                business_type,
-                industry,
-                years_in_business,
-                owner_name,
-                owner_email,
-                owner_phone,
-                business_address1,
-                business_address2,
-                city,
-                state,
-                postal_code,
-                country
-            )
-            VALUES
-            (%s,%s,%s,%s,%s,%s,%s)
-        """, (
-            spa_id,
-            legal_business_name,
-            dba_name,
-            ein,
-            business_type,
-            industry,
-            years_in_business,
-            owner_name,
-            owner_email,
-            owner_phone,
-            business_address1,
-            business_address2,
-            city,
-            state,
-            postal_code,
-            country
-        ))
+            ({", ".join(columns)})
+            VALUES ({", ".join(placeholders)})
+        """, values)
 
     conn.commit()
-
     cur.close()
     conn.close()
 
 
+############################################################
+# MESSAGING COMPLIANCE CHECK
+############################################################
 
+def run_messaging_compliance_check(onboarding):
+    issues = []
+    score = 100
+
+    if not onboarding:
+        return {
+            "score": 0,
+            "status": "Not Started",
+            "issues": ["Messaging onboarding has not been started yet."]
+        }
+
+    website_url = onboarding.get("website_url")
+    privacy_policy_url = onboarding.get("privacy_policy_url")
+    terms_url = onboarding.get("terms_url")
+    sms_policy_url = onboarding.get("sms_policy_url")
+    consent_language = onboarding.get("consent_language") or ""
+    sample_message_1 = onboarding.get("sample_message_1") or ""
+    sample_message_2 = onboarding.get("sample_message_2") or ""
+
+    if not website_url:
+        issues.append("Website URL is missing.")
+        score -= 15
+
+    if not privacy_policy_url:
+        issues.append("Privacy Policy URL is missing.")
+        score -= 15
+
+    if not terms_url:
+        issues.append("Terms & Conditions URL is missing.")
+        score -= 10
+
+    if not sms_policy_url:
+        issues.append("SMS consent policy URL is missing.")
+        score -= 15
+
+    required_consent_phrases = [
+        "STOP",
+        "HELP",
+        "message and data rates",
+        "consent is not a condition"
+    ]
+
+    for phrase in required_consent_phrases:
+        if phrase.lower() not in consent_language.lower():
+            issues.append(f"Consent language may be missing: {phrase}")
+            score -= 10
+
+    if not sample_message_1:
+        issues.append("Sample message 1 is missing.")
+        score -= 10
+
+    if not sample_message_2:
+        issues.append("Sample message 2 is missing.")
+        score -= 10
+
+    score = max(score, 0)
+
+    if score >= 85:
+        status = "Ready for Review"
+    elif score >= 60:
+        status = "Needs Review"
+    else:
+        status = "Incomplete"
+
+    return {
+        "score": score,
+        "status": status,
+        "issues": issues
+    }
     
+
+
+
+############################################################
+#    MESSAGING COMPLIANCE CHECK - ONBOARDING
+############################################################
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ############################################################
 # EXECUTIVE DASHBOARD DATA
@@ -2686,36 +2721,31 @@ def messaging_compliance_onboarding():
     spa_id = session.get("spa_id")   # use your existing helper
     step = request.args.get("step", 1, type=int)
 
+
     if request.method == "POST":
 
+        form_data = dict(request.form)
+        form_data.pop("action", None)   # Don't save the button value
+
         save_messaging_onboarding(
-
-            spa_id,
-
-            request.form.get("legal_business_name"),
-            request.form.get("dba_name"),
-            request.form.get("ein"),
-            request.form.get("business_type"),
-            request.form.get("industry"),
-            request.form.get("years_in_business"),
-
-            request.form.get("owner_name"),
-            request.form.get("owner_email"),
-            request.form.get("owner_phone"),
-            request.form.get("business_address1"),
-            request.form.get("business_address2"),
-            request.form.get("city"),
-            request.form.get("state"),
-            request.form.get("postal_code"),
-            request.form.get("country")
+            spa_id=spa_id,
+            **form_data
         )
 
-        next_step = min(step + 1, 7)
+
+
+        action = request.form.get("action")
+
         flash("Onboarding information saved.", "success")
+
+        if action == "save_exit":
+            return redirect(url_for("messaging_compliance_dashboard"))
+
+        next_step = min(step + 1, 7)
 
         return redirect(
             url_for("messaging_compliance_onboarding", step=next_step)
-        )
+)
 
     onboarding = get_messaging_onboarding(spa_id)
 

@@ -11,6 +11,9 @@
 
 <progress value="{{ step }}" max="7" style="width:100%;"></progress>
 
+
+<form method="POST" action="{{ url_for('messaging_compliance_onboarding', step=step) }}">
+
 </div>
 
 {% if step == 1 %}
@@ -22,8 +25,6 @@
     <h2>Business Information</h2>
     
 </div>
-
-<form method="POST" action="{{ url_for('messaging_compliance_onboarding', step=step) }}">
     <label>Legal Business Name</label><br>
     <input type="text" name="legal_business_name"
            value="{{ onboarding.legal_business_name if onboarding else '' }}"
@@ -56,79 +57,141 @@
            value="{{ onboarding.years_in_business if onboarding else '' }}"
            style="width:100%;"><br><br>
 
-     {% endif %}
 
-     {% if step == 2 %} 
-   
+{% elif step == 2 %} 
     <hr>
 
-<h2>Step 2: Contact Information</h2>
+    <h2>Step 2: Contact Information</h2>
+        
+    <label>Owner Name</label><br>
+    <input type="text" name="owner_name"
+            value="{{ onboarding.owner_name if onboarding else '' }}"
+            style="width:100%;"><br><br>
 
-<label>Owner Name</label><br>
-<input type="text" name="owner_name"
-       value="{{ onboarding.owner_name if onboarding else '' }}"
-       style="width:100%;"><br><br>
+    <label>Owner Email</label><br>
+    <input type="email" name="owner_email"
+            value="{{ onboarding.owner_email if onboarding else '' }}"
+            style="width:100%;"><br><br>
 
-<label>Owner Email</label><br>
-<input type="email" name="owner_email"
-       value="{{ onboarding.owner_email if onboarding else '' }}"
-       style="width:100%;"><br><br>
+    <label>Owner Phone</label><br>
+    <input type="text" name="owner_phone"
+            value="{{ onboarding.owner_phone if onboarding else '' }}"
+            style="width:100%;"><br><br>
 
-<label>Owner Phone</label><br>
-<input type="text" name="owner_phone"
-       value="{{ onboarding.owner_phone if onboarding else '' }}"
-       style="width:100%;"><br><br>
+    <label>Business Address 1</label><br>
+    <input type="text" name="business_address1"
+            value="{{ onboarding.business_address1 if onboarding else '' }}"
+            style="width:100%;"><br><br>
 
-<label>Business Address 1</label><br>
-<input type="text" name="business_address1"
-       value="{{ onboarding.business_address1 if onboarding else '' }}"
-       style="width:100%;"><br><br>
+    <label>Business Address 2</label><br>
+    <input type="text" name="business_address2"
+            value="{{ onboarding.business_address2 if onboarding else '' }}"
+            style="width:100%;"><br><br>
 
-<label>Business Address 2</label><br>
-<input type="text" name="business_address2"
-       value="{{ onboarding.business_address2 if onboarding else '' }}"
-       style="width:100%;"><br><br>
+    <label>City</label><br>
+    <input type="text" name="city"
+            value="{{ onboarding.city if onboarding else '' }}"
+            style="width:100%;"><br><br>
 
-<label>City</label><br>
-<input type="text" name="city"
-       value="{{ onboarding.city if onboarding else '' }}"
-       style="width:100%;"><br><br>
+    <label>State</label><br>
+    <input type="text" name="state"
+            value="{{ onboarding.state if onboarding else '' }}"
+            style="width:100%;"><br><br>
 
-<label>State</label><br>
-<input type="text" name="state"
-       value="{{ onboarding.state if onboarding else '' }}"
-       style="width:100%;"><br><br>
+    <label>Postal Code</label><br>
+    <input type="text" name="postal_code"
+            value="{{ onboarding.postal_code if onboarding else '' }}"
+            style="width:100%;"><br><br>
 
-<label>Postal Code</label><br>
-<input type="text" name="postal_code"
-       value="{{ onboarding.postal_code if onboarding else '' }}"
-       style="width:100%;"><br><br>
+    <label>Country</label><br>
+    <input type="text" name="country"
+            value="{{ onboarding.country if onboarding else 'United States' }}"
+            style="width:100%;"><br><br>
 
-<label>Country</label><br>
-<input type="text" name="country"
-       value="{{ onboarding.country if onboarding else 'United States' }}"
-       style="width:100%;"><br><br>
+    
+{% elif step == 3 %}
+    <hr>
 
+    <h3>Step 3: Website & Compliance</h3>
+
+    <div class="mb-3">
+    <label class="form-label">Website URL</label>
+    <input type="url" name="website_url" class="form-control"
+            value="{{ onboarding.website_url or '' }}">
+    </div>
+<br>
+    <div class="mb-3">
+    <label class="form-label">Privacy Policy URL</label>
+    <input type="url" name="privacy_policy_url" class="form-control"
+            value="{{ onboarding.privacy_policy_url or '' }}">
+    </div>
+<br>
+    <div class="mb-3">
+    <label class="form-label">Terms & Conditions URL</label>
+    <input type="url" name="terms_url" class="form-control"
+            value="{{ onboarding.terms_url or '' }}">
+    </div>
+<br>
+    <div class="mb-3">
+    <label class="form-label">SMS Consent Policy URL</label>
+    <input type="url" name="sms_policy_url" class="form-control"
+            value="{{ onboarding.sms_policy_url or '' }}">
+    </div>
+<br>
+<br>
+    <div class="mb-3">
+    <label class="form-label">Opt-In Method</label>
+    <select name="opt_in_method" class="form-select">
+        <option value="">Select opt-in method</option>
+        <option value="Website Form" {% if onboarding.opt_in_method == 'Website Form' %}selected{% endif %}>Website Form</option>
+        <option value="Client Intake Form" {% if onboarding.opt_in_method == 'Client Intake Form' %}selected{% endif %}>Client Intake Form</option>
+        <option value="Paper Form" {% if onboarding.opt_in_method == 'Paper Form' %}selected{% endif %}>Paper Form</option>
+        <option value="In-App Consent" {% if onboarding.opt_in_method == 'In-App Consent' %}selected{% endif %}>In-App Consent</option>
+    </select>
+    </div>
+<br>
+    <div class="mb-3">
+    <label class="form-label">Consent Language</label>
+        <textarea name="consent_language" class="form-control" rows="5">{{ onboarding.consent_language or '' }}</textarea>
+    </div>
+
+    <div class="mb-3">
+    <label class="form-label">Sample Message 1</label>
+    <textarea name="sample_message_1" class="form-control" rows="3">{{ onboarding.sample_message_1 or '' }}</textarea>
+    </div>
+
+    <div class="mb-3">
+    <label class="form-label">Sample Message 2</label>
+    <textarea name="sample_message_2" class="form-control" rows="3">{{ onboarding.sample_message_2 or '' }}</textarea>
+    </div>
+
+{% endif %}  
+      
+ 
+       
+
+
+    <div style="margin-top:30px;">
+
+        {% if step > 1 %}
+            <a href="{{ url_for('messaging_compliance_onboarding', step=step-1) }}">
+                ← Previous
+            </a>
+            &nbsp;&nbsp;
         {% endif %}
 
-
-<div style="margin-top:30px;">
-
-    {% if step > 1 %}
-        <a href="{{ url_for('messaging_compliance_onboarding', step=step-1) }}">
-            ← Previous
-        </a>
-        &nbsp;&nbsp;
-    {% endif %}
-
-    &nbsp;&nbsp;&nbsp;
-
-    <button type="submit">
-    Save & Continue
+        &nbsp;&nbsp;&nbsp  
+        
+    <button type="submit" name="action" value="save_exit">
+        Save & Exit
     </button>
 
-    </div>
-    </div>
+    <button type="submit" name="action" value="next">
+        Save & Continue
+    </button>
+
+        </div>
+        </div>
 
 </form>
 
