@@ -2,8 +2,84 @@
 
 {% block content %}
 
-<h1>Messaging Compliance Dashboard</h1>
+<h1>Messaging Compliance Center</h1>
 
-<p>This page is under development.</p>
+<p>
+    Manage onboarding, compliance, messaging approvals,
+    documentation, and migration tools for Peach Suite Pro.
+</p>
+
+<div class="dashboard-card">
+    <h2>Platform Readiness</h2>
+
+    <p><strong>Status:</strong> Setup in Progress</p>
+    <p><strong>Readiness Score:</strong> 52%</p>
+
+    <p>
+        Business Information: Pending<br>
+        Website Compliance: Pending<br>
+        SMS Consent Review: Pending<br>
+        Brand Registration: Future Automation<br>
+        Campaign Registration: Future Automation
+    </p>
+</div>
+
+<div class="dashboard-grid">
+
+    <div class="dashboard-card">
+        <h3>Compliance Overview</h3>
+        <p>Review messaging readiness, missing items, and overall compliance status.</p>
+        <a href="{{ url_for('messaging_compliance_overview') }}">Open</a>
+    </div>
+
+    <div class="dashboard-card">
+        <h3>Onboarding Wizard</h3>
+        <p>Guide new spas through business information, consent setup, and messaging readiness.</p>
+        <a href="{{ url_for('messaging_compliance_onboarding') }}">Open</a>
+    </div>
+
+    <div class="dashboard-card">
+        <h3>Brand Registration</h3>
+        <p>Track future Telnyx brand registration, vetting, and approval status.</p>
+        <a href="{{ url_for('messaging_compliance_brand') }}">Open</a>
+    </div>
+
+    <div class="dashboard-card">
+        <h3>Campaign Registration</h3>
+        <p>Track campaign setup, use case, approval status, and phone number assignment.</p>
+        <a href="{{ url_for('messaging_compliance_campaign') }}">Open</a>
+    </div>
+
+    <div class="dashboard-card">
+        <h3>Template Review</h3>
+        <p>Review SMS templates for opt-out language, consent risk, and marketing content.</p>
+        <a href="{{ url_for('messaging_compliance_templates') }}">Open</a>
+    </div>
+
+    <div class="dashboard-card">
+        <h3>Data Migration Center</h3>
+        <p>Plan imports from CSV, Excel, Square, Vagaro, GlossGenius, and other platforms.</p>
+        <a href="{{ url_for('messaging_compliance_migration') }}">Open</a>
+    </div>
+
+    <div class="dashboard-card">
+        <h3>Documents</h3>
+        <p>Store compliance policies, consent language, approval records, and review notes.</p>
+        <a href="{{ url_for('messaging_compliance_documents') }}">Open</a>
+    </div>
+
+    <div class="dashboard-card">
+        <h3>Audit Log</h3>
+        <p>Track compliance actions, approvals, reviews, and system-generated changes.</p>
+        <a href="{{ url_for('messaging_compliance_audit_log') }}">Open</a>
+    </div>
+
+    <div class="dashboard-card">
+        <h3>Platform Status</h3>
+        <p>Future home for provider status, webhook health, and messaging readiness score.</p>
+        <a href="#">Coming Soon</a>
+    </div>
+
+</div>
 
 {% endblock %}

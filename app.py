@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, Response, send_file, redirect, url_for, session, flash
 from datetime import date, timedelta, datetime
 from psycopg2 import sql
+from psycopg2.extras import RealDictCursor
 from apscheduler.schedulers.background import BackgroundScheduler
 import os
 from decimal import Decimal
@@ -126,12 +127,183 @@ def current_spa_id():
 
 
 
-#   ---------------------
+# ############################################
+#
+#  Messaging Compliance Center - Onboarding 
 #
 #  
+###############################################
+
+
+def get_messaging_onboarding(spa_id):
+    ...
+
+
+
+def save_messaging_onboarding(spa_id, form_data):
+    ...
+
+
+def get_messaging_onboarding(spa_id):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    cur.execute("""
+        SELECT *
+        FROM messaging_onboarding
+        WHERE spa_id = %s
+    """, (spa_id,))
+
+    row = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    return row
+
+
+####################################
 #
-#  
-#   --------------------
+#
+#  SAVE MESSAGING ONBOARDING
+#
+######################################
+
+
+        
+def save_messaging_onboarding(
+        spa_id,
+        legal_business_name,
+        dba_name,
+        ein,
+        business_type,
+        industry,
+        years_in_business,
+        owner_name,
+        owner_email,
+        owner_phone,
+        business_address1,
+        business_address2,
+        city,
+        state,
+        postal_code,
+        country
+): 
+
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT onboarding_id
+        FROM messaging_onboarding
+        WHERE spa_id = %s
+    """, (spa_id,))
+
+    existing = cur.fetchone()
+ 
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT onboarding_id
+        FROM messaging_onboarding
+        WHERE spa_id = %s
+    """, (spa_id,))
+
+    existing = cur.fetchone()
+
+    if existing:
+
+        cur.execute("""
+            UPDATE messaging_onboarding
+            SET
+                legal_business_name=%s,
+                dba_name=%s,
+                ein=%s,
+                business_type=%s,
+                industry=%s,
+                years_in_business=%s,
+                owner_name=%s,
+                owner_email=%s,
+                owner_phone=%s,
+                business_address1=%s,
+                business_address2=%s,
+                city=%s,
+                state=%s,
+                postal_code=%s,
+                country=%s,
+                updated_at=CURRENT_TIMESTAMP
+            WHERE spa_id=%s
+        """, (
+            legal_business_name,
+            dba_name,
+            ein,
+            business_type,
+            industry,
+            years_in_business,
+            owner_name,
+            owner_email,
+            owner_phone,
+            business_address1,
+            business_address2,
+            city,
+            state,
+            postal_code,
+            country,
+            spa_id
+        ))
+
+    else:
+
+        cur.execute("""
+            INSERT INTO messaging_onboarding
+            (
+                spa_id,
+                legal_business_name,
+                dba_name,
+                ein,
+                business_type,
+                industry,
+                years_in_business,
+                owner_name,
+                owner_email,
+                owner_phone,
+                business_address1,
+                business_address2,
+                city,
+                state,
+                postal_code,
+                country
+            )
+            VALUES
+            (%s,%s,%s,%s,%s,%s,%s)
+        """, (
+            spa_id,
+            legal_business_name,
+            dba_name,
+            ein,
+            business_type,
+            industry,
+            years_in_business,
+            owner_name,
+            owner_email,
+            owner_phone,
+            business_address1,
+            business_address2,
+            city,
+            state,
+            postal_code,
+            country
+        ))
+
+    conn.commit()
+
+    cur.close()
+    conn.close()
+
+
 
     
 
@@ -2474,20 +2646,221 @@ def clients_home():
 
 
 
-#   -------------------------
+# #################################
 #
 #
 #       COMPLIANCE HOME
 #
 #
 #
-#   -------------------------
+# #################################
 
-@app.route('/compliance')
+
+# ==========================================================
+# MESSAGING COMPLIANCE CENTER
+# ==========================================================
+
+@app.route('/admin/messaging-compliance')
 @login_required
 @spa_required
-def compliance_center():
-    return render_template('compliance_center.html')
+def messaging_compliance_dashboard():
+    return render_template("admin/messaging_compliance/dashboard.html")
+
+############################
+#
+#
+#     COMPLIANCE ONBOARDING
+#
+#############################
+
+
+@app.route(
+    '/admin/messaging-compliance/onboarding',
+    methods=['GET', 'POST']
+)
+@login_required
+@spa_required
+def messaging_compliance_onboarding():
+
+    spa_id = session.get("spa_id")   # use your existing helper
+
+    if request.method == "POST":
+
+        save_messaging_onboarding(
+
+            spa_id,
+
+            request.form.get("legal_business_name"),
+
+            request.form.get("dba_name"),
+
+            request.form.get("ein"),
+
+            request.form.get("business_type"),
+
+            request.form.get("industry"),
+
+            request.form.get("years_in_business"),
+
+            request.form.get("owner_name"),
+            request.form.get("owner_email"),
+            request.form.get("owner_phone"),
+
+            request.form.get("business_address1"),
+            request.form.get("business_address2"),
+
+            request.form.get("city"),
+            request.form.get("state"),
+            request.form.get("postal_code"),
+            request.form.get("country")
+        )
+
+        flash("Business information saved successfully.", "success")
+
+        return redirect(
+            url_for("messaging_compliance_onboarding")
+        )
+
+    onboarding = get_messaging_onboarding(spa_id)
+
+    return render_template(
+        "admin/messaging_compliance/onboarding_wizard.html",
+        onboarding=onboarding
+    )
+
+
+
+
+############################
+#      
+#
+#     COMPLIANCE OVERVIEW
+#
+#############################
+
+
+@app.route('/admin/messaging-compliance/overview')
+@login_required
+@spa_required
+def messaging_compliance_overview():
+    return render_template("admin/messaging_compliance/compliance_overview.html")
+
+
+
+############################
+#      
+#
+#     COMPLIANCE BRAND
+#
+#############################
+
+
+@app.route('/admin/messaging-compliance/brand')
+@login_required
+@spa_required
+def messaging_compliance_brand():
+    return render_template("admin/messaging_compliance/brand_registration.html")
+
+
+
+############################
+#      
+#
+#     COMPLIANCE CAMPAIGN
+#
+#############################
+
+
+@app.route('/admin/messaging-compliance/campaign')
+@login_required
+@spa_required
+def messaging_compliance_campaign():
+    return render_template("admin/messaging_compliance/campaign_registration.html")
+
+
+
+
+
+############################
+#      
+#
+#     COMPLIANCE TEMPLATES
+#
+#############################
+
+@app.route('/admin/messaging-compliance/templates')
+@login_required
+@spa_required
+def messaging_compliance_templates():
+    return render_template("admin/messaging_compliance/template_review.html")
+
+
+############################
+#      
+#
+#     COMPLIANCE DATA MIGRATION
+#
+#############################
+
+@app.route('/admin/messaging-compliance/migration')
+@login_required
+@spa_required
+def messaging_compliance_migration():
+    return render_template("admin/messaging_compliance/data_migration.html")
+
+
+
+############################
+#      
+#
+#     COMPLIANCE DOCUMENTS
+#
+#############################
+
+
+@app.route('/admin/messaging-compliance/documents')
+@login_required
+@spa_required
+def messaging_compliance_documents():
+    return render_template("admin/messaging_compliance/documents.html")
+
+
+
+
+
+############################
+#      
+#
+#     COMPLIANCE AUDIT LOG
+#
+#############################
+
+@app.route('/admin/messaging-compliance/audit-log')
+@login_required
+@spa_required
+def messaging_compliance_audit_log():
+    return render_template("admin/messaging_compliance/audit_log.html")
+
+
+
+
+############################
+#
+#
+#     COMPLIANCE ONBOARDING
+#
+#############################
+
+
+@app.route('/admin/messaging-compliance/campaign-registration')
+@login_required
+@spa_required
+def messaging_compliance_campaign_registration():
+    return render_template("admin/messaging_compliance/campaign_registration.html")
+
+
+
+
 
 
 

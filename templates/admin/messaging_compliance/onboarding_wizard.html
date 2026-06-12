@@ -4,6 +4,119 @@
 
 <h1>Messaging Compliance Onboarding Wizard</h1>
 
-<p>This page is under development.</p>
+<p>
+    Step 1 of 7: Business Information
+</p>
+
+<div class="dashboard-card">
+    <h2>Business Information</h2>
+    
+</div>
+
+<form method="POST">
+    <label>Legal Business Name</label><br>
+    <input type="text" name="legal_business_name"
+           value="{{ onboarding.legal_business_name if onboarding else '' }}"
+           style="width:100%;"><br><br>
+
+    <label>DBA / Public Business Name</label><br>
+    <input type="text" name="dba_name"
+           value="{{ onboarding.dba_name if onboarding else '' }}"
+           style="width:100%;"><br><br>
+
+    <label>EIN</label><br>
+    <input type="text" name="ein"
+           value="{{ onboarding.ein if onboarding else '' }}"
+           style="width:100%;"><br><br>
+
+    <label>Business Type</label><br>
+    <input type="text" name="business_type"
+           value="{{ onboarding.business_type if onboarding else '' }}"
+           placeholder="LLC, Sole Proprietor, Corporation"
+           style="width:100%;"><br><br>
+
+    <label>Industry</label><br>
+    <input type="text" name="industry"
+           value="{{ onboarding.industry if onboarding else '' }}"
+           placeholder="Spa, Salon, Esthetics, Wellness"
+           style="width:100%;"><br><br>
+
+    <label>Years in Business</label><br>
+    <input type="number" name="years_in_business" min="0"
+           value="{{ onboarding.years_in_business if onboarding else '' }}"
+           style="width:100%;"><br><br>
+
+   
+    <hr>
+
+<h2>Step 2: Contact Information</h2>
+
+<label>Owner Name</label><br>
+<input type="text" name="owner_name"
+       value="{{ onboarding.owner_name if onboarding else '' }}"
+       style="width:100%;"><br><br>
+
+<label>Owner Email</label><br>
+<input type="email" name="owner_email"
+       value="{{ onboarding.owner_email if onboarding else '' }}"
+       style="width:100%;"><br><br>
+
+<label>Owner Phone</label><br>
+<input type="text" name="owner_phone"
+       value="{{ onboarding.owner_phone if onboarding else '' }}"
+       style="width:100%;"><br><br>
+
+<label>Business Address 1</label><br>
+<input type="text" name="business_address1"
+       value="{{ onboarding.business_address1 if onboarding else '' }}"
+       style="width:100%;"><br><br>
+
+<label>Business Address 2</label><br>
+<input type="text" name="business_address2"
+       value="{{ onboarding.business_address2 if onboarding else '' }}"
+       style="width:100%;"><br><br>
+
+<label>City</label><br>
+<input type="text" name="city"
+       value="{{ onboarding.city if onboarding else '' }}"
+       style="width:100%;"><br><br>
+
+<label>State</label><br>
+<input type="text" name="state"
+       value="{{ onboarding.state if onboarding else '' }}"
+       style="width:100%;"><br><br>
+
+<label>Postal Code</label><br>
+<input type="text" name="postal_code"
+       value="{{ onboarding.postal_code if onboarding else '' }}"
+       style="width:100%;"><br><br>
+
+<label>Country</label><br>
+<input type="text" name="country"
+       value="{{ onboarding.country if onboarding else 'United States' }}"
+       style="width:100%;"><br><br>
+
+ <button type="submit">Save & Continue</button>
+
+
+
+
+</form>
+
+
+
+
+
+
+
+
+
+
+
+
+
+<p>
+    <a href="{{ url_for('messaging_compliance_dashboard') }}">← Back to Messaging Compliance Center</a>
+</p>
 
 {% endblock %}
