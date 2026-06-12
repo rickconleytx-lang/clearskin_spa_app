@@ -4,8 +4,18 @@
 
 <h1>Messaging Compliance Onboarding Wizard</h1>
 
+
+<div style="margin-bottom:20px;">
+
+<h2>Step {{ step }} of 7</h2>
+
+<progress value="{{ step }}" max="7" style="width:100%;"></progress>
+
+</div>
+
+{% if step == 1 %}
 <p>
-    Step 1 of 7: Business Information
+    Step 1: Business Information
 </p>
 
 <div class="dashboard-card">
@@ -13,7 +23,7 @@
     
 </div>
 
-<form method="POST">
+<form method="POST" action="{{ url_for('messaging_compliance_onboarding', step=step) }}">
     <label>Legal Business Name</label><br>
     <input type="text" name="legal_business_name"
            value="{{ onboarding.legal_business_name if onboarding else '' }}"
@@ -46,6 +56,9 @@
            value="{{ onboarding.years_in_business if onboarding else '' }}"
            style="width:100%;"><br><br>
 
+     {% endif %}
+
+     {% if step == 2 %} 
    
     <hr>
 
@@ -96,23 +109,28 @@
        value="{{ onboarding.country if onboarding else 'United States' }}"
        style="width:100%;"><br><br>
 
- <button type="submit">Save & Continue</button>
+        {% endif %}
 
 
+<div style="margin-top:30px;">
 
+    {% if step > 1 %}
+        <a href="{{ url_for('messaging_compliance_onboarding', step=step-1) }}">
+            ← Previous
+        </a>
+        &nbsp;&nbsp;
+    {% endif %}
+
+    &nbsp;&nbsp;&nbsp;
+
+    <button type="submit">
+    Save & Continue
+    </button>
+
+    </div>
+    </div>
 
 </form>
-
-
-
-
-
-
-
-
-
-
-
 
 
 <p>

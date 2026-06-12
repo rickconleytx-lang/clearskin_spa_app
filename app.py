@@ -2656,6 +2656,7 @@ def clients_home():
 # #################################
 
 
+
 # ==========================================================
 # MESSAGING COMPLIANCE CENTER
 # ==========================================================
@@ -2683,6 +2684,7 @@ def messaging_compliance_dashboard():
 def messaging_compliance_onboarding():
 
     spa_id = session.get("spa_id")   # use your existing helper
+    step = request.args.get("step", 1, type=int)
 
     if request.method == "POST":
 
@@ -2691,41 +2693,36 @@ def messaging_compliance_onboarding():
             spa_id,
 
             request.form.get("legal_business_name"),
-
             request.form.get("dba_name"),
-
             request.form.get("ein"),
-
             request.form.get("business_type"),
-
             request.form.get("industry"),
-
             request.form.get("years_in_business"),
 
             request.form.get("owner_name"),
             request.form.get("owner_email"),
             request.form.get("owner_phone"),
-
             request.form.get("business_address1"),
             request.form.get("business_address2"),
-
             request.form.get("city"),
             request.form.get("state"),
             request.form.get("postal_code"),
             request.form.get("country")
         )
 
-        flash("Business information saved successfully.", "success")
+        next_step = min(step + 1, 7)
+        flash("Onboarding information saved.", "success")
 
         return redirect(
-            url_for("messaging_compliance_onboarding")
+            url_for("messaging_compliance_onboarding", step=next_step)
         )
 
     onboarding = get_messaging_onboarding(spa_id)
 
     return render_template(
         "admin/messaging_compliance/onboarding_wizard.html",
-        onboarding=onboarding
+        onboarding=onboarding,
+        step=step
     )
 
 
