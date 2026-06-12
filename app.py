@@ -959,6 +959,102 @@ def current_user_role():
 
 #   ---------------------------
 #
+#      DEF  GET ACCOUNTING 
+#
+#
+#   ---------------------------
+
+def get_accounting_ytd_summary(spa_id):
+
+
+    cur.execute("""
+        SELECT COALESCE(SUM(total_amount), 0)
+        FROM income
+        WHERE spa_id = %s
+          AND income_date BETWEEN %s AND %s
+    """, (spa_id, year_start, today))
+
+    ytd_income = cur.fetchone()[0]
+
+
+    cur.execute("""
+        SELECT COALESCE(SUM(amount), 0)
+        FROM expenses
+        WHERE spa_id = %s
+          AND expense_date BETWEEN %s AND %s
+    """, (spa_id, year_start, today))
+
+    ytd_expenses = cur.fetchone()[0]
+
+
+
+    # Birthday alert count
+    # Adjust this query if your birthday table/logic differs
+    cur.execute("""
+        SELECT COUNT(*)
+        FROM client_birthday_offers cbo
+        JOIN clients c 
+            ON c.client_id = cbo.client_id
+           AND c.spa_id = cbo.spa_id
+        WHERE c.spa_id = %s
+          AND cbo.offer_sent = FALSE
+          AND cbo.birthday_year = %s
+    """, (spa_id, today.year))
+    birthday_alert_count = cur.fetchone()[0] or 0
+
+    # Expiring gift certificate count
+    cur.execute("""
+        SELECT COUNT(*)
+        FROM gift_certificates gc 
+        JOIN gift_certificate_statuses gcs
+        ON gc.gift_certificate_status_id = gcs.gift_certificate_status_id
+        WHERE gc.spa_id = %s
+        AND gcs.status_name = 'Active'
+        AND gc.amount_paid > 0
+        AND gc.is_redeemed = FALSE
+        AND gc.remaining_balance > 0
+        AND gc.expires_date BETWEEN %s AND (%s + INTERVAL '60 days')
+    """, (spa_id, today, today))
+    expiring_gc_count = cur.fetchone()[0] or 0
+
+    return {
+    
+        "ytd_income": ytd_income,
+        "ytd_expenses": ytd_expenses,
+    }
+
+
+
+#   ---------------------------
+#
+#      DEF GET EMPLOYEE COMPENSATION
+#
+#   ---------------------------
+
+
+#  get_employee_compensation_ytd_summary(spa_id)
+
+
+    cur.execute("""
+        SELECT COALESCE(SUM(amount), 0)
+        FROM employee_compensation
+        WHERE spa_id = %s
+          AND compensation_date BETWEEN %s AND %s
+    """, (spa_id, year_start, today))
+
+    ytd_employee_compensation = cur.fetchone()[0]
+
+    return {
+        "ytd_employee_compensation": ytd_employee_compensation
+    }
+
+
+
+
+
+
+#   ---------------------------
+#
 #      SMS EMAIL CONSENT RECORD
 #
 #
@@ -2373,6 +2469,26 @@ def logout():
 @spa_required
 def clients_home():
     return redirect(url_for("client_management"))
+
+
+
+
+
+#   -------------------------
+#
+#
+#       COMPLIANCE HOME
+#
+#
+#
+#   -------------------------
+
+@app.route('/compliance')
+@login_required
+@spa_required
+def compliance_center():
+    return render_template('compliance_center.html')
+
 
 
 

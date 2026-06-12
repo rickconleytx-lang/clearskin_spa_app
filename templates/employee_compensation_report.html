@@ -96,6 +96,11 @@
             <p>${{ '%.2f'|format(total_comp_paid) }}</p>
         </div>
 
+        <div class="summary-card">
+            <h3>YTD Employee Compensation</h3>
+            <p>${{ "{:,.2f}".format(ytd_employee_compensation or 0) }}</p>
+        </div>
+
     </div>
 
 
