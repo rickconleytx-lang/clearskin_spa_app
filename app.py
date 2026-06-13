@@ -199,6 +199,19 @@ def save_messaging_onboarding(spa_id, **fields):
         "consent_language",
         "sample_message_1",
         "sample_message_2",
+
+        "opt_in_method_primary",
+        "consent_language",
+        "frequency_disclosed",
+        "rates_disclosed",
+        "stop_disclosed",
+        "help_disclosed",
+        "privacy_linked",
+        "terms_linked",
+        "double_opt_in",
+        "consent_record_retention",
+        "opt_in_screenshot",
+        "consent_last_reviewed"
     ]
 
     clean_fields = {
@@ -2700,7 +2713,37 @@ def clients_home():
 @login_required
 @spa_required
 def messaging_compliance_dashboard():
-    return render_template("admin/messaging_compliance/dashboard.html")
+
+    spa_id = session.get("spa_id")
+
+    onboarding = get_messaging_onboarding(spa_id)
+
+    if onboarding:
+        current_step = onboarding.get("current_step") or 1
+        last_completed_step = onboarding.get("last_completed_step") or 0
+    else:
+        current_step = 1
+        last_completed_step = 0
+
+    compliance_check = run_messaging_compliance_check(onboarding)
+
+    return render_template(
+        "admin/messaging_compliance/dashboard.html",
+        onboarding=onboarding,
+        current_step=current_step,
+        last_completed_step=last_completed_step,
+        compliance_check=compliance_check
+    )
+
+
+
+
+
+
+
+
+
+
 
 ############################
 #

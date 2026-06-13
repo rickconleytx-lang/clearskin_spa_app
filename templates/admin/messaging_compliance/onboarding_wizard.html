@@ -165,8 +165,88 @@
     <textarea name="sample_message_2" class="form-control" rows="3">{{ onboarding.sample_message_2 or '' }}</textarea>
     </div>
 
-{% endif %}  
-      
+{% elif step == 4 %}
+ 
+
+<hr>
+
+<h2>Step 4: Consent & Opt-In Process</h2>
+
+<p>
+    Document how customers give permission to receive SMS messages.
+</p>
+
+<label>Primary Opt-In Method</label><br>
+<select name="opt_in_method_primary" style="width:100%;">
+    <option value="">Select method</option>
+    <option value="Website Form" {% if onboarding.opt_in_method_primary == 'Website Form' %}selected{% endif %}>Website Form</option>
+    <option value="Appointment Booking" {% if onboarding.opt_in_method_primary == 'Appointment Booking' %}selected{% endif %}>Appointment Booking</option>
+    <option value="Client Intake Form" {% if onboarding.opt_in_method_primary == 'Client Intake Form' %}selected{% endif %}>Client Intake Form</option>
+    <option value="Paper Consent Form" {% if onboarding.opt_in_method_primary == 'Paper Consent Form' %}selected{% endif %}>Paper Consent Form</option>
+    <option value="QR Code" {% if onboarding.opt_in_method_primary == 'QR Code' %}selected{% endif %}>QR Code</option>
+    <option value="Text Keyword" {% if onboarding.opt_in_method_primary == 'Text Keyword' %}selected{% endif %}>Text Keyword</option>
+    <option value="Other" {% if onboarding.opt_in_method_primary == 'Other' %}selected{% endif %}>Other</option>
+</select><br><br>
+
+<label>Consent Language</label><br>
+<textarea name="consent_language" rows="5" style="width:100%;">{{ onboarding.consent_language if onboarding else '' }}</textarea><br><br>
+
+<h3>Required Disclosures</h3>
+
+<label>
+    <input type="checkbox" name="frequency_disclosed" value="true"
+           {% if onboarding.frequency_disclosed %}checked{% endif %}>
+    Message frequency is disclosed
+</label><br>
+
+<label>
+    <input type="checkbox" name="rates_disclosed" value="true"
+           {% if onboarding.rates_disclosed %}checked{% endif %}>
+    Message and data rates disclosure included
+</label><br>
+
+<label>
+    <input type="checkbox" name="stop_disclosed" value="true"
+           {% if onboarding.stop_disclosed %}checked{% endif %}>
+    STOP opt-out instructions included
+</label><br>
+
+<label>
+    <input type="checkbox" name="help_disclosed" value="true"
+           {% if onboarding.help_disclosed %}checked{% endif %}>
+    HELP instructions included
+</label><br>
+
+<label>
+    <input type="checkbox" name="privacy_linked" value="true"
+           {% if onboarding.privacy_linked %}checked{% endif %}>
+    Privacy Policy is linked
+</label><br>
+
+<label>
+    <input type="checkbox" name="terms_linked" value="true"
+           {% if onboarding.terms_linked %}checked{% endif %}>
+    Terms & Conditions are linked
+</label><br><br>
+
+<label>Double Opt-In Used?</label><br>
+<select name="double_opt_in" style="width:100%;">
+    <option value="">Select</option>
+    <option value="true" {% if onboarding.double_opt_in == true %}selected{% endif %}>Yes</option>
+    <option value="false" {% if onboarding.double_opt_in == false %}selected{% endif %}>No</option>
+</select><br><br>
+
+<label>Consent Record Retention</label><br>
+<textarea name="consent_record_retention" rows="4" style="width:100%;">{{ onboarding.consent_record_retention if onboarding else '' }}</textarea><br><br>
+
+<label>Opt-In Screenshot / File Reference</label><br>
+<input type="text" name="opt_in_screenshot"
+       value="{{ onboarding.opt_in_screenshot if onboarding else '' }}"
+       style="width:100%;"><br><br>
+
+{% endif %}
+
+     
  
        
 
