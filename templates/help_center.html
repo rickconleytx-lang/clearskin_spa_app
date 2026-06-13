@@ -56,18 +56,34 @@
 
     <div class="narrow-cards">
 
-        {% for page in pages %}
-            <div class="card">
 
-                <h3>{{ page[1] }}</h3>
+            {% for page in pages %}
+                <div class="card">
 
-                <a href="{{ url_for('view_help_page', page_key=page[0]) }}"
-                   class="btn">
-                    Open Help
-                </a>
+                    <h3>
+                        {% if page[3] == 'EN' %}
+                            🇺🇸 EN
+                        {% elif page[3] == 'ES' %}
+                            🇪🇸 ES
+                        {% elif page[3] == 'FR' %}
+                            🇫🇷 FR
+                        {% elif page[3] == 'DE' %}
+                            🇩🇪 DE
+                        {% else %}
+                            {{ page[3] }}
+                        {% endif %}
 
-            </div>
-        {% endfor %}
+                        {{ page[1] or page[2] }}
+                    </h3>
+
+                    <a href="{{ url_for('view_help_page', page_key=page[0], lang=page[3]) }}"
+                    class="btn">
+                        Open Help
+                    </a>
+
+                </div>
+            {% endfor %}
+
 
     </div>
 

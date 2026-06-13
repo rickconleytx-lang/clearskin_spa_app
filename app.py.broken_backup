@@ -3673,6 +3673,7 @@ from datetime import date, timedelta
 
 @app.route("/dashboard")
 def dashboard():
+    return redirect(url_for("home"))
     spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()

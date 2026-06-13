@@ -1133,7 +1133,7 @@ def master_admin_required(f):
     def decorated_function(*args, **kwargs):
         if session.get("role") != "master_admin":
             flash("Access denied.", "error")
-            return redirect(url_for("dashboard"))
+            return redirect(url_for("home"))
         return f(*args, **kwargs)
     return decorated_function
 
@@ -1434,7 +1434,7 @@ def spa_required(f):
 
         if not spa_id:
             flash("No spa is assigned to this user.", "error")
-            return redirect(url_for("dashboard"))
+            return redirect(url_for("login"))
 
         return f(*args, **kwargs)
 
@@ -1592,7 +1592,7 @@ def switch_spa(spa_id):
     session["spa_id"] = spa_id
 
     flash(f"Switched to spa {spa_id}.", "success")
-    return redirect(url_for("dashboard"))
+    return redirect(url_for("home"))
 
 
 
@@ -1783,7 +1783,7 @@ def add_new_client_from_booking(incoming_booking_id):
 
         if not booking:
             flash("Booking record not found.", "error")
-            return redirect(url_for("dashboard"))
+            return redirect(url_for("home"))
 
         return render_template(
             "add_new_client.html",
@@ -1792,7 +1792,7 @@ def add_new_client_from_booking(incoming_booking_id):
 
     except Exception as e:
         flash(f"Error loading booking: {str(e)}", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("home"))
 
     finally:
         cur.close()
@@ -3027,7 +3027,7 @@ def add_spa():
 
             conn.commit()
             flash("Spa and owner admin user created successfully.", "success")
-            return redirect(url_for("dashboard"))
+            return redirect(url_for("home"))
 
         except Exception as e:
             conn.rollback()
@@ -3104,7 +3104,7 @@ def add_user():
 
             conn.commit()
             flash("User created successfully.", "success")
-            return redirect(url_for("dashboard"))
+            return redirect(url_for("home"))
 
         except Exception as e:
             conn.rollback()
@@ -3127,76 +3127,126 @@ def add_user():
 #   -------------------------
 #
 #
-#        HELP
-#
-#
+#        HELP - NEW & EDIT
+#.       HELP NEW
+#.       HELP EDIT
 #
 #   -------------------------
             
-
 @app.route("/admin/help-pages/new", methods=["GET", "POST"])
 @app.route("/admin/help-pages/edit/<page_key>", methods=["GET", "POST"])
 @login_required
 @master_admin_required
 def edit_help_page(page_key=None):
-        
+
     conn = get_db_connection()
     cur = conn.cursor()
 
     if request.method == "POST":
-        
+
         if not page_key:
             page_key = request.form.get("page_key", "").strip()
-        
+
+        display_name = request.form.get("display_name", "").strip()
         title = request.form.get("title", "").strip()
+        language_code = request.form.get("language_code", "EN").strip().upper()
+        display_order = request.form.get("display_order") or None
         content = request.form.get("content", "").strip()
         is_active = request.form.get("is_active") == "on"
-    
+
         cur.execute("""
             SELECT help_page_id
             FROM help_pages
             WHERE page_key = %s
-        """, (page_key,))
-    
-        existing = cur.fetchone()   
-        
+              AND language_code = %s
+        """, (page_key, language_code))
+
+        existing = cur.fetchone()
+
         if existing:
             cur.execute("""
                 UPDATE help_pages
-                SET title = %s,
+                SET display_name = %s,
+                    title = %s,
+                    language_code = %s,
+                    display_order = %s,
                     content = %s,
                     is_active = %s
                 WHERE page_key = %s
-            """, (title, content, is_active, page_key))
+                  AND language_code = %s
+            """, (
+                display_name,
+                title,
+                language_code,
+                display_order,
+                content,
+                is_active,
+                page_key,
+                language_code
+            ))
         else:
             cur.execute("""
                 INSERT INTO help_pages
-                    (page_key, title, content, is_active)
-                VALUES (%s, %s, %s, %s)
-            """, (page_key, title, content, is_active))
- 
+                    (
+                        page_key,
+                        display_name,
+                        title,
+                        language_code,
+                        display_order,
+                        content,
+                        is_active
+                    )
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (
+                page_key,
+                display_name,
+                title,
+                language_code,
+                display_order,
+                content,
+                is_active
+            ))
+
         conn.commit()
         cur.close()
         conn.close()
 
         flash("Help page saved.", "success")
-        return redirect(url_for("edit_help_page", page_key=page_key))
-    
+        return redirect(
+            url_for(
+                "edit_help_page",
+                page_key=page_key,
+                lang=language_code
+            )
+        )
+
+    language_code = request.args.get("lang", "EN").strip().upper()
+
     cur.execute("""
-        SELECT page_key, title, content, is_active
+        SELECT
+            page_key,
+            display_name,
+            title,
+            language_code,
+            display_order,
+            content,
+            is_active
         FROM help_pages
         WHERE page_key = %s
-    """, (page_key,))  
-        
+          AND language_code = %s
+    """, (page_key, language_code))
+
     page = cur.fetchone()
-    
+
     cur.close()
     conn.close()
-        
+
     return render_template(
         "admin_edit_help_page.html",
         page=page,
-        page_key=page_key
+        page_key=page_key,
+        language_code=language_code,
+        mode="edit" if page else "new"
     )
 
 
@@ -3235,7 +3285,7 @@ def view_help_page(page_key):
         
     if not page:
         flash("Help page not found.", "warning")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("help_center"))
                     
     return render_template(
         "help_page.html",
@@ -3309,32 +3359,47 @@ def help_center():
     conn = get_db_connection()
     cur = conn.cursor()
 
+
     if search:
         search_term = f"%{search}%"
 
         cur.execute("""
             SELECT
                 page_key,
-                title
+                display_name,
+                title,
+                language_code,
+                display_order
             FROM help_pages
             WHERE is_active = TRUE
-              AND (
+            AND (
                     page_key ILIKE %s
-                 OR title ILIKE %s
-                 OR content ILIKE %s
-              )
-            ORDER BY title
-        """, (search_term, search_term, search_term))
+                OR display_name ILIKE %s
+                OR title ILIKE %s
+                OR content ILIKE %s
+            )
+            ORDER BY display_order, page_key, language_code
+        """, (
+            search_term,
+            search_term,
+            search_term,
+            search_term
+        ))
 
     else:
         cur.execute("""
             SELECT
                 page_key,
-                title
+                display_name,
+                title,
+                language_code,
+                display_order
             FROM help_pages
             WHERE is_active = TRUE
-            ORDER BY title
+            ORDER BY display_order, display_name
         """)
+
+
 
     pages = cur.fetchall()
 
@@ -3389,7 +3454,7 @@ def sms_email_terms():
         conn.close()
 
         flash("Terms page not found.", "warning")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("home"))
 
     if request.method == "POST":
 
@@ -3422,7 +3487,7 @@ def sms_email_terms():
 
         flash("Terms accepted successfully.", "success")
 
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("home"))
 
     cur.close()
     conn.close()
@@ -17683,7 +17748,7 @@ def dashboard():
     conn.close()
 
     return render_template(
-        "dashboard.html",
+        "home.html",
         ytd_income=ytd_income,
         ytd_expenses=ytd_expenses,
         ytd_employee_compensation=ytd_employee_compensation,

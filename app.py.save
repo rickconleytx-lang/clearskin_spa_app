@@ -218,7 +218,7 @@ def master_admin_required(f):
     def decorated_function(*args, **kwargs):
         if session.get("role") != "master_admin":
             flash("Access denied.", "error")
-            return redirect(url_for("dashboard"))
+            return redirect(url_for("home"))
         return f(*args, **kwargs)
     return decorated_function
 
@@ -388,7 +388,7 @@ def switch_spa(spa_id):
     session["spa_id"] = spa_id
 
     flash(f"Switched to spa {spa_id}.", "success")
-    return redirect(url_for("dashboard"))
+    return redirect(url_for("home"))
 
 
 
@@ -568,7 +568,7 @@ def add_new_client_from_booking(incoming_booking_id):
 
         if not booking:
             flash("Booking record not found.", "error")
-            return redirect(url_for("dashboard"))
+            return redirect(url_for("home"))
 
         return render_template(
             "add_new_client.html",
@@ -577,7 +577,7 @@ def add_new_client_from_booking(incoming_booking_id):
 
     except Exception as e:
         flash(f"Error loading booking: {str(e)}", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("home"))
 
     finally:
         cur.close()
@@ -1183,7 +1183,7 @@ def login():
             session["role"] = user[6]
 
             flash("Logged in successfully.", "success")
-            return redirect(url_for("dashboard"))
+            return redirect(url_for("home"))
 
         flash("Invalid email or password.", "error")
 
@@ -9808,6 +9808,7 @@ from datetime import date, timedelta
 
 @app.route("/dashboard")
 def dashboard():
+    return redirect(url_for("home"))
     spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()

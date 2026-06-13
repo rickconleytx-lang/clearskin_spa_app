@@ -2,15 +2,32 @@
 
 {% block content %}
 
-<h1>Edit Help Page</h1>
+<h1>
+    {% if mode == "edit" %}
+        Edit Help Page
+    {% else %}
+        Create New Help Page
+    {% endif %}
+</h1>
 
-<<form method="POST" accept-charset="UTF-8" class="styled-form">
+<form method="POST" accept-charset="UTF-8" class="styled-form">
+
     <div class="form-group">
         <label for="page_key">Page Key</label>
         <input type="text"
                id="page_key"
                name="page_key"
-               value="{{ page_key }}"
+               value="{{ page[0] if page else page_key }}"
+               required>
+    </div>
+
+    <div class="form-group">
+        <label for="display_name">Display Name</label>
+        <input type="text"
+               id="display_name"
+               name="display_name"
+               value="{{ page[1] if page else '' }}"
+               placeholder="Example: Calendar"
                required>
     </div>
 
@@ -19,25 +36,43 @@
         <input type="text"
                id="title"
                name="title"
-               value="{{ page[1] if page else '' }}"
+               value="{{ page[2] if page else '' }}"
+               placeholder="Example: Calendar Help"
                required>
     </div>
 
     <div class="form-group">
-        <label for="content">Help Page Content</label>
+        <label for="language_code">Language</label>
+        <select id="language_code" name="language_code" required>
+            <option value="EN" {% if page and page[3] == 'EN' %}selected{% endif %}>🇺🇸 EN - English</option>
+            <option value="ES" {% if page and page[3] == 'ES' %}selected{% endif %}>🇪🇸 ES - Spanish</option>
+            <option value="FR" {% if page and page[3] == 'FR' %}selected{% endif %}>🇫🇷 FR - French</option>
+            <option value="DE" {% if page and page[3] == 'DE' %}selected{% endif %}>🇩🇪 DE - German</option>
+        </select>
+    </div>
 
+    <div class="form-group">
+        <label for="display_order">Display Order</label>
+        <input type="number"
+               id="display_order"
+               name="display_order"
+               value="{{ page[4] if page else '' }}">
+    </div>
+    <p>Display Order: Use increments of 10 (10, 20, 30..) to allow for future reordering</p>
+    <div class="form-group">
+        <label for="content">Help Page Content</label>
         <textarea id="content"
                   name="content"
                   rows="25"
                   style="width: 100%;"
-                  required>{{ page[2] if page else '' }}</textarea>
+                  required>{{ page[5] if page else '' }}</textarea>
     </div>
 
     <div class="form-group">
         <label>
             <input type="checkbox"
                    name="is_active"
-                   {% if not page or page[3] %}checked{% endif %}>
+                   {% if not page or page[6] %}checked{% endif %}>
             Active
         </label>
     </div>
