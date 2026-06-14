@@ -21,13 +21,12 @@
         <div class="narrow-cards">
             {{ section_card("Email History", "Review your Email Send History", url_for('email_history')) }}
             {{ section_card("Email Templates", "Manage Email Templates", url_for('email_templates_admin')) }}
-        </div>
-<br>
-<br>
-        <div class="narrow-cards">
             {{ section_card("Add New Template", "Add New Email Template", url_for('add_email_template')) }}
-            {{ section_card("SMS and Email Preferences", "View and Manage Client Contact Preferences", url_for('client_contact_preferences')) }}
+             {{ section_card("Reminder Queue", "Email & SMS Reminder Queue", url_for('reminder_queue')) }}
+
         </div>
+<br>
+<br>
         
         <form method="GET">
 

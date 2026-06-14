@@ -1,0 +1,240 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div class="page-card">
+
+<h1>📱 Messaging Template</h1>
+
+<p>
+    Template Type: <strong>{{ template_type }}</strong>
+</p>
+
+<form method="POST" class="styled-form">
+
+    <label>Template Name</label><br>
+    <input type="text"
+           name="template_name"
+           value="{{ template[0] if template else '' }}"
+           style="width:100%;"
+           required><br><br>
+
+    <label>Message Text</label><br>
+    <textarea id="message_text"
+              name="message_text"
+              rows="8"
+              style="width:100%;"
+              required>{{ template[1] if template else '' }}</textarea><br><br>
+
+    <label>
+        <input type="checkbox"
+               name="is_active"
+               {% if not template or template[2] %}checked{% endif %}>
+        Active
+    </label><br><br>
+
+    {% if template and template[3] is not none %}
+
+<div style="
+    border: 2px solid
+    {% if template[5] == 'High' %}#cc0000
+    {% elif template[5] == 'Medium' %}#d99a00
+    {% else %}#2e7d32
+    {% endif %};
+    background:
+    {% if template[5] == 'High' %}#ffe6e6
+    {% elif template[5] == 'Medium' %}#fff7df
+    {% else %}#e8f5e9
+    {% endif %};
+    padding: 15px;
+    margin: 20px 0;
+    border-radius: 8px;
+">
+
+    <h3>🤖 AI Review</h3>
+
+    <p>
+        <strong>AI Score:</strong> {{ template[3] }}/100
+    </p>
+
+    <p>
+        <strong>Risk Level:</strong>
+        {% if template[5] == 'High' %}
+            🔴 High
+        {% elif template[5] == 'Medium' %}
+            🟡 Medium
+        {% else %}
+            🟢 Low
+        {% endif %}
+    </p>
+
+    <p>
+        <strong>Review:</strong>
+    </p>
+
+    <div style="white-space: pre-wrap;">
+        {{ template[4] }}
+    </div>
+
+    {% if template[6] %}
+        <p>
+            <strong>Last Reviewed:</strong>
+            {{ template[6].strftime('%m/%d/%Y %I:%M %p') }}
+        </p>
+    {% endif %}
+
+</div>
+
+{% endif %}
+
+    <button type="submit"
+        name="action"
+        value="ai_review"
+        class="btn">
+    🤖 AI Review
+</button>
+
+    <hr>
+
+<h3>🧩 Available Merge Fields</h3>
+
+<p>
+Click any button below to insert the merge field at the current cursor location.
+</p>
+
+<h4>👤 Client</h4>
+
+<button type="button"
+onclick="insertMergeField('{{ '{{ client_first_name }}' }}')">
+First Name
+</button>
+
+<button type="button"
+onclick="insertMergeField('{{ '{{ client_last_name }}' }}')">
+Last Name
+</button>
+
+<button type="button"
+onclick="insertMergeField('{{ '{{ client_full_name }}' }}')">
+Full Name
+</button>
+
+<button type="button"
+onclick="insertMergeField('{% raw %}{{ client_phone }}{% endraw %}')">
+Phone
+</button>
+
+<button type="button"
+onclick="insertMergeField('{% raw %}{{ client_email }}{% endraw %}')">
+Email
+</button>
+
+
+<br><br>
+
+<h4>📅 Appointment</h4>
+
+<button type="button"
+onclick="insertMergeField('{{ '{{ appointment_date }}' }}')">
+Appointment Date
+</button>
+
+<button type="button"
+onclick="insertMergeField('{{ '{{ appointment_time }}' }}')">
+Appointment Time
+</button>
+
+<button type="button"
+onclick="insertMergeField('{{ '{{ service_name }}' }}')">
+Service Name
+</button>
+
+<button type="button"
+onclick="insertMergeField('{% raw %}{{ employee_name }}{% endraw %}')">
+Employee
+</button>
+
+<button type="button"
+onclick="insertMergeField('{% raw %}{{ appointment_duration }}{% endraw %}')">
+Duration
+</button>
+
+<br><br>
+
+<h4>🏢 Business</h4>
+
+<button type="button"
+onclick="insertMergeField('{{ '{{ spa_name }}' }}')">
+Business Name
+</button>
+
+<button type="button"
+onclick="insertMergeField('{{ '{{ business_phone }}' }}')">
+Business Phone
+</button>
+
+<button type="button"
+onclick="insertMergeField('{% raw %}{{ spa_address }}{% endraw %}')">
+Address
+</button>
+
+<button type="button"
+onclick="insertMergeField('{% raw %}{{ spa_phone }}{% endraw %}')">
+Business Phone
+</button>
+
+<button type="button"
+onclick="insertMergeField('{% raw %}{{ spa_website }}{% endraw %}')">
+Website
+</button>
+
+
+<br><br>
+
+<h4>⚖️ Compliance</h4>
+
+<button type="button"
+onclick="insertMergeField('{{ '{{ opt_out }}' }}')">
+STOP Disclosure
+</button>
+
+
+
+<br><br>
+
+    <button type="submit" class="btn">Save Template</button>
+
+    <a class="btn" href="{{ url_for('template_review') }}">
+        Back to Template Library
+    </a>
+
+</form>
+
+</div>
+
+<script>
+
+function insertMergeField(fieldText) {
+
+    const textarea = document.getElementById("message_text");
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+
+    textarea.value =
+        textarea.value.substring(0, start) +
+        fieldText +
+        textarea.value.substring(end);
+
+    textarea.focus();
+
+    textarea.selectionStart =
+    textarea.selectionEnd =
+        start + fieldText.length;
+
+}
+
+</script>
+
+
+{% endblock %}

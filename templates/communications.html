@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% from "components/cards.html" import section_card %}
+
+{% block title %}SMS Home{% endblock %}
+
+{% block content %}
+
+
+<h1>Communications Home</h1>
+
+<p style="color:red;">
+    SMS messages may only be sent to clients who have opted in to receive text messages.
+    Maximum 5 clients per SMS send.
+</p>
+
+<div style="display:flex; flex-direction:row; justify-content:space-between; align-items:flex-start; gap:25px; width:100%;">
+            
+    <!-- LEFT SIDE -->
+    <div style="flex:1; min-width:0;">
+
+     <!-- 🔹 HEADER 1 -->
+        <h2 style="margin-top: 25px;">SMS</h2>
+        <div class="narrow-cards">
+            {{ section_card("SMS Home", "Send, View and Manage Client Contact Preferences", url_for('sms_home')) }}
+            {{ section_card("SMS Templates", "View and Add Templates",  url_for('sms_templates_admin')) }}
+            {{ section_card("SMS History", "View SMS History",  url_for('sms_history_all')) }}
+            {{ section_card("SMS and Email Preferences", "View and Manage Client Contact Preferences", url_for('client_contact_preferences')) }}            
+        </div>
+
+<br>
+<br>
+     <!-- 🔹 HEADER 2 -->
+        <h2 style="margin-top: 25px;">Email</h2>
+        <div class="narrow-cards">
+            {{ section_card("Email Home", "Email Home", url_for('general_email')) }}
+            {{ section_card("Email History", "Review your Email Send History", url_for('email_history')) }}
+            {{ section_card("Email Templates", "Manage Email Templates", url_for('email_templates_admin')) }}
+            {{ section_card("Add New Template", "Add New Email Template", url_for('add_email_template')) }}          
+        </div>
+     
+        
+
+    </div>
+                <!-- RIGHT SIDE IMAGE -->
+    <div style="width: 260px; flex-shrink: 0; text-align: right;">
+        <img src="{{ url_for('static', filename='images/ps_sms_email.png') }}"
+             alt="Peach Suite Pro Calendar"  
+             style="width: 260px; height: auto; border-radius: 12px;">
+    </div>
+
+</div>
+
+
+{% endblock %}

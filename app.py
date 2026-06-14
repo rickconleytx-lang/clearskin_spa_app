@@ -345,8 +345,115 @@ def run_messaging_compliance_check(onboarding):
 
 
 
+################################################################
+#.   COMMUNICATIONS HELPERS
+###############################################################
 
 
+
+
+
+##########################################################
+#       AI TEMPLATE REVIEW
+##########################################################
+
+def review_template_ai_basic(message_text):
+
+    message_text = message_text or ""
+
+    score = 100
+    notes = []
+
+    if "{{ opt_out }}" not in message_text:
+        score -= 30
+        notes.append("Missing STOP disclosure.")
+
+    if "{{ client_first_name }}" not in message_text \
+       and "{{ client_full_name }}" not in message_text:
+        score -= 5
+        notes.append("Consider adding client personalization.")
+
+    if "{{ appointment_date }}" not in message_text:
+        score -= 5
+        notes.append("Appointment date merge field missing.")
+
+    if "{{ appointment_time }}" not in message_text:
+        score -= 5
+        notes.append("Appointment time merge field missing.")
+
+    if len(message_text) > 160:
+        score -= 10
+        notes.append("Message may exceed one SMS segment.")
+
+    if not notes:
+        notes.append("Template looks excellent.")
+
+    if score >= 90:
+        risk = "Low"
+    elif score >= 70:
+        risk = "Medium"
+    else:
+        risk = "High"
+
+    return {
+        "score": max(score, 0),
+        "review": "\n".join(notes),
+        "risk_level": risk
+    }
+
+
+
+
+############################
+#      HELPER
+#
+#     TEMPLATE MERGE DATA
+#
+#############################
+
+def render_template_text(message_text, merge_data=None):
+
+    if merge_data is None:
+        merge_data = {
+            "{{ client_first_name }}": "Sarah",
+            "{{ client_last_name }}": "Johnson",
+            "{{ service_name }}": "90 Minute Facial",
+            "{{ appointment_date }}": "Tuesday, June 16",
+            "{{ appointment_time }}": "2:00 PM",
+            "{{ spa_name }}": "Clear Skin Esthetics",
+            "{{ business_phone }}": "(817) 555-1234",
+            "{{ opt_out }}": "Reply STOP to opt out."
+        }
+
+    for key, value in merge_data.items():
+        message_text = message_text.replace(key, str(value))
+
+    return message_text
+
+
+
+
+
+############################################################
+#    template preview
+############################################################
+
+def render_template_preview(message_text):
+
+
+    sample = {
+        "{{ client_first_name }}": "Sarah",
+        "{{ service_name }}": "90 Minute Facial",
+        "{{ appointment_date }}": "Tuesday, June 16",
+        "{{ appointment_time }}": "2:00 PM",
+        "{{ spa_name }}": "Clear Skin Esthetics",
+        "{{ opt_out }}": "Reply STOP to opt out."
+    }
+
+    for key, value in sample.items():
+        message_text = message_text.replace(key, value)
+
+    return message_text
 
 
 
@@ -2474,7 +2581,18 @@ def spa_management():
 
 
 
+####################################
+#   COMMUNICATIONS HOME
+###################################
 
+
+@app.route("/communications")
+@login_required
+@spa_required  
+
+def communications():
+    return render_template("communications.html")
+     
 
 
 
@@ -2526,6 +2644,28 @@ def email_template_form1():
 
 def accounting_home():
     return render_template("accounting_home.html")
+
+
+
+
+
+
+#########################################
+#   FINANCIALS HOME
+#
+#######################################
+
+
+@app.route("/financials_home")
+@login_required
+@spa_required  
+
+def financials_home():
+    return render_template("financials_home.html")
+
+
+
+
 
 
 
@@ -2727,14 +2867,16 @@ def messaging_compliance_dashboard():
 
     compliance_check = run_messaging_compliance_check(onboarding)
 
+    progress_percent = int((last_completed_step / 7) * 100)
+
     return render_template(
         "admin/messaging_compliance/dashboard.html",
         onboarding=onboarding,
         current_step=current_step,
         last_completed_step=last_completed_step,
+        progress_percent=progress_percent,
         compliance_check=compliance_check
     )
-
 
 
 
@@ -2852,17 +2994,274 @@ def messaging_compliance_campaign():
 
 
 ############################
-#      
+#      TEMPLATE REVIEW
 #
 #     COMPLIANCE TEMPLATES
 #
 #############################
-
-@app.route('/admin/messaging-compliance/templates')
+@app.route("/admin/messaging-compliance/templates")
 @login_required
 @spa_required
-def messaging_compliance_templates():
-    return render_template("admin/messaging_compliance/template_review.html")
+def template_review():
+
+    spa_id = session.get("spa_id")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            t.template_type,
+            t.display_name,
+            t.template_category,
+            m.template_id,
+            m.is_active,
+            m.approved_for_use,
+            m.ai_score,
+            m.updated_at,
+            m.ai_risk_level
+        FROM messaging_template_types t
+
+        LEFT JOIN messaging_templates m
+            ON t.template_type = m.template_type
+           AND m.spa_id = %s
+
+        WHERE t.is_active = TRUE
+
+        ORDER BY t.display_order
+    """, (spa_id,))
+
+    templates = cur.fetchall()
+
+    completed = sum(1 for t in templates if t[3])
+    total = len(templates)
+    percent = round((completed / total) * 100) if total else 0
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "admin/messaging_compliance/template_review.html",
+        templates=templates,
+        completed=completed,
+        total=total,
+        percent=percent
+    )
+
+
+
+
+
+
+
+
+
+############################
+#      
+#
+#     COMPLIANCE TEMPLATE TYPES
+#
+#############################
+
+@app.route(
+    "/admin/messaging-compliance/templates/<template_type>",
+    methods=["GET", "POST"]
+)
+@login_required
+@spa_required
+def edit_messaging_template(template_type):
+
+    spa_id = session.get("spa_id")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+
+    if request.method == "POST":
+
+        template_name = request.form.get("template_name")
+        message_text = request.form.get("message_text")
+        is_active = request.form.get("is_active") == "on"
+
+        ai = review_template_ai_basic(message_text)
+
+        cur.execute("""
+            SELECT template_id
+            FROM messaging_templates
+            WHERE spa_id=%s
+              AND template_type=%s
+        """, (spa_id, template_type))
+
+        existing = cur.fetchone()
+
+        if existing:
+
+            cur.execute("""
+                UPDATE messaging_templates
+                SET
+                    template_name=%s,
+                    message_text=%s,
+                    is_active=%s,
+                    ai_score=%s,
+                    ai_review=%s,
+                    ai_risk_level=%s,
+                    last_ai_reviewed_at=NOW(),
+                    updated_at=NOW()
+                WHERE
+                    spa_id=%s
+                    AND template_type=%s
+            """, (
+                template_name,
+                message_text,
+                is_active,
+                ai["score"],
+                ai["review"],
+                ai["risk_level"],
+                spa_id,
+                template_type
+            ))
+
+        else:
+
+            cur.execute("""
+                INSERT INTO messaging_templates
+                (
+                    spa_id,
+                    template_name,
+                    template_type,
+                    message_text,
+                    is_active,
+                    ai_score,
+                    ai_review,
+                    ai_risk_level,
+                    last_ai_reviewed_at,
+                    created_at,
+                    updated_at
+                )
+                VALUES
+                (%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW(),NOW())
+            """, (
+                spa_id,
+                template_name,
+                template_type,
+                message_text,
+                is_active,
+                ai["score"],
+                ai["review"],
+                ai["risk_level"]
+            ))
+
+        conn.commit()
+
+        flash("Template saved and AI reviewed.", "success")
+
+        return redirect(
+            url_for(
+                "edit_messaging_template",
+                template_type=template_type
+            )
+        )
+
+    cur.execute("""
+        SELECT
+            template_name,
+            message_text,
+            is_active,
+            ai_score,
+            ai_review,
+            ai_risk_level,
+            last_ai_reviewed_at
+        FROM messaging_templates
+        WHERE
+            spa_id=%s
+            AND template_type=%s
+    """, (
+        spa_id,
+        template_type
+    ))
+
+    template = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "admin/messaging_compliance/edit_template.html",
+        template=template,
+        template_type=template_type
+    )
+
+
+
+
+
+
+
+
+############################
+#      
+#
+#     TEMPLATE PREVIEW
+#
+#############################
+
+@app.route(
+    "/admin/communications/templates/<template_type>/preview"
+)
+@login_required
+@spa_required
+def preview_messaging_template(template_type):
+
+    spa_id = session.get("spa_id")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            template_name,
+            message_text,
+            ai_score,
+            updated_at,
+            ai_review,
+            ai_risk_level,
+            approved_for_use
+        FROM messaging_templates
+        WHERE spa_id = %s
+          AND template_type = %s
+    """, (spa_id, template_type))
+
+    
+    template = cur.fetchone()
+
+    if not template:
+        flash("Template not found.", "warning")
+        cur.close()
+        conn.close()
+        return redirect(url_for("template_review"))
+
+    preview_text = render_template_text(template[1])
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "admin/messaging_compliance/template_preview.html",
+        template=template,
+        preview_text=preview_text,
+        template_type=template_type
+    )
+
+
+
+
+
+
+
+
+
+
+
 
 
 ############################

@@ -8,33 +8,27 @@
 
 <h1>SMS Messaging Home</h1>
 
-<p>
-    <p style="color: red";>SMS messages may only be sent to clients who have opted in to receive text messages.
+<p style="color:red;">
+    SMS messages may only be sent to clients who have opted in to receive text messages.
     Maximum 5 clients per SMS send.
 </p>
-
 
 <div style="display:flex; flex-direction:row; justify-content:space-between; align-items:flex-start; gap:25px; width:100%;">
             
     <!-- LEFT SIDE -->
     <div style="flex:1; min-width:0;">
+         <!-- 🔹 HEADER 1 -->
+        
+        
+        <div class="narrow-cards">     
+            {{ section_card("SMS Compliance", "Check your compliance status",  url_for('messaging_compliance_dashboard')) }}
+            {{ section_card("SMS Templates", "View and Add Templates",  url_for('sms_templates_admin')) }}
+            {{ section_card("SMS History", "View SMS History",  url_for('sms_history_all')) }}
+            {{ section_card("SMS and Email Preferences", "View and Manage Client Contact Preferences", url_for('client_contact_preferences')) }}
+       
+        </div>
 
-        <div class="narrow-cards">
-        {{ section_card("SMS Templates", "View and Add Templates",  url_for('sms_templates_admin')) }}
-        {{ section_card("SMS History", "View SMS History",  url_for('sms_history_all')) }}
-    </div>
 
-<br>
-<br>
-
-    <div class="narrow-cards">
-        {{ section_card("SMS and Email Preferences", "View and Manage Client Contact Preferences", url_for('client_contact_preferences')) }}
-
-        {{ section_card(
-            "SMS Message to Client",
-            "Another way to send SMS to one client - From Client Management - Client - Full Summary-Edit",  
-            url_for('client_management')) }}
-    </div>
 
     <form method="GET">
 

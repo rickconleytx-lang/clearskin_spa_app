@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% from "components/cards.html" import section_card %}
+
+
+{% block content %}
+
+<a href="{{ url_for('help_center') }}" class="btn">
+    📖 Help Center
+</a>
+
+        <h1>Financials Home</h1>
+      
+
+<div style="display: flex; flex-direction: row; justify-content: space-between; align-items: flex-start; gap: 25px; width: 100%;">
+
+    <!-- LEFT SIDE -->
+    <div style="flex: 1; min-width: 0;">
+    
+
+    <!-- 🔹 HEADER 1 -->
+    <h2 style="margin-top: 25px;">Accounting</h2>
+
+        <div class="narrow-cards">
+            
+            {{ section_card("Income", "Accounts Receivable Department",  url_for('income_home')) }}
+            {{ section_card("Expenses", "Accounts Payable Department", url_for('expenses_home')) }}
+            {{ section_card("Financing Home", "Corporate Finance Department", url_for('finance_home')) }}
+           
+
+        </div>
+        
+<br>
+        <div class="narrow-cards">
+            
+            {{ section_card("Birthday Celebrations", "View & manage Client Birthdays, Mark sent client a Birthday Offer", url_for('birthday_offers_home')) }}  
+            {{ section_card("Gift Certificates", "Add New Gift Certificates when printed, update when sold and redeemed", url_for('gift_certificates_home')) }}
+             {{ section_card("Employees Home", "Corporate Human Resources Department", url_for('employee_admin')) }}
+        </div>
+
+    </div>
+
+    <!-- RIGHT SIDE IMAGE -->
+    <div style="width: 260px; flex-shrink: 0; text-align: right;">
+        <img src="{{ url_for('static', filename='images/ps_control_panel.png') }}"
+             alt="Peach Suite Pro Calendar"
+             style="width: 260px; height: auto; border-radius: 12px;">
+    </div>
+</div>
+
+
+
+
+    <!-- 🔹 HEADER 2 -->
+    <h2 style="margin-top: 30px;">Logistics - Inventory</h2>
+
+    <div class="narrow-cards">
+       
+        {{ section_card("Inventory Home", "Logistics Department",  url_for('inventory_home')) }}
+       
+      
+    </div>
+
+    </div>
+
+
+         
+
+{% endblock %}

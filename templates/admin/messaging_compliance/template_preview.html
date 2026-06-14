@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>👁 Template Preview</h1>
+
+<h2>{{ template[0] }}</h2>
+
+<p>
+
+<strong>AI Score:</strong>
+
+{{ template[2] or "--" }}
+
+</p>
+
+<p>
+
+<strong>Last Updated:</strong>
+
+{{ template[3] }}
+
+</p>
+
+<hr>
+
+<div
+style="
+border:1px solid #ccc;
+padding:20px;
+background:#f8f8f8;
+white-space:pre-wrap;
+">
+
+{{ preview_text }}
+
+</div>
+
+<br>
+
+<a class="btn btn-primary"
+href="{{ url_for('edit_messaging_template',
+template_type=request.view_args['template_type']) }}">
+
+✏️ Edit
+
+</a>
+
+<a class="btn btn-secondary"
+href="{{ url_for('template_review') }}">
+
+← Back
+
+</a>
+
+{% endblock %}

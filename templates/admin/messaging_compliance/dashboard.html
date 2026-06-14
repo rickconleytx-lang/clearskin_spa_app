@@ -2,12 +2,173 @@
 
 {% block content %}
 
-<h1>Messaging Compliance Center</h1>
+
+
+<h1>🍑 Messaging Compliance Center</h1>
 
 <p>
     Manage onboarding, compliance, messaging approvals,
     documentation, and migration tools for Peach Suite Pro.
 </p>
+
+
+<div class="dashboard-card">
+    <h2>Overall Progress</h2>
+
+    <h1>{{ progress_percent }}%</h1>
+
+    <progress value="{{ progress_percent }}" max="100" style="width:100%;"></progress>
+
+  <div class="dashboard-card">
+
+    <h2>Onboarding Checklist</h2>
+
+    <table class="table">
+
+        <tr>
+            <td>Business Information</td>
+            <td>{% if last_completed_step >= 1 %}✅{% else %}⬜{% endif %}</td>
+        </tr>
+
+        <tr>
+            <td>Contact Information</td>
+            <td>{% if last_completed_step >= 2 %}✅{% else %}⬜{% endif %}</td>
+        </tr>
+
+        <tr>
+            <td>Website & Compliance</td>
+            <td>{% if last_completed_step >= 3 %}✅{% else %}⬜{% endif %}</td>
+        </tr>
+
+        <tr>
+            <td>Consent & Opt-In</td>
+            <td>{% if last_completed_step >= 4 %}✅{% else %}⬜{% endif %}</td>
+        </tr>
+
+        <tr>
+            <td>Messaging Templates</td>
+            <td>{% if last_completed_step >= 5 %}✅{% else %}⬜{% endif %}</td>
+        </tr>
+
+        <tr>
+            <td>Document Center</td>
+            <td>{% if last_completed_step >= 6 %}✅{% else %}⬜{% endif %}</td>
+        </tr>
+
+        <tr>
+            <td>Review & Submit</td>
+            <td>{% if last_completed_step >= 7 %}✅{% else %}⬜{% endif %}</td>
+        </tr>
+
+    </table>
+
+</div>  
+
+<div class="dashboard-card">
+
+<h2>Communications Status</h2>
+
+<table class="table">
+
+<tr>
+<td>Brand</td>
+<td>✅ Verified</td>
+</tr>
+
+<tr>
+<td>Campaign</td>
+<td>⏳ Pending Approval</td>
+</tr>
+
+<tr>
+<td>SMS Module</td>
+<td>🔒 Locked</td>
+</tr>
+
+</table>
+
+</div>
+
+
+
+
+<div class="dashboard-card">
+
+    <h2>Quick Actions</h2>
+
+    <p>
+        <a class="btn"
+           href="{{ url_for('messaging_compliance_onboarding',
+                            step=current_step) }}">
+            Continue Wizard
+        </a>
+    </p>
+
+    <p>
+        <a class="btn"
+           href="{{ url_for('template_review') }}">
+            Messaging Templates
+        </a>
+    </p>
+
+    <p>
+        <a class="btn"
+           href="#">
+            Document Center
+        </a>
+    </p>
+
+    <p>
+        <a class="btn"
+           href="#">
+            Brand Registration
+        </a>
+    </p>
+
+    <p>
+        <a class="btn"
+           href="#">
+            Campaign Registration
+        </a>
+    </p>
+
+</div>
+
+    <p>
+        Step {{ current_step }} of 7
+    </p>
+
+    <a class="btn"
+       href="{{ url_for('messaging_compliance_onboarding', step=current_step) }}">
+        Continue Onboarding
+    </a>
+</div>
+
+<div class="dashboard-card">
+    <h2>Compliance Score</h2>
+
+    <h1>{{ compliance_check.score }}/100</h1>
+
+    <progress value="{{ compliance_check.score }}" max="100" style="width:100%;"></progress>
+
+    <p>
+        Status: <strong>{{ compliance_check.status }}</strong>
+    </p>
+</div>
+
+<div class="dashboard-card">
+    <h2>Compliance Issues</h2>
+
+    {% if compliance_check.issues %}
+        <ul>
+            {% for issue in compliance_check.issues %}
+                <li>{{ issue }}</li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p>✅ No compliance issues detected.</p>
+    {% endif %}
+</div>
 
 <div class="dashboard-card">
     <h2>Platform Readiness</h2>
@@ -53,7 +214,7 @@
     <div class="dashboard-card">
         <h3>Template Review</h3>
         <p>Review SMS templates for opt-out language, consent risk, and marketing content.</p>
-        <a href="{{ url_for('messaging_compliance_templates') }}">Open</a>
+        <a href="{{ url_for('template_review') }}">Open</a>
     </div>
 
     <div class="dashboard-card">

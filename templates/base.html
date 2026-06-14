@@ -50,28 +50,42 @@
 
     <!-- Navigation -->
     <nav class="main-nav">
+         
 
-        <a class="nav-btn nav-btn-briefing nav-btn-two-line"
+     <br>   
+        <a class="btn nav-btn-briefing nav-btn-two-line"
             href="{{ url_for('morning_briefing') }}">
 
-            🌅<br>
-            Daily<br>
-            Briefing
-
+            Daily <br> Briefing<br>🌅
         </a>
 
-        <a class="nav-btn" href="{{ url_for('home') }}">
-            Control<br> Panel
+        <a class="btn" href="{{ url_for('reports') }}">
+         🍑 Business <br>  Summary
         </a>
-        <a class="nav-btn" href="{{ url_for('reports') }}">
-            🍑 Business<br> Summary
-        </a> 
-        <a class="nav-btn" href="{{ url_for('messaging_compliance_dashboard') }}">Compliance <br>Dashboard</a>
-        <a class="nav-btn" href="{{ url_for('calendar_view') }}">Calendar</a>
-        <a class="nav-btn" href="{{ url_for('appointments') }}">Appointments</a>      
-        <a class="nav-btn" href="{{ url_for('client_management') }}">
+        
+        <a class="btn" 
+            href="{{ url_for('calendar_view') }}"
+            >Calendar & <br> Appointments
+        </a>
+             
+        <a class="btn" href="{{ url_for('client_management') }}">
             Client<br> Management
         </a>
+
+        <a class="btn" href="{{ url_for('communications') }}">
+            Communications<br> Center
+        </a>
+
+        <a class="btn" href="{{ url_for('financials_home') }}">
+            Financials<br> Home
+        </a>
+       
+        <a class="btn" href="{{ url_for('admin') }}">
+            Spa<br> Management
+        </a>
+
+        <a class="btn" href="{{ url_for('messaging_compliance_dashboard') }}">Compliance <br>Dashboard</a>
+
     {% if session.get("user_id") %}
         <a class="btn" href="{{ url_for('logout') }}"
                                onclick="return confirm('Are you sure you want to LOG OUT?')">
