@@ -12,15 +12,6 @@
         Page Help
     </a>
 
-    
-    <a class="btn" href="{{ url_for('client_contact_preferences') }}">
-        SMS/Email Opt In/Out Settings
-    </a>
-
-
-    <a class="btn" href="{{ url_for('gift_certificates_home') }}">
-        Gift Certificate Management
-    </a>
 
 
    
@@ -36,6 +27,16 @@
     <div style="flex:1; min-width:0;">
 
 
+        <!-- 🔹 HEADER 1 -->
+        <div class="narrow-cards">
+            {{ section_card("SMS Opt Out", "SMS Opt Out Settings", url_for('client_contact_preferences')) }}
+            {{ section_card("Gift Certificates", "Manage: Add / Edit Gift Certificates", url_for('gift_certificates_home')) }}
+            {{ section_card("Birthday Offers", "View and Manage Birthday Offers", url_for('birthday_offers_home')) }}            
+        </div>
+
+<br>
+
+
         <p>
             Please search for Client's Name, then use an Action Button
             (Add Appointment, Health / Intake, Forms, Visit Summaries, Full Record, Edit) 
@@ -45,7 +46,7 @@
         <p>
             <span style="color: red;">Note: SMS/Email Opt In/Out:</span> 
             Search Client below, then click on the Client's - SMS Settings button (far right).
-
+        </p>  
 
         <div style="margin-bottom: 20px;">    
             <a class="btn" href="{{ url_for('add_new_client') }}">
@@ -79,9 +80,10 @@
            {% endif %}
 
         </form>
-    </div>
+  
+        </div>
 
-        <!-- RIGHT SIDE IMAGE -->
+    <!-- RIGHT SIDE IMAGE -->
     <div style="width:260px; flex-shrink:0; text-align:right;">
         <img src="{{ url_for('static', filename='images/ps_client_management.png') }}"
              alt="Peach Suite Pro Client Management"

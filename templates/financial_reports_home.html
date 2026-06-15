@@ -8,8 +8,8 @@
     📖 Help Center
 </a>
 
-        <h1>Control Panel</h1>
-        <h2>Quick access to all areas of the system.</h2>
+        <h1>Financial Reports</h1>
+        
 
 <div style="display: flex; flex-direction: row; justify-content: space-between; align-items: flex-start; gap: 25px; width: 100%;">
 
@@ -24,10 +24,8 @@
         </div>
 <br>
         <div class="narrow-cards">
-        
             {{ section_card("Birthday Celebrations", "View & manage Client Birthdays, Mark sent client a Birthday Offer", url_for('birthday_offers_home')) }}  
             {{ section_card("Gift Certificates", "Add New Gift Certificates when printed, update when sold and redeemed", url_for('gift_certificates_home')) }}
-
         </div>
 
     </div>
@@ -46,11 +44,8 @@
     <!-- 🔹 HEADER 2 -->
     <h2 style="margin-top: 30px;">Accounting - Logistics - Human Resources</h2>
 
-    <div class="narrow-cards">
-       
-       
+    <div class="narrow-cards"> 
         {{ section_card("Employees Home", "Corporate Human Resources Department", url_for('employee_admin')) }}
-       
     </div>
 
     <!-- 🔹 HEADER 3 -->
@@ -73,20 +68,6 @@
             url_for('view_help_page', page_key='privacy')
          ) }}
 
-    </div>
-
-        <!-- 🔹 HEADER 4 -->
-    <h2 style="margin-top: 30px;">Master Admin</h2>
-
-    <div class="narrow-cards">
-        {{ section_card("Daily Change Log", "Record development updates and daily changes", url_for('log_it')) }}
-        {{ section_card("Feedbacks", "Feedbacks", url_for('feedback_admin')) }}
-        {{ section_card("Create New Help Page", "Create a New Help Page", url_for('new_help_page')) }}
-        {{ section_card(
-            "Edit Existing Help Page",  
-            "Edit an existing Help Page, then change page in address", 
-            url_for('edit_help_page', page_key='calendar') 
-         ) }}
     </div>
 
          

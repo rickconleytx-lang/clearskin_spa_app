@@ -5,10 +5,10 @@
 {% block content %}
 
 <a href="{{ url_for('help_center') }}" class="btn">
-    📖 Help Center
+    📖 Help 
 </a>
 
-        <h1>Financials Home</h1>
+        <h1>Accounting Home</h1>
       
 
 <div style="display: flex; flex-direction: row; justify-content: space-between; align-items: flex-start; gap: 25px; width: 100%;">
@@ -20,21 +20,18 @@
     <!-- 🔹 HEADER 1 -->
     <h2 style="margin-top: 25px;">Accounting</h2>
 
-        <div class="narrow-cards">
-            
-            {{ section_card("Income", "Accounts Receivable Department",  url_for('income_home')) }}
-            {{ section_card("Expenses", "Accounts Payable Department", url_for('expenses_home')) }}
-            {{ section_card("Financing Home", "Corporate Finance Department", url_for('finance_home')) }}
-           
-
+        <div class="narrow-cards"> 
+            {{ section_card("Income Home", "Accounts Receivable Department",  url_for('income_home')) }}
+            {{ section_card("Expense Home", "Accounts Payable Department", url_for('expenses_home')) }}
+            {{ section_card("Financing Department", " ", url_for('birthday_offers_home')) }}  
+            {{ section_card("Inventory / Logistics", "need report and URL", url_for('finance_home')) }}
         </div>
         
 <br>
         <div class="narrow-cards">
-            
-            {{ section_card("Birthday Celebrations", "View & manage Client Birthdays, Mark sent client a Birthday Offer", url_for('birthday_offers_home')) }}  
-            {{ section_card("Gift Certificates", "Add New Gift Certificates when printed, update when sold and redeemed", url_for('gift_certificates_home')) }}
-             {{ section_card("Employees Home", "Corporate Human Resources Department", url_for('employee_admin')) }}
+            {{ section_card("Employees / HR", "need report and URL", url_for('finance_home')) }}
+            {{ section_card("Financial Reports", " ", url_for('gift_certificates_home')) }}
+            {{ section_card("Available", " ", url_for('employee_admin')) }}
         </div>
 
     </div>

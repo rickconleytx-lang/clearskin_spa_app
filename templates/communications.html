@@ -21,9 +21,8 @@
      <!-- 🔹 HEADER 1 -->
         <h2 style="margin-top: 25px;">SMS</h2>
         <div class="narrow-cards">
+            {{ section_card("SMS Messaging Compliance", "SMS Compliance Dashboard", url_for('messaging_compliance_dashboard')) }}
             {{ section_card("SMS Home", "Send, View and Manage Client Contact Preferences", url_for('sms_home')) }}
-            {{ section_card("SMS Templates", "View and Add Templates",  url_for('sms_templates_admin')) }}
-            {{ section_card("SMS History", "View SMS History",  url_for('sms_history_all')) }}
             {{ section_card("SMS and Email Preferences", "View and Manage Client Contact Preferences", url_for('client_contact_preferences')) }}            
         </div>
 
@@ -32,10 +31,7 @@
      <!-- 🔹 HEADER 2 -->
         <h2 style="margin-top: 25px;">Email</h2>
         <div class="narrow-cards">
-            {{ section_card("Email Home", "Email Home", url_for('general_email')) }}
-            {{ section_card("Email History", "Review your Email Send History", url_for('email_history')) }}
-            {{ section_card("Email Templates", "Manage Email Templates", url_for('email_templates_admin')) }}
-            {{ section_card("Add New Template", "Add New Email Template", url_for('add_email_template')) }}          
+            {{ section_card("Email Home", "Email Home", url_for('general_email')) }}         
         </div>
      
         

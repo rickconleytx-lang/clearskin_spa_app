@@ -10,6 +10,55 @@
     Template Type: <strong>{{ template_type }}</strong>
 </p>
 
+<div style="
+    border:1px solid #ddd;
+    border-radius:10px;
+    padding:15px;
+    margin-bottom:20px;
+    background:#f8f9fa;
+">
+
+    <h3>Template Status</h3>
+
+    {% if not template %}
+
+        <p style="font-size:20px;">
+            ⚪ <strong>NO CURRENT TEMPLATE</strong>
+        </p>
+
+        <p>No template has been created for this message type.</p>
+
+    {% elif template.is_active and template.approved_for_use %}
+
+        <p style="font-size:20px; color:green;">
+            🟢 <strong>APPROVED</strong>
+        </p>
+
+        <p>AI Score: {{ template.ai_score or 0 }}</p>
+
+        <p>This template is approved and available for use.</p>
+
+    {% else %}
+
+        <p style="font-size:20px; color:red;">
+            🔴 <strong>DISABLED</strong>
+        </p>
+
+        <p>AI Score: {{ template.ai_score or 0 }}</p>
+
+        <p>
+            This template has been automatically disabled due to AI compliance issues.
+            Please correct the template and save again.
+        </p>
+
+    {% endif %}
+
+</div>
+
+
+
+
+
 <form method="POST" class="styled-form">
 
     <label>Template Name</label><br>
@@ -26,12 +75,36 @@
               style="width:100%;"
               required>{{ template[1] if template else '' }}</textarea><br><br>
 
-    <label>
-        <input type="checkbox"
-               name="is_active"
-               {% if not template or template[2] %}checked{% endif %}>
-        Active
-    </label><br><br>
+    
+
+
+    
+
+<h3>🔒 System Compliance Footer</h3>
+
+<div style="
+    background:#f8f9fa;
+    border:1px solid #ddd;
+    border-radius:8px;
+    padding:15px;
+    margin-top:10px;
+">
+
+    <pre style="
+        white-space:pre-wrap;
+        font-family:inherit;
+        margin:0;
+    ">{{ sms_footer }}</pre>
+
+</div>
+
+<p style="color:#666; font-size:0.9em; margin-top:8px;">
+    This compliance footer is automatically appended to all outbound SMS messages by Peach Suite Pro.
+    It cannot be edited here.
+</p>
+<hr>
+<br><br>
+ 
 
     {% if template and template[3] is not none %}
 

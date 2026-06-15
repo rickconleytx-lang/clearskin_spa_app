@@ -53,6 +53,14 @@
          
 
      <br>   
+        {% if session.get("role") == "master_admin" %}
+    <a class="btn btn-primary"
+       href="{{ url_for('master_admin_home') }}">
+        Master Admin
+    </a>
+        {% endif %}
+
+
         <a class="btn nav-btn-briefing nav-btn-two-line"
             href="{{ url_for('morning_briefing') }}">
 
@@ -77,14 +85,18 @@
         </a>
 
         <a class="btn" href="{{ url_for('financials_home') }}">
-            Financials<br> Home
+            Accounting<br> Home
         </a>
        
-        <a class="btn" href="{{ url_for('admin') }}">
-            Spa<br> Management
+
+        <a class="btn" href="{{ url_for('spa_management') }}">
+            Business <br> Management
         </a>
 
-        <a class="btn" href="{{ url_for('messaging_compliance_dashboard') }}">Compliance <br>Dashboard</a>
+        <a class="btn" href="{{ url_for('help_center') }}">
+            Help Center
+        </a>
+
 
     {% if session.get("user_id") %}
         <a class="btn" href="{{ url_for('logout') }}"

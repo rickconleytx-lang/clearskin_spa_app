@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}Messaging Footer Settings{% endblock %}
+
+{% block content %}
+
+<h1>Messaging Footer Settings</h1>
+
+<p style="color:red;">
+    These footers are controlled by Master Admin and are automatically added to outbound messages.
+</p>
+
+<form method="POST">
+
+    <label><strong>SMS Opt-Out Footer</strong></label><br>
+    <textarea name="sms_opt_out" rows="3" style="width:100%;">{{ footers.get('sms_opt_out', '') }}</textarea>
+
+    <br><br>
+
+    <label><strong>Email Unsubscribe Footer</strong></label><br>
+    <textarea name="email_unsubscribe" rows="5" style="width:100%;">{{ footers.get('email_unsubscribe', '') }}</textarea>
+
+    <br><br>
+
+    <button type="submit" class="btn">Save Footer Settings</button>
+
+</form>
+
+{% endblock %}

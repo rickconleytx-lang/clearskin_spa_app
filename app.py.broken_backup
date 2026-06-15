@@ -247,7 +247,7 @@ def add_new_client_from_booking(incoming_booking_id):
 
         if not booking:
             flash("Booking record not found.", "error")
-            return redirect(url_for("dashboard"))
+            return redirect(url_for("home"))
 
         return render_template(
             "add_new_client.html",
@@ -256,7 +256,7 @@ def add_new_client_from_booking(incoming_booking_id):
 
     except Exception as e:
         flash(f"Error loading booking: {str(e)}", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("home"))
 
     finally:
         cur.close()
@@ -3839,7 +3839,7 @@ def dashboard():
     conn.close()
 
     return render_template(
-        "dashboard.html",
+        "home.html",
         total_clients=total_clients,
         todays_appointments=todays_appointments,
         upcoming_appointments=upcoming_appointments,

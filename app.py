@@ -162,6 +162,64 @@ def get_messaging_onboarding(spa_id):
     return row
 
 
+
+##################################################
+#
+#   SMS  & EMAIL OPT OUT FOOTER FROM MASTER ADMIN
+#
+###################################################
+
+def get_messaging_footer(footer_type):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT footer_text
+        FROM messaging_footer_settings
+        WHERE footer_type = %s
+          AND is_active = TRUE
+        LIMIT 1
+    """, (footer_type,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    return row[0] if row else ""
+
+
+
+
+
+def append_sms_footer(message):
+
+    footer = get_messaging_footer("sms_opt_out")
+
+    message = (message or "").strip()
+    footer = (footer or "").strip()
+
+    # Don't append if already present
+    if footer and footer.lower() in message.lower():
+        return message
+
+    if footer:
+        return f"{message}\n\n{footer}"
+
+    return message
+
+
+
+
+
+def append_email_footer(body):
+    footer = get_messaging_footer("email_unsubscribe")
+    body = (body or "").strip()
+
+    if footer:
+        return f"{body}<br><br>{footer}"
+
+    return body
+
+
+
 ####################################
 #
 #
@@ -357,30 +415,80 @@ def run_messaging_compliance_check(onboarding):
 #       AI TEMPLATE REVIEW
 ##########################################################
 
-def review_template_ai_basic(message_text):
+def review_template_ai_basic(template_type, message_text):
 
     message_text = message_text or ""
 
     score = 100
     notes = []
 
-    if "{{ opt_out }}" not in message_text:
-        score -= 30
-        notes.append("Missing STOP disclosure.")
+    required_fields = {
+        "appointment_reminder": [
+            "{{ client_first_name }}",
+            "{{ appointment_date }}",
+            "{{ appointment_time }}"
+        ],
 
-    if "{{ client_first_name }}" not in message_text \
-       and "{{ client_full_name }}" not in message_text:
-        score -= 5
-        notes.append("Consider adding client personalization.")
+        "birthday": [
+            "{{ client_first_name }}"
+        ],
 
-    if "{{ appointment_date }}" not in message_text:
-        score -= 5
-        notes.append("Appointment date merge field missing.")
+        "followup": [
+            "{{ client_first_name }}"
+        ],
 
-    if "{{ appointment_time }}" not in message_text:
-        score -= 5
-        notes.append("Appointment time merge field missing.")
+        "promotion": [],
 
+        "gift_certificate": [
+            "{{ client_first_name }}"
+        ]
+    }
+
+    fields = required_fields.get(template_type, [])
+
+    if "{{ opt_out }}" in message_text:
+        score -= 10
+        notes.append(
+            "Remove opt-out text from the template. Peach Suite Pro automatically appends the system compliance footer."
+        )
+    else:
+        notes.append(
+            "System compliance footer will be automatically appended."
+        )
+
+   
+    for field in fields:
+
+        if field not in message_text:
+
+            notes.append(f"💡 Consider adding client personalization: {field}")
+   
+   
+    for field in fields:
+
+        if field not in message_text:
+
+            notes.append(f"💡 Appointment date merge field missing.: {field}")
+   
+  
+    for field in fields:
+
+        if field not in message_text:
+
+            notes.append(f"💡 Appointment time merge field missing.: {field}")
+   
+    if len(message_text.strip()) < 10:
+        score -= 50
+        notes.append("Template appears to be empty.")
+
+    if "{{ opt_out }}" in message_text:
+        score -= 10
+        notes.append(
+            "Remove opt-out text. Peach Suite Pro automatically appends the system compliance footer."
+        )
+
+
+   
     if len(message_text) > 160:
         score -= 10
         notes.append("Message may exceed one SMS segment.")
@@ -2667,6 +2775,35 @@ def financials_home():
 
 
 
+#########################################
+#   Reports
+#
+#######################################
+
+
+@app.route("/financial_reports_home")
+@login_required
+@spa_required  
+
+def financial_reports_home():
+    return render_template("financial_reports_home.html")
+
+
+
+#########################################
+#   MASTER ADMIN HOME
+#
+#######################################
+
+
+@app.route("/master_admin_home")
+@login_required
+@spa_required  
+
+def master_admin_home():
+    return render_template("master_admin_home.html")
+
+
 
 
 
@@ -3058,7 +3195,7 @@ def template_review():
 
 ############################
 #      
-#
+#           AI Check
 #     COMPLIANCE TEMPLATE TYPES
 #
 #############################
@@ -3182,13 +3319,16 @@ def edit_messaging_template(template_type):
 
     template = cur.fetchone()
 
+    sms_footer = get_messaging_footer("sms_opt_out")
+
     cur.close()
     conn.close()
 
     return render_template(
         "admin/messaging_compliance/edit_template.html",
         template=template,
-        template_type=template_type
+        template_type=template_type,
+        sms_footer=sms_footer
     )
 
 
@@ -3242,6 +3382,8 @@ def preview_messaging_template(template_type):
 
     preview_text = render_template_text(template[1])
 
+    final_message = append_sms_footer(preview_text)
+
     cur.close()
     conn.close()
 
@@ -3249,7 +3391,8 @@ def preview_messaging_template(template_type):
         "admin/messaging_compliance/template_preview.html",
         template=template,
         preview_text=preview_text,
-        template_type=template_type
+        template_type=template_type,
+        final_message=final_message
     )
 
 
@@ -3332,9 +3475,62 @@ def messaging_compliance_campaign_registration():
 
 
 
+##################################################
+#
+#   MASTER ADMIN FOOTERS
+#
+#
+#
+######################################################
 
+@app.route("/master/messaging-footers", methods=["GET", "POST"])
+@login_required
+@master_admin_required
+def master_messaging_footers():
 
+    conn = get_db_connection()
+    cur = conn.cursor()
 
+    if request.method == "POST":
+        sms_footer = request.form.get("sms_opt_out", "").strip()
+        email_footer = request.form.get("email_unsubscribe", "").strip()
+
+        cur.execute("""
+            UPDATE messaging_footer_settings
+            SET footer_text = %s,
+                updated_at = CURRENT_TIMESTAMP,
+                updated_by = %s
+            WHERE footer_type = 'sms_opt_out'
+        """, (sms_footer, session.get("user_id")))
+
+        cur.execute("""
+            UPDATE messaging_footer_settings
+            SET footer_text = %s,
+                updated_at = CURRENT_TIMESTAMP,
+                updated_by = %s
+            WHERE footer_type = 'email_unsubscribe'
+        """, (email_footer, session.get("user_id")))
+
+        conn.commit()
+        flash("Messaging footer settings updated.", "success")
+        return redirect(url_for("master_messaging_footers"))
+
+    cur.execute("""
+        SELECT footer_type, footer_text
+        FROM messaging_footer_settings
+        WHERE is_active = TRUE
+    """)
+    rows = cur.fetchall()
+
+    footers = {row[0]: row[1] for row in rows}
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "master_messaging_footers.html",
+        footers=footers
+    )
 
 
 
@@ -17193,7 +17389,7 @@ def income_report():
             COALESCE(i.income_type, '') AS income_type,  
             COALESCE(i.description, '') AS description,
             COALESCE(i.payment_method, '') AS payment_method,
-v            COALESCE(cp.credit_processor_name, '') AS credit_processor_name,
+            COALESCE(cp.credit_processor_name, '') AS credit_processor_name,
             COALESCE(i.processor_payment_id, '') AS processor_payment_id,
             COALESCE(i.service_amount, 0.00) AS service_amount,
             COALESCE(i.tip_amount, 0.00) AS tip_amount,
