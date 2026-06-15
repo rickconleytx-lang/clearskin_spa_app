@@ -34,7 +34,7 @@
             🟢 <strong>APPROVED</strong>
         </p>
 
-        <p>AI Score: {{ template.ai_score or 0 }}</p>
+        <p>AI Score: {{ template[3] or 0 }}</p>
 
         <p>This template is approved and available for use.</p>
 
@@ -44,7 +44,7 @@
             🔴 <strong>DISABLED</strong>
         </p>
 
-        <p>AI Score: {{ template.ai_score or 0 }}</p>
+        <p>AI Score: {{ template[3]or 0 }}</p>
 
         <p>
             This template has been automatically disabled due to AI compliance issues.

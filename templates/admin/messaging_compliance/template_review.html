@@ -16,6 +16,8 @@ templates completed ({{ percent }}%).
 
 <progress value="{{ completed }}" max="{{ total }}"></progress>
 
+<p>Template count: {{ templates|length }}</p>
+
 
 <table class="table">
 
@@ -79,5 +81,6 @@ templates completed ({{ percent }}%).
 {% endfor %}
 
 </table>
+
 
 {% endblock %}

@@ -222,37 +222,41 @@ def append_email_footer(body):
     return body
 
 
+
+
+
+
+
 ##################################
 #
 #   GET APPROVED SMS TEMPLATE
 #
 #################################
 
+
+
 def get_approved_sms_template(spa_id, template_type):
     conn = get_db_connection()
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT message_text
+        SELECT template_id, template_name, template_type, message_text
         FROM messaging_templates
         WHERE spa_id = %s
           AND template_type = %s
           AND is_active = TRUE
           AND approved_for_use = TRUE
-          AND COALESCE(ai_score, 0) > 60
-        ORDER BY updated_at DESC
+        ORDER BY updated_at DESC, template_id DESC
         LIMIT 1
     """, (spa_id, template_type))
 
-    row = cur.fetchone()
+    template = cur.fetchone()
 
     cur.close()
     conn.close()
 
-    if not row:
-        return None
+    return template
 
-    return row[0]
 
 
 
@@ -260,22 +264,59 @@ def get_approved_sms_template(spa_id, template_type):
 
 ##################################
 #
-#     RENDER HELPER
+#     RENDER SMS TEMPLATE. HELPER
 #
 #################################
 
 
+import re
 
 def render_sms_template(template_text, merge_data):
-    rendered = template_text or ""
+    if not template_text:
+        return ""
 
-    for key, value in (merge_data or {}).items():
-        rendered = rendered.replace(
-            "{{" + key + "}}",
-            str(value or "")
-        )
+    if merge_data is None:
+        merge_data = {}
 
-    return rendered.strip()
+    def replace_field(match):
+        field_name = match.group(1).strip()
+        value = merge_data.get(field_name, "")
+        return str(value or "")
+
+    return re.sub(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}", replace_field, template_text)
+
+
+
+
+##################################
+#
+#     BUILD SMS MESSAGE
+#
+#################################
+
+def build_sms_message(spa_id, template_type, merge_data):
+    template = get_approved_sms_template(spa_id, template_type)
+
+    if not template:
+        return {
+            "success": False,
+            "error": f"No approved active SMS template found for: {template_type}",
+            "message_body": None,
+            "template_id": None
+        }
+
+    template_id = template[0]
+    template_text = template[3]
+
+    rendered_message = render_sms_template(template_text, merge_data)
+
+    return {
+        "success": True,
+        "error": None,
+        "message_body": rendered_message,
+        "template_id": template_id
+    }
+
 
 
 
@@ -283,9 +324,10 @@ def render_sms_template(template_text, merge_data):
 
 ##################################
 #
-#     SEND TEMPLATE
+#     SEND TEMPLATE SMS
 #
 #################################
+
 
 
 def send_template_sms(
@@ -293,30 +335,33 @@ def send_template_sms(
     client_id,
     recipient_phone,
     template_type,
-    merge_data=None
+    merge_data,
+    message_type=None
 ):
-    template_text = get_approved_sms_template(spa_id, template_type)
+    built = build_sms_message(spa_id, template_type, merge_data)
 
-    if not template_text:
+    if not built["success"]:
         return {
             "success": False,
-            "status": "failed",
-            "provider_message_id": None,
-            "provider_status": None,
-            "provider_error_code": "NO_APPROVED_TEMPLATE",
-            "provider_error_message": f"No approved SMS template found for {template_type}.",
-            "final_message_body": None
+            "error": built["error"],
+            "template_id": None
         }
 
-    message_body = render_sms_template(template_text, merge_data or {})
-
-    return send_compliant_sms(
+    result = send_compliant_sms(
         spa_id=spa_id,
         client_id=client_id,
         recipient_phone=recipient_phone,
-        message_body=message_body,
-        message_type=template_type
+        message_body=built["message_body"],
+        message_type=message_type or template_type
     )
+
+    result["template_id"] = built["template_id"]
+    result["rendered_message_body"] = built["message_body"]
+
+    return result
+
+
+
 
 
 
@@ -534,6 +579,7 @@ def run_messaging_compliance_check(onboarding):
 #       AI TEMPLATE REVIEW
 ##########################################################
 
+
 def review_template_ai_basic(template_type, message_text):
 
     message_text = message_text or ""
@@ -541,79 +587,66 @@ def review_template_ai_basic(template_type, message_text):
     score = 100
     notes = []
 
-    required_fields = {
+    recommended_fields = {
         "appointment_reminder": [
-            "{{ client_first_name }}",
-            "{{ appointment_date }}",
-            "{{ appointment_time }}"
+            "{{client_first_name}}",
+            "{{appointment_date}}",
+            "{{appointment_time}}"
         ],
-
-        "birthday": [
-            "{{ client_first_name }}"
+        "appointment_confirmation": [
+            "{{client_first_name}}",
+            "{{appointment_date}}",
+            "{{appointment_time}}"
         ],
-
-        "followup": [
-            "{{ client_first_name }}"
+        "appointment_rescheduled": [
+            "{{client_first_name}}",
+            "{{appointment_date}}",
+            "{{appointment_time}}"
         ],
-
-        "promotion": [],
-
+        "appointment_cancelled": [
+            "{{client_first_name}}"
+        ],
+        "birthday_message": [
+            "{{client_first_name}}"
+        ],
+        "follow_up": [
+            "{{client_first_name}}"
+        ],
+        "review_request": [
+            "{{client_first_name}}"
+        ],
         "gift_certificate": [
-            "{{ client_first_name }}"
+            "{{client_first_name}}"
         ]
     }
 
-    fields = required_fields.get(template_type, [])
+    fields = recommended_fields.get(template_type, [])
 
-    if "{{ opt_out }}" in message_text:
+    if len(message_text.strip()) < 10:
+        score -= 50
+        notes.append("Template appears to be empty.")
+
+    if "{{ opt_out }}" in message_text or "{{opt_out}}" in message_text:
         score -= 10
         notes.append(
-            "Remove opt-out text from the template. Peach Suite Pro automatically appends the system compliance footer."
+            "Remove opt-out text. Peach Suite Pro automatically appends the system compliance footer."
         )
     else:
         notes.append(
             "System compliance footer will be automatically appended."
         )
 
-   
+    normalized_message = message_text.replace(" ", "")
+
     for field in fields:
+        normalized_field = field.replace(" ", "")
 
-        if field not in message_text:
+        if normalized_field not in normalized_message:
+            notes.append(f"💡 Consider adding merge field: {field}")
 
-            notes.append(f"💡 Consider adding client personalization: {field}")
-   
-   
-    for field in fields:
-
-        if field not in message_text:
-
-            notes.append(f"💡 Appointment date merge field missing.: {field}")
-   
-  
-    for field in fields:
-
-        if field not in message_text:
-
-            notes.append(f"💡 Appointment time merge field missing.: {field}")
-   
-    if len(message_text.strip()) < 10:
-        score -= 50
-        notes.append("Template appears to be empty.")
-
-    if "{{ opt_out }}" in message_text:
-        score -= 10
-        notes.append(
-            "Remove opt-out text. Peach Suite Pro automatically appends the system compliance footer."
-        )
-
-
-   
     if len(message_text) > 160:
         score -= 10
         notes.append("Message may exceed one SMS segment.")
-
-    if not notes:
-        notes.append("Template looks excellent.")
 
     if score >= 90:
         risk = "Low"
@@ -627,6 +660,13 @@ def review_template_ai_basic(template_type, message_text):
         "review": "\n".join(notes),
         "risk_level": risk
     }
+
+
+
+
+
+
+
 
 
 
@@ -3382,9 +3422,21 @@ def edit_messaging_template(template_type):
 
         template_name = request.form.get("template_name")
         message_text = request.form.get("message_text")
-        is_active = request.form.get("is_active") == "on"
 
-        ai = review_template_ai_basic(message_text)
+        ai_result = review_template_ai_basic(template_type, message_text)
+
+
+
+        print("Message:", message_text)
+        print("AI Result:", ai_result)
+
+
+
+
+
+        is_active = ai_result["score"] > 60
+        approved_for_use = ai_result["score"] > 60
+
 
         cur.execute("""
             SELECT template_id
@@ -3403,6 +3455,7 @@ def edit_messaging_template(template_type):
                     template_name=%s,
                     message_text=%s,
                     is_active=%s,
+                    approved_for_use=%,
                     ai_score=%s,
                     ai_review=%s,
                     ai_risk_level=%s,
@@ -3415,9 +3468,10 @@ def edit_messaging_template(template_type):
                 template_name,
                 message_text,
                 is_active,
-                ai["score"],
-                ai["review"],
-                ai["risk_level"],
+                approved_for_use,
+                ai_result["score"],
+                ai_result["review"],
+                ai_result["risk_level"],
                 spa_id,
                 template_type
             ))
@@ -3432,6 +3486,7 @@ def edit_messaging_template(template_type):
                     template_type,
                     message_text,
                     is_active,
+                    approved_for_use,
                     ai_score,
                     ai_review,
                     ai_risk_level,
@@ -3440,16 +3495,17 @@ def edit_messaging_template(template_type):
                     updated_at
                 )
                 VALUES
-                (%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW(),NOW())
+                (%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW(),NOW())
             """, (
                 spa_id,
                 template_name,
                 template_type,
                 message_text,
                 is_active,
-                ai["score"],
-                ai["review"],
-                ai["risk_level"]
+                approved_for_use,
+                ai_result["score"],
+                ai_result["review"],
+                ai_result["risk_level"]
             ))
 
         conn.commit()
@@ -3551,6 +3607,9 @@ def preview_messaging_template(template_type):
     cur.close()
     conn.close()
 
+
+    preview_text = built["message_body"]
+
     return render_template(
         "admin/messaging_compliance/template_preview.html",
         template=template,
@@ -3562,10 +3621,33 @@ def preview_messaging_template(template_type):
 
 
 
+############################################
+###########################################
+#####test.  test.  test
 
+@app.route("/admin/test-template")
+@login_required
+@spa_required
+def test_template():
 
+    spa_id = session.get("spa_id")
 
+    merge_data = {
+        "client_first_name": "Rick",
+        "client_last_name": "Conley",
+        "appointment_date": "June 20, 2026",
+        "appointment_time": "10:00 AM",
+        "service_name": "Facial",
+        "spa_name": "Clear Skin Esthetics"
+    }
 
+    result = build_sms_message(
+        spa_id,
+        "appointment_reminder",
+        merge_data
+    )
+
+    return f"<pre>{result}</pre>"
 
 
 
