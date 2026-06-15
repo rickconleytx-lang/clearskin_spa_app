@@ -20,7 +20,7 @@ load_dotenv()
 from flask import abort
 from flask import g
 from services.sms_service import send_sms_telnyx
-from twilio.rest import Client
+
 
 app = Flask(__name__)
 
@@ -189,9 +189,12 @@ def get_messaging_footer(footer_type):
 
 
 
-def append_sms_footer(message):
+def append_sms_footer(spa_id, message):
 
-    footer = get_messaging_footer("sms_opt_out")
+    footer = get_messaging_footer(
+        spa_id,
+        "sms_opt_out"
+    )
 
     message = (message or "").strip()
     footer = (footer or "").strip()
@@ -217,6 +220,122 @@ def append_email_footer(body):
         return f"{body}<br><br>{footer}"
 
     return body
+
+
+##################################
+#
+#   GET APPROVED SMS TEMPLATE
+#
+#################################
+
+def get_approved_sms_template(spa_id, template_type):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT message_text
+        FROM messaging_templates
+        WHERE spa_id = %s
+          AND template_type = %s
+          AND is_active = TRUE
+          AND approved_for_use = TRUE
+          AND COALESCE(ai_score, 0) > 60
+        ORDER BY updated_at DESC
+        LIMIT 1
+    """, (spa_id, template_type))
+
+    row = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if not row:
+        return None
+
+    return row[0]
+
+
+
+
+
+##################################
+#
+#     RENDER HELPER
+#
+#################################
+
+
+
+def render_sms_template(template_text, merge_data):
+    rendered = template_text or ""
+
+    for key, value in (merge_data or {}).items():
+        rendered = rendered.replace(
+            "{{" + key + "}}",
+            str(value or "")
+        )
+
+    return rendered.strip()
+
+
+
+
+
+##################################
+#
+#     SEND TEMPLATE
+#
+#################################
+
+
+def send_template_sms(
+    spa_id,
+    client_id,
+    recipient_phone,
+    template_type,
+    merge_data=None
+):
+    template_text = get_approved_sms_template(spa_id, template_type)
+
+    if not template_text:
+        return {
+            "success": False,
+            "status": "failed",
+            "provider_message_id": None,
+            "provider_status": None,
+            "provider_error_code": "NO_APPROVED_TEMPLATE",
+            "provider_error_message": f"No approved SMS template found for {template_type}.",
+            "final_message_body": None
+        }
+
+    message_body = render_sms_template(template_text, merge_data or {})
+
+    return send_compliant_sms(
+        spa_id=spa_id,
+        client_id=client_id,
+        recipient_phone=recipient_phone,
+        message_body=message_body,
+        message_type=template_type
+    )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -567,6 +686,51 @@ def render_template_preview(message_text):
 
 
 
+############################################################
+#   SEND COMPLIANT SMS
+############################################################
+
+def send_compliant_sms(spa_id, client_id, recipient_phone, message_body, message_type="manual"):
+    """
+    Central SMS sending pipeline:
+    1. Append required compliance footer
+    2. Send through provider
+    3. Return provider result with final message body
+    """
+
+    final_message = append_sms_footer(spa_id, message_body)
+
+    result = send_sms_message(
+        recipient_phone,
+        final_message
+    )
+
+    result["client_id"] = client_id
+    result["message_type"] = message_type
+    result["final_message_body"] = final_message
+
+    return result
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#####################################################################
+#   >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+#
+#   END OF SMS COMPLIANCE - AI - MESSAGING COMPLIANCE
+#
+#   <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+#####################################################################
 
 
 
@@ -5099,34 +5263,23 @@ from services.sms_service import send_sms_telnyx
 
  
 
-###############################  
+
+
+
+##################################################################
 #
-#   DEF  SMS SEND
-#                 SMS OPT OUT
+#   HELPER   SEND SMS MESSAGE
 #
-##############################3
+#################################################################
 
 
-
-SMS_OPT_OUT_TEXT_EN = "\n\nReply STOP to opt out."
-SMS_OPT_OUT_TEXT_ES = "\n\nResponda STOP para cancelar los mensajes."
-
-
-
-def add_sms_opt_out(message_body):
-    message_body = (message_body or "").strip()
-
-    if "reply stop" in message_body.lower():
-        return message_body
-
-    return f"{message_body}{SMS_OPT_OUT_TEXT_EN}"
 
 
 def send_sms_message(to_phone, message_body):
 
     sms_enabled = os.getenv("SMS_ENABLED", "false").lower() == "true"
 
-    final_message_body = add_sms_opt_out(message_body)
+    final_message_body = message_body
 
     if not sms_enabled:
         return {
@@ -5166,27 +5319,6 @@ def send_sms_message(to_phone, message_body):
             "provider_error_message": str(e),
             "final_message_body": final_message_body
         }
-
-
-
-
-
-
-#   ----------------------------
-#
-#              
-#   ---------------------------
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -6249,8 +6381,14 @@ def sms_preview(client_id):
             # if sms_opt_out:
             #     skip
 
+        result = send_compliant_sms(
+            spa_id=spa_id,
+            client_id=client[0],
+            recipient_phone=client[3],
+            message_body=message_body,
+            message_type="manual"
+        )
 
-        result = send_sms_message(client[3], message_body)
 
         status = result.get("status") or "failed"
 
@@ -6263,8 +6401,8 @@ def sms_preview(client_id):
                 sms_type,
                 status,
                 provider_message_id,
-                twilio_error_code,
-                twilio_error_message,                
+                provider_error_code,
+                provider_error_message,                
                 sent_at
             )
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s,
@@ -6274,12 +6412,12 @@ def sms_preview(client_id):
             spa_id,
             client[0],
             client[3],
-            message_body,
+            result.get("final_message_body"),
             "manual",
             status,
-            result.get("sid"),
-            result.get("error_code"),
-            result.get("error_message"),
+            result.get("provider_message_id"),
+            result.get("provider_error_code"),
+            result.get("provider_error_message"),
             status
         ))
 
@@ -6359,7 +6497,13 @@ def sms_conversation(client_id):
            return redirect(url_for("sms_conversation", client_id=client_id))
 
         try:
-            send_sms(client[3], message_body)
+            result = send_compliant_sms(
+                spa_id=spa_id,
+                client_id=client_id,
+                recipient_phone=client[3],
+                message_body=message_body,
+                message_type="manual"
+            )
 
             cur.execute("""
                 INSERT INTO sms_log (
@@ -6377,9 +6521,9 @@ def sms_conversation(client_id):
                 spa_id,
                 client_id,
                 client[3],
-                message_body,
+                result.get("final_message_body"),
                 "outbound",
-                "sent"
+                result.get("status")
             ))
 
             conn.commit()
@@ -6880,7 +7024,14 @@ def sms_group_send():
             print("ABOUT TO SEND SMS TO:", phone, flush=True)
 
             try:
-                result = send_sms_message(phone, personalized_message)
+                result = send_compliant_sms(
+                    spa_id=spa_id,
+                    client_id=client_id,
+                    recipient_phone=phone,
+                    message_body=personalized_message,
+                    message_type="group_send"
+                )
+
                 print("SMS SEND RESULT:", result, flush=True)
 
                 status = result.get("status")
@@ -7129,82 +7280,15 @@ def sms_history_all():
 #
 #   ----------------------------
 
-
 @app.route("/sms_logs/<int:sms_log_id>/refresh", methods=["POST"])
 @login_required
 @spa_required
 def refresh_sms_status(sms_log_id):
-    spa_id = current_spa_id()
-
-    flash("SMS status refresh is not available after migrating to Telnyx. Status updates will be handled by Telnyx webhooks.", "info")
+    flash(
+        "SMS status refresh is not available after migrating to Telnyx. Status updates will be handled by Telnyx webhooks.",
+        "info"
+    )
     return redirect(url_for("sms_history_all"))
-
-    account_sid = os.getenv("TWILIO_ACCOUNT_SID")
-    auth_token = os.getenv("TWILIO_AUTH_TOKEN")
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    try:
-        # 🔥 THIS is the query you’re asking about
-        cur.execute("""
-            SELECT provider_message_id
-            FROM sms_log
-            WHERE sms_log_id = %s
-              AND spa_id = %s
-        """, (sms_log_id, spa_id))
-
-        log = cur.fetchone()
-
-        if not log:
-            flash("SMS log not found.", "error")
-            return redirect(url_for("sms_history_all"))
-
-        provider_message_id = log[0]
-
-        if not provider_message_id:
-            flash("No Twilio SID found for this message.", "error")
-            return redirect(url_for("sms_history_all"))
-
-        client = Client(account_sid, auth_token)
-
-        msg = client.messages(provider_message_id).fetch()
-
-        twilio_status = msg.status
-        twilio_error_code = str(msg.error_code) if msg.error_code else None
-        twilio_error_message = msg.error_message if msg.error_message else None
-
-        cur.execute("""
-            UPDATE sms_log
-            SET status = %s,
-                twilio_error_code = %s,
-                twilio_error_message = %s
-            WHERE sms_log_id = %s
-              AND spa_id = %s
-        """, (
-            twilio_status,
-            twilio_error_code,
-            twilio_error_message,
-            sms_log_id,
-            spa_id
-        ))
-
-        conn.commit()
-
-        flash(f"SMS updated: {twilio_status}", "success")
-
-    except Exception as e:
-        conn.rollback()
-        flash(f"Error refreshing SMS: {e}", "error")
-
-    finally:
-        cur.close()
-        conn.close()
-
-    return redirect(url_for("sms_history_all"))
-
-
-
 
 
 
@@ -7216,88 +7300,16 @@ def refresh_sms_status(sms_log_id):
 #
 #   --------------------------
 
+
 @app.route("/sms/refresh-all", methods=["POST"])
 @login_required
 @spa_required
 def refresh_all_sms_statuses():
-    spa_id = current_spa_id()
-
-    flash("SMS status refresh is not available after migrating to Telnyx. Status updates will be handled by Telnyx webhooks.", "info")
+    flash(
+        "SMS status refresh is not available after migrating to Telnyx. Status updates will be handled by Telnyx webhooks.",
+        "info"
+    )
     return redirect(url_for("sms_history_all"))
-
-    account_sid = os.getenv("TWILIO_ACCOUNT_SID")
-    auth_token = os.getenv("TWILIO_AUTH_TOKEN")
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    updated_count = 0
-    skipped_count = 0
-
-    try:
-        cur.execute("""
-            SELECT sms_log_id, provider_message_id
-            FROM sms_log
-            WHERE spa_id = %s
-              AND provider_message_id IS NOT NULL
-              AND status NOT IN ('delivered', 'failed', 'undelivered')
-            ORDER BY created_at DESC
-        """, (spa_id,))
-
-        logs = cur.fetchall()
-
-        if not logs:
-            flash("No SMS messages found that need refreshing.", "info")
-            return redirect(url_for("sms_history_all"))
-
-        client = Client(account_sid, auth_token)
-
-        for sms_log_id, provider_message_id in logs:
-            try:
-                msg = client.messages(provider_message_id).fetch()
-
-                twilio_status = msg.status
-                twilio_error_code = str(msg.error_code) if msg.error_code else None
-                twilio_error_message = msg.error_message if msg.error_message else None
-
-                cur.execute("""
-                    UPDATE sms_log
-                    SET status = %s,
-                        twilio_error_code = %s,
-                        twilio_error_message = %s
-                    WHERE sms_log_id = %s
-                      AND spa_id = %s
-                """, (
-                    twilio_status,
-                    twilio_error_code,
-                    twilio_error_message,
-                    sms_log_id,
-                    spa_id
-                ))
-
-                updated_count += 1
-
-            except Exception:
-                skipped_count += 1
-
-        conn.commit()
-
-        flash(
-            f"SMS statuses refreshed. Updated: {updated_count}, skipped: {skipped_count}.",
-            "success"
-        )
-
-    except Exception as e:
-        conn.rollback()
-        flash(f"Bulk SMS refresh failed: {e}", "error")
-
-    finally:
-        cur.close()
-        conn.close()
-
-    return redirect(url_for("sms_history_all"))
-
-
 
 
 
@@ -7376,7 +7388,13 @@ def resend_sms(sms_log_id):
         return redirect(url_for("sms_history", client_id=client_id))
 
     try:
-        message = send_sms(phone_number, message_body)
+        result = send_compliant_sms(
+            spa_id=spa_id,
+            client_id=client_id,
+            recipient_phone=phone_number,
+            message_body=message_body,
+            message_type=f"{sms_type or 'manual'}_resend"
+        )
 
         cur.execute("""
             INSERT INTO sms_log (
@@ -7394,10 +7412,10 @@ def resend_sms(sms_log_id):
             spa_id,
             client_id,
             phone_number,
-            message_body,
+            result.get("final_message_body"),
             f"{sms_type or 'manual'}_resend",
-            message.status,
-            message.sid
+            result.get("status"),
+            result.get("provider_message_id")
         ))
 
         conn.commit()
@@ -9198,7 +9216,13 @@ def send_pending_reminders():
                     skipped_count += 1
                     continue
 
-                result = send_sms_message(recipient_phone, message_body)
+                result = send_compliant_sms(
+                    spa_id=spa_id,
+                    client_id=client_id,
+                    recipient_phone=recipient_phone,
+                    message_body=message_body,
+                    message_type=reminder_type
+                )
 
                 if result.get("success"):
                     cur.execute("""
@@ -9230,12 +9254,12 @@ def send_pending_reminders():
                     spa_id,
                     client_id,
                     recipient_phone,
-                    message_body,
+                    result.get("final_message_body"),
                     reminder_type,
                     "sent",
-                    result.get("sid"),
-                    result.get("error_code"),
-                    result.get("error_message")
+                    result.get("provider_message_id"),
+                    result.get("provider_error_code"),
+                    result.get("provider_error_message")
                 ))
 
                     sent_count += 1
@@ -9247,7 +9271,7 @@ def send_pending_reminders():
                         WHERE reminder_id = %s
                           AND spa_id = %s
                     """, (
-                        result.get("twilio_error_message") or "SMS send failed",
+                        result.get("provider_error_message") or "SMS send failed",
                         reminder_id,
                         spa_id
                     ))
@@ -9402,7 +9426,15 @@ def send_one_reminder(reminder_id):
                 flash("Reminder skipped: missing phone number.", "warning")
                 return redirect(url_for("reminder_queue"))
 
-            result = send_sms_message(recipient_phone, message_body)
+            result = send_template_sms(
+                spa_id=spa_id,
+                client_id=client_id,
+                recipient_phone=recipient_phone,
+                template_type=reminder_type,
+                merge_data={
+                    "client_id": client_id
+                }
+            )
 
             if result.get("success"):
                 cur.execute("""
@@ -9433,14 +9465,14 @@ def send_one_reminder(reminder_id):
                     spa_id,
                     client_id,
                     recipient_phone,
-                    message_body,
+                    result.get("final_message_body"),
                     reminder_type,
                     "outbound",
                     "sent",
-                    result.get("sid"),
-                    result.get("status"),
-                    result.get("error_code"),
-                    result.get("error_message")
+                    result.get("provider_message_id"),
+                    result.get("provider_status"),
+                    result.get("provider_error_code"),
+                    result.get("provider_error_message")
                 ))
 
                 conn.commit()
@@ -9454,7 +9486,7 @@ def send_one_reminder(reminder_id):
                     WHERE reminder_id = %s
                       AND spa_id = %s
                 """, (
-                    result.get("twilio_error_message") or "SMS send failed",
+                    result.get("provider_error_message") or "SMS send failed",
                     reminder_id,
                     spa_id
                 ))
