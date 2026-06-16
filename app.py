@@ -191,13 +191,12 @@ def get_messaging_footer(footer_type):
 
 def append_sms_footer(spa_id, message):
 
-    footer = get_messaging_footer(
-        spa_id,
-        "sms_opt_out"
-    )
+    footer = get_messaging_footer("sms_opt_out")
 
     message = (message or "").strip()
-    footer = (footer or "").strip()
+
+    footer = get_messaging_footer("sms_opt_out")
+
 
     # Don't append if already present
     if footer and footer.lower() in message.lower():
@@ -3455,7 +3454,7 @@ def edit_messaging_template(template_type):
                     template_name=%s,
                     message_text=%s,
                     is_active=%s,
-                    approved_for_use=%,
+                    approved_for_use=%s,
                     ai_score=%s,
                     ai_review=%s,
                     ai_risk_level=%s,
@@ -3565,65 +3564,51 @@ def edit_messaging_template(template_type):
 #
 #############################
 
-@app.route(
-    "/admin/communications/templates/<template_type>/preview"
-)
+@app.route("/admin/messaging-compliance/templates/<template_type>/preview")
 @login_required
 @spa_required
 def preview_messaging_template(template_type):
 
     spa_id = session.get("spa_id")
 
-    conn = get_db_connection()
-    cur = conn.cursor()
+    merge_data = {
+        "client_first_name": "Rick",
+        "client_last_name": "Conley",
+        "client_full_name": "Rick Conley",
+        "appointment_date": "June 20, 2026",
+        "appointment_time": "10:00 AM",
+        "service_name": "Facial",
+        "spa_name": "Clear Skin Esthetics",
+        "spa_phone": "817-555-1212",
+        "spa_website": "https://peachsuitepro.com"
+    }
 
-    cur.execute("""
-        SELECT
-            template_name,
-            message_text,
-            ai_score,
-            updated_at,
-            ai_review,
-            ai_risk_level,
-            approved_for_use
-        FROM messaging_templates
-        WHERE spa_id = %s
-          AND template_type = %s
-    """, (spa_id, template_type))
+    built = build_sms_message(
+        spa_id,
+        template_type,
+        merge_data
+    )
 
-    
-    template = cur.fetchone()
-
-    if not template:
-        flash("Template not found.", "warning")
-        cur.close()
-        conn.close()
-        return redirect(url_for("template_review"))
-
-    preview_text = render_template_text(template[1])
-
-    final_message = append_sms_footer(preview_text)
-
-    cur.close()
-    conn.close()
-
-
-    preview_text = built["message_body"]
+    if built["success"]:
+        preview_text = append_sms_footer(
+            spa_id,
+            built["message_body"]
+        )
+    else:
+        preview_text = built["error"]
 
     return render_template(
         "admin/messaging_compliance/template_preview.html",
-        template=template,
-        preview_text=preview_text,
         template_type=template_type,
-        final_message=final_message
+        preview_text=preview_text,
+        built=built
     )
-
 
 
 
 ############################################
 ###########################################
-#####test.  test.  test
+#####test.  test.  test. remove rick conley from below
 
 @app.route("/admin/test-template")
 @login_required

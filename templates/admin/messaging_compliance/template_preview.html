@@ -2,55 +2,52 @@
 
 {% block content %}
 
-<h1>👁 Template Preview</h1>
+<div class="page-card">
 
-<h2>{{ template[0] }}</h2>
-
-<p>
-
-<strong>AI Score:</strong>
-
-{{ template[2] or "--" }}
-
-</p>
+<h1>👁 SMS Template Preview</h1>
 
 <p>
-
-<strong>Last Updated:</strong>
-
-{{ template[3] }}
-
+    <strong>Template Type:</strong> {{ template_type }}
 </p>
 
 <hr>
 
-<div
-style="
-border:1px solid #ccc;
-padding:20px;
-background:#f8f8f8;
-white-space:pre-wrap;
+<h3>Final SMS Message</h3>
+
+<div style="
+    border:1px solid #ccc;
+    padding:20px;
+    background:#f8f8f8;
+    white-space:pre-wrap;
+    border-radius:8px;
 ">
-
-{{ final_message }}
-
+{{ preview_text }}
 </div>
 
 <br>
 
+{% if built and built.success %}
+    <p style="color:green;">
+        ✅ Template rendered successfully.
+    </p>
+{% else %}
+    <p style="color:red;">
+        🔴 Template could not be rendered.
+    </p>
+{% endif %}
+
+<br>
+
 <a class="btn btn-primary"
-href="{{ url_for('edit_messaging_template',
-template_type=request.view_args['template_type']) }}">
-
-✏️ Edit
-
+   href="{{ url_for('edit_messaging_template', template_type=template_type) }}">
+    ✏️ Edit Template
 </a>
 
 <a class="btn btn-secondary"
-href="{{ url_for('template_review') }}">
-
-← Back
-
+   href="{{ url_for('template_review') }}">
+    ← Back to Template Library
 </a>
+
+</div>
 
 {% endblock %}
