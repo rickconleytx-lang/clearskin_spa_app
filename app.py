@@ -287,6 +287,116 @@ def render_sms_template(template_text, merge_data):
 
 
 
+
+
+
+
+##################################
+#
+#     ENRICH SMS MERGE DATA
+#
+#################################
+
+def enrich_sms_merge_data(spa_id, template_type, merge_data):
+    merge_data = merge_data or {}
+
+    if template_type == "appointment_reminder":
+        return enrich_appointment_reminder_merge_data(spa_id, merge_data)
+
+    return merge_data
+
+
+
+def enrich_appointment_reminder_merge_data(spa_id, merge_data):
+    # We will fill this in next.
+    return merge_data
+
+
+
+
+
+
+##################################
+#
+#     ENRICH APPOINTMENT REMINDER MERGE
+#
+#################################
+
+def enrich_appointment_reminder_merge_data(spa_id, merge_data):
+    reminder_id = merge_data.get("reminder_id")
+    client_id = merge_data.get("client_id")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            c.first_name,
+            c.last_name,
+            a.appointment_date,
+            a.appointment_time,
+            a.service_name,
+            s.spa_name,
+            s.phone,
+            s.website
+        FROM reminder_queue rq
+        JOIN clients c
+          ON rq.client_id = c.client_id
+         AND rq.spa_id = c.spa_id
+        LEFT JOIN appointments a
+          ON rq.appointment_id = a.appointment_id
+         AND rq.spa_id = a.spa_id
+        LEFT JOIN spa_business_profile s
+          ON rq.spa_id = s.spa_id
+        WHERE rq.spa_id = %s
+          AND (
+                rq.reminder_id = %s
+                OR rq.client_id = %s
+              )
+        LIMIT 1
+    """, (spa_id, reminder_id, client_id))
+
+    row = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if not row:
+        return merge_data
+
+    (
+        first_name,
+        last_name,
+        appointment_date,
+        appointment_time,
+        service_name,
+        spa_name,
+        spa_phone,
+        spa_website
+    ) = row
+
+    client_first_name = first_name or ""
+    client_full_name = f"{first_name or ''} {last_name or ''}".strip()
+
+    merge_data.update({
+        "client_first_name": client_first_name,
+        "client_full_name": client_full_name,
+        "appointment_date": appointment_date.strftime("%m/%d/%Y") if appointment_date else "",
+        "appointment_time": appointment_time.strftime("%I:%M %p") if appointment_time else "",
+        "service_name": service_name or "",
+        "spa_name": spa_name or "",
+        "spa_phone": spa_phone or "",
+        "spa_website": spa_website or ""
+    })
+
+    return merge_data
+
+
+
+
+
+
+
 ##################################
 #
 #     BUILD SMS MESSAGE
@@ -307,6 +417,12 @@ def build_sms_message(spa_id, template_type, merge_data):
     template_id = template[0]
     template_text = template[3]
 
+    merge_data = enrich_sms_merge_data(
+        spa_id=spa_id,
+        template_type=template_type,
+        merge_data=merge_data or {}
+    )
+
     rendered_message = render_sms_template(template_text, merge_data)
 
     return {
@@ -315,6 +431,7 @@ def build_sms_message(spa_id, template_type, merge_data):
         "message_body": rendered_message,
         "template_id": template_id
     }
+
 
 
 
@@ -337,7 +454,9 @@ def send_template_sms(
     merge_data,
     message_type=None
 ):
-    built = build_sms_message(spa_id, template_type, merge_data)
+    
+
+    built = build_sms_message(spa_id, template_type, merge_data or {})
 
     if not built["success"]:
         return {
@@ -361,18 +480,150 @@ def send_template_sms(
 
 
 
+##################################
+#
+#     SEND appointment reminder sms
+#
+#################################
+
+
+
+
+def send_appointment_reminder_sms(reminder_id, spa_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            rq.reminder_id,
+            rq.client_id,
+            rq.recipient_phone,
+            a.appointment_date,
+            a.appointment_time,
+            a.service_name,
+            s.spa_name,
+            s.phone,
+            s.website
+        FROM reminder_queue rq
+        JOIN appointments a
+          ON rq.appointment_id = a.appointment_id
+         AND rq.spa_id = a.spa_id
+        JOIN spa_business_profile s
+          ON rq.spa_id = s.spa_id
+        WHERE rq.reminder_id = %s
+          AND rq.spa_id = %s
+          AND rq.reminder_type = 'appointment_reminder'
+          AND rq.send_method = 'sms'
+    """, (reminder_id, spa_id))
+
+    row = cur.fetchone()
+
+    if not row:
+        cur.close()
+        conn.close()
+        return False, "Reminder not found."
+
+    (
+        reminder_id,
+        client_id,
+        recipient_phone,
+        appointment_date,
+        appointment_time,
+        service_name,
+        spa_name,
+        spa_phone,
+        spa_website
+    ) = row
+
+    merge_data = build_appointment_reminder_merge_data(
+        spa_id=spa_id,
+        client_id=client_id,
+        appointment_date=appointment_date,
+        appointment_time=appointment_time,
+        service_name=service_name,
+        spa_name=spa_name,
+        spa_phone=spa_phone,
+        spa_website=spa_website
+    )
+
+    success, result = send_template_sms(
+        spa_id=spa_id,
+        client_id=client_id,
+        recipient_phone=recipient_phone,
+        template_type="appointment_reminder",
+        merge_data=merge_data,
+        message_type="appointment_reminder"
+    )
+
+    if success:
+        cur.execute("""
+            UPDATE reminder_queue
+            SET status = 'sent',
+                sent_at = NOW(),
+                error_message = NULL
+            WHERE reminder_id = %s
+              AND spa_id = %s
+        """, (reminder_id, spa_id))
+    else:
+        cur.execute("""
+            UPDATE reminder_queue
+            SET status = 'failed',
+                error_message = %s
+            WHERE reminder_id = %s
+              AND spa_id = %s
+        """, (str(result), reminder_id, spa_id))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return success, result
 
 
 
 
 
 
+##################################
+#
+#     BUILD APPOINTMENT REMINDER SMS
+#
+#################################
 
 
+def build_appointment_reminder_merge_data(
+    spa_id,
+    client_id,
+    appointment_date,
+    appointment_time,
+    service_name,
+    spa_name,
+    spa_phone=None,
+    spa_website=None
+):
+    client = get_client_sms_merge_data(spa_id, client_id)
+
+    return {
+        **client,
+        "appointment_date": appointment_date.strftime("%m/%d/%Y") if appointment_date else "",
+        "appointment_time": appointment_time.strftime("%I:%M %p") if appointment_time else "",
+        "service_name": service_name or "",
+        "spa_name": spa_name or "",
+        "spa_phone": spa_phone or "",
+        "spa_website": spa_website or ""
+}
 
 
+##############################
+#
+#   BUILD COMMON MERGE DATA
+############################
 
-
+def build_common_merge_data(
+    spa_id,
+    client_id
+):
+    return {}
 
 
 
@@ -9480,28 +9731,26 @@ def send_one_reminder(reminder_id):
             return redirect(url_for("reminder_queue"))
 
         if send_method == "sms":
-            if not recipient_phone:
-                cur.execute("""
-                    UPDATE reminder_queue
-                    SET status = 'skipped',
-                        error_message = %s
-                    WHERE reminder_id = %s
-                      AND spa_id = %s
-                """, ("Missing phone number", reminder_id, spa_id))
+            if reminder_type == "appointment_reminder":
+                success, result = send_appointment_reminder_sms(
+                    reminder_id=reminder_id,
+                    spa_id=spa_id
+                )
 
-                conn.commit()
-                flash("Reminder skipped: missing phone number.", "warning")
+                if success:
+                    flash("Appointment reminder SMS sent.", "success")
+                else:
+                    flash(f"Appointment reminder SMS failed: {result}", "danger")
+
                 return redirect(url_for("reminder_queue"))
 
-            result = send_template_sms(
-                spa_id=spa_id,
-                client_id=client_id,
-                recipient_phone=recipient_phone,
-                template_type=reminder_type,
-                merge_data={
-                    "client_id": client_id
-                }
-            )
+
+            print("DEBUG reminder_type:", reminder_type)
+            print("DEBUG send_method:", send_method)    
+
+            flash("This SMS reminder type is not connected to the new messaging pipeline yet.", "warning")
+            return redirect(url_for("reminder_queue"))
+
 
             if result.get("success"):
                 cur.execute("""
