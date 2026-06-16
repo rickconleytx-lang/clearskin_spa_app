@@ -337,8 +337,8 @@ def enrich_appointment_reminder_merge_data(spa_id, merge_data):
             a.appointment_time,
             a.service_name,
             s.spa_name,
-            s.phone,
-            s.website
+            s.owner_phone,
+            NULL AS spa_website
         FROM reminder_queue rq
         JOIN clients c
           ON rq.client_id = c.client_id
@@ -346,7 +346,7 @@ def enrich_appointment_reminder_merge_data(spa_id, merge_data):
         LEFT JOIN appointments a
           ON rq.appointment_id = a.appointment_id
          AND rq.spa_id = a.spa_id
-        LEFT JOIN spa_business_profile s
+        LEFT JOIN spas s
           ON rq.spa_id = s.spa_id
         WHERE rq.spa_id = %s
           AND (
@@ -500,15 +500,15 @@ def send_appointment_reminder_sms(reminder_id, spa_id):
             rq.recipient_phone,
             a.appointment_date,
             a.appointment_time,
-            a.service_name,
+            a.service_type,
             s.spa_name,
-            s.phone,
-            s.website
+            s.owner_phone,
+            NULL AS spa_website
         FROM reminder_queue rq
         JOIN appointments a
           ON rq.appointment_id = a.appointment_id
          AND rq.spa_id = a.spa_id
-        JOIN spa_business_profile s
+        JOIN spas s
           ON rq.spa_id = s.spa_id
         WHERE rq.reminder_id = %s
           AND rq.spa_id = %s
@@ -546,14 +546,16 @@ def send_appointment_reminder_sms(reminder_id, spa_id):
         spa_website=spa_website
     )
 
-    success, result = send_template_sms(
+    result = send_template_sms(
         spa_id=spa_id,
         client_id=client_id,
         recipient_phone=recipient_phone,
-        template_type="appointment_reminder",
+        template_type="appointment_confirmation",
         merge_data=merge_data,
         message_type="appointment_reminder"
     )
+
+    success = result.get("success", False)
 
     if success:
         cur.execute("""
@@ -590,7 +592,6 @@ def send_appointment_reminder_sms(reminder_id, spa_id):
 #
 #################################
 
-
 def build_appointment_reminder_merge_data(
     spa_id,
     client_id,
@@ -601,17 +602,38 @@ def build_appointment_reminder_merge_data(
     spa_phone=None,
     spa_website=None
 ):
-    client = get_client_sms_merge_data(spa_id, client_id)
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            first_name,
+            last_name
+        FROM clients
+        WHERE client_id = %s
+          AND spa_id = %s
+    """, (client_id, spa_id))
+
+    client = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    first_name = client[0] if client else ""
+    last_name = client[1] if client else ""
 
     return {
-        **client,
+        "client_id": client_id,
+        "client_first_name": first_name or "",
+        "client_last_name": last_name or "",
+        "client_full_name": f"{first_name or ''} {last_name or ''}".strip(),
         "appointment_date": appointment_date.strftime("%m/%d/%Y") if appointment_date else "",
         "appointment_time": appointment_time.strftime("%I:%M %p") if appointment_time else "",
         "service_name": service_name or "",
         "spa_name": spa_name or "",
         "spa_phone": spa_phone or "",
         "spa_website": spa_website or ""
-}
+    }
 
 
 ##############################
