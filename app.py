@@ -335,7 +335,7 @@ def enrich_appointment_reminder_merge_data(spa_id, merge_data):
             c.last_name,
             a.appointment_date,
             a.appointment_time,
-            a.service_name,
+            a.service_type,
             s.spa_name,
             s.owner_phone,
             NULL AS spa_website
@@ -434,8 +434,104 @@ def build_sms_message(spa_id, template_type, merge_data):
 
 
 
+################################
+#       SEND BIRTHDAY
+##############################
 
+def send_birthday_reminder_sms(reminder_id, spa_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
 
+    cur.execute("""
+        SELECT
+            rq.reminder_id,
+            rq.client_id,
+            rq.recipient_phone,
+            c.first_name,
+            c.birth_date,
+            s.spa_name
+        FROM reminder_queue rq
+        JOIN clients c
+          ON rq.client_id = c.client_id
+         AND rq.spa_id = c.spa_id
+        JOIN spas s
+          ON rq.spa_id = s.spa_id
+        WHERE rq.reminder_id = %s
+          AND rq.spa_id = %s
+          AND rq.reminder_type = 'birthday'
+          AND rq.send_method = 'sms'
+    """, (reminder_id, spa_id))
+
+    row = cur.fetchone()
+
+    if not row:
+        cur.close()
+        conn.close()
+        return False, "Birthday reminder not found."
+
+    (
+        reminder_id,
+        client_id,
+        recipient_phone,
+        first_name,
+        birth_date,
+        spa_name
+    ) = row
+
+    if not recipient_phone:
+        cur.execute("""
+            UPDATE reminder_queue
+            SET status = 'skipped',
+                error_message = %s
+            WHERE reminder_id = %s
+              AND spa_id = %s
+        """, ("Missing phone number", reminder_id, spa_id))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return False, "Missing phone number."
+
+    merge_data = build_birthday_message_merge_data(
+        client_id=client_id,
+        first_name=first_name,
+        birth_date=birth_date,
+        spa_name=spa_name
+    )
+
+    result = send_template_sms(
+        spa_id=spa_id,
+        client_id=client_id,
+        recipient_phone=recipient_phone,
+        template_type="birthday_message",
+        merge_data=merge_data,
+        message_type="birthday_message"
+    )
+
+    success = result.get("success", False)
+
+    if success:
+        cur.execute("""
+            UPDATE reminder_queue
+            SET status = 'sent',
+                sent_at = NOW(),
+                error_message = NULL
+            WHERE reminder_id = %s
+              AND spa_id = %s
+        """, (reminder_id, spa_id))
+    else:
+        cur.execute("""
+            UPDATE reminder_queue
+            SET status = 'failed',
+                error_message = %s
+            WHERE reminder_id = %s
+              AND spa_id = %s
+        """, (str(result), reminder_id, spa_id))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return success, result
 
 
 ##################################
@@ -650,8 +746,25 @@ def build_common_merge_data(
 
 
 
+##############################
+#
+#   BUILD. BIRTHDAY MERGE DATA
+############################
 
-
+def build_birthday_message_merge_data(
+    client_id,
+    first_name,
+    birth_date,
+    spa_name
+):
+    return {
+        "client_id": client_id,
+        "client_first_name": first_name or "",
+        "first_name": first_name or "",
+        "birthday_month": birth_date.strftime("%B") if birth_date else "",
+        "birthday_day": birth_date.strftime("%d") if birth_date else "",
+        "spa_name": spa_name or ""
+    }
 
 
 
@@ -894,27 +1007,40 @@ def review_template_ai_basic(template_type, message_text):
 
     fields = recommended_fields.get(template_type, [])
 
+    message_lower = message_text.lower()
+    normalized_message = message_text.replace(" ", "")
+
     if len(message_text.strip()) < 10:
         score -= 50
         notes.append("Template appears to be empty.")
 
-    if "{{ opt_out }}" in message_text or "{{opt_out}}" in message_text:
-        score -= 10
+    opt_out_terms = [
+        "stop",
+        "unsubscribe",
+        "opt out",
+        "opt-out",
+        "reply stop",
+        "text stop",
+        "{{ opt_out }}",
+        "{{opt_out}}"
+    ]
+
+    if any(term in message_lower for term in opt_out_terms):
+        score -= 40
         notes.append(
-            "Remove opt-out text. Peach Suite Pro automatically appends the system compliance footer."
+            "Remove STOP, unsubscribe, or opt-out language. Peach Suite Pro automatically appends the required compliance footer."
         )
     else:
         notes.append(
             "System compliance footer will be automatically appended."
         )
 
-    normalized_message = message_text.replace(" ", "")
-
     for field in fields:
         normalized_field = field.replace(" ", "")
 
         if normalized_field not in normalized_message:
-            notes.append(f"💡 Consider adding merge field: {field}")
+            score -= 10
+            notes.append(f"⚠️ Missing recommended merge field: {field}")
 
     if len(message_text) > 160:
         score -= 10
@@ -932,7 +1058,6 @@ def review_template_ai_basic(template_type, message_text):
         "review": "\n".join(notes),
         "risk_level": risk
     }
-
 
 
 
@@ -1023,6 +1148,13 @@ def send_compliant_sms(spa_id, client_id, recipient_phone, message_body, message
 
     return result
 
+
+
+
+
+############################################################
+#    
+############################################################
 
 
 
@@ -6611,30 +6743,47 @@ def send_birthday_sms_month():
 
     birthday_clients = cur.fetchall()
 
-    template_text = get_sms_template(spa_id, "SMS_Birthday")
+
+    sent_count = 0
+    failed_count = 0
 
     for client in birthday_clients:
         client_id = client[0]
         first_name = client[1]
         phone = client[2]
+        birth_date = client[3]
 
-        context = {
-            "first_name": first_name,
-            "spa_name": spa_name
-        }
+        merge_data = build_birthday_sms_merge_data(
+            client_id=client_id,
+            first_name=first_name,
+            birth_date=birth_date,
+            spa_name=spa_name
+        )
 
-        message = render_email_template(template_text, context)
+        result = send_template_sms(
+            spa_id=spa_id,
+            client_id=client_id,
+            recipient_phone=phone,
+            template_type="birthday_message",
+            merge_data=merge_data,
+            message_type="birthday_message"
+        )
 
-        print("WOULD SEND SMS TO:", phone, message)
+        if result.get("success"):
+            sent_count += 1
+        else:
+            failed_count += 1
+            print("Birthday SMS failed:", result)
 
         #send_sms(phone, message)
 
     cur.close()
     conn.close()
 
-    flash(f"Found {len(birthday_clients)} birthday SMS recipients.", "info")
-    return redirect(url_for("birthday_offers_home"))
-
+    flash(
+    f"Birthday SMS complete. Sent: {sent_count}. Failed: {failed_count}.",
+    "success" if failed_count == 0 else "warning"
+)
 
 
 #   -------------------------
@@ -9766,9 +9915,19 @@ def send_one_reminder(reminder_id):
 
                 return redirect(url_for("reminder_queue"))
 
+            if reminder_type == "birthday":
+                success, result = send_birthday_reminder_sms(
+                    reminder_id=reminder_id,
+                    spa_id=spa_id
+                )
 
-            print("DEBUG reminder_type:", reminder_type)
-            print("DEBUG send_method:", send_method)    
+                if success:
+                    flash("Birthday SMS sent.", "success")
+                else:
+                    flash(f"Birthday SMS failed: {result}", "danger")
+
+                return redirect(url_for("reminder_queue"))
+     
 
             flash("This SMS reminder type is not connected to the new messaging pipeline yet.", "warning")
             return redirect(url_for("reminder_queue"))

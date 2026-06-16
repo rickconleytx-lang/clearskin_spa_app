@@ -10,52 +10,89 @@
     Template Type: <strong>{{ template_type }}</strong>
 </p>
 
+{% if template and template[3] is not none %}
+
 <div style="
-    border:1px solid #ddd;
-    border-radius:10px;
+    border: 2px solid
+    {% if template[5] == 'High' %}#cc0000
+    {% elif template[5] == 'Medium' %}#d99a00
+    {% else %}#2e7d32
+    {% endif %};
+    background:
+    {% if template[5] == 'High' %}#ffe6e6
+    {% elif template[5] == 'Medium' %}#fff7df
+    {% else %}#e8f5e9
+    {% endif %};
     padding:15px;
     margin-bottom:20px;
-    background:#f8f9fa;
+    border-radius:10px;
 ">
 
-    <h3>Template Status</h3>
+    <h3>🤖 AI Compliance Review</h3>
 
-    {% if not template %}
+    <p>
+        <strong>AI Score:</strong> {{ template[3] }}/100
+    </p>
 
-        <p style="font-size:20px;">
-            ⚪ <strong>NO CURRENT TEMPLATE</strong>
-        </p>
+    <p>
+        <strong>Risk Level:</strong>
+        {% if template[5] == 'High' %}
+            🔴 High
+        {% elif template[5] == 'Medium' %}
+            🟡 Medium
+        {% else %}
+            🟢 Low
+        {% endif %}
+    </p>
 
-        <p>No template has been created for this message type.</p>
+    <p><strong>Review:</strong></p>
 
-    {% elif template.is_active and template.approved_for_use %}
+    <div style="white-space: pre-wrap;">
+        {{ template[4] }}
+    </div>
 
-        <p style="font-size:20px; color:green;">
-            🟢 <strong>APPROVED</strong>
-        </p>
-
-        <p>AI Score: {{ template[3] or 0 }}</p>
-
-        <p>This template is approved and available for use.</p>
-
-    {% else %}
-
-        <p style="font-size:20px; color:red;">
-            🔴 <strong>DISABLED</strong>
-        </p>
-
-        <p>AI Score: {{ template[3]or 0 }}</p>
-
+    {% if template[6] %}
         <p>
-            This template has been automatically disabled due to AI compliance issues.
-            Please correct the template and save again.
+            <strong>Last Reviewed:</strong>
+            {{ template[6].strftime('%m/%d/%Y %I:%M %p') }}
         </p>
-
     {% endif %}
 
 </div>
 
+{% else %}
 
+<div style="
+    border:2px solid #ccc;
+    background:#f8f9fa;
+    padding:15px;
+    margin-bottom:20px;
+    border-radius:10px;
+">
+
+    <h3>🤖 AI Compliance Review</h3>
+
+    <p><strong>Status:</strong> ⚪ No AI Review Yet</p>
+
+    <p>
+        Create and save this template to generate an AI Compliance Review.
+    </p>
+
+    <p>
+        <strong>AI Score:</strong> --
+    </p>
+
+    <p>
+        <strong>Risk Level:</strong> --
+    </p>
+
+</div>
+
+{% endif %}
+
+
+
+</div>
 
 
 
@@ -76,10 +113,6 @@
               required>{{ template[1] if template else '' }}</textarea><br><br>
 
     
-
-
-    
-
 <h3>🔒 System Compliance Footer</h3>
 
 <div style="
@@ -108,55 +141,7 @@
 
     {% if template and template[3] is not none %}
 
-<div style="
-    border: 2px solid
-    {% if template[5] == 'High' %}#cc0000
-    {% elif template[5] == 'Medium' %}#d99a00
-    {% else %}#2e7d32
-    {% endif %};
-    background:
-    {% if template[5] == 'High' %}#ffe6e6
-    {% elif template[5] == 'Medium' %}#fff7df
-    {% else %}#e8f5e9
-    {% endif %};
-    padding: 15px;
-    margin: 20px 0;
-    border-radius: 8px;
-">
 
-    <h3>🤖 AI Review</h3>
-
-    <p>
-        <strong>AI Score:</strong> {{ template[3] }}/100
-    </p>
-
-    <p>
-        <strong>Risk Level:</strong>
-        {% if template[5] == 'High' %}
-            🔴 High
-        {% elif template[5] == 'Medium' %}
-            🟡 Medium
-        {% else %}
-            🟢 Low
-        {% endif %}
-    </p>
-
-    <p>
-        <strong>Review:</strong>
-    </p>
-
-    <div style="white-space: pre-wrap;">
-        {{ template[4] }}
-    </div>
-
-    {% if template[6] %}
-        <p>
-            <strong>Last Reviewed:</strong>
-            {{ template[6].strftime('%m/%d/%Y %I:%M %p') }}
-        </p>
-    {% endif %}
-
-</div>
 
 {% endif %}
 
@@ -165,6 +150,7 @@
         value="ai_review"
         class="btn">
     🤖 AI Review
+    
 </button>
 
     <hr>
@@ -275,7 +261,7 @@ STOP Disclosure
 
 <br><br>
 
-    <button type="submit" class="btn">Save Template</button>
+    <button type="submit" class="btn">Save & AI Review Template</button>
 
     <a class="btn" href="{{ url_for('template_review') }}">
         Back to Template Library
