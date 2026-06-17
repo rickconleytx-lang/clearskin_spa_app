@@ -8,10 +8,6 @@
 
 <h1>Communications Home</h1>
 
-<p style="color:red;">
-    SMS messages may only be sent to clients who have opted in to receive text messages.
-    Maximum 5 clients per SMS send.
-</p>
 
 <div style="display:flex; flex-direction:row; justify-content:space-between; align-items:flex-start; gap:25px; width:100%;">
             
@@ -19,34 +15,38 @@
     <div style="flex:1; min-width:0;">
 
      <!-- 🔹 HEADER 1 -->
-        <h2 style="margin-top: 25px;">Main Pages</h2>
+        <h2 style="margin-top: 25px;">Send Messages</h2>
         <div class="narrow-cards">
-            {{ section_card("Send SMS Messages", "Send SMS Messages", url_for('sms_home')) }}
-            {{ section_card("Send Emails", "Send Emails", url_for('general_email')) }}  
-            {{ section_card("SMS Messaging Compliance", "SMS Compliance Dashboard", url_for('messaging_compliance_dashboard')) }}
+            {{ section_card("Send SMS Messages", "", url_for('sms_home')) }}
+            {{ section_card("Send Emails", "", url_for('general_email')) }}            
         </div>
 
 <br>
 <br>
      <!-- 🔹 HEADER 2 -->
-        <h2 style="margin-top: 25px;">SMS Support</h2>
+        <h2 style="margin-top: 25px;">Templates & Automation</h2>
         <div class="narrow-cards">
-            {{ section_card("SMS Templates", "View and Add Templates",  url_for('sms_templates_admin')) }}
-            {{ section_card("SMS History", "View SMS Send History",  url_for('sms_history_all')) }}           
-            {{ section_card("SMS/Phone and Email Opt-In and Opt-Out", "Manage Client Contact (Opt -In/Out) Preferences", url_for('client_contact_preferences')) }}
+            {{ section_card("SMS Templates", "",  url_for('sms_templates_admin')) }}
+            {{ section_card("Email Templates", "", url_for('email_templates_admin')) }}
+            {{ section_card("Communications Automation", "", url_for('reminder_queue')) }}  
             
         </div>
-     
-        <h2 style="margin-top: 25px;">Email Support</h2>
+
+
+     <!-- 🔹 HEADER 3 -->
+        <h2 style="margin-top: 25px;">History & Preferences</h2>
         <div class="narrow-cards">                  
-            {{ section_card("Email Templates", "Add New/Edit & Preview Email Templates", url_for('email_templates_admin')) }}  
-             {{ section_card("Email History", "View Email Send History", url_for('email_history')) }}               
-            {{ section_card("Communications Automation", "Home for SMS and Email Automation", url_for('reminder_queue')) }}  
-                           
+            {{ section_card("SMS History", "",  url_for('sms_history_all')) }}    
+            {{ section_card("Email History", "", url_for('email_history')) }}                                  
+            {{ section_card("Opt-Out/In Settings", "", url_for('client_contact_preferences')) }}                       
         </div>
-      
 
 
+      <!-- 🔹 HEADER 4 -->
+        <h2 style="margin-top: 25px;">Compliance</h2>
+        <div class="narrow-cards">   
+             {{ section_card("SMS Messaging Compliance", "", url_for('messaging_compliance_dashboard')) }}
+        </div>
 
     </div>
                 <!-- RIGHT SIDE IMAGE -->

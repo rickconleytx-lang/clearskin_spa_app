@@ -1116,9 +1116,10 @@ def render_template_text(message_text, merge_data=None):
 
 ############################################################
 #    template preview
+# # TODO: Replace sample_data with build_merge_data() when Communications Engine is complete.
 ############################################################
 
-def render_template_preview(message_text):
+def merge_template_preview(message_text, merge_data):
 
 
     sample = {
@@ -1141,7 +1142,35 @@ def render_template_preview(message_text):
 
 ############################################################
 #   SEND COMPLIANT SMS
+#
+#
+#
+#
 ############################################################
+
+# ==========================================================
+# PSP_REFACTOR          TODO
+#
+# Central SMS Communications Pipeline.
+#
+# All application SMS routes should call this function.
+#
+# Future Communications Engine enhancements:
+#   - Verify SMS consent
+#   - Load template
+#   - Merge template fields
+#   - AI compliance validation
+#   - Append compliance footer
+#   - Queue/schedule message
+#   - Send through provider
+#   - Log delivery and analytics
+#
+# Do NOT call send_sms_message() directly from routes.
+# ==========================================================
+
+
+
+
 
 def send_compliant_sms(spa_id, client_id, recipient_phone, message_body, message_type="manual"):
     """
@@ -5782,6 +5811,15 @@ from services.sms_service import send_sms_telnyx
 #################################################################
 
 
+# ==========================================================
+# Internal provider wrapper.   TODO
+#
+# Called only by send_compliant_sms().
+#
+# This function abstracts the SMS provider (Telnyx today,
+# future providers tomorrow) from the application.
+# ==========================================================
+
 
 
 def send_sms_message(to_phone, message_body):
@@ -6478,8 +6516,12 @@ def test_gmail_import():
 #     SMS WEBHOOK
 #
 #.  LEGACY TWILIO WEBHOOK
-#
+#       TODO
 #   ----------------------
+
+# PSP_CLEANUP:
+# Legacy Twilio webhook.
+# Safe to remove after confirming all messaging uses Telnyx.
 
 @app.route("/sms/webhook", methods=["POST"])
 def sms_webhook():
@@ -7068,8 +7110,8 @@ def sms_conversation(client_id):
             sms_type,
             message_body,
             status,
-            twilio_error_code,
-            twilio_error_message
+            provider_error_code,
+            provider_error_message
         FROM sms_log
         WHERE client_id = %s
           AND spa_id = %s
@@ -7591,9 +7633,9 @@ def sms_group_send():
                     direction,
                     status,
                     provider_message_id,
-                    twilio_status,
-                    twilio_error_code,
-                    twilio_error_message
+                    provider_status,
+                    provider_error_code,
+                    provider_error_message
                 )
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
@@ -7708,8 +7750,8 @@ def sms_history(client_id):
             sl.message_body,             -- 5
             sl.status,                   -- 6
             sl.status,                   -- 7
-            sl.twilio_error_code,        -- 8
-            sl.twilio_error_message,     -- 9
+            sl.provider_error_code,        -- 8
+            sl.provider_error_message,     -- 9
             sl.sms_log_id                -- 10
         FROM sms_log sl
         JOIN clients c
@@ -7766,9 +7808,9 @@ def sms_history_all():
             sm.recipient_phone,          -- 4
             sm.message_body,             -- 5
             sm.status,                   -- 6
-            sm.twilio_status,            -- 7  
-            sm.twilio_error_code,        -- 8
-            sm.twilio_error_message,     -- 9
+            sm.provider_status,            -- 7  
+            sm.provider_error_code,        -- 8
+            sm.provider_error_message,     -- 9
             sm.sms_message_id            -- 10
         FROM sms_messages sm
         LEFT JOIN clients c
@@ -9770,8 +9812,8 @@ def send_pending_reminders():
                             sms_type,
                             status,
                             provider_message_id,
-                            twilio_error_code,
-                            twilio_error_message,
+                            provider_error_code,
+                            provider_error_message,
                             created_at,
                             sent_at
                     )
@@ -9969,64 +10011,6 @@ def send_one_reminder(reminder_id):
             flash("This SMS reminder type is not connected to the new messaging pipeline yet.", "warning")
             return redirect(url_for("reminder_queue"))
 
-
-            if result.get("success"):
-                cur.execute("""
-                    UPDATE reminder_queue
-                    SET status = 'sent',
-                        sent_at = NOW(),
-                        error_message = NULL
-                    WHERE reminder_id = %s
-                      AND spa_id = %s
-                """, (reminder_id, spa_id))
-
-                cur.execute("""
-                    INSERT INTO sms_messages (
-                        spa_id,
-                        client_id,
-                        recipient_phone,
-                        message_body,
-                        message_type,
-                        direction,
-                        status,
-                        provider_message_id,
-                        twilio_status,
-                        twilio_error_code,
-                        twilio_error_message
-                    )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """, (
-                    spa_id,
-                    client_id,
-                    recipient_phone,
-                    result.get("final_message_body"),
-                    reminder_type,
-                    "outbound",
-                    "sent",
-                    result.get("provider_message_id"),
-                    result.get("provider_status"),
-                    result.get("provider_error_code"),
-                    result.get("provider_error_message")
-                ))
-
-                conn.commit()
-                flash("Reminder sent successfully.", "success")
-
-            else:
-                cur.execute("""
-                    UPDATE reminder_queue
-                    SET status = 'failed',
-                        error_message = %s
-                    WHERE reminder_id = %s
-                      AND spa_id = %s
-                """, (
-                    result.get("provider_error_message") or "SMS send failed",
-                    reminder_id,
-                    spa_id
-                ))
-
-                conn.commit()
-                flash("Reminder failed to send.", "danger")
 
         else:
             flash("Only SMS reminders are supported right now.", "warning")
