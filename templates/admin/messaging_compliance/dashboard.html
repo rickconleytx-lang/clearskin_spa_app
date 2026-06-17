@@ -104,13 +104,12 @@
         </a>
     </p>
 
-    <p>
-        <a class="btn"
-           href="{{ url_for('template_review') }}">
-            Messaging Templates
-        </a>
-    </p>
-
+   <p>
+    <a class="btn"
+       href="{{ url_for('template_review', channel='sms') }}">
+        SMS Messaging Templates
+    </a>
+</p>
     <p>
         <a class="btn"
            href="#">
@@ -214,7 +213,7 @@
     <div class="dashboard-card">
         <h3>Template Review</h3>
         <p>Review SMS templates for opt-out language, consent risk, and marketing content.</p>
-        <a href="{{ url_for('template_review') }}">Open</a>
+        <a href="{{ url_for('template_review', channel='sms') }}">Open</a>
     </div>
 
     <div class="dashboard-card">

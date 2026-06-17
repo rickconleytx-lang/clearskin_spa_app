@@ -5,13 +5,21 @@
 
 {% block content %}
 
-
-<h1>Send SMS Messages</h1>
-
 <p style="color:red;">
     SMS messages may only be sent to clients who have opted in to receive text messages.
     Maximum 5 clients per SMS send.
 </p>
+
+<h1>Send SMS Messages</h1>
+
+<span class="help-icon" onclick="toggleHelp('smsHelp')">❔</span>
+<div id="smsHelp" class="help-popover" style="display:none;">
+  To SEND a message. 1. Select Template   2. Select Client Status  3.  Search and Select recipients (up to 5)
+  4. Click on Preview SMS - then click Send SMS if everything looks good.
+</div>
+
+
+
 
 <div style="display:flex; flex-direction:row; justify-content:space-between; align-items:flex-start; gap:25px; width:100%;">
             
@@ -140,6 +148,15 @@ function validateSmsSelection() {
 
     return true;
 }
+
+function toggleHelp(id) {
+  const box = document.getElementById(id);
+  box.style.display = box.style.display === "none" ? "block" : "none";
+}
+
+
+
+
 </script>
 
 {% endblock %}

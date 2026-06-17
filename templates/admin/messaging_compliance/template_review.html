@@ -2,11 +2,16 @@
 
 {% block content %}
 
-<h1>📱 Messaging Template Library</h1>
+<div class="d-flex justify-content-between align-items-center mb-3">
 
-<p>
-Manage your SMS messaging templates.
-</p>
+    <h1>{{ page_title }}</h1>
+
+    <a class="btn btn-outline-primary"
+       href="{{ url_for('template_review', channel=switch_channel) }}">
+        {{ switch_label }}
+    </a>
+
+</div>
 
 <p>
 <strong>{{ completed }}</strong> of
@@ -69,10 +74,13 @@ templates completed ({{ percent }}%).
     </a>
 
     <a class="btn btn-secondary"
-   href="{{ url_for('preview_messaging_template', template_type=t[0]) }}">
-    👁 Preview
-</a>
+        href="{{ url_for('preview_messaging_template',
+                    channel=channel,
+                    template_type=t[0]) }}">
+        👁 Preview
+    </a>
 
+    
 </td>
 </tr>
 

@@ -2459,6 +2459,37 @@ def save_time_settings():
     return redirect(url_for("admin"))
 
 
+
+
+######################################
+#
+#   TIMEZONE HELPER
+#
+#######################################
+
+def get_spa_timezone(spa_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT timezone_name
+        FROM spas
+        WHERE spa_id = %s
+        LIMIT 1
+    """, (spa_id,))
+
+    row = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    return row[0] if row and row[0] else "UTC"
+
+
+
+
+
+
 #   ----------------------------------
 #
 #     SWITCH ROUTE
@@ -2748,9 +2779,9 @@ def match_existing_client_booking(incoming_booking_id):
 #
 #
 #
-#              MAILGUN TEST
+#              MAILGUN   EMAIL 
 #
-#   
+#       this is good.... checked on 6/17/26
 #   ----------------------------------------------------------
 
 
@@ -3810,11 +3841,35 @@ def messaging_compliance_campaign():
 #     COMPLIANCE TEMPLATES
 #
 #############################
-@app.route("/admin/messaging-compliance/templates")
+@app.route("/admin/messaging-compliance/template-library")
 @login_required
 @spa_required
-def template_review():
+def template_review_default():
+    return redirect(url_for("template_review", channel="sms"))
 
+
+@app.route("/admin/messaging-compliance/template-library/<channel>")
+@login_required
+@spa_required
+def template_review(channel):
+
+
+    if channel not in ["sms", "email"]:
+        flash("Invalid template library.", "warning")
+        return redirect(url_for("template_review", channel="sms"))
+
+    page_title = (
+        "SMS Messaging Template Library"
+        if channel == "sms"
+        else "Email Messaging Template Library"
+    )
+    switch_channel = "email" if channel == "sms" else "sms"
+
+    switch_label = (
+        "Go To: 📧 Email Templates"
+        if channel == "sms"
+        else "Go To: 💬 SMS Templates"
+    )
     spa_id = session.get("spa_id")
 
     conn = get_db_connection()
@@ -3830,19 +3885,24 @@ def template_review():
             m.approved_for_use,
             m.ai_score,
             m.updated_at,
-            m.ai_risk_level
+            m.ai_risk_level,
+            m.channel
         FROM messaging_template_types t
 
         LEFT JOIN messaging_templates m
             ON t.template_type = m.template_type
            AND m.spa_id = %s
+           AND m.channel = %s
 
         WHERE t.is_active = TRUE
 
         ORDER BY t.display_order
-    """, (spa_id,))
+    """, (spa_id, channel))
 
     templates = cur.fetchall()
+
+    print("TEMPLATE LIBRARY CHANNEL:", channel, flush=True)
+    print("TEMPLATES:", templates, flush=True)
 
     completed = sum(1 for t in templates if t[3])
     total = len(templates)
@@ -3856,7 +3916,11 @@ def template_review():
         templates=templates,
         completed=completed,
         total=total,
-        percent=percent
+        percent=percent,
+        channel=channel,
+        page_title=page_title,
+        switch_channel=switch_channel,
+        switch_label=switch_label
     )
 
 
@@ -4035,12 +4099,16 @@ def edit_messaging_template(template_type):
 #
 #############################
 
-@app.route("/admin/messaging-compliance/templates/<template_type>/preview")
+@app.route("/admin/messaging-compliance/templates/<channel>/<template_type>/preview")
 @login_required
 @spa_required
-def preview_messaging_template(template_type):
+def preview_messaging_template(channel, template_type):
 
     spa_id = session.get("spa_id")
+
+    if channel not in ["sms", "email"]:
+        flash("Invalid template library.", "warning")
+        return redirect(url_for("template_review", channel="sms"))
 
     merge_data = {
         "client_first_name": "Rick",
@@ -4078,7 +4146,7 @@ def preview_messaging_template(template_type):
 
 
 ############################################
-###########################################
+###########################################. TODO
 #####test.  test.  test. remove rick conley from below
 
 @app.route("/admin/test-template")
@@ -4875,7 +4943,7 @@ def log_it_report():
 #  FEEDBACK FORM
 #
 #
-#
+#   this is checked 6-17-26
 #   -------------------------
 
 
@@ -4940,7 +5008,7 @@ def feedback():
                     response = send_email(
                         to="rickconleytx@gmail.com",
                         subject=f" SEV {severity} | {feedback_type} | {page_name}",
-                        text=(
+                        body=(
                             f"Spa ID: {spa_id}\n"
                             f"User Name: {user_name or 'Not provided'}\n"
                             f"User Email: {user_email or 'Not provided'}\n"
@@ -7720,6 +7788,8 @@ def sms_group_send():
 def sms_history(client_id):
     spa_id = current_spa_id()
 
+    spa_timezone = get_spa_timezone(spa_id)
+
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -7742,7 +7812,7 @@ def sms_history(client_id):
     # Get SMS logs
     cur.execute("""
         SELECT
-            sl.created_at,               -- 0
+            sl.created_at AT TIME ZONE %s AS created_at,      -- 0
             sl.sms_type,                 -- 1
             c.first_name,                -- 2
             c.last_name,                 -- 3
@@ -7760,7 +7830,7 @@ def sms_history(client_id):
         WHERE sl.spa_id = %s
           AND sl.client_id = %s
         ORDER BY sl.created_at DESC
-    """, (spa_id, client_id))
+    """, (spa_timezone, spa_id, client_id))
 
     sms_log = cur.fetchall()
 
@@ -7796,12 +7866,14 @@ def sms_history(client_id):
 def sms_history_all():
     spa_id = current_spa_id()
 
+    spa_timezone = get_spa_timezone(spa_id)
+
     conn = get_db_connection()
     cur = conn.cursor()
 
     cur.execute("""
         SELECT
-            sm.created_at,               -- 0
+            sm.created_at AT TIME ZONE %s AS created_at,     -- 0
             sm.message_type,             -- 1
             c.first_name,                -- 2
             c.last_name,                 -- 3
@@ -7818,7 +7890,7 @@ def sms_history_all():
            AND sm.spa_id = c.spa_id
         WHERE sm.spa_id = %s
         ORDER BY sm.created_at DESC
-    """, (spa_id,))
+    """, (spa_timezone, spa_id,))
 
     sms_log = cur.fetchall()
 
@@ -8097,10 +8169,11 @@ def build_birthday_email(first_name):
 #
 #    BIRTHDAY MANUAL SEND
 #
-#   SPA ID AND ROUTE GOOD
+#   SPA ID AND ROUTE GOOD. TODO
 #   --------------------------
 
-
+# PSP_REFACTOR:
+# Refactor birthday month emails to use centralized Email Communications Pipeline.
 
 
 @app.route("/birthday-emails/send-month", methods=["POST"])
@@ -9007,9 +9080,12 @@ def general_email_preview():
 #    SEND GENERAL EMAILS
 #
 #
-#
+#           TODO
 #  SPA_ID AND ROUTE GOOD   4/23/26
 #   ---------------------------------
+
+# PSP_REFACTOR:
+# Refactor birthday month emails to use centralized Email Communications Pipeline.
 
 
 @app.route("/general-email/send", methods=["POST"])
@@ -9264,8 +9340,16 @@ def clear_email_history():
 #       SEND ONE BIRTHDAY EMAIL
 #
 #
-#    4/25/26
+#    4/25/26        TODO
 #   -------------------------------------
+
+
+# PSP_REFACTOR:
+# Refactor birthday month emails to use centralized Email Communications Pipeline.
+
+
+
+
 
 @app.route("/birthday-offers/send-one/<int:client_id>", methods=["POST"])
 @login_required
@@ -9378,8 +9462,13 @@ def send_one_birthday_offer_email(client_id):
 #   
 #    SEND ALL  SEND ALL BIRTHDAY EMAILS
 #   
-#      4/25/26
+#      4/25/26      TODO
 #   --------------------------------------
+
+
+
+# PSP_REFACTOR:
+# Refactor birthday month emails to use centralized Email Communications Pipeline.
 
 @app.route("/birthday-offers/send-all", methods=["POST"])
 @login_required

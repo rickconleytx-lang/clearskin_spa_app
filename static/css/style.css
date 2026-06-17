@@ -2763,3 +2763,20 @@ td:nth-child(3) {
 .dashboard-card h3 {
     font-weight: 400;
 }
+
+.help-icon {
+  cursor: pointer;
+  margin-left: 6px;
+  background-color: #10b981;
+}
+
+
+.help-popover {
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid #ccc;
+  background: #fff8e8;
+  border-radius: 40px;
+  max-width: 350px;
+  font-size: 14px;
+}
