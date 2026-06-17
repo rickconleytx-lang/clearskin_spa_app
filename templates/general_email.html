@@ -3,7 +3,7 @@
 
 {% block content %}
 
-<h1>Email Campaigns</h1>
+<h1>Send Email</h1>
 
 <p style="color: red;">
     Notice: This database shall not be used for mass-market or spam emails.
@@ -18,13 +18,7 @@
     <!-- LEFT SIDE -->
     <div style="flex: 1; min-width: 0;">
 
-        <div class="narrow-cards">
-            {{ section_card("Email History", "Review your Email Send History", url_for('email_history')) }}
-            {{ section_card("Email Templates", "Manage Email Templates", url_for('email_templates_admin')) }}
-            {{ section_card("Add New Template", "Add New Email Template", url_for('add_email_template')) }}
-             {{ section_card("Reminder Queue", "Email & SMS Reminder Queue", url_for('reminder_queue')) }}
-
-        </div>
+        
 <br>
 <br>
         

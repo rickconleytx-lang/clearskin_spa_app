@@ -6,7 +6,7 @@
 {% block content %}
 
 
-<h1>SMS Messaging Home</h1>
+<h1>Send SMS Messages</h1>
 
 <p style="color:red;">
     SMS messages may only be sent to clients who have opted in to receive text messages.
@@ -18,16 +18,6 @@
     <!-- LEFT SIDE -->
     <div style="flex:1; min-width:0;">
          <!-- 🔹 HEADER 1 -->
-        
-        
-        <div class="narrow-cards">     
-            {{ section_card("Reminder Queue", "Check your compliance status",  url_for('reminder_queue')) }}
-            {{ section_card("SMS Templates", "View and Add Templates",  url_for('sms_templates_admin')) }}
-            {{ section_card("SMS History", "View SMS History",  url_for('sms_history_all')) }}
-            {{ section_card("SMS and Email Preferences", "View and Manage Client Contact Preferences", url_for('client_contact_preferences')) }}
-       
-        </div>
-
 
 
     <form method="GET">

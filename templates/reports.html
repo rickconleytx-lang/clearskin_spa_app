@@ -97,6 +97,32 @@
         </table>
     </div>
 
+
+
+<div class="health-card">
+
+    <div class="dashboard-card"
+         style="
+            width:280px;
+            height:400px;
+            padding:0px;
+         "
+
+        <h2>📊 Interactive Business Intelligence</h2>
+
+        <canvas
+            id="appointmentStatusChart"
+            style="width:100%; height:100%;">
+        </canvas>
+
+    </div>
+
+</div>
+
+
+
+
+
 </div>
 
 
@@ -564,7 +590,36 @@
             <th>Service</th>
             <th>Completed Appointments</th>
             <th>Total Revenue</th>
-        </tr>
+        </tr><script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script>
+const appointmentStatusData = {{ dashboard.appointment_status_chart | tojson }};
+
+const appointmentLabels = appointmentStatusData.map(item => item.status);
+const appointmentCounts = appointmentStatusData.map(item => item.count);
+
+new Chart(document.getElementById("appointmentStatusChart"), {
+    type: "pie",
+    data: {
+        labels: appointmentLabels,
+        datasets: [{
+            data: appointmentCounts
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: {
+            legend: {
+                position: "bottom"
+            },
+            title: {
+                display: true,
+                text: "Appointments This Month"
+            }
+        }
+    }
+});
+</script>
     </thead>
     <tbody>
         {% for row in revenue_by_service %}
@@ -680,6 +735,38 @@
 {% else %}
 <p>No appointment hour data available this month.</p>
 {% endif %}
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script>
+const appointmentStatusData = {{ dashboard.appointment_status_chart | tojson }};
+
+const appointmentLabels = appointmentStatusData.map(item => item.status);
+const appointmentCounts = appointmentStatusData.map(item => item.count);
+
+new Chart(document.getElementById("appointmentStatusChart"), {
+    type: "pie",
+    data: {
+        labels: appointmentLabels,
+        datasets: [{
+            data: appointmentCounts
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: {
+            legend: {
+                position: "bottom"
+            },
+            title: {
+                display: true,
+                text: "Appointments This Month"
+            }
+        }
+    }
+});
+</script>
+
 
 
 {% endblock %}

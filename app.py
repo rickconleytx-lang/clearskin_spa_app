@@ -769,6 +769,22 @@ def build_birthday_message_merge_data(
 
 
 
+
+
+
+##############################
+#
+#    REMINDER QUEUE AFTER APPOINTMENT
+############################
+
+
+def reminder_queue_after_appointment():
+    return True, "Test"
+
+
+
+
+
 ####################################
 #
 #
@@ -1244,12 +1260,33 @@ def get_dashboard_data(spa_id):
 
 
     cur.execute("""
+        SELECT
+            COALESCE(status, 'Unknown') AS status,
+            COUNT(*) AS count
+        FROM appointments
+        WHERE spa_id = %s
+        AND appointment_date >= date_trunc('month', CURRENT_DATE)
+        AND appointment_date < date_trunc('month', CURRENT_DATE) + INTERVAL '1 month'
+        GROUP BY status
+        ORDER BY status
+    """, (spa_id,))
+
+    appointment_status_chart = [
+        {
+            "status": row[0],
+            "count": row[1]
+        }
+        for row in cur.fetchall()
+    ]
+
+    cur.execute("""
         SELECT COUNT(*)
         FROM clients
         WHERE spa_id = %s
     """, (spa_id,))
 
     dashboard["total_clients"]  = cur.fetchone()[0] or 0
+    dashboard["appointment_status_chart"] = appointment_status_chart
 
 
     #####################################################

@@ -8,27 +8,44 @@
     📖 Help Center
 </a>
 
-        <h1>Control Panel</h1>
-        <h2>Quick access to all areas of the system.</h2>
+        <h1>New Master Admin</h1>
+       
 
 <div style="display: flex; flex-direction: row; justify-content: space-between; align-items: flex-start; gap: 25px; width: 100%;">
+
+
 
     <!-- LEFT SIDE -->
     <div style="flex: 1; min-width: 0;">    
     <!-- 🔹 HEADER 1 -->
-    <h2 style="margin-top: 25px;">Email Campaigns, Gift Certificates - Birthday Offers</h2>
+    <h2 style="margin-top: 25px;">Terms and Privacy</h2>
 
-        <div class="narrow-cards">
-           
-            {{ section_card("Reminder Queue", "Email & SMS Reminder Queue", url_for('reminder_queue')) }}
-        </div>
-<br>
-        <div class="narrow-cards">
-        
-            {{ section_card("Birthday Celebrations", "View & manage Client Birthdays, Mark sent client a Birthday Offer", url_for('birthday_offers_home')) }}  
-            {{ section_card("Gift Certificates", "Add New Gift Certificates when printed, update when sold and redeemed", url_for('gift_certificates_home')) }}
+    <div class="narrow-cards">       
+        {{ section_card(
+            "Terms and Conditions", 
+            "Peach Suite Pro - Terms and Conditions", 
+            url_for('view_help_page', page_key='sms_email_terms')
+         ) }}
 
-        </div>
+         {{ section_card(
+            "Privacy Policy",
+            "Peach Suite Pro - Privacy Policy",
+            url_for('view_help_page', page_key='privacy')
+         ) }}
+    </div> 
+        <!-- 🔹 HEADER 2 -->
+    <h2 style="margin-top: 30px;">Master Admin</h2>
+
+    <div class="narrow-cards">
+        {{ section_card("Daily Change Log", "Record development updates and daily changes", url_for('log_it')) }}
+        {{ section_card("Feedbacks", "Feedbacks", url_for('feedback_admin')) }}
+        {{ section_card("Create New Help Page", "Create a New Help Page", url_for('new_help_page')) }}
+        {{ section_card(
+            "Edit Existing Help Page",  
+            "Edit an existing Help Page, then change page in address", 
+            url_for('edit_help_page', page_key='calendar') 
+         ) }}
+    </div>
 
     </div>
 
@@ -43,51 +60,10 @@
 
 
 
-    <!-- 🔹 HEADER 2 -->
-    <h2 style="margin-top: 30px;">Accounting - Logistics - Human Resources</h2>
 
-    <div class="narrow-cards">
-       
-       
-        {{ section_card("Employees Home", "Corporate Human Resources Department", url_for('employee_admin')) }}
-       
-    </div>
+    
 
-    <!-- 🔹 HEADER 3 -->
-    <h2 style="margin-top: 30px;">Admin - Spa Management</h2>
-
-    <div class="narrow-cards">
-        {{ section_card("Admin", "Admin Home", url_for('admin')) }}
-        {{ section_card("Spa Management", "Spa Management", url_for('spa_management')) }}
-
-        {{ section_card(
-            "Terms and Conditions", 
-            "Peach Suite Pro - Terms and Conditions", 
-            url_for('view_help_page', page_key='sms_email_terms')
-         ) }}
-
-
-         {{ section_card(
-            "Privacy Policy",
-            "Peach Suite Pro - Privacy Policy",
-            url_for('view_help_page', page_key='privacy')
-         ) }}
-
-    </div>
-
-        <!-- 🔹 HEADER 4 -->
-    <h2 style="margin-top: 30px;">Master Admin</h2>
-
-    <div class="narrow-cards">
-        {{ section_card("Daily Change Log", "Record development updates and daily changes", url_for('log_it')) }}
-        {{ section_card("Feedbacks", "Feedbacks", url_for('feedback_admin')) }}
-        {{ section_card("Create New Help Page", "Create a New Help Page", url_for('new_help_page')) }}
-        {{ section_card(
-            "Edit Existing Help Page",  
-            "Edit an existing Help Page, then change page in address", 
-            url_for('edit_help_page', page_key='calendar') 
-         ) }}
-    </div>
+    
 
          
 

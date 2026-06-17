@@ -2648,7 +2648,7 @@ td:nth-child(3) {
 
 .health-container {
     display: flex;
-    gap: 25px;
+    gap: 10px;
     align-items: flex-start;
     margin-bottom: 30px;
     flex-wrap: wrap;
