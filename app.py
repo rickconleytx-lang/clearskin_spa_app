@@ -186,9 +186,29 @@ def get_messaging_footer(footer_type):
     return row[0] if row else ""
 
 
+
+
+###################################################
+###############################################
+#############################################
 ##########################################
 #
-#SMS EMAIL Communications Group
+#   COMMUNICATIONS ENGINE
+#
+#
+#
+#
+#
+######################################
+
+
+
+
+
+
+##########################################
+#
+#   SMS EMAIL Communications Group
 ######################################
 
 ######### number  1 first
@@ -454,11 +474,166 @@ def build_communication(spa_id, channel, template_type, merge_data):
 
 
 
+##################################
+#
+#     SEND COMMUNICATION
+#   
+#################################
+
+
+def send_communication(
+    spa_id,
+    channel,
+    recipient,
+    template_type,
+    merge_data,
+    client_id=None,
+    message_type=None
+):
+    channel = (channel or "").lower().strip()
+
+    if channel not in ("sms", "email"):
+        raise ValueError(f"Unsupported communication channel: {channel}")
+
+    communication = build_communication(
+        spa_id=spa_id,
+        channel=channel,
+        template_type=template_type,
+        merge_data=merge_data
+    )
+
+    if not communication:
+        return {
+            "success": False,
+            "error": "Communication could not be built."
+        }
+
+
+    if channel == "sms":
+        return send_compliant_sms(
+            spa_id=spa_id,
+            client_id=client_id,
+            recipient_phone=recipient,
+            message_body=communication["body"],
+            message_type=message_type or template_type
+        )
+
+    if channel == "email":
+        return send_email_message(
+            spa_id=spa_id,
+            client_id=client_id,
+            recipient_email=recipient,
+            subject=communication["subject"],
+            message_body=communication["body"],
+            message_type=message_type or template_type
+        )
+    
+    if not communication:
+        return {
+            "success": False,
+            "error": "Unable to build communication."
+        }
 
 
 
 
 
+##################################
+#
+#   SEND EMAIL MESSAGE
+#
+##################################
+
+def send_email_message(
+    spa_id,
+    client_id,
+    recipient_email,
+    subject,
+    message_body,
+    message_type
+):
+    result = send_email(
+        to_email=recipient_email,
+        subject=subject,
+        body=message_body
+    )
+
+    # Later we can move this to a shared communication log table.
+    log_email_message(
+        spa_id=spa_id,
+        client_id=client_id,
+        recipient_email=recipient_email,
+        subject=subject,
+        message_body=message_body,
+        message_type=message_type,
+        status="sent"
+    )
+
+    return result
+
+
+
+
+
+
+
+##################################
+#
+#      
+#
+##################################
+
+
+
+##################################
+#
+#   
+#
+##################################
+
+
+
+##################################
+#
+#   
+#
+##################################
+
+
+
+##################################
+#
+#   
+#
+##################################
+
+
+
+##################################
+#
+#   
+#
+##################################
+
+
+
+
+
+
+
+##################################
+#
+#   
+#
+##################################
+
+
+
+##################################
+#
+#   
+#
+##################################
 
 
 ##################################
@@ -809,12 +984,13 @@ def send_appointment_reminder_sms(reminder_id, spa_id):
         spa_website=spa_website
     )
 
-    result = send_template_sms(
+    result = send_communication(
         spa_id=spa_id,
-        client_id=client_id,
-        recipient_phone=recipient_phone,
-        template_type="appointment_confirmation",
+        channel="sms",
+        recipient=recipient_phone,
+        template_type="appointment_reminder",
         merge_data=merge_data,
+        client_id=client_id,
         message_type="appointment_reminder"
     )
 
@@ -1347,7 +1523,7 @@ def send_compliant_sms(spa_id, client_id, recipient_phone, message_body, message
     3. Return provider result with final message body
     """
 
-    final_message = append_sms_footer(spa_id, message_body)
+    final_message = append_sms_footer(message_body)
 
     result = send_sms_message(
         recipient_phone,
