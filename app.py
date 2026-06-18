@@ -371,6 +371,9 @@ def build_sms_message(spa_id, template_type, merge_data):
         merge_data=merge_data or {}
     )
 
+    print("MERGE DATA BEFORE RENDER:", merge_data, flush=True)
+
+
     rendered_message = render_sms_template(
         template_text,
         merge_data
@@ -696,10 +699,11 @@ def enrich_appointment_reminder_merge_data(spa_id, merge_data):
 #     ENRICH APPOINTMENT REMINDER MERGE
 #
 #################################
-
 def enrich_appointment_reminder_merge_data(spa_id, merge_data):
     reminder_id = merge_data.get("reminder_id")
-    client_id = merge_data.get("client_id")
+
+    if not reminder_id:
+        return merge_data
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -724,12 +728,9 @@ def enrich_appointment_reminder_merge_data(spa_id, merge_data):
         LEFT JOIN spas s
           ON rq.spa_id = s.spa_id
         WHERE rq.spa_id = %s
-          AND (
-                rq.reminder_id = %s
-                OR rq.client_id = %s
-              )
+          AND rq.reminder_id = %s
         LIMIT 1
-    """, (spa_id, reminder_id, client_id))
+    """, (spa_id, reminder_id))
 
     row = cur.fetchone()
 
@@ -750,12 +751,10 @@ def enrich_appointment_reminder_merge_data(spa_id, merge_data):
         spa_website
     ) = row
 
-    client_first_name = first_name or ""
-    client_full_name = f"{first_name or ''} {last_name or ''}".strip()
-
     merge_data.update({
-        "client_first_name": client_first_name,
-        "client_full_name": client_full_name,
+        "client_first_name": first_name or "",
+        "client_last_name": last_name or "",
+        "client_full_name": f"{first_name or ''} {last_name or ''}".strip(),
         "appointment_date": appointment_date.strftime("%m/%d/%Y") if appointment_date else "",
         "appointment_time": appointment_time.strftime("%I:%M %p") if appointment_time else "",
         "service_name": service_name or "",
@@ -765,8 +764,6 @@ def enrich_appointment_reminder_merge_data(spa_id, merge_data):
     })
 
     return merge_data
-
-
 
 
 
@@ -888,30 +885,15 @@ def send_template_sms(
     merge_data,
     message_type=None
 ):
-    
-
-    built = build_sms_message(spa_id, template_type, merge_data or {})
-
-    if not built["success"]:
-        return {
-            "success": False,
-            "error": built["error"],
-            "template_id": None
-        }
-
-    result = send_compliant_sms(
+    return send_communication(
         spa_id=spa_id,
+        channel="sms",
+        recipient=recipient_phone,
+        template_type=template_type,
+        merge_data=merge_data or {},
         client_id=client_id,
-        recipient_phone=recipient_phone,
-        message_body=built["message_body"],
         message_type=message_type or template_type
     )
-
-    result["template_id"] = built["template_id"]
-    result["rendered_message_body"] = built["message_body"]
-
-    return result
-
 
 
 
@@ -923,8 +905,6 @@ def send_template_sms(
 #     SEND appointment reminder sms
 #
 #################################
-
-
 
 
 def send_appointment_reminder_sms(reminder_id, spa_id):
@@ -984,6 +964,8 @@ def send_appointment_reminder_sms(reminder_id, spa_id):
         spa_website=spa_website
     )
 
+    merge_data["reminder_id"] = reminder_id
+
     result = send_communication(
         spa_id=spa_id,
         channel="sms",
@@ -1019,9 +1001,6 @@ def send_appointment_reminder_sms(reminder_id, spa_id):
     conn.close()
 
     return success, result
-
-
-
 
 
 
@@ -1518,12 +1497,11 @@ def merge_template_preview(message_text, merge_data):
 def send_compliant_sms(spa_id, client_id, recipient_phone, message_body, message_type="manual"):
     """
     Central SMS sending pipeline:
-    1. Append required compliance footer
-    2. Send through provider
-    3. Return provider result with final message body
+    1. Send already-built compliant SMS body
+    2. Return provider result with final message body
     """
 
-    final_message = append_sms_footer(message_body)
+    final_message = message_body
 
     result = send_sms_message(
         recipient_phone,
@@ -6270,6 +6248,8 @@ def send_sms_message(to_phone, message_body):
         }
 
     try:
+        
+        print("FINAL SMS BODY BEING SENT:", final_message_body, flush=True)
         result = send_sms_telnyx(to_phone, final_message_body)
 
         print("TELNYX RESULT:", result, flush=True)
