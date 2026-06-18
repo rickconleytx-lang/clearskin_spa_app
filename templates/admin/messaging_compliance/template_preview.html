@@ -2,52 +2,65 @@
 
 {% block content %}
 
-<div class="page-card">
-
-<h1>👁 SMS Template Preview</h1>
+<h1>👁 Template Preview</h1>
 
 <p>
-    <strong>Template Type:</strong> {{ template_type }}
+    <strong>Channel:</strong> {{ channel|upper }}
 </p>
 
 <hr>
 
-<h3>Final SMS Message</h3>
+{% if preview.channel == "email" %}
 
-<div style="
-    border:1px solid #ccc;
-    padding:20px;
-    background:#f8f8f8;
-    white-space:pre-wrap;
-    border-radius:8px;
-">
-{{ preview_text }}
-</div>
+    <h3>Email Subject</h3>
 
-<br>
+    <div
+        style="
+            border:1px solid #ccc;
+            padding:12px;
+            background:#f8f8f8;
+            margin-bottom:20px;
+        "
+    >
+        {{ preview.subject }}
+    </div>
 
-{% if built and built.success %}
-    <p style="color:green;">
-        ✅ Template rendered successfully.
-    </p>
+    <h3>Email Body</h3>
+
+    <div
+        style="
+            border:1px solid #ccc;
+            padding:20px;
+            background:#f8f8f8;
+            white-space:pre-wrap;
+        "
+    >{{ preview.body }}</div>
+
 {% else %}
-    <p style="color:red;">
-        🔴 Template could not be rendered.
-    </p>
+
+    <h3>SMS Message</h3>
+
+    <div
+        style="
+            border:1px solid #ccc;
+            padding:20px;
+            background:#f8f8f8;
+            white-space:pre-wrap;
+        "
+    >{{ preview.body }}</div>
+
 {% endif %}
 
 <br>
 
 <a class="btn btn-primary"
-   href="{{ url_for('edit_messaging_template', template_type=template_type) }}">
-    ✏️ Edit Template
+   href="{{ url_for('edit_messaging_template', channel=channel, template_type=template_type) }}">
+    ✏️ Edit
 </a>
 
 <a class="btn btn-secondary"
-   href="{{ url_for('template_review', channel='sms') }}">
-    ← Back to Template Library
+   href="{{ url_for('template_review', channel=channel) }}">
+    ← Back
 </a>
-
-</div>
 
 {% endblock %}

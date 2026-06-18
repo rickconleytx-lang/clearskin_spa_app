@@ -186,19 +186,18 @@ def get_messaging_footer(footer_type):
     return row[0] if row else ""
 
 
+##########################################
+#
+#SMS EMAIL Communications Group
+######################################
 
-
-
-def append_sms_footer(spa_id, message):
+######### number  1 first
+def append_sms_footer(message):
 
     footer = get_messaging_footer("sms_opt_out")
 
     message = (message or "").strip()
 
-    footer = get_messaging_footer("sms_opt_out")
-
-
-    # Don't append if already present
     if footer and footer.lower() in message.lower():
         return message
 
@@ -209,20 +208,26 @@ def append_sms_footer(spa_id, message):
 
 
 
+#################################
+#
+#   APPEND EMAIL FOOTER
+#
+############## number 2
 
+def append_email_footer(message):
+    footer = get_messaging_footer(
+        "email_unsubscribe"
+    )
 
-def append_email_footer(body):
-    footer = get_messaging_footer("email_unsubscribe")
-    body = (body or "").strip()
+    message = (message or "").strip()
+
+    if footer and footer.lower() in message.lower():
+        return message
 
     if footer:
-        return f"{body}<br><br>{footer}"
+        return f"{message}\n\n{footer}"
 
-    return body
-
-
-
-
+    return message
 
 
 
@@ -233,7 +238,7 @@ def append_email_footer(body):
 #################################
 
 
-
+############# number 3
 def get_approved_sms_template(spa_id, template_type):
     conn = get_db_connection()
     cur = conn.cursor()
@@ -243,6 +248,7 @@ def get_approved_sms_template(spa_id, template_type):
         FROM messaging_templates
         WHERE spa_id = %s
           AND template_type = %s
+          AND channel = 'sms'
           AND is_active = TRUE
           AND approved_for_use = TRUE
         ORDER BY updated_at DESC, template_id DESC
@@ -255,6 +261,200 @@ def get_approved_sms_template(spa_id, template_type):
     conn.close()
 
     return template
+
+
+
+
+############################################################
+#       GET APPROVED EMAIL TEMPLATE
+############################################################
+############. number 4
+
+def get_approved_email_template(spa_id, template_type):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            subject_text,
+            message_text
+        FROM messaging_templates
+        WHERE spa_id = %s
+          AND template_type = %s
+          AND channel = 'email'
+          AND approved_for_use = TRUE
+          AND is_active = TRUE
+          ORDER BY updated_at DESC, template_id DESC
+        LIMIT 1
+    """, (
+        spa_id,
+        template_type
+    ))
+
+    row = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if not row:
+        return None
+
+    return {
+        "subject": row[0] or "",
+        "body": row[1] or ""
+    }
+
+
+
+#####################################
+#
+#. APPLY MERGE FIELDS
+###################################
+#### number 5
+def apply_merge_fields(text, merge_data):
+    text = text or ""
+
+    for field, value in merge_data.items():
+        text = text.replace(
+            "{{" + field + "}}",
+            str(value or "")
+        )
+
+    return text
+
+
+
+
+#####################################
+#
+#       BUILD SMS MESSAGE
+###################################
+##############. Number 6
+
+def build_sms_message(spa_id, template_type, merge_data):
+    template = get_approved_sms_template(spa_id, template_type)
+
+    if not template:
+        return {
+            "success": False,
+            "error": f"No approved active SMS template found for: {template_type}",
+            "message_body": None,
+            "template_id": None
+        }
+
+    template_id = template[0]
+    template_text = template[3]
+
+    merge_data = enrich_sms_merge_data(
+        spa_id=spa_id,
+        template_type=template_type,
+        merge_data=merge_data or {}
+    )
+
+    rendered_message = render_sms_template(
+        template_text,
+        merge_data
+    )
+
+    rendered_message = append_sms_footer(
+        rendered_message
+    )
+
+    return {
+        "success": True,
+        "error": None,
+        "message_body": rendered_message,
+        "template_id": template_id
+    }
+
+
+
+
+
+#####################################
+#
+#       BUILD EMAIL MESSAGE
+###################################
+##############. Number 7
+def build_email_message(spa_id, template_type, merge_data):
+    template = get_approved_email_template(spa_id, template_type)
+
+    if not template:
+        return None
+
+    subject = apply_merge_fields(
+        template["subject"],
+        merge_data
+    )
+
+    body = apply_merge_fields(
+        template["body"],
+        merge_data
+    )
+
+    body = append_email_footer(body)
+
+    return {
+        "subject": subject,
+        "body": body
+    }
+
+
+
+
+
+
+#####################################
+#
+#       BUILD COMMUNICATION 
+###################################
+############number 8 - - last
+
+def build_communication(spa_id, channel, template_type, merge_data):
+    if channel == "sms":
+
+        sms = build_sms_message(
+            spa_id,
+            template_type,
+            merge_data
+        )
+
+        if not sms or not sms.get("success"):
+            return None
+
+        return {
+            "channel": "sms",
+            "subject": None,
+            "body": sms["message_body"],
+            "template_id": sms["template_id"]
+        }
+
+    if channel == "email":
+
+        email = build_email_message(
+            spa_id,
+            template_type,
+            merge_data
+        )
+
+        if not email:
+            return None
+
+        return {
+            "channel": "email",
+            "subject": email["subject"],
+            "body": email["body"],
+            "template_id": email.get("template_id")
+        }
+
+    return None
+
+
+
+
+
+
+
 
 
 
@@ -397,43 +597,6 @@ def enrich_appointment_reminder_merge_data(spa_id, merge_data):
 
 
 
-##################################
-#
-#     BUILD SMS MESSAGE
-#
-#################################
-
-def build_sms_message(spa_id, template_type, merge_data):
-    template = get_approved_sms_template(spa_id, template_type)
-
-    if not template:
-        return {
-            "success": False,
-            "error": f"No approved active SMS template found for: {template_type}",
-            "message_body": None,
-            "template_id": None
-        }
-
-    template_id = template[0]
-    template_text = template[3]
-
-    merge_data = enrich_sms_merge_data(
-        spa_id=spa_id,
-        template_type=template_type,
-        merge_data=merge_data or {}
-    )
-
-    rendered_message = render_sms_template(template_text, merge_data)
-
-    return {
-        "success": True,
-        "error": None,
-        "message_body": rendered_message,
-        "template_id": template_id
-    }
-
-
-
 ################################
 #       SEND BIRTHDAY
 ##############################
@@ -573,6 +736,10 @@ def send_template_sms(
     result["rendered_message_body"] = built["message_body"]
 
     return result
+
+
+
+
 
 
 
@@ -1220,6 +1387,21 @@ def send_compliant_sms(spa_id, client_id, recipient_phone, message_body, message
 #
 #   <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 #####################################################################
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4098,49 +4280,53 @@ def edit_messaging_template(template_type):
 #     TEMPLATE PREVIEW
 #
 #############################
-
-@app.route("/admin/messaging-compliance/templates/<channel>/<template_type>/preview")
+@app.route(
+    "/admin/messaging-compliance/templates/<channel>/<template_type>/preview"
+)
 @login_required
 @spa_required
 def preview_messaging_template(channel, template_type):
+    spa_id = current_spa_id()
 
-    spa_id = session.get("spa_id")
+    if channel not in ("sms", "email"):
+        flash("Invalid communication channel.", "warning")
+        return redirect(url_for("template_review"))
 
-    if channel not in ["sms", "email"]:
-        flash("Invalid template library.", "warning")
-        return redirect(url_for("template_review", channel="sms"))
-
-    merge_data = {
+    sample_data = {
         "client_first_name": "Rick",
-        "client_last_name": "Conley",
         "client_full_name": "Rick Conley",
         "appointment_date": "June 20, 2026",
-        "appointment_time": "10:00 AM",
-        "service_name": "Facial",
+        "appointment_time": "2:00 PM",
+        "service_name": "Signature Facial",
         "spa_name": "Clear Skin Esthetics",
-        "spa_phone": "817-555-1212",
-        "spa_website": "https://peachsuitepro.com"
+        "spa_phone": "(817) 555-1234",
+        "spa_website": "https://peachsuitepro.com",
+        "spa_address": "123 Main Street",
+        "opt_out": "Reply STOP to opt out"
     }
 
-    built = build_sms_message(
+    preview = build_communication(
         spa_id,
+        channel,
         template_type,
-        merge_data
+        sample_data
     )
 
-    if built["success"]:
-        preview_text = append_sms_footer(
-            spa_id,
-            built["message_body"]
+    if not preview:
+        flash("No approved active template found for preview.", "warning")
+        return redirect(
+            url_for(
+                "edit_messaging_template",
+                channel=channel,
+                template_type=template_type
+            )
         )
-    else:
-        preview_text = built["error"]
 
     return render_template(
         "admin/messaging_compliance/template_preview.html",
+        channel=channel,
         template_type=template_type,
-        preview_text=preview_text,
-        built=built
+        preview=preview
     )
 
 
