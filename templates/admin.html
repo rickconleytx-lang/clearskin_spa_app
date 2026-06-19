@@ -100,7 +100,7 @@ Cat 2
     <h2>Time Settings</h2>
 
     <p><strong>Server UTC Time:</strong> {{ utc_now.strftime("%Y-%m-%d %I:%M %p") }}</p>
-    <p><strong>Spa Current Time:</strong> {{ spa_now.strftime("%Y-%m-%d %I:%M %p") }}</p>
+    <p><strong>Current Local Time:</strong> {{ spa_now.strftime("%Y-%m-%d %I:%M %p") }}</p>
     <p><strong>Current Timezone:</strong> {{ current_timezone }}</p>
 
     <form method="POST" action="{{ url_for('save_time_settings') }}">

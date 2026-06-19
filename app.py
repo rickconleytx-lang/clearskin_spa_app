@@ -346,10 +346,10 @@ def apply_merge_fields(text, merge_data):
 
 
 #####################################
-#
-#       BUILD SMS MESSAGE
+#   BUILD SMS MESSAGE
+#      COMMUNICATION ENGINE PART 7
 ###################################
-##############. Number 6
+##############. 
 
 def build_sms_message(spa_id, template_type, merge_data):
     template = get_approved_sms_template(spa_id, template_type)
@@ -370,7 +370,7 @@ def build_sms_message(spa_id, template_type, merge_data):
         template_type=template_type,
         merge_data=merge_data or {}
     )
-
+        # remove later after testing. TODO
     print("MERGE DATA BEFORE RENDER:", merge_data, flush=True)
 
 
@@ -531,11 +531,6 @@ def send_communication(
             message_type=message_type or template_type
         )
     
-    if not communication:
-        return {
-            "success": False,
-            "error": "Unable to build communication."
-        }
 
 
 
@@ -556,7 +551,7 @@ def send_email_message(
     message_type
 ):
     result = send_email(
-        to_email=recipient_email,
+        to=recipient_email,
         subject=subject,
         body=message_body
     )
@@ -833,12 +828,13 @@ def send_birthday_reminder_sms(reminder_id, spa_id):
         spa_name=spa_name
     )
 
-    result = send_template_sms(
+    result = send_communication(
         spa_id=spa_id,
-        client_id=client_id,
-        recipient_phone=recipient_phone,
+        channel="sms",
+        recipient=recipient_phone,
         template_type="birthday_message",
         merge_data=merge_data,
+        client_id=client_id,
         message_type="birthday_message"
     )
 
@@ -2182,21 +2178,6 @@ def add_email_footer(body, language="English"):
 
 
 
-def send_email(to_email, subject, body):
-
-    final_body = add_email_footer(body, spa_name)
-
-    # existing Mailgun code below
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -2840,21 +2821,20 @@ def get_spa_timezone(spa_id):
 #    DELETE  DELETE  DELETE AFTER TESTING
 #   ---------------------------------
 
-
-
 @app.route("/switch-spa/<int:spa_id>")
+@login_required
+@master_admin_required
 def switch_spa(spa_id):
-    print("SWITCH ROUTE HIT:", spa_id, flush=True)
+
+    if not spa_exists(spa_id):
+        flash("Spa not found.", "warning")
+        return redirect(url_for("home"))
+
     session["spa_id"] = spa_id
 
-    flash(f"Switched to spa {spa_id}.", "success")
+    flash(f"Development mode: switched to spa {spa_id}.", "info")
+
     return redirect(url_for("home"))
-
-
-
-
-
-
 
 #  -------------------------
 #
@@ -2874,7 +2854,11 @@ def telnyx_sms_webhook():
 #  -------------------------
 #
 #  SQUARE WEBHOOK
-#                   NOT SAFE  NOT SAFE
+#
+#
+# Not production-safe until signature validation, idempotency,
+# spa/location mapping, and duplicate protection are complete.
+#  ------------------
 #  -------------------------
 
 @app.route("/square/webhook", methods=["POST"])
@@ -2902,7 +2886,11 @@ def square_webhook():
 
 #  -------------------
 #   Square Incomming Bookings
-#            NOT SAFE  NOT SAFE
+# SQUARE_INTEGRATION_STAGING
+#
+#
+# Not production-safe until signature validation, idempotency,
+# spa/location mapping, and duplicate protection are complete.
 #  ------------------
 
 @app.route("/incoming_bookings")
@@ -2942,7 +2930,11 @@ def incoming_bookings():
 
 #  -------------------------------------
 #   Square Incoming Booking Review
-#        NOT SAFE   NOT  SAFE
+#
+#
+# Not production-safe until signature validation, idempotency,
+# spa/location mapping, and duplicate protection are complete.
+#  ------------------
 #  ------------------------------------
 
 @app.route("/incoming_bookings/<int:incoming_booking_id>")
@@ -2986,7 +2978,11 @@ def review_incoming_booking(incoming_booking_id):
 #  ----------------------------------
 #
 #  SQUARE Ignore incoming 
-#            NOT SAAFE   NOT  SAFE
+#
+#
+# Not production-safe until signature validation, idempotency,
+# spa/location mapping, and duplicate protection are complete.
+#  ------------------
 #  ----------------------------------
 
 @app.route("/incoming_bookings/<int:incoming_booking_id>/ignore", methods=["POST"])
@@ -3016,7 +3012,11 @@ def ignore_incoming_booking(incoming_booking_id):
 #  ------------------------------
 #
 #  SQUARE ADD NEW CLIENT 
-#  NOT SAFE    NOT  SAFE
+#
+#
+# Not production-safe until signature validation, idempotency,
+# spa/location mapping, and duplicate protection are complete.
+#  ------------------#  NOT SAFE    NOT  SAFE
 #  -----------------------------
   
 
@@ -3098,7 +3098,11 @@ def add_new_client_from_booking(incoming_booking_id):
 #  ------------------
 #
 #  SQUARE MATCH EXISTING
-#     NOT SAFE  NOT SAFE
+#
+#
+# Not production-safe until signature validation, idempotency,
+# spa/location mapping, and duplicate protection are complete.
+#  ------------------#     NOT SAFE  NOT SAFE
 #  ------------------
 
 
@@ -4275,18 +4279,23 @@ def template_review(channel):
 #############################
 
 @app.route(
-    "/admin/messaging-compliance/templates/<template_type>",
+    "/admin/messaging-compliance/templates/<channel>/<template_type>",
     methods=["GET", "POST"]
 )
 @login_required
 @spa_required
-def edit_messaging_template(template_type):
+def edit_messaging_template(channel, template_type):
+
+    channel = (channel or "sms").lower()
+
+    if channel not in ("sms", "email"):
+        flash("Invalid template channel.", "warning")
+        return redirect(url_for("template_review", channel="sms"))
 
     spa_id = session.get("spa_id")
 
     conn = get_db_connection()
     cur = conn.cursor()
-
 
     if request.method == "POST":
 
@@ -4294,15 +4303,6 @@ def edit_messaging_template(template_type):
         message_text = request.form.get("message_text")
 
         ai_result = review_template_ai_basic(template_type, message_text)
-
-
-
-        print("Message:", message_text)
-        print("AI Result:", ai_result)
-
-
-
-
 
         is_active = ai_result["score"] > 60
         approved_for_use = ai_result["score"] > 60
@@ -4352,6 +4352,7 @@ def edit_messaging_template(template_type):
                 INSERT INTO messaging_templates
                 (
                     spa_id,
+                    channel,
                     template_name,
                     template_type,
                     message_text,
@@ -4365,9 +4366,10 @@ def edit_messaging_template(template_type):
                     updated_at
                 )
                 VALUES
-                (%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW(),NOW())
+                (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW(),NOW())
             """, (
                 spa_id,
+                channel,
                 template_name,
                 template_type,
                 message_text,
@@ -4385,6 +4387,7 @@ def edit_messaging_template(template_type):
         return redirect(
             url_for(
                 "edit_messaging_template",
+                channel=channel,
                 template_type=template_type
             )
         )
@@ -4401,10 +4404,10 @@ def edit_messaging_template(template_type):
         FROM messaging_templates
         WHERE
             spa_id=%s
-            AND template_type=%s
+            AND channel=%s
     """, (
         spa_id,
-        template_type
+        channel
     ))
 
     template = cur.fetchone()
@@ -6220,7 +6223,7 @@ from services.sms_service import send_sms_telnyx
 
 
 # ==========================================================
-# Internal provider wrapper.   TODO
+# Internal provider wrapper.   
 #
 # Called only by send_compliant_sms().
 #
@@ -7249,12 +7252,13 @@ def send_birthday_sms_month():
             spa_name=spa_name
         )
 
-        result = send_template_sms(
+        result = send_communication(
             spa_id=spa_id,
-            client_id=client_id,
-            recipient_phone=phone,
+            channel="sms",
+            recipient=phone,
             template_type="birthday_message",
             merge_data=merge_data,
+            client_id=client_id,
             message_type="birthday_message"
         )
 
@@ -7264,7 +7268,6 @@ def send_birthday_sms_month():
             failed_count += 1
             print("Birthday SMS failed:", result)
 
-        #send_sms(phone, message)
 
     cur.close()
     conn.close()
@@ -7359,10 +7362,11 @@ def sms_preview(client_id):
             # if sms_opt_out:
             #     skip
 
-        result = send_compliant_sms(
+        result = send_communication(
             spa_id=spa_id,
+            channel="sms",
             client_id=client[0],
-            recipient_phone=client[3],
+            recipient=client[3],
             message_body=message_body,
             message_type="manual"
         )
@@ -7456,88 +7460,102 @@ def sms_conversation(client_id):
 
     client = cur.fetchone()
 
-    if not client:
-        cur.close()
-        conn.close()
-        flash("Client not found.", "error")
-        return redirect(url_for("sms_history"))
 
+def sms_home():
+    spa_id = current_spa_id()
+    if not sms_email_terms_accepted(spa_id):
+        flash(
+            "You must accept the SMS and Email Terms and Conditions before using messaging features",
+            "warning"
+        )
+        return redirect(url_for("sms_email_terms"))
 
-    if request.method == "POST":
-        message_body = request.form.get("message_body", "").strip()
+    search = request.args.get("search", "").strip()
+    show_all = request.args.get("show_all")
+    template_id = request.args.get("template_id", "")
+    client_status = request.args.get("client_status", "")
 
-        if not message_body:
-            flash("Message cannot be blank.", "error")
-            return redirect(url_for("sms_conversation", client_id=client_id))
+    conn = get_db_connection()
+    cur = conn.cursor()
 
-        if not client[3]:
-           flash("Client does not have a phone number.", "error")
-           return redirect(url_for("sms_conversation", client_id=client_id))
-
-        try:
-            result = send_compliant_sms(
-                spa_id=spa_id,
-                client_id=client_id,
-                recipient_phone=client[3],
-                message_body=message_body,
-                message_type="manual"
-            )
-
-            cur.execute("""
-                INSERT INTO sms_log (
-                    spa_id,
-                    client_id,
-                    phone_number,
-                    message_body,
-                    sms_type,
-                    status,
-                    created_at,
-                    sent_at
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
-            """, (
-                spa_id,
-                client_id,
-                client[3],
-                result.get("final_message_body"),
-                "outbound",
-                result.get("status")
-            ))
-
-            conn.commit()
-            flash("SMS sent.", "success")
-
-        except Exception as e:
-            conn.rollback()
-            flash(f"SMS send failed: {e}", "error")
-
-        return redirect(url_for("sms_conversation", client_id=client_id))
-
-
+    # Active SMS templates
     cur.execute("""
-        SELECT
-            created_at,
-            sms_type,
-            message_body,
-            status,
-            provider_error_code,
-            provider_error_message
-        FROM sms_log
-        WHERE client_id = %s
-          AND spa_id = %s
-        ORDER BY created_at ASC
-    """, (client_id, spa_id))
+        SELECT sms_template_id, template_name
+        FROM sms_templates
+        WHERE spa_id = %s
+          AND active = TRUE
+        ORDER BY template_name
+    """, (spa_id,))
+    sms_templates = cur.fetchall()
 
-    messages = cur.fetchall()
+    # Client statuses
+    cur.execute("""
+        SELECT status_name
+        FROM client_statuses
+        WHERE spa_id = %s
+        ORDER BY status_name
+    """, (spa_id,))
+    client_statuses = cur.fetchall()
+
+    clients = []
+
+    if search or show_all:
+        query = """
+            SELECT
+                c.client_id,
+                c.first_name,
+                c.last_name,
+                c.phone,
+                cs.status_name
+            FROM clients c
+            LEFT JOIN client_statuses cs
+                ON c.client_status = cs.status_name
+            WHERE c.spa_id = %s
+              AND c.sms_opt_in = TRUE
+              AND c.active_client = TRUE
+              AND c.phone IS NOT NULL
+              AND TRIM(c.phone) <> ''
+        """
+
+        params = [spa_id]
+
+        if search:
+            query += """
+              AND (
+                   LOWER(c.first_name) LIKE %s
+                   OR LOWER(c.last_name) LIKE %s
+                   OR c.phone LIKE %s
+              )
+            """
+            params.extend([
+                f"%{search.lower()}%",
+                f"%{search.lower()}%",
+                f"%{search}%"
+            ])
+
+        if client_status:
+            query += " AND c.client_status = %s"
+            params.append(client_status)
+
+        query += " ORDER BY c.last_name, c.first_name"
+
+        cur.execute(query, params)
+        clients = cur.fetchall()
 
     cur.close()
     conn.close()
 
     return render_template(
-        "sms_conversation.html",
-        client=client,
-        messages=messages
+        "sms_home.html",
+        sms_templates=sms_templates,
+        client_statuses=client_statuses,
+        clients=clients,
+        search=search,
+        show_all=show_all,
+        template_id=template_id,
+        client_status=client_status
     )
+
 
 
 
@@ -7747,12 +7765,17 @@ def sms_home():
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Active SMS templates
+    
+    # Active approved SMS templates
     cur.execute("""
-        SELECT sms_template_id, template_name
-        FROM sms_templates
+        SELECT
+            template_type,
+            template_name
+        FROM messaging_templates
         WHERE spa_id = %s
-          AND active = TRUE
+            AND channel = 'sms'
+            AND is_active = TRUE
+            AND approved_for_use = TRUE
         ORDER BY template_name
     """, (spa_id,))
     sms_templates = cur.fetchall()
@@ -8002,10 +8025,11 @@ def sms_group_send():
             print("ABOUT TO SEND SMS TO:", phone, flush=True)
 
             try:
-                result = send_compliant_sms(
+                result = send_communication(
                     spa_id=spa_id,
+                    channel="sms",
                     client_id=client_id,
-                    recipient_phone=phone,
+                    recipient=client[3],
                     message_body=personalized_message,
                     message_type="group_send"
                 )
@@ -8370,14 +8394,14 @@ def resend_sms(sms_log_id):
         return redirect(url_for("sms_history", client_id=client_id))
 
     try:
-        result = send_compliant_sms(
+        result = send_communication(
             spa_id=spa_id,
+            channel="sms",
             client_id=client_id,
-            recipient_phone=phone_number,
+            recipient=phone_number,
             message_body=message_body,
             message_type=f"{sms_type or 'manual'}_resend"
         )
-
         cur.execute("""
             INSERT INTO sms_log (
                 spa_id,
@@ -10215,10 +10239,11 @@ def send_pending_reminders():
                     skipped_count += 1
                     continue
 
-                result = send_compliant_sms(
+                result = send_communication(
                     spa_id=spa_id,
+                    channel="sms",
                     client_id=client_id,
-                    recipient_phone=recipient_phone,
+                    recipient=recipient_phone,
                     message_body=message_body,
                     message_type=reminder_type
                 )

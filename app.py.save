@@ -399,11 +399,16 @@ def switch_spa(spa_id):
 
 
 
-
 #  -------------------------
-#
 #  SQUARE WEBHOOK
-#                   NOT SAFE  NOT SAFE
+#  -------------------------
+#  PLACEHOLDER ONLY.
+#  Currently returns 204 immediately and does not process data.
+#  Do not enable real Square webhook processing until:
+#  - signature validation is implemented
+#  - duplicate protection is implemented
+#  - booking event parsing is implemented
+#  - errors are logged safely
 #  -------------------------
 
 @app.route("/square/webhook", methods=["POST"])

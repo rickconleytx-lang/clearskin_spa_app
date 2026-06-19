@@ -1,8 +1,5 @@
 {% extends "base.html" %}
-{% from "components/cards.html" import section_card %}
-
-{% block title %}SMS Home{% endblock %}
-
+{% block title %}Send SMS Messages | Peach Suite Pro{% endblock %}
 {% block content %}
 
 <p style="color:red;">
@@ -10,17 +7,26 @@
     Maximum 5 clients per SMS send.
 </p>
 
-<h1>Send SMS Messages</h1>
 
-<span class="help-icon" onclick="toggleHelp('smsHelp')">❔</span>
-<div id="smsHelp" class="help-popover" style="display:none;">
-  To SEND a message.<br> 
-  1. Select Template <br>  
-  2. Select Client Status <br> 
-  3.  Search and Select recipients (up to 5)<br>
-  4. Click on Preview SMS - then click Send SMS if everything looks good.
+<div style="display:flex; align-items:center; gap:10px; margin-bottom:15px;">
+
+    <h1 style="margin:0;">Send SMS Messages</h1>
+
+    <span class="help-icon"
+          onclick="toggleHelp('smsHelp')"
+          style="cursor:pointer;">
+        ❔
+    </span>
+
 </div>
 
+<div id="smsHelp" class="help-popover" style="display:none;">
+    To SEND a message.<br>
+    1. Select Template<br>
+    2. Select Client Status<br>
+    3. Search and Select recipients (up to 5)<br>
+    4. Click Preview SMS, then click Send SMS if everything looks good.
+</div>
 
 
 

@@ -7,13 +7,12 @@
 
     <title>{% block title %}Peach Suite Pro | Just Peachy Data{% endblock %}</title>
 
-    <link rel="apple-touch-icon"
-        href="{{ url_for('static', filename='apple-touch-icon.png') }}">
-
     <link rel="icon"
-          type="image/png"
-          href="{{ url_for('static', filename='apple-touch-icon.png') }}">
+      type="image/png"
+      href="{{ url_for('static', filename='peachsuite-icon.png') }}?v=20260618">
 
+<link rel="apple-touch-icon"
+      href="{{ url_for('static', filename='peachsuite-icon.png') }}?v=20260618">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="PeachSuite Pro">
@@ -139,7 +138,7 @@
        rel="noopener noreferrer"
        class="footer-brand">
 
-        <img src="{{ url_for('static', filename='apple-touch-icon.png') }}"
+        <img src="{{ url_for('static', filename='peachsuite-icon.png') }}"
              alt="{{ product_name }}"
              class="footer-icon">
 

@@ -13,27 +13,33 @@
     <form method="POST" action="{{ url_for('schedule_appointment_start') }}">
         <input type="hidden" name="selected_date" value="{{ selected_date }}">
 
-        <div class="form-group">
-            <label for="last_name">Search by Last Name</label>
-            <input type="text" id="last_name" name="last_name" value="{{ last_name }}">
-        </div>
+        
+        <div style="display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap;">
 
-        <div class="form-group">
+        <div class="form-group" style="margin-bottom:0;">
             <label for="birth_date">Search by Birthday</label>
-            <input type="date" id="birth_date" name="birth_date" value="{{ birth_date }}">
+            <input type="date"
+                id="birth_date"
+                name="birth_date"
+                value="{{ birth_date }}">
         </div>
 
-        <div class="form-actions">
-            <button type="submit" class="btn btn-primary">Search</button>
+        <button type="submit" class="btn btn-primary">
+            Search
+        </button>
 
-            <a href="{{ url_for('add_new_client', selected_date=selected_date) }}" class="btn btn-secondary">
-                Add New Client
-            </a>
+        <a href="{{ url_for('add_new_client', selected_date=selected_date) }}"
+        class="btn btn-secondary">
+            Add New Client
+        </a>
 
-            <a href="{{ url_for('clients_home') }}" class="btn btn-secondary">
-                Cancel
-            </a>
-        </div>
+        <a href="{{ url_for('clients_home') }}"
+        class="btn btn-secondary">
+            Cancel
+        </a>
+
+    </div>
+
     </form>
 </div>
 

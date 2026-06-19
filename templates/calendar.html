@@ -1,8 +1,24 @@
 {% extends "base.html" %}
-
+{% block title %}Calendar | Peach Suite Pro{% endblock %}
 {% block content %}
 
 <meta http-equiv="refresh" content="30">
+
+<div class="page-title">
+
+    <h1>Calendar</h1>
+
+    <span class="help-icon"
+          onclick="toggleHelp('smsHelp')">
+          ❔
+    </span>
+
+</div>
+
+<div id="smsHelp" class="help-popover" style="display:none;">
+    This is a test<br>
+    where is my text?
+</div>
 
 
 <a href="{{ url_for('view_help_page', page_key='calendar') }}"
@@ -15,7 +31,7 @@
 <br>
 
 <div class="summary-card" style="font-size: 14px; padding: 8px;">
-    <h3 style="font-size: 16px; margin-bottom: 4px;">Current Spa Time</h3>
+    <h3 style="font-size: 16px; margin-bottom: 4px;">Current Local Time</h3>
     <p style="margin: 2px 0;">{{ formatted_spa_time }}</p>
     <p style="margin: 2px 0;">{{ current_timezone }}</p>
 </div>
@@ -23,7 +39,6 @@
 <br>
 
 
-<h1>Weekly Calendar</h1>
 
 <div style="display: flex; flex-direction: row; justify-content: space-between; align-items: flex-start; gap: 25px; width: 100%;">
 
@@ -505,6 +520,10 @@ function setupModalFormSafety() {
 setupModalFormSafety();
 
 
+    function toggleHelp(id) {
+    const box = document.getElementById(id);
+    box.style.display = box.style.display === "none" ? "block" : "none";
+    }
 
 
 </script>

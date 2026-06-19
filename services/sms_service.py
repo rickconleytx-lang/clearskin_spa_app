@@ -60,6 +60,15 @@ def send_sms_telnyx(to_phone, message_body):
     return data
 
 
+
+
+######################################
+#   SEND SMS TO PHONE
+#####################################
+
+
+
+
 def send_sms(to_phone, message_body, spa_id=None, client_id=None, message_type="manual"):
     provider = os.getenv("SMS_PROVIDER", "telnyx").lower()
 
