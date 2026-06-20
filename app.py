@@ -7068,8 +7068,6 @@ def client_messaging_settings(client_id):
             last_name,
             phone,
             email,
-            ok_to_text,
-            ok_to_email,
             ok_to_call,
             sms_opt_in,
             sms_opt_out,
@@ -7089,9 +7087,13 @@ def client_messaging_settings(client_id):
         return redirect(url_for("clients"))
 
     if request.method == "POST":
-        ok_to_text = request.form.get("ok_to_text") == "on"
-        ok_to_email = request.form.get("ok_to_email") == "on"
         ok_to_call = request.form.get("ok_to_call") == "on"
+
+        sms_opt_in = request.form.get("sms_opt_in") == "on"
+        sms_opt_out = request.form.get("sms_opt_out") == "on"
+
+        email_opt_in = request.form.get("email_opt_in") == "on"
+        email_opt_out = request.form.get("email_opt_out") == "on"
 
         phone = client[3]
         email = client[4]
@@ -7099,8 +7101,6 @@ def client_messaging_settings(client_id):
         cur.execute("""
             UPDATE clients
             SET
-                ok_to_text = %s,
-                ok_to_email = %s,
                 ok_to_call = %s,
                 sms_opt_in = %s,
                 sms_opt_out = %s,
@@ -7109,13 +7109,11 @@ def client_messaging_settings(client_id):
             WHERE client_id = %s
               AND spa_id = %s
         """, (
-            ok_to_text,
-            ok_to_email,
             ok_to_call,
-            ok_to_text,
-            not ok_to_text,
-            ok_to_email,
-            not ok_to_email,
+            sms_opt_in,
+            sms_opt_out,
+            email_opt_in,
+            email_opt_out,
             client_id,
             spa_id
         ))
@@ -7135,7 +7133,7 @@ def client_messaging_settings(client_id):
                 spa_id,
                 client_id,
                 phone,
-                ok_to_text,
+                sms_opt_in,
                 "manual_admin_update",
                 "Messaging preference updated by staff."
             ))
@@ -7154,7 +7152,7 @@ def client_messaging_settings(client_id):
                 spa_id,
                 client_id,
                 email,
-                ok_to_email,
+                email_opt_in,
                 "manual_admin_update"
             ))
 
@@ -7205,7 +7203,6 @@ def client_messaging_settings(client_id):
         sms_logs=sms_logs,
         email_logs=email_logs
     )
-
 
 
 
@@ -7498,8 +7495,20 @@ def sms_conversation(client_id):
     client = cur.fetchone()
 
 
+
+
+
+####################################
+#
+#       SMS HOME
+#
+###################################
+
+
+
 def sms_home():
     spa_id = current_spa_id()
+
     if not sms_email_terms_accepted(spa_id):
         flash(
             "You must accept the SMS and Email Terms and Conditions before using messaging features",
@@ -7509,18 +7518,22 @@ def sms_home():
 
     search = request.args.get("search", "").strip()
     show_all = request.args.get("show_all")
-    template_id = request.args.get("template_id", "")
+    template_type = request.args.get("template_type", "")
     client_status = request.args.get("client_status", "")
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Active SMS templates
+    # Active approved SMS templates from unified Communications Engine
     cur.execute("""
-        SELECT sms_template_id, template_name
-        FROM sms_templates
+        SELECT
+            template_type,
+            template_name
+        FROM messaging_templates
         WHERE spa_id = %s
-          AND active = TRUE
+          AND channel = 'sms'
+          AND is_active = TRUE
+          AND approved_for_use = TRUE
         ORDER BY template_name
     """, (spa_id,))
     sms_templates = cur.fetchall()
@@ -7549,6 +7562,7 @@ def sms_home():
                 ON c.client_status = cs.status_name
             WHERE c.spa_id = %s
               AND c.sms_opt_in = TRUE
+              AND COALESCE(c.sms_opt_out, FALSE) = FALSE
               AND c.active_client = TRUE
               AND c.phone IS NOT NULL
               AND TRIM(c.phone) <> ''
@@ -7589,11 +7603,9 @@ def sms_home():
         clients=clients,
         search=search,
         show_all=show_all,
-        template_id=template_id,
+        template_type=template_type,
         client_status=client_status
     )
-
-
 
 
 
@@ -7796,7 +7808,7 @@ def sms_home():
 
     search = request.args.get("search", "").strip()
     show_all = request.args.get("show_all")
-    template_id = request.args.get("template_id", "")
+    template_type = request.args.get("template_type", "")
     client_status = request.args.get("client_status", "")
 
     conn = get_db_connection()
@@ -7881,7 +7893,7 @@ def sms_home():
         clients=clients,
         search=search,
         show_all=show_all,
-        template_id=template_id,
+        template_type=template_type,
         client_status=client_status
     )
 
@@ -7898,7 +7910,6 @@ def sms_home():
 #   
 #   ---------------------
     
-
 @app.route("/sms/group-preview", methods=["POST"])
 @login_required
 @spa_required
@@ -7912,10 +7923,14 @@ def sms_group_preview():
         )
         return redirect(url_for("sms_email_terms"))
 
-    template_id = request.form.get("template_id")
+    template_type = request.form.get("template_type")
     client_ids = [int(x) for x in request.form.getlist("client_ids")]
 
-    if not template_id:
+    print("GROUP PREVIEW TEMPLATE_TYPE:", template_type, flush=True)
+    print("GROUP PREVIEW CLIENT_IDS:", client_ids, flush=True)
+
+ 
+    if not template_type:
         flash("Please select an SMS template.", "error")
         return redirect(url_for("sms_home"))
 
@@ -7930,26 +7945,42 @@ def sms_group_preview():
     conn = get_db_connection()
     cur = conn.cursor()
 
+    # Verify active approved SMS template exists in unified Communications Engine
     cur.execute("""
-        SELECT sms_template_id, template_name, message_body
-        FROM sms_templates
-        WHERE sms_template_id = %s
-          AND spa_id = %s
-          AND active = TRUE
-    """, (template_id, spa_id))
+        SELECT
+            template_type,
+            template_name
+        FROM messaging_templates
+        WHERE spa_id = %s
+          AND channel = 'sms'
+          AND template_type = %s
+          AND is_active = TRUE
+          AND approved_for_use = TRUE
+        LIMIT 1
+    """, (spa_id, template_type))
+
     template = cur.fetchone()
+
+    print("GROUP PREVIEW TEMPLATE FOUND:", template, flush=True)
 
     if not template:
         cur.close()
         conn.close()
-        flash("SMS template not found or inactive.", "error")
+        flash("SMS template not found, inactive, or not approved.", "error")
         return redirect(url_for("sms_home"))
 
     cur.execute("""
-        SELECT client_id, first_name, last_name, phone
+        SELECT
+            client_id,
+            first_name,
+            last_name,
+            phone,
+            sms_opt_in,
+            sms_opt_out
         FROM clients
         WHERE spa_id = %s
           AND sms_opt_in = TRUE
+          AND COALESCE(sms_opt_out, FALSE) = FALSE
           AND active_client = TRUE
           AND phone IS NOT NULL
           AND TRIM(phone) <> ''
@@ -7966,13 +7997,53 @@ def sms_group_preview():
         flash("No eligible SMS clients found.", "error")
         return redirect(url_for("sms_home"))
 
+    preview_messages = []
+
+    for client in clients:
+        (
+            client_id,
+            first_name,
+            last_name,
+            phone,
+            sms_opt_in,
+            sms_opt_out
+        ) = client
+
+        merge_data = {
+            "client_first_name": first_name,
+            "client_full_name": f"{first_name} {last_name}".strip(),
+            "spa_name": get_spa_name(spa_id),
+        }
+
+        built = build_communication(
+            spa_id=spa_id,
+            channel="sms",
+            template_type=template_type,
+            merge_data=merge_data
+        )
+
+        print("BUILD COMMUNICATION RESULT:", built, flush=True)
+
+        if built.get("body"):
+            preview_messages.append({
+                "client_id": client_id,
+                "client_name": f"{first_name} {last_name}".strip(),
+                "phone": phone,
+                "message_body": built["body"],
+                "template_type": template_type
+            })
+
+    if not preview_messages:
+        flash("Unable to build preview messages.", "error")
+        return redirect(url_for("sms_home"))
+
     return render_template(
         "sms_group_preview.html",
         template=template,
-        clients=clients
+        clients=clients,
+        preview_messages=preview_messages,
+        template_type=template_type
     )
-
-
 
 
 
@@ -8002,11 +8073,10 @@ def sms_group_send():
         return redirect(url_for("sms_email_terms"))
 
 
-    template_id = request.form.get("template_id")
+    template_type = request.form.get("template_type")
     client_ids = request.form.getlist("client_ids")
-    message_body = request.form.get("message_body", "").strip()
-
-    if not template_id:
+ 
+    if not template_type:
         flash("SMS template is required.", "error")
         return redirect(url_for("sms_home"))
 
@@ -8018,9 +8088,6 @@ def sms_group_send():
         flash("You can send SMS to a maximum of 5 clients at a time.", "error")
         return redirect(url_for("sms_home"))
 
-    if not message_body:
-        flash("SMS message cannot be blank.", "error")
-        return redirect(url_for("sms_home"))
 
     client_ids = [int(x) for x in client_ids]
 
@@ -8035,7 +8102,8 @@ def sms_group_send():
             SELECT client_id, first_name, last_name, phone
             FROM clients
             WHERE spa_id = %s
-              AND sms_opt_in = TRUE
+              AND sms_opt_in = TRUE  
+              AND COALESCE(sms_opt_out, FALSE) = FALSE      
               AND active_client = TRUE
               AND phone IS NOT NULL
               AND TRIM(phone) <> ''
@@ -8052,21 +8120,34 @@ def sms_group_send():
         for client in clients:
             client_id, first_name, last_name, phone = client
 
-            personalized_message = apply_sms_placeholders(message_body, {
-                "first_name": first_name,
-                "last_name": last_name,
-                "phone": phone 
-            })            
+            merge_data = {
+                "client_first_name": first_name,
+                "client_full_name": f"{first_name} {last_name}".strip(),
+                "spa_name": get_spa_name(spa_id),
+            }
 
+            built = build_communication(
+                spa_id=spa_id,
+                channel="sms",
+                template_type=template_type,
+                merge_data=merge_data
+            )
 
+            if not built.get("body"):
+                failed_count += 1
+                print("BUILD COMMUNICATION FAILED:", built, flush=True)
+                continue
+
+            personalized_message = built["body"] 
+      
+      
             print("ABOUT TO SEND SMS TO:", phone, flush=True)
 
             try:
-                result = send_communication(
+                result = send_compliant_sms(
                     spa_id=spa_id,
-                    channel="sms",
                     client_id=client_id,
-                    recipient=client[3],
+                    recipient_phone=phone,
                     message_body=personalized_message,
                     message_type="group_send"
                 )
@@ -8115,6 +8196,7 @@ def sms_group_send():
                 phone,
                 personalized_message,
                 "group",
+         
                 "outbound",
                 status,
                 provider_message_id,
@@ -8407,7 +8489,7 @@ def resend_sms(sms_log_id):
 
     # Verify client still allows SMS
     cur.execute("""
-        SELECT ok_to_text, sms_opt_in, sms_opt_out
+        SELECT sms_opt_in, sms_opt_out
         FROM clients
         WHERE client_id = %s
           AND spa_id = %s
@@ -11197,7 +11279,6 @@ def business_goals():
 #           
 #   --------------------------------------------------
 
-
 @app.route("/client-contact-preferences")
 @login_required
 @spa_required
@@ -11217,8 +11298,8 @@ def client_contact_preferences():
             last_name,
             phone,
             email,
-            ok_to_text,
-            ok_to_email,
+            sms_opt_in,
+            email_opt_in,
             ok_to_call
         FROM clients
         WHERE spa_id = %s
@@ -11240,17 +11321,33 @@ def client_contact_preferences():
         params.extend([like_search, like_search, like_search, like_search])
 
     if filter_status == "sms_yes":
-        query += " AND ok_to_text = TRUE"
+        query += """
+            AND sms_opt_in = TRUE
+            AND COALESCE(sms_opt_out, FALSE) = FALSE
+        """
     elif filter_status == "sms_no":
-        query += " AND COALESCE(ok_to_text, FALSE) = FALSE"
+        query += """
+            AND (
+                sms_opt_out = TRUE
+                OR COALESCE(sms_opt_in, FALSE) = FALSE
+            )
+        """
     elif filter_status == "email_yes":
-        query += " AND ok_to_email = TRUE"
+        query += """
+            AND email_opt_in = TRUE
+            AND COALESCE(email_opt_out, FALSE) = FALSE
+        """
     elif filter_status == "email_no":
-        query += " AND COALESCE(ok_to_email, FALSE) = FALSE"
+        query += """
+            AND (
+                email_opt_out = TRUE
+                OR COALESCE(email_opt_in, FALSE) = FALSE
+            )
+        """
     elif filter_status == "missing_phone":
-        query += " AND (phone IS NULL OR phone = '')"
+        query += " AND (phone IS NULL OR TRIM(phone) = '')"
     elif filter_status == "missing_email":
-        query += " AND (email IS NULL OR email = '')"
+        query += " AND (email IS NULL OR TRIM(email) = '')"
 
     query += " ORDER BY last_name, first_name"
 
@@ -11269,13 +11366,24 @@ def client_contact_preferences():
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 #   -------------------------------
 #
 #   EDIT PREFERENCES
-#
+#   FOR SMS - EMAIL -CALL
 #
 #   ------------------------------
-
 
 @app.route("/client-contact-preferences/edit/<int:client_id>", methods=["GET", "POST"])
 @login_required
@@ -11287,12 +11395,26 @@ def edit_client_contact_preferences(client_id):
     cur = conn.cursor()
 
     if request.method == "POST":
-        ok_to_text = request.form.get("ok_to_text") == "on"
-        ok_to_email = request.form.get("ok_to_email") == "on"
+        sms_opt_in = request.form.get("sms_opt_in") == "on"
+        sms_opt_out = request.form.get("sms_opt_out") == "on"
+        email_opt_in = request.form.get("email_opt_in") == "on"
+        email_opt_out = request.form.get("email_opt_out") == "on"
         ok_to_call = request.form.get("ok_to_call") == "on"
 
+        print("FORM DATA:", request.form, flush=True)
+        print("EMAIL OPT IN:", email_opt_in, flush=True)
+        print("EMAIL OPT OUT:", email_opt_out, flush=True)
+
+
+
+
         cur.execute("""
-            SELECT ok_to_text, ok_to_email, ok_to_call
+            SELECT
+                sms_opt_in,
+                sms_opt_out,
+                email_opt_in,
+                email_opt_out,
+                ok_to_call
             FROM clients
             WHERE client_id = %s
               AND spa_id = %s
@@ -11306,36 +11428,67 @@ def edit_client_contact_preferences(client_id):
             flash("Client not found.", "error")
             return redirect(url_for("client_contact_preferences"))
 
-        old_text = old_prefs[0]
-        old_email = old_prefs[1]
-        old_call = old_prefs[2]
+        old_sms_opt_in = old_prefs[0]
+        old_sms_opt_out = old_prefs[1]
+        old_email_opt_in = old_prefs[2]
+        old_email_opt_out = old_prefs[3]
+        old_call = old_prefs[4]
 
         cur.execute("""
             UPDATE clients
-            SET ok_to_text = %s,
-                ok_to_email = %s,
+            SET
+                sms_opt_in = %s,
+                sms_opt_out = %s,
+                email_opt_in = %s,
+                email_opt_out = %s,
                 ok_to_call = %s
             WHERE client_id = %s
               AND spa_id = %s
-        """, (ok_to_text, ok_to_email, ok_to_call, client_id, spa_id))
+        """, (
+            sms_opt_in,
+            sms_opt_out,
+            email_opt_in,
+            email_opt_out,
+            ok_to_call,
+            client_id,
+            spa_id
+        ))
 
         updated_by = session.get("user_id")
 
-        if old_text != ok_to_text:
+        if old_sms_opt_in != sms_opt_in:
             add_consent_record(
                 cur, spa_id, client_id,
-                "SMS", ok_to_text,
+                "SMS", sms_opt_in,
                 "Admin Updated",
-                "SMS consent updated from contact preferences page.",
+                "SMS opt-in updated from contact preferences page.",
                 updated_by
             )
 
-        if old_email != ok_to_email:
+        if old_sms_opt_out != sms_opt_out:
             add_consent_record(
                 cur, spa_id, client_id,
-                "Email", ok_to_email,
+                "SMS", not sms_opt_out,
                 "Admin Updated",
-                "Email consent updated from contact preferences page.",
+                "SMS opt-out updated from contact preferences page.",
+                updated_by
+            )
+
+        if old_email_opt_in != email_opt_in:
+            add_consent_record(
+                cur, spa_id, client_id,
+                "Email", email_opt_in,
+                "Admin Updated",
+                "Email opt-in updated from contact preferences page.",
+                updated_by
+            )
+
+        if old_email_opt_out != email_opt_out:
+            add_consent_record(
+                cur, spa_id, client_id,
+                "Email", not email_opt_out,
+                "Admin Updated",
+                "Email opt-out updated from contact preferences page.",
                 updated_by
             )
 
@@ -11362,14 +11515,21 @@ def edit_client_contact_preferences(client_id):
             last_name,
             phone,
             email,
-            ok_to_text,
-            ok_to_email,
+            sms_opt_in,
+            sms_opt_out,
+            email_opt_in,
+            email_opt_out,
             ok_to_call
         FROM clients
         WHERE client_id = %s
           AND spa_id = %s
           AND active_client = TRUE
     """, (client_id, spa_id))
+
+
+
+
+
 
     client = cur.fetchone()
 
@@ -11384,8 +11544,6 @@ def edit_client_contact_preferences(client_id):
         "edit_client_contact_preferences.html",
         client=client
     )
-
-
 
 
 
