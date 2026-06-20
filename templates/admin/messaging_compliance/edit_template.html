@@ -4,13 +4,24 @@
 
 <div class="page-card">
 
-<h1>📱 Messaging Template</h1>
+<h1>📱 Edit Messaging Template</h1>
 
 <p>
     Template Type: <strong>{{ template_type }}</strong>
 </p>
 
-{% if template and template[3] is not none %}
+<p>
+    <strong>Channel:</strong>
+    {{ "SMS" if channel == "sms" else "Email" }}
+</p>
+
+<a class="btn btn-secondary"
+   href="{{ url_for('template_review', channel=channel) }}">
+    ← Back
+</a>
+
+
+{% if template and template[8] is not none %}
 
 <div style="
     border: 2px solid
@@ -31,14 +42,14 @@
     <h3>🤖 AI Compliance Review</h3>
 
     <p>
-        <strong>AI Score:</strong> {{ template[3] }}/100
+        <strong>AI Score:</strong> {{ template[8] }}/100
     </p>
 
     <p>
         <strong>Risk Level:</strong>
-        {% if template[5] == 'High' %}
+        {% if template[10] == 'High' %}
             🔴 High
-        {% elif template[5] == 'Medium' %}
+        {% elif template[10] == 'Medium' %}
             🟡 Medium
         {% else %}
             🟢 Low
@@ -48,14 +59,14 @@
     <p><strong>Review:</strong></p>
 
     <div style="white-space: pre-wrap;">
-        {{ template[4] }}
+        {{ template[5] }}
     </div>
 
-    {% if template[6] %}
-        <p>
-            <strong>Last Reviewed:</strong>
-            {{ template[6].strftime('%m/%d/%Y %I:%M %p') }}
-        </p>
+    {% if template and template[11] %}
+    <p>
+        <strong>Last Reviewed:</strong>
+        {{ template[11].strftime('%m/%d/%Y %I:%M %p') }}
+    </p>
     {% endif %}
 
 </div>
@@ -95,24 +106,31 @@
 </div>
 
 
-
 <form method="POST" class="styled-form">
 
     <label>Template Name</label><br>
     <input type="text"
            name="template_name"
-           value="{{ template[0] if template else '' }}"
+           value="{{ template[1] if template else '' }}"
            style="width:100%;"
            required><br><br>
+
+    {% if channel == "email" %}
+    <label>Email Subject</label><br>
+    <input type="text"
+           name="subject_text"
+           value="{{ template[4] if template and template[4] else '' }}"
+           style="width:100%;"
+           required><br><br>
+    {% endif %}
 
     <label>Message Text</label><br>
     <textarea id="message_text"
               name="message_text"
               rows="8"
               style="width:100%;"
-              required>{{ template[1] if template else '' }}</textarea><br><br>
+              required>{{ template[5] if template else '' }}</textarea><br><br>
 
-    
 <h3>🔒 System Compliance Footer</h3>
 
 <div style="
@@ -127,7 +145,7 @@
         white-space:pre-wrap;
         font-family:inherit;
         margin:0;
-    ">{{ sms_footer }}</pre>
+    ">{{ compliance_footer }}</pre>
 
 </div>
 

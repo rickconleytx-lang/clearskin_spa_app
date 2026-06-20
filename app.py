@@ -256,32 +256,32 @@ def append_email_footer(message):
 #   GET APPROVED SMS TEMPLATE
 #
 #################################
-
-
 ############# number 3
+
 def get_approved_sms_template(spa_id, template_type):
     conn = get_db_connection()
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT template_id, template_name, template_type, message_text
+        SELECT
+            template_id,
+            message_text
         FROM messaging_templates
         WHERE spa_id = %s
-          AND template_type = %s
           AND channel = 'sms'
+          AND template_type = %s
           AND is_active = TRUE
           AND approved_for_use = TRUE
-        ORDER BY updated_at DESC, template_id DESC
+        ORDER BY updated_at DESC
         LIMIT 1
     """, (spa_id, template_type))
 
-    template = cur.fetchone()
+    row = cur.fetchone()
 
     cur.close()
     conn.close()
 
-    return template
-
+    return row
 
 
 
@@ -363,7 +363,7 @@ def build_sms_message(spa_id, template_type, merge_data):
         }
 
     template_id = template[0]
-    template_text = template[3]
+    template_text = template[1]
 
     merge_data = enrich_sms_merge_data(
         spa_id=spa_id,
@@ -389,6 +389,8 @@ def build_sms_message(spa_id, template_type, merge_data):
         "message_body": rendered_message,
         "template_id": template_id
     }
+
+
 
 
 
@@ -4278,6 +4280,7 @@ def template_review(channel):
 #
 #############################
 
+
 @app.route(
     "/admin/messaging-compliance/templates/<channel>/<template_type>",
     methods=["GET", "POST"]
@@ -4292,62 +4295,90 @@ def edit_messaging_template(channel, template_type):
         flash("Invalid template channel.", "warning")
         return redirect(url_for("template_review", channel="sms"))
 
-    spa_id = session.get("spa_id")
+    spa_id = current_spa_id()
 
     conn = get_db_connection()
     cur = conn.cursor()
 
     if request.method == "POST":
+        template_name = (request.form.get("template_name") or "").strip()
+        subject_text = (request.form.get("subject_text") or "").strip()
+        message_text = (request.form.get("message_text") or "").strip()
 
-        template_name = request.form.get("template_name")
-        message_text = request.form.get("message_text")
+        if not template_name:
+            flash("Template name is required.", "warning")
+            cur.close()
+            conn.close()
+            return redirect(url_for(
+                "edit_messaging_template",
+                channel=channel,
+                template_type=template_type
+            ))
+
+        if not message_text:
+            flash("Message text is required.", "warning")
+            cur.close()
+            conn.close()
+            return redirect(url_for(
+                "edit_messaging_template",
+                channel=channel,
+                template_type=template_type
+            ))
+
+        if channel == "sms":
+            subject_text = None
 
         ai_result = review_template_ai_basic(template_type, message_text)
 
         is_active = ai_result["score"] > 60
         approved_for_use = ai_result["score"] > 60
 
-
         cur.execute("""
             SELECT template_id
             FROM messaging_templates
-            WHERE spa_id=%s
-              AND template_type=%s
-        """, (spa_id, template_type))
+            WHERE spa_id = %s
+              AND channel = %s
+              AND template_type = %s
+            ORDER BY updated_at DESC, template_id DESC
+            LIMIT 1
+        """, (spa_id, channel, template_type))
 
         existing = cur.fetchone()
 
         if existing:
-
             cur.execute("""
                 UPDATE messaging_templates
                 SET
-                    template_name=%s,
-                    message_text=%s,
-                    is_active=%s,
-                    approved_for_use=%s,
-                    ai_score=%s,
-                    ai_review=%s,
-                    ai_risk_level=%s,
-                    last_ai_reviewed_at=NOW(),
-                    updated_at=NOW()
-                WHERE
-                    spa_id=%s
-                    AND template_type=%s
+                    template_name = %s,
+                    subject_text = %s,
+                    message_text = %s,
+                    is_active = %s,
+                    approved_for_use = %s,
+                    ai_score = %s,
+                    ai_review = %s,
+                    ai_risk_level = %s,
+                    last_ai_reviewed_at = NOW(),
+                    updated_at = NOW()
+                WHERE template_id = %s
+                  AND spa_id = %s
+                  AND channel = %s
+                  AND template_type = %s
             """, (
                 template_name,
+                subject_text,
                 message_text,
                 is_active,
                 approved_for_use,
                 ai_result["score"],
                 ai_result["review"],
                 ai_result["risk_level"],
+                existing[0],
                 spa_id,
+                channel,
                 template_type
             ))
 
         else:
-
             cur.execute("""
                 INSERT INTO messaging_templates
                 (
@@ -4355,6 +4386,7 @@ def edit_messaging_template(channel, template_type):
                     channel,
                     template_name,
                     template_type,
+                    subject_text,
                     message_text,
                     is_active,
                     approved_for_use,
@@ -4366,12 +4398,13 @@ def edit_messaging_template(channel, template_type):
                     updated_at
                 )
                 VALUES
-                (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW(),NOW())
+                (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW(),NOW())
             """, (
                 spa_id,
                 channel,
                 template_name,
                 template_type,
+                subject_text,
                 message_text,
                 is_active,
                 approved_for_use,
@@ -4381,38 +4414,43 @@ def edit_messaging_template(channel, template_type):
             ))
 
         conn.commit()
+        cur.close()
+        conn.close()
 
         flash("Template saved and AI reviewed.", "success")
 
-        return redirect(
-            url_for(
-                "edit_messaging_template",
-                channel=channel,
-                template_type=template_type
-            )
-        )
+        return redirect(url_for(
+            "edit_messaging_template",
+            channel=channel,
+            template_type=template_type
+        ))
 
     cur.execute("""
         SELECT
-            template_name,
-            message_text,
-            is_active,
-            ai_score,
-            ai_review,
-            ai_risk_level,
-            last_ai_reviewed_at
+            template_id,              -- 0
+            template_name,            -- 1
+            template_type,            -- 2
+            channel,                  -- 3
+            subject_text,             -- 4
+            message_text,             -- 5
+            is_active,                -- 6
+            approved_for_use,         -- 7
+            ai_score,                 -- 8
+            ai_review,                -- 9
+            ai_risk_level,            -- 10
+            last_ai_reviewed_at       -- 11
         FROM messaging_templates
-        WHERE
-            spa_id=%s
-            AND channel=%s
-    """, (
-        spa_id,
-        channel
-    ))
+        WHERE spa_id = %s
+          AND channel = %s
+          AND template_type = %s
+        ORDER BY updated_at DESC, template_id DESC
+        LIMIT 1
+    """, (spa_id, channel, template_type))
 
     template = cur.fetchone()
 
-    sms_footer = get_messaging_footer("sms_opt_out")
+    footer_key = "sms_opt_out" if channel == "sms" else "email_unsubscribe"
+    compliance_footer = get_messaging_footer(footer_key)
 
     cur.close()
     conn.close()
@@ -4421,10 +4459,9 @@ def edit_messaging_template(channel, template_type):
         "admin/messaging_compliance/edit_template.html",
         template=template,
         template_type=template_type,
-        sms_footer=sms_footer
+        channel=channel,
+        compliance_footer=compliance_footer
     )
-
-
 
 
 
@@ -7670,7 +7707,7 @@ def add_sms_template():
 #       
 #   ---------------------
         
-
+#. LEGACY.  LEGACY.  LEGACY ROUTE.  LEGACY ROUTE
 @app.route("/sms/templates/edit/<int:template_id>", methods=["GET", "POST"])
 @login_required
 @spa_required
