@@ -7,7 +7,7 @@
 <h1>SMS Preview</h1>
 
 <p>
-    Review the SMS message before sending.
+    Review the SMS messages before sending.
     Maximum 5 recipients allowed.
 </p>
 
@@ -17,10 +17,10 @@
 
 <form method="POST" action="{{ url_for('sms_group_send') }}">
 
-    <input type="hidden" name="template_id" value="{{ template[0] }}">
+    <input type="hidden" name="template_type" value="{{ template_type }}">
 
-    {% for c in clients %}
-        <input type="hidden" name="client_ids" value="{{ c[0] }}">
+    {% for msg in preview_messages %}
+        <input type="hidden" name="client_ids" value="{{ msg.client_id }}">
     {% endfor %}
 
     <div class="form-group">
@@ -31,30 +31,26 @@
     </div>
 
     <div class="form-group">
-        <label>Recipients</label>
+        <label>Recipients and Messages</label>
 
-        <div class="preview-box">
-            {% for c in clients %}
+        {% for msg in preview_messages %}
+            <div class="preview-box" style="margin-bottom:15px;">
                 <p>
-                    {{ c[2] }}, {{ c[1] }}
-                    — {{ c[3] }}
+                    <strong>{{ msg.client_name }}</strong>
+                    — {{ msg.phone }}
                 </p>
-            {% endfor %}
-        </div>
+
+                <textarea rows="6"
+                          readonly
+                          style="width:100%;">{{ msg.message_body }}</textarea>
+
+                <small>{{ msg.message_body|length }} characters</small>
+            </div>
+        {% endfor %}
     </div>
 
-    <div class="form-group">
-        <label for="message_body">SMS Message</label>
+    <br>
 
-        <textarea id="message_body"
-                  name="message_body"
-                  rows="6"
-                  maxlength="400"
-                  required>{{ template[2] }}</textarea>
-
-        <small id="char-count">0 / 400 characters</small>
-    </div>
-<br>
     <button type="submit"
             class="btn"
             onclick="return confirm('Send SMS to selected clients?');">
@@ -62,17 +58,5 @@
     </button>
 
 </form>
-
-<script>
-const textarea = document.getElementById("message_body");
-const counter = document.getElementById("char-count");
-
-function updateCharCount() {
-    counter.textContent = textarea.value.length + " / 400 characters";
-}
-
-textarea.addEventListener("input", updateCharCount);
-updateCharCount();
-</script>
 
 {% endblock %}

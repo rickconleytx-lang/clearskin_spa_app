@@ -164,11 +164,12 @@
         </label>
         <br>
        
-        <label>
-            <input type="checkbox" name="ok_to_text" value="true"
-                {% if step1_data.get('ok_to_text', False) %}checked{% endif %}>
-            OK to Text
-        </label>
+        
+    <div class="info-box" style="margin:15px 0; padding:12px; border:1px solid #ccc; background:#f8f8f8;">
+        <strong>SMS and Email Consent Notice</strong><br>
+        SMS and Email opt-in consent must be managed from the Client Contact Preferences page.
+        Checking contact options on this intake form does not create SMS or Email consent.
+    </div>
         <br>
     <hr>
 

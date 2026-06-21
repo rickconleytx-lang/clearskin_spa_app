@@ -27,8 +27,8 @@
      <!-- 🔹 HEADER 2 -->
         <h2 style="margin-top: 25px;">Templates & Automation</h2>
         <div class="narrow-cards">
-            {{ section_card("SMS Templates", "",  url_for('sms_templates_admin')) }}
-            {{ section_card("Email Templates", "", url_for('email_templates_admin')) }}
+            {{ section_card("SMS Templates", "",  url_for('template_review', channel='sms')) }}
+            {{ section_card("Email Templates", "", url_for('template_review', channel='email')) }}
             {{ section_card("Communications Automation", "", url_for('reminder_queue')) }}  
             
         </div>

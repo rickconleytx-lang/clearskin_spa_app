@@ -116,11 +116,11 @@
                         Preview
                     </a>
 
-                    <a href="{{ url_for('edit_email_template', template_id=template_id) }}"
-                       class="btn btn-small">
-                        Edit
+                    <a href="{{ url_for('template_review', channel='email') }}"
+                        class="btn btn-secondary">
+                        Email Templates
                     </a>
-                {% else %}
+                                    {% else %}
                     <span style="color: gray;">Select Template</span>
                 {% endif %}
             </td>

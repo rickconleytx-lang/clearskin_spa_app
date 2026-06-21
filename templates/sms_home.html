@@ -40,10 +40,10 @@
     <form method="GET">
 
         <label>SMS Template</label><br>
-        <select name="template_id">
+        <select name="template_type">
             <option value="">Select Template</option>
             {% for t in sms_templates %}
-                <option value="{{ t[0] }}" {% if template_id|string == t[0]|string %}selected{% endif %}>
+                <option value="{{ t[0] }}" {% if template_type|string == t[0]|string %}selected{% endif %}>
                     {{ t[1] }}
                 </option>
             {% endfor %}
@@ -52,7 +52,7 @@
 <br><br>
 
         <label>Client Status</label><br>
-        <select name="client_status_id">
+        <select name="client_status">
             <option value="">All Statuses</option>
             {% for status in client_statuses %}
                 <option value="{{ status[0] }}"
@@ -93,7 +93,7 @@
 
 <form method="POST" action="{{ url_for('sms_group_preview') }}" onsubmit="return validateSmsSelection();">
 
-    <input type="hidden" name="template_id" value="{{ template_id }}">
+    <input type="hidden" name="template_type" value="{{ template_type }}">
 
     <table>
         <tr>
