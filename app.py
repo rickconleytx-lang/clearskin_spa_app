@@ -1311,34 +1311,34 @@ def review_template_ai_basic(template_type, message_text):
 
     recommended_fields = {
         "appointment_reminder": [
-            "{{client_first_name}}",
-            "{{appointment_date}}",
-            "{{appointment_time}}"
+            "{client_first_name}",
+            "{appointment_date}",
+            "{appointment_time}"
         ],
         "appointment_confirmation": [
-            "{{client_first_name}}",
-            "{{appointment_date}}",
-            "{{appointment_time}}"
+            "{client_first_name}",
+            "{appointment_date}",
+            "{appointment_time}"
         ],
         "appointment_rescheduled": [
-            "{{client_first_name}}",
-            "{{appointment_date}}",
-            "{{appointment_time}}"
+            "{client_first_name}",
+            "{appointment_date}",
+            "{appointment_time}"
         ],
         "appointment_cancelled": [
-            "{{client_first_name}}"
+            "{client_first_name}"
         ],
         "birthday_message": [
-            "{{client_first_name}}"
+            "{client_first_name}"
         ],
         "follow_up": [
-            "{{client_first_name}}"
+            "{client_first_name}"
         ],
         "review_request": [
-            "{{client_first_name}}"
+            "{client_first_name}"
         ],
         "gift_certificate": [
-            "{{client_first_name}}"
+            "{client_first_name}"
         ]
     }
 
@@ -1358,7 +1358,7 @@ def review_template_ai_basic(template_type, message_text):
         "opt-out",
         "reply stop",
         "text stop",
-        "{{ opt_out }}",
+        "{{opt_out}}",
         "{{opt_out}}"
     ]
 
@@ -1488,11 +1488,6 @@ def send_compliant_sms(spa_id, client_id, recipient_phone, message_body, message
 
 
 
-
-
-############################################################
-#    
-############################################################
 
 
 
@@ -4188,32 +4183,46 @@ def template_review(channel):
     )
     spa_id = session.get("spa_id")
 
+    show_archived = request.args.get("show_archived") == "1"
+
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute("""
+    query = """
         SELECT
             t.template_type,
             t.display_name,
             t.template_category,
             m.template_id,
+            m.template_name,
             m.is_active,
             m.approved_for_use,
             m.ai_score,
             m.updated_at,
             m.ai_risk_level,
-            m.channel
+            m.channel,
+            m.is_archived
         FROM messaging_template_types t
 
         LEFT JOIN messaging_templates m
             ON t.template_type = m.template_type
            AND m.spa_id = %s
            AND m.channel = %s
-
+    """      
+    
+    params = [spa_id, channel]
+       
+    if not show_archived:
+        query += """
+            AND COALESCE(m.is_archived, FALSE) = FALSE
+        """        
+                
+    query += """    
         WHERE t.is_active = TRUE
-
         ORDER BY t.display_order
-    """, (spa_id, channel))
+    """
+
+    cur.execute(query, params)
 
     templates = cur.fetchall()
 
@@ -4230,10 +4239,11 @@ def template_review(channel):
     return render_template(
         "admin/messaging_compliance/template_review.html",
         templates=templates,
+        channel=channel,
+        show_archived=show_archived,
         completed=completed,
         total=total,
         percent=percent,
-        channel=channel,
         page_title=page_title,
         switch_channel=switch_channel,
         switch_label=switch_label
@@ -10401,6 +10411,201 @@ def add_email_template():
 
 
 
+
+
+
+############################################################
+#    EMAIL TEMPLATE ARCHIVE
+############################################################
+
+
+@app.route(
+    "/admin/messaging-compliance/templates/<channel>/<int:template_id>/archive",
+    methods=["POST"]
+)
+@login_required
+@spa_required
+def archive_messaging_template(channel, template_id):
+
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE messaging_templates
+        SET is_archived = TRUE
+        WHERE template_id = %s
+          AND spa_id = %s
+          AND channel = %s
+    """, (template_id, spa_id, channel))
+
+    conn.commit()
+
+    cur.close()
+    conn.close()
+
+    flash("Template archived.", "success")
+
+    return redirect(
+        url_for("template_review", channel=channel)
+    )
+
+
+
+
+
+############################################################
+#    EMAIL TEMPLATE RESTORE
+############################################################
+
+
+@app.route(
+    "/admin/messaging-compliance/templates/<channel>/<template_type>/restore",
+    methods=["POST"]
+)
+@login_required
+@spa_required
+def restore_messaging_template(channel, template_type):
+
+    spa_id = session.get("spa_id")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE messaging_templates
+           SET is_archived = FALSE,
+               is_active = FALSE,
+               updated_at = NOW()
+         WHERE spa_id = %s
+           AND channel = %s
+           AND template_type = %s
+           AND is_archived = TRUE
+    """, (
+        spa_id,
+        channel,
+        template_type
+    ))
+
+    conn.commit()
+
+    cur.close()
+    conn.close()
+
+    flash(
+        "Template restored and placed in Disabled status.",
+        "success"
+    )
+
+    return redirect(
+        url_for(
+            "template_review",
+            channel=channel,
+            show_archived=1
+        )
+    )
+
+
+
+
+############################################################
+#    EMAIL TEMPLATE ENABLE
+############################################################
+
+
+@app.route(
+    "/admin/messaging-compliance/templates/<int:template_id>/enable",
+    methods=["POST"]
+)
+@login_required
+@spa_required
+def enable_messaging_template(template_id):
+
+    spa_id = session.get("spa_id")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE messaging_templates
+           SET is_active = TRUE,
+               updated_at = NOW()
+         WHERE template_id = %s
+           AND spa_id = %s
+           AND approved_for_use = TRUE
+           AND COALESCE(is_archived,FALSE) = FALSE
+    """, (
+        template_id,
+        spa_id
+    ))
+
+    conn.commit()
+
+    flash(
+        "Template enabled.",
+        "success"
+    )
+
+    cur.close()
+    conn.close()
+
+    return redirect(request.referrer or url_for(
+        "template_review",
+        channel="sms"
+    ))
+
+
+
+
+
+
+
+
+
+############################################################
+#    EMAIL TEMPLATE DISABLE
+############################################################
+
+
+@app.route(
+    "/admin/messaging-compliance/templates/<int:template_id>/disable",
+    methods=["POST"]
+)
+@login_required
+@spa_required
+def disable_messaging_template(template_id):
+
+    spa_id = session.get("spa_id")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE messaging_templates
+           SET is_active = FALSE,
+               updated_at = NOW()
+         WHERE template_id = %s
+           AND spa_id = %s
+    """, (
+        template_id,
+        spa_id
+    ))
+
+    conn.commit()
+
+    flash(
+        "Template disabled.",
+        "success"
+    )
+
+    cur.close()
+    conn.close()
+
+    return redirect(request.referrer or url_for(
+        "template_review",
+        channel="sms"
+    ))
 
 
 
