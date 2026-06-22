@@ -334,11 +334,12 @@ def get_approved_email_template(spa_id, template_type):
 def apply_merge_fields(text, merge_data):
     text = text or ""
 
-    for field, value in merge_data.items():
-        text = text.replace(
-            "{{" + field + "}}",
-            str(value or "")
-        )
+    for field, value in (merge_data or {}).items():
+        value = str(value or "")
+
+        text = text.replace(f"{{{{{field}}}}}", value)
+        text = text.replace(f"{{{{ {field} }}}}", value)
+        text = text.replace(f"{{{field}}}", value)
 
     return text
 
@@ -1402,33 +1403,6 @@ def review_template_ai_basic(template_type, message_text):
 
 
 
-
-
-############################
-#      HELPER
-#
-#     TEMPLATE MERGE DATA
-#
-#############################
-
-def render_template_text(message_text, merge_data=None):
-
-    if merge_data is None:
-        merge_data = {
-            "{{ client_first_name }}": "Sarah",
-            "{{ client_last_name }}": "Johnson",
-            "{{ service_name }}": "90 Minute Facial",
-            "{{ appointment_date }}": "Tuesday, June 16",
-            "{{ appointment_time }}": "2:00 PM",
-            "{{ spa_name }}": "Clear Skin Esthetics",
-            "{{ business_phone }}": "(817) 555-1234",
-            "{{ opt_out }}": "Reply STOP to opt out."
-        }
-
-    for key, value in merge_data.items():
-        message_text = message_text.replace(key, str(value))
-
-    return message_text
 
 
 
@@ -8853,8 +8827,108 @@ def general_email():
 @login_required
 @spa_required
 def general_email_preview():
-    flash("General Email preview is being migrated to the unified Communications Engine.", "info")
-    return redirect(url_for("general_email"))
+    spa_id = current_spa_id()
+    spa_name = get_spa_name(spa_id)
+
+    template_id = request.args.get("template_id")
+    client_id = request.args.get("client_id")
+
+    if not template_id:
+        flash("Please select a template to preview.", "error")
+        return redirect(url_for("general_email"))
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT template_type
+            FROM messaging_templates
+            WHERE template_id = %s
+              AND spa_id = %s
+              AND channel = 'email'
+              AND is_active = TRUE
+        """, (template_id, spa_id))
+
+        template = cur.fetchone()
+
+        if not template:
+            flash("Template not found or inactive.", "error")
+            return redirect(url_for("general_email"))
+
+        template_type = template[0]
+
+        if client_id:
+            cur.execute("""
+                SELECT first_name, last_name, email
+                FROM clients
+                WHERE client_id = %s
+                  AND spa_id = %s
+            """, (client_id, spa_id))
+            client = cur.fetchone()
+        else:
+            client = None
+
+        if client:
+            first_name, last_name, email = client
+        else:
+            first_name = "Sample"
+            last_name = "Client"
+            email = "sample@example.com"
+
+        spa_phone = "" #get_spa_phone(spa_id)
+
+        communication = build_communication(
+            spa_id=spa_id,
+            channel="email",
+            template_type=template_type,
+            merge_data={
+                "client_first_name": first_name or "",
+                "client_last_name": last_name or "",
+                "first_name": first_name or "",
+                "last_name": last_name or "",
+                "email": email or "",
+                "spa_name": spa_name or "",
+                "spa_phone": spa_phone or "",
+                "appointment_date": "",
+                "appointment_time": "",
+                "service_name": "",
+                "unsubscribe_link": ""
+            }
+        )
+
+        subject = communication.get("subject") or f"Message from {spa_name}"
+        body = communication.get("body") or communication.get("message_body")
+
+        if not body:
+            flash("Unable to build email preview.", "error")
+            return redirect(url_for("general_email"))
+
+        return render_template(
+            "general_email_preview.html",
+            subject=subject,
+            body=body,
+            first_name=first_name,
+            last_name=last_name,
+            email=email
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 #   --------------------------------
 #
@@ -8961,10 +9035,13 @@ def general_email_send():
                 merge_data={
                     "client_first_name": first_name or "",
                     "client_last_name": last_name or "",
+                    "client_full_name": f"{first_name or ''} {last_name or ''}".strip(),
                     "first_name": first_name or "",
                     "last_name": last_name or "",
                     "email": email or "",
                     "spa_name": spa_name or "",
+                    "business_phone": "",
+                    "spa_phone": "",
                     "appointment_date": "",
                     "appointment_time": "",
                     "service_name": "",
