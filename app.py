@@ -580,9 +580,12 @@ def send_email_message(
 
 ##################################
 #
-#      
+#      Template name
 #
 ##################################
+
+def is_default_template_name(template_name):
+    return (template_name or "").strip().lower() == "default"
 
 
 
@@ -4252,6 +4255,165 @@ def template_review(channel):
 
 
 
+###################################
+#
+#   DUPLICATE MESSAGING TEMPLATE
+#
+###################################
+
+
+
+@app.route(
+    "/admin/messaging-compliance/templates/<int:template_id>/duplicate",
+    methods=["POST"]
+)
+@login_required
+@spa_required
+def duplicate_messaging_template(template_id):
+
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            channel,
+            template_type,
+            template_name,
+            language_code,
+            subject_text,
+            message_text
+        FROM messaging_templates
+        WHERE template_id = %s
+          AND spa_id = %s
+          AND COALESCE(is_archived, FALSE) = FALSE
+        LIMIT 1
+    """, (template_id, spa_id))
+
+    original = cur.fetchone()
+
+    if not original:
+        cur.close()
+        conn.close()
+        flash("Template not found or cannot be duplicated.", "warning")
+        return redirect(url_for("template_review", channel="sms"))
+
+    channel = original[0]
+    template_type = original[1]
+    template_name = original[2] or "Template"
+    language_code = original[3] or "en"
+    subject_text = original[4]
+    message_text = original[5]
+
+    copy_base = f"{template_name} Copy"
+
+    cur.execute("""
+        SELECT template_name
+        FROM messaging_templates
+        WHERE spa_id = %s
+        AND channel = %s
+        AND template_type = %s
+        AND COALESCE(is_archived, FALSE) = FALSE
+    """, (
+        spa_id,
+        channel,
+        template_type
+    ))
+
+    existing_names = {
+        row[0].strip()
+        for row in cur.fetchall()
+        if row[0]
+    }
+
+    if copy_base not in existing_names:
+        new_template_name = copy_base
+    else:
+        counter = 2
+
+        while f"{copy_base} {counter}" in existing_names:
+            counter += 1
+
+        new_template_name = f"{copy_base} {counter}"
+
+
+    cur.execute("""
+        INSERT INTO messaging_templates
+        (
+            spa_id,
+            channel,
+            template_type,
+            template_name,
+            language_code,
+            subject_text,
+            message_text,
+            is_active,
+            approved_for_use,
+            is_archived,
+            ai_score,
+            ai_review,
+            ai_risk_level,
+            created_at,
+            updated_at
+        )
+        VALUES
+        (
+            %s, %s, %s, %s, %s, %s, %s,
+            FALSE, FALSE, FALSE,
+            NULL, NULL, NULL,
+            NOW(), NOW()
+        )
+        RETURNING template_id
+    """, (
+        spa_id,
+        channel,
+        template_type,
+        new_template_name,
+        language_code,
+        subject_text,
+        message_text
+    ))
+
+    new_template_id = cur.fetchone()[0]
+
+    conn.commit()
+
+    cur.close()
+    conn.close()
+
+    flash("Template duplicated. Review and save before using.", "success")
+
+    return redirect(url_for(
+        "edit_messaging_template_by_id",
+        template_id=new_template_id
+    ))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4264,7 +4426,7 @@ def template_review(channel):
 #
 #############################
 
-
+#################. OLD ROUTE
 @app.route(
     "/admin/messaging-compliance/templates/<channel>/<template_type>",
     methods=["GET", "POST"]
@@ -4433,6 +4595,18 @@ def edit_messaging_template(channel, template_type):
 
     template = cur.fetchone()
 
+    is_default_template = False
+
+    if template:
+        is_default_template = is_default_template_name(template[1])
+
+
+    print("TEMPLATE NAME:", template[1], flush=True)
+    print("IS DEFAULT:", is_default_template, flush=True)
+
+
+
+
     footer_key = "sms_opt_out" if channel == "sms" else "email_unsubscribe"
     compliance_footer = get_messaging_footer(footer_key)
 
@@ -4444,8 +4618,165 @@ def edit_messaging_template(channel, template_type):
         template=template,
         template_type=template_type,
         channel=channel,
-        compliance_footer=compliance_footer
+        compliance_footer=compliance_footer,
+        is_default_template=is_default_template
     )
+
+
+###################################
+#
+#   ADD NEW EDIT ROUTE
+#
+#######################################
+#############. THIS IS NEW EDIT ROUTE
+
+@app.route(
+    "/admin/messaging-compliance/templates/edit/<int:template_id>",
+    methods=["GET", "POST"]
+)
+@login_required
+@spa_required
+def edit_messaging_template_by_id(template_id):
+
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            template_id,              -- 0
+            template_name,            -- 1
+            template_type,            -- 2
+            channel,                  -- 3
+            subject_text,             -- 4
+            message_text,             -- 5
+            is_active,                -- 6
+            approved_for_use,         -- 7
+            ai_score,                 -- 8
+            ai_review,                -- 9
+            ai_risk_level,            -- 10
+            last_ai_reviewed_at,      -- 11
+            COALESCE(is_archived,FALSE), -- 12
+            COALESCE(language_code,'en') -- 13
+        FROM messaging_templates
+        WHERE template_id = %s
+          AND spa_id = %s
+        LIMIT 1
+    """, (template_id, spa_id))
+
+    template = cur.fetchone()
+
+    if not template:
+        cur.close()
+        conn.close()
+        flash("Template not found.", "warning")
+        return redirect(url_for("template_review", channel="sms"))
+
+    channel = template[3]
+    template_type = template[2]
+
+    is_default_template = is_default_template_name(template[1])
+
+    if request.method == "POST":
+        action = request.form.get("action")
+
+        if action == "archive" and is_default_template:
+            flash("Default templates are protected and cannot be archived.", "warning")
+            cur.close()
+            conn.close()
+            return redirect(url_for(
+                "edit_messaging_template_by_id",
+                template_id=template_id
+            ))
+
+        if is_default_template:
+            template_name = template[1]
+        else:
+            template_name = (request.form.get("template_name") or "").strip()
+
+        subject_text = (request.form.get("subject_text") or "").strip()
+        message_text = (request.form.get("message_text") or "").strip()
+        language_code = (request.form.get("language_code") or "en").strip().lower()
+
+        if not template_name:
+            flash("Template name is required.", "warning")
+            cur.close()
+            conn.close()
+            return redirect(url_for("edit_messaging_template_by_id", template_id=template_id))
+
+        if not message_text:
+            flash("Message text is required.", "warning")
+            cur.close()
+            conn.close()
+            return redirect(url_for("edit_messaging_template_by_id", template_id=template_id))
+
+        if channel == "sms":
+            subject_text = None
+
+        ai_result = review_template_ai_basic(template_type, message_text)
+
+        approved_for_use = ai_result["score"] >= 80 and ai_result["risk_level"] != "High"
+        is_active = approved_for_use and not template[12]
+
+        cur.execute("""
+            UPDATE messaging_templates
+               SET template_name = %s,
+                   subject_text = %s,
+                   message_text = %s,
+                   language_code = %s,
+                   is_active = %s,
+                   approved_for_use = %s,
+                   ai_score = %s,
+                   ai_review = %s,
+                   ai_risk_level = %s,
+                   last_ai_reviewed_at = NOW(),
+                   updated_at = NOW()
+             WHERE template_id = %s
+               AND spa_id = %s
+        """, (
+            template_name,
+            subject_text,
+            message_text,
+            language_code,
+            is_active,
+            approved_for_use,
+            ai_result["score"],
+            ai_result["review"],
+            ai_result["risk_level"],
+            template_id,
+            spa_id
+        ))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        flash("Template saved and AI reviewed.", "success")
+
+        return redirect(url_for(
+            "edit_messaging_template_by_id",
+            template_id=template_id
+        ))
+
+    footer_key = "sms_opt_out" if channel == "sms" else "email_unsubscribe"
+    compliance_footer = get_messaging_footer(footer_key)
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "admin/messaging_compliance/edit_template.html",
+        template=template,
+        template_type=template_type,
+        channel=channel,
+        compliance_footer=compliance_footer,
+        is_default_template=is_default_template
+    )
+
+
+
+
 
 
 
@@ -10433,8 +10764,36 @@ def archive_messaging_template(channel, template_id):
     cur = conn.cursor()
 
     cur.execute("""
+        SELECT template_name
+        FROM messaging_templates
+        WHERE template_id = %s
+          AND spa_id = %s
+          AND channel = %s
+        LIMIT 1
+    """, (template_id, spa_id, channel))
+
+    template = cur.fetchone()
+
+    if not template:
+        cur.close()
+        conn.close()
+        flash("Template not found.", "warning")
+        return redirect(url_for("template_review", channel=channel))
+
+    if is_default_template_name(template[0]):
+        cur.close()
+        conn.close()
+        flash("Default templates are protected and cannot be archived.", "warning")
+        return redirect(url_for(
+            "edit_messaging_template_by_id",
+            template_id=template_id
+        ))
+
+    cur.execute("""
         UPDATE messaging_templates
-        SET is_archived = TRUE
+        SET is_archived = TRUE,
+            is_active = FALSE,
+            updated_at = NOW()
         WHERE template_id = %s
           AND spa_id = %s
           AND channel = %s
