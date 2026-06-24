@@ -2791,3 +2791,15 @@ td:nth-child(3) {
 .page-title h1 {
     margin: 0;
 }
+
+.archive-filter-form {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 15px;
+}
+
+.archive-filter-form input[type="checkbox"] {
+    margin: 0;
+    width: auto;
+}

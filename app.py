@@ -4678,6 +4678,11 @@ def edit_messaging_template_by_id(template_id):
 
     is_default_template = is_default_template_name(template[1])
 
+    print("EDIT TEMPLATE NAME:", repr(template[1]), flush=True)
+    print("IS DEFAULT TEMPLATE:", is_default_template, flush=True)
+
+
+
     if request.method == "POST":
         action = request.form.get("action")
 

@@ -15,6 +15,16 @@
     {{ "SMS" if channel == "sms" else "Email" }}
 </p>
 
+{% if is_default_template %}
+<div class="alert alert-info">
+    🔒 This is a protected Default template.
+    You may edit the message content, preview it, or duplicate it,
+    but the template name cannot be changed and it cannot be archived.
+</div>
+{% endif %}
+
+
+
 <a class="btn btn-secondary"
    href="{{ url_for('template_review', channel=channel) }}">
     ← Back
@@ -110,10 +120,11 @@
 
     <label>Template Name</label><br>
     <input type="text"
-           name="template_name"
-           value="{{ template[1] if template else '' }}"
-           style="width:100%;"
-           required><br><br>
+       name="template_name"
+       value="{{ template[1] if template else '' }}"
+       style="width:100%;"
+       {% if is_default_template %}readonly{% endif %}
+       required>
 
     {% if channel == "email" %}
     <label>Email Subject</label><br>

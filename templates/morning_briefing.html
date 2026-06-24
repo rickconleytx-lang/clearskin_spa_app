@@ -3,10 +3,50 @@
 {% block content %}
 
 
+<div style="margin-bottom:15px;">
 
 <a class="btn" href="{{ url_for('home') }}">
     Control Panel
 </a>
+
+<a href="/morning_briefing" class="btn btn-secondary">
+    🍑 Peach Suite Pro | Daily Briefing
+</a>
+
+    <span class="help-icon"
+           onclick="toggleHelp('bookmarkHelp')"
+           style="cursor:pointer;">    
+        ❔
+    </span>
+
+</div>
+
+<div id="bookmarkHelp"
+     style="display:none;"
+     class="help-box">
+
+    <strong>Bookmark Daily Briefing</strong>
+
+    <p>
+        Daily Briefing is the recommended starting page for Peach Suite Pro.
+    </p>
+
+    <p>
+        Add this page to your browser Favorites Bar for one-click access.
+    </p>
+
+    <p>
+        For complete instructions and bookmark settings,
+        please see the Help Center.
+    </p>
+
+</div>
+
+
+
+
+
+
 <br><br>
 <div class="dashboard-card">
         
@@ -78,6 +118,16 @@
 
 <a class="btn" href="{{ url_for('reports') }}">View Executive Dashboard</a>
 <a class="btn" href="{{ url_for('calendar_view') }}">Go to Calendar</a>
+
+
+
+<script>
+function toggleHelp(id) {
+    const box = document.getElementById(id);
+    box.style.display = box.style.display === "none" ? "block" : "none";
+    }
+</script>
+
 
 {% endblock %}
 
