@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Send SMS Messages | Peach Suite Pro{% endblock %}
+
 {% block content %}
 
 <p style="color:red;">
@@ -7,9 +8,7 @@
     Maximum 5 clients per SMS send.
 </p>
 
-
 <div style="display:flex; align-items:center; gap:10px; margin-bottom:15px;">
-
     <h1 style="margin:0;">Send SMS Messages</h1>
 
     <span class="help-icon"
@@ -17,83 +16,123 @@
           style="cursor:pointer;">
         ❔
     </span>
-
 </div>
 
 <div id="smsHelp" class="help-popover" style="display:none;">
     To SEND a message.<br>
-    1. Select Template<br>
-    2. Select Client Status<br>
-    3. Search and Select recipients (up to 5)<br>
-    4. Click Preview SMS, then click Send SMS if everything looks good.
+    1. Select Template Type<br>
+    2. Select Template Variant<br>
+    3. Search or Show Eligible Clients<br>
+    4. Select recipients, up to 5<br>
+    5. Click Preview SMS, then Send SMS if everything looks good.
 </div>
 
-
-
 <div style="display:flex; flex-direction:row; justify-content:space-between; align-items:flex-start; gap:25px; width:100%;">
-            
-    <!-- LEFT SIDE -->
+
     <div style="flex:1; min-width:0;">
-         <!-- 🔹 HEADER 1 -->
 
+        <form method="GET">
 
-    <form method="GET">
+            <label>Template Type</label>
+            <select name="template_type"
+                    id="template_type"
+                    class="form-control"
+                    onchange="this.form.submit()">
 
-        <label>SMS Template</label><br>
-        <select name="template_type">
-            <option value="">Select Template</option>
-            {% for t in sms_templates %}
-                <option value="{{ t[0] }}" {% if template_type|string == t[0]|string %}selected{% endif %}>
-                    {{ t[1] }}
-                </option>
-            {% endfor %}
-        </select>
+                <option value="">Select Template Type</option>
 
-<br><br>
+                {% for t in sms_template_types %}
+                    <option value="{{ t[0] }}"
+                        {% if selected_template_type == t[0] %}selected{% endif %}>
+                        {{ t[1] or t[0].replace('_',' ').title() }}
+                    </option>
+                {% endfor %}
 
-        <label>Client Status</label><br>
-        <select name="client_status">
-            <option value="">All Statuses</option>
-            {% for status in client_statuses %}
-                <option value="{{ status[0] }}"
-                    {% if client_status  == status[0] %}
-                        selected
+            </select>
+
+            <br>
+
+            <label>Template</label>
+            <select name="template_id"
+                    id="template_id"
+                    class="form-control"
+                    onchange="updateSmsLivePreview()">
+
+                <option value="">Select Template</option>
+
+                {% for t in sms_templates %}
+                    {% if selected_template_type and t[1] == selected_template_type %}
+                        <option value="{{ t[0] }}"
+                            {% if selected_template_id|string == t[0]|string %}selected{% endif %}>
+                            {{ t[2] }}
+                        </option>
                     {% endif %}
-                >
-                    {{ status[0] }}
-                </option>
-            {% endfor %}
-        </select>
+                {% endfor %}
 
-     <br><br>
+            </select>
 
-        <label>Search Clients</label><br>
-        <input type="text" name="search" value="{{ search or '' }}">
+            <div id="sms-live-preview-box"
+                 style="border:1px solid #ccc; border-radius:8px; padding:12px; background:#f9f9f9; margin-top:15px; margin-bottom:15px;">
 
-    <br><br>
+                <strong>Live SMS Preview</strong>
 
-        <button type="submit" class="btn">Search</button>
-        <button type="submit" name="show_all" value="1" class="btn">Show All Eligible Clients</button>
+                <p style="font-size:13px; color:#666;">
+                    Preview uses sample client data.
+                </p>
 
-    </form>
+                <textarea id="sms-live-preview"
+                          rows="6"
+                          readonly
+                          style="width:100%;"></textarea>
+
+                <small>
+                    <span id="sms-preview-count">0</span> characters
+                </small>
+            </div>
+
+            <label>Search Clients</label><br>
+            <input type="text"
+                   name="search"
+                   value="{{ search or '' }}">
+
+            <br><br>
+
+            <button type="submit" class="btn">
+                Search
+            </button>
+
+            <button type="submit"
+                    name="show_all"
+                    value="1"
+                    class="btn">
+                Show All Eligible Clients
+            </button>
+
+        </form>
 
     </div>
 
-            <!-- RIGHT SIDE IMAGE -->
-    <div style="width: 260px; flex-shrink: 0; text-align: right;">
+    <div style="width:260px; flex-shrink:0; text-align:right;">
         <img src="{{ url_for('static', filename='images/ps_sms_email.png') }}"
-             alt="Peach Suite Pro Calendar"  
-             style="width: 260px; height: auto; border-radius: 12px;">
+             alt="Peach Suite Pro SMS and Email"
+             style="width:260px; height:auto; border-radius:12px;">
     </div>
+
 </div>
 
 <hr>
 
 {% if clients %}
 
-<form method="POST" action="{{ url_for('sms_group_preview') }}" onsubmit="return validateSmsSelection();">
+<form method="POST"
+      action="{{ url_for('sms_group_preview') }}"
+      onsubmit="return validateSmsSelection();">
 
-    <input type="hidden" name="template_type" value="{{ template_type }}">
+    <input type="hidden" name="template_type" value="{{ selected_template_type }}">
+    <input type="hidden" name="template_id" value="{{ selected_template_id }}">
+    <input type="hidden" name="search" value="{{ search or '' }}">
+    <input type="hidden" name="show_all" value="{{ '1' if show_all else '' }}">
+    <input type="hidden" name="client_status" value="{{ client_status or '' }}">
 
     <table>
         <tr>
@@ -131,15 +170,67 @@
 {% endif %}
 
 <script>
+const smsTemplates = {
+    {% for t in sms_templates %}
+        "{{ t[0] }}": {
+            template_type: "{{ t[1] }}",
+            template_name: "{{ t[2]|e }}",
+            message_text: `{{ t[3]|default('', true)|e }}`
+        },
+    {% endfor %}
+};
+
+function updateSmsLivePreview() {
+    const templateSelect = document.getElementById("template_id");
+    const previewBox = document.getElementById("sms-live-preview");
+    const countBox = document.getElementById("sms-preview-count");
+
+    if (!templateSelect || !previewBox || !countBox) {
+        return;
+    }
+
+    const templateId = templateSelect.value;
+
+    if (!templateId || !smsTemplates[templateId]) {
+        previewBox.value = "";
+        countBox.textContent = "0";
+        return;
+    }
+
+    let message = smsTemplates[templateId].message_text || "";
+
+    const sampleData = {
+        client_first_name: "Client",
+        client_full_name: "Client Name",
+        appointment_date: "01/15/2026",
+        appointment_time: "2:00 PM",
+        service_name: "Facial",
+        spa_name: "Clear Skin Esthetics",
+        spa_phone: "(555) 555-5555",
+        spa_website: "www.example.com",
+        spa_address: "Business Address"
+    };
+
+    for (const key in sampleData) {
+        const pattern = new RegExp("\\{\\{\\s*" + key + "\\s*\\}\\}", "g");
+        message = message.replace(pattern, sampleData[key]);
+    }
+
+    previewBox.value = message;
+    countBox.textContent = message.length;
+}
+
 function updateSelectedCount() {
     const checked = document.querySelectorAll('input[name="client_ids"]:checked');
-    document.getElementById("selected-count").textContent = checked.length;
+    const selectedCount = document.getElementById("selected-count");
 
     if (checked.length > 5) {
         alert("You can select a maximum of 5 clients for SMS.");
         checked[checked.length - 1].checked = false;
-        document.getElementById("selected-count").textContent = 5;
     }
+
+    selectedCount.textContent =
+        document.querySelectorAll('input[name="client_ids"]:checked').length;
 }
 
 function validateSmsSelection() {
@@ -159,13 +250,11 @@ function validateSmsSelection() {
 }
 
 function toggleHelp(id) {
-  const box = document.getElementById(id);
-  box.style.display = box.style.display === "none" ? "block" : "none";
+    const box = document.getElementById(id);
+    box.style.display = box.style.display === "none" ? "block" : "none";
 }
 
-
-
-
+document.addEventListener("DOMContentLoaded", updateSmsLivePreview);
 </script>
 
 {% endblock %}

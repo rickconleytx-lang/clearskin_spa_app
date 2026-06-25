@@ -17,7 +17,8 @@
 
 <form method="POST" action="{{ url_for('sms_group_send') }}">
 
-    <input type="hidden" name="template_type" value="{{ template_type }}">
+    <input type="hidden" name="template_type" value="{{ selected_template_type }}">
+    <input type="hidden" name="template_id" value="{{ selected_template_id }}">
 
     {% for msg in preview_messages %}
         <input type="hidden" name="client_ids" value="{{ msg.client_id }}">
@@ -26,7 +27,7 @@
     <div class="form-group">
         <label>Template</label>
         <input type="text"
-               value="{{ template[1] }}"
+               value="{{ template[2] }}"
                readonly>
     </div>
 

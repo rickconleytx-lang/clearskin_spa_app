@@ -591,9 +591,46 @@ def is_default_template_name(template_name):
 
 ##################################
 #
-#   
+#   GET ACTIVE MESSAGING TEMPLATES
 #
 ##################################
+
+
+
+def get_active_messaging_templates(spa_id, channel):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            template_id,
+            template_type,
+            template_name,
+            message_text,
+            subject_text,
+            language_code
+        FROM messaging_templates
+        WHERE spa_id = %s
+          AND channel = %s
+          AND is_active = TRUE
+          AND approved_for_use = TRUE
+          AND COALESCE(is_archived, FALSE) = FALSE
+        ORDER BY template_type, template_name
+    """, (spa_id, channel))
+
+    templates = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return templates
+
+
+
+
+
+
+
 
 
 
@@ -7776,6 +7813,75 @@ def sms_conversation(client_id):
 
 
 
+
+
+###############################################
+###############################################
+#
+#   HELPERS. HELPERS
+#
+#       GET ACTIVE MESSAGING TEMPLATES
+#
+###############################################
+
+
+def get_active_messaging_templates(spa_id, channel):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            template_id,
+            template_type,
+            template_name,
+            message_text,
+            subject_text,
+            language_code
+        FROM messaging_templates
+        WHERE spa_id = %s
+          AND channel = %s
+          AND is_active = TRUE
+          AND approved_for_use = TRUE
+          AND COALESCE(is_archived, FALSE) = FALSE
+        ORDER BY template_type, template_name
+    """, (spa_id, channel))
+
+    templates = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return templates
+
+
+def get_active_messaging_template_types(spa_id, channel):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT DISTINCT
+            template_type,
+            template_type
+        FROM messaging_templates
+        WHERE spa_id = %s
+          AND channel = %s
+          AND is_active = TRUE
+          AND approved_for_use = TRUE
+          AND COALESCE(is_archived, FALSE) = FALSE
+        ORDER BY template_type
+    """, (spa_id, channel))
+
+    template_types = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return template_types
+
+
+
+
+
 ####################################
 #
 #       SMS HOME
@@ -7784,6 +7890,9 @@ def sms_conversation(client_id):
 
 
 
+@app.route("/sms")
+@login_required
+@spa_required
 def sms_home():
     spa_id = current_spa_id()
 
@@ -7794,35 +7903,25 @@ def sms_home():
         )
         return redirect(url_for("sms_email_terms"))
 
+    selected_template_type = request.args.get("template_type", "").strip()
+    selected_template_id = request.args.get("template_id", "").strip()
     search = request.args.get("search", "").strip()
-    show_all = request.args.get("show_all")
-    template_type = request.args.get("template_type", "")
-    client_status = request.args.get("client_status", "")
+    show_all = request.args.get("show_all") == "1"
+    client_status = request.args.get("client_status", "").strip()
+
+    sms_templates = get_active_messaging_templates(spa_id, "sms")
+    sms_template_types = get_active_messaging_template_types(spa_id, "sms")
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Active approved SMS templates from unified Communications Engine
-    cur.execute("""
-        SELECT
-            template_type,
-            template_name
-        FROM messaging_templates
-        WHERE spa_id = %s
-          AND channel = 'sms'
-          AND is_active = TRUE
-          AND approved_for_use = TRUE
-        ORDER BY template_name
-    """, (spa_id,))
-    sms_templates = cur.fetchall()
-
-    # Client statuses
     cur.execute("""
         SELECT status_name
         FROM client_statuses
         WHERE spa_id = %s
         ORDER BY status_name
     """, (spa_id,))
+
     client_statuses = cur.fetchall()
 
     clients = []
@@ -7877,13 +7976,30 @@ def sms_home():
     return render_template(
         "sms_home.html",
         sms_templates=sms_templates,
+        sms_template_types=sms_template_types,
+        selected_template_type=selected_template_type,
+        selected_template_id=selected_template_id,
         client_statuses=client_statuses,
         clients=clients,
         search=search,
         show_all=show_all,
-        template_type=template_type,
         client_status=client_status
     )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -8062,121 +8178,7 @@ def edit_sms_template(template_id):
 
 
 
-            
-            
-#   ------------------------
-#    SMS HOME
-#
-#
-#
-#       
-#   ---------------------
-        
-@app.route("/sms", methods=["GET"])
-@login_required
-@spa_required
-def sms_home():
-    spa_id = current_spa_id()
-    if not sms_email_terms_accepted(spa_id):
-        flash(
-            "You must accept the SMS and Email Terms and Conditions before using messaging features",
-            "warning"
-        )
-        return redirect(url_for("sms_email_terms"))
-
-    search = request.args.get("search", "").strip()
-    show_all = request.args.get("show_all")
-    template_type = request.args.get("template_type", "")
-    client_status = request.args.get("client_status", "")
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    
-    # Active approved SMS templates
-    cur.execute("""
-        SELECT
-            template_type,
-            template_name
-        FROM messaging_templates
-        WHERE spa_id = %s
-            AND channel = 'sms'
-            AND is_active = TRUE
-            AND approved_for_use = TRUE
-        ORDER BY template_name
-    """, (spa_id,))
-    sms_templates = cur.fetchall()
-
-    # Client statuses
-    cur.execute("""
-        SELECT status_name
-        FROM client_statuses
-        WHERE spa_id = %s
-        ORDER BY status_name
-    """, (spa_id,))
-    client_statuses = cur.fetchall()
-
-    clients = []
-
-    if search or show_all:
-        query = """
-            SELECT
-                c.client_id,
-                c.first_name,
-                c.last_name,
-                c.phone,
-                cs.status_name
-            FROM clients c
-            LEFT JOIN client_statuses cs
-                ON c.client_status = cs.status_name
-            WHERE c.spa_id = %s
-              AND c.sms_opt_in = TRUE
-              AND c.active_client = TRUE
-              AND c.phone IS NOT NULL
-              AND TRIM(c.phone) <> ''
-        """
-
-        params = [spa_id]
-
-        if search:
-            query += """
-              AND (
-                   LOWER(c.first_name) LIKE %s
-                   OR LOWER(c.last_name) LIKE %s
-                   OR c.phone LIKE %s
-              )
-            """
-            params.extend([
-                f"%{search.lower()}%",
-                f"%{search.lower()}%",
-                f"%{search}%"
-            ])
-
-        if client_status:
-            query += " AND c.client_status = %s"
-            params.append(client_status)
-
-        query += " ORDER BY c.last_name, c.first_name"
-
-        cur.execute(query, params)
-        clients = cur.fetchall()
-
-    cur.close()
-    conn.close()
-
-    return render_template(
-        "sms_home.html",
-        sms_templates=sms_templates,
-        client_statuses=client_statuses,
-        clients=clients,
-        search=search,
-        show_all=show_all,
-        template_type=template_type,
-        client_status=client_status
-    )
-
-
-
+ 
 
 
         
@@ -8193,6 +8195,12 @@ def sms_home():
 @spa_required
 def sms_group_preview():
     spa_id = current_spa_id()
+
+    selected_template_type = request.form.get("template_type", "").strip()
+    selected_template_id = request.form.get("template_id", "").strip()
+    search = request.form.get("search", "").strip()
+    show_all = request.form.get("show_all", "").strip()
+    client_status = request.form.get("client_status", "").strip()
 
     if not sms_email_terms_accepted(spa_id):
         flash(
@@ -8226,16 +8234,17 @@ def sms_group_preview():
     # Verify active approved SMS template exists in unified Communications Engine
     cur.execute("""
         SELECT
+            template_id,
             template_type,
             template_name
         FROM messaging_templates
         WHERE spa_id = %s
-          AND channel = 'sms'
-          AND template_type = %s
-          AND is_active = TRUE
-          AND approved_for_use = TRUE
+        AND channel = 'sms'
+        AND template_id = %s
+        AND is_active = TRUE
+        AND approved_for_use = TRUE
         LIMIT 1
-    """, (spa_id, template_type))
+    """, (spa_id, selected_template_id))
 
     template = cur.fetchone()
 
@@ -8317,10 +8326,14 @@ def sms_group_preview():
 
     return render_template(
         "sms_group_preview.html",
-        template=template,
+        selected_template_type=selected_template_type,
+        selected_template_id=selected_template_id,
+        search=search,
+        show_all=show_all,
+        client_status=client_status,
         clients=clients,
-        preview_messages=preview_messages,
-        template_type=template_type
+        template=template,
+        preview_messages=preview_messages
     )
 
 

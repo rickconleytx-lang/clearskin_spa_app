@@ -171,6 +171,28 @@ templates completed ({{ percent }}%).
                 👁 Preview
             </a>
 
+
+
+            {% if t[3] %}
+                {% if channel == "sms" %}
+                    <a class="btn btn-success"
+                    href="{{ url_for('sms_home',
+                                        template_type=t[0],
+                                        template_id=t[3]) }}">
+                        📤 Send
+                    </a>
+                {% elif channel == "email" %}
+                    <a class="btn btn-success"
+                    href="{{ url_for('general_email',
+                                        template_type=t[0],
+                                        template_id=t[3]) }}">
+                        📤 Send
+                    </a>
+                {% endif %}
+            {% endif %}
+
+
+
             {% if t[3] and t[4] %}
 
                 <form method="POST"
@@ -185,6 +207,7 @@ templates completed ({{ percent }}%).
                     </button>
 
                 </form>
+
 
             {% elif t[3] and not t[4] and t[5] %}
 
@@ -206,6 +229,8 @@ templates completed ({{ percent }}%).
                 <span class="badge badge-warning">
                     Review Required
                 </span>
+
+
 
             {% endif %}
             {% if t[3] and (t[4] or "Default") != "Default" %}
