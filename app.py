@@ -539,6 +539,70 @@ def send_communication(
 
 
 
+
+##################################
+#
+#   LOG SMS MESSAGE
+#
+##################################
+
+
+def log_sms_message(
+    spa_id,
+    client_id,
+    recipient_phone,
+    message_body,
+    message_type,
+    direction,
+    status,
+    provider_message_id=None,
+    provider_status=None,
+    provider_error_code=None,
+    provider_error_message=None
+):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        INSERT INTO sms_messages (
+            spa_id,
+            client_id,
+            recipient_phone,
+            message_body,
+            message_type,
+            direction,
+            status,
+            provider_message_id,
+            provider_status,
+            provider_error_code,
+            provider_error_message,
+            created_at
+        )
+        VALUES (
+            %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW()
+        )
+    """, (
+        spa_id,
+        client_id,
+        recipient_phone,
+        message_body,
+        message_type,
+        direction,
+        status,
+        provider_message_id,
+        provider_status,
+        provider_error_code,
+        provider_error_message
+    ))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+
+
+
 ##################################
 #
 #   SEND EMAIL MESSAGE
@@ -1819,16 +1883,6 @@ def send_compliant_sms(spa_id, client_id, recipient_phone, message_body, message
 
 
 
-
-
-
-
-
-
-
-
-
-
 ############################################################
 # EXECUTIVE DASHBOARD DATA
 ############################################################
@@ -1886,6 +1940,18 @@ def get_dashboard_data(spa_id):
     cur.execute("""
         SELECT COALESCE(SUM(price_at_booking), 0)
         FROM appointments
+        WHERE spa_id = %s
+        AND appointment_date = CURRENT_DATE
+        AND status NOT IN ('Cancelled', 'No Show')
+    """, (spa_id,))
+
+    expected_income_today = cur.fetchone()[0] or 0
+
+
+
+    cur.execute("""
+        SELECT COALESCE(SUM(price_at_booking), 0)
+        FROM appointments
         WHERE appointment_date = %s
           AND spa_id = %s
           AND status IN ('booked', 'completed')
@@ -1922,7 +1988,7 @@ def get_dashboard_data(spa_id):
 
     dashboard["total_clients"]  = cur.fetchone()[0] or 0
     dashboard["appointment_status_chart"] = appointment_status_chart
-
+    dashboard["expected_income_today"] = expected_income_today
 
     #####################################################
     
@@ -4304,6 +4370,86 @@ def clients_home():
 
 
 
+###############################################
+#
+#   REVIEW GODADDY IMPORTS
+#
+#
+###############################################
+
+
+@app.route("/godaddy-imports/review-calendar")
+@login_required
+@spa_required
+def review_godaddy_imports_and_calendar():
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE appointments
+        SET import_reviewed = TRUE
+        WHERE spa_id = %s
+          AND external_source = 'godaddy'
+          AND COALESCE(import_reviewed, FALSE) = FALSE
+    """, (spa_id,))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return redirect(url_for("calendar_view"))
+
+
+
+
+
+###############################################
+#
+#   REVIEW GODADDY IMPORTS DISMISS
+#
+#   THIS IS FOR THE IMPORT BANNER MESSAGE
+###############################################
+
+
+
+@app.route("/godaddy-imports/dismiss", methods=["POST"])
+@login_required
+@spa_required
+def dismiss_godaddy_import_review():
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE appointments
+        SET
+            import_reviewed = TRUE,
+            import_reviewed_at = NOW(),
+            import_reviewed_by = %s,
+            import_status = 'Reviewed'
+        WHERE spa_id = %s
+        AND external_source = 'godaddy'
+        AND COALESCE(import_reviewed, FALSE) = FALSE
+    """, (
+        current_user.id,
+        spa_id
+    ))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return redirect(url_for("calendar_view"))
+
+
+
+
+
+
+
 # #################################
 #
 #
@@ -4761,7 +4907,7 @@ def edit_messaging_template(channel, template_type):
     cur = conn.cursor()
 
     if request.method == "POST":
-        template_name = (request.form.get("template_name") or "").strip()
+        template_name = (request.form.get("template_name") or "").strip() or "Default"
         subject_text = (request.form.get("subject_text") or "").strip()
         message_text = (request.form.get("message_text") or "").strip()
 
@@ -4915,7 +5061,9 @@ def edit_messaging_template(channel, template_type):
         is_default_template = is_default_template_name(template[1])
 
 
-    print("TEMPLATE NAME:", template[1], flush=True)
+    if template:
+        print("TEMPLATE NAME:", template[1], flush=True)
+
     print("IS DEFAULT:", is_default_template, flush=True)
 
 
@@ -6733,9 +6881,25 @@ def test_gmail_booking_poll():
 
 
 
+###############################################
+#
+#   GODADDY PARSER HELPER
+#
+#
+##############################################
 
+from decimal import Decimal
 
+def parse_money(value):
+    if not value:
+        return None
 
+    value = value.replace("$", "").replace(",", "").strip()
+
+    try:
+        return Decimal(value)
+    except Exception:
+        return None
 
 
 
@@ -6797,6 +6961,19 @@ def parse_godaddy_booking_email(body):
     payment_match = re.search(r"Payment status:\s*(.+)", body)
     if payment_match:
         data["payment_status"] = payment_match.group(1).strip()
+
+    subtotal_match = re.search(r"Subtotal\s+\$([\d,]+\.\d{2})", body)
+    if subtotal_match:
+        data["subtotal"] = parse_money(subtotal_match.group(1))
+
+    order_total_match = re.search(r"Order Total\s+\$([\d,]+\.\d{2})", body)
+    if order_total_match:
+        data["order_total"] = parse_money(order_total_match.group(1))
+
+    paid_checkout_match = re.search(r"Paid at checkout\s+\$([\d,]+\.\d{2})", body)
+    if paid_checkout_match:
+        data["paid_at_checkout"] = parse_money(paid_checkout_match.group(1))
+    
 
     return data
 
@@ -6860,13 +7037,6 @@ def get_sms_template(spa_id, template_type):
         return None
 
     return result.get("message_body")
-
-
-
-
-#   --------------------
-
-from services.sms_service import send_sms_telnyx
 
 
 
@@ -7142,6 +7312,7 @@ def test_godaddy_parser():
 
 def import_godaddy_booking(body, spa_id, subject=""):
     booking = parse_godaddy_booking_email(body)
+    price_at_booking = booking.get("subtotal") or booking.get("order_total")
     from datetime import datetime
 
     conn = get_db_connection()
@@ -7221,7 +7392,7 @@ def import_godaddy_booking(body, spa_id, subject=""):
 
         client_id = cur.fetchone()[0]
 
-    # 4. Insert appointment
+        # 4. Insert appointment
     cur.execute("""
         INSERT INTO appointments (
             spa_id,
@@ -7236,9 +7407,16 @@ def import_godaddy_booking(body, spa_id, subject=""):
             external_order_id,
             external_email_subject,
             external_email_body,
-            imported_at
+            price_at_booking,
+            subtotal,
+            order_total,
+            paid_at_checkout,
+            imported_at,
+            import_reviewed,
+            parser_version,
+            import_status
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """, (
         spa_id,
         client_id,
@@ -7252,8 +7430,17 @@ def import_godaddy_booking(body, spa_id, subject=""):
         booking["order_number"],
         subject,
         body,
-        datetime.now()
+        price_at_booking,
+        booking.get("subtotal"),
+        booking.get("order_total"),
+        booking.get("paid_at_checkout"),
+        datetime.now(),
+        False,
+        "godaddy_v1",
+        "Imported"
     ))
+
+
 
     conn.commit()
     cur.close()
@@ -7283,6 +7470,7 @@ def import_godaddy_booking(body, spa_id, subject=""):
 #   
 #   -----------------------------------------------
 
+
 @app.route("/godaddy-imports/<int:appointment_id>/raw")
 @login_required
 @spa_required
@@ -7293,11 +7481,37 @@ def godaddy_import_raw(appointment_id):
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT external_email_subject, external_email_body
-        FROM appointments
-        WHERE appointment_id = %s
-          AND spa_id = %s
-          AND external_source = 'godaddy'
+        SELECT
+            a.appointment_id,
+            a.external_source,
+            a.external_order_id,
+            a.external_service_name,
+            a.appointment_date,
+            a.appointment_time,
+            a.duration_minutes,
+            a.status,
+            a.notes,
+            a.price_at_booking,
+            a.external_email_subject,
+            a.external_email_body,
+            a.import_reviewed,
+            a.import_reviewed_at,
+            a.import_reviewed_by,
+            a.parser_version,
+            a.import_status,
+            a.subtotal,
+            a.order_total,
+            a.paid_at_checkout,
+            c.first_name,
+            c.last_name,
+            c.phone,
+            c.email
+        FROM appointments a
+        LEFT JOIN clients c
+            ON a.client_id = c.client_id
+        WHERE a.appointment_id = %s
+          AND a.spa_id = %s
+          AND a.external_source = 'godaddy'
     """, (appointment_id, spa_id))
 
     row = cur.fetchone()
@@ -7306,17 +7520,44 @@ def godaddy_import_raw(appointment_id):
     conn.close()
 
     if not row:
-        return "Raw email not found.", 404
+        return "Import not found.", 404
+
+    appointment = {
+        "appointment_id": row[0],
+        "external_source": row[1],
+        "external_order_id": row[2],
+        "external_service_name": row[3],
+        "appointment_date": row[4],
+        "appointment_time": row[5],
+        "duration_minutes": row[6],
+        "status": row[7],
+        "notes": row[8],
+        "price_at_booking": row[9],
+        "external_email_subject": row[10],
+        "external_email_body": row[11],
+
+        # Import audit fields
+        "import_reviewed": row[12],
+        "import_reviewed_at": row[13],
+        "import_reviewed_by": row[14],
+        "parser_version": row[15],
+        "import_status": row[16],
+
+        # Revenue import fields
+        "subtotal": row[17],
+        "order_total": row[18],
+        "paid_at_checkout": row[19],
+
+        # Client fields
+        "client_name": f"{row[20] or ''} {row[21] or ''}".strip(),
+        "phone": row[22],
+        "email": row[23],
+    }
 
     return render_template(
-        "godaddy_raw_email.html",
-        subject=row[0],
-        body=row[1]
+        "import_review.html",
+        appointment=appointment
     )
-
-
-
-
 
 
 
@@ -7368,20 +7609,28 @@ def mark_godaddy_import_reviewed(appointment_id):
 
     cur.execute("""
         UPDATE appointments
-        SET import_reviewed = TRUE
+        SET
+            import_reviewed = TRUE,
+            import_reviewed_at = NOW(),
+            import_reviewed_by = %s,
+            import_status = 'Reviewed'
         WHERE appointment_id = %s
           AND spa_id = %s
           AND external_source = 'godaddy'
-    """, (appointment_id, spa_id))
+    """, (
+        current_user.id,
+        appointment_id,
+        spa_id
+    ))
 
     conn.commit()
+
     cur.close()
     conn.close()
 
     flash("GoDaddy import marked as reviewed.", "success")
+
     return redirect(url_for("godaddy_imports"))
-
-
 
 
 
@@ -8669,37 +8918,19 @@ def sms_group_send():
                 provider_error_message = str(sms_error)
                 failed_count += 1
 
-            cur.execute("""
-                INSERT INTO sms_messages (
-                    spa_id,
-                    client_id,
-                    recipient_phone,
-                    message_body,
-                    message_type,
-                    direction,
-                    status,
-                    provider_message_id,
-                    provider_status,
-                    provider_error_code,
-                    provider_error_message
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (
-                spa_id,
-                client_id,
-                phone,
-                personalized_message,
-                "group",
-         
-                "outbound",
-                status,
-                provider_message_id,
-                provider_status,
-                provider_error_code,
-                provider_error_message
-            ))
-
-        conn.commit()
+            log_sms_message(
+                spa_id=spa_id,
+                client_id=client_id,
+                recipient_phone=phone,
+                message_body=personalized_message,
+                message_type="group",
+                direction="outbound",
+                status=status,
+                provider_message_id=provider_message_id,
+                provider_status=provider_status,
+                provider_error_code=provider_error_code,
+                provider_error_message=provider_error_message
+            )
 
         flash(f"SMS sent: {sent_count}. Failed: {failed_count}.", "success")
         return redirect(url_for("sms_history_all"))
