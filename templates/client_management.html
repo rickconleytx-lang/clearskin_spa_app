@@ -30,7 +30,7 @@
 
         <!-- 🔹 HEADER 1 -->
         <div class="narrow-cards">
-            {{ section_card("SMS Opt Out", "SMS Opt Out Settings", url_for('client_contact_preferences')) }}
+            {{ section_card("SMS & Email Opt-In/Out", "", url_for('client_contact_preferences')) }}
             {{ section_card("Gift Certificates", "Manage: Add / Edit Gift Certificates", url_for('gift_certificates_home')) }}
             {{ section_card("Birthday Offers", "View and Manage Birthday Offers", url_for('birthday_offers_home')) }}            
         </div>
@@ -176,7 +176,7 @@
                 </a>
 
                 <a class="btn" href="{{ url_for('client_messaging_settings', client_id=row[0]) }}">
-                    SMS Settings
+                    Consent History
                 </a>
             </td>
         </tr>

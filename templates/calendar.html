@@ -4,45 +4,83 @@
 
 <meta http-equiv="refresh" content="30">
 
-<div class="page-title">
 
-    <h1>Calendar</h1>
+<div style="display:flex;
+            justify-content:space-between;
+            align-items:flex-start;
+            gap: 50px;
+            margin-bottom:20px;">
 
-    <span class="help-icon"
-          onclick="toggleHelp('smsHelp')">
-          ❔
-    </span>
+    <!-- LEFT SIDE -->
+    <div>
+    
+    <a href="{{ url_for('view_help_page', page_key='calendar') }}"
+        class="btn">
+        Page Help
+    </a>
 
+    <a class="nav-btn"
+        href="{{ url_for('appointments') }}">
+        Appointments
+    </a>
+
+       
+            <div class="page-title">
+
+            <h1>Calendar</h1>
+
+                <span class="help-icon"
+                    onclick="toggleHelp('smsHelp')">
+                    ❔
+                </span>
+                    <div id="smsHelp" class="help-popover" style="display:none;">
+                        This is a test<br>
+                        where is my text?
+                    </div>
+
+
+                    <div class="summary-card"
+                        style="width:540px;
+                                font-size:14px;
+                                padding:10px;">
+
+                        <h3 style="font-size:16px; margin-bottom:4px;">
+                            Current Local Time
+                        </h3>
+
+                        <p style="margin:2px 0;">
+                            {{ formatted_spa_time }}
+                        </p>
+
+                        <p style="margin:2px 0;">
+                            {{ current_timezone }}
+                        </p>
+                    </div>
+        
+
+            </div>
+
+    
+
+
+    </div>
+
+    
+    <!-- RIGHT SIDE IMAGE -->
+    <div style="width: 260px; flex-shrink: 0; text-align: right;">
+        <img src="{{ url_for('static', filename='images/ps_calendar.png') }}"
+             alt="Peach Suite Pro Calendar"
+             style="width: 260px; height: auto; border-radius: 12px;">
+    </div>
 </div>
-
-<div id="smsHelp" class="help-popover" style="display:none;">
-    This is a test<br>
-    where is my text?
-</div>
-
-
-<a href="{{ url_for('view_help_page', page_key='calendar') }}"
-   class="btn">
-   Page Help
-</a>
-<a class="nav-btn" href="{{ url_for('appointments') }}">Appointments</a>  
 
 <br>
 <br>
-
-<div class="summary-card" style="font-size: 14px; padding: 8px;">
-    <h3 style="font-size: 16px; margin-bottom: 4px;">Current Local Time</h3>
-    <p style="margin: 2px 0;">{{ formatted_spa_time }}</p>
-    <p style="margin: 2px 0;">{{ current_timezone }}</p>
-</div>
-
 <br>
-
-
 
 <div style="display: flex; flex-direction: row; justify-content: space-between; align-items: flex-start; gap: 25px; width: 100%;">
 
-    <!-- LEFT SIDE -->
+   
     <div style="flex: 1; min-width: 0;">
 
         <div style="margin-bottom: 15px;">
@@ -100,12 +138,7 @@
     </div>
 
 
-    <!-- RIGHT SIDE IMAGE -->
-    <div style="width: 260px; flex-shrink: 0; text-align: right;">
-        <img src="{{ url_for('static', filename='images/ps_calendar.png') }}"
-             alt="Peach Suite Pro Calendar"
-             style="width: 260px; height: auto; border-radius: 12px;">
-    </div>
+    
 
 </div>
 

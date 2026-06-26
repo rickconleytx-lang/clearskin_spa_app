@@ -183,8 +183,16 @@
 {# ✅ Revenue Section Dashboard Ready - - Do Not Modify #}
 <h3>Revenue</h3>
 
-{# ✅ Dashboard Ready - Verified with get_dashboard_data() - Do Not Modify #}
 <div class="dashboard-cards">
+    <div class="dashboard-card">
+        <h3>??Expected Income Today</h3>
+        <p>{{ dashboard.completed_today }}</p>
+    </div>
+
+
+
+{# ✅ Dashboard Ready - Verified with get_dashboard_data() - Do Not Modify #}
+
     <div class="dashboard-card
         {% if daily_revenue_goal > 0 and dashboard.daily_revenue >= daily_revenue_goal %}
             kpi-green
@@ -196,7 +204,7 @@
             kpi-neutral
         {% endif %}
     ">
-        <h3>Daily Revenue</h3>
+        <h3>Today's Revenue Received</h3>
         <p>${{ '%.2f'|format(daily_revenue) }}</p>
         {% if daily_revenue_goal > 0 %}
             <small>Goal: ${{ '%.2f'|format(daily_revenue_goal) }}</small>

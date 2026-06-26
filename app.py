@@ -575,6 +575,238 @@ def send_email_message(
 
 
 
+##################################
+#
+#      GET SMS ELIGIBLE CLIENTS
+#
+##################################
+
+
+def get_sms_eligible_clients(
+    spa_id,
+    search="",
+    client_status="",
+    show_all=False
+):
+    clients = []
+
+    if not search and not show_all:
+        return clients
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    query = """
+        SELECT
+            c.client_id,
+            c.first_name,
+            c.last_name,
+            c.phone,
+            cs.status_name
+        FROM clients c
+        LEFT JOIN client_statuses cs
+            ON c.client_status = cs.status_name
+        WHERE c.spa_id = %s
+          AND c.sms_opt_in = TRUE
+          AND COALESCE(c.sms_opt_out, FALSE) = FALSE
+          AND c.active_client = TRUE
+          AND c.phone IS NOT NULL
+          AND TRIM(c.phone) <> ''
+    """
+
+    params = [spa_id]
+
+    if search:
+        query += """
+          AND (
+               LOWER(c.first_name) LIKE %s
+               OR LOWER(c.last_name) LIKE %s
+               OR c.phone LIKE %s
+          )
+        """
+        params.extend([
+            f"%{search.lower()}%",
+            f"%{search.lower()}%",
+            f"%{search}%"
+        ])
+
+    if client_status:
+        query += " AND c.client_status = %s"
+        params.append(client_status)
+
+    query += " ORDER BY c.last_name, c.first_name"
+
+    cur.execute(query, params)
+    clients = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return clients
+    
+
+
+
+##################################
+#
+#      GET CLIENT STATUSES
+#
+##################################
+
+
+def get_client_statuses(spa_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            client_status_id,
+            status_name
+        FROM client_statuses
+        WHERE spa_id = %s
+        ORDER BY status_name
+    """, (spa_id,))
+
+    statuses = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return statuses
+
+
+
+
+
+##################################
+#
+#     GET EMAIL ELIGIBLE CLIENTS
+#
+##################################
+
+def get_email_eligible_clients(
+    spa_id,
+    search="",
+    client_status="",
+    show_all=False
+):
+    clients = []
+
+    if not search and not show_all:
+        return clients
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    query = """
+        SELECT
+            c.client_id,
+            c.first_name,
+            c.last_name,
+            c.email,
+            cs.status_name
+        FROM clients c
+        LEFT JOIN client_statuses cs
+            ON c.client_status = cs.status_name
+        WHERE c.spa_id = %s
+          AND c.email_opt_in = TRUE
+          AND COALESCE(c.email_opt_out, FALSE) = FALSE
+          AND c.active_client = TRUE
+          AND c.email IS NOT NULL
+          AND TRIM(c.email) <> ''
+    """
+
+    params = [spa_id]
+
+    if search:
+        query += """
+          AND (
+               LOWER(c.first_name) LIKE %s
+               OR LOWER(c.last_name) LIKE %s
+               OR LOWER(c.email) LIKE %s
+          )
+        """
+
+        params.extend([
+            f"%{search.lower()}%",
+            f"%{search.lower()}%",
+            f"%{search.lower()}%"
+        ])
+
+    if client_status:
+        query += " AND c.client_status = %s"
+        params.append(client_status)
+
+    query += " ORDER BY c.last_name, c.first_name"
+
+    cur.execute(query, params)
+
+    clients = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return clients
+
+
+
+
+#################################
+#
+#      GET TEMPLATE BY ID
+#
+##################################
+
+
+def get_template_by_id(
+    spa_id,
+    template_id,
+    channel=None
+):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    query = """
+        SELECT
+            template_id,
+            template_type,
+            template_name,
+            message_text,
+            subject_text,
+            language_code,
+            approved_for_use,
+            is_active,
+            ai_score,
+            ai_review,
+            ai_risk_level,
+            last_ai_reviewed_at,
+            channel
+        FROM messaging_templates
+        WHERE spa_id = %s
+          AND template_id = %s
+    """
+
+    params = [spa_id, template_id]
+
+    if channel:
+        query += " AND channel = %s"
+        params.append(channel)
+
+    query += " LIMIT 1"
+
+    cur.execute(query, params)
+
+    template = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    return template
+
+
+
+
+
 
 
 
@@ -630,6 +862,45 @@ def get_active_messaging_templates(spa_id, channel):
 
 
 
+##################################
+#
+#   GET SMS CLIENTS BY IDS
+#
+##################################
+
+
+def get_sms_clients_by_ids(spa_id, client_ids):
+    if not client_ids:
+        return []
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            client_id,
+            first_name,
+            last_name,
+            phone,
+            sms_opt_in,
+            sms_opt_out
+        FROM clients
+        WHERE spa_id = %s
+          AND sms_opt_in = TRUE
+          AND COALESCE(sms_opt_out, FALSE) = FALSE
+          AND active_client = TRUE
+          AND phone IS NOT NULL
+          AND TRIM(phone) <> ''
+          AND client_id = ANY(%s)
+        ORDER BY last_name, first_name
+    """, (spa_id, client_ids))
+
+    clients = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return clients
 
 
 
@@ -650,14 +921,6 @@ def get_active_messaging_templates(spa_id, channel):
 
 
 
-##################################
-#
-#   
-#
-##################################
-
-
-
 
 
 
@@ -670,11 +933,11 @@ def get_active_messaging_templates(spa_id, channel):
 
 
 
-##################################
+###################################################################
+#       >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+#   >>>>>. COMMUNICATIONS ENGING.  <<<<<<<<<<<<<
 #
-#   
-#
-##################################
+#####################################################################
 
 
 ##################################
@@ -3843,6 +4106,20 @@ def financials_home():
 
 def financial_reports_home():
     return render_template("financial_reports_home.html")
+
+
+
+
+
+
+@app.route("/reports_all")
+@login_required
+@spa_required  
+
+def eports_all():
+    return render_template("reports_all.html")
+
+
 
 
 
@@ -7915,60 +8192,15 @@ def sms_home():
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute("""
-        SELECT status_name
-        FROM client_statuses
-        WHERE spa_id = %s
-        ORDER BY status_name
-    """, (spa_id,))
+    client_statuses = get_client_statuses(spa_id)
 
-    client_statuses = cur.fetchall()
 
-    clients = []
-
-    if search or show_all:
-        query = """
-            SELECT
-                c.client_id,
-                c.first_name,
-                c.last_name,
-                c.phone,
-                cs.status_name
-            FROM clients c
-            LEFT JOIN client_statuses cs
-                ON c.client_status = cs.status_name
-            WHERE c.spa_id = %s
-              AND c.sms_opt_in = TRUE
-              AND COALESCE(c.sms_opt_out, FALSE) = FALSE
-              AND c.active_client = TRUE
-              AND c.phone IS NOT NULL
-              AND TRIM(c.phone) <> ''
-        """
-
-        params = [spa_id]
-
-        if search:
-            query += """
-              AND (
-                   LOWER(c.first_name) LIKE %s
-                   OR LOWER(c.last_name) LIKE %s
-                   OR c.phone LIKE %s
-              )
-            """
-            params.extend([
-                f"%{search.lower()}%",
-                f"%{search.lower()}%",
-                f"%{search}%"
-            ])
-
-        if client_status:
-            query += " AND c.client_status = %s"
-            params.append(client_status)
-
-        query += " ORDER BY c.last_name, c.first_name"
-
-        cur.execute(query, params)
-        clients = cur.fetchall()
+    clients = get_sms_eligible_clients(
+        spa_id=spa_id,
+        search=search,
+        client_status=client_status,
+        show_all=show_all
+    )   
 
     cur.close()
     conn.close()
@@ -8228,57 +8460,27 @@ def sms_group_preview():
         flash("You can send SMS to a maximum of 5 clients at a time.", "error")
         return redirect(url_for("sms_home"))
 
-    conn = get_db_connection()
-    cur = conn.cursor()
 
     # Verify active approved SMS template exists in unified Communications Engine
-    cur.execute("""
-        SELECT
-            template_id,
-            template_type,
-            template_name
-        FROM messaging_templates
-        WHERE spa_id = %s
-        AND channel = 'sms'
-        AND template_id = %s
-        AND is_active = TRUE
-        AND approved_for_use = TRUE
-        LIMIT 1
-    """, (spa_id, selected_template_id))
+    template = get_template_by_id(
+        spa_id=spa_id,
+        template_id=selected_template_id,
+        channel="sms"
+    )
 
-    template = cur.fetchone()
 
     print("GROUP PREVIEW TEMPLATE FOUND:", template, flush=True)
 
-    if not template:
-        cur.close()
-        conn.close()
+    if not template or not template[6] or not template[7]:
         flash("SMS template not found, inactive, or not approved.", "error")
         return redirect(url_for("sms_home"))
 
-    cur.execute("""
-        SELECT
-            client_id,
-            first_name,
-            last_name,
-            phone,
-            sms_opt_in,
-            sms_opt_out
-        FROM clients
-        WHERE spa_id = %s
-          AND sms_opt_in = TRUE
-          AND COALESCE(sms_opt_out, FALSE) = FALSE
-          AND active_client = TRUE
-          AND phone IS NOT NULL
-          AND TRIM(phone) <> ''
-          AND client_id = ANY(%s)
-        ORDER BY last_name, first_name
-    """, (spa_id, client_ids))
 
-    clients = cur.fetchall()
+    clients = get_sms_clients_by_ids(
+        spa_id=spa_id,
+        client_ids=client_ids
+    )
 
-    cur.close()
-    conn.close()
 
     if not clients:
         flash("No eligible SMS clients found.", "error")
@@ -8382,34 +8584,35 @@ def sms_group_send():
 
     client_ids = [int(x) for x in client_ids]
 
+
+
     conn = get_db_connection()
     cur = conn.cursor()
+
+
 
     sent_count = 0
     failed_count = 0
 
     try:
-        cur.execute("""
-            SELECT client_id, first_name, last_name, phone
-            FROM clients
-            WHERE spa_id = %s
-              AND sms_opt_in = TRUE  
-              AND COALESCE(sms_opt_out, FALSE) = FALSE      
-              AND active_client = TRUE
-              AND phone IS NOT NULL
-              AND TRIM(phone) <> ''
-              AND client_id = ANY(%s)
-            ORDER BY last_name, first_name
-        """, (spa_id, client_ids))
-
-        clients = cur.fetchall()
+        clients = get_sms_clients_by_ids(
+            spa_id=spa_id,
+            client_ids=client_ids
+        )
 
         if not clients:
             flash("No eligible SMS clients found.", "error")
             return redirect(url_for("sms_home"))
 
         for client in clients:
-            client_id, first_name, last_name, phone = client
+            (
+                client_id,
+                first_name,
+                last_name,
+                phone,
+                sms_opt_in,
+                sms_opt_out
+            ) = client
 
             merge_data = {
                 "client_first_name": first_name,
@@ -9068,32 +9271,8 @@ def general_email():
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Get email template types
-    cur.execute("""
-        SELECT DISTINCT template_type
-        FROM messaging_templates
-        WHERE spa_id = %s
-        AND channel = 'email'
-        AND is_active = TRUE
-        AND approved_for_use = TRUE
-        ORDER BY template_type
-    """, (spa_id,))
-    template_types = cur.fetchall()
-
-    # Get templates for selected type
-    templates = []
-    if template_type:
-        cur.execute("""
-            SELECT template_id, template_name
-            FROM messaging_templates
-            WHERE spa_id = %s
-            AND channel = 'email'
-            AND template_type = %s
-            AND is_active = TRUE
-            AND approved_for_use = TRUE
-            ORDER BY template_name
-        """, (spa_id, template_type))
-        templates = cur.fetchall()
+    template_types = get_active_messaging_template_types(spa_id, "email")
+    templates = get_active_messaging_templates(spa_id, "email")
 
 
     # Get client statuses for dropdown
@@ -9105,49 +9284,16 @@ def general_email():
     """, (spa_id,))
     client_statuses = cur.fetchall()
 
+ 
+ 
     # Search clients
-    clients = []
+    clients = get_email_eligible_clients(
+        spa_id=spa_id,
+        search=search,
+        client_status=client_status_id,
+        show_all=show_all
+    )
 
-    if search or show_all:
-        query = """
-            SELECT
-                c.client_id,
-                c.first_name,
-                c.last_name,
-                c.email,
-                cs.status_name
-            FROM clients c
-            LEFT JOIN client_statuses cs
-                ON c.client_status = cs.status_name
-            WHERE c.spa_id = %s
-              AND c.email IS NOT NULL
-              AND TRIM(c.email) <> ''
-        """
-
-        params = [spa_id]
-
-        if search:
-            query += """
-              AND (
-                   LOWER(c.first_name) LIKE %s
-                   OR LOWER(c.last_name) LIKE %s
-                   OR LOWER(c.email) LIKE %s
-              )
-            """
-            params.extend([
-                f"%{search.lower()}%",
-                f"%{search.lower()}%",
-                f"%{search.lower()}%"
-            ])
-
-        if client_status_id:
-            query += " AND c.client_status = %s"
-            params.append(client_status_id)
-
-        query += " ORDER BY c.last_name, c.first_name"
-
-        cur.execute(query, params)
-        clients = cur.fetchall()
 
     cur.close()
     conn.close()

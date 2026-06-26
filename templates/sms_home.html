@@ -146,9 +146,10 @@
         <tr>
             <td>
                 <input type="checkbox"
-                       name="client_ids"
+                       class="sms-client"
+                       name=""client_ids"
                        value="{{ c[0] }}"
-                       onchange="updateSelectedCount()">
+                       onchange="updateSelectedCount(); updateSmsLivePreview();"
             </td>
             <td>{{ c[2] }}, {{ c[1] }}</td>
             <td>{{ c[3] }}</td>
@@ -180,6 +181,18 @@ const smsTemplates = {
     {% endfor %}
 };
 
+const smsClients = {
+    {% for c in clients %}
+    "{{ c[0] }}": {
+        first_name: "{{ c[1]|e }}",
+        last_name: "{{ c[2]|e }}",
+        full_name: "{{ (c[1] ~ ' ' ~ c[2])|e }}",
+        phone: "{{ c[3] }}"
+    },
+    {% endfor %}
+};
+
+
 function updateSmsLivePreview() {
     const templateSelect = document.getElementById("template_id");
     const previewBox = document.getElementById("sms-live-preview");
@@ -199,16 +212,36 @@ function updateSmsLivePreview() {
 
     let message = smsTemplates[templateId].message_text || "";
 
+    const checked =
+    document.querySelectorAll(".sms-client:checked");
+
+    let firstName = "Client";
+    let fullName = "Client Name";
+
+    if (checked.length > 0) {
+
+        const id = checked[0].value;
+
+        if (smsClients[id]) {
+            firstName = smsClients[id].first_name;
+            fullName = smsClients[id].full_name;
+        }
+    }
+
     const sampleData = {
-        client_first_name: "Client",
-        client_full_name: "Client Name",
+
+        client_first_name: firstName,
+        client_full_name: fullName,
+
         appointment_date: "01/15/2026",
         appointment_time: "2:00 PM",
         service_name: "Facial",
+
         spa_name: "Clear Skin Esthetics",
         spa_phone: "(555) 555-5555",
         spa_website: "www.example.com",
         spa_address: "Business Address"
+
     };
 
     for (const key in sampleData) {

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Messaging Settings{% endblock %}
+{% block title %}Messaging History{% endblock %}
 
 {% block content %}
 
@@ -16,40 +16,20 @@
 
 
 
-<h1>Messaging Settings</h1>
+<h1>Messaging Consent History</h1>
 
 {% if client %}
     <h2>{{ client[1] }} {{ client[2] }}</h2>
 {% endif %}
 
-<form method="POST">
 
-    <div class="form-group">
-        <label>
-            <input type="checkbox" name="ok_to_text"
-                   {% if client[5] %}checked{% endif %}>
-            Allow SMS (Text Messages)
-        </label>
-    </div>
-
-    <div class="form-group">
-        <label>
-            <input type="checkbox" name="ok_to_email"
-                   {% if client[6] %}checked{% endif %}>
-            Allow Email
-        </label>
-    </div>
-
-    <div class="form-group">
-        <label>
-            <input type="checkbox" name="ok_to_call"
-                   {% if client[7] %}checked{% endif %}>
-            Allow Phone Calls
-        </label>
-    </div>
-
-    <button type="submit" class="btn">Save Settings</button>
-</form>
+<div>
+<p>Note: SMS and Email Opt-In/Out changes must be made here: 
+    <a href="{{ url_for('client_contact_preferences') }}" class="btn">
+        Opt-In/Out
+    </a>
+</p>
+</div>
 
 <hr>
 

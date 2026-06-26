@@ -31,9 +31,8 @@
         Daily Briefing is the recommended starting page for Peach Suite Pro.
     </p>
 
-    <p>
-        Add this page to your browser Favorites Bar for one-click access.
-    </p>
+    <p>Add this page to your browser Favorites Bar for one-click access.</p>
+    <p>Click and Drag the Peach Suite Pro button to the bookmarks (left Panel.)</p>
 
     <p>
         For complete instructions and bookmark settings,
@@ -50,13 +49,15 @@
 <br><br>
 <div class="dashboard-card">
         
-    <h2>🍑 Business Health</h2>
     
-    <h1>{{ business_health.score if business_health.score is not none else 0 }}/100</h1>
+    <h2>🍑 Business Health</h2>
+            <p style="font-size: 42px; font-weight: bold; margin: 10px 0;">
+                {{ business_health_score }} / 100
+            </p>
+            <h3>{{ business_health_label }}</h3>
+</div>    
+    
 
-    <h3>{{ business_health.label }}</h3>
-       
-</div>
 
 
 <h2>🌅 Daily Briefing</h2>
