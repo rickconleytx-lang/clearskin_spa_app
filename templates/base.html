@@ -39,11 +39,25 @@
 
 
     {% if godaddy_unreviewed_count and godaddy_unreviewed_count > 0 %}
-        <div class="alert alert-warning">
-            {{ godaddy_unreviewed_count }} appointment(s) imported from GoDaddy need review.
-            <a href="{{ url_for('calendar_view') }}">View Calendar</a>
-        </div>
-    {% endif %}
+    <div class="alert alert-warning">
+        {{ godaddy_unreviewed_count }} appointment(s) imported from GoDaddy need review.
+
+        {% if request.endpoint == "calendar_view" %}
+            <form method="POST"
+                  action="{{ url_for('dismiss_godaddy_import_review') }}"
+                  style="display:inline;">
+                <button type="submit"
+                        style="background:none; border:none; color:#0066cc; text-decoration:underline; cursor:pointer; padding:0;">
+                    Dismiss
+                </button>
+            </form>
+        {% else %}
+            <a href="{{ url_for('review_godaddy_imports_and_calendar') }}">
+                View Calendar
+            </a>
+        {% endif %}
+    </div>
+{% endif %}
 
 
 

@@ -5,78 +5,54 @@
 <meta http-equiv="refresh" content="30">
 
 
+<!-- TOP PAGE HEADER -->
 <div style="display:flex;
             justify-content:space-between;
             align-items:flex-start;
-            gap: 50px;
-            margin-bottom:20px;">
+            gap:30px;
+            margin-bottom:6px;">
 
-    <!-- LEFT SIDE -->
-    <div>
-    
-    <a href="{{ url_for('view_help_page', page_key='calendar') }}"
-        class="btn">
-        Page Help
-    </a>
+    <!-- LEFT HEADER -->
+    <div style="flex:1; min-width:0;">
 
-    <a class="nav-btn"
-        href="{{ url_for('appointments') }}">
-        Appointments
-    </a>
-
-       
-            <div class="page-title">
-
+        <div class="page-title">
             <h1>Calendar</h1>
 
-                <span class="help-icon"
-                    onclick="toggleHelp('smsHelp')">
-                    ❔
-                </span>
-                    <div id="smsHelp" class="help-popover" style="display:none;">
-                        This is a test<br>
-                        where is my text?
-                    </div>
+            <span class="help-icon"
+                  onclick="toggleHelp('smsHelp')">
+                ❔
+            </span>
+        </div>
 
+        <div id="smsHelp" class="help-popover" style="display:none;">
+            This is a test<br>
+            where is my text?
+        </div>
 
-                    <div class="summary-card"
-                        style="width:540px;
-                                font-size:14px;
-                                padding:10px;">
+        <div style="margin-top:4px;">
+            <a href="{{ url_for('view_help_page', page_key='calendar') }}"
+               class="btn">
+                Page Help
+            </a>
 
-                        <h3 style="font-size:16px; margin-bottom:4px;">
-                            Current Local Time
-                        </h3>
-
-                        <p style="margin:2px 0;">
-                            {{ formatted_spa_time }}
-                        </p>
-
-                        <p style="margin:2px 0;">
-                            {{ current_timezone }}
-                        </p>
-                    </div>
-        
-
-            </div>
-
-    
-
+            <a class="nav-btn"
+               href="{{ url_for('appointments') }}">
+                Appointments
+            </a>
+        </div>
 
     </div>
 
-    
-    <!-- RIGHT SIDE IMAGE -->
-    <div style="width: 260px; flex-shrink: 0; text-align: right;">
+    <!-- RIGHT HEADER IMAGE -->
+    <div style="width:260px; flex-shrink:0; text-align:right;">
         <img src="{{ url_for('static', filename='images/ps_calendar.png') }}"
              alt="Peach Suite Pro Calendar"
-             style="width: 260px; height: auto; border-radius: 12px;">
+             style="width:260px; height:auto; border-radius:12px;">
     </div>
+
 </div>
 
-<br>
-<br>
-<br>
+
 
 <div style="display: flex; flex-direction: row; justify-content: space-between; align-items: flex-start; gap: 25px; width: 100%;">
 
@@ -197,10 +173,45 @@
 {% endif %}
 
 
-<div id="week-view"></div>
-<h1>Weekly Day View</h1>
 
-Note: To book a new appointment, please click on the Date Number in calendar below.
+
+<div id="week-view"></div>
+
+<div style="display:flex;
+            justify-content:space-between;
+            align-items:center;
+            gap:25px;
+            margin-top:25px;
+            margin-bottom:10px;">
+
+    <div>
+        <h1 style="margin-bottom:5px;">Weekly Day View</h1>
+        <p style="margin-top:0;">
+            Note: To book a new appointment, please click on the Date Number in calendar below.
+        </p>
+    </div>
+
+    <div class="summary-card"
+         style="width:280px;
+                font-size:14px;
+                padding:10px;
+                text-align:left;">
+
+        <h3 style="font-size:16px; margin-bottom:4px;">
+            Current Local Time
+        </h3>
+
+        <p style="margin:2px 0;">
+            {{ formatted_spa_time }}
+        </p>
+
+        <p style="margin:2px 0;">
+            {{ current_timezone }}
+        </p>
+
+    </div>
+
+</div>
 
 <h3>
     {{ week_days[0].strftime('%B %d, %Y') }} -

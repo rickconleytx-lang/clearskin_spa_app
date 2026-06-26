@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}Import Review | Peach Suite Pro{% endblock %}
+
+{% block content %}
+
+<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:25px; margin-bottom:20px;">
+
+    <div style="flex:1; min-width:0;">
+        <div class="page-title">
+            <h1>Import Review</h1>
+
+            <span class="help-icon"
+                  onclick="toggleHelp('importReviewHelp')">
+                ❔
+            </span>
+        </div>
+
+        <div id="importReviewHelp" class="help-popover" style="display:none;">
+            Review imported appointment details and compare them to the original source data.
+        </div>
+
+        <div style="margin-top:10px;">
+            <a href="{{ url_for('godaddy_imports') }}" class="btn">
+                ← Back to GoDaddy Imports
+            </a>
+
+            <a href="{{ url_for('calendar_view') }}" class="btn">
+                View Calendar
+            </a>
+        </div>
+    </div>
+
+    <div style="width:220px; flex-shrink:0; text-align:right;">
+        <img src="{{ url_for('static', filename='images/ps_sms_email.png') }}"
+             alt="Peach Suite Pro Import Review"
+             style="width:220px; height:auto; border-radius:12px;">
+    </div>
+
+</div>
+
+<hr>
+
+<h3>Import Summary</h3>
+
+<div class="dashboard-cards">
+
+    <div class="dashboard-card">
+        <h3>Import Source</h3>
+        <p>{{ appointment.external_source|default('GoDaddy', true)|title }}</p>
+    </div>
+
+    <div class="dashboard-card">
+        <h3>Order Number</h3>
+        <p>{{ appointment.external_order_id or '--' }}</p>
+    </div>
+
+    <div class="dashboard-card">
+        <h3>Status</h3>
+        <p>{{ appointment.status or '--' }}</p>
+    </div>
+
+    <div class="dashboard-card">
+        <h3>Expected Revenue</h3>
+        <p>
+            {% if appointment.price_at_booking %}
+                ${{ '%.2f'|format(appointment.price_at_booking) }}
+            {% else %}
+                $0.00
+            {% endif %}
+        </p>
+    </div>
+
+</div>
+
+<br>
+
+<h3>Parsed Appointment</h3>
+
+<table>
+    <tr>
+        <th>Client</th>
+        <td>{{ appointment.client_name or '--' }}</td>
+    </tr>
+    <tr>
+        <th>Phone</th>
+        <td>{{ appointment.phone or '--' }}</td>
+    </tr>
+    <tr>
+        <th>Email</th>
+        <td>{{ appointment.email or '--' }}</td>
+    </tr>
+    <tr>
+        <th>Service</th>
+        <td>{{ appointment.external_service_name or '--' }}</td>
+    </tr>
+    <tr>
+        <th>Date</th>
+        <td>{{ appointment.appointment_date.strftime('%m/%d/%Y') if appointment.appointment_date else '--' }}</td>
+    </tr>
+    <tr>
+        <th>Time</th>
+        <td>{{ appointment.appointment_time.strftime('%I:%M %p') if appointment.appointment_time else '--' }}</td>
+    </tr>
+    <tr>
+        <th>Duration</th>
+        <td>{{ appointment.duration_minutes or '--' }} minutes</td>
+    </tr>
+    <tr>
+        <th>Notes</th>
+        <td>{{ appointment.notes or '--' }}</td>
+    </tr>
+</table>
+
+<br>
+
+<h3>Raw Import Data</h3>
+
+<details>
+    <summary style="cursor:pointer; font-weight:bold;">
+        View Original GoDaddy Email
+    </summary>
+
+    <pre style="white-space:pre-wrap; background:#f7f7f7; border:1px solid #ddd; padding:15px; border-radius:8px; margin-top:10px;">
+{{ appointment.external_email_body or 'No raw import data available.' }}
+    </pre>
+</details>
+
+<script>
+function toggleHelp(id) {
+    const box = document.getElementById(id);
+    box.style.display = box.style.display === "none" ? "block" : "none";
+}
+</script>
+
+{% endblock %}

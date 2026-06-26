@@ -90,6 +90,17 @@
                 </small>
             </div>
 
+            {% if clients %}
+                <button type="submit"
+                        form="smsSendForm"
+                        class="btn btn-primary"
+                        {% if not selected_template_id %}disabled{% endif %}>
+                    Send SMS
+                </button>
+            {% endif %}
+
+
+
             <label>Search Clients</label><br>
             <input type="text"
                    name="search"
@@ -124,8 +135,9 @@
 
 {% if clients %}
 
-<form method="POST"
-      action="{{ url_for('sms_group_preview') }}"
+<form id="smsSendForm"
+      method="POST"
+      action="{{ url_for('sms_group_send') }}"
       onsubmit="return validateSmsSelection();">
 
     <input type="hidden" name="template_type" value="{{ selected_template_type }}">
@@ -146,10 +158,10 @@
         <tr>
             <td>
                 <input type="checkbox"
-                       class="sms-client"
-                       name=""client_ids"
-                       value="{{ c[0] }}"
-                       onchange="updateSelectedCount(); updateSmsLivePreview();"
+                    class="sms-client"
+                    name="client_ids"
+                    value="{{ c[0] }}"
+                    onchange="updateSelectedCount(); updateSmsLivePreview();">
             </td>
             <td>{{ c[2] }}, {{ c[1] }}</td>
             <td>{{ c[3] }}</td>

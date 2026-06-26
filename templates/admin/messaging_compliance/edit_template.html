@@ -121,7 +121,7 @@
     <label>Template Name</label><br>
     <input type="text"
        name="template_name"
-       value="{{ template[1] if template else '' }}"
+       value="{{ template[1] if template else 'Default' }}"
        style="width:100%;"
        {% if is_default_template %}readonly{% endif %}
        required>
