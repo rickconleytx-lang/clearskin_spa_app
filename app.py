@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, Response, send_file, redirect, url_for, session, flash
+from flask import Flask, render_template, request, Response, send_file, redirect, url_for, session, flash, abort, g
 from datetime import date, timedelta, datetime
 from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
@@ -17,8 +17,6 @@ from db import get_db_connection
 output = io.StringIO()
 file_data = io.BytesIO()
 load_dotenv()
-from flask import abort
-from flask import g
 from services.sms_service import send_sms_telnyx
 
 
@@ -68,19 +66,38 @@ print("MAILGUN KEY STARTS:", MAILGUN_API_KEY[:4] if MAILGUN_API_KEY else None, f
 # ==========================================================
 
 
-
 @app.context_processor
-def inject_branding():
+def inject_godaddy_import_alert():
+    if "user_id" not in session or "spa_id" not in session:
+        return {}
+
+    spa_id = current_spa_id()
+    
+
+
+    if not spa_id:
+        return {}
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT COUNT(*)
+        FROM appointments
+        WHERE spa_id = %s
+          AND external_source = 'godaddy'
+          AND COALESCE(import_reviewed, FALSE) = FALSE
+    """, (spa_id,))
+
+    godaddy_unreviewed_count = cur.fetchone()[0]
+
+
+    cur.close()
+    conn.close()
+
     return {
-        "product_name": app.config["PRODUCT_NAME"],
-        "company_name": app.config["COMPANY_NAME"],
-        "app_version": app.config["APP_VERSION"],
-        "tagline": app.config["TAGLINE"],
-        "current_year": datetime.now().year
+        "godaddy_unreviewed_count": godaddy_unreviewed_count
     }
-
-
-
 
 
 
@@ -6972,8 +6989,13 @@ def parse_godaddy_booking_email(body):
 
     paid_checkout_match = re.search(r"Paid at checkout\s+\$([\d,]+\.\d{2})", body)
     if paid_checkout_match:
-        data["paid_at_checkout"] = parse_money(paid_checkout_match.group(1))
-    
+        data["paid_at_checkout"] = True
+        data["paid_at_checkout_amount"] = parse_money(paid_checkout_match.group(1))
+    else:
+        data["paid_at_checkout"] = False
+        data["paid_at_checkout_amount"] = 0
+
+    data["raw_email_body"] = body
 
     return data
 
@@ -7391,22 +7413,12 @@ def import_godaddy_booking(body, spa_id, subject=""):
         ))
 
         client_id = cur.fetchone()[0]
-    # Convert paid_at_checkout to boolean for database
-    paid_at_checkout_value = booking.get("paid_at_checkout")
 
-    if isinstance(paid_at_checkout_value, (int, float)):
-        paid_at_checkout = paid_at_checkout_value > 0
-    elif isinstance(paid_at_checkout_value, str):
-        paid_at_checkout = paid_at_checkout_value.strip().lower() in (
-            "yes",
-            "true",
-            "paid",
-            "paid at checkout",
-            "1"
-        )
-    else:
-        paid_at_checkout = False
 
+    # Parser returns True/False
+    paid_at_checkout = bool(booking.get("paid_at_checkout"))
+
+   
 
     # 4. Insert appointment
     cur.execute("""
@@ -7456,6 +7468,7 @@ def import_godaddy_booking(body, spa_id, subject=""):
         "Imported"
     ))
 
+    
 
 
     conn.commit()
