@@ -7391,8 +7391,24 @@ def import_godaddy_booking(body, spa_id, subject=""):
         ))
 
         client_id = cur.fetchone()[0]
+    # Convert paid_at_checkout to boolean for database
+    paid_at_checkout_value = booking.get("paid_at_checkout")
 
-        # 4. Insert appointment
+    if isinstance(paid_at_checkout_value, (int, float)):
+        paid_at_checkout = paid_at_checkout_value > 0
+    elif isinstance(paid_at_checkout_value, str):
+        paid_at_checkout = paid_at_checkout_value.strip().lower() in (
+            "yes",
+            "true",
+            "paid",
+            "paid at checkout",
+            "1"
+        )
+    else:
+        paid_at_checkout = False
+
+
+    # 4. Insert appointment
     cur.execute("""
         INSERT INTO appointments (
             spa_id,
@@ -7433,7 +7449,7 @@ def import_godaddy_booking(body, spa_id, subject=""):
         price_at_booking,
         booking.get("subtotal"),
         booking.get("order_total"),
-        booking.get("paid_at_checkout"),
+        paid_at_checkout,
         datetime.now(),
         False,
         "godaddy_v1",
@@ -7558,6 +7574,61 @@ def godaddy_import_raw(appointment_id):
         "import_review.html",
         appointment=appointment
     )
+
+
+
+############################################################
+#
+#   TEST. TEST. TEST.   TODO
+#
+#   DEBUG
+#
+#
+#########################################################
+
+@app.route("/debug-db")
+@login_required
+def debug_db():
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("SELECT current_database(), current_user, inet_server_addr(), inet_server_port()")
+    db_info = cur.fetchone()
+
+    cur.execute("""
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'appointments'
+          AND column_name IN (
+            'subtotal',
+            'order_total',
+            'paid_at_checkout',
+            'import_reviewed_at',
+            'import_reviewed_by',
+            'parser_version',
+            'import_status'
+          )
+        ORDER BY column_name
+    """)
+    columns = cur.fetchall()
+
+    cur.execute("""
+        SELECT appointment_id, external_source, external_order_id, imported_at
+        FROM appointments
+        ORDER BY appointment_id DESC
+        LIMIT 5
+    """)
+    latest = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return {
+        "db_info": db_info,
+        "columns": columns,
+        "latest_appointments": latest
+    }
+
 
 
 
