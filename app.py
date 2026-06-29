@@ -284,10 +284,17 @@ def append_email_footer(message):
 #################################
 ############# number 3
 
-def get_approved_sms_template(spa_id, template_type):
+
+def get_approved_sms_template(spa_id, template_type, language_code=None):
+    language_code = (language_code or "EN").strip().upper()
+
+    if language_code not in ("EN", "ES"):
+        language_code = "EN"
+
     conn = get_db_connection()
     cur = conn.cursor()
 
+    # 1. Try preferred language first
     cur.execute("""
         SELECT
             template_id,
@@ -296,13 +303,35 @@ def get_approved_sms_template(spa_id, template_type):
         WHERE spa_id = %s
           AND channel = 'sms'
           AND template_type = %s
+          AND language_code = %s
           AND is_active = TRUE
           AND approved_for_use = TRUE
+          AND COALESCE(is_archived, FALSE) = FALSE
         ORDER BY updated_at DESC
         LIMIT 1
-    """, (spa_id, template_type))
+    """, (spa_id, template_type, language_code))
 
     row = cur.fetchone()
+
+    # 2. Fallback to English
+    if not row and language_code != "EN":
+        cur.execute("""
+            SELECT
+                template_id,
+                message_text
+            FROM messaging_templates
+            WHERE spa_id = %s
+              AND channel = 'sms'
+              AND template_type = %s
+              AND language_code = 'EN'
+              AND is_active = TRUE
+              AND approved_for_use = TRUE
+              AND COALESCE(is_archived, FALSE) = FALSE
+            ORDER BY updated_at DESC
+            LIMIT 1
+        """, (spa_id, template_type))
+
+        row = cur.fetchone()
 
     cur.close()
     conn.close()
@@ -316,10 +345,18 @@ def get_approved_sms_template(spa_id, template_type):
 ############################################################
 ############. number 4
 
-def get_approved_email_template(spa_id, template_type):
+
+def get_approved_email_template(spa_id, template_type, language_code=None):
+
+    language_code = (language_code or "EN").strip().upper()
+
+    if language_code not in ("EN", "ES"):
+        language_code = "EN"
+
     conn = get_db_connection()
     cur = conn.cursor()
 
+    # 1. Try preferred language first
     cur.execute("""
         SELECT
             subject_text,
@@ -328,16 +365,43 @@ def get_approved_email_template(spa_id, template_type):
         WHERE spa_id = %s
           AND template_type = %s
           AND channel = 'email'
+          AND language_code = %s
           AND approved_for_use = TRUE
           AND is_active = TRUE
-          ORDER BY updated_at DESC, template_id DESC
+          AND COALESCE(is_archived, FALSE) = FALSE
+        ORDER BY updated_at DESC, template_id DESC
         LIMIT 1
     """, (
         spa_id,
-        template_type
+        template_type,
+        language_code
     ))
 
     row = cur.fetchone()
+
+    # 2. Fallback to English
+    if not row and language_code != "EN":
+
+        cur.execute("""
+            SELECT
+                subject_text,
+                message_text
+            FROM messaging_templates
+            WHERE spa_id = %s
+              AND template_type = %s
+              AND channel = 'email'
+              AND language_code = 'EN'
+              AND approved_for_use = TRUE
+              AND is_active = TRUE
+              AND COALESCE(is_archived, FALSE) = FALSE
+            ORDER BY updated_at DESC, template_id DESC
+            LIMIT 1
+        """, (
+            spa_id,
+            template_type
+        ))
+
+        row = cur.fetchone()
 
     cur.close()
     conn.close()
@@ -352,11 +416,23 @@ def get_approved_email_template(spa_id, template_type):
 
 
 
+
+
+
+
+
+
+
+
+
 #####################################
 #
 #. APPLY MERGE FIELDS
 ###################################
 #### number 5
+
+
+
 def apply_merge_fields(text, merge_data):
     text = text or ""
 
@@ -372,14 +448,32 @@ def apply_merge_fields(text, merge_data):
 
 
 
+
+
+
+
 #####################################
 #   BUILD SMS MESSAGE
 #      COMMUNICATION ENGINE PART 7
 ###################################
-##############. 
+############## TODO remove print(f"SMS...)
+
+
+
 
 def build_sms_message(spa_id, template_type, merge_data):
-    template = get_approved_sms_template(spa_id, template_type)
+    merge_data = merge_data or {}
+
+    client_id = merge_data.get("client_id")
+    language_code = get_client_language(client_id)
+
+    print(f"SMS LANGUAGE: {language_code}  CLIENT: {client_id}", flush=True)
+
+    template = get_approved_sms_template(
+        spa_id,
+        template_type,
+        language_code
+    )
 
     if not template:
         return {
@@ -395,11 +489,8 @@ def build_sms_message(spa_id, template_type, merge_data):
     merge_data = enrich_sms_merge_data(
         spa_id=spa_id,
         template_type=template_type,
-        merge_data=merge_data or {}
+        merge_data=merge_data
     )
-        # remove later after testing. TODO
-    print("MERGE DATA BEFORE RENDER:", merge_data, flush=True)
-
 
     rendered_message = render_sms_template(
         template_text,
@@ -414,9 +505,9 @@ def build_sms_message(spa_id, template_type, merge_data):
         "success": True,
         "error": None,
         "message_body": rendered_message,
-        "template_id": template_id
+        "template_id": template_id,
+        "language_code": language_code
     }
-
 
 
 
@@ -427,9 +518,21 @@ def build_sms_message(spa_id, template_type, merge_data):
 #
 #       BUILD EMAIL MESSAGE
 ###################################
-##############. Number 7
+##############. Number 7.  TODO remove print(F:EMAIL..)
+
 def build_email_message(spa_id, template_type, merge_data):
-    template = get_approved_email_template(spa_id, template_type)
+    merge_data = merge_data or {}
+
+    client_id = merge_data.get("client_id")
+    language_code = get_client_language(client_id)
+
+    print(f"EMAIL LANGUAGE: {language_code}  CLIENT: {client_id}", flush=True)
+
+    template = get_approved_email_template(
+        spa_id,
+        template_type,
+        language_code
+    )
 
     if not template:
         return None
@@ -448,9 +551,9 @@ def build_email_message(spa_id, template_type, merge_data):
 
     return {
         "subject": subject,
-        "body": body
+        "body": body,
+        "language_code": language_code
     }
-
 
 
 
@@ -461,6 +564,7 @@ def build_email_message(spa_id, template_type, merge_data):
 #       BUILD COMMUNICATION 
 ###################################
 ############number 8 - - last
+
 
 def build_communication(spa_id, channel, template_type, merge_data):
     if channel == "sms":
@@ -513,6 +617,8 @@ def build_communication(spa_id, channel, template_type, merge_data):
 #################################
 
 
+
+
 def send_communication(
     spa_id,
     channel,
@@ -527,6 +633,11 @@ def send_communication(
     if channel not in ("sms", "email"):
         raise ValueError(f"Unsupported communication channel: {channel}")
 
+    merge_data = merge_data or {}
+
+    if client_id and not merge_data.get("client_id"):
+        merge_data["client_id"] = client_id
+
     communication = build_communication(
         spa_id=spa_id,
         channel=channel,
@@ -539,7 +650,6 @@ def send_communication(
             "success": False,
             "error": "Communication could not be built."
         }
-
 
     if channel == "sms":
         return send_compliant_sms(
@@ -559,9 +669,6 @@ def send_communication(
             message_body=communication["body"],
             message_type=message_type or template_type
         )
-    
-
-
 
 
 
@@ -2749,6 +2856,10 @@ def current_user_role():
 
 
 
+
+
+
+
 #   ---------------------------
 #
 #      DEF  GET ACCOUNTING 
@@ -4093,6 +4204,90 @@ def spa_management():
         spa=spa,
         terms_status=terms_status
     )
+
+
+
+
+
+##############################################
+#
+#   USER SETTINGS 
+#
+#
+###############################################
+
+
+
+
+@app.route("/my-settings", methods=["GET", "POST"])
+@login_required
+@spa_required
+def my_settings():
+    user_id = session.get("user_id")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    if request.method == "POST":
+        preferred_language = request.form.get("preferred_language", "EN").strip().upper()
+
+        if preferred_language not in ("EN", "ES"):
+            preferred_language = "EN"
+
+        cur.execute("""
+            UPDATE users
+            SET preferred_language = %s
+            WHERE user_id = %s
+        """, (preferred_language, user_id))
+
+        conn.commit()
+
+        session["language_code"] = preferred_language
+
+        flash("User settings updated.", "success")
+        cur.close()
+        conn.close()
+
+        return redirect(url_for("my_settings"))
+
+    cur.execute("""
+        SELECT preferred_language
+        FROM users
+        WHERE user_id = %s
+    """, (user_id,))
+
+    row = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    preferred_language = row[0] if row and row[0] else "EN"
+
+    return render_template(
+        "my_settings.html",
+        preferred_language=preferred_language
+    )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -5804,16 +5999,98 @@ def edit_help_page(page_key=None):
 #   -------------------------
 #  
 #  
-#       HELP PUBLIC
+#       CURRENT LANGUAGE
 #   
 #   
 #   
 #   -------------------------
 
 
+
+
+
+
+
 def get_current_language():
-    return session.get("language_code", "EN")
-    
+    user_id = session.get("user_id")
+
+    if not user_id:
+        return "EN"
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT preferred_language
+        FROM users
+        WHERE user_id = %s
+    """, (user_id,))
+
+    row = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    language = row[0] if row and row[0] else "EN"
+    language = language.strip().upper()
+
+    if language not in ("EN", "ES"):
+        language = "EN"
+
+    return language
+
+
+
+#   -------------------------
+#  
+#  
+#       GET CLIENT LANGUAGE
+#   
+#   
+#   
+#   -------------------------
+
+
+
+
+def get_client_language(client_id):
+    if not client_id:
+        return "EN"
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT preferred_language
+        FROM clients
+        WHERE client_id = %s
+    """, (client_id,))
+
+    row = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    language = row[0] if row and row[0] else "EN"
+    language = language.strip().upper()
+
+    if language not in ("EN", "ES"):
+        language = "EN"
+
+    return language
+
+
+
+
+
+#   -------------------------
+#  
+#  
+#       VIEW HELP PAGE
+#   
+#   
+#   
+#   -------------------------
 
 
 
@@ -5828,7 +6105,9 @@ def view_help_page(page_key):
     cur = conn.cursor()
 
     # 1. Try requested language first
-    requested_language = "ES"
+    session["language_code"] = "ES"
+
+    requested_language = get_current_language()
 
     cur.execute("""
         SELECT title, content, language_code
@@ -9195,7 +9474,15 @@ def sms_group_send():
                 merge_data=merge_data
             )
 
-            if not built.get("body"):
+
+
+            if not built or not built.get("body"):
+                flash("SMS message could not be built. Check that an approved active template exists.", "danger")
+                return redirect(url_for("sms_home"))
+
+
+
+            if not built or not built.get("body"):
                 failed_count += 1
                 print("BUILD COMMUNICATION FAILED:", built, flush=True)
                 continue

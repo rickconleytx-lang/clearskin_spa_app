@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block title %}My Settings | Peach Suite Pro{% endblock %}
 {% from "components/cards.html" import section_card %}
 
 {% block content %}
@@ -21,7 +22,8 @@
 
     <!-- 🔹 HEADER 1 -->
         <div class="narrow-cards">
-            {{ section_card("Employees Home", "Human Relations Department", url_for('employee_admin')) }}
+            {{ section_card("My Settings", "Settings", url_for('my_settings')) }}
+            {{ section_card("Admin", "Dropdown Managment ", url_for('admin')) }}
             {{ section_card("Business Goals", "Your Business Goals", url_for('business_goals')) }}
             {{ section_card("Credit Processors", "Credit Card processors (Square)",  url_for('credit_processors')) }}
         </div>
@@ -29,7 +31,8 @@
     <!-- 🔹 HEADER 2 -->
         <div class="narrow-cards">
             {{ section_card("Admin", "Dropdown Managment ", url_for('admin')) }}
-            {{ section_card("Settings", "Settings", url_for('funding_home')) }}
+            {{ section_card("Employees Home", "Human Relations Department", url_for('employee_admin')) }}
+            
             
         </div>
         </div>
