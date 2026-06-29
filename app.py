@@ -66,17 +66,31 @@ print("MAILGUN KEY STARTS:", MAILGUN_API_KEY[:4] if MAILGUN_API_KEY else None, f
 # ==========================================================
 
 
+
+
+
+
 @app.context_processor
-def inject_godaddy_import_alert():
+def inject_global_context():
+    from datetime import datetime
+
+    # These values should always be available
+    context = {
+        "product_name": app.config.get("PRODUCT_NAME"),
+        "company_name": app.config.get("COMPANY_NAME"),
+        "app_version": app.config.get("APP_VERSION"),
+        "tagline": app.config.get("TAGLINE"),
+        "current_year": datetime.now().year,
+        "godaddy_unreviewed_count": 0
+    }
+
     if "user_id" not in session or "spa_id" not in session:
-        return {}
+        return context
 
     spa_id = current_spa_id()
-    
-
 
     if not spa_id:
-        return {}
+        return context
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -89,17 +103,12 @@ def inject_godaddy_import_alert():
           AND COALESCE(import_reviewed, FALSE) = FALSE
     """, (spa_id,))
 
-    godaddy_unreviewed_count = cur.fetchone()[0]
-
+    context["godaddy_unreviewed_count"] = cur.fetchone()[0]
 
     cur.close()
     conn.close()
 
-    return {
-        "godaddy_unreviewed_count": godaddy_unreviewed_count
-    }
-
-
+    return context
 
 
 
@@ -4431,6 +4440,8 @@ def review_godaddy_imports_and_calendar():
 
 
 
+
+
 @app.route("/godaddy-imports/dismiss", methods=["POST"])
 @login_required
 @spa_required
@@ -4442,24 +4453,23 @@ def dismiss_godaddy_import_review():
 
     cur.execute("""
         UPDATE appointments
-        SET
-            import_reviewed = TRUE,
-            import_reviewed_at = NOW(),
-            import_reviewed_by = %s,
-            import_status = 'Reviewed'
+        SET import_reviewed = TRUE
         WHERE spa_id = %s
-        AND external_source = 'godaddy'
-        AND COALESCE(import_reviewed, FALSE) = FALSE
-    """, (
-        current_user.id,
-        spa_id
-    ))
+          AND external_source = 'godaddy'
+          AND COALESCE(import_reviewed, FALSE) = FALSE
+    """, (spa_id,))
 
     conn.commit()
+
     cur.close()
     conn.close()
 
     return redirect(url_for("calendar_view"))
+
+
+
+
+
 
 
 
@@ -5801,39 +5811,64 @@ def edit_help_page(page_key=None):
 #   -------------------------
 
 
+def get_current_language():
+    return session.get("language_code", "EN")
+    
 
-@app.route("/help/<page_key>")  
+
+
+
+@app.route("/help/<page_key>")
 @login_required
 @spa_required
 def view_help_page(page_key):
+
+    
     conn = get_db_connection()
     cur = conn.cursor()
-        
+
+    # 1. Try requested language first
+    requested_language = "ES"
+
     cur.execute("""
-        SELECT title, content
+        SELECT title, content, language_code
         FROM help_pages
         WHERE page_key = %s
-          AND is_active = TRUE
+        AND language_code = %s
+        AND is_active = TRUE
         ORDER BY help_page_id DESC
         LIMIT 1
-    """, (page_key,))
-              
+    """, (page_key, requested_language))
+
     page = cur.fetchone()
-    
+
+    # 2. Fallback to English
+    if not page and requested_language.upper() != "EN":
+        cur.execute("""
+            SELECT title, content, language_code
+            FROM help_pages
+            WHERE page_key = %s
+              AND language_code = 'EN'
+              AND is_active = TRUE
+            ORDER BY help_page_id DESC
+            LIMIT 1
+        """, (page_key,))
+
+        page = cur.fetchone()
+
     cur.close()
     conn.close()
-        
+
     if not page:
         flash("Help page not found.", "warning")
         return redirect(url_for("help_center"))
-                    
+
     return render_template(
         "help_page.html",
         page=page,
-        page_key=page_key
+        page_key=page_key,
+        selected_language=page[2]
     )
-
-
 
 
 
@@ -6788,6 +6823,11 @@ def sync_calendar():
     
 @app.route("/mailgun/godaddy-booking", methods=["POST"])
 def mailgun_godaddy_booking():
+
+    print("MAILGUN GODADDY ROUTE HIT", flush=True)
+    print("SUBJECT:", request.form.get("subject", ""), flush=True)
+    print("FORM KEYS:", list(request.form.keys()), flush=True)
+
     subject = request.form.get("subject", "")
 
     body = (
@@ -7320,6 +7360,125 @@ def test_godaddy_parser():
 
 
 
+##########################################
+# >>>>>>>>>>>  GO DADDY  <<<<<<<<<<<<<<<<<
+#
+#    GoDaddy EMAIL  Parser   
+#
+#    
+#
+#   -----------------------------------------------
+
+
+import re
+from datetime import datetime
+
+def parse_godaddy_email_body(body):
+    booking = {}
+
+    order_match = re.search(r"Order #\s*(C-[A-Z0-9]+)", body)
+    booking["external_order_id"] = order_match.group(1) if order_match else None
+
+    subtotal_match = re.search(r"Subtotal\s*\$?([\d.]+)", body)
+    booking["subtotal"] = float(subtotal_match.group(1)) if subtotal_match else None
+
+    total_match = re.search(r"Order Total\s*\$?([\d.]+)", body)
+    booking["order_total"] = float(total_match.group(1)) if total_match else None
+
+    paid_match = re.search(r"Paid at checkout\s*\$?([\d.]+)", body)
+    paid_amount = float(paid_match.group(1)) if paid_match else 0
+    booking["paid_at_checkout"] = paid_amount > 0
+
+    name_match = re.search(r"Name:\s*(.+)", body)
+    booking["customer_name"] = name_match.group(1).strip() if name_match else None
+
+    phone_match = re.search(r"Phone:\s*(.+)", body)
+    booking["phone"] = phone_match.group(1).strip() if phone_match else None
+    if booking["phone"] and len(booking["phone"]) == 10:
+        booking["phone"] = (
+            f"({booking['phone'][0:3]}) "
+            f"{booking['phone'][3:6]}-"
+            f"{booking['phone'][6:]}"
+        )
+
+    email_match = re.search(r"Email:\s*(.+)", body)
+    booking["email"] = email_match.group(1).strip() if email_match else None
+
+    what_match = re.search(r"What:\s*(.+)", body)
+    booking["service_name"] = what_match.group(1).strip() if what_match else None
+
+    when_match = re.search(r"When:\s*(.+?)\s*\((\d+)\s*hour", body)
+    if when_match:
+        when_text = when_match.group(1).strip()
+        duration_hours = int(when_match.group(2))
+
+        dt = datetime.strptime(when_text, "%A, %B %d, %Y at %I:%M%p")
+
+        booking["appointment_date"] = dt.date()
+        booking["appointment_time"] = dt.time()
+        booking["duration_minutes"] = duration_hours * 60
+    else:
+        booking["appointment_date"] = None
+        booking["appointment_time"] = None
+        booking["duration_minutes"] = None
+
+    payment_match = re.search(r"Payment status:\s*(.+)", body)
+    booking["payment_status"] = payment_match.group(1).strip() if payment_match else None
+
+    booking["external_source"] = "godaddy"
+
+    return booking
+
+
+
+######################################
+#
+#   TEST TEST. TODO
+#
+#   TEST GODADDY PARSER
+#
+#########################################################
+
+
+
+@app.route("/booking-email-import", methods=["GET", "POST"])
+@login_required
+@spa_required
+def booking_email_import():
+    body = ""
+
+    if request.method == "POST":
+        body = request.form.get("email_body", "").strip()
+        booking = parse_godaddy_email_body(body)
+
+        return render_template(
+            "booking_email_import.html",
+            booking=booking,
+            email_body=body
+        )
+
+    return render_template(
+        "booking_email_import.html",
+        booking=None,
+        email_body=body
+    )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 #   ------------------------------------------------
@@ -7452,7 +7611,7 @@ def import_godaddy_booking(body, spa_id, subject=""):
         booking["appointment_datetime"].time(),
         booking["duration_minutes"],
         booking["service"],
-        "Scheduled",
+        "booked",
         f"Imported from GoDaddy. Service: {booking['service']}. Payment status: {booking['payment_status']}",
         "godaddy",
         booking["order_number"],
@@ -7583,10 +7742,77 @@ def godaddy_import_raw(appointment_id):
         "email": row[23],
     }
 
+    if appointment["phone"] and len(appointment["phone"]) == 10:
+        appointment["phone"] = (
+            f"({appointment['phone'][0:3]}) "
+            f"{appointment['phone'][3:6]}-"
+            f"{appointment['phone'][6:]}"
+        )
+
+
     return render_template(
         "import_review.html",
         appointment=appointment
     )
+
+
+
+
+
+
+
+
+
+
+
+
+##########################################
+#
+#   BOOKING EMIAL IMPORT --CONFIRM
+#
+#
+###############################################
+
+
+
+@app.route("/booking-email-import/confirm", methods=["POST"])
+@login_required
+@spa_required
+def booking_email_import_confirm():
+    spa_id = current_spa_id()
+    body = request.form.get("email_body", "").strip()
+
+    if not body:
+        flash("No email body found to import.", "warning")
+        return redirect(url_for("booking_email_import"))
+
+    result = import_godaddy_booking(
+        body,
+        spa_id,
+        "Forwarded GoDaddy booking email"
+    )
+
+    if result["status"] == "duplicate":
+        flash(result["message"], "warning")
+    else:
+        flash(result["message"], "success")
+
+    return redirect(url_for("calendar_view"))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -7739,6 +7965,10 @@ def mark_godaddy_import_reviewed(appointment_id):
 #           
 #
 #   ----------------------
+
+
+
+
         
 def poll_gmail_for_godaddy_bookings(spa_id):
     gmail_user = os.getenv("GMAIL_BOOKING_EMAIL")
@@ -7748,10 +7978,7 @@ def poll_gmail_for_godaddy_bookings(spa_id):
     mail.login(gmail_user, gmail_pass)
     mail.select("inbox")
 
-    status, messages = mail.search(
-        None,
-        '(UNSEEN FROM "donotreply@email.ola.godaddy.com" SUBJECT "Booking Confirmed")'
-    )
+    status, messages = mail.search(None, "ALL")
 
     email_ids = messages[0].split()
 
@@ -7761,8 +7988,7 @@ def poll_gmail_for_godaddy_bookings(spa_id):
 
     results = []
 
-    # process newest 10 only
-    for email_id in email_ids[-10:]:
+    for email_id in email_ids[-5:]:
         status, msg_data = mail.fetch(email_id, "(RFC822)")
         raw_email = msg_data[0][1]
 
@@ -7786,24 +8012,45 @@ def poll_gmail_for_godaddy_bookings(spa_id):
         else:
             body = email_message.get_payload(decode=True).decode(errors="ignore")
 
-        if not body:
+        if (
+            "Order #" not in subject
+            and "Order #" not in body
+        ):
             results.append({
                 "email_id": email_id.decode(),
-                "status": "no_body",
-                "subject": subject
+                "subject": subject,
+                "status": "skipped_no_order_number"
             })
-
-            mail.store(email_id, "+FLAGS", "\\Seen")
-
             continue
 
+        if (
+            "Order #" not in body
+            or "What:" not in body
+            or "When:" not in body
+            or "Payment status:" not in body
+        ):
+            results.append({
+                "email_id": email_id.decode(),
+                "subject": subject,
+                "status": "skipped_not_booking_email"
+            })
+            continue
 
         try:
             result = import_godaddy_booking(
-                body, 
-                spa_id, 
+                body,
+                spa_id,
                 subject
             )
+
+            if result["status"] in ("imported", "duplicate"):
+                mail.store(email_id, "+FLAGS", "\\Seen")
+
+            results.append({
+                "email_id": email_id.decode(),
+                "subject": subject,
+                "result": result
+            })
 
         except KeyError as e:
             results.append({
@@ -7812,14 +8059,6 @@ def poll_gmail_for_godaddy_bookings(spa_id):
                 "status": "parse_failed",
                 "missing_field": str(e)
             })
-            continue
-
-
-        results.append({
-            "email_id": email_id.decode(),
-            "subject": subject,
-            "result": result
-        })
 
     mail.logout()
 
@@ -7828,10 +8067,6 @@ def poll_gmail_for_godaddy_bookings(spa_id):
         "processed_count": len(results),
         "results": results
     }
-
-
-    
-
 
 
 

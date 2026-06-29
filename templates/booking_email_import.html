@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Booking Email Import{% endblock %}
+
+{% block content %}
+
+<h1>Email Booking Import</h1>
+<p>Paste a forwarded booking confirmation email below. Peach Suite Pro will extract 
+    the booking details for review before importing the appointment.</p>
+
+<form method="POST">
+    <label>Paste forwarded GoDaddy email body</label><br>
+    <textarea name="email_body" rows="18" style="width:100%;">{{ email_body }}</textarea>
+    <br><br>
+    <button type="submit" class="btn">Parse Email</button>
+</form>
+
+{% if booking %}
+    <hr>
+ <h3>Booking Details</h3>
+
+<table class="table">
+
+<tr>
+    <th style="width:220px;">Order Number</th>
+    <td>{{ booking.external_order_id }}</td>
+</tr>
+
+<tr>
+    <th>Customer</th>
+    <td>{{ booking.customer_name }}</td>
+</tr>
+
+<tr>
+    <th>Phone</th>
+    <td>{{ booking.phone }}</td>
+</tr>
+
+<tr>
+    <th>Email</th>
+    <td>{{ booking.email }}</td>
+</tr>
+
+<tr>
+    <th>Service</th>
+    <td>{{ booking.service_name }}</td>
+</tr>
+
+<tr>
+    <th>Appointment Date</th>
+    <td>{{ booking.appointment_date.strftime('%A, %B %d, %Y') if booking.appointment_date else '' }}</td>
+</tr>
+
+<tr>
+    <th>Appointment Time</th>
+    <td>{{ booking.appointment_time.strftime('%I:%M %p') if booking.appointment_time else '' }}</td>
+</tr>
+
+<tr>
+    <th>Duration</th>
+    <td>{{ booking.duration_minutes }} minutes</td>
+</tr>
+
+<tr>
+    <th>Payment Status</th>
+    <td>{{ booking.payment_status.title() }}</td>
+</tr>
+
+<tr>
+    <th>Order Total</th>
+    <td>${{ "%.2f"|format(booking.order_total) }}</td>
+</tr>
+
+
+{% endif %}
+
+</table>
+<br>    
+Import Status:
+<br>
+Ready To Import
+
+{% if booking %}
+<form method="POST" action="{{ url_for('booking_email_import_confirm') }}">
+    <textarea name="email_body" style="display:none;">{{ email_body }}</textarea>
+
+    <button type="submit" class="btn btn-primary">
+        Import Appointment
+    </button>
+
+    <a href="{{ url_for('booking_email_import') }}" class="btn btn-secondary">
+        Cancel
+    </a>
+</form>
+{% endif %}
+{% endblock %}

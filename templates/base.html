@@ -38,7 +38,7 @@
     </div>
 
 
-    {% if godaddy_unreviewed_count and godaddy_unreviewed_count > 0 %}
+    {% if godaddy_unreviewed_count|default(0) > 0 %}
     <div class="alert alert-warning">
         {{ godaddy_unreviewed_count }} appointment(s) imported from GoDaddy need review.
 
@@ -52,8 +52,8 @@
                 </button>
             </form>
         {% else %}
-            <a href="{{ url_for('review_godaddy_imports_and_calendar') }}">
-                View Calendar
+            <a href="{{ url_for('calendar_view') }}">
+                Go to Calendar
             </a>
         {% endif %}
     </div>
