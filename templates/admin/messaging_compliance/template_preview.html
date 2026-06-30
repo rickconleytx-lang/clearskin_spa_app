@@ -5,6 +5,8 @@
 <h1>👁 Template Preview</h1>
 
 <p>
+    <strong>Name:</strong> {{ display_name }}<br>
+    <strong>Template:</strong> {{ template_name }}<br>
     <strong>Channel:</strong> {{ channel|upper }}<br>
     <strong>Language:</strong> {{ language_name }} ({{ language_code }})
 </p>
@@ -15,55 +17,31 @@
 
     <h3>Email Subject</h3>
 
-    <div
-        style="
-            border:1px solid #ccc;
-            padding:12px;
-            background:#f8f8f8;
-            margin-bottom:20px;
-        "
-    >
+    <div style="border:1px solid #ccc; padding:12px; background:#f8f8f8; margin-bottom:20px;">
         {{ preview.subject }}
     </div>
 
     <h3>Email Body</h3>
 
-    <div
-        style="
-            border:1px solid #ccc;
-            padding:20px;
-            background:#f8f8f8;
-            white-space:pre-wrap;
-        "
-    >{{ preview.body }}</div>
+    <div style="border:1px solid #ccc; padding:20px; background:#f8f8f8; white-space:pre-wrap;">{{ preview.body }}</div>
 
 {% else %}
 
     <h3>SMS Message</h3>
 
-    <div
-        style="
-            border:1px solid #ccc;
-            padding:20px;
-            background:#f8f8f8;
-            white-space:pre-wrap;
-        "
-    >{{ preview.body }}</div>
+    <div style="border:1px solid #ccc; padding:20px; background:#f8f8f8; white-space:pre-wrap;">{{ preview.body }}</div>
 
 {% endif %}
 
 <br>
 
-<a class="btn btn-primary"
-   href="{{ url_for('edit_messaging_template', channel=channel, template_type=template_type) }}">
-    ✏️ Edit
-</a>
-
 <a class="btn btn-secondary"
-   href="{{ url_for('template_review', 
-   channel=channel,
-   language_code=language_code) }}">
-    ← Back
+   href="{{ url_for(
+       'template_review',
+       channel=channel,
+       language_code=language_code
+   ) }}">
+    ← Back to Template Library
 </a>
 
 {% endblock %}

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
-{% block title %}SMS/Email Review | Peach Suite Pro{% endblock %}
+{% block title %}Template Library | Peach Suite Pro{% endblock %}
+
 {% block content %}
 
 <a href="{{ url_for('view_help_page', page_key='message_templates') }}"
@@ -11,63 +12,64 @@
 
     <h1>{{ page_title }}</h1>
 
-
     <a class="btn btn-outline-primary"
-        href="{{ url_for('template_review',
-                        channel=switch_channel,
-                        language_code=selected_language,
-                        show_archived=1 if show_archived else None) }}">
+       href="{{ url_for(
+           'template_review',
+           channel=switch_channel,
+           language_code=language_code,
+           show_archived=1 if show_archived else None
+       ) }}">
         {{ switch_label }}
     </a>
 
 </div>
 
-
 <hr>
-<br>
-<form method="GET" class="archive-filter-form">
 
-    <label>Language</label>
+<form method="GET"
+      action="{{ url_for('template_review', channel=channel) }}"
+      class="archive-filter-form"
+      style="margin-bottom:20px;">
+
+    <label for="language_code"><strong>Template Language</strong></label>
 
     <select name="language_code"
-        onchange="this.form.submit()"
-        class="form-control">
+            id="language_code"
+            onchange="this.form.submit()"
+            class="form-control">
 
-    {% for lang in supported_languages %}
-        <option value="{{ lang.language_code }}"
-            {% if selected_language == lang.language_code %}selected{% endif %}>
-            {{ lang.native_name }}
-        </option>
-    {% endfor %}
+        {% for lang in supported_languages %}
+            <option value="{{ lang['language_code'] }}"
+                {% if language_code == lang['language_code'] %}selected{% endif %}>
+                {{ lang['language_name'] }}{% if lang['native_name'] %} / {{ lang['native_name'] }}{% endif %}
+            </option>
+        {% endfor %}
 
-    <option value="" {% if selected_language == "" %}selected{% endif %}>
-        All Languages
-    </option>
-
-</select>
+    </select>
 
     <br>
 
-    <input type="checkbox"
-           id="show_archived"
-           name="show_archived"
-           value="1"
-           {% if show_archived %}checked{% endif %}>
+    <label>
+        <input type="checkbox"
+               id="show_archived"
+               name="show_archived"
+               value="1"
+               {% if show_archived %}checked{% endif %}>
+        Show Archived Templates
+    </label>
 
-    <span>Show Archived Templates</span>
-
-    <button class="btn btn-secondary">
+    <button class="btn btn-secondary" type="submit">
         Apply
     </button>
 
 </form>
 
-
 <hr>
+
 <p>
-<strong>{{ completed }}</strong> of
-<strong>{{ total }}</strong>
-templates completed ({{ percent }}%).
+    <strong>{{ completed }}</strong> of
+    <strong>{{ total }}</strong>
+    templates completed ({{ percent }}%).
 </p>
 
 <progress value="{{ completed }}" max="{{ total }}"></progress>
@@ -76,221 +78,209 @@ templates completed ({{ percent }}%).
 
 <hr>
 
-
-
 <table class="table">
 
-<tr>
-    <th>Template Type / Name</th>
-    <th>Language</th>
-    <th>Category</th>
-    <th>Compliance</th>
-    <th>Lifecycle</th>
-    <th>AI Score</th>
-    <th>Last Updated</th>
-    <th>Actions</th>
-</tr>
+    <tr>
+        <th>Template Type / Name</th>
+        <th>Language</th>
+        <th>Category</th>
+        <th>Compliance</th>
+        <th>Lifecycle</th>
+        <th>AI Score</th>
+        <th>Last Updated</th>
+        <th>Actions</th>
+    </tr>
 
-{% for t in templates %}
+    {% for t in templates %}
 
-<tr>
-    <td>
-    <strong>{{ t[1] }}</strong><br>
-    <small style="color:#666;">
-        {{ t[4] or "Default" }}
-    </small>
-    </td>
+    <tr>
+        <td>
+            <strong>{{ t[1] }}</strong><br>
+            <small style="color:#666;">
+                {{ t[4] or "Default" }}
+            </small>
+        </td>
 
-    <td>{{ t[12] if t[12] else "-" }}</td>
+        <td>{{ t[12] if t[12] else "-" }}</td>
 
-    <td>{{ t[2] }}</td>
+        <td>{{ t[2] }}</td>
 
-    <td>
-    {% if not t[3] %}
-        ⬜ Missing
-    {% elif t[9] == 'High' %}
-        🔴 Needs Review
-    {% elif t[9] == 'Medium' %}
-        🟡 Review Suggested
-    {% elif t[6] %}
-        ✅ Ready
-    {% endif %}
-    </td>
-
-    <td>
-
-    {% if t[11] %}
-        ⚫ Archived
-
-    {% elif t[5] %}
-        🟢 Active
-
-    {% else %}
-        🟡 Disabled
-
-    {% endif %}
-
-    </td>
-
-
-
-    <td>
-        {{ t[7] or "--" }}
-    </td>
-
-    <td>
-        {{ t[8].strftime('%m/%d/%Y %I:%M %p') if t[8] else "--" }}
-    </td>
-
-    
-
-
-    <td>
-
-        {% if t[11] %}
-
-            <form method="POST"
-                action="{{ url_for(
-                    'restore_messaging_template',
-                    channel=channel,
-                    template_type=t[0]
-                ) }}"
-                style="display:inline;">
-
-                <button type="submit" class="btn btn-success">
-                    Restore
-                </button>
-
-            </form>
-
-        {% else %}
-
-            {% if t[3] %}
-            <a class="btn btn-primary"
-            href="{{ url_for('edit_messaging_template_by_id',
-                                template_id=t[3]) }}">
-                ✏️ Edit
-            </a>
+        <td>
+            {% if not t[3] %}
+                ⬜ Missing
+            {% elif t[9] == 'High' %}
+                🔴 Needs Review
+            {% elif t[9] == 'Medium' %}
+                🟡 Review Suggested
+            {% elif t[6] %}
+                ✅ Ready
             {% else %}
-            <a class="btn btn-primary"
-            href="{{ url_for('edit_messaging_template',
-                                channel=channel,
-                                template_type=t[0]) }}">
-                ✏️ Create               
-            </a>
+                🟡 Review Required
             {% endif %}
+        </td>
 
-            {% if t[3] %}
-            <form method="POST"
-                action="{{ url_for(
-                    'duplicate_messaging_template',
-                    template_id=t[3]
-                ) }}"
-                style="display:inline;">
-
-                <button class="btn btn-secondary">
-                    📋 Duplicate
-                </button>
-
-            </form>
+        <td>
+            {% if t[11] %}
+                ⚫ Archived
+            {% elif t[5] %}
+                🟢 Active
+            {% else %}
+                🟡 Disabled
             {% endif %}
+        </td>
 
+        <td>{{ t[7] or "--" }}</td>
 
-            <a class="btn btn-secondary"
-            href="{{ url_for('preview_messaging_template',
-                                channel=channel,
-                                template_type=t[0],
-                                language_code=selected_language) }}">
-                👁 Preview
-            </a>
+        <td>
+            {{ t[8].strftime('%m/%d/%Y %I:%M %p') if t[8] else "--" }}
+        </td>
 
+        <td>
 
+            {% if t[11] %}
 
-            {% if t[3] %}
-                {% if channel == "sms" %}
-                    <a class="btn btn-success"
-                    href="{{ url_for('sms_home',
-                                        template_type=t[0],
-                                        template_id=t[3]) }}">
-                        📤 Send
+                <form method="POST"
+                      action="{{ url_for(
+                          'restore_messaging_template',
+                          template_id=t[3],
+                          language_code=language_code
+                      ) }}"
+                      style="display:inline;">
+
+                    <button type="submit" class="btn btn-success">
+                        Restore
+                    </button>
+
+                </form>
+
+            {% else %}
+
+                {% if t[3] %}
+
+                    <a class="btn btn-primary"
+                       href="{{ url_for(
+                           'edit_messaging_template_by_id',
+                           template_id=t[3],
+                           language_code=language_code
+                       ) }}">
+                        ✏️ Edit
                     </a>
-                {% elif channel == "email" %}
-                    <a class="btn btn-success"
-                    href="{{ url_for('general_email',
-                                        template_type=t[0],
-                                        template_id=t[3]) }}">
-                        📤 Send
+
+                    <a class="btn btn-secondary"
+                       href="{{ url_for(
+                           'preview_messaging_template_by_id',
+                           template_id=t[3],
+                           language_code=language_code
+                       ) }}">
+                        👁 Preview
                     </a>
+
+                    <form method="POST"
+                          action="{{ url_for(
+                              'duplicate_messaging_template',
+                              template_id=t[3],
+                              language_code=language_code
+                          ) }}"
+                          style="display:inline;">
+
+                        <button class="btn btn-secondary" type="submit">
+                            📋 Duplicate
+                        </button>
+
+                    </form>
+
+                    {% if channel == "sms" %}
+                        <a class="btn btn-success"
+                           href="{{ url_for(
+                               'sms_home',
+                               template_type=t[0],
+                               template_id=t[3],
+                               language_code=language_code
+                           ) }}">
+                            📤 Send
+                        </a>
+                    {% elif channel == "email" %}
+                        <a class="btn btn-success"
+                           href="{{ url_for(
+                               'general_email',
+                               template_type=t[0],
+                               template_id=t[3],
+                               language_code=language_code
+                           ) }}">
+                            📤 Send
+                        </a>
+                    {% endif %}
+
+                    {% if t[5] %}
+                        <form method="POST"
+                              action="{{ url_for(
+                                  'disable_messaging_template',
+                                  template_id=t[3],
+                                  language_code=language_code
+                              ) }}"
+                              style="display:inline;">
+
+                            <button class="btn btn-warning" type="submit">
+                                ⏸ Disable
+                            </button>
+
+                        </form>
+                    {% else %}
+                        <form method="POST"
+                              action="{{ url_for(
+                                  'enable_messaging_template',
+                                  template_id=t[3],
+                                  language_code=language_code
+                              ) }}"
+                              style="display:inline;">
+
+                            <button class="btn btn-success" type="submit">
+                                ▶ Enable
+                            </button>
+
+                        </form>
+                    {% endif %}
+
+                    {% if (t[4] or "Default") != "Default" %}
+                        <form method="POST"
+                              action="{{ url_for(
+                                  'archive_messaging_template',
+                                  template_id=t[3],
+                                  language_code=language_code
+                              ) }}"
+                              style="display:inline;">
+
+                            <button type="submit"
+                                    class="btn btn-danger"
+                                    onclick="return confirm('Archive this template?');">
+                                🗄 Archive Template
+                            </button>
+
+                        </form>
+                    {% endif %}
+
+                {% else %}
+
+                    <a class="btn btn-primary"
+                       href="{{ url_for(
+                           'create_messaging_template',
+                           channel=channel,
+                           template_type=t[0],
+                           language_code=language_code
+                       ) }}">
+                        ✏️ Create
+                    </a>
+
                 {% endif %}
-            {% endif %}
-
-
-
-            {% if t[3] and t[4] %}
-
-                <form method="POST"
-                    action="{{ url_for(
-                        'disable_messaging_template',
-                        template_id=t[3]
-                    ) }}"
-                    style="display:inline;">
-
-                    <button class="btn btn-warning">
-                        ⏸ Disable
-                    </button>
-
-                </form>
-
-
-            {% elif t[3] and not t[4] and t[5] %}
-
-                <form method="POST"
-                    action="{{ url_for(
-                        'enable_messaging_template',
-                        template_id=t[3]
-                    ) }}"
-                    style="display:inline;">
-
-                    <button class="btn btn-success">
-                        ▶ Enable
-                    </button>
-
-                </form>
-
-            {% elif t[3] and not t[4] and not t[5] %}
-
-                <span class="badge badge-warning">
-                    Review Required
-                </span>
-
-
 
             {% endif %}
-            {% if t[3] and (t[4] or "Default") != "Default" %}
-            <form method="POST"
-                action="{{ url_for('archive_messaging_template',
-                                    channel=channel,
-                                    template_id=t[3]) }}"
-                style="display:inline;">
 
-                <button type="submit"
-                        class="btn btn-danger"
-                        onclick="return confirm('Archive this template?');">
-                    🗄 Archive Template
-                </button>
+        </td>
 
-            </form>
-            {% endif %}
-                
-        {% endif %}
+    </tr>
 
-    </td>
-
-</tr>
-
-{% endfor %}
+    {% endfor %}
 
 </table>
-
 
 {% endblock %}

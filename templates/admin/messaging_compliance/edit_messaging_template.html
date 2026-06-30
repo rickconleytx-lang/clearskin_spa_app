@@ -4,48 +4,51 @@
 
 <div class="page-card">
 
-<h1>📱 Edit Messaging Template</h1>
+<h1>
+    {% if create_mode %}
+        📱 Create Messaging Template
+    {% else %}
+        📱 Edit Messaging Template
+    {% endif %}
+</h1>
 
 <p>
-    Template Type: <strong>{{ template_type }}</strong>
+    <strong>Name:</strong> {{ display_name }}<br>
+    <strong>Template:</strong> {{ template_name }}<br>
+    <strong>Channel:</strong> {{ channel|upper }}<br>
+    <strong>Language:</strong> {{ language_name }} ({{ language_code }})
 </p>
 
-<p>
-    <strong>Channel:</strong>
-    {{ "SMS" if channel == "sms" else "Email" }}
-</p>
+<a class="btn btn-secondary"
+   href="{{ url_for(
+       'template_review',
+       channel=channel,
+       language_code=language_code
+   ) }}">
+    ← Back to Template Library
+</a>
 
 {% if is_default_template %}
-<div class="alert alert-info">
+<div class="alert alert-info" style="margin-top:15px;">
     🔒 This is a protected Default template.
     You may edit the message content, preview it, or duplicate it,
     but the template name cannot be changed and it cannot be archived.
 </div>
 {% endif %}
 
+<hr>
 
-
-<a class="btn btn-secondary"
-   href="{{ url_for('template_review', 
-   channel=channel,
-   language_code=language_code) }}">
-    ← Back
-</a>
-
-
-
-
-{% if template and template[8] is not none %}
+{% if template and template[10] is not none %}
 
 <div style="
     border: 2px solid
-    {% if template[5] == 'High' %}#cc0000
-    {% elif template[5] == 'Medium' %}#d99a00
+    {% if template[12] == 'High' %}#cc0000
+    {% elif template[12] == 'Medium' %}#d99a00
     {% else %}#2e7d32
     {% endif %};
     background:
-    {% if template[5] == 'High' %}#ffe6e6
-    {% elif template[5] == 'Medium' %}#fff7df
+    {% if template[12] == 'High' %}#ffe6e6
+    {% elif template[12] == 'Medium' %}#fff7df
     {% else %}#e8f5e9
     {% endif %};
     padding:15px;
@@ -56,14 +59,14 @@
     <h3>🤖 AI Compliance Review</h3>
 
     <p>
-        <strong>AI Score:</strong> {{ template[8] }}/100
+        <strong>AI Score:</strong> {{ template[10] }}/100
     </p>
 
     <p>
         <strong>Risk Level:</strong>
-        {% if template[10] == 'High' %}
+        {% if template[12] == 'High' %}
             🔴 High
-        {% elif template[10] == 'Medium' %}
+        {% elif template[12] == 'Medium' %}
             🟡 Medium
         {% else %}
             🟢 Low
@@ -73,13 +76,13 @@
     <p><strong>Review:</strong></p>
 
     <div style="white-space: pre-wrap;">
-        {{ template[5] }}
+        {{ template[11] or "No AI review notes." }}
     </div>
 
-    {% if template and template[11] %}
+    {% if template[13] %}
     <p>
         <strong>Last Reviewed:</strong>
-        {{ template[11].strftime('%m/%d/%Y %I:%M %p') }}
+        {{ template[13] }}
     </p>
     {% endif %}
 
@@ -103,32 +106,24 @@
         Create and save this template to generate an AI Compliance Review.
     </p>
 
-    <p>
-        <strong>AI Score:</strong> --
-    </p>
-
-    <p>
-        <strong>Risk Level:</strong> --
-    </p>
+    <p><strong>AI Score:</strong> --</p>
+    <p><strong>Risk Level:</strong> --</p>
 
 </div>
 
 {% endif %}
 
-
-
-</div>
-
-
 <form method="POST" class="styled-form">
 
     <label>Template Name</label><br>
     <input type="text"
-       name="template_name"
-       value="{{ template[1] if template else 'Default' }}"
-       style="width:100%;"
-       {% if is_default_template %}readonly{% endif %}
-       required>
+           name="template_name"
+           value="{{ template[4] if template else template_name or 'Default' }}"
+           style="width:100%;"
+           {% if is_default_template %}readonly{% endif %}
+           required>
+
+    <br><br>
 
     <label>Language</label><br>
 
@@ -137,9 +132,9 @@
             style="max-width:220px;">
 
         {% for lang in supported_languages %}
-            <option value="{{ lang.language_code }}"
-                {% if language_code == lang.language_code %}selected{% endif %}>
-                {{ lang.native_name }}
+            <option value="{{ lang['language_code'] }}"
+                {% if language_code == lang['language_code'] %}selected{% endif %}>
+                {{ lang['language_name'] }}{% if lang['native_name'] %} / {{ lang['native_name'] }}{% endif %}
             </option>
         {% endfor %}
 
@@ -147,14 +142,15 @@
 
     <br>
 
-
     {% if channel == "email" %}
-    <label>Email Subject</label><br>
-    <input type="text"
-           name="subject_text"
-           value="{{ template[4] if template and template[4] else '' }}"
-           style="width:100%;"
-           required><br><br>
+        <label>Email Subject</label><br>
+        <input type="text"
+               name="subject_text"
+               value="{{ template[6] if template and template[6] else '' }}"
+               style="width:100%;"
+               required>
+
+        <br><br>
     {% endif %}
 
     <label>Message Text</label><br>
@@ -162,49 +158,53 @@
               name="message_text"
               rows="8"
               style="width:100%;"
-              required>{{ template[5] if template else '' }}</textarea><br><br>
+              required>{{ template[7] if template else '' }}</textarea>
 
-<h3>🔒 System Compliance Footer</h3>
+    <br><br>
 
-<div style="
-    background:#f8f9fa;
-    border:1px solid #ddd;
-    border-radius:8px;
-    padding:15px;
-    margin-top:10px;
-">
+    <h3>🔒 System Compliance Footer</h3>
 
-    <pre style="
-        white-space:pre-wrap;
-        font-family:inherit;
-        margin:0;
-    ">{{ compliance_footer }}</pre>
+    <div style="
+        background:#f8f9fa;
+        border:1px solid #ddd;
+        border-radius:8px;
+        padding:15px;
+        margin-top:10px;
+    ">
 
-</div>
+        <pre style="
+            white-space:pre-wrap;
+            font-family:inherit;
+            margin:0;
+        ">{{ compliance_footer }}</pre>
 
-<p style="color:#666; font-size:0.9em; margin-top:8px;">
-    This compliance footer is automatically appended to all outbound SMS messages by Peach Suite Pro.
-    It cannot be edited here.
-</p>
-<hr>
-<br><br>
- 
+    </div>
 
-    {% if template and template[3] is not none %}
-
-
-
-{% endif %}
-
-    <button type="submit"
-        name="action"
-        value="ai_review"
-        class="btn">
-    🤖 AI Review
-    
-</button>
+    <p style="color:#666; font-size:0.9em; margin-top:8px;">
+        This compliance footer is automatically appended to outbound messages by Peach Suite Pro.
+        It cannot be edited here.
+    </p>
 
     <hr>
+
+    <button type="submit"
+            name="action"
+            value="ai_review"
+            class="btn">
+        🤖 Save & AI Review Template
+    </button>
+
+    <a class="btn"
+       href="{{ url_for(
+           'template_review',
+           channel=channel,
+           language_code=language_code
+       ) }}">
+        Back to Template Library
+    </a>
+
+    <hr>
+
 
 <h3>🧩 Available Merge Fields</h3>
 

@@ -68,8 +68,27 @@
                           rows="8"
                           readonly
                           style="width:100%;"></textarea>
+
+                <br><br>
+
+                <button type="submit"
+                        form="email-send-form"
+                        class="btn"
+                        onclick="return confirm('Send this email to selected clients?');">
+                    📤 Send Selected Emails
+                </button>
+
+                <button type="submit"
+                        form="email-send-form"
+                        class="btn"
+                        onclick="selectAllClients(); return confirm('Send this email to ALL clients currently listed?');">
+                    📤 Send All Listed
+                </button>
+
+
             </div>
 
+            
             <label>Client Status</label><br>
             <select name="client_status">
                 <option value="">All Statuses</option>
@@ -116,9 +135,11 @@
 
 {% if clients %}
 
-<form method="POST" action="{{ url_for('general_email_send') }}">
+<form id="email-send-form" method="POST" action="{{ url_for('general_email_send') }}">
 
     <input type="hidden" name="template_id" value="{{ template_id }}">
+    <input type="hidden" name="language_code" value="{{ language_code }}">
+
 
     <table>
         <tr>

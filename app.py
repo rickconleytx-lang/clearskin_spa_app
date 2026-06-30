@@ -232,6 +232,40 @@ def get_messaging_footer(footer_type):
 
 
 
+
+
+
+
+##########################################
+#
+#   GET REQUEST LANGUAGE
+######################################
+
+def get_request_language():
+    """
+    Official messaging route language resolver.
+
+    Priority:
+    1. URL query string
+    2. Submitted form
+    3. Platform default language
+    """
+    return normalize_language_code(
+        request.args.get("language_code")
+        or request.form.get("language_code")
+        or get_current_language()
+        or get_default_language()
+    )
+
+
+
+
+
+
+
+
+
+
 ##########################################
 #
 #   SMS EMAIL Communications Group
@@ -280,18 +314,47 @@ def append_email_footer(message):
 ##################################
 #
 #   GET APPROVED SMS TEMPLATE
-#
+#       6-30-26
 #################################
 ############# number 3
 
-def get_approved_sms_template(spa_id, template_type, language_code=None):
+
+
+
+def get_approved_sms_template(
+    spa_id,
+    template_type,
+    language_code=None,
+    template_id=None
+):
     language_code = normalize_language_code(language_code or get_default_language())
     default_language = normalize_language_code(get_default_language())
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # 1. Try requested language first
+    if template_id:
+        cur.execute("""
+            SELECT
+                template_id,
+                message_text
+            FROM messaging_templates
+            WHERE template_id = %s
+              AND spa_id = %s
+              AND channel = 'sms'
+              AND is_active = TRUE
+              AND approved_for_use = TRUE
+              AND COALESCE(is_archived, FALSE) = FALSE
+            LIMIT 1
+        """, (template_id, spa_id))
+
+        row = cur.fetchone()
+
+        cur.close()
+        conn.close()
+
+        return row
+
     cur.execute("""
         SELECT
             template_id,
@@ -304,13 +367,12 @@ def get_approved_sms_template(spa_id, template_type, language_code=None):
           AND is_active = TRUE
           AND approved_for_use = TRUE
           AND COALESCE(is_archived, FALSE) = FALSE
-        ORDER BY updated_at DESC
+        ORDER BY updated_at DESC, template_id DESC
         LIMIT 1
     """, (spa_id, template_type, language_code))
 
     row = cur.fetchone()
 
-    # 2. Fallback to default language
     if not row and language_code != default_language:
         cur.execute("""
             SELECT
@@ -324,7 +386,7 @@ def get_approved_sms_template(spa_id, template_type, language_code=None):
               AND is_active = TRUE
               AND approved_for_use = TRUE
               AND COALESCE(is_archived, FALSE) = FALSE
-            ORDER BY updated_at DESC
+            ORDER BY updated_at DESC, template_id DESC
             LIMIT 1
         """, (spa_id, template_type, default_language))
 
@@ -336,25 +398,66 @@ def get_approved_sms_template(spa_id, template_type, language_code=None):
     return row
 
 
+
+
+
+
+
 ############################################################
 #       GET APPROVED EMAIL TEMPLATE
+#
+#
+#       6-30-26
 ############################################################
 ############. number 4
 
 
-def get_approved_email_template(spa_id, template_type, language_code=None):
 
-    language_code = (language_code or "EN").strip().upper()
-
-    if language_code not in ("EN", "ES"):
-        language_code = "EN"
+def get_approved_email_template(
+    spa_id,
+    template_type,
+    language_code=None,
+    template_id=None
+):
+    language_code = normalize_language_code(language_code or get_default_language())
+    default_language = normalize_language_code(get_default_language())
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # 1. Try preferred language first
+    if template_id:
+        cur.execute("""
+            SELECT
+                template_id,
+                subject_text,
+                message_text
+            FROM messaging_templates
+            WHERE template_id = %s
+              AND spa_id = %s
+              AND channel = 'email'
+              AND approved_for_use = TRUE
+              AND is_active = TRUE
+              AND COALESCE(is_archived, FALSE) = FALSE
+            LIMIT 1
+        """, (template_id, spa_id))
+
+        row = cur.fetchone()
+
+        cur.close()
+        conn.close()
+
+        if not row:
+            return None
+
+        return {
+            "template_id": row[0],
+            "subject": row[1] or "",
+            "body": row[2] or ""
+        }
+
     cur.execute("""
         SELECT
+            template_id,
             subject_text,
             message_text
         FROM messaging_templates
@@ -375,18 +478,17 @@ def get_approved_email_template(spa_id, template_type, language_code=None):
 
     row = cur.fetchone()
 
-    # 2. Fallback to English
-    if not row and language_code != "EN":
-
+    if not row and language_code != default_language:
         cur.execute("""
             SELECT
+                template_id,
                 subject_text,
                 message_text
             FROM messaging_templates
             WHERE spa_id = %s
               AND template_type = %s
               AND channel = 'email'
-              AND language_code = 'EN'
+              AND language_code = %s
               AND approved_for_use = TRUE
               AND is_active = TRUE
               AND COALESCE(is_archived, FALSE) = FALSE
@@ -394,7 +496,8 @@ def get_approved_email_template(spa_id, template_type, language_code=None):
             LIMIT 1
         """, (
             spa_id,
-            template_type
+            template_type,
+            default_language
         ))
 
         row = cur.fetchone()
@@ -406,10 +509,10 @@ def get_approved_email_template(spa_id, template_type, language_code=None):
         return None
 
     return {
-        "subject": row[0] or "",
-        "body": row[1] or ""
+        "template_id": row[0],
+        "subject": row[1] or "",
+        "body": row[2] or ""
     }
-
 
 
 
@@ -451,14 +554,21 @@ def apply_merge_fields(text, merge_data):
 #####################################
 #   BUILD SMS MESSAGE
 #      COMMUNICATION ENGINE PART 7
+#
+#
+#   6-30-26
 ###################################
-############## TODO remove print(f"SMS...)
+############## 
 
 
 
-
-
-def build_sms_message(spa_id, template_type, merge_data, language_code=None):
+def build_sms_message(
+    spa_id,
+    template_type,
+    merge_data,
+    language_code=None,
+    template_id=None
+):
     merge_data = merge_data or {}
 
     client_id = merge_data.get("client_id")
@@ -466,19 +576,16 @@ def build_sms_message(spa_id, template_type, merge_data, language_code=None):
     language_code = normalize_language_code(
         language_code
         or merge_data.get("language_code")
-        or get_client_language(client_id)
-        or get_current_language()
         or get_default_language()
     )
 
     merge_data["language_code"] = language_code
 
-    print(f"SMS LANGUAGE: {language_code}  CLIENT: {client_id}", flush=True)
-
     template = get_approved_sms_template(
-        spa_id,
-        template_type,
-        language_code
+        spa_id=spa_id,
+        template_type=template_type,
+        language_code=language_code,
+        template_id=template_id
     )
 
     if not template:
@@ -486,7 +593,8 @@ def build_sms_message(spa_id, template_type, merge_data, language_code=None):
             "success": False,
             "error": f"No approved active SMS template found for: {template_type}",
             "message_body": None,
-            "template_id": None
+            "template_id": None,
+            "language_code": language_code
         }
 
     template_id = template[0]
@@ -503,9 +611,7 @@ def build_sms_message(spa_id, template_type, merge_data, language_code=None):
         merge_data
     )
 
-    rendered_message = append_sms_footer(
-        rendered_message
-    )
+    rendered_message = append_sms_footer(rendered_message)
 
     return {
         "success": True,
@@ -514,39 +620,12 @@ def build_sms_message(spa_id, template_type, merge_data, language_code=None):
         "template_id": template_id,
         "language_code": language_code
     }
-    if not template:
-        return {
-            "success": False,
-            "error": f"No approved active SMS template found for: {template_type}",
-            "message_body": None,
-            "template_id": None
-        }
 
-    template_id = template[0]
-    template_text = template[1]
 
-    merge_data = enrich_sms_merge_data(
-        spa_id=spa_id,
-        template_type=template_type,
-        merge_data=merge_data
-    )
 
-    rendered_message = render_sms_template(
-        template_text,
-        merge_data
-    )
 
-    rendered_message = append_sms_footer(
-        rendered_message
-    )
 
-    return {
-        "success": True,
-        "error": None,
-        "message_body": rendered_message,
-        "template_id": template_id,
-        "language_code": language_code
-    }
+
 
 
 
@@ -556,26 +635,37 @@ def build_sms_message(spa_id, template_type, merge_data, language_code=None):
 #####################################
 #
 #       BUILD EMAIL MESSAGE
+#
+#
+#       6-30-26
 ###################################
-##############. Number 7.  TODO remove print(F:EMAIL..)
+##############. Number 7.  
 
-def build_email_message(spa_id, template_type, merge_data):
+
+
+
+def build_email_message(
+    spa_id,
+    template_type,
+    merge_data,
+    language_code=None,
+    template_id=None
+):
     merge_data = merge_data or {}
 
-    client_id = merge_data.get("client_id")
-
     language_code = normalize_language_code(
-        merge_data.get("language_code")
-        or get_client_language(client_id)
-        or get_current_language()
+        language_code
+        or merge_data.get("language_code")
+        or get_default_language()
     )
 
-    print(f"EMAIL LANGUAGE: {language_code}  CLIENT: {client_id}", flush=True)
+    merge_data["language_code"] = language_code
 
     template = get_approved_email_template(
-        spa_id,
-        template_type,
-        language_code
+        spa_id=spa_id,
+        template_type=template_type,
+        language_code=language_code,
+        template_id=template_id
     )
 
     if not template:
@@ -596,8 +686,15 @@ def build_email_message(spa_id, template_type, merge_data):
     return {
         "subject": subject,
         "body": body,
+        "template_id": template["template_id"],
         "language_code": language_code
     }
+
+
+
+
+
+
 
 
 
@@ -606,19 +703,32 @@ def build_email_message(spa_id, template_type, merge_data):
 #####################################
 #
 #       BUILD COMMUNICATION 
+#
+#   6-30-26
+#
 ###################################
 ############number 8 - - last
 
-def build_communication(spa_id, channel, template_type, merge_data, language_code=None):
+
+
+def build_communication(
+    spa_id,
+    channel,
+    template_type,
+    merge_data,
+    language_code=None,
+    template_id=None
+):
+    channel = (channel or "").lower().strip()
     language_code = normalize_language_code(language_code or get_default_language())
 
     if channel == "sms":
-
         sms = build_sms_message(
-            spa_id,
-            template_type,
-            merge_data,
-            language_code=language_code
+            spa_id=spa_id,
+            template_type=template_type,
+            merge_data=merge_data,
+            language_code=language_code,
+            template_id=template_id
         )
 
         if not sms or not sms.get("success"):
@@ -628,16 +738,17 @@ def build_communication(spa_id, channel, template_type, merge_data, language_cod
             "channel": "sms",
             "subject": None,
             "body": sms["message_body"],
-            "template_id": sms["template_id"]
+            "template_id": sms["template_id"],
+            "language_code": sms["language_code"]
         }
 
     if channel == "email":
-
         email = build_email_message(
-            spa_id,
-            template_type,
-            merge_data,
-            language_code=language_code
+            spa_id=spa_id,
+            template_type=template_type,
+            merge_data=merge_data,
+            language_code=language_code,
+            template_id=template_id
         )
 
         if not email:
@@ -647,7 +758,8 @@ def build_communication(spa_id, channel, template_type, merge_data, language_cod
             "channel": "email",
             "subject": email["subject"],
             "body": email["body"],
-            "template_id": email.get("template_id")
+            "template_id": email.get("template_id"),
+            "language_code": email.get("language_code", language_code)
         }
 
     return None
@@ -655,10 +767,14 @@ def build_communication(spa_id, channel, template_type, merge_data, language_cod
 
 
 
+
+
+
+
 ##################################
 #
 #     SEND COMMUNICATION
-#   
+#   6-30-26
 #################################
 
 
@@ -670,7 +786,8 @@ def send_communication(
     merge_data,
     client_id=None,
     message_type=None,
-    language_code=None
+    language_code=None,
+    template_id=None
 ):
     channel = (channel or "").lower().strip()
     language_code = normalize_language_code(language_code or get_default_language())
@@ -679,6 +796,7 @@ def send_communication(
         raise ValueError(f"Unsupported communication channel: {channel}")
 
     merge_data = merge_data or {}
+    merge_data["language_code"] = language_code
 
     if client_id and not merge_data.get("client_id"):
         merge_data["client_id"] = client_id
@@ -688,17 +806,35 @@ def send_communication(
         channel=channel,
         template_type=template_type,
         merge_data=merge_data,
-        language_code=language_code
+        language_code=language_code,
+        template_id=template_id
     )
 
     if not communication:
         return {
             "success": False,
-            "error": "Communication could not be built."
+            "error": "Communication could not be built.",
+            "channel": channel,
+            "template_id": template_id,
+            "template_type": template_type,
+            "language_code": language_code
         }
 
     if channel == "sms":
-        return send_compliant_sms(
+        length_check = validate_sms_length(communication["body"])
+
+        if not length_check["valid"]:
+            return {
+                "success": False,
+                "error": length_check["error"],
+                "channel": "sms",
+                "message_body": communication["body"],
+                "template_id": communication.get("template_id"),
+                "template_type": template_type,
+                "language_code": language_code
+            }
+
+        sms_result = send_compliant_sms(
             spa_id=spa_id,
             client_id=client_id,
             recipient_phone=recipient,
@@ -706,15 +842,50 @@ def send_communication(
             message_type=message_type or template_type
         )
 
+        sms_result["channel"] = "sms"
+        sms_result["message_body"] = communication["body"]
+        sms_result["template_id"] = communication.get("template_id")
+        sms_result["template_type"] = template_type
+        sms_result["language_code"] = language_code
+
+        return sms_result
+
     if channel == "email":
-        return send_email_message(
-            spa_id=spa_id,
-            client_id=client_id,
-            recipient_email=recipient,
+        response = send_email(
+            to=recipient,
             subject=communication["subject"],
-            message_body=communication["body"],
-            message_type=message_type or template_type
+            body=communication["body"]
         )
+
+        if response.status_code == 200:
+            return {
+                "success": True,
+                "status": "sent",
+                "provider_status": response.status_code,
+                "error": None,
+                "channel": "email",
+                "subject": communication["subject"],
+                "body": communication["body"],
+                "template_id": communication.get("template_id"),
+                "template_type": template_type,
+                "language_code": language_code
+            }
+
+        return {
+            "success": False,
+            "status": "failed",
+            "provider_status": response.status_code,
+            "error": response.text,
+            "channel": "email",
+            "subject": communication["subject"],
+            "body": communication["body"],
+            "template_id": communication.get("template_id"),
+            "template_type": template_type,
+            "language_code": language_code
+        }
+
+
+
 
 
 
@@ -1960,10 +2131,13 @@ def run_messaging_compliance_check(onboarding):
 
 ##########################################################
 #       AI TEMPLATE REVIEW
+#
+#   REVIEW TEMPLATE AI BASIC
+#   6-30-26
 ##########################################################
 
 
-def review_template_ai_basic(template_type, message_text):
+def review_template_ai_basic(template_type, message_text, channel="sms"):
 
     message_text = message_text or ""
 
@@ -2012,26 +2186,60 @@ def review_template_ai_basic(template_type, message_text):
         score -= 50
         notes.append("Template appears to be empty.")
 
-    opt_out_terms = [
-        "stop",
-        "unsubscribe",
-        "opt out",
-        "opt-out",
-        "reply stop",
-        "text stop",
-        "{{opt_out}}",
-        "{{opt_out}}"
-    ]
 
-    if any(term in message_lower for term in opt_out_terms):
-        score -= 40
-        notes.append(
-            "Remove STOP, unsubscribe, or opt-out language. Peach Suite Pro automatically appends the required compliance footer."
+
+
+
+    if channel == "sms":
+
+        opt_out_terms = [
+            "stop",
+            "unsubscribe",
+            "opt out",
+            "opt-out",
+            "reply stop",
+            "text stop",
+            "{{opt_out}}"
+        ]
+
+        if any(term in message_lower for term in opt_out_terms):
+            score -= 40
+            notes.append(
+                "Remove STOP, unsubscribe, or opt-out language. Peach Suite Pro automatically appends the required compliance footer."
+            )
+        else:
+            notes.append(
+                "System compliance footer will be automatically appended."
+            )
+
+        single_segment_warning = get_system_setting_int(
+            "sms_best_practice_length",
+            160
         )
-    else:
-        notes.append(
-            "System compliance footer will be automatically appended."
+
+        sms_max_characters = get_system_setting_int(
+            "sms_max_length",
+            320
         )
+
+        if len(message_text) > sms_max_characters:
+            score -= 40
+            notes.append(
+                f"Template exceeds the maximum allowed SMS length of {sms_max_characters} characters."
+            )
+
+
+        elif len(message_text) > single_segment_warning:
+            score -= 10
+            notes.append(
+                f"Message exceeds the recommended SMS length of {single_segment_warning} characters and may be delivered as multiple text messages."
+            )
+
+    elif channel == "email":
+        notes.append(
+            "Email compliance footer will be automatically appended."
+        )
+
 
     for field in fields:
         normalized_field = field.replace(" ", "")
@@ -2040,10 +2248,8 @@ def review_template_ai_basic(template_type, message_text):
             score -= 10
             notes.append(f"⚠️ Missing recommended merge field: {field}")
 
-    if len(message_text) > 160:
-        score -= 10
-        notes.append("Message may exceed one SMS segment.")
 
+  
     if score >= 90:
         risk = "Low"
     elif score >= 70:
@@ -2169,6 +2375,133 @@ def send_compliant_sms(spa_id, client_id, recipient_phone, message_body, message
 #
 #   <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 #####################################################################
+
+
+
+
+
+
+
+
+
+
+
+#####################################
+#
+#   GET SYSTEM SETTING
+#
+#
+###################################
+
+
+
+def get_system_setting(key, default=None):
+    ...
+
+
+
+
+
+
+
+
+#####################################
+#
+#   GET SET SYSTEM  SETTING
+#
+#
+###################################
+
+
+
+def set_system_setting(key, value):
+    ...
+
+
+
+
+
+
+
+
+#####################################
+#
+#   GET PLATFORM SETTING
+#
+#
+###################################
+
+
+
+def get_system_setting_int(setting_key, default_value):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT setting_value
+        FROM system_settings
+        WHERE setting_key = %s
+        LIMIT 1
+    """, (setting_key,))
+
+    row = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if not row:
+        return default_value
+
+    try:
+        return int(row[0])
+    except (TypeError, ValueError):
+        return default_value
+
+
+
+
+
+
+
+#####################################
+#
+#   VALIDATE SMS LENGTH
+#
+#
+###################################
+
+
+
+def validate_sms_length(message_body):
+    message_body = message_body or ""
+
+    max_characters = get_system_setting_int(
+        "sms_max_characters",
+        320
+    )
+
+    if len(message_body) > max_characters:
+        return {
+            "valid": False,
+            "error": f"SMS message is {len(message_body)} characters. Maximum allowed is {max_characters}."
+        }
+
+    return {
+        "valid": True,
+        "error": None
+    }
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -5023,34 +5356,46 @@ def messaging_compliance_campaign():
 #     COMPLIANCE TEMPLATES
 #
 #############################
+
+
+
 @app.route("/admin/messaging-compliance/template-library")
 @login_required
 @spa_required
 def template_review_default():
-    return redirect(url_for("template_review", channel="sms"))
+    language_code = get_request_language()
+
+    return redirect(url_for(
+        "template_review",
+        channel="sms",
+        language_code=language_code
+    ))
 
 
 @app.route("/admin/messaging-compliance/template-library/<channel>")
 @login_required
 @spa_required
 def template_review(channel):
+    spa_id = current_spa_id()
 
-    language_arg = request.args.get("language_code")
+    channel = (channel or "sms").lower().strip()
+    language_code = get_request_language()
+    show_archived = request.args.get("show_archived") == "1"
 
-    if language_arg is None:
-        language_code = normalize_language_code(get_current_language())
-    else:
-        language_code = normalize_language_code(language_arg)
-
-    if channel not in ["sms", "email"]:
+    if channel not in ("sms", "email"):
         flash("Invalid template library.", "warning")
-        return redirect(url_for("template_review", channel="sms"))
+        return redirect(url_for(
+            "template_review",
+            channel="sms",
+            language_code=language_code
+        ))
 
     page_title = (
         "SMS Messaging Template Library"
         if channel == "sms"
         else "Email Messaging Template Library"
     )
+
     switch_channel = "email" if channel == "sms" else "sms"
 
     switch_label = (
@@ -5058,14 +5403,11 @@ def template_review(channel):
         if channel == "sms"
         else "Go To: 💬 SMS Templates"
     )
-    spa_id = session.get("spa_id")
-
-    show_archived = request.args.get("show_archived") == "1"
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    query = """
+    cur.execute("""
         SELECT
             t.template_type,
             t.display_name,
@@ -5078,76 +5420,31 @@ def template_review(channel):
             m.updated_at,
             m.ai_risk_level,
             m.channel,
-            m.is_archived
+            COALESCE(m.is_archived, FALSE) AS is_archived,
+            m.language_code
         FROM messaging_template_types t
 
         LEFT JOIN messaging_templates m
             ON t.template_type = m.template_type
            AND m.spa_id = %s
            AND m.channel = %s
-           AND (%s = '' OR m.language_code = %s)
-    """      
-    
-    params = [
-        spa_id,
-        channel,
-        language_code,
-        language_code
-    ]
-       
-    if not show_archived:
-        query += """
-            AND COALESCE(m.is_archived, FALSE) = FALSE
-        """        
-                
-    query = """
-        SELECT
-            t.template_type,
-            t.display_name,
-            t.template_category,
-            m.template_id,
-            m.template_name,
-            m.is_active,
-            m.approved_for_use,
-            m.ai_score,
-            m.updated_at,
-            m.ai_risk_level,
-            m.channel,
-            m.is_archived,
-            m.language_code
-        FROM messaging_template_types t
-
-        LEFT JOIN messaging_templates m
-            ON t.template_type = m.template_type
-        AND m.spa_id = %s
-        AND m.channel = %s
-        AND (%s = '' OR m.language_code = %s)
+           AND m.language_code = %s
+           AND (
+                %s = TRUE
+                OR COALESCE(m.is_archived, FALSE) = FALSE
+           )
 
         WHERE t.is_active = TRUE
-    """
 
-    params = [
+        ORDER BY t.display_order
+    """, (
         spa_id,
         channel,
         language_code,
-        language_code
-    ]
-
-    if not show_archived:
-        query += """
-            AND COALESCE(m.is_archived, FALSE) = FALSE
-        """
-
-    query += """
-        ORDER BY t.display_order
-    """
-
-    cur.execute(query, params)
+        show_archived
+    ))
 
     templates = cur.fetchall()
-
-    print("TEMPLATE LIBRARY CHANNEL:", channel, flush=True)
-    print("TEMPLATES:", templates, flush=True)
 
     completed = sum(1 for t in templates if t[3])
     total = len(templates)
@@ -5158,20 +5455,208 @@ def template_review(channel):
     cur.close()
     conn.close()
 
+    print("SUPPORTED LANGUAGES:", supported_languages, flush=True)
+    print("CURRENT LANGUAGE:", language_code, flush=True)
+
     return render_template(
         "admin/messaging_compliance/template_review.html",
         templates=templates,
         channel=channel,
+        language_code=language_code,
         show_archived=show_archived,
         completed=completed,
         total=total,
         percent=percent,
         page_title=page_title,
         switch_channel=switch_channel,
-        supported_languages=supported_languages,
         switch_label=switch_label,
-        language_code=language_code
+        supported_languages=supported_languages
     )
+
+
+
+
+
+
+###################################
+#
+#   EDIT MESSAGING TEMPLATE BY ID
+#   6/30/26
+###################################
+
+
+@app.route("/admin/messaging-compliance/templates/edit/<int:template_id>", methods=["GET", "POST"])
+@login_required
+@spa_required
+def edit_messaging_template_by_id(template_id):
+    spa_id = current_spa_id()
+    language_code = get_request_language()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            m.template_id,              -- 0
+            m.spa_id,                   -- 1
+            m.channel,                  -- 2
+            m.template_type,            -- 3
+            m.template_name,            -- 4
+            m.language_code,            -- 5
+            m.subject_text,             -- 6
+            m.message_text,             -- 7
+            m.is_active,                -- 8
+            m.approved_for_use,         -- 9
+            m.ai_score,                 -- 10
+            m.ai_review,                -- 11
+            m.ai_risk_level,            -- 12
+            m.last_ai_reviewed_at,      -- 13
+            COALESCE(is_archived, FALSE), -- 14
+            t.display_name            --15
+        FROM messaging_templates m
+
+        LEFT JOIN messaging_template_types t
+            ON m.template_type = t.template_type
+
+        WHERE m.template_id = %s
+        AND m.spa_id = %s
+                LIMIT 1
+    """, (template_id, spa_id))
+
+    template = cur.fetchone()
+
+    if not template:
+        cur.close()
+        conn.close()
+        flash("Template not found.", "warning")
+        return redirect(url_for(
+            "template_review",
+            channel="sms",
+            language_code=language_code
+        ))
+
+    channel = template[2]
+    template_type = template[3]
+    template_name = template[4] or "Default"
+    display_name = template[15] or template_type.replace("_", " ").title()
+    
+
+    template_language_code = normalize_language_code(template[5] or language_code)
+
+    language_name = get_language_name(template_language_code)
+
+    is_default_template = template_name.strip().lower() == "default"
+
+    if request.method == "POST":
+        submitted_template_name = (
+            request.form.get("template_name")
+            or template_name
+            or "Default"
+        ).strip()
+
+        final_template_name = "Default" if is_default_template else submitted_template_name
+
+        form_language_code = normalize_language_code(
+            request.form.get("language_code")
+            or template_language_code
+        )
+
+        subject_text = (request.form.get("subject_text") or "").strip()
+        message_text = (request.form.get("message_text") or "").strip()
+
+        if channel == "sms":
+            subject_text = None
+
+        if not message_text:
+            flash("Message text is required.", "warning")
+            cur.close()
+            conn.close()
+            return redirect(url_for(
+                "edit_messaging_template_by_id",
+                template_id=template_id,
+                language_code=form_language_code
+            ))
+
+        is_active = request.form.get("is_active") == "on"
+        approved_for_use = request.form.get("approved_for_use") == "on"
+
+        ai_result = review_template_ai_basic(
+            template_type,
+            message_text,
+            channel=channel
+        )
+
+        cur.execute("""
+            UPDATE messaging_templates
+            SET
+                template_name = %s,
+                language_code = %s,
+                subject_text = %s,
+                message_text = %s,
+                is_active = %s,
+                approved_for_use = %s,
+                ai_score = %s,
+                ai_review = %s,
+                ai_risk_level = %s,
+                last_ai_reviewed_at = NOW(),
+                updated_at = NOW()
+            WHERE template_id = %s
+              AND spa_id = %s
+        """, (
+            final_template_name,
+            form_language_code,
+            subject_text,
+            message_text,
+            is_active,
+            approved_for_use,
+            ai_result["score"],
+            ai_result["review"],
+            ai_result["risk_level"],
+            template_id,
+            spa_id
+        ))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        flash("Template saved and AI reviewed.", "success")
+
+        return redirect(url_for(
+            "edit_messaging_template_by_id",
+            template_id=template_id,
+            language_code=form_language_code
+        ))
+
+    footer_key = "sms_opt_out" if channel == "sms" else "email_unsubscribe"
+    compliance_footer = get_messaging_footer(footer_key)
+    supported_languages = get_supported_languages()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "admin/messaging_compliance/edit_messaging_template.html",
+        template=template,
+        template_id=template_id,
+        channel=channel,
+        template_type=template_type,
+        template_name=template_name,
+        display_name=display_name,
+        language_name=language_name,
+        language_code=template_language_code,
+        compliance_footer=compliance_footer,
+        supported_languages=supported_languages,
+        is_default_template=is_default_template,
+        create_mode=False
+    )
+
+
+
+
+
+
+
 
 
 
@@ -5343,139 +5828,101 @@ def duplicate_messaging_template(template_id):
 
 ############################
 #      
-#           AI Check
-#     COMPLIANCE TEMPLATE TYPES
-#
+#         CREATE MESSAGING TEMPLATE
+#     
+#   6-30-26
 #############################
+##
+#################
 
-#################. OLD ROUTE
+
+
 @app.route(
     "/admin/messaging-compliance/templates/<channel>/<template_type>",
     methods=["GET", "POST"]
 )
 @login_required
 @spa_required
-def edit_messaging_template(channel, template_type):
+def create_messaging_template(channel, template_type):
+    spa_id = current_spa_id()
+    language_code = get_request_language()
 
-    channel = (channel or "sms").lower()
+    channel = (channel or "sms").lower().strip()
 
     if channel not in ("sms", "email"):
         flash("Invalid template channel.", "warning")
-        return redirect(url_for("template_review", channel="sms"))
-
-    spa_id = current_spa_id()
+        return redirect(url_for(
+            "template_review",
+            channel="sms",
+            language_code=language_code
+        ))
 
     conn = get_db_connection()
     cur = conn.cursor()
 
+    cur.execute("""
+        SELECT template_id
+        FROM messaging_templates
+        WHERE spa_id = %s
+          AND channel = %s
+          AND template_type = %s
+          AND language_code = %s
+          AND COALESCE(is_archived, FALSE) = FALSE
+        ORDER BY updated_at DESC, template_id DESC
+        LIMIT 1
+    """, (
+        spa_id,
+        channel,
+        template_type,
+        language_code
+    ))
+
+    existing = cur.fetchone()
+
+    if existing:
+        cur.close()
+        conn.close()
+        return redirect(url_for(
+            "edit_messaging_template_by_id",
+            template_id=existing[0],
+            language_code=language_code
+        ))
+
     if request.method == "POST":
-        template_name = (request.form.get("template_name") or "").strip() or "Default"
+        template_name = (request.form.get("template_name") or "Default").strip()
+        form_language_code = normalize_language_code(
+            request.form.get("language_code") or language_code
+        )
+
         subject_text = (request.form.get("subject_text") or "").strip()
         message_text = (request.form.get("message_text") or "").strip()
 
-        language_code = normalize_language_code(
-        request.form.get("language_code") or get_current_language()
-        )
-
-        if not template_name:
-            flash("Template name is required.", "warning")
-            cur.close()
-            conn.close()
-            return redirect(url_for(
-                "edit_messaging_template",
-                channel=channel,
-                template_type=template_type
-            ))
+        if channel == "sms":
+            subject_text = None
 
         if not message_text:
             flash("Message text is required.", "warning")
             cur.close()
             conn.close()
             return redirect(url_for(
-                "edit_messaging_template",
+                "create_messaging_template",
                 channel=channel,
-                template_type=template_type
+                template_type=template_type,
+                language_code=form_language_code
             ))
 
-        if channel == "sms":
-            subject_text = None
-
-        ai_result = review_template_ai_basic(template_type, message_text)
+        ai_result = review_template_ai_basic(
+            template_type,
+            message_text,
+            channel=channel
+        )
 
         is_active = ai_result["score"] > 60
         approved_for_use = ai_result["score"] > 60
 
         cur.execute("""
-            SELECT template_id
-            FROM messaging_templates
-            WHERE spa_id = %s
-              AND channel = %s
-              AND template_type = %s
-              AND language_code = %s
-            ORDER BY updated_at DESC, template_id DESC
-            LIMIT 1
-        """, (spa_id, channel, template_type, language_code))
-
-        existing = cur.fetchone()
-
-        if existing:
-            cur.execute("""
-                UPDATE messaging_templates
-                SET
-                    template_name = %s,
-                    subject_text = %s,
-                    message_text = %s,
-                    language_code = %s,
-                    is_active = %s,
-                    approved_for_use = %s,
-                    ai_score = %s,
-                    ai_review = %s,
-                    ai_risk_level = %s,
-                    last_ai_reviewed_at = NOW(),
-                    updated_at = NOW()
-                WHERE template_id = %s
-                  AND spa_id = %s
-                  AND channel = %s
-                  AND template_type = %s
-            """, (
-                template_name,
-                subject_text,
-                message_text,
-                language_code,
-                is_active,
-                approved_for_use,
-                ai_result["score"],
-                ai_result["review"],
-                ai_result["risk_level"],
-                existing[0],
-                spa_id,
-                channel,
-                template_type
-            ))
-
-        else:
-            cur.execute("""
-                INSERT INTO messaging_templates
-                (
-                    spa_id,
-                    channel,
-                    template_name,
-                    template_type,
-                    language_code,
-                    subject_text,
-                    message_text,
-                    is_active,
-                    approved_for_use,
-                    ai_score,
-                    ai_review,
-                    ai_risk_level,
-                    last_ai_reviewed_at,
-                    created_at,
-                    updated_at
-                )
-                VALUES
-                (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW(),NOW())
-            """, (
+            INSERT INTO messaging_templates
+            (
                 spa_id,
                 channel,
                 template_name,
@@ -5485,248 +5932,66 @@ def edit_messaging_template(channel, template_type):
                 message_text,
                 is_active,
                 approved_for_use,
-                ai_result["score"],
-                ai_result["review"],
-                ai_result["risk_level"]
-            ))
-
-        conn.commit()
-        cur.close()
-        conn.close()
-
-        flash("Template saved and AI reviewed.", "success")
-
-        return redirect(url_for(
-            "edit_messaging_template",
-            channel=channel,
-            template_type=template_type
-        ))
-    
-    language_code = normalize_language_code(get_current_language())
-
-    cur.execute("""
-        SELECT
-            template_id,              -- 0
-            template_name,            -- 1
-            template_type,            -- 2
-            channel,                  -- 3
-            subject_text,             -- 4
-            message_text,             -- 5
-            is_active,                -- 6
-            approved_for_use,         -- 7
-            ai_score,                 -- 8
-            ai_review,                -- 9
-            ai_risk_level,            -- 10
-            last_ai_reviewed_at,       -- 11
-            COALESCE(language_code, 'EN') --12
-        FROM messaging_templates
-        WHERE spa_id = %s
-          AND channel = %s
-          AND template_type = %s
-          AND language_code = %s
-        ORDER BY updated_at DESC, template_id DESC
-        LIMIT 1
-    """, (spa_id, channel, template_type, language_code))
-
-    template = cur.fetchone()
-
-    is_default_template = False
-
-    if template:
-        is_default_template = is_default_template_name(template[1])
-
-
-    if template:
-        print("TEMPLATE NAME:", template[1], flush=True)
-
-    print("IS DEFAULT:", is_default_template, flush=True)
-
-
-
-
-    footer_key = "sms_opt_out" if channel == "sms" else "email_unsubscribe"
-    compliance_footer = get_messaging_footer(footer_key)
-
-    supported_languages = get_supported_languages()   
-
-    cur.close()
-    conn.close()
-
-    return render_template(
-        "admin/messaging_compliance/edit_template.html",
-        template=template,
-        template_type=template_type,
-        channel=channel,
-        compliance_footer=compliance_footer,
-        is_default_template=is_default_template,
-        language_code=language_code,
-        supported_languages=supported_languages
-    )
-
-
-
-
-
-
-
-###################################
-#
-#   ADD NEW EDIT ROUTE
-#
-#######################################
-#############. THIS IS NEW EDIT ROUTE
-
-@app.route(
-    "/admin/messaging-compliance/templates/edit/<int:template_id>",
-    methods=["GET", "POST"]
-)
-@login_required
-@spa_required
-def edit_messaging_template_by_id(template_id):
-
-    spa_id = current_spa_id()
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    cur.execute("""
-        SELECT
-            template_id,              -- 0
-            template_name,            -- 1
-            template_type,            -- 2
-            channel,                  -- 3
-            subject_text,             -- 4
-            message_text,             -- 5
-            is_active,                -- 6
-            approved_for_use,         -- 7
-            ai_score,                 -- 8
-            ai_review,                -- 9
-            ai_risk_level,            -- 10
-            last_ai_reviewed_at,      -- 11
-            COALESCE(is_archived,FALSE), -- 12
-            COALESCE(language_code,'EN') -- 13
-        FROM messaging_templates
-        WHERE template_id = %s
-          AND spa_id = %s
-        LIMIT 1
-    """, (template_id, spa_id))
-
-    template = cur.fetchone()
-
-    if not template:
-        cur.close()
-        conn.close()
-        flash("Template not found.", "warning")
-        return redirect(url_for("template_review", channel="sms"))
-
-    channel = template[3]
-    template_type = template[2]
-
-    is_default_template = is_default_template_name(template[1])
-
-
-    if request.method == "POST":
-        action = request.form.get("action")
-
-        if action == "archive" and is_default_template:
-            flash("Default templates are protected and cannot be archived.", "warning")
-            cur.close()
-            conn.close()
-            return redirect(url_for(
-                "edit_messaging_template_by_id",
-                template_id=template_id
-            ))
-
-        if is_default_template:
-            template_name = template[1]
-        else:
-            template_name = (request.form.get("template_name") or "").strip()
-
-        subject_text = (request.form.get("subject_text") or "").strip()
-        message_text = (request.form.get("message_text") or "").strip()
-        language_code = (request.form.get("language_code") or "EN").strip().upper()
-
-        if language_code not in ("EN", "ES"):
-            language_code = "EN"
-
-        if not template_name:
-            flash("Template name is required.", "warning")
-            cur.close()
-            conn.close()
-            return redirect(url_for("edit_messaging_template_by_id", template_id=template_id))
-
-        if not message_text:
-            flash("Message text is required.", "warning")
-            cur.close()
-            conn.close()
-            return redirect(url_for("edit_messaging_template_by_id", template_id=template_id))
-
-        if channel == "sms":
-            subject_text = None
-
-        ai_result = review_template_ai_basic(template_type, message_text)
-
-        approved_for_use = ai_result["score"] >= 80 and ai_result["risk_level"] != "High"
-        is_active = approved_for_use and not template[12]
-
-        cur.execute("""
-            UPDATE messaging_templates
-               SET template_name = %s,
-                   subject_text = %s,
-                   message_text = %s,
-                   language_code = %s,
-                   is_active = %s,
-                   approved_for_use = %s,
-                   ai_score = %s,
-                   ai_review = %s,
-                   ai_risk_level = %s,
-                   last_ai_reviewed_at = NOW(),
-                   updated_at = NOW()
-             WHERE template_id = %s
-               AND spa_id = %s
+                ai_score,
+                ai_review,
+                ai_risk_level,
+                last_ai_reviewed_at,
+                created_at,
+                updated_at
+            )
+            VALUES
+            (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW(),NOW())
+            RETURNING template_id
         """, (
+            spa_id,
+            channel,
             template_name,
+            template_type,
+            form_language_code,
             subject_text,
             message_text,
-            language_code,
             is_active,
             approved_for_use,
             ai_result["score"],
             ai_result["review"],
-            ai_result["risk_level"],
-            template_id,
-            spa_id
+            ai_result["risk_level"]
         ))
+
+        new_template_id = cur.fetchone()[0]
 
         conn.commit()
         cur.close()
         conn.close()
 
-        flash("Template saved and AI reviewed.", "success")
+        flash("Template created and AI reviewed.", "success")
 
         return redirect(url_for(
             "edit_messaging_template_by_id",
-            template_id=template_id
+            template_id=new_template_id,
+            language_code=form_language_code
         ))
 
     footer_key = "sms_opt_out" if channel == "sms" else "email_unsubscribe"
     compliance_footer = get_messaging_footer(footer_key)
-
     supported_languages = get_supported_languages()
 
     cur.close()
     conn.close()
 
     return render_template(
-        "admin/messaging_compliance/edit_template.html",
-        template=template,
-        template_type=template_type,
+        "admin/messaging_compliance/edit_messaging_template.html",
+        template=None,
+        template_id=None,
         channel=channel,
+        template_type=template_type,
+        template_name="Default",
+        language_code=language_code,
         compliance_footer=compliance_footer,
-        is_default_template=is_default_template,
-        language_code=(template[13] or "EN").upper(),
-        supported_languages=supported_languages
+        supported_languages=supported_languages,
+        is_default_template=False,
+        create_mode=True
     )
+
 
 
 
@@ -5740,32 +6005,61 @@ def edit_messaging_template_by_id(template_id):
 ############################
 #      
 #
-#     TEMPLATE PREVIEW
-#
+#     PREVIEW MESSAGING TEMPLATE BY ID
+#   6-30-26
 #############################
+
+
 @app.route(
-    "/admin/messaging-compliance/templates/<channel>/<template_type>/preview"
+    "/admin/messaging-compliance/templates/preview/<int:template_id>",
+    methods=["GET"]
 )
 @login_required
 @spa_required
-def preview_messaging_template(channel, template_type):
+def preview_messaging_template_by_id(template_id):
     spa_id = current_spa_id()
 
-    language_arg = request.args.get("language_code")
+    conn = get_db_connection()
+    cur = conn.cursor()
 
-    if language_arg is None:
-        language_code = normalize_language_code(get_current_language())
-    else:
-        language_code = normalize_language_code(language_arg)
+    cur.execute("""
+        SELECT
+            m.template_id,        -- 0
+            m.channel,            -- 1
+            m.template_type,      -- 2
+            m.template_name,      -- 3
+            m.language_code,      -- 4
+            m.subject_text,       -- 5
+            m.message_text,       -- 6
+            t.display_name        -- 7
+        FROM messaging_templates m
+        LEFT JOIN messaging_template_types t
+            ON m.template_type = t.template_type
+        WHERE m.template_id = %s
+          AND m.spa_id = %s
+          AND COALESCE(m.is_archived, FALSE) = FALSE
+        LIMIT 1
+    """, (template_id, spa_id))
 
-    print("PREVIEW LANGUAGE ARG:", language_arg, flush=True)
-    print("PREVIEW LANGUAGE CODE:", language_code, flush=True)
+    template = cur.fetchone()
 
+    cur.close()
+    conn.close()
+
+    if not template:
+        flash("Template not found.", "warning")
+        return redirect(url_for(
+            "template_review",
+            channel="sms",
+            language_code=get_request_language()
+        ))
+
+    channel = template[1]
+    template_type = template[2]
+    template_name = template[3] or "Default"
+    language_code = normalize_language_code(template[4] or get_default_language())
+    display_name = template[7] or template_type.replace("_", " ").title()
     language_name = get_language_name(language_code)
-
-    if channel not in ("sms", "email"):
-        flash("Invalid communication channel.", "warning")
-        return redirect(url_for("template_review"))
 
     sample_data = {
         "client_id": None,
@@ -5784,30 +6078,37 @@ def preview_messaging_template(channel, template_type):
     }
 
     preview = build_communication(
-        spa_id,
-        channel,
-        template_type,
-        sample_data
+        spa_id=spa_id,
+        channel=channel,
+        template_type=template_type,
+        merge_data=sample_data,
+        language_code=language_code,
+        template_id=template_id
     )
 
     if not preview:
-        flash("No approved active template found for preview.", "warning")
-        return redirect(
-            url_for(
-                "edit_messaging_template",
-                channel=channel,
-                template_type=template_type
-            )
-        )
+        flash("Unable to build preview.", "warning")
+        return redirect(url_for(
+            "edit_messaging_template_by_id",
+            template_id=template_id,
+            language_code=language_code
+        ))
 
     return render_template(
         "admin/messaging_compliance/template_preview.html",
+        template_id=template_id,
+        display_name=display_name,
+        template_name=template_name,
         channel=channel,
         template_type=template_type,
         preview=preview,
         language_code=language_code,
         language_name=language_name
     )
+
+
+
+
 
 
 
@@ -9305,6 +9606,7 @@ def get_active_messaging_template_types(spa_id, channel):
 @spa_required
 def sms_home():
     spa_id = current_spa_id()
+    language_code=language_code
 
     if not sms_email_terms_accepted(spa_id):
         flash(
@@ -9679,7 +9981,7 @@ def sms_group_preview():
 #    SMS GROUP SEND
 #
 #
-#  
+#   6-30-26
 #   ---------------------
 
 
@@ -9690,6 +9992,7 @@ def sms_group_send():
     print("SMS GROUP SEND ROUTE HIT", flush=True)
 
     spa_id = current_spa_id()
+    language_code = get_request_language()
 
     if not sms_email_terms_accepted(spa_id):
         flash(
@@ -9698,31 +10001,39 @@ def sms_group_send():
         )
         return redirect(url_for("sms_email_terms"))
 
-
     template_type = request.form.get("template_type")
+    template_id_raw = request.form.get("template_id")
     client_ids = request.form.getlist("client_ids")
- 
+
+    template_id = int(template_id_raw) if template_id_raw else None
+
     if not template_type:
         flash("SMS template is required.", "error")
-        return redirect(url_for("sms_home"))
+        return redirect(url_for(
+            "sms_home",
+            language_code=language_code,
+            template_id=template_id
+        ))
 
     if not client_ids:
         flash("Please select at least one client.", "error")
-        return redirect(url_for("sms_home"))
+        return redirect(url_for(
+            "sms_home",
+            template_type=template_type,
+            template_id=template_id,
+            language_code=language_code
+        ))
 
     if len(client_ids) > 5:
         flash("You can send SMS to a maximum of 5 clients at a time.", "error")
-        return redirect(url_for("sms_home"))
-
+        return redirect(url_for(
+            "sms_home",
+            template_type=template_type,
+            template_id=template_id,
+            language_code=language_code
+        ))
 
     client_ids = [int(x) for x in client_ids]
-
-
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-
 
     sent_count = 0
     failed_count = 0
@@ -9735,7 +10046,12 @@ def sms_group_send():
 
         if not clients:
             flash("No eligible SMS clients found.", "error")
-            return redirect(url_for("sms_home"))
+            return redirect(url_for(
+                "sms_home",
+                template_type=template_type,
+                template_id=template_id,
+                language_code=language_code
+            ))
 
         for client in clients:
             (
@@ -9748,92 +10064,69 @@ def sms_group_send():
             ) = client
 
             merge_data = {
+                "client_id": client_id,
+                "language_code": language_code,
                 "client_first_name": first_name,
                 "client_full_name": f"{first_name} {last_name}".strip(),
                 "spa_name": get_spa_name(spa_id),
             }
 
-            built = build_communication(
-                spa_id=spa_id,
-                channel="sms",
-                template_type=template_type,
-                merge_data=merge_data
+            print(
+                "SMS SEND LANGUAGE:",
+                language_code,
+                "TEMPLATE ID:",
+                template_id,
+                "TYPE:",
+                template_type,
+                flush=True
             )
 
-
-
-            if not built or not built.get("body"):
-                flash("SMS message could not be built. Check that an approved active template exists.", "danger")
-                return redirect(url_for("sms_home"))
-
-
-
-            if not built or not built.get("body"):
-                failed_count += 1
-                print("BUILD COMMUNICATION FAILED:", built, flush=True)
-                continue
-
-            personalized_message = built["body"] 
-      
-      
-            print("ABOUT TO SEND SMS TO:", phone, flush=True)
-
-            try:
-                result = send_compliant_sms(
-                    spa_id=spa_id,
-                    client_id=client_id,
-                    recipient_phone=phone,
-                    message_body=personalized_message,
-                    message_type="group_send"
-                )
-
-                print("SMS SEND RESULT:", result, flush=True)
-
-                status = result.get("status")
-                provider_message_id = result.get("provider_message_id")
-                provider_status = result.get("provider_status")
-                provider_error_code = result.get("provider_error_code")
-                provider_error_message = result.get("provider_error_message")
-
-                if result.get("success"):
-                    sent_count += 1
-                else:
-                    failed_count += 1
-
-            except Exception as sms_error:
-                print("SMS SEND ERROR:", sms_error, flush=True)
-
-                status = "error"
-                provider_message_id = None
-                provider_status = None
-                provider_error_code = None
-                provider_error_message = str(sms_error)
-                failed_count += 1
+            result = send_communication(
+                spa_id=spa_id,
+                channel="sms",
+                recipient=phone,
+                template_type=template_type,
+                merge_data=merge_data,
+                client_id=client_id,
+                message_type="group_send",
+                language_code=language_code,
+                template_id=template_id
+            )
 
             log_sms_message(
                 spa_id=spa_id,
                 client_id=client_id,
                 recipient_phone=phone,
-                message_body=personalized_message,
-                message_type="group",
+                message_body=result.get("message_body",""),
+                message_type="group_send",
                 direction="outbound",
-                status=status,
-                provider_message_id=provider_message_id,
-                provider_status=provider_status,
-                provider_error_code=provider_error_code,
-                provider_error_message=provider_error_message
+                status="sent" if result.get("success") else "failed",
+                provider_message_id=result.get("provider_message_id"),
+                provider_status=result.get("provider_status"),
+                provider_error_code=result.get("provider_error_code"),
+                provider_error_message=result.get("error")
             )
+
+
+            print("SMS SEND RESULT:", result, flush=True)
+
+            if result.get("success"):
+                sent_count += 1
+            else:
+                failed_count += 1
 
         flash(f"SMS sent: {sent_count}. Failed: {failed_count}.", "success")
         return redirect(url_for("sms_history_all"))
 
-    finally:
-        cur.close()
-        conn.close()
-
-
-
-
+    except Exception as error:
+        print("SMS GROUP SEND ERROR:", error, flush=True)
+        flash("Something went wrong while sending SMS messages.", "danger")
+        return redirect(url_for(
+            "sms_home",
+            template_type=template_type,
+            template_id=template_id,
+            language_code=language_code
+        ))
 
 
 
@@ -10568,11 +10861,15 @@ def general_email_preview():
 # Refactor birthday month emails to use centralized Email Communications Pipeline.
 
 
+
+
+
 @app.route("/general-email/send", methods=["POST"])
 @login_required
 @spa_required
 def general_email_send():
     spa_id = current_spa_id()
+    language_code = get_request_language()
 
     if not sms_email_terms_accepted(spa_id):
         flash(
@@ -10581,16 +10878,18 @@ def general_email_send():
         )
         return redirect(url_for("sms_email_terms"))
 
-
     spa_name = get_spa_name(spa_id)
 
-    template_id = request.form.get("template_id")
+    template_id_raw = request.form.get("template_id")
     client_ids = request.form.getlist("client_ids")
 
+    template_id = int(template_id_raw) if template_id_raw else None
+
+    #----------------DEBUG TODO -----------
     print("GENERAL EMAIL SEND HIT", flush=True)
     print("TEMPLATE ID:", template_id, flush=True)
     print("CLIENT IDS:", client_ids, flush=True)
-
+    print("LANGUAGE:", language_code, flush=True)
     print("MAILGUN DOMAIN:", MAILGUN_DOMAIN, flush=True)
     print("MAILGUN FROM:", MAILGUN_FROM, flush=True)
     print(
@@ -10598,15 +10897,24 @@ def general_email_send():
         MAILGUN_API_KEY[:4] if MAILGUN_API_KEY else None,
         flush=True
     )
+    #--------------------------------------
+
 
 
     if not template_id:
         flash("Please select an email template.", "error")
-        return redirect(url_for("general_email"))
+        return redirect(url_for(
+            "general_email",
+            language_code=language_code
+        ))
 
     if not client_ids:
         flash("Please select at least one client.", "error")
-        return redirect(url_for("general_email"))
+        return redirect(url_for(
+            "general_email",
+            template_id=template_id,
+            language_code=language_code
+        ))
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -10622,20 +10930,33 @@ def general_email_send():
               AND spa_id = %s
               AND channel = 'email'
               AND is_active = TRUE
-              AND approved_for_use = TRUE      
+              AND approved_for_use = TRUE
+              AND COALESCE(is_archived, FALSE) = FALSE
+            LIMIT 1
         """, (template_id, spa_id))
 
         template = cur.fetchone()
 
         if not template:
             flash("Template not found or inactive.", "error")
-            return redirect(url_for("general_email"))
+            return redirect(url_for(
+                "general_email",
+                language_code=language_code
+            ))
 
         template_type = template[0]
 
-        print("GENERAL EMAIL TEMPLATE TYPE:", template_type, flush=True)
+        print(
+            "GENERAL EMAIL SEND:",
+            "LANGUAGE:", language_code,
+            "TEMPLATE ID:", template_id,
+            "TYPE:", template_type,
+            flush=True
+        )
 
-        for client_id in client_ids:
+        for raw_client_id in client_ids:
+            client_id = int(raw_client_id)
+
             cur.execute("""
                 SELECT client_id, first_name, last_name, email
                 FROM clients
@@ -10644,6 +10965,7 @@ def general_email_send():
                   AND email IS NOT NULL
                   AND email <> ''
             """, (client_id, spa_id))
+
             client = cur.fetchone()
 
             if not client:
@@ -10652,61 +10974,59 @@ def general_email_send():
 
             client_id, first_name, last_name, email = client
 
-            communication = build_communication(
+            merge_data = {
+                "client_id": client_id,
+                "language_code": language_code,
+                "client_first_name": first_name or "",
+                "client_last_name": last_name or "",
+                "client_full_name": f"{first_name or ''} {last_name or ''}".strip(),
+                "first_name": first_name or "",
+                "last_name": last_name or "",
+                "email": email or "",
+                "spa_name": spa_name or "",
+                "business_phone": "",
+                "spa_phone": "",
+                "appointment_date": "",
+                "appointment_time": "",
+                "service_name": "",
+                "unsubscribe_link": ""
+            }
+
+            result = send_communication(
                 spa_id=spa_id,
                 channel="email",
+                recipient=email,
                 template_type=template_type,
-                merge_data={
-                    "client_first_name": first_name or "",
-                    "client_last_name": last_name or "",
-                    "client_full_name": f"{first_name or ''} {last_name or ''}".strip(),
-                    "first_name": first_name or "",
-                    "last_name": last_name or "",
-                    "email": email or "",
-                    "spa_name": spa_name or "",
-                    "business_phone": "",
-                    "spa_phone": "",
-                    "appointment_date": "",
-                    "appointment_time": "",
-                    "service_name": "",
-                    "unsubscribe_link": ""
-                }
+                merge_data=merge_data,
+                client_id=client_id,
+                message_type=template_type,
+                language_code=language_code,
+                template_id=template_id
             )
 
-            print("COMMUNICATION RESULT:", communication, flush=True)
+            subject_line = result.get("subject")
+            body = result.get("body")
 
-            subject = communication.get("subject") or f"Message from {spa_name}"
-            body = communication.get("body") or communication.get("message_body")
-
-            if not body:
+            if result and result.get("success"):
+                sent_status = "Sent"
+                error_message = None
+                sent_count += 1
+            else:
+                sent_status = "Failed"
+                error_message = result.get("error") if result else "Email send failed."
                 failed_count += 1
-                continue
 
 
-            try:
-                response = send_email(
-                    to=email,
-                    subject=subject,
-                    body=body
-                )
+            print("GENERAL EMAIL SEND RESULT:", result, flush=True)
 
-                print("MAILGUN STATUS:", response.status_code, flush=True)
-                print("MAILGUN BODY:", response.text, flush=True)
-
-                if response.status_code == 200:
-                    sent_status = "Sent"
-                    error_message = None
-                    sent_count += 1
-                else:
-                    sent_status = "Failed"
-                    error_message = response.text
-                    failed_count += 1
-
-            except Exception as email_error:
-                sent_status = "Error"
-                error_message = str(email_error)
+            if result and result.get("success"):
+                sent_status = "Sent"
+                error_message = None
+                sent_count += 1
+            else:
+                sent_status = "Failed"
+                error_message = result.get("error") if result else "Email send failed."
                 failed_count += 1
-                print("GENERAL EMAIL ERROR:", error_message)
 
             cur.execute("""
                 INSERT INTO email_send_log (
@@ -10726,18 +11046,38 @@ def general_email_send():
                 template_id,
                 template_type,
                 email,
-                subject,
+                subject_line,
                 sent_status,
                 error_message
             ))
 
         conn.commit()
+
         flash(f"Emails sent: {sent_count}. Failed: {failed_count}.", "success")
-        return redirect(url_for("general_email"))
+
+        return redirect(url_for(
+            "general_email",
+            template_id=template_id,
+            language_code=language_code
+        ))
+
+    except Exception as error:
+        print("GENERAL EMAIL SEND ERROR:", error, flush=True)
+        flash("Something went wrong while sending emails.", "danger")
+        return redirect(url_for(
+            "general_email",
+            template_id=template_id,
+            language_code=language_code
+        ))
 
     finally:
         cur.close()
         conn.close()
+
+
+
+
+
 
 
 
@@ -12030,68 +12370,83 @@ def add_email_template():
 
 ############################################################
 #    EMAIL TEMPLATE ARCHIVE
+#
+#
+#
+#       6-30-26
+#
 ############################################################
 
 
-@app.route(
-    "/admin/messaging-compliance/templates/<channel>/<int:template_id>/archive",
-    methods=["POST"]
-)
+@app.route("/admin/messaging-compliance/templates/archive/<int:template_id>", methods=["POST"])
 @login_required
 @spa_required
-def archive_messaging_template(channel, template_id):
-
+def archive_messaging_template(template_id):
     spa_id = current_spa_id()
+    language_code = get_request_language()
 
     conn = get_db_connection()
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT template_name
+        SELECT channel, template_name
         FROM messaging_templates
         WHERE template_id = %s
           AND spa_id = %s
-          AND channel = %s
         LIMIT 1
-    """, (template_id, spa_id, channel))
+    """, (template_id, spa_id))
 
-    template = cur.fetchone()
+    row = cur.fetchone()
 
-    if not template:
+    if not row:
         cur.close()
         conn.close()
         flash("Template not found.", "warning")
-        return redirect(url_for("template_review", channel=channel))
+        return redirect(url_for(
+            "template_review",
+            channel="sms",
+            language_code=language_code
+        ))
 
-    if is_default_template_name(template[0]):
+    channel = row[0]
+    template_name = row[1] or "Default"
+
+    if template_name.strip().lower() == "default":
         cur.close()
         conn.close()
-        flash("Default templates are protected and cannot be archived.", "warning")
+        flash("Default templates cannot be archived.", "warning")
         return redirect(url_for(
-            "edit_messaging_template_by_id",
-            template_id=template_id
+            "template_review",
+            channel=channel,
+            language_code=language_code
         ))
 
     cur.execute("""
         UPDATE messaging_templates
-        SET is_archived = TRUE,
+        SET
+            is_archived = TRUE,
             is_active = FALSE,
             updated_at = NOW()
         WHERE template_id = %s
           AND spa_id = %s
-          AND channel = %s
-    """, (template_id, spa_id, channel))
+    """, (template_id, spa_id))
 
     conn.commit()
-
     cur.close()
     conn.close()
 
     flash("Template archived.", "success")
 
-    return redirect(
-        url_for("template_review", channel=channel)
-    )
+    return redirect(url_for(
+        "template_review",
+        channel=channel,
+        language_code=language_code
+    ))
+
+
+
+
+
 
 
 
