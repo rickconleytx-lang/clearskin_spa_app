@@ -9606,7 +9606,11 @@ def get_active_messaging_template_types(spa_id, channel):
 @spa_required
 def sms_home():
     spa_id = current_spa_id()
-    language_code=language_code
+    language_code = get_request_language()
+
+    template_id = request.args.get("template_id")
+    template_type = request.args.get("template_type")
+
 
     if not sms_email_terms_accepted(spa_id):
         flash(
@@ -11007,6 +11011,8 @@ def general_email_send():
             subject_line = result.get("subject")
             body = result.get("body")
 
+            print("GENERAL EMAIL SEND ERROR:", repr(error), flush=True)
+
             if result and result.get("success"):
                 sent_status = "Sent"
                 error_message = None
@@ -11016,8 +11022,6 @@ def general_email_send():
                 error_message = result.get("error") if result else "Email send failed."
                 failed_count += 1
 
-
-            print("GENERAL EMAIL SEND RESULT:", result, flush=True)
 
             if result and result.get("success"):
                 sent_status = "Sent"
