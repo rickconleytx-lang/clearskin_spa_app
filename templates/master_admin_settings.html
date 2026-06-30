@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Master Admin Settings | Peach Suite Pro{% endblock %}
+{% block content %}
+
+<h1>Master Admin Settings</h1>
+
+<hr>
+
+<h2>Supported Languages</h2>
+
+<table class="table">
+    <tr>
+        <th>Code</th>
+        <th>Language</th>
+        <th>Native Name</th>
+        <th>Locale</th>
+        <th>Active</th>
+        <th>Default</th>
+    </tr>
+
+    {% for lang in supported_languages %}
+    <tr>
+        <td>{{ lang.language_code }}</td>
+        <td>{{ lang.language_name }}</td>
+        <td>{{ lang.native_name }}</td>
+        <td>{{ lang.locale_code or "-" }}</td>
+        <td>{{ "Yes" if lang.is_active else "No" }}</td>
+        <td>{{ "Yes" if lang.is_default else "No" }}</td>
+    </tr>
+    {% endfor %}
+</table>
+
+{% endblock %}

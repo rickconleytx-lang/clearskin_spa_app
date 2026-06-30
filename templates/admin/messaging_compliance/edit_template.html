@@ -26,9 +26,13 @@
 
 
 <a class="btn btn-secondary"
-   href="{{ url_for('template_review', channel=channel) }}">
+   href="{{ url_for('template_review', 
+   channel=channel,
+   language_code=language_code) }}">
     ← Back
 </a>
+
+
 
 
 {% if template and template[8] is not none %}
@@ -125,6 +129,24 @@
        style="width:100%;"
        {% if is_default_template %}readonly{% endif %}
        required>
+
+    <label>Language</label><br>
+
+    <select name="language_code"
+            class="form-control"
+            style="max-width:220px;">
+
+        {% for lang in supported_languages %}
+            <option value="{{ lang.language_code }}"
+                {% if language_code == lang.language_code %}selected{% endif %}>
+                {{ lang.native_name }}
+            </option>
+        {% endfor %}
+
+    </select>
+
+    <br>
+
 
     {% if channel == "email" %}
     <label>Email Subject</label><br>
@@ -287,9 +309,18 @@ STOP Disclosure
 
     <button type="submit" class="btn">Save & AI Review Template</button>
 
-    <a class="btn" href="{{ url_for('template_review', channel='sms') }}">
-        Back to Template Library
+    <a class="btn" href="{{ url_for('template_review', 
+        channel=channel,
+        language_code=language_code) }}">
+            Back to Template Library
     </a>
+
+
+
+
+
+
+
 
 </form>
 

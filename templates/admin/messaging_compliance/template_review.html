@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-
+{% block title %}SMS/Email Review | Peach Suite Pro{% endblock %}
 {% block content %}
 
 <a href="{{ url_for('view_help_page', page_key='message_templates') }}"
@@ -13,26 +13,40 @@
 
 
     <a class="btn btn-outline-primary"
-       href="{{ url_for('template_review', channel=switch_channel) }}">
+        href="{{ url_for('template_review',
+                        channel=switch_channel,
+                        language_code=selected_language,
+                        show_archived=1 if show_archived else None) }}">
         {{ switch_label }}
     </a>
 
 </div>
 
-<p>
-<strong>{{ completed }}</strong> of
-<strong>{{ total }}</strong>
-templates completed ({{ percent }}%).
-</p>
-
-<progress value="{{ completed }}" max="{{ total }}"></progress>
-
-<p>Template count: {{ templates|length }}</p>
 
 <hr>
+<br>
+<form method="GET" class="archive-filter-form">
 
-<form method="GET"
-      class="archive-filter-form">
+    <label>Language</label>
+
+    <select name="language_code"
+        onchange="this.form.submit()"
+        class="form-control">
+
+    {% for lang in supported_languages %}
+        <option value="{{ lang.language_code }}"
+            {% if selected_language == lang.language_code %}selected{% endif %}>
+            {{ lang.native_name }}
+        </option>
+    {% endfor %}
+
+    <option value="" {% if selected_language == "" %}selected{% endif %}>
+        All Languages
+    </option>
+
+</select>
+
+    <br>
 
     <input type="checkbox"
            id="show_archived"
@@ -49,10 +63,26 @@ templates completed ({{ percent }}%).
 </form>
 
 
+<hr>
+<p>
+<strong>{{ completed }}</strong> of
+<strong>{{ total }}</strong>
+templates completed ({{ percent }}%).
+</p>
+
+<progress value="{{ completed }}" max="{{ total }}"></progress>
+
+<p>Template count: {{ templates|length }}</p>
+
+<hr>
+
+
+
 <table class="table">
 
 <tr>
     <th>Template Type / Name</th>
+    <th>Language</th>
     <th>Category</th>
     <th>Compliance</th>
     <th>Lifecycle</th>
@@ -69,7 +99,9 @@ templates completed ({{ percent }}%).
     <small style="color:#666;">
         {{ t[4] or "Default" }}
     </small>
-</td>
+    </td>
+
+    <td>{{ t[12] if t[12] else "-" }}</td>
 
     <td>{{ t[2] }}</td>
 
@@ -167,7 +199,8 @@ templates completed ({{ percent }}%).
             <a class="btn btn-secondary"
             href="{{ url_for('preview_messaging_template',
                                 channel=channel,
-                                template_type=t[0]) }}">
+                                template_type=t[0],
+                                language_code=selected_language) }}">
                 👁 Preview
             </a>
 

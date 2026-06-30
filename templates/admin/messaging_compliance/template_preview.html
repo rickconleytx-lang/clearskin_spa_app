@@ -5,7 +5,8 @@
 <h1>👁 Template Preview</h1>
 
 <p>
-    <strong>Channel:</strong> {{ channel|upper }}
+    <strong>Channel:</strong> {{ channel|upper }}<br>
+    <strong>Language:</strong> {{ language_name }} ({{ language_code }})
 </p>
 
 <hr>
@@ -59,7 +60,9 @@
 </a>
 
 <a class="btn btn-secondary"
-   href="{{ url_for('template_review', channel=channel) }}">
+   href="{{ url_for('template_review', 
+   channel=channel,
+   language_code=language_code) }}">
     ← Back
 </a>
 

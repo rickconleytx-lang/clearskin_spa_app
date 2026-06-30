@@ -17,10 +17,10 @@
     <h2 style="margin-top: 25px;">Row 1</h2>
 
         <div class="narrow-cards">
+            {{ section_card("Settings", "future", url_for('master_admin_settings')) }}
             {{ section_card("Feedbacks", "Feedbacks", url_for('feedback_admin')) }}
             {{ section_card("Daily Change Log", "Record development updates and daily changes", url_for('log_it')) }}
             {{ section_card("Admin", "Admin Home", url_for('admin')) }}
-            {{ section_card("empty", "future", url_for('gift_certificates_home')) }}
             {{ section_card("empty", "", url_for('reminder_queue')) }}
         </div>
 
