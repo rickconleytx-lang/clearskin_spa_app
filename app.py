@@ -119,6 +119,32 @@ def inject_global_context():
 
 
 
+######################################
+#
+#   LOG GODADDY MESSAGE
+#
+######################################
+
+
+def log_godaddy(message):
+    print(f"[GODADDY IMPORT] {message}", flush=True)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 #   ---------------------
 #
@@ -8859,8 +8885,9 @@ def mark_godaddy_import_reviewed(appointment_id):
 
 
 
-        
 def poll_gmail_for_godaddy_bookings(spa_id):
+    log_godaddy("Polling Gmail for GoDaddy booking emails...")
+
     gmail_user = os.getenv("GMAIL_BOOKING_EMAIL")
     gmail_pass = os.getenv("GMAIL_BOOKING_APP_PASSWORD")
 
@@ -8869,16 +8896,20 @@ def poll_gmail_for_godaddy_bookings(spa_id):
     mail.select("inbox")
 
     status, messages = mail.search(None, "ALL")
-
     email_ids = messages[0].split()
+
+    log_godaddy(f"Emails found in inbox: {len(email_ids)}")
 
     if not email_ids:
         mail.logout()
+        log_godaddy("No emails found.")
         return {"status": "no_emails_found"}
 
     results = []
 
     for email_id in email_ids[-5:]:
+        log_godaddy(f"Checking email ID: {email_id.decode()}")
+
         status, msg_data = mail.fetch(email_id, "(RFC822)")
         raw_email = msg_data[0][1]
 
@@ -8888,6 +8919,8 @@ def poll_gmail_for_godaddy_bookings(spa_id):
 
         if isinstance(subject, bytes):
             subject = subject.decode(encoding or "utf-8")
+
+        log_godaddy(f"Subject: {subject}")
 
         body = ""
 
@@ -8906,6 +8939,7 @@ def poll_gmail_for_godaddy_bookings(spa_id):
             "Order #" not in subject
             and "Order #" not in body
         ):
+            log_godaddy("Skipped: no Order # found.")
             results.append({
                 "email_id": email_id.decode(),
                 "subject": subject,
@@ -8919,6 +8953,7 @@ def poll_gmail_for_godaddy_bookings(spa_id):
             or "When:" not in body
             or "Payment status:" not in body
         ):
+            log_godaddy("Skipped: email did not match booking format.")
             results.append({
                 "email_id": email_id.decode(),
                 "subject": subject,
@@ -8927,14 +8962,19 @@ def poll_gmail_for_godaddy_bookings(spa_id):
             continue
 
         try:
+            log_godaddy("Booking email matched. Starting import.")
+
             result = import_godaddy_booking(
                 body,
                 spa_id,
                 subject
             )
 
+            log_godaddy(f"Import result: {result}")
+
             if result["status"] in ("imported", "duplicate"):
                 mail.store(email_id, "+FLAGS", "\\Seen")
+                log_godaddy("Email marked as read.")
 
             results.append({
                 "email_id": email_id.decode(),
@@ -8943,6 +8983,8 @@ def poll_gmail_for_godaddy_bookings(spa_id):
             })
 
         except KeyError as e:
+            log_godaddy(f"Parse failed. Missing field: {e}")
+            log_godaddy("Email left unread for retry.")
             results.append({
                 "email_id": email_id.decode(),
                 "subject": subject,
@@ -8950,16 +8992,25 @@ def poll_gmail_for_godaddy_bookings(spa_id):
                 "missing_field": str(e)
             })
 
+        except Exception as e:
+            log_godaddy(f"Import failed: {e}")
+            log_godaddy("Email left unread for retry.")
+            results.append({
+                "email_id": email_id.decode(),
+                "subject": subject,
+                "status": "import_failed",
+                "error": str(e)
+            })
+
     mail.logout()
+
+    log_godaddy(f"Polling completed. Processed count: {len(results)}")
 
     return {
         "status": "completed",
         "processed_count": len(results),
         "results": results
     }
-
-
-
 
 
 
