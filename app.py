@@ -7884,7 +7884,23 @@ def parse_godaddy_booking_email(body):
         raw_when = when_match.group(1).strip()
         duration_hours = int(when_match.group(2))
 
-        dt = datetime.strptime(raw_when, "%A, %B %d, %Y at %I:%M%p")
+        date_formats = [
+            "%A, %B %d, %Y at %I:%M%p",   # 4:00PM
+            "%A, %B %d, %Y at %I:%M %p",  # 4:00 PM
+            "%A, %B %d, %Y at %H:%M",     # 16:00
+        ]
+
+        dt = None
+
+        for fmt in date_formats:
+            try:
+                dt = datetime.strptime(raw_when, fmt)
+                break
+            except ValueError:
+                continue
+
+        if dt is None:
+            raise ValueError(f"Could not parse GoDaddy appointment datetime: {raw_when}")
 
         data["appointment_datetime"] = dt
         data["duration_minutes"] = duration_hours * 60
