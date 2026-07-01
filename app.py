@@ -5577,9 +5577,17 @@ def edit_messaging_template_by_id(template_id):
                 language_code=form_language_code
             ))
 
-        is_active = request.form.get("is_active") == "on"
-        approved_for_use = request.form.get("approved_for_use") == "on"
+        is_active = template[8]
 
+        ai_result = review_template_ai_basic(
+            template_type,
+            message_text,
+            channel=channel
+        )
+
+        approved_for_use = ai_result["score"] > 60
+
+        
         ai_result = review_template_ai_basic(
             template_type,
             message_text,
@@ -11008,20 +11016,10 @@ def general_email_send():
                 template_id=template_id
             )
 
-            subject_line = result.get("subject")
-            body = result.get("body")
 
-            print("GENERAL EMAIL SEND ERROR:", repr(error), flush=True)
+            print("GENERAL EMAIL SEND RESULT:", result, flush=True)
 
-            if result and result.get("success"):
-                sent_status = "Sent"
-                error_message = None
-                sent_count += 1
-            else:
-                sent_status = "Failed"
-                error_message = result.get("error") if result else "Email send failed."
-                failed_count += 1
-
+            subject_line = result.get("subject") if result else None
 
             if result and result.get("success"):
                 sent_status = "Sent"
@@ -11031,6 +11029,7 @@ def general_email_send():
                 sent_status = "Failed"
                 error_message = result.get("error") if result else "Email send failed."
                 failed_count += 1
+
 
             cur.execute("""
                 INSERT INTO email_send_log (
@@ -12515,6 +12514,7 @@ def restore_messaging_template(channel, template_type):
 ############################################################
 
 
+
 @app.route(
     "/admin/messaging-compliance/templates/<int:template_id>/enable",
     methods=["POST"]
@@ -12522,41 +12522,77 @@ def restore_messaging_template(channel, template_type):
 @login_required
 @spa_required
 def enable_messaging_template(template_id):
-
-    spa_id = session.get("spa_id")
+    spa_id = current_spa_id()
+    language_code = get_request_language()
 
     conn = get_db_connection()
     cur = conn.cursor()
 
     cur.execute("""
+        SELECT channel, approved_for_use, COALESCE(is_archived, FALSE)
+        FROM messaging_templates
+        WHERE template_id = %s
+          AND spa_id = %s
+        LIMIT 1
+    """, (template_id, spa_id))
+
+    template = cur.fetchone()
+
+    if not template:
+        cur.close()
+        conn.close()
+        flash("Template not found.", "warning")
+        return redirect(url_for(
+            "template_review",
+            channel="sms",
+            language_code=language_code
+        ))
+
+    channel = template[0]
+    approved_for_use = template[1]
+    is_archived = template[2]
+
+    if is_archived:
+        cur.close()
+        conn.close()
+        flash("Archived templates must be restored before they can be enabled.", "warning")
+        return redirect(url_for(
+            "template_review",
+            channel=channel,
+            language_code=language_code
+        ))
+
+    if not approved_for_use:
+        cur.close()
+        conn.close()
+        flash("Template must be approved for use before it can be enabled.", "warning")
+        return redirect(url_for(
+            "template_review",
+            channel=channel,
+            language_code=language_code
+        ))
+
+    cur.execute("""
         UPDATE messaging_templates
-           SET is_active = TRUE,
-               updated_at = NOW()
-         WHERE template_id = %s
-           AND spa_id = %s
-           AND approved_for_use = TRUE
-           AND COALESCE(is_archived,FALSE) = FALSE
-    """, (
-        template_id,
-        spa_id
-    ))
+        SET
+            is_active = TRUE,
+            updated_at = NOW()
+        WHERE template_id = %s
+          AND spa_id = %s
+    """, (template_id, spa_id))
 
     conn.commit()
-
-    flash(
-        "Template enabled.",
-        "success"
-    )
 
     cur.close()
     conn.close()
 
-    return redirect(request.referrer or url_for(
+    flash("Template enabled.", "success")
+
+    return redirect(url_for(
         "template_review",
-        channel="sms"
+        channel=channel,
+        language_code=language_code
     ))
-
-
 
 
 

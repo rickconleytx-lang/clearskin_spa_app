@@ -8,10 +8,14 @@
 {% block content %}
 <div class="client-management-page">
 
-    <a href="{{ url_for('view_help_page', page_key='client_Management') }}"
-        class="btn">
-        Page Help
-    </a>
+    <a class="btn"
+           href="{{ url_for(
+               'view_help_page',
+               page_key='client_management',
+               language_code=language_code
+           ) }}">
+            Page Help
+        </a>
 
 
 

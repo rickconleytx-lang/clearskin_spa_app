@@ -180,17 +180,7 @@
 
     <br>
 
-    <button type="submit"
-            class="btn"
-            onclick="return confirm('Send this email to selected clients?');">
-        Send Selected Emails
-    </button>
-
-    <button type="submit"
-            class="btn"
-            onclick="selectAllClients(); return confirm('Send this email to ALL clients currently listed?');">
-        Send All Listed
-    </button>
+   
 
 </form>
 
@@ -198,10 +188,6 @@
 
 <br>
 
-<a href="{{ url_for('template_review', channel='email') }}"
-   class="btn btn-secondary">
-    Email Templates
-</a>
 
 <script>
 const emailTemplates = {

@@ -6,11 +6,7 @@
 
 
 <!-- TOP PAGE HEADER -->
-<div style="display:flex;
-            justify-content:space-between;
-            align-items:flex-start;
-            gap:30px;
-            margin-bottom:6px;">
+<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:30px; margin-bottom:6px;">
 
     <!-- LEFT HEADER -->
     <div style="flex:1; min-width:0;">
@@ -19,27 +15,29 @@
             <h1>Calendar</h1>
 
             <span class="help-icon"
-                  onclick="toggleHelp('smsHelp')">
+                  onclick="toggleHelp('calendarHelp')">
                 ❔
             </span>
         </div>
 
-        <div id="smsHelp" class="help-popover" style="display:none;">
+        <div id="calendarHelp" class="help-popover" style="display:none;">
             This is a test<br>
             where is my text?
         </div>
 
-        <div style="margin-top:4px;">
-            <a href="{{ url_for('view_help_page', page_key='calendar') }}"
-               class="btn">
-                Page Help
-            </a>
+        <a class="btn"
+           href="{{ url_for(
+               'view_help_page',
+               page_key='calendar',
+               language_code=language_code
+           ) }}">
+            Page Help
+        </a>
 
-            <a class="nav-btn"
-               href="{{ url_for('appointments') }}">
-                Appointments
-            </a>
-        </div>
+        <a class="nav-btn"
+           href="{{ url_for('appointments') }}">
+            Appointments
+        </a>
 
     </div>
 
@@ -51,8 +49,6 @@
     </div>
 
 </div>
-
-
 
 <div style="display: flex; flex-direction: row; justify-content: space-between; align-items: flex-start; gap: 25px; width: 100%;">
 
