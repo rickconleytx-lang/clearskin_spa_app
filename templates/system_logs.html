@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}System Logs | Peach Suite Pro{% endblock %}
+
+{% block content %}
+
+<h1>System Logs</h1>
+
+<table class="table table-striped">
+    <thead>
+        <tr>
+            <th>Date/Time</th>
+            <th>Category</th>
+            <th>Severity</th>
+            <th>Message</th>
+        </tr>
+    </thead>
+
+    <tbody>
+    {% for log in logs %}
+        <tr>
+            <td>{{ log[4] }}</td>
+            <td>{{ log[1] }}</td>
+            <td>{{ log[2] }}</td>
+            <td>{{ log[3] }}</td>
+        </tr>
+    {% else %}
+        <tr>
+            <td colspan="5" style="text-align:center;">
+                No system logs found.
+            </td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+
+{% endblock %}

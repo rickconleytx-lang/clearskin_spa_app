@@ -111,11 +111,167 @@ def inject_global_context():
     return context
 
 
+# =====================================================
+# LOGGING HELPERS
+# =====================================================
+
+
+
+def log_sms(message):
+    print(f"[SMS] {message}", flush=True)
+
+def log_email(message):
+    print(f"[EMAIL] {message}", flush=True)
+
+def log_godaddy(message):
+    print(f"[GODADDY] {message}", flush=True)
+
+def log_scheduler(message):
+    print(f"[SCHEDULER] {message}", flush=True)
+
+def log_reminder(message):
+    print(f"[REMINDER] {message}", flush=True)
+
+def log_ai(message):
+    print(f"[AI] {message}", flush=True)
+
+
+
+
+
+
+###################################
+#
+#
+###################################
+
+
+
+def log_event(category, message, severity="INFO", spa_id=None, related_type=None, related_id=None, created_by=None):
+    print(f"[{category}] {severity}: {message}", flush=True)
+
+    save_system_log(
+        category=category,
+        severity=severity,
+        message=message,
+        spa_id=spa_id,
+        related_type=related_type,
+        related_id=related_id,
+        created_by=created_by
+    )
+
+def log_sms(message, severity="INFO", spa_id=None, related_type=None, related_id=None, created_by=None):
+    log_event("SMS", message, severity, spa_id, related_type, related_id, created_by)
+
+
+def log_email(message, severity="INFO", spa_id=None, related_type=None, related_id=None, created_by=None):
+    log_event("EMAIL", message, severity, spa_id, related_type, related_id, created_by)
+
+
+def log_godaddy(message, severity="INFO", spa_id=None, related_type=None, related_id=None, created_by=None):
+    log_event("GODADDY", message, severity, spa_id, related_type, related_id, created_by)
+
+
+def log_scheduler(message, severity="INFO", spa_id=None, related_type=None, related_id=None, created_by=None):
+    log_event("SCHEDULER", message, severity, spa_id, related_type, related_id, created_by)
+
+
+def log_reminder(message, severity="INFO", spa_id=None, related_type=None, related_id=None, created_by=None):
+    log_event("REMINDER", message, severity, spa_id, related_type, related_id, created_by)
+
+
+def log_ai(message, severity="INFO", spa_id=None, related_type=None, related_id=None, created_by=None):
+    log_event("AI", message, severity, spa_id, related_type, related_id, created_by)
+
+
+
+
+#######################################
+#  Save SYSTEM LOGGING
+#####################################
+
+
+
+def save_system_log(
+    category,
+    message,
+    severity="INFO",
+    spa_id=None,
+    related_type=None,
+    related_id=None,
+    created_by=None
+):
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            INSERT INTO system_logs (
+                spa_id,
+                category,
+                severity,
+                message,
+                related_type,
+                related_id,
+                created_by
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """, (
+            spa_id,
+            category,
+            severity,
+            message,
+            related_type,
+            related_id,
+            created_by
+        ))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+    except Exception as e:
+        print(f"[SYSTEM LOGGING ERROR] {e}", flush=True)
+
+
+
+
+
+
+
+
+########################################
+#LOG EVENT
+#LOGGING HELPER FUNCTION
+#################################
+
+
+
+
+def log_event(category, message, severity="INFO", spa_id=None, related_type=None, related_id=None, created_by=None):
+    print(f"[{category}] {severity}: {message}", flush=True)
+
+    save_system_log(
+        category=category,
+        message=message,
+        severity=severity,
+        spa_id=spa_id,
+        related_type=related_type,
+        related_id=related_id,
+        created_by=created_by
+    )
+
+
 
 
 #  ---------------------
 #        HELPERS
 #  --------------------
+
+
+
+
+
 
 
 
@@ -3804,6 +3960,76 @@ def get_spa_timezone(spa_id):
 
 
 
+
+
+
+
+
+
+###############################################
+#
+#       SYSTEM LOGS
+#
+#
+################################################
+
+
+
+@app.route("/admin/system-logs")
+@login_required
+@spa_required
+def system_logs():
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            log_id,
+            category,
+            severity,
+            message,
+            created_at
+        FROM system_logs
+        ORDER BY created_at DESC
+        LIMIT 100
+    """)
+
+    logs = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "system_logs.html",
+        logs=logs
+    )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #   ----------------------------------
 #
 #     SWITCH ROUTE
@@ -5060,16 +5286,14 @@ def login():
         conn.close()
 
         if not user:
-            print("USER NOT FOUND FOR EMAIL:", email)
+            log_scheduler("Login failed: user account not found.")
             flash("Invalid email or password.", "error")
             return render_template("login.html")
 
         password_match = check_password_hash(user[5], password)
-        print("PASSWORD MATCH:", password_match)
 
         if not password_match:
-            flash("Invalid email or password.", "error")
-            return render_template("login.html")
+            log_scheduler("Login failed: invalid password.")
 
         role = user[6]
 
@@ -8895,10 +9119,10 @@ def poll_gmail_for_godaddy_bookings(spa_id):
     mail.login(gmail_user, gmail_pass)
     mail.select("inbox")
 
-    status, messages = mail.search(None, "ALL")
+    status, messages = mail.search(None, "UNSEEN")
     email_ids = messages[0].split()
 
-    log_godaddy(f"Emails found in inbox: {len(email_ids)}")
+    log_godaddy(f"Unread booking emails found: {len(email_ids)}")
 
     if not email_ids:
         mail.logout()
@@ -8907,7 +9131,7 @@ def poll_gmail_for_godaddy_bookings(spa_id):
 
     results = []
 
-    for email_id in email_ids[-5:]:
+    for email_id in email_ids:
         log_godaddy(f"Checking email ID: {email_id.decode()}")
 
         status, msg_data = mail.fetch(email_id, "(RFC822)")
@@ -15946,7 +16170,7 @@ def edit_gift_certificate(certificate_id):
         return redirect(url_for("gift_certificates_home"))
 
     cur.execute("""
-v        SELECT gift_certificate_status_id, status_name
+        SELECT gift_certificate_status_id, status_name
         FROM gift_certificate_statuses
         WHERE spa_id = %s
         ORDER BY gift_certificate_status_id
@@ -25243,6 +25467,23 @@ def scheduled_generate_birthdays():
     print(f"Birthday reminders created: {created_count}", flush=True)
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #   ---------------------------
 #
 #
@@ -25290,6 +25531,8 @@ def start_scheduler():
     print("Scheduler started.", flush=True)
 
 
+
+    log_scheduler("System logging initialized.")
 #   -------------------
 #
 #  GO DADDY
