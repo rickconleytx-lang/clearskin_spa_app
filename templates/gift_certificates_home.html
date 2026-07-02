@@ -16,23 +16,19 @@
     ← Back
 </a>
 
-<a href="{{ url_for('view_help_page', page_key='gift_certificates') }}"
-   class="btn">
-   Page Help
-</a>
-
-
-
 
 <br>
 <br>
 
 <h1>Gift Certificates Home</h1>
 <div class="narrow-cards">
-    {{ section_card("Gift Certificates Reminders", "Reminder page Contains Email Reminders",  url_for('gift_certificate_reminders')) }}
-    {{ section_card("Gift Certificates Reminder Historyy", "See Email Reminders Sent Report", url_for('gift_certificate_reminder_history')) }}
-    {{ section_card("Accounting Department Home", "Accounting Department", url_for('accounting_home')) }}
+    {{ section_card("Gift Certificates Reminders", "",  url_for('gift_certificate_reminders')) }}
+    {{ section_card("Gift Certs Reminder Historyy", "", url_for('gift_certificate_reminder_history')) }}
+    {{ section_card("Accounting Department", "", url_for('accounting_home')) }}
 </div>
+
+<hr>
+<br>
 
 <div class="summary-cards">
     <div class="summary-card">
@@ -50,6 +46,8 @@
         <p>${{ "%.2f"|format(gift_certificate_summary[2] or 0) }}</p>
     </div>
 </div>
+
+
 
 <form method="GET" class="filter-form">
     <div class="form-row">

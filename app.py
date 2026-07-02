@@ -28,7 +28,7 @@ app = Flask(__name__)
 
 app.config["PRODUCT_NAME"] = "Peach Suite Pro"
 app.config["COMPANY_NAME"] = "Just Peachy Data LLC"
-app.config["APP_VERSION"] = "1.0 Beta"
+app.config["APP_VERSION"] = "1.0.0"
 app.config["TAGLINE"] = "Helping Your Business Bear Fruit™"
 
 
@@ -5294,6 +5294,8 @@ def login():
 
         if not password_match:
             log_scheduler("Login failed: invalid password.")
+            flash("Invalid email or password.", "error")
+            return render_template("login.html")
 
         role = user[6]
 
