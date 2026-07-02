@@ -1,8 +1,17 @@
+# Environment
 .env
 venv/
+
+# Python
 __pycache__/
 *.pyc
-.DS_Store
-*.save
+
+# macOS
 .DS_Store
 **/.DS_Store
+
+# Temporary files
+*.save
+
+# Local development archive
+Old Templates Storage/
