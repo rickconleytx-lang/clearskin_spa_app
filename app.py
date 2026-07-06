@@ -150,7 +150,7 @@ def log_ai(message):
 def log_event(category, message, severity="INFO", spa_id=None, related_type=None, related_id=None, created_by=None):
     print(f"[{category}] {severity}: {message}", flush=True)
 
-    save_system_log(
+    save_system_activity(
         category=category,
         severity=severity,
         message=message,
@@ -192,7 +192,7 @@ def log_ai(message, severity="INFO", spa_id=None, related_type=None, related_id=
 
 
 
-def save_system_log(
+def save_system_activity(
     category,
     message,
     severity="INFO",
@@ -251,7 +251,7 @@ def save_system_log(
 def log_event(category, message, severity="INFO", spa_id=None, related_type=None, related_id=None, created_by=None):
     print(f"[{category}] {severity}: {message}", flush=True)
 
-    save_system_log(
+    save_system_activity(
         category=category,
         message=message,
         severity=severity,
@@ -3968,17 +3968,17 @@ def get_spa_timezone(spa_id):
 
 ###############################################
 #
-#       SYSTEM LOGS
+#       SYSTEM ACTIVITY LOG
 #
 #
 ################################################
 
 
 
-@app.route("/admin/system-logs")
+@app.route("/admin/system-activity")
 @login_required
 @spa_required
-def system_logs():
+def system_activity():
     page = request.args.get("page", 1, type=int)
     per_page = 100
     offset = (page - 1) * per_page
@@ -4061,7 +4061,7 @@ def system_logs():
     conn.close()
 
     return render_template(
-        "system_logs.html",
+        "system_activity.html",
         logs=logs,
         categories=categories,
         page=page,

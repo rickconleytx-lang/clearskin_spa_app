@@ -3,12 +3,28 @@
 
 {% block content %}
 
+
+<div class="page-tool-pills">
+    <a href="{{ url_for('master_admin_home') }}" class="tool-pill">← Back</a>
+    <a href="#" class="tool-pill">⚡️ Q Launch</a>
+    <a href="{{ url_for('view_help_page', page_key='system_activity') }}" class="tool-pill">❓ Help</a>
+    <a href="{{ url_for('feedback') }}" class="tool-pill">🐞 Report</a>
+</div> 
+
+<br>
+
 <div class="page-title">
     <h1>System Activity</h1>
 </div>
+<br>
 
 <p style="margin-top:-10px; color:#666;">
-    {{ total_logs }} log(s) found
+    🏅 {{ total_logs }}
+{% if total_logs == 1 %}
+    Record found
+{% else %}
+     Records found
+{% endif %}
 </p>
 
 <form method="get" style="margin:20px 0; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
@@ -26,7 +42,7 @@
         <option value="">All Severities</option>
         <option value="INFO" {% if severity == "INFO" %}selected{% endif %}>INFO</option>
         <option value="WARNING" {% if severity == "WARNING" %}selected{% endif %}>WARNING</option>
-        <option value="ERROR" {% if severity == "ERROR" %}selected{% endif %}>ERROR</option>
+        <option value="ALERT" {% if severity == "ALERT" %}selected{% endif %}>ALERT</option>
     </select>
 
     <select name="date_filter">
@@ -37,19 +53,30 @@
         <option value="" {% if date_filter == "" %}selected{% endif %}>All Time</option>
     </select>
 
-    <input
-        type="text"
-        name="search"
-        value="{{ search }}"
-        placeholder="Search message..."
-        style="min-width:220px;"
-    >
+    <!-- Search Box -->
+    <div style="flex:100%;">
+        <input
+            type="text"
+            name="search"
+            value="{{ search }}"
+            placeholder="Search message..."
+            style="min-width:220px;"
+        >
+    </div>
 
-    <button type="submit" class="btn">Search</button>
+    <!-- Buttons -->
+    <div style="flex:100%; display:flex; gap:10px; margin-top:8px;">
 
-    <a href="{{ url_for('system_activity') }}" class="btn secondary">
-        Reset
-    </a>
+        <button type="submit" class="btn">
+            Search
+        </button>
+
+        <a href="{{ url_for('system_activity') }}" class="btn secondary">
+            Reset
+        </a>
+
+    </div> 
+
 
 </form>
 
@@ -57,7 +84,24 @@
 
     {% for log in logs %}
 
-        {% set sev = log.severity|upper %}
+    {% set sev = log.severity|upper %}
+
+        {% set category_icons = {
+            "SYSTEM": "⚙️",
+            "SECURITY": "🔒",
+            "SMS": "💬",
+            "EMAIL": "📧",
+            "IMPORT": "📥",
+            "GODADDY": "📥",
+            "DATABASE": "🗄️",
+            "SCHEDULER": "⏰",
+            "USER": "👤",
+            "AI": "🤖"
+        } %}
+        {% set category_key = log.category|upper %}
+
+
+
         {% set current_date = log.created_at.strftime("%b %-d") %}
         {% set previous_date = logs[loop.index0 - 1].created_at.strftime("%b %-d") if not loop.first else "" %}
 
@@ -88,13 +132,14 @@
                         <span style="font-size:14px;">🟢</span>
                     {% elif sev == "WARNING" %}
                         <span style="font-size:14px;">🟡</span>
-                    {% elif sev == "ERROR" %}
+                    {% elif sev == "ALERT" %}
                         <span style="font-size:14px;">🔴</span>
                     {% else %}
                         <span style="font-size:14px;">⚪</span>
                     {% endif %}
 
                     <span style="font-size:15px; font-weight:600;">
+                        {{ category_icons.get(category_key, "📄") }}
                         {{ log.category|title }}
                     </span>
 
@@ -109,8 +154,14 @@
 
     {% else %}
 
-        <div style="text-align:center; padding:30px; color:#666;">
-            No system activity found.
+        <div style="text-align:center; padding:40px; color:#666;">
+            <div style="font-size:34px; margin-bottom:8px;">📝</div>
+            <div style="font-size:18px; font-weight:600; color:#444;">
+                No system activity found
+            </div>
+            <div style="margin-top:6px;">
+                Try adjusting your filters or search criteria.
+            </div>
         </div>
 
     {% endfor %}
