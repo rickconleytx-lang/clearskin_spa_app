@@ -6,30 +6,44 @@
 
 {% block content %}
 
-<a href="javascript:history.back()" class="btn">
-    ← Back
-</a>
+<a href="javascript:history.back()"
+       style="
+            display:inline-block;
+            padding:2px 8px;
+            font-size:11px;
+            font-weight:600;
+            text-decoration:none;
+            color:#555;
+            background:#f7f7f7;
+            border:1px solid #d9d9d9;
+            border-radius:12px;
+            white-space:nowrap;
+            transition:all .2s;">
+        ← Back
+    </a>
 
 <h1>Expense Report</h1>
 
 <div class="narrow-cards">
-    {{ section_card("Back to Accounting Department", " ",  url_for('accounting_home')) }}
+    {{ section_card("Accounting Department", " ",  url_for('accounting_home')) }}
 
-    {{ section_card("Back to Expenses", "Return to Expenses Home",  url_for('expenses_home')) }}
-    {{ section_card("Export to CSV", "Exports the file in CSV format", 
+    {{ section_card("Back to Expenses", "",  url_for('expenses_home')) }}
+
+    {{ section_card("Export to CSV", "", 
             url_for('export_expense_report_csv',
             start_date=start_date,
             end_date=end_date,
             category=category,
             vendor_name=vendor_name)) }}
+            
 
-    {{ section_card("Export to Excel", "Exports the file in Excel (xlsx)", url_for('export_expense_report_xlsx',
+    {{ section_card("Export to Excel (xlsx)", "", url_for('export_expense_report_xlsx',
             start_date=start_date,
             end_date=end_date,
             category=category,
             vendor_name=vendor_name)) }}
 
-    {{ section_card("🖨️ Print Report", "Prints Report", "javascript:window.print();") }}
+
 </div>
 
 
@@ -72,7 +86,7 @@
     <a class="btn" href="{{ url_for('expense_report') }}">Reset</a>
 
     <button type="button" class="btn" onclick="window.print()">
-        Print Report
+        🖨️ Print Report
     </button>
 
 </div>

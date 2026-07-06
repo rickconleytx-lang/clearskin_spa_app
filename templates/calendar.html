@@ -1,80 +1,174 @@
 {% extends "base.html" %}
 {% block title %}Calendar | Peach Suite Pro{% endblock %}
+
+{% from "components/cards.html" import section_card %}
+
 {% block content %}
 
 <meta http-equiv="refresh" content="30">
 
+<!-- =========================================================
+     PAGE HEADER
+========================================================= -->
 
-<!-- TOP PAGE HEADER -->
-<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:30px; margin-bottom:6px;">
+<div style="margin-bottom:15px;">
 
-    <!-- LEFT HEADER -->
-    <div style="flex:1; min-width:0;">
+    <div class="page-title">
+        <h1>Calendar</h1>
 
-        <div class="page-title">
-            <h1>Calendar</h1>
+        <span class="help-icon"
+              onclick="toggleHelp('calendarHelp')">
+            ❔
+        </span>
 
-            <span class="help-icon"
-                  onclick="toggleHelp('calendarHelp')">
-                ❔
-            </span>
+        <div class="narrow-cards">
+            {{ section_card("Go to: Appointments", "", url_for('appointments')) }}         
         </div>
-
-        <div id="calendarHelp" class="help-popover" style="display:none;">
-            This is a test<br>
-            where is my text?
-        </div>
-
-     
-        <a class="nav-btn"
-           href="{{ url_for('appointments') }}">
-            Appointments
-        </a>
 
     </div>
 
-    <!-- RIGHT HEADER IMAGE -->
-    <div style="width:260px; flex-shrink:0; text-align:right;">
-        <img src="{{ url_for('static', filename='images/ps_calendar.png') }}"
+    <div id="calendarHelp"
+         class="help-popover"
+         style="display:none;">
+        This is a test<br>
+        where is my text?
+    </div>
+
+     
+
+
+</div>
+<br>
+<br>
+
+<!-- =========================================================
+     PAGE TOOLS / IMAGE
+========================================================= -->
+
+<div style="
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    gap:30px;
+    margin-bottom:20px;
+">
+
+    <!-- LEFT SIDE -->
+    <div style="flex:1; min-width:0;">
+
+        <div style="margin-bottom:15px;">
+
+            <a class="btn"
+               href="{{ url_for('calendar_view', week_start=current_week_start.strftime('%Y-%m-%d')) }}#week-view">
+                Today
+            </a>
+
+            <a class="btn"
+               href="{{ url_for('calendar_view', week_start=prev_week_start.strftime('%Y-%m-%d')) }}#week-view">
+                Previous Week
+            </a>
+
+            <a class="btn"
+               href="{{ url_for('calendar_view', week_start=next_week_start.strftime('%Y-%m-%d')) }}#week-view">
+                Next Week
+            </a>
+
+            <a class="btn"
+               href="{{ url_for('calendar_view', week_start=current_week_start.strftime('%Y-%m-%d')) }}#week-view">
+                Current Week
+            </a>
+
+            <form method="GET"
+                  action="{{ url_for('calendar_view') }}"
+                  style="display:inline-block; margin-left:10px;">
+
+                <input type="date"
+                       name="goto_date"
+                       value="{{ goto_date if goto_date else '' }}">
+
+                <button type="submit" class="btn">
+                    Go To Date
+                </button>
+
+            </form>
+
+        </div>
+
+<br>
+
+
+
+        <div style="margin-bottom:20px;">
+
+            <form method="GET"
+                  action="{{ url_for('calendar_view') }}">
+
+                <label for="start_date">
+                    <strong>Search Appointments From:</strong>
+                </label>
+
+                <input type="date"
+                       id="start_date"
+                       name="start_date"
+                       value="{{ request.args.get('start_date', '') }}">
+
+                <label for="end_date"
+                       style="margin-left:10px;">
+                    <strong>To:</strong>
+                </label>
+
+                <input type="date"
+                       id="end_date"
+                       name="end_date"
+                       value="{{ request.args.get('end_date', '') }}">
+
+                <button type="submit" class="btn">
+                    Search
+                </button>
+
+                <a class="btn"
+                   href="{{ url_for('calendar_view', offset=offset) }}">
+                    Clear
+                </a>
+
+            </form>
+
+        </div>
+
+    </div>
+
+
+    <!-- RIGHT IMAGE -->
+
+    <div style="
+        width:260px;
+        flex-shrink:0;
+        text-align:right;
+    ">
+
+        <img src="{{ url_for('static',
+                             filename='images/ps_calendar.png') }}"
              alt="Peach Suite Pro Calendar"
-             style="width:260px; height:auto; border-radius:12px;">
+             style="
+                width:260px;
+                height:auto;
+                border-radius:12px;
+             ">
+
     </div>
 
 </div>
 
-<div style="display: flex; flex-direction: row; justify-content: space-between; align-items: flex-start; gap: 25px; width: 100%;">
+<!-- =========================================================
+     CALENDAR CONTENT CONTINUES BELOW
+========================================================= -->     
 
-   
-    <div style="flex: 1; min-width: 0;">
 
-        <div style="margin-bottom: 15px;">
-            <a class="btn" href="{{ url_for('calendar_view', week_start=current_week_start.strftime('%Y-%m-%d')) }}#week-view">Today</a>
 
-            <a class="btn" href="{{ url_for('calendar_view', week_start=prev_week_start.strftime('%Y-%m-%d')) }}#week-view">Previous Week</a>
 
-            <a class="btn" href="{{ url_for('calendar_view', week_start=next_week_start.strftime('%Y-%m-%d')) }}#week-view">Next Week</a>
 
-            <a class="btn" href="{{ url_for('calendar_view', week_start=current_week_start.strftime('%Y-%m-%d')) }}#week-view">Current Week</a>
 
-            <form method="GET" action="{{ url_for('calendar_view') }}" style="display:inline-block; margin-left:10px;">
-                <input type="date" name="goto_date" value="{{ goto_date if goto_date else '' }}">
-                <button type="submit" class="btn">Go To Date</button>
-            </form>
-        </div>
 
-        <div style="margin-bottom:20px;">
-            <form method="GET" action="{{ url_for('calendar_view') }}">
-                <label for="start_date"><strong>Search Appointments From:</strong></label>
-                <input type="date" id="start_date" name="start_date" value="{{ request.args.get('start_date', '') }}">
-
-                <label for="end_date" style="margin-left:10px;"><strong>To:</strong></label>
-                <input type="date" id="end_date" name="end_date" value="{{ request.args.get('end_date', '') }}">
-
-                <button type="submit" class="btn">Search</button>
-                <a class="btn" href="{{ url_for('calendar_view', offset=offset) }}">Clear</a>
-            </form>
-        </div>
-       
         {% if overdue_count > 0 %}
         <div class="next-appointment"
              style="background-color:#ffe5e5; border-left:5px solid #cc0000; margin-top:15px;">

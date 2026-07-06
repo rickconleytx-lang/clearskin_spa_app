@@ -3979,10 +3979,62 @@ def get_spa_timezone(spa_id):
 @login_required
 @spa_required
 def system_logs():
-    conn = get_db_connection()
-    cur = conn.cursor()
+    page = request.args.get("page", 1, type=int)
+    per_page = 100
+    offset = (page - 1) * per_page
 
-    cur.execute("""
+    category = request.args.get("category", "").strip()
+    severity = request.args.get("severity", "").strip()
+    date_filter = request.args.get("date_filter", "today").strip()
+    search = request.args.get("search", "").strip()
+
+    where_clauses = []
+    params = []
+
+    if category:
+        where_clauses.append("category = %s")
+        params.append(category)
+
+    if severity:
+        where_clauses.append("severity = %s")
+        params.append(severity)
+
+    if search:
+        where_clauses.append("message ILIKE %s")
+        params.append(f"%{search}%")
+
+    if date_filter == "today":
+        where_clauses.append("created_at::date = CURRENT_DATE")
+    elif date_filter == "yesterday":
+        where_clauses.append("created_at::date = CURRENT_DATE - INTERVAL '1 day'")
+    elif date_filter == "7":
+        where_clauses.append("created_at >= NOW() - INTERVAL '7 days'")
+    elif date_filter == "30":
+        where_clauses.append("created_at >= NOW() - INTERVAL '30 days'")
+
+    where_sql = ""
+    if where_clauses:
+        where_sql = "WHERE " + " AND ".join(where_clauses)
+
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    cur.execute(f"""
+        SELECT COUNT(*)
+        FROM system_logs
+        {where_sql}
+    """, params)
+
+    cur.execute(f"""
+        SELECT COUNT(*) AS total
+        FROM system_logs
+        {where_sql}
+    """, params)
+
+    total_logs = cur.fetchone()["total"]
+    total_pages = max((total_logs + per_page - 1) // per_page, 1)
+
+    cur.execute(f"""
         SELECT
             log_id,
             category,
@@ -3990,21 +4042,36 @@ def system_logs():
             message,
             created_at
         FROM system_logs
+        {where_sql}
         ORDER BY created_at DESC
-        LIMIT 100
-    """)
+        LIMIT %s OFFSET %s
+    """, params + [per_page, offset])
 
     logs = cur.fetchall()
+
+    cur.execute("""
+        SELECT DISTINCT category
+        FROM system_logs
+        WHERE category IS NOT NULL
+        ORDER BY category
+    """)
+    categories = [row["category"] for row in cur.fetchall()]
 
     cur.close()
     conn.close()
 
     return render_template(
         "system_logs.html",
-        logs=logs
+        logs=logs,
+        categories=categories,
+        page=page,
+        total_pages=total_pages,
+        total_logs=total_logs,
+        category=category,
+        severity=severity,
+        date_filter=date_filter,
+        search=search
     )
-
-
 
 
 
@@ -5310,7 +5377,7 @@ def login():
         flash("Logged in successfully.", "success")
 
 
-        return redirect(url_for("home"))
+        return redirect(url_for("morning_briefing"))
 
     return render_template("login.html")
 

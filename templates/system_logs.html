@@ -1,36 +1,154 @@
 {% extends "base.html" %}
-{% block title %}System Logs | Peach Suite Pro{% endblock %}
+{% block title %}System Activity | Peach Suite Pro{% endblock %}
 
 {% block content %}
 
-<h1>System Logs</h1>
+<div class="page-title">
+    <h1>System Activity</h1>
+</div>
 
-<table class="table table-striped">
-    <thead>
-        <tr>
-            <th>Date/Time</th>
-            <th>Category</th>
-            <th>Severity</th>
-            <th>Message</th>
-        </tr>
-    </thead>
+<p style="margin-top:-10px; color:#666;">
+    {{ total_logs }} log(s) found
+</p>
 
-    <tbody>
+<form method="get" style="margin:20px 0; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+
+    <select name="category">
+        <option value="">All Categories</option>
+        {% for c in categories %}
+            <option value="{{ c }}" {% if c == category %}selected{% endif %}>
+                {{ c }}
+            </option>
+        {% endfor %}
+    </select>
+
+    <select name="severity">
+        <option value="">All Severities</option>
+        <option value="INFO" {% if severity == "INFO" %}selected{% endif %}>INFO</option>
+        <option value="WARNING" {% if severity == "WARNING" %}selected{% endif %}>WARNING</option>
+        <option value="ERROR" {% if severity == "ERROR" %}selected{% endif %}>ERROR</option>
+    </select>
+
+    <select name="date_filter">
+        <option value="today" {% if date_filter == "today" %}selected{% endif %}>Today</option>
+        <option value="yesterday" {% if date_filter == "yesterday" %}selected{% endif %}>Yesterday</option>
+        <option value="7" {% if date_filter == "7" %}selected{% endif %}>Last 7 Days</option>
+        <option value="30" {% if date_filter == "30" %}selected{% endif %}>Last 30 Days</option>
+        <option value="" {% if date_filter == "" %}selected{% endif %}>All Time</option>
+    </select>
+
+    <input
+        type="text"
+        name="search"
+        value="{{ search }}"
+        placeholder="Search message..."
+        style="min-width:220px;"
+    >
+
+    <button type="submit" class="btn">Search</button>
+
+    <a href="{{ url_for('system_logs') }}" class="btn secondary">
+        Reset
+    </a>
+
+</form>
+
+<div style="margin-top:20px;">
+
     {% for log in logs %}
-        <tr>
-            <td>{{ log[4] }}</td>
-            <td>{{ log[1] }}</td>
-            <td>{{ log[2] }}</td>
-            <td>{{ log[3] }}</td>
-        </tr>
+
+        {% set sev = log.severity|upper %}
+        {% set current_date = log.created_at.strftime("%b %-d") %}
+        {% set previous_date = logs[loop.index0 - 1].created_at.strftime("%b %-d") if not loop.first else "" %}
+
+        <div style="display:flex; gap:14px; padding:12px 0; border-bottom:1px solid #eee;">
+
+            <div style="width:90px;">
+                <div style="
+                    font-size:11px;
+                    {% if current_date != previous_date %}
+                        color:#d2691e;
+                        font-weight:600;
+                    {% else %}
+                        color:#888;
+                    {% endif %}
+                ">
+                    {{ current_date }}
+                </div>
+
+                <div style="font-size:14px; font-weight:600; color:#333;">
+                    {{ log.created_at.strftime("%-I:%M %p") }}
+                </div>
+            </div>
+
+            <div style="flex:1;">
+                <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+
+                    {% if sev == "INFO" %}
+                        <span style="font-size:14px;">🟢</span>
+                    {% elif sev == "WARNING" %}
+                        <span style="font-size:14px;">🟡</span>
+                    {% elif sev == "ERROR" %}
+                        <span style="font-size:14px;">🔴</span>
+                    {% else %}
+                        <span style="font-size:14px;">⚪</span>
+                    {% endif %}
+
+                    <span style="font-size:15px; font-weight:600;">
+                        {{ log.category|title }}
+                    </span>
+
+                </div>
+
+                <div style="color:#333;">
+                    {{ log.message }}
+                </div>
+            </div>
+
+        </div>
+
     {% else %}
-        <tr>
-            <td colspan="5" style="text-align:center;">
-                No system logs found.
-            </td>
-        </tr>
+
+        <div style="text-align:center; padding:30px; color:#666;">
+            No system activity found.
+        </div>
+
     {% endfor %}
-    </tbody>
-</table>
+
+</div>
+
+<div style="margin-top:20px; display:flex; justify-content:center; align-items:center; gap:20px;">
+
+    {% if page > 1 %}
+        <a class="btn"
+           href="{{ url_for('system_logs',
+                page=page-1,
+                category=category,
+                severity=severity,
+                date_filter=date_filter,
+                search=search
+           ) }}">
+            ← Previous
+        </a>
+    {% endif %}
+
+    <span>
+        Page {{ page }} of {{ total_pages }}
+    </span>
+
+    {% if page < total_pages %}
+        <a class="btn"
+           href="{{ url_for('system_logs',
+                page=page+1,
+                category=category,
+                severity=severity,
+                date_filter=date_filter,
+                search=search
+           ) }}">
+            Next →
+        </a>
+    {% endif %}
+
+</div>
 
 {% endblock %}

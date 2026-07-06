@@ -111,18 +111,54 @@
         </a>
 
 
-    {% if session.get("user_id") %}
-        <a class="btn" href="{{ url_for('logout') }}"
-                               onclick="return confirm('Are you sure you want to LOG OUT?')">
-                               Log out
-        </a>
-    {% else %}
-        <a class="btn" href="{{ url_for('login') }}">Login</a>
-    {% endif %}     
+        {% if session.get("user_id") %}
+            <a class="btn" href="{{ url_for('logout') }}"
+                                onclick="return confirm('Are you sure you want to LOG OUT?')">
+                                Log out
+            </a>
+        {% else %}
+            <a class="btn" href="{{ url_for('login') }}">Login</a>
+        {% endif %}     
+    
+                <div style="display:flex;
+            flex-direction:column;
+            gap:4px;
+            margin-left:10px;
+            align-items:flex-end;">
 
-    <div style="margin-top: 10px; margin-bottom: 10px;">
-         <a class="btn" href="{{ url_for('feedback', page=path) }}">Report Issue</a>
-    </div>
+    <a href="#"
+       style="
+            display:inline-block;
+            padding:2px 8px;
+            font-size:11px;
+            font-weight:600;
+            text-decoration:none;
+            color:#555;
+            background:#f7f7f7;
+            border:1px solid #d9d9d9;
+            border-radius:12px;
+            white-space:nowrap;
+            transition:all .2s;">
+        🐞 Report
+    </a>
+
+    <a href="#"
+       style="
+            display:inline-block;
+            padding:2px 8px;
+            font-size:11px;
+            font-weight:600;
+            text-decoration:none;
+            color:#555;
+            background:#f7f7f7;
+            border:1px solid #d9d9d9;
+            border-radius:12px;
+            white-space:nowrap;
+            transition:all .2s;">
+        ⚡ Q Launch
+    </a>
+
+</div>
     </nav>
 
 

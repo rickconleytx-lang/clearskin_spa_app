@@ -6,6 +6,23 @@
 
 {% block content %}
 
+<a href="javascript:history.back()"
+       style="
+            display:inline-block;
+            padding:2px 8px;
+            font-size:11px;
+            font-weight:600;
+            text-decoration:none;
+            color:#555;
+            background:#f7f7f7;
+            border:1px solid #d9d9d9;
+            border-radius:12px;
+            white-space:nowrap;
+            transition:all .2s;">
+        ← Back
+    </a>
+
+
 <h1>Employee Admin</h1>
 
 <div style="display: flex; flex-direction: row; justify-content: space-between; align-items: flex-start; gap: 25px; width: 100%;">
@@ -14,15 +31,15 @@
     <div style="flex: 1; min-width: 0;">
         
         <div class="narrow-cards">
-            {{ section_card("Back to Employees Home", "Back to Employees Home Page",  url_for('employees_home')) }}
-            {{ section_card("Add New Employee", "Add a New Employee",  url_for('add_employee')) }}
+            {{ section_card("Back to Employees Home", "",  url_for('employees_home')) }}
+            {{ section_card("Add New Employee", "",  url_for('add_employee')) }}
         </div>
 
 <br>
 <br>
 <br>
         <div class="narrow-cards">
-            {{ section_card("Compensation Report", "Provides an Employee Compensation Summary and Compensation Ledger", url_for('employee_compensation_report')) }}
+            {{ section_card("Compensation Report", "Compensation Summary and Ledger", url_for('employee_compensation_report')) }}
             {{ section_card("Manage Compensation Types", "Add/Edit/Deactivate Compensation Categories",  url_for('compensation_types_report')) }}
         </div>
 
