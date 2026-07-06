@@ -2823,3 +2823,47 @@ td:nth-child(3) {
     border-color: #7aa7d9;
     color: #0b5cad;
 }
+
+/* ======================================================
+   TOOL PILLS
+====================================================== */
+
+.tool-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border-radius: 999px;
+    border: 1px solid #ddd;
+    background: #fff;
+    color: #444;
+    text-decoration: none;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.tool-pill:hover {
+    background: #f7f7f7;
+    color: #222;
+    text-decoration: none;
+}
+
+/* Small: page tools */
+.tool-pill-small {
+    padding: 6px 12px;
+    font-size: 0.9rem;
+}
+
+/* Medium: base/header nav */
+.tool-pill-medium {
+    line-height: 1.2;
+    padding: 10px 15px;
+    font-size: 0.98rem;
+}
+
+/* Large: sub-page navigation */
+.tool-pill-large {
+    padding: 12px 18px;
+    font-size: 1.05rem;
+    font-weight: 600;
+}

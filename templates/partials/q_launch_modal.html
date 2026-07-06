@@ -1,0 +1,98 @@
+<div id="qLaunchOverlay" class="q-launch-overlay" style="display:none;">
+    <div class="q-launch-modal">
+
+        <div class="q-launch-header">
+            <div>
+                <h2>⚡️ Q Launch</h2>
+                <p>Find anything in Peach Suite Pro.</p>
+            </div>
+
+            <button type="button"
+                    class="q-launch-close"
+                    onclick="closeQLaunch()">
+                ×
+            </button>
+        </div>
+
+        <input
+            type="text"
+            id="qLaunchSearch"
+            class="q-launch-search"
+            placeholder="Search pages..."
+            onkeyup="filterQLaunch()"
+        >
+        <div id="qLaunchResults" class="q-launch-section" style="display:none;">
+            <h3>🔎 Search Results</h3>
+
+            {% for item in q_launch_items %}
+                <a href="{{ url_for(item.endpoint) }}"
+                class="q-launch-registry-item"
+                data-search="{{ item.title }} {{ item.category }} {{ item.keywords|join(' ') }}">
+                    {{ item.icon|default("📄") }} {{ item.title }}
+                    <span class="q-launch-category">{{ item.category }}</span>
+                </a>
+            {% endfor %}
+        </div>
+
+        <div class="q-launch-section">
+            <h3>⭐ Favorites</h3>
+
+            <a href="{{ url_for('morning_briefing') }}" class="q-launch-item">
+                Morning Briefing
+            </a>
+
+            <a href="{{ url_for('calendar_view') }}" class="q-launch-item">
+                Calendar
+            </a>
+
+            <a href="{{ url_for('client_management') }}" class="q-launch-item">
+                Clients
+            </a>
+
+            <a href="{{ url_for('communications') }}" class="q-launch-item">
+                Communications
+            </a>
+        </div>
+
+        <div class="q-launch-section">
+            <h3>🕘 Recent</h3>
+
+            <a href="{{ url_for('system_activity') }}" class="q-launch-item">
+                System Activity
+            </a>
+
+            <a href="{{ url_for('inventory_home') }}" class="q-launch-item">
+                Inventory
+            </a>
+
+            <a href="{{ url_for('reports') }}" class="q-launch-item">
+                Reports
+            </a>
+        </div>
+
+        <div class="q-launch-section">
+            <h3>📂 Categories</h3>
+
+            <a href="{{ url_for('dashboard') }}" class="q-launch-item">
+                Dashboard
+            </a>
+
+            <a href="{{ url_for('appointments') }}" class="q-launch-item">
+                Appointments
+            </a>
+
+            <a href="{{ url_for('income_home') }}" class="q-launch-item">
+                Income
+            </a>
+
+            <a href="{{ url_for('expenses_home') }}" class="q-launch-item">
+                Expenses
+            </a>
+
+            <a href="{{ url_for('admin') }}" class="q-launch-item">
+                Administration
+            </a>
+        </div>
+
+    </div>
+</div>

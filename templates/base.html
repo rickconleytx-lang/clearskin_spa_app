@@ -19,6 +19,7 @@
 
 
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/q_launch.css') }}">
 </head>
 
 <body>
@@ -62,104 +63,49 @@
 
 
     <!-- Navigation -->
-    <nav class="main-nav">
-         
+    <div>
 
-     <br>   
+         
         {% if session.get("role") == "master_admin" %}
-    <a class="btn btn-primary"
-       href="{{ url_for('master_admin_home') }}">
-        Master Admin
-    </a>
+            <a class="btn btn-primary"
+            href="{{ url_for('master_admin_home') }}">
+                Master Admin
+            </a>
         {% endif %}
 
 
-        <a class="btn nav-btn-briefing nav-btn-two-line"
-            href="{{ url_for('morning_briefing') }}">
+        <a href="morning_briefing" class="tool-pill tool-pill-medium">🌅Daily<br>Briefing</a>
 
-            Daily <br> Briefing<br>🌅
-        </a>
+        <a href="reports" class="tool-pill tool-pill-medium">🍑Business<br>Summary</a>
 
-        <a class="btn" href="{{ url_for('reports') }}">
-         🍑 Business <br>  Summary
-        </a>
-        
-        <a class="btn" 
-            href="{{ url_for('calendar_view') }}"
-            >Calendar & <br> Appointments
-        </a>
-             
-        <a class="btn" href="{{ url_for('client_management') }}">
-            Client<br> Management
-        </a>
+        <a href="calendar" class="tool-pill tool-pill-medium">📅Calendar &<br>Appointments</a>
+    
+        <a href="client_management" class="tool-pill tool-pill-medium">🙋‍♀️Client<br>Management</a>
 
-        <a class="btn" href="{{ url_for('communications') }}">
-            Communications<br> Center
-        </a>
+        <a href="communications" class="tool-pill tool-pill-medium">📡Comm<br>SMS & Email</a>
 
-        <a class="btn" href="{{ url_for('financials_home') }}">
-            Accounting &<br>Logistics
-        </a>
-       
-
-        <a class="btn" href="{{ url_for('spa_management') }}">
-            Business <br> Management
-        </a>
-
-        <a class="btn" href="{{ url_for('help_center') }}">
-            📕Knowledge<br>Base
-        </a>
+        <a href="financials_home" class="tool-pill tool-pill-medium">📊Accounting &<br>🚚Logistics</a>
+    
+        <a href="spa_management" class="tool-pill tool-pill-medium">🗂️Business<br>Management</a>
 
 
-        {% if session.get("user_id") %}
-            <a class="btn" href="{{ url_for('logout') }}"
+           {% if session.get("user_id") %}
+                <a class="btn" href="{{ url_for('logout') }}"
                                 onclick="return confirm('Are you sure you want to LOG OUT?')">
                                 Log out
-            </a>
-        {% else %}
-            <a class="btn" href="{{ url_for('login') }}">Login</a>
-        {% endif %}     
+                </a>
+            {% else %}
+                <a class="btn" href="{{ url_for('login') }}">Login</a>
+            {% endif %}     
     
-                <div style="display:flex;
-            flex-direction:column;
-            gap:4px;
-            margin-left:10px;
-            align-items:flex-end;">
+        
+    </div>
+<br>
 
-    <a href="#"
-       style="
-            display:inline-block;
-            padding:2px 8px;
-            font-size:11px;
-            font-weight:600;
-            text-decoration:none;
-            color:#555;
-            background:#f7f7f7;
-            border:1px solid #d9d9d9;
-            border-radius:12px;
-            white-space:nowrap;
-            transition:all .2s;">
-        🐞 Report
-    </a>
-
-    <a href="#"
-       style="
-            display:inline-block;
-            padding:2px 8px;
-            font-size:11px;
-            font-weight:600;
-            text-decoration:none;
-            color:#555;
-            background:#f7f7f7;
-            border:1px solid #d9d9d9;
-            border-radius:12px;
-            white-space:nowrap;
-            transition:all .2s;">
-        ⚡ Q Launch
-    </a>
+    
 
 </div>
-    </nav>
+   
 
 
 
@@ -237,6 +183,93 @@
 
 </footer>
 
+{% include "partials/q_launch_modal.html" %}
+<a href="#" class="tool-pill">⚡️ Q Launch</a>
+
+
+<script>
+function openQLaunch() {
+    const overlay = document.getElementById("qLaunchOverlay");
+    const search = document.getElementById("qLaunchSearch");
+
+    if (!overlay) return;
+
+    overlay.style.display = "flex";
+
+    setTimeout(function () {
+        if (search) {
+            search.focus();
+            search.value = "";
+            filterQLaunch();
+        }
+    }, 50);
+}
+
+function closeQLaunch() {
+    const overlay = document.getElementById("qLaunchOverlay");
+
+    if (!overlay) return;
+
+    overlay.style.display = "none";
+}
+
+function filterQLaunch() {
+    const search = document.getElementById("qLaunchSearch");
+    const results = document.getElementById("qLaunchResults");
+    const registryItems = document.querySelectorAll(".q-launch-registry-item");
+    const normalSections = document.querySelectorAll(".q-launch-section:not(#qLaunchResults)");
+
+    if (!search || !results) return;
+
+    const value = search.value.toLowerCase().trim();
+
+    if (!value) {
+        results.style.display = "none";
+
+        normalSections.forEach(function (section) {
+            section.style.display = "block";
+        });
+
+        return;
+    }
+
+    results.style.display = "block";
+
+    normalSections.forEach(function (section) {
+        section.style.display = "none";
+    });
+
+    registryItems.forEach(function (item) {
+        const searchText = (item.dataset.search || item.textContent).toLowerCase();
+
+        item.style.display = searchText.includes(value)
+            ? "flex"
+            : "none";
+    });
+}
+
+document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape") {
+        closeQLaunch();
+    }
+
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        openQLaunch();
+    }
+});
+
+document.addEventListener("click", function (event) {
+    const overlay = document.getElementById("qLaunchOverlay");
+
+    if (!overlay) return;
+
+    if (event.target === overlay) {
+        closeQLaunch();
+    }
+});
+</script>
 
 </body>
+
 </html>

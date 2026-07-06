@@ -3,6 +3,7 @@ from datetime import date, timedelta, datetime
 from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
 from apscheduler.schedulers.background import BackgroundScheduler
+from q_launch_registry import Q_LAUNCH_ITEMS
 import os
 from decimal import Decimal
 import csv
@@ -83,6 +84,8 @@ def inject_global_context():
         "current_year": datetime.now().year,
         "godaddy_unreviewed_count": 0
     }
+
+    context["q_launch_items"] = Q_LAUNCH_ITEMS
 
     if "user_id" not in session or "spa_id" not in session:
         return context
