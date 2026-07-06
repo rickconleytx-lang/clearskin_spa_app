@@ -23,10 +23,7 @@
 </head>
 
 <body>
-    <div style="background-color:#f4f4f4; padding:8px 15px; margin-bottom:15px; border-bottom:1px solid #ccc;">
-        <strong>Current User:</strong> {{ active_spa_name }} (ID: {{ active_spa_id }})
-    </div>
-
+    
     <!-- Banner -->
     <div class="banner">
         <img src="{{ url_for('static', filename='images/smallbanner.png') }}" alt="Banner">
@@ -62,54 +59,66 @@
 
 
 
-    <!-- Navigation -->
-    <div>
+<!-- Navigation -->
+<div>
 
-         
-        {% if session.get("role") == "master_admin" %}
-            <a class="btn btn-primary"
-            href="{{ url_for('master_admin_home') }}">
-                Master Admin
+    {% if session.get("role") == "master_admin" %}
+        <a class="btn btn-primary"
+           href="{{ url_for('master_admin_home') }}">
+            Master Admin
+        </a>
+    {% endif %}
+
+    <div class="page-tool-pills">
+
+        <a href="{{ url_for('morning_briefing') }}" class="tool-pill tool-pill-medium">
+            🌅 Daily<br>Briefing
+        </a>
+
+        <a href="{{ url_for('reports') }}" class="tool-pill tool-pill-medium">
+            🍑 Business<br>Summary
+        </a>
+
+        <a href="{{ url_for('calendar_view') }}" class="tool-pill tool-pill-medium">
+            📅 Calendar &<br>Appointments
+        </a>
+
+        <a href="{{ url_for('client_management') }}" class="tool-pill tool-pill-medium">
+            🙋‍♀️ Client<br>Management
+        </a>
+
+        <a href="{{ url_for('communications') }}" class="tool-pill tool-pill-medium">
+            📡 Comm<br>SMS & Email
+        </a>
+
+        <a href="{{ url_for('financials_home') }}" class="tool-pill tool-pill-medium">
+            📊 Accounting &<br>🚚 Logistics
+        </a>
+
+        <a href="{{ url_for('spa_management') }}" class="tool-pill tool-pill-medium">
+            🗂️ Business<br>Management
+        </a>
+
+
+        {% if session.get("user_id") %}
+            {% include "partials/user_menu.html" %}
+        {% else %}
+            <a class="tool-pill tool-pill-medium"
+            href="{{ url_for('login') }}">
+                Login
             </a>
         {% endif %}
 
-
-        <a href="morning_briefing" class="tool-pill tool-pill-medium">🌅Daily<br>Briefing</a>
-
-        <a href="reports" class="tool-pill tool-pill-medium">🍑Business<br>Summary</a>
-
-        <a href="calendar" class="tool-pill tool-pill-medium">📅Calendar &<br>Appointments</a>
-    
-        <a href="client_management" class="tool-pill tool-pill-medium">🙋‍♀️Client<br>Management</a>
-
-        <a href="communications" class="tool-pill tool-pill-medium">📡Comm<br>SMS & Email</a>
-
-        <a href="financials_home" class="tool-pill tool-pill-medium">📊Accounting &<br>🚚Logistics</a>
-    
-        <a href="spa_management" class="tool-pill tool-pill-medium">🗂️Business<br>Management</a>
-
-
-           {% if session.get("user_id") %}
-                <a class="btn" href="{{ url_for('logout') }}"
-                                onclick="return confirm('Are you sure you want to LOG OUT?')">
-                                Log out
-                </a>
-            {% else %}
-                <a class="btn" href="{{ url_for('login') }}">Login</a>
-            {% endif %}     
-    
-        
     </div>
+<!-- Navigation -->
+</div>
+
 <br>
 
     
 
 </div>
    
-
-
-
-
 
     <!-- Page Content -->
     <div class="container">
@@ -269,7 +278,35 @@ document.addEventListener("click", function (event) {
     }
 });
 </script>
+<script>
+function toggleUserMenu() {
+    const menu = document.getElementById("userMenuDropdown");
+    if (!menu) return;
 
+    menu.style.display = menu.style.display === "none" ? "block" : "none";
+}
+
+document.addEventListener("click", function(event) {
+    const menuWrapper = document.querySelector(".user-menu");
+    const dropdown = document.getElementById("userMenuDropdown");
+
+    if (!menuWrapper || !dropdown) return;
+
+    if (!menuWrapper.contains(event.target)) {
+        dropdown.style.display = "none";
+    }
+});
+
+document.addEventListener("keydown", function(event) {
+    const dropdown = document.getElementById("userMenuDropdown");
+
+    if (!dropdown) return;
+
+    if (event.key === "Escape") {
+        dropdown.style.display = "none";
+    }
+});
+</script>
 </body>
 
 </html>

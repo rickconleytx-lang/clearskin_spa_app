@@ -93,3 +93,15 @@
 .q-launch-registry-item:hover {
     background: #f7f7f7;
 }
+
+
+.q-launch-group-header{
+    margin-top:18px;
+    padding:8px 12px;
+    font-size:.72rem;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:.08em;
+    color:#9a6a4f;
+    border-bottom:1px solid #e8ddd5;
+}

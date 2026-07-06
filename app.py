@@ -66,6 +66,36 @@ print("MAILGUN KEY STARTS:", MAILGUN_API_KEY[:4] if MAILGUN_API_KEY else None, f
 # PEACH SUITE PRO APPLICATION SETTINGS
 # ==========================================================
 
+def build_q_launch_items():
+    items = []
+
+    for item in Q_LAUNCH_ITEMS:
+        if not item.get("active", True):
+            continue
+
+        try:
+            item_copy = item.copy()
+            item_copy["url"] = url_for(
+                item["endpoint"],
+                **item.get("endpoint_args", {})
+            )
+            items.append(item_copy)
+
+        except Exception as e:
+            print(
+                f"[Q Launch] Skipping {item.get('title')} "
+                f"({item.get('endpoint')}): {e}",
+                flush=True
+            )
+
+    return items
+
+
+
+
+
+
+
 
 
 
@@ -85,7 +115,7 @@ def inject_global_context():
         "godaddy_unreviewed_count": 0
     }
 
-    context["q_launch_items"] = Q_LAUNCH_ITEMS
+    context["q_launch_items"] = build_q_launch_items()
 
     if "user_id" not in session or "spa_id" not in session:
         return context

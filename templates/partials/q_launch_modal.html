@@ -24,14 +24,28 @@
         <div id="qLaunchResults" class="q-launch-section" style="display:none;">
             <h3>🔎 Search Results</h3>
 
-            {% for item in q_launch_items %}
-                <a href="{{ url_for(item.endpoint) }}"
-                class="q-launch-registry-item"
-                data-search="{{ item.title }} {{ item.category }} {{ item.keywords|join(' ') }}">
-                    {{ item.icon|default("📄") }} {{ item.title }}
-                    <span class="q-launch-category">{{ item.category }}</span>
+
+
+            {% set current_group = namespace(name="") %}
+
+            {% for item in q_launch_items|sort(attribute="group") %}
+
+                {% if current_group.name != item.group %}
+                    {% set current_group.name = item.group %}
+                    <div class="q-launch-group-header">
+                        {{ item.group }}
+                    </div>
+                {% endif %}
+
+                <a href="{{ item.url }}"
+                    class="q-launch-registry-item"
+                    data-search="{{ item.title }} {{ item.category }} {{ item.keywords|join(' ') }}">
+                        {{ item.icon|default("📄") }} {{ item.title }}
+                        <span class="q-launch-category">{{ item.category }}</span>
                 </a>
+
             {% endfor %}
+
         </div>
 
         <div class="q-launch-section">

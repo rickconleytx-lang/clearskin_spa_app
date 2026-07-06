@@ -1,0 +1,46 @@
+<div class="user-menu">
+    <button type="button"
+            class="user-menu-button"
+            onclick="toggleUserMenu()">
+        👤 {{ session.get("first_name", "Account") }} {{ session.get("last_name", "") }} ▾
+    </button>
+
+    <div id="userMenuDropdown"
+         class="user-menu-dropdown"
+         style="display:none;">
+
+        <div class="user-menu-header">
+            <strong>
+                👤 {{ session.get("first_name", "User") }} {{ session.get("last_name", "") }}
+            </strong>
+        <br>  <br>  
+            <div class="user-menu-muted">
+                Administrator
+            </div>
+
+            <div class="user-menu-muted">
+                Just Peachy Data
+            </div>
+        </div>
+
+        <div class="user-menu-divider"></div>
+
+        <a href="{{ url_for('my_settings') }}">⚙️ My Settings</a>
+        <a href="#">👤 My Profile</a>
+        <a href="#">🔒 Security</a>
+        <a href="#">⌨️ Keyboard Shortcuts</a>
+
+        <div class="user-menu-divider"></div>
+
+        <a href="{{ url_for('help_center') }}">❓ Help Center</a>
+        <a href="#">ℹ️ About Peach Suite Pro</a>
+        <a href="{{ url_for('feedback') }}">💬 Feedback</a>
+
+        <div class="user-menu-divider"></div>
+
+        <a href="{{ url_for('logout') }}"
+           onclick="return confirm('Log out of Peach Suite Pro?')">
+            🚪 Log Out
+        </a>
+    </div>
+</div>
