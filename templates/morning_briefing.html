@@ -3,103 +3,134 @@
 
 {% block content %}
 
-<div style="margin-bottom:15px;">
-
-
 <div class="page-title">
     <h1>🌅 Daily Briefing</h1>
 </div>
 
 <p style="color:#777; margin-top:4px;">
-    Your daily overview of appointments, revenue, reminders, and business health.
+    What you need to know before you start your business day.
 </p>
 
-</div>
+<div class="briefing-hero">
 
+    <div>
+        <h2>Good Morning!</h2>
+        <p>
+            <strong>{{ today.strftime('%A, %B %d, %Y') }}</strong>
+        </p>
+    </div>
 
+    <div class="briefing-health-score">
+        <div class="briefing-score-subtitle">
+            Business Health
+        </div>
 
-<br><br>
-<div class="dashboard-card">
-        
-    
-    <h2>🍑 Business Health</h2>
-            <p style="font-size: 42px; font-weight: bold; margin: 10px 0;">
-                {{ business_health_score }} / 100
+        {% if business_health.score %}
+            <div class="briefing-score-number">
+                {{ business_health.score }}
+            </div>
+
+            <div class="briefing-score-label">
+                {{ business_health.label }}
+            </div>
+        {% else %}
+            <div class="briefing-score-label">
+                {{ business_health.label }}
+            </div>
+
+            <p style="color:#777; font-size:0.9rem; margin-top:8px;">
+                Coming soon
             </p>
-            <h3>{{ business_health_label }}</h3>
-</div>    
- <br>
- <br>   
-
-
-
-<div class="dashboard-card">
-
-    <h2>Good Morning!</h2>
-
-    <p><strong>{{ today.strftime('%A, %B %d, %Y') }}</strong></p>
-
-    <hr>
-
-    <p>
-        📅 Appointments Today:
-        <strong>{{ dashboard.appointments_today }}</strong>
-    </p>
-
-    <p>
-        💰 Expected Revenue:
-        <strong>${{ '%.2f'|format(dashboard.expected_revenue) }}</strong>
-    </p>
-
-    <p>
-        🎂 Birthdays Today:
-        <strong>{{ dashboard.birthdays_today }}</strong>
-    </p>
-
-
-    <p>
-        📅 Appointments Tomorrow:
-        <strong>{{ dashboard.appointments_tomorrow }}</strong>
-    </p>
-
-
-    {% if dashboard.next_appointment %}
-    <p>
-        ⏰ Next Appointment:
-        <strong>
-            {{ dashboard.next_appointment[0] }}
-            —
-            {{ dashboard.next_appointment[1] }} {{ dashboard.next_appointment[2] }}
-        </strong>
-    </p>
-
-
-    {% else %}
-    <p>
-        ⏰ Next Appointment:
-        <strong>None remaining today</strong>
-    </p>
-    {% endif %}
-
+        {% endif %}
+</div>
 
 </div>
 
+<div class="briefing-grid">
 
+    <div class="dashboard-card">
+        <h2>📅 Today</h2>
+
+        <p>
+            Appointments:
+            <strong>{{ dashboard.appointments_today }}</strong>
+        </p>
+
+        <p>
+            Expected Revenue:
+            <strong>${{ '%.2f'|format(dashboard.expected_revenue) }}</strong>
+        </p>
+
+        {% if dashboard.next_appointment %}
+            <p>
+                Next Appointment:
+                <strong>
+                    {{ dashboard.next_appointment[0] }}
+                    —
+                    {{ dashboard.next_appointment[1] }}
+                    {{ dashboard.next_appointment[2] }}
+                </strong>
+            </p>
+        {% else %}
+            <p>
+                Next Appointment:
+                <strong>None remaining today</strong>
+            </p>
+        {% endif %}
+    </div>
+
+    <div class="dashboard-card">
+        <h2>✅ Priority Actions</h2>
+
+        <p>
+            🎂 Birthdays Today:
+            <strong>{{ dashboard.birthdays_today }}</strong>
+        </p>
+
+        <p>
+            📅 Appointments Tomorrow:
+            <strong>{{ dashboard.appointments_tomorrow }}</strong>
+        </p>
+
+        <p>
+            📨 GoDaddy Imports:
+            <strong>{{ godaddy_unreviewed_count|default(0) }}</strong>
+        </p>
+    </div>
+
+    <div class="dashboard-card">
+        <h2>📊 Business Snapshot</h2>
+
+        <p>
+            Today’s expected revenue:
+            <strong>${{ '%.2f'|format(dashboard.expected_revenue) }}</strong>
+        </p>
+
+        <p>
+            Scheduled activity:
+            <strong>{{ dashboard.appointments_today }} appointment(s)</strong>
+        </p>
+
+        <p style="color:#777;">
+            More weekly and monthly KPIs coming next.
+        </p>
+    </div>
+
+    <div class="dashboard-card">
+        <h2>🍑 Coach Note</h2>
+
+        <p>
+            Start with today’s appointments, review any birthdays or imports,
+            and check open time on the calendar before the day gets busy.
+        </p>
+    </div>
+
+</div>
 
 <br>
 
-<a class="btn" href="{{ url_for('calendar_view') }}">Go to Calendar</a>
-
-
-
-<script>
-function toggleHelp(id) {
-    const box = document.getElementById(id);
-    box.style.display = box.style.display === "none" ? "block" : "none";
-    }
-</script>
-
+<a class="btn" href="{{ url_for('calendar_view') }}">
+    Go to Calendar
+</a>
 
 {% endblock %}
-
-

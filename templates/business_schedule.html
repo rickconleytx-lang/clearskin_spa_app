@@ -1,0 +1,304 @@
+{% extends "base.html" %}
+{% block title %}Business Schedule | Peach Suite Pro{% endblock %}
+
+{% block content %}
+
+<div class="page-title">
+    <h1>🗓️ Business Schedule</h1>
+</div>
+
+<p style="color:#777; margin-top:4px;">
+    Business Schedule helps Peach Suite Pro remember the important responsibilities
+    that keep your business running. These reminders will appear in your Daily
+    Briefing so you can focus on serving your customers.
+</p>
+
+<hr>
+{% if not schedule_items %}
+<div class="business-schedule-empty">
+
+    <p>
+        Your Business Schedule is currently empty.</p>
+    <p>    Peach Suite Pro can create a recommended schedule with common reminders for
+        taxes, licensing, insurance, marketing, operations, and growth.
+        You can edit or remove items later.
+    </p>
+
+    <form method="POST"
+          action="{{ url_for('build_business_schedule') }}">
+
+        <button type="submit" class="btn">
+            Create Recommended Schedule
+        </button>
+
+    </form>
+
+</div>
+{% endif %}
+
+<br>
+
+
+<div class="dashboard-card">
+
+    <div class="briefing-card-title">
+        Add Business Schedule Item
+    </div>
+
+    <form method="POST">
+
+        <label>Category</label>
+
+        <select name="category" required>
+
+            <option value="">Select Category...</option>
+
+            <option>Compliance</option>
+            <option>Financial</option>
+            <option>Licensing</option>
+            <option>Insurance</option>
+            <option>Marketing</option>
+            <option>Operations</option>
+            <option>Technology</option>
+            <option>Employees</option>
+            <option>Growth</option>
+            <option>Other</option>
+
+        </select>
+
+        <label>Title</label>
+
+        <input
+            type="text"
+            name="title"
+            required
+            placeholder="Example: Texas Sales Tax Report">
+
+        <label>Description</label>
+
+        <textarea
+            name="description"
+            rows="3"
+            placeholder="Optional notes or instructions..."></textarea>
+
+        <div class="form-row">
+
+            <div>
+
+                <label>Due Date</label>
+
+                <input
+                    type="date"
+                    name="due_date">
+
+            </div>
+
+            <div>
+
+                <label>Repeats</label>
+
+                <select name="recurrence_type">
+
+                    <option value="">Does Not Repeat</option>
+                    <option>Weekly</option>
+                    <option>Monthly</option>
+                    <option>Quarterly</option>
+                    <option>Yearly</option>
+
+                </select>
+
+            </div>
+
+        </div>
+
+        <div class="form-row">
+
+
+            <div>
+
+                <label>Reminder (Days Before)</label>
+
+                <input
+                    type="number"
+                    name="reminder_days"
+                    value="14"
+                    min="0">
+
+            </div>
+
+        </div>
+
+        <br>
+
+        <label>
+
+            <input
+                type="checkbox"
+                name="is_required"
+                checked>
+
+            Required Business Responsibility
+
+        </label>
+
+        <br><br>
+
+        <button
+            type="submit"
+            class="btn btn-primary">
+
+            Save Business Schedule Item
+
+        </button>
+
+    </form>
+
+</div>
+
+<br>
+
+<div class="dashboard-card">
+
+    <div class="briefing-card-title">
+
+        Current Business Schedule
+
+    </div>
+
+    {% if schedule_items %}
+
+        <table>
+
+            <thead>
+
+                <tr>
+
+                    <th>Category</th>
+                    <th>Title</th>
+                    <th>Due</th>
+                    <th>Repeats</th>
+                    <th>Reminder</th>
+                    <th>Actions</th>
+
+                </tr>
+
+            </thead>
+
+            <tbody>
+
+            {% for item in schedule_items %}
+
+                <tr>
+
+                    <td>{{ item[1] }}</td>
+
+                    <td>{{ item[2] }}</td>
+
+                    <td>
+
+                        {% if item[4] %}
+                            {{ item[4].strftime("%b %d, %Y") }}
+                        {% endif %}
+
+                    </td>
+
+                    <td>
+
+                        {% if item[5] %}
+                            Every {{ item[6] }} {{ item[5] }}
+                        {% else %}
+                            —
+                        {% endif %}
+
+                    </td>
+
+                    <td>
+
+                        {{ item[7] }} day(s)
+
+                    </td>
+
+                    <td class="table-actions">
+
+                        <a class="btn btn-small"
+                            href="{{ url_for('view_business_schedule', schedule_id=item[0]) }}">
+                                View
+                        </a>
+
+
+                        <a class="btn btn-small"
+                            href="{{ url_for('edit_business_schedule', schedule_id=item[0]) }}">
+                                Edit
+                        </a>
+
+                        <form method="POST"
+                                action="{{ url_for('archive_business_schedule', schedule_id=item[0]) }}"
+                                style="display:inline;">
+                            <button type="submit" class="btn btn-small">
+                                Archive
+                            </button>
+                        </form>
+
+                        <form method="POST"
+                                action="{{ url_for('delete_business_schedule', schedule_id=item[0]) }}"
+                                style="display:inline;">
+                            <button type="submit" class="btn btn-small">
+                                Delete
+                            </button>
+                        </form>
+
+                        <form method="POST"
+                                action="{{ url_for('duplicate_business_schedule', schedule_id=item[0]) }}"
+                                style="display:inline;">
+                            <button type="submit" class="btn btn-small">
+                                Duplicate
+                            </button>
+                        </form>
+
+</td>
+
+
+
+                </tr>
+
+            {% endfor %}
+
+            </tbody>
+
+        </table>
+
+    <hr>
+
+<div class="business-schedule-footer-action">
+
+    <p>
+        Want Peach Suite Pro to check for additional recommended business schedule items?
+    </p>
+
+    <form method="POST"
+          action="{{ url_for('build_business_schedule') }}">
+        <button type="submit" class="btn">
+            Update Recommended Schedule
+        </button>
+    </form>
+
+</div>    
+
+
+<hr>
+    {% else %}
+
+        <p style="color:#777;">
+
+            Your Business Schedule is empty.
+
+            Add a few important business responsibilities and Peach Suite
+            will begin reminding you through your Daily Briefing.
+
+        </p>
+
+    {% endif %}
+
+</div>
+
+{% endblock %}

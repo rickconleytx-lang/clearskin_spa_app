@@ -21481,6 +21481,653 @@ def morning_briefing():
     )
 
 
+####################################
+#
+#   BUSINESS COACH PROFILE
+#
+#
+##########################################
+
+
+
+@app.route("/business-coach/profile", methods=["GET", "POST"])
+@login_required
+@spa_required
+def business_coach_profile():
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    if request.method == "POST":
+        business_type = request.form.get("business_type")
+        business_description = request.form.get("business_description")
+        business_address = request.form.get("business_address")
+        city = request.form.get("city")
+        state = request.form.get("state")
+        zip_code = request.form.get("zip_code")
+        service_area = request.form.get("service_area")
+        business_hours = request.form.get("business_hours")
+
+        website_url = request.form.get("website_url")
+        facebook_url = request.form.get("facebook_url")
+        instagram_url = request.form.get("instagram_url")
+        yelp_url = request.form.get("yelp_url")
+        google_business_url = request.form.get("google_business_url")
+
+        website_intro = request.form.get("website_intro")
+        facebook_intro = request.form.get("facebook_intro")
+        instagram_intro = request.form.get("instagram_intro")
+        yelp_intro = request.form.get("yelp_intro")
+
+        has_business_cards = bool(request.form.get("has_business_cards"))
+        has_flyers = bool(request.form.get("has_flyers"))
+        has_referral_cards = bool(request.form.get("has_referral_cards"))
+        has_gift_certificates = bool(request.form.get("has_gift_certificates"))
+        has_promotional_banner = bool(request.form.get("has_promotional_banner"))
+        has_signage = bool(request.form.get("has_signage"))
+
+        primary_goal = request.form.get("primary_goal")
+
+        cur.execute("""
+            INSERT INTO business_coach_profiles (
+                spa_id,
+                business_type,
+                business_description,
+                business_address,
+                city,
+                state,
+                zip_code,
+                service_area,
+                business_hours,
+                website_url,
+                facebook_url,
+                instagram_url,
+                yelp_url,
+                google_business_url,
+                website_intro,
+                facebook_intro,
+                instagram_intro,
+                yelp_intro,
+                has_business_cards,
+                has_flyers,
+                has_referral_cards,
+                has_gift_certificates,
+                has_promotional_banner,
+                has_signage,
+                primary_goal,
+                updated_at
+            )
+            VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, NOW()
+            )
+            ON CONFLICT (spa_id)
+            DO UPDATE SET
+                business_type = EXCLUDED.business_type,
+                business_description = EXCLUDED.business_description,
+                business_address = EXCLUDED.business_address,
+                city = EXCLUDED.city,
+                state = EXCLUDED.state,
+                zip_code = EXCLUDED.zip_code,
+                service_area = EXCLUDED.service_area,
+                business_hours = EXCLUDED.business_hours,
+                website_url = EXCLUDED.website_url,
+                facebook_url = EXCLUDED.facebook_url,
+                instagram_url = EXCLUDED.instagram_url,
+                yelp_url = EXCLUDED.yelp_url,
+                google_business_url = EXCLUDED.google_business_url,
+                website_intro = EXCLUDED.website_intro,
+                facebook_intro = EXCLUDED.facebook_intro,
+                instagram_intro = EXCLUDED.instagram_intro,
+                yelp_intro = EXCLUDED.yelp_intro,
+                has_business_cards = EXCLUDED.has_business_cards,
+                has_flyers = EXCLUDED.has_flyers,
+                has_referral_cards = EXCLUDED.has_referral_cards,
+                has_gift_certificates = EXCLUDED.has_gift_certificates,
+                has_promotional_banner = EXCLUDED.has_promotional_banner,
+                has_signage = EXCLUDED.has_signage,
+                primary_goal = EXCLUDED.primary_goal,
+                updated_at = NOW()
+        """, (
+            spa_id,
+            business_type,
+            business_description,
+            business_address,
+            city,
+            state,
+            zip_code,
+            service_area,
+            business_hours,
+            website_url,
+            facebook_url,
+            instagram_url,
+            yelp_url,
+            google_business_url,
+            website_intro,
+            facebook_intro,
+            instagram_intro,
+            yelp_intro,
+            has_business_cards,
+            has_flyers,
+            has_referral_cards,
+            has_gift_certificates,
+            has_promotional_banner,
+            has_signage,
+            primary_goal
+        ))
+
+        conn.commit()
+        flash("Business Coach Profile saved.", "success")
+        return redirect(url_for("business_coach_profile"))
+
+    cur.execute("""
+        SELECT *
+        FROM business_coach_profiles
+        WHERE spa_id = %s
+    """, (spa_id,))
+
+    profile = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "business_coach_profile.html",
+        profile=profile
+    )
+
+
+
+
+###################################
+#
+#   BUSINESS SCHEDULE
+#
+#
+#####################################
+
+
+@app.route("/business-schedule", methods=["GET", "POST"])
+@login_required
+@spa_required
+def business_schedule():
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    if request.method == "POST":
+        category = request.form.get("category")
+        title = request.form.get("title")
+        description = request.form.get("description")
+        due_date = request.form.get("due_date") or None
+        recurrence_type = request.form.get("recurrence_type")
+        recurrence_interval = request.form.get("recurrence_interval") or 1
+        reminder_days = request.form.get("reminder_days") or 14
+        is_required = bool(request.form.get("is_required"))
+
+        cur.execute("""
+            INSERT INTO business_schedule (
+                spa_id,
+                category,
+                title,
+                description,
+                due_date,
+                recurrence_type,
+                recurrence_interval,
+                reminder_days,
+                is_required
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            spa_id,
+            category,
+            title,
+            description,
+            due_date,
+            recurrence_type,
+            recurrence_interval,
+            reminder_days,
+            is_required
+        ))
+
+        conn.commit()
+        flash("Business Schedule item added.", "success")
+        return redirect(url_for("business_schedule"))
+
+    cur.execute("""
+        SELECT
+            schedule_id,
+            category,
+            title,
+            description,
+            due_date,
+            recurrence_type,
+            recurrence_interval,
+            reminder_days,
+            is_required,
+            is_completed,
+            is_active
+        FROM business_schedule
+        WHERE spa_id = %s
+          AND is_active = TRUE
+        ORDER BY
+            due_date ASC NULLS LAST,
+            category,
+            title
+    """, (spa_id,))
+
+    schedule_items = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "business_schedule.html",
+        schedule_items=schedule_items
+    )
+
+
+
+
+
+######################################
+#
+#   BUSINESS SCHEDULE BUILD
+#
+#
+#########################################
+
+
+
+
+@app.route("/business-schedule/build", methods=["POST"])
+@login_required
+@spa_required
+def build_business_schedule():
+    spa_id = current_spa_id()
+
+    recommended_items = [
+        ("Financial", "Texas Sales Tax Report", "Review and file Texas sales tax report.", "Monthly", 1, 14),
+        ("Financial", "Quarterly Estimated Tax Review", "Review estimated tax payments with your accountant.", "Quarterly", 1, 21),
+        ("Financial", "Monthly Financial Review", "Review income, expenses, and profit trends.", "Monthly", 1, 7),
+
+        ("Licensing", "Professional License Renewal", "Review professional license renewal requirements.", "Yearly", 1, 60),
+        ("Insurance", "Business Insurance Review", "Review liability and business insurance coverage.", "Yearly", 1, 30),
+
+        ("Operations", "Monthly Inventory Count", "Review retail and backbar inventory levels.", "Monthly", 1, 7),
+        ("Operations", "Equipment Maintenance Review", "Check treatment equipment, supplies, and maintenance needs.", "Quarterly", 1, 14),
+
+        ("Marketing", "Google Review Reminder", "Ask recent happy clients for Google reviews.", "Weekly", 1, 2),
+        ("Marketing", "Facebook / Instagram Post Review", "Review recent social activity and plan new posts.", "Weekly", 1, 2),
+        ("Marketing", "Monthly Promotion Planning", "Plan next month's featured service or retail promotion.", "Monthly", 1, 10),
+
+        ("Growth", "Quarterly Pricing Review", "Review service pricing and compare against business goals.", "Quarterly", 1, 21),
+        ("Growth", "Website / Online Presence Review", "Review website, Google profile, and social media presence.", "Quarterly", 1, 21),
+    ]
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    for category, title, description, recurrence_type, recurrence_interval, reminder_days in recommended_items:
+        cur.execute("""
+            INSERT INTO business_schedule (
+                spa_id,
+                category,
+                title,
+                description,
+                recurrence_type,
+                recurrence_interval,
+                reminder_days,
+                is_required,
+                is_active
+            )
+            SELECT %s, %s, %s, %s, %s, %s, %s, TRUE, TRUE
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM business_schedule
+                WHERE spa_id = %s
+                  AND title = %s
+                  AND is_active = TRUE
+            )
+        """, (
+            spa_id,
+            category,
+            title,
+            description,
+            recurrence_type,
+            recurrence_interval,
+            reminder_days,
+            spa_id,
+            title
+        ))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    flash("Recommended Business Schedule created.", "success")
+    return redirect(url_for("business_schedule"))
+
+
+
+
+##################################
+#
+#   EDIT BUSINESS SCHEDULE ITEM
+#
+#
+##################################
+
+
+@app.route("/business-schedule/edit/<int:schedule_id>", methods=["GET", "POST"])
+@login_required
+@spa_required
+def edit_business_schedule(schedule_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    if request.method == "POST":
+        category = request.form.get("category")
+        title = request.form.get("title")
+        description = request.form.get("description")
+        due_date = request.form.get("due_date") or None
+        recurrence_type = request.form.get("recurrence_type")
+        recurrence_interval = request.form.get("recurrence_interval") or 1
+        reminder_days = request.form.get("reminder_days") or 14
+        is_required = bool(request.form.get("is_required"))
+
+        cur.execute("""
+            UPDATE business_schedule
+            SET
+                category = %s,
+                title = %s,
+                description = %s,
+                due_date = %s,
+                recurrence_type = %s,
+                recurrence_interval = %s,
+                reminder_days = %s,
+                is_required = %s,
+                updated_at = NOW()
+            WHERE schedule_id = %s
+              AND spa_id = %s
+        """, (
+            category,
+            title,
+            description,
+            due_date,
+            recurrence_type,
+            recurrence_interval,
+            reminder_days,
+            is_required,
+            schedule_id,
+            spa_id
+        ))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        flash("Business Schedule item updated.", "success")
+        return redirect(url_for("business_schedule"))
+
+    cur.execute("""
+        SELECT
+            schedule_id,
+            category,
+            title,
+            description,
+            due_date,
+            recurrence_type,
+            recurrence_interval,
+            reminder_days,
+            is_required
+        FROM business_schedule
+        WHERE schedule_id = %s
+          AND spa_id = %s
+    """, (schedule_id, spa_id))
+
+    item = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if not item:
+        flash("Business Schedule item not found.", "warning")
+        return redirect(url_for("business_schedule"))
+
+    return render_template(
+        "edit_business_schedule.html",
+        item=item
+    )
+
+
+
+
+
+
+##################################
+#
+#   ARCHIVE BUSINESS SCHEDULE ITEM
+#
+#
+##################################
+
+
+@app.route("/business-schedule/<int:schedule_id>/archive", methods=["POST"])
+@login_required
+@spa_required
+def archive_business_schedule(schedule_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE business_schedule
+        SET
+            is_active = FALSE,
+            updated_at = NOW()
+        WHERE schedule_id = %s
+          AND spa_id = %s
+    """, (schedule_id, spa_id))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    flash("Business Schedule item archived.", "success")
+    return redirect(url_for("business_schedule"))
+
+
+
+
+
+
+##################################
+#
+#   DELETE BUSINESS SCHEDULE ITEM
+#
+#
+##################################
+
+
+@app.route("/business-schedule/<int:schedule_id>/delete", methods=["POST"])
+@login_required
+@spa_required
+def delete_business_schedule(schedule_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        DELETE FROM business_schedule
+        WHERE schedule_id = %s
+          AND spa_id = %s
+    """, (schedule_id, spa_id))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    flash("Business Schedule item deleted.", "success")
+    return redirect(url_for("business_schedule"))
+
+
+
+
+
+
+
+##################################
+#
+#   DUPLICATE BUSINESS SCHEDULE ITEM
+#
+#
+##################################
+
+
+@app.route("/business-schedule/<int:schedule_id>/duplicate", methods=["POST"])
+@login_required
+@spa_required
+def duplicate_business_schedule(schedule_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        INSERT INTO business_schedule (
+            spa_id,
+            category,
+            title,
+            description,
+            due_date,
+            recurrence_type,
+            recurrence_interval,
+            reminder_days,
+            is_required,
+            is_completed,
+            is_active
+        )
+        SELECT
+            spa_id,
+            category,
+            title || ' Copy',
+            description,
+            due_date,
+            recurrence_type,
+            recurrence_interval,
+            reminder_days,
+            is_required,
+            FALSE,
+            TRUE
+        FROM business_schedule
+        WHERE schedule_id = %s
+          AND spa_id = %s
+    """, (schedule_id, spa_id))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    flash("Business Schedule item duplicated.", "success")
+    return redirect(url_for("business_schedule"))
+
+
+
+
+
+
+##################################
+#
+#   VIEW BUSINESS SCHEDULE ITEM
+#
+#
+##################################
+
+
+@app.route("/business-schedule/<int:schedule_id>")
+@login_required
+@spa_required
+def view_business_schedule(schedule_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            schedule_id,
+            category,
+            title,
+            description,
+            due_date,
+            recurrence_type,
+            recurrence_interval,
+            reminder_days,
+            is_required,
+            is_completed,
+            is_active,
+            completed_at,
+            created_at,
+            updated_at
+        FROM business_schedule
+        WHERE schedule_id = %s
+          AND spa_id = %s
+    """, (schedule_id, spa_id))
+
+    item = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if not item:
+        flash("Business Schedule item not found.", "warning")
+        return redirect(url_for("business_schedule"))
+
+    return render_template(
+        "view_business_schedule.html",
+        item=item
+    )
+
+
+
+
+
+
+
+
+##################################
+#
+#
+#
+#
+##################################
+
+
+
+
+
+
+
+
+
+##################################
+#
+#
+#
+#
+##################################
+
+
+
+
 
 
 

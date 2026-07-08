@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block title %}Business Schedule Item | Peach Suite Pro{% endblock %}
+
+{% block content %}
+
+<div class="page-title">
+    <h1>Business Schedule Item</h1>
+</div>
+
+<a class="btn" href="{{ url_for('business_schedule') }}">
+    Back to Business Schedule
+</a>
+
+<br><br>
+
+<div class="dashboard-card">
+
+    <div class="detail-title">
+        {{ item[2] }}
+    </div>
+
+    <div class="detail-list">
+
+        <div class="detail-row">
+            <div class="detail-label">Category</div>
+            <div class="detail-value">{{ item[1] }}</div>
+        </div>
+
+        {% if item[3] %}
+        <div class="detail-row">
+            <div class="detail-label">Description</div>
+            <div class="detail-value">{{ item[3] }}</div>
+        </div>
+        {% endif %}
+
+        <div class="detail-row">
+            <div class="detail-label">Due Date</div>
+            <div class="detail-value">
+                {% if item[4] %}
+                    {{ item[4].strftime("%B %d, %Y") }}
+                {% else %}
+                    Not set
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="detail-row">
+            <div class="detail-label">Repeats</div>
+            <div class="detail-value">
+                {% if item[5] %}
+                    Every {{ item[6] }} {{ item[5] }}
+                {% else %}
+                    Does not repeat
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="detail-row">
+            <div class="detail-label">Reminder</div>
+            <div class="detail-value">
+                {{ item[7] }} day(s) before
+            </div>
+        </div>
+
+        <div class="detail-row">
+            <div class="detail-label">Required</div>
+            <div class="detail-value">
+                {% if item[8] %}Yes{% else %}No{% endif %}
+            </div>
+        </div>
+
+        <div class="detail-row">
+            <div class="detail-label">Status</div>
+            <div class="detail-value">
+                {% if not item[10] %}
+                    Archived
+                {% elif item[9] %}
+                    Completed
+                {% else %}
+                    Active
+                {% endif %}
+            </div>
+        </div>
+
+    </div>
+
+</div>
+
+<div class="dashboard-card">
+
+    <p class="detail-note">
+        Reporting period details will appear here for sales tax,
+        quarterly taxes, payroll summaries, license renewals, and other
+        filing responsibilities.
+    </p>
+
+    <div class="detail-title">
+        <h3>Reporting Details</h3>
+    </div>
+
+    
+
+    <div class="detail-list">
+
+        <div class="detail-row">
+            <div class="detail-label">Current Reporting Period</div>
+            <div class="detail-value">Coming soon</div>
+        </div>
+
+        <div class="detail-row">
+            <div class="detail-label">Next Reporting Period</div>
+            <div class="detail-value">Coming soon</div>
+        </div>
+
+        <div class="detail-row">
+            <div class="detail-label">File Due Date</div>
+            <div class="detail-value">Coming soon</div>
+        </div>
+
+        <div class="detail-row">
+            <div class="detail-label">Linked Report</div>
+            <div class="detail-value">Coming soon</div>
+        </div>
+
+    </div>
+
+</div>
+
+<div class="dashboard-card">
+
+    <div class="detail-title">
+        Actions
+    </div>
+
+    <a class="btn"
+       href="{{ url_for('edit_business_schedule', schedule_id=item[0]) }}">
+        Edit
+    </a>
+
+    <form method="POST"
+          action="{{ url_for('duplicate_business_schedule', schedule_id=item[0]) }}"
+          style="display:inline;">
+        <button type="submit" class="btn">
+            Duplicate
+        </button>
+    </form>
+
+    <form method="POST"
+          action="{{ url_for('archive_business_schedule', schedule_id=item[0]) }}"
+          style="display:inline;">
+        <button type="submit" class="btn">
+            Archive
+        </button>
+    </form>
+
+    <form method="POST"
+          action="{{ url_for('delete_business_schedule', schedule_id=item[0]) }}"
+          style="display:inline;">
+        <button type="submit" class="btn">
+            Delete
+        </button>
+    </form>
+
+</div>
+
+{% endblock %}
