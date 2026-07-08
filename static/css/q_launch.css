@@ -105,3 +105,20 @@
     color:#9a6a4f;
     border-bottom:1px solid #e8ddd5;
 }
+
+.q-launch-empty {
+    text-align: center;
+    padding: 28px 20px;
+    color: #777;
+}
+
+.q-launch-empty-title {
+    font-size: 1rem;
+    margin-bottom: 12px;
+}
+
+.q-launch-empty-examples {
+    font-size: 0.90rem;
+    color: #999;
+    line-height: 1.8;
+}

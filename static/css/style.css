@@ -2949,7 +2949,7 @@ td:nth-child(3) {
     border: 1px solid #f0c9a8;
     border-radius: 14px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-    padding: 10px;
+    padding: 12px;
     z-index: 9999;
     text-align: left;
 }
@@ -2967,7 +2967,7 @@ td:nth-child(3) {
 
 .user-menu-dropdown a {
     display: block;
-    padding: 9px 12px;
+    padding: 1px 10px;
     border-radius: 10px;
     color: #4a2c1a;
     text-decoration: none;
@@ -2981,5 +2981,43 @@ td:nth-child(3) {
 .user-menu-divider {
     height: 1px;
     background: #f2d7c0;
-    margin: 8px 0;
+    margin: 4px 0;
+}
+
+.app-header {
+    position: sticky;
+    top: 0;
+    z-index: 9000;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 18px;
+    background: #fff7f0;
+    border-bottom: 1px solid #f0c9a8;
+}
+
+.app-header-left,
+.app-header-right,
+.app-main-menu {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.app-brand {
+    font-weight: 700;
+    color: #6f3b1f;
+    text-decoration: none;
+    margin-right: 12px;
+    white-space: nowrap;
+}
+
+.app-main-menu {
+    flex-wrap: wrap;
+}
+
+.app-header-right {
+    margin-left: 10px;
+    white-space: nowrap;
 }

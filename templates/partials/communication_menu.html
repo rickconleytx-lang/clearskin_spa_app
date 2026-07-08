@@ -1,0 +1,45 @@
+<div class="user-menu">
+    <button type="button"
+            class="user-menu-button"
+            onclick="toggleCommunicationMenu()">
+        📡 Communications <br> SMS & Email ▾
+    </button>
+
+    <div id="communicationMenuDropdown"
+         class="user-menu-dropdown"
+         style="display:none;">
+
+        <div class="user-menu-header">
+            <strong>💬 Communications </strong>
+        </div>
+
+        <div class="user-menu-divider"></div>
+
+        <div class="user-menu-muted" style="padding:6px 12px;">📨 Send</div>
+        <a href="{{ url_for('sms_home') }}">SMS</a>
+        <a href="{{ url_for('general_email') }}">Email</a>
+
+        <div class="user-menu-divider"></div>
+
+        <div class="user-menu-muted" style="padding:6px 12px;">📝 Templates</div>
+        <a href="{{ url_for('template_review', channel='sms') }}">SMS Templates</a>
+        <a href="{{ url_for('template_review', channel='email') }}">Email Templates</a>
+
+        <div class="user-menu-divider"></div>
+
+        <div class="user-menu-muted" style="padding:6px 12px;">🕘 History</div>
+        <a href="{{ url_for('sms_history_all') }}">SMS History</a>
+        <a href="{{ url_for('email_history') }}">Email History</a>
+
+        <div class="user-menu-divider"></div>
+
+        <a href="{{ url_for('client_contact_preferences') }}">⚙️ Contact Preferences</a>
+        <a href="{{ url_for('reminder_queue') }}">🔁 Communication Automation</a>
+
+        <div class="user-menu-divider"></div>
+        
+        <a href="{{ url_for('messaging_compliance_dashboard') }}">🛡️ Messaging Compliance</a>
+        <a href="{{ url_for('communications') }}">📡 Communications Home</a>
+
+    </div>
+</div>

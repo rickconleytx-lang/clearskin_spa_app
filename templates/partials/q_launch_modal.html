@@ -3,8 +3,8 @@
 
         <div class="q-launch-header">
             <div>
-                <h2>⚡️ Q Launch</h2>
-                <p>Find anything in Peach Suite Pro.</p>
+                <h2>🔍 Search</h2>
+                <p>Find pages, reports, tools, and features.</p>
             </div>
 
             <button type="button"
@@ -18,94 +18,41 @@
             type="text"
             id="qLaunchSearch"
             class="q-launch-search"
-            placeholder="Search pages..."
-            onkeyup="filterQLaunch()"
+            placeholder="Search pages, reports, tools..."
+            autocomplete="off"
         >
-        <div id="qLaunchResults" class="q-launch-section" style="display:none;">
-            <h3>🔎 Search Results</h3>
 
+        <div class="q-launch-section q-launch-results-section">
+            <h3>Results</h3>
 
+            <div id="qLaunchEmptyState" class="q-launch-empty">
+                <div class="q-launch-empty-title">
+                    Start typing to search Peach Suite Pro.
+                </div>
 
-            {% set current_group = namespace(name="") %}
+                <div class="q-launch-empty-examples">
+                    Try: calendar
+                    <br> client 
+                    <br> sms
+                    <br> inventory
+                    <br> expense
+                    <br> report
+                </div>
+            </div>
 
-            {% for item in q_launch_items|sort(attribute="group") %}
-
-                {% if current_group.name != item.group %}
-                    {% set current_group.name = item.group %}
-                    <div class="q-launch-group-header">
-                        {{ item.group }}
-                    </div>
-                {% endif %}
-
+            {% for item in q_launch_items %}
                 <a href="{{ item.url }}"
-                    class="q-launch-registry-item"
-                    data-search="{{ item.title }} {{ item.category }} {{ item.keywords|join(' ') }}">
-                        {{ item.icon|default("📄") }} {{ item.title }}
-                        <span class="q-launch-category">{{ item.category }}</span>
+                   class="q-launch-registry-item"
+                   style="display:none;"
+                   data-search="{{ item.title }} {{ item.category }} {{ item.group }} {{ item.keywords|join(' ') }}">
+                    {{ item.icon|default("📄") }} {{ item.title }}
+                    <span class="q-launch-category">{{ item.category }}</span>
                 </a>
-
             {% endfor %}
-
         </div>
 
-        <div class="q-launch-section">
-            <h3>⭐ Favorites</h3>
-
-            <a href="{{ url_for('morning_briefing') }}" class="q-launch-item">
-                Morning Briefing
-            </a>
-
-            <a href="{{ url_for('calendar_view') }}" class="q-launch-item">
-                Calendar
-            </a>
-
-            <a href="{{ url_for('client_management') }}" class="q-launch-item">
-                Clients
-            </a>
-
-            <a href="{{ url_for('communications') }}" class="q-launch-item">
-                Communications
-            </a>
-        </div>
-
-        <div class="q-launch-section">
-            <h3>🕘 Recent</h3>
-
-            <a href="{{ url_for('system_activity') }}" class="q-launch-item">
-                System Activity
-            </a>
-
-            <a href="{{ url_for('inventory_home') }}" class="q-launch-item">
-                Inventory
-            </a>
-
-            <a href="{{ url_for('reports') }}" class="q-launch-item">
-                Reports
-            </a>
-        </div>
-
-        <div class="q-launch-section">
-            <h3>📂 Categories</h3>
-
-            <a href="{{ url_for('dashboard') }}" class="q-launch-item">
-                Dashboard
-            </a>
-
-            <a href="{{ url_for('appointments') }}" class="q-launch-item">
-                Appointments
-            </a>
-
-            <a href="{{ url_for('income_home') }}" class="q-launch-item">
-                Income
-            </a>
-
-            <a href="{{ url_for('expenses_home') }}" class="q-launch-item">
-                Expenses
-            </a>
-
-            <a href="{{ url_for('admin') }}" class="q-launch-item">
-                Administration
-            </a>
+        <div class="q-launch-footer">
+            Press ESC to close · Press ⌘K / Ctrl+K to search
         </div>
 
     </div>

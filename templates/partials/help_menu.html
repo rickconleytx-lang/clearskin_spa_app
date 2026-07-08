@@ -1,0 +1,39 @@
+<div class="user-menu">
+    <button type="button"
+            class="user-menu-button"
+            onclick="toggleHelpMenu()">
+        ❓ Help ▾
+    </button>
+
+    <div id="helpMenuDropdown"
+         class="user-menu-dropdown"
+         style="display:none;">
+
+        <div class="user-menu-header">
+            <strong></strong>
+        </div>
+   
+            <button type="button"
+                        class="user-menu-button"
+                        onclick="openQLaunch()">
+                    🔍 Search
+            </button>
+        <div class="user-menu-divider"></div>
+
+        <div class="user-menu-muted" style="padding:6px 12px;"></div>
+        <a href="{{ url_for('help_center') }}">❓ Peach Suite Pro Help</a>
+
+
+        <div class="user-menu-divider"></div>
+
+        <div class="user-menu-muted" style="padding:6px 12px;"></div>
+        <a href="{{ url_for('godaddy_imports') }}">About</a>
+
+         <div class="user-menu-muted" style="padding:6px 12px;"></div>
+        <a href="{{ url_for('feedback') }}">Feedback</a>
+
+
+         
+
+    </div>
+</div>

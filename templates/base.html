@@ -69,48 +69,40 @@
         </a>
     {% endif %}
 
-    <div class="page-tool-pills">
+    <header class="app-header">
 
-        <a href="{{ url_for('morning_briefing') }}" class="tool-pill tool-pill-medium">
-            🌅 Daily<br>Briefing
-        </a>
+        
+            
+        <nav class="app-main-menu">
+            <a href="{{ url_for('morning_briefing') }}" class="user-menu-button">🌅 Daily <br> Briefing</a>
+            <a href="{{ url_for('reports') }}" class="user-menu-button">📊 Business <br> Summary</a>
+            
+            {% include "partials/calendar_menu.html" %}
+            {% include "partials/communication_menu.html" %}
+            {% include "partials/client_management_menu.html" %}
+            {% include "partials/financials_menu.html" %}
+            {% include "partials/business_management_menu.html" %}
+            
+            {% if session.get("user_id") %}
+                {% include "partials/user_menu.html" %}
+            {% else %}
+                <a class="user-menu-button" href="{{ url_for('login') }}">
+                    Login
+                </a>
+            {% endif %}  
 
-        <a href="{{ url_for('reports') }}" class="tool-pill tool-pill-medium">
-            🍑 Business<br>Summary
-        </a>
+            {% include "partials/help_menu.html" %} 
+            
+            <button type="button"
+                        class="user-menu-button"
+                        onclick="openQLaunch()">
+                    🔍 Search
+            </button>
+        </nav>
 
-        <a href="{{ url_for('calendar_view') }}" class="tool-pill tool-pill-medium">
-            📅 Calendar &<br>Appointments
-        </a>
-
-        <a href="{{ url_for('client_management') }}" class="tool-pill tool-pill-medium">
-            🙋‍♀️ Client<br>Management
-        </a>
-
-        <a href="{{ url_for('communications') }}" class="tool-pill tool-pill-medium">
-            📡 Comm<br>SMS & Email
-        </a>
-
-        <a href="{{ url_for('financials_home') }}" class="tool-pill tool-pill-medium">
-            📊 Accounting &<br>🚚 Logistics
-        </a>
-
-        <a href="{{ url_for('spa_management') }}" class="tool-pill tool-pill-medium">
-            🗂️ Business<br>Management
-        </a>
-
-
-        {% if session.get("user_id") %}
-            {% include "partials/user_menu.html" %}
-        {% else %}
-            <a class="tool-pill tool-pill-medium"
-            href="{{ url_for('login') }}">
-                Login
-            </a>
-        {% endif %}
-
-    </div>
+    </header>
 <!-- Navigation -->
+
 </div>
 
 <br>
@@ -192,99 +184,181 @@
 
 </footer>
 
+
 {% include "partials/q_launch_modal.html" %}
 <a href="#" class="tool-pill">⚡️ Q Launch</a>
 
 
+<!----------  Q Launch (Search)     -->
+
 <script>
 function openQLaunch() {
     const overlay = document.getElementById("qLaunchOverlay");
-    const search = document.getElementById("qLaunchSearch");
+    const searchInput = document.getElementById("qLaunchSearch");
 
     if (!overlay) return;
 
     overlay.style.display = "flex";
 
     setTimeout(function () {
-        if (search) {
-            search.focus();
-            search.value = "";
-            filterQLaunch();
+        if (searchInput) {
+            searchInput.focus();
+            searchInput.select();
         }
     }, 50);
 }
 
 function closeQLaunch() {
     const overlay = document.getElementById("qLaunchOverlay");
+    const searchInput = document.getElementById("qLaunchSearch");
 
     if (!overlay) return;
 
     overlay.style.display = "none";
+
+    if (searchInput) {
+        searchInput.value = "";
+    }
+
+    filterQLaunch();
 }
 
 function filterQLaunch() {
-    const search = document.getElementById("qLaunchSearch");
-    const results = document.getElementById("qLaunchResults");
-    const registryItems = document.querySelectorAll(".q-launch-registry-item");
-    const normalSections = document.querySelectorAll(".q-launch-section:not(#qLaunchResults)");
+    const input = document.getElementById("qLaunchSearch");
+    const emptyState = document.getElementById("qLaunchEmptyState");
+    const items = document.querySelectorAll(".q-launch-registry-item");
 
-    if (!search || !results) return;
+    if (!input) return;
 
-    const value = search.value.toLowerCase().trim();
+    const searchValue = input.value.toLowerCase().trim();
+    let visibleCount = 0;
 
-    if (!value) {
-        results.style.display = "none";
+    items.forEach(function (item) {
+        const searchText = (item.dataset.search || "").toLowerCase();
 
-        normalSections.forEach(function (section) {
-            section.style.display = "block";
-        });
+        if (searchValue && searchText.includes(searchValue)) {
+            item.style.display = "block";
+            visibleCount++;
+        } else {
+            item.style.display = "none";
+        }
+    });
 
-        return;
+    if (!emptyState) return;
+
+    if (!searchValue) {
+        emptyState.innerHTML = 'Start typing to search Peach Suite Pro.<br><span>Try: calendar, client, sms, inventory, expense, report</span>';
+        emptyState.style.display = "block";
+    } else if (visibleCount === 0) {
+        emptyState.innerHTML = 'No results found.<br><span>Try a different word or phrase.</span>';
+        emptyState.style.display = "block";
+    } else {
+        emptyState.style.display = "none";
     }
-
-    results.style.display = "block";
-
-    normalSections.forEach(function (section) {
-        section.style.display = "none";
-    });
-
-    registryItems.forEach(function (item) {
-        const searchText = (item.dataset.search || item.textContent).toLowerCase();
-
-        item.style.display = searchText.includes(value)
-            ? "flex"
-            : "none";
-    });
 }
 
+document.addEventListener("DOMContentLoaded", function () {
+    const searchInput = document.getElementById("qLaunchSearch");
+
+    if (searchInput) {
+        searchInput.addEventListener("input", filterQLaunch);
+    }
+});
+
 document.addEventListener("keydown", function (event) {
+
     if (event.key === "Escape") {
+
+        // Close Search
         closeQLaunch();
+
+        // Close ALL header dropdowns
+        document.querySelectorAll(".user-menu-dropdown").forEach(function(menu) {
+            menu.style.display = "none";
+        });
+
     }
 
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         openQLaunch();
     }
-});
 
-document.addEventListener("click", function (event) {
-    const overlay = document.getElementById("qLaunchOverlay");
-
-    if (!overlay) return;
-
-    if (event.target === overlay) {
-        closeQLaunch();
-    }
 });
 </script>
+
+
+
 <script>
+
+
+function toggleCalendarMenu() {
+    const menu = document.getElementById("calendarMenuDropdown");
+    if (!menu) return;
+
+    menu.style.display = menu.style.display === "none" ? "block" : "none";
+}
+
+
+function toggleCommunicationMenu() {
+    const menu = document.getElementById("communicationMenuDropdown");
+    if (!menu) return;
+
+    menu.style.display = menu.style.display === "none" ? "block" : "none";
+}
+
+
+function togglefinancialsMenu() {
+    const menu = document.getElementById("financialsMenuDropdown");
+    if (!menu) return;
+
+    menu.style.display = menu.style.display === "none" ? "block" : "none";
+}
+
+function toggleClientManagementMenu() {
+    const menu = document.getElementById("clientManagementMenuDropdown");
+    if (!menu) return;
+
+    menu.style.display = menu.style.display === "none" ? "block" : "none";
+}
+
+function toggleBusinessManagementMenu() {
+    const menu = document.getElementById("businessManagementMenuDropdown");
+    if (!menu) return;
+
+    menu.style.display = menu.style.display === "none" ? "block" : "none";
+}
+
 function toggleUserMenu() {
     const menu = document.getElementById("userMenuDropdown");
     if (!menu) return;
 
     menu.style.display = menu.style.display === "none" ? "block" : "none";
 }
+
+function toggleHelpMenu() {
+    const menu = document.getElementById("helpMenuDropdown");
+    if (!menu) return;
+
+    menu.style.display = menu.style.display === "none" ? "block" : "none";
+}
+
+
+
+
+document.addEventListener("click", function(event) {
+
+    const menus = document.querySelectorAll(".user-menu-dropdown");
+
+    menus.forEach(function(menu) {
+
+        if (!menu.parentElement.contains(event.target)) {
+            menu.style.display = "none";
+        }
+
+    });
+
+});
 
 document.addEventListener("click", function(event) {
     const menuWrapper = document.querySelector(".user-menu");

@@ -1,7 +1,7 @@
 <div class="user-menu">
     <button type="button"
             class="user-menu-button"
-            onclick="toggleUserMenu()">
+            onclick="event.stopPropagation(); toggleUserMenu();">
         👤 {{ session.get("first_name", "Account") }} {{ session.get("last_name", "") }} ▾
     </button>
 

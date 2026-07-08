@@ -3,58 +3,18 @@
 
 {% block content %}
 
-
 <div style="margin-bottom:15px;">
 
-<div class="page-tool-pills">
-    <a href="{{ url_for('master_admin_home') }}" class="tool-pill">← Back</a>
-    <button type="button" class="tool-pill" onclick="openQLaunch()">
-        ⚡️ Q Launch
-    </button>
-    <a href="{{ url_for('view_help_page', page_key='system_activity') }}" class="tool-pill">❓ Help</a>
-    <a href="{{ url_for('feedback') }}" class="tool-pill">✉️ Feedback</a>
-</div> 
-<br>
 
-
-<h1>🌅 Daily Briefing</h1>
-
-<small>←Browser Bookmark</small>
-<br>
-<a href="#morning_briefing" class="btn btn-secondary">
-    🍑 Peach Suite Pro | Morning Briefing
-</a>
-
-    <span class="help-icon"
-           onclick="toggleHelp('bookmarkHelp')"
-           style="cursor:pointer;">    
-        ❔
-    </span>
-
+<div class="page-title">
+    <h1>🌅 Daily Briefing</h1>
 </div>
 
-<div id="bookmarkHelp"
-     style="display:none;"
-     class="help-box">
-
-    <strong>Bookmark Daily Briefing</strong>
-
-    <p>
-        Daily Briefing is the recommended starting page for Peach Suite Pro.
-    </p>
-
-    <p>Add this page to your browser Favorites Bar for one-click access.</p>
-    <p>Click and Drag the Peach Suite Pro button to the bookmarks (left Panel.)</p>
-
-    <p>
-        For complete instructions and bookmark settings,
-        please see the Help Center.
-    </p>
+<p style="color:#777; margin-top:4px;">
+    Your daily overview of appointments, revenue, reminders, and business health.
+</p>
 
 </div>
-
-
-
 
 
 
@@ -128,7 +88,6 @@
 
 <br>
 
-<a class="btn" href="{{ url_for('reports') }}">View Executive Dashboard</a>
 <a class="btn" href="{{ url_for('calendar_view') }}">Go to Calendar</a>
 
 

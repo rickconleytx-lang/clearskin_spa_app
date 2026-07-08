@@ -1,0 +1,26 @@
+<div class="user-menu">
+    <button type="button"
+            class="user-menu-button"
+            onclick="toggleCalendarMenu()">
+        📅 Calendar & <br> Appointments ▾
+    </button>
+
+    <div id="calendarMenuDropdown"
+         class="user-menu-dropdown"
+         style="display:none;">
+
+        
+        <a href="{{ url_for('calendar_view') }}">Calendar</a>
+
+        <div class="user-menu-divider"></div>
+        <a href="{{ url_for('appointments') }}">Appointments</a>
+
+
+        <div class="user-menu-divider"></div>
+        <a href="{{ url_for('godaddy_imports') }}">GoDaddy Imports</a>
+
+
+         
+
+    </div>
+</div>

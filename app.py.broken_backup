@@ -4026,14 +4026,26 @@ def reports():
 
 #  -------------------------
 #
-#    REPORTS BY DATE/RANGE
+#    DAILY SUMMARY
 #
 #  ------------------------
 
+@app.route("/reports")
+@login_required
+@spa_required
+def reports():
+    return redirect(url_for("business_summary"))
+
+
+
 from datetime import datetime
 
-@app.route("/reports/range", methods=["GET", "POST"])
-def reports_range():
+
+
+@app.route("/business-summary")
+@login_required
+@spa_required
+def business_summary():
     spa_id = get_current_spa_id()
     conn = get_db_connection()
     cur = conn.cursor()
