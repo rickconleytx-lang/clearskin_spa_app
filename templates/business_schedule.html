@@ -130,16 +130,17 @@
 
         <br>
 
-        <label>
-
+        <div class="compact-checkbox">
             <input
                 type="checkbox"
                 name="is_required"
+                id="is_required"
                 checked>
 
-            Required Business Responsibility
-
-        </label>
+            <label for="is_required">
+                Required Business Responsibility
+            </label>
+        </div>
 
         <br><br>
 
@@ -165,6 +166,29 @@
 
     </div>
 
+    <form method="GET">
+
+    <form method="GET" class="compact-filter-form">
+        <div class="compact-checkbox">
+            <input
+                type="checkbox"
+                name="show_archived"
+                id="show_archived"
+                value="1"
+                onchange="this.form.submit()"
+                {% if show_archived %}checked{% endif %}>
+
+            <label for="show_archived">
+                Show Archived
+            </label>
+        </div>
+    </form>
+
+    </form>
+
+
+
+
     {% if schedule_items %}
 
         <table>
@@ -173,6 +197,7 @@
 
                 <tr>
 
+                    <th>Status</th>
                     <th>Category</th>
                     <th>Title</th>
                     <th>Due</th>
@@ -189,6 +214,14 @@
             {% for item in schedule_items %}
 
                 <tr>
+
+                    <td>
+                        {% if item[10] %}
+                            Active
+                        {% else %}
+                            Archived
+                        {% endif %}
+                    </td>
 
                     <td>{{ item[1] }}</td>
 
@@ -220,42 +253,60 @@
 
                     <td class="table-actions">
 
+                        <!-- View always -->
                         <a class="btn btn-small"
-                            href="{{ url_for('view_business_schedule', schedule_id=item[0]) }}">
-                                View
+                        href="{{ url_for('view_business_schedule', schedule_id=item[0]) }}">
+                            View
                         </a>
 
+                        {% if item[10] %}
 
-                        <a class="btn btn-small"
+                            <!-- ACTIVE -->
+
+                            <a class="btn btn-small"
                             href="{{ url_for('edit_business_schedule', schedule_id=item[0]) }}">
                                 Edit
+                            </a>
+
+                            <a class="btn btn-small"
+                            href="{{ url_for('confirm_duplicate_business_schedule', schedule_id=item[0]) }}">
+                                Duplicate
+                            </a>
+
+                            <a class="btn btn-small"
+                            href="{{ url_for('confirm_archive_business_schedule', schedule_id=item[0]) }}">
+                                Archive
+                            </a>
+
+                        {% else %}
+
+                            <!-- ARCHIVED -->
+
+                            <a class="btn btn-small"
+                            href="{{ url_for('confirm_duplicate_business_schedule', schedule_id=item[0]) }}">
+                                Duplicate
+                            </a>
+
+                            <form method="POST"
+                                action="{{ url_for('restore_business_schedule', schedule_id=item[0]) }}"
+                                style="display:inline;">
+
+                                <button type="submit" class="btn btn-small">
+                                    Restore
+                                </button>
+
+                            </form>
+
+                        {% endif %}
+
+                        <!-- Delete always -->
+
+                        <a class="btn btn-small"
+                        href="{{ url_for('confirm_delete_business_schedule', schedule_id=item[0]) }}">
+                            Delete
                         </a>
 
-                        <form method="POST"
-                                action="{{ url_for('archive_business_schedule', schedule_id=item[0]) }}"
-                                style="display:inline;">
-                            <button type="submit" class="btn btn-small">
-                                Archive
-                            </button>
-                        </form>
-
-                        <form method="POST"
-                                action="{{ url_for('delete_business_schedule', schedule_id=item[0]) }}"
-                                style="display:inline;">
-                            <button type="submit" class="btn btn-small">
-                                Delete
-                            </button>
-                        </form>
-
-                        <form method="POST"
-                                action="{{ url_for('duplicate_business_schedule', schedule_id=item[0]) }}"
-                                style="display:inline;">
-                            <button type="submit" class="btn btn-small">
-                                Duplicate
-                            </button>
-                        </form>
-
-</td>
+                    </td>
 
 
 

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}Archive Schedule Item{% endblock %}
+
+{% block content %}
+
+<div class="page-container">
+
+    <div class="page-header">
+        <h1>Archive Schedule Item</h1>
+        <p>This will remove the item from the active Business Schedule.</p>
+    </div>
+
+    <div class="form-card">
+
+        <div class="detail-row">
+            <span>Category</span>
+            <span>{{ item[1] or '—' }}</span>
+        </div>
+
+        <div class="detail-row">
+            <span>Title</span>
+            <span>{{ item[2] or '—' }}</span>
+        </div>
+
+        <div class="detail-row">
+            <span>Due Date</span>
+            <span>{{ item[4] or '—' }}</span>
+        </div>
+
+        <div class="detail-row">
+            <span>Recurrence</span>
+            <span>{{ item[5] or 'None' }}</span>
+        </div>
+
+        <p class="page-note">
+            Archived items will no longer appear in the active schedule.
+        </p>
+
+        <form method="POST" action="{{ url_for('archive_business_schedule', schedule_id=item[0]) }}">
+            <div class="form-actions">
+                <a href="{{ url_for('business_schedule') }}" class="btn btn-secondary">
+                    Cancel
+                </a>
+
+                <button type="submit" class="btn btn-primary">
+                    Archive Item
+                </button>
+            </div>
+        </form>
+
+    </div>
+
+</div>
+
+{% endblock %}

@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}Duplicate Schedule Item{% endblock %}
+
+{% block content %}
+
+<div class="page-container">
+
+    <div class="page-header">
+        <h1>Duplicate Schedule Item</h1>
+        <p>Create a copy of this Business Schedule item.</p>
+    </div>
+
+    <div class="form-card">
+
+        <div class="detail-row">
+            <span>Category</span>
+            <span>{{ item[1] or '—' }}</span>
+        </div>
+
+        <div class="detail-row">
+            <span>Title</span>
+            <span>{{ item[2] or '—' }}</span>
+        </div>
+
+        <div class="detail-row">
+            <span>Due Date</span>
+            <span>{{ item[4] or '—' }}</span>
+        </div>
+
+        <div class="detail-row">
+            <span>Recurrence</span>
+            <span>{{ item[5] or 'None' }}</span>
+        </div>
+
+        <div class="detail-row">
+            <span>Reminder</span>
+            <span>{{ item[7] }} day(s)</span>
+        </div>
+
+        <p class="page-note">
+            A new active schedule item will be created with "<em>Copy</em>" appended to the title.
+        </p>
+
+        <form method="POST"
+              action="{{ url_for('duplicate_business_schedule', schedule_id=item[0]) }}">
+
+            <div class="form-actions">
+
+                <a href="{{ url_for('business_schedule') }}"
+                   class="btn btn-secondary">
+                    Cancel
+                </a>
+
+                <button type="submit"
+                        class="btn btn-primary">
+                    Create Copy
+                </button>
+
+            </div>
+
+        </form>
+
+    </div>
+
+</div>
+
+{% endblock %}

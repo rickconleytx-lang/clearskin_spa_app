@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Schedule Item{% endblock %}
+
+{% block content %}
+
+<div class="page-container">
+
+    <div class="page-header">
+        <h1>Edit Schedule Item</h1>
+        <p>Update this Business Schedule item.</p>
+    </div>
+
+    <form method="POST" class="form-card">
+
+        <div class="form-group">
+            <label>Category</label>
+            <input type="text" name="category" value="{{ item[1] or '' }}" required>
+        </div>
+
+        <div class="form-group">
+            <label>Title</label>
+            <input type="text" name="title" value="{{ item[2] or '' }}" required>
+        </div>
+
+        <div class="form-group">
+            <label>Description</label>
+            <textarea name="description" rows="5">{{ item[3] or '' }}</textarea>
+        </div>
+
+        <div class="form-group">
+            <label>Due Date</label>
+            <input type="date" name="due_date" value="{{ item[4] or '' }}">
+        </div>
+
+        <div class="form-group">
+            <label>Recurrence Type</label>
+            <select name="recurrence_type">
+                <option value="none" {% if item[5] == "none" %}selected{% endif %}>None</option>
+                <option value="daily" {% if item[5] == "daily" %}selected{% endif %}>Daily</option>
+                <option value="weekly" {% if item[5] == "weekly" %}selected{% endif %}>Weekly</option>
+                <option value="monthly" {% if item[5] == "monthly" %}selected{% endif %}>Monthly</option>
+                <option value="quarterly" {% if item[5] == "quarterly" %}selected{% endif %}>Quarterly</option>
+                <option value="yearly" {% if item[5] == "yearly" %}selected{% endif %}>Yearly</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label>Recurrence Interval</label>
+            <input type="number" name="recurrence_interval" min="1" value="{{ item[6] or 1 }}">
+            <small>Example: every 1 month, every 2 weeks, every 3 months.</small>
+        </div>
+
+        <div class="form-group">
+            <label>Reminder Days Before Due</label>
+            <input type="number" name="reminder_days" min="0" value="{{ item[7] or 14 }}">
+        </div>
+
+        <div class="form-check">
+            <input type="checkbox" name="is_required" id="is_required" {% if item[8] %}checked{% endif %}>
+            <label for="is_required">Required business task</label>
+        </div>
+
+        <div class="form-actions">
+            <a href="{{ url_for('business_schedule') }}" class="btn btn-secondary">
+                Cancel
+            </a>
+
+            <button type="submit" class="btn btn-primary">
+                Save Changes
+            </button>
+        </div>
+
+    </form>
+
+</div>
+
+{% endblock %}

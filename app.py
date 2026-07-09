@@ -21658,6 +21658,8 @@ def business_schedule():
     conn = get_db_connection()
     cur = conn.cursor()
 
+    show_archived = request.args.get("show_archived") == "1"
+
     if request.method == "POST":
         category = request.form.get("category")
         title = request.form.get("title")
@@ -21697,27 +21699,52 @@ def business_schedule():
         flash("Business Schedule item added.", "success")
         return redirect(url_for("business_schedule"))
 
-    cur.execute("""
-        SELECT
-            schedule_id,
-            category,
-            title,
-            description,
-            due_date,
-            recurrence_type,
-            recurrence_interval,
-            reminder_days,
-            is_required,
-            is_completed,
-            is_active
-        FROM business_schedule
-        WHERE spa_id = %s
-          AND is_active = TRUE
-        ORDER BY
-            due_date ASC NULLS LAST,
-            category,
-            title
-    """, (spa_id,))
+        
+
+    if show_archived:
+        cur.execute("""
+            SELECT
+                schedule_id,
+                category,
+                title,
+                description,
+                due_date,
+                recurrence_type,
+                recurrence_interval,
+                reminder_days,
+                is_required,
+                is_completed,
+                is_active
+            FROM business_schedule
+            WHERE spa_id = %s
+            ORDER BY
+                is_active DESC,
+                due_date ASC NULLS LAST,
+                category,
+                title
+        """, (spa_id,))
+    else:
+        cur.execute("""
+            SELECT
+                schedule_id,
+                category,
+                title,
+                description,
+                due_date,
+                recurrence_type,
+                recurrence_interval,
+                reminder_days,
+                is_required,
+                is_completed,
+                is_active
+            FROM business_schedule
+            WHERE spa_id = %s
+              AND is_active = TRUE
+            ORDER BY
+                due_date ASC NULLS LAST,
+                category,
+                title
+        """, (spa_id,))
 
     schedule_items = cur.fetchall()
 
@@ -21726,7 +21753,8 @@ def business_schedule():
 
     return render_template(
         "business_schedule.html",
-        schedule_items=schedule_items
+        schedule_items=schedule_items,
+        show_archived=show_archived
     )
 
 
@@ -21912,6 +21940,66 @@ def edit_business_schedule(schedule_id):
 
 ##################################
 #
+#   ARCHIVE BUSINESS SCHEDULE CONFIRMATION
+#
+#
+##################################
+
+
+
+@app.route("/business-schedule/<int:schedule_id>/archive", methods=["GET"])
+@login_required
+@spa_required
+def confirm_archive_business_schedule(schedule_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            schedule_id,
+            category,
+            title,
+            description,
+            due_date,
+            recurrence_type,
+            is_required
+        FROM business_schedule
+        WHERE schedule_id = %s
+          AND spa_id = %s
+          AND is_active = TRUE
+    """, (schedule_id, spa_id))
+
+    item = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if not item:
+        flash("Business Schedule item not found.", "warning")
+        return redirect(url_for("business_schedule"))
+
+    return render_template(
+        "archive_business_schedule.html",
+        item=item
+    )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+##################################
+#
 #   ARCHIVE BUSINESS SCHEDULE ITEM
 #
 #
@@ -21948,6 +22036,115 @@ def archive_business_schedule(schedule_id):
 
 
 
+
+
+
+##################################
+#
+#   RESTORE BUSINESS SCHEDULE ITEM
+#
+#
+##################################
+
+
+
+@app.route("/business-schedule/<int:schedule_id>/restore", methods=["POST"])
+@login_required
+@spa_required
+def restore_business_schedule(schedule_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE business_schedule
+        SET
+            is_active = TRUE,
+            updated_at = NOW()
+        WHERE schedule_id = %s
+          AND spa_id = %s
+    """, (schedule_id, spa_id))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    flash("Business Schedule item restored.", "success")
+    return redirect(url_for("business_schedule"))
+
+
+
+
+
+
+
+
+
+
+##################################
+#
+#   DELETE BUSINESS SCHEDULE ITEM
+#       CONFIRM DELETE
+#
+##################################
+
+
+
+@app.route("/business-schedule/<int:schedule_id>/delete", methods=["GET"])
+@login_required
+@spa_required
+def confirm_delete_business_schedule(schedule_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            schedule_id,
+            category,
+            title,
+            description,
+            due_date,
+            recurrence_type,
+            is_required
+        FROM business_schedule
+        WHERE schedule_id = %s
+          AND spa_id = %s
+    """, (schedule_id, spa_id))
+
+    item = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if not item:
+        flash("Business Schedule item not found.", "warning")
+        return redirect(url_for("business_schedule"))
+
+    return render_template(
+        "delete_business_schedule.html",
+        item=item
+    )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ##################################
 #
 #   DELETE BUSINESS SCHEDULE ITEM
@@ -21977,6 +22174,71 @@ def delete_business_schedule(schedule_id):
 
     flash("Business Schedule item deleted.", "success")
     return redirect(url_for("business_schedule"))
+
+
+
+
+
+##################################
+#
+#   DUPLICATE BUSINESS SCHEDULE ITEM
+#   CONFIRM DUPLICATE
+#
+##################################
+
+
+@app.route("/business-schedule/<int:schedule_id>/duplicate", methods=["GET"])
+@login_required
+@spa_required
+def confirm_duplicate_business_schedule(schedule_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            schedule_id,
+            category,
+            title,
+            description,
+            due_date,
+            recurrence_type,
+            recurrence_interval,
+            reminder_days,
+            is_required
+        FROM business_schedule
+        WHERE schedule_id = %s
+          AND spa_id = %s
+    """, (schedule_id, spa_id))
+
+    item = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if not item:
+        flash("Business Schedule item not found.", "warning")
+        return redirect(url_for("business_schedule"))
+
+    return render_template(
+        "duplicate_business_schedule.html",
+        item=item
+    )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

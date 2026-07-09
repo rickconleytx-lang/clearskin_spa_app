@@ -3190,3 +3190,44 @@ td:nth-child(3) {
     margin: 0 0 14px 0;
     max-width: 760px;
 }
+
+.compact-checkbox {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 6px 0;
+    font-size: 0.9rem;
+}
+
+.compact-checkbox input {
+    margin: 0;
+}
+
+.compact-checkbox label {
+    margin: 0;
+}
+
+.compact-filter-form {
+    margin: 4px 0 10px 0;
+}
+
+/* Compact checkbox layout override */
+.compact-checkbox {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    margin: 6px 0 !important;
+}
+
+.compact-checkbox input[type="checkbox"] {
+    width: auto !important;
+    margin: 0 !important;
+}
+
+.compact-checkbox label {
+    display: inline !important;
+    width: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    font-weight: normal !important;
+}
