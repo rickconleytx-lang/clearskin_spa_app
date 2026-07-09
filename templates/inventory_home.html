@@ -6,51 +6,54 @@
 {% block content %}
 
 <div class="report-page">
-
-    <div class="report-header">
-        <div>
-            <h1>Inventory</h1>
-            <p class="report-subtitle">Track products, stock levels, and inventory value</p>
-        </div>
-
      
 
         <div style="display: flex; flex-direction: row; justify-content: space-between; align-items: flex-start; gap: 25px; width: 100%;">
     
-            <!-- LEFT SIDE -->
-            <div style="flex: 1; min-width: 0;">
-            
-                <div class="form-buttons">
-                    <a href="{{ url_for('add_inventory_product') }}" class="btn"> 
-                       Add Product
-                    </a>
-            
-                    <a href="{{ url_for('inventory_scan') }}" class="btn btn-secondary">
-                        Scan SKU
-                    </a>
-                </div>
-    
-                <div class="narrow-cards">
+        <!-- LEFT SIDE -->
+        <div style="flex: 1; min-width: 0;">
+        
 
-                    <div class="summary-card">
-                        <span class="summary-label">Total Stock</span>
-                        <span class="summary-value">{{ total_stock }}</span>
-                    </div>
-
-                    <div class="summary-card">
-                        <span class="summary-label">Wholesale Value</span>
-                        <span class="summary-value">
-                            ${{ "{:,.2f}".format(total_wholesale_value or 0) }}
-                        </span>
-                    </div>
-
-                    <div class="summary-card">
-                        <span class="summary-label">Retail Value</span>
-                        <span class="summary-value">
-                            ${{ "{:,.2f}".format(total_retail_value or 0) }}
-                        </span>
-                    </div>
+            <div class="report-header">
+            <div>
+                <h1>Inventory</h1>
+                <p class="report-subtitle">Track products, stock levels, and inventory value</p>
             </div>
+
+                
+                    <div class="form-buttons">
+                        <a href="{{ url_for('add_inventory_product') }}" class="btn"> 
+                        Add Product
+                        </a>
+                
+                        <a href="{{ url_for('inventory_scan') }}" class="btn btn-secondary">
+                            Scan SKU
+                        </a>
+                    </div>
+        
+                    <div class="narrow-cards">
+
+                        <div class="summary-card">
+                            <span class="summary-label">Total Stock</span>
+                            <span class="summary-value">{{ total_stock }}</span>
+                        </div>
+
+                        <div class="summary-card">
+                            <span class="summary-label">Wholesale Value</span>
+                            <span class="summary-value">
+                                ${{ "{:,.2f}".format(total_wholesale_value or 0) }}
+                            </span>
+                        </div>
+
+                        <div class="summary-card">
+                            <span class="summary-label">Retail Value</span>
+                            <span class="summary-value">
+                                ${{ "{:,.2f}".format(total_retail_value or 0) }}
+                            </span>
+                </div>
+                    
+            </div>
+        </div>
         </div>
 
         <!-- RIGHT SIDE IMAGE -->

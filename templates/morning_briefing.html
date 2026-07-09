@@ -125,6 +125,52 @@
         </p>
     </div>
 
+
+
+    <div class="dashboard-card">
+        <h2>Business Schedule</h2>
+
+        {% if business_schedule_due %}
+            <p>Needs attention:</p>
+
+            {% for item in business_schedule_due %}
+                <p>
+                    {{ item[2] }}
+                    <br>
+                    <span style="color:#777;">
+                        {{ item[1] }} · Due {{ item[4].strftime("%b %d, %Y") }}
+                    </span>
+                </p>
+
+                <a class="btn btn-small"
+                href="{{ url_for('view_business_schedule', schedule_id=item[0]) }}">
+                    View
+                </a>
+            {% endfor %}
+        {% else %}
+            <p>No business schedule items need attention today.</p>
+        {% endif %}
+
+        {% if business_schedule_upcoming %}
+            <hr>
+            <p>Coming up:</p>
+
+            {% for item in business_schedule_upcoming %}
+                <p>
+                    {{ item[2] }}
+                    <br>
+                    <span style="color:#777;">
+                        {{ item[1] }} · Due {{ item[4].strftime("%b %d, %Y") }}
+                    </span>
+                </p>
+            {% endfor %}
+        {% endif %}
+    </div>
+
+
+
+
+
 </div>
 
 <br>

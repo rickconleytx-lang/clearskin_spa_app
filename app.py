@@ -21455,6 +21455,9 @@ def dashboard():
 #  
 #  -----------------------------
    
+
+
+
 @app.route("/morning_briefing")
 @login_required
 @spa_required
@@ -21462,10 +21465,8 @@ def morning_briefing():
 
     spa_id = session["spa_id"]
 
-    # New helper
     dashboard = get_dashboard_data(spa_id)
 
-    # Temporary placeholder until Business Health is rebuilt
     business_health = {
         "score": None,
         "label": "Not Calculated"
@@ -21473,12 +21474,77 @@ def morning_briefing():
 
     today = date.today()
 
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            schedule_id,
+            category,
+            title,
+            description,
+            due_date,
+            recurrence_type,
+            recurrence_interval,
+            reminder_days,
+            is_required
+        FROM business_schedule
+        WHERE spa_id = %s
+          AND is_active = TRUE
+          AND COALESCE(is_completed, FALSE) = FALSE
+          AND due_date IS NOT NULL
+          AND due_date <= %s
+        ORDER BY
+            due_date ASC,
+            category,
+            title
+        LIMIT 5
+    """, (spa_id, today))
+
+    business_schedule_due = cur.fetchall()
+
+    cur.execute("""
+        SELECT
+            schedule_id,
+            category,
+            title,
+            description,
+            due_date,
+            recurrence_type,
+            recurrence_interval,
+            reminder_days,
+            is_required
+        FROM business_schedule
+        WHERE spa_id = %s
+          AND is_active = TRUE
+          AND COALESCE(is_completed, FALSE) = FALSE
+          AND due_date IS NOT NULL
+          AND due_date > %s
+          AND due_date <= %s + INTERVAL '14 days'
+        ORDER BY
+            due_date ASC,
+            category,
+            title
+        LIMIT 5
+    """, (spa_id, today, today))
+
+    business_schedule_upcoming = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
     return render_template(
         "morning_briefing.html",
         dashboard=dashboard,
         business_health=business_health,
-        today=today
+        today=today,
+        business_schedule_due=business_schedule_due,
+        business_schedule_upcoming=business_schedule_upcoming
     )
+
+
+
+
 
 
 ####################################
