@@ -70,7 +70,7 @@
             <p>
                 Next Appointment:
                 <strong>
-                    {{ dashboard.next_appointment[0] }}
+                    {{ dashboard.next_appointment[0].strftime('%-I:%M %p') }}
                     —
                     {{ dashboard.next_appointment[1] }}
                     {{ dashboard.next_appointment[2] }}
@@ -131,24 +131,21 @@
         <h2>Business Schedule</h2>
 
         {% if business_schedule_due %}
-            <p>Needs attention:</p>
 
-            {% for item in business_schedule_due %}
-                <p>
-                    {{ item[2] }}
-                    <br>
-                    <span style="color:#777;">
-                        {{ item[1] }} · Due {{ item[4].strftime("%b %d, %Y") }}
-                    </span>
-                </p>
+            <p>Business schedule items need attention today.</p>
 
-                <a class="btn btn-small"
-                href="{{ url_for('view_business_schedule', schedule_id=item[0]) }}">
-                    View
-                </a>
-            {% endfor %}
+        {% elif business_schedule_upcoming %}
+
+            <p>
+                Your next business schedule item is
+                {{ business_schedule_upcoming[0][2] }},
+                due {{ business_schedule_upcoming[0][4].strftime('%B %-d, %Y') }}.
+            </p>
+
         {% else %}
-            <p>No business schedule items need attention today.</p>
+
+            <p>Your business schedule is clear for the next 14 days.</p>
+
         {% endif %}
 
         {% if business_schedule_upcoming %}
@@ -168,28 +165,267 @@
     </div>
 
 
-    <div class="dashboard-card coach-card">
+    <div class="coach-card">
+
     <h2>🍑 Coach</h2>
 
-    <p>{{ coach.message }}</p>
+    <p id="coach-message">
+        {{ coach.message }}
+    </p>
 
-    {% if coach.question %}
-        <p><strong>{{ coach.question }}</strong></p>
+    <p id="coach-question" {% if not coach.question %}hidden{% endif %}>
+        <strong>{{ coach.question or "" }}</strong>
+    </p>
 
-        {% if coach.yes_url %}
-            <a class="btn btn-small" href="{{ coach.yes_url }}">
-                {{ coach.yes_label }}
-            </a>
-        {% else %}
-            <button class="btn btn-small" type="button">
-                {{ coach.yes_label }}
-            </button>
-        {% endif %}
+    <div id="coach-actions" {% if not coach.question %}hidden{% endif %}>
+        <button
+            id="coach-yes-button"
+            class="btn btn-small"
+            type="button"
+        >
+            {{ coach.yes_label }}
+        </button>
 
-        <button class="btn btn-small btn-secondary" type="button">
+        <button
+            id="coach-no-button"
+            class="btn btn-small btn-secondary"
+            type="button"
+        >
             {{ coach.no_label }}
         </button>
-    {% endif %}
+    </div>
+
+
+    <script>
+document.addEventListener("DOMContentLoaded", function () {
+    const messageElement = document.getElementById("coach-message");
+    const questionElement = document.getElementById("coach-question");
+    const actionsElement = document.getElementById("coach-actions");
+    const yesButton = document.getElementById("coach-yes-button");
+    const noButton = document.getElementById("coach-no-button");
+    const recommendationsData = document.getElementById(
+        "coach-recommendations-data"
+    );
+
+    if (
+        !messageElement ||
+        !questionElement ||
+        !actionsElement ||
+        !yesButton ||
+        !noButton ||
+        !recommendationsData
+    ) {
+        return;
+    }
+
+    let recommendations = [];
+
+    try {
+        recommendations = JSON.parse(
+            recommendationsData.textContent
+        );
+    } catch (error) {
+        console.error(
+            "Unable to load Coach recommendations:",
+            error
+        );
+        return;
+    }
+
+    let currentRecommendationIndex = -1;
+    let conversationState = "introduction";
+
+    function hideCoachActions() {
+        questionElement.hidden = true;
+        actionsElement.hidden = true;
+    }
+
+    function showCoachActions() {
+        questionElement.hidden = false;
+        actionsElement.hidden = false;
+    }
+
+    function showRecommendation(index) {
+        const recommendation = recommendations[index];
+
+        if (!recommendation) {
+            finishConversation();
+            return;
+        }
+
+        currentRecommendationIndex = index;
+        conversationState = "recommendation";
+
+        const position = index + 1;
+        const total = recommendations.length;
+
+        messageElement.textContent =
+            `Recommendation ${position} of ${total}: ` +
+            recommendation.message;
+
+        questionElement.querySelector("strong").textContent =
+            recommendation.question ||
+            "Would you like to review this item?";
+
+        if (recommendation.action_url) {
+            yesButton.textContent = "Review";
+        } else {
+            yesButton.textContent = "Yes";
+        }
+
+        noButton.textContent = "No";
+
+        showCoachActions();
+    }
+
+    function showNextRecommendation() {
+        const nextIndex = currentRecommendationIndex + 1;
+
+        if (nextIndex < recommendations.length) {
+            showRecommendation(nextIndex);
+        } else {
+            finishConversation();
+        }
+    }
+
+    function finishConversation() {
+        conversationState = "complete";
+
+        messageElement.textContent =
+            "That completes today's recommendations. " +
+            "I'll continue monitoring your business throughout the day.";
+
+        hideCoachActions();
+    }
+
+    function handleRecommendationYes() {
+        const recommendation =
+            recommendations[currentRecommendationIndex];
+
+        if (!recommendation) {
+            finishConversation();
+            return;
+        }
+
+        if (recommendation.action_url) {
+            window.location.href = recommendation.action_url;
+            return;
+        }
+
+        messageElement.textContent =
+            "I've noted that recommendation. " +
+            "This action will be available as Coach gains " +
+            "additional capabilities.";
+
+        questionElement.querySelector("strong").textContent =
+            "Would you like to review the next recommendation?";
+
+        yesButton.textContent = "Yes";
+        noButton.textContent = "No";
+
+        conversationState = "continue_after_yes";
+    }
+
+    function handleRecommendationNo() {
+        const recommendation =
+            recommendations[currentRecommendationIndex];
+
+        const category = recommendation?.category || "this item";
+
+        messageElement.textContent =
+            `Understood. We'll skip ${category.toLowerCase()} for now.`;
+
+        if (
+            currentRecommendationIndex + 1 <
+            recommendations.length
+        ) {
+            questionElement.querySelector("strong").textContent =
+                "Would you like to review the next recommendation?";
+
+            if (recommendation.action_url) {
+                yesButton.textContent = "Review";
+            } else {
+                yesButton.textContent = "Yes";
+            }
+
+            noButton.textContent = "No";
+
+            conversationState = "continue_after_no";
+        } else {
+            finishConversation();
+        }
+    }
+
+    yesButton.addEventListener("click", function () {
+        if (conversationState === "introduction") {
+            if (recommendations.length === 0) {
+                finishConversation();
+                return;
+            }
+
+            const firstRecommendation = recommendations[0];
+
+            if (
+                recommendations.length === 1 &&
+                firstRecommendation.action_url
+            ) {
+                window.location.href = firstRecommendation.action_url;
+                return;
+            }
+
+            showRecommendation(0);
+            return;
+        }
+
+        if (conversationState === "recommendation") {
+            handleRecommendationYes();
+            return;
+        }
+
+        if (
+            conversationState === "continue_after_yes" ||
+            conversationState === "continue_after_no"
+        ) {
+            showNextRecommendation();
+        }
+    });
+
+    noButton.addEventListener("click", function () {
+        if (conversationState === "introduction") {
+            messageElement.textContent =
+                "Understood. Your recommendations will remain " +
+                "available when you're ready.";
+
+            hideCoachActions();
+            conversationState = "complete";
+            return;
+        }
+
+        if (conversationState === "recommendation") {
+            handleRecommendationNo();
+            return;
+        }
+
+        if (
+            conversationState === "continue_after_yes" ||
+            conversationState === "continue_after_no"
+        ) {
+            messageElement.textContent =
+                "Understood. We'll stop here for now.";
+
+            hideCoachActions();
+            conversationState = "complete";
+        }
+    });
+});
+</script>
+
+
+    <script id="coach-recommendations-data" type="application/json">
+        {{ coach.recommendations | tojson }}
+    </script>
+
+</div>
 </div>
 
 

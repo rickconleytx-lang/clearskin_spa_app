@@ -9,16 +9,10 @@
          class="user-menu-dropdown"
          style="display:none;">
 
-        <div class="user-menu-header">
-            <strong>🗂️ Business Management</strong>
-        </div>
-
-        <div class="user-menu-divider"></div>
-
         <div class="user-menu-muted" style="padding:6px 12px;">Employee Admin</div>
         <a href="{{ url_for('add_employee') }}">Add New Employee</a>
         <a href="{{ url_for('employees_home') }}">Employee Home</a>       
-        <a href="{{ url_for('compensation_types_report') }}">Manage Compensation Types</a>
+        
 
               
         <div class="user-menu-divider"></div>
@@ -34,11 +28,14 @@
         <a href="{{ url_for('business_coach_profile') }}">🍑 Business Coach Profile</a>
         <a href="{{ url_for('business_schedule') }}">🗓️ Business Schedule</a>
         <br>
+       
+        <div class="user-menu-divider"></div>
+        
+        <div class="user-menu-muted" style="padding:6px 12px;">📝 Business Settings</div>
+        <a href="{{ url_for('compensation_types_report') }}">Manage Compensation Types</a>
         <a href="{{ url_for('business_goals') }}">Goals</a>
         <a href="{{ url_for('admin') }}">Admin Settings</a>
         <a href="{{ url_for('client_contact_preferences') }}">vacant</a>
-        
-
 
         <div class="user-menu-divider"></div>
 

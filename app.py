@@ -2833,6 +2833,21 @@ def get_dashboard_data(spa_id):
     dashboard["appointment_status_chart"] = appointment_status_chart
     dashboard["expected_income_today"] = expected_income_today
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     #####################################################
     
     #   TODAY
@@ -20785,7 +20800,9 @@ def calendar_view():
                 a.status,
                 a.appointment_id,
                 a.duration_minutes,
-                a.price_at_booking
+                a.price_at_booking,
+                a.owner_reviewed,
+                a.owner_reviewed_at
             FROM appointments a
             JOIN clients c
                 ON a.client_id = c.client_id
@@ -21494,6 +21511,7 @@ def dashboard():
 def morning_briefing():
 
     spa_id = session["spa_id"]
+    today = date.today()
 
     dashboard = get_dashboard_data(spa_id)
 
@@ -21502,11 +21520,12 @@ def morning_briefing():
         "label": "Not Calculated"
     }
 
-    today = date.today()
-
     conn = get_db_connection()
     cur = conn.cursor()
 
+    # ---------------------------------------------------------
+    # Business schedule items due now
+    # ---------------------------------------------------------
     cur.execute("""
         SELECT
             schedule_id,
@@ -21533,6 +21552,9 @@ def morning_briefing():
 
     business_schedule_due = cur.fetchall()
 
+    # ---------------------------------------------------------
+    # Business schedule items coming up within 14 days
+    # ---------------------------------------------------------
     cur.execute("""
         SELECT
             schedule_id,
@@ -21560,21 +21582,19 @@ def morning_briefing():
 
     business_schedule_upcoming = cur.fetchall()
 
+    # ---------------------------------------------------------
+    # Priority action review
+    # ---------------------------------------------------------
     priority_actions = []
-
-    coach = build_coach(
-        dashboard=dashboard,
-        business_schedule_due=business_schedule_due,
-        business_schedule_upcoming=business_schedule_upcoming,
-        priority_actions=priority_actions
-    )
 
     if dashboard.get("birthdays_today", 0) > 0:
         priority_actions.append({
             "icon": "🎂",
-                "label": "Birthday today",
+            "label": "Birthday today",
             "value": dashboard.get("birthdays_today", 0),
-            "url": None
+            "url": None,
+            "category": "Client Care",
+            "priority": 80
         })
 
     if dashboard.get("appointments_tomorrow", 0) > 0:
@@ -21582,17 +21602,20 @@ def morning_briefing():
             "icon": "📅",
             "label": "Appointments tomorrow",
             "value": dashboard.get("appointments_tomorrow", 0),
-            "url": url_for("calendar_view")
+            "url": url_for("calendar_view"),
+            "category": "Appointments",
+            "priority": 60
         })
 
-    godaddy_unreviewed_count = 0
-
+    # ---------------------------------------------------------
+    # GoDaddy imports awaiting review
+    # ---------------------------------------------------------
     cur.execute("""
         SELECT COUNT(*)
         FROM appointments
         WHERE spa_id = %s
-        AND external_source = 'godaddy'
-        AND COALESCE(import_reviewed, FALSE) = FALSE
+          AND external_source = 'godaddy'
+          AND COALESCE(import_reviewed, FALSE) = FALSE
     """, (spa_id,))
 
     godaddy_unreviewed_count = cur.fetchone()[0] or 0
@@ -21602,10 +21625,20 @@ def morning_briefing():
             "icon": "📨",
             "label": "GoDaddy imports need review",
             "value": godaddy_unreviewed_count,
-            "url": url_for("godaddy_imports")
+            "url": url_for("godaddy_imports"),
+            "category": "Appointments",
+            "priority": 90
         })
 
-
+    # ---------------------------------------------------------
+    # Coach performs the review only after all data is collected
+    # ---------------------------------------------------------
+    coach = build_coach(
+        dashboard=dashboard,
+        business_schedule_due=business_schedule_due,
+        business_schedule_upcoming=business_schedule_upcoming,
+        priority_actions=priority_actions
+    )
 
     cur.close()
     conn.close()
@@ -21621,6 +21654,10 @@ def morning_briefing():
         godaddy_unreviewed_count=godaddy_unreviewed_count,
         coach=coach
     )
+
+
+
+
 
 
 

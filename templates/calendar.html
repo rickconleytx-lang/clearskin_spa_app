@@ -329,22 +329,42 @@
                             {% set is_past = (appt[0] < today) or (appt[0] == today and appt[1] < now_time) %}
                             {% set is_future = (appt[0] > today) or (appt[0] == today and appt[1] > now_time) %}
 
-                            <div class="calendar-event {{ appt[5] }}{% if appt[5] == 'booked' and is_past %} overdue{% endif %}">
+                            <div class="
+                                calendar-event
+                                {% if appt[5] == 'completed' %}
+                                    completed
+                                {% elif appt[5] == 'booked' and is_past %}
+                                    overdue
+                                {% elif appt[5] == 'booked' and not appt[9] %}
+                                    unreviewed
+                                {% else %}
+                                    booked
+                                {% endif %}
+                            ">
                        
-
-
                                     <button type="button"
                                             class="calendar-event-link"
                                             onclick="openAppointmentModal({{ appt[6] }})">
                                         <strong>{{ appt[1].strftime('%I:%M %p') }}</strong><br>
                                         {{ appt[2] }} {{ appt[3] }}<br>
                                         <small>{{ appt[4] or 'Service' }}</small><br>
+                                 
+                                        <small>{{ appt[4] or 'Service' }}</small><br>
+
+                                        {% if appt[5] == 'booked' and not appt[9] %}
+                                            <small class="appointment-review-badge">
+                                                Imported · Needs Review
+                                            </small>
+                                            <br>
+                                        {% endif %}
+
+                                        <small>Status: {{ appt[5]|title }}</small>
+                                 
                                         <small>Status: {{ appt[5]|title }}</small>
                                     </button>
 
                                     <div style="margin-top: 8px;">
 
-                                    
                                 </div>
                             </div>
                         {% endif %}
