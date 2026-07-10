@@ -20776,9 +20776,16 @@ def calendar_view():
                 a.appointment_time,
                 c.first_name,
                 c.last_name,
-                COALESCE(s.service_name, a.external_service_name) AS service_name,
-                a.status,   
-                a.appointment_id  
+                COALESCE(
+                    NULLIF(a.service_type, ''),
+                    NULLIF(a.external_service_name, ''),
+                    s.service_name,
+                    'Service not entered'
+                ) AS service_name,
+                a.status,
+                a.appointment_id,
+                a.duration_minutes,
+                a.price_at_booking
             FROM appointments a
             JOIN clients c
                 ON a.client_id = c.client_id
@@ -20795,20 +20802,27 @@ def calendar_view():
     # Show booked appointments for the displayed week
     cur.execute(f"""
         SELECT
-            a.appointment_date,
-            a.appointment_time,
-            c.first_name,
-            c.last_name,
-            COALESCE(s.service_name, a.external_service_name) AS service_name,
-            a.status,
-            a.appointment_id 
+            a.appointment_date,                             -- 0
+            a.appointment_time,                             -- 1
+            c.first_name,                                   -- 2
+            c.last_name,                                    -- 3
+            COALESCE(
+                NULLIF(a.service_type, ''),
+                NULLIF(a.external_service_name, ''),
+                s.service_name,
+                'Service not entered'
+            ) AS service_name,                              -- 4
+            a.status,                                       -- 5
+            a.appointment_id,                               -- 6
+            a.duration_minutes,                             -- 7
+            a.price_at_booking                              -- 8
         FROM appointments a
         JOIN clients c
             ON a.client_id = c.client_id
-           AND a.spa_id = c.spa_id
+        AND a.spa_id = c.spa_id
         LEFT JOIN services s
             ON a.service_id = s.service_id
-           AND a.spa_id = s.spa_id
+        AND a.spa_id = s.spa_id
         {filter_sql}
         ORDER BY a.appointment_date, a.appointment_time
     """, week_params)
@@ -20837,7 +20851,12 @@ def calendar_view():
             c.last_name,
             a.appointment_date,
             a.appointment_time,
-            s.service_name
+            COALESCE(
+                NULLIF(a.service_type, ''),
+                NULLIF(a.external_service_name, ''),
+                s.service_name,
+                'Service not entered'
+            ) AS service_name
         FROM appointments a
         JOIN clients c
             ON a.client_id = c.client_id
@@ -21055,9 +21074,16 @@ def appointment_details(appointment_id):
             c.last_name,
             c.phone,
             c.email,
-            COALESCE(s.service_name, a.external_service_name) AS service_name,
+            COALESCE(
+                NULLIF(a.service_type, ''),
+                NULLIF(a.external_service_name, ''),
+                s.service_name,
+                'Service not entered'
+            ) AS service_name,
             a.notes,
-            a.external_source
+            a.external_source,
+            a.duration_minutes,
+            a.price_at_booking
         FROM appointments a
         JOIN clients c
             ON a.client_id = c.client_id
@@ -21089,7 +21115,9 @@ def appointment_details(appointment_id):
         "service_name": appt[8] or "",
         "provider_name": "",
         "notes": appt[9] or "",
-        "external_source": appt[10] or ""
+        "external_source": appt[10] or "",
+        "duration_minutes": appt[11],
+        "price_at_booking": appt[12]
     }
 
 
@@ -21135,23 +21163,24 @@ def daily_schedule():
             
     cur.execute(f"""
         SELECT
-            a.appointment_id,
-            a.client_id,
-            c.first_name,
-            c.last_name,
-            s.service_name,
-            a.appointment_time,
-            a.duration_minutes,
-            a.room_number,
-            a.status,
-            a.notes
+            a.appointment_id,                              -- 0
+            a.client_id,                                   -- 1
+            c.first_name,                                  -- 2
+            c.last_name,                                   -- 3
+            COALESCE(a.service_type, s.service_name),       -- 4
+            a.appointment_time,                            -- 5
+            a.duration_minutes,                            -- 6
+            a.room_number,                                 -- 7
+            a.status,                                      -- 8
+            a.notes,                                       -- 9
+            a.price_at_booking                             -- 10
         FROM appointments a
         JOIN clients c
             ON a.client_id = c.client_id
-           AND a.spa_id = c.spa_id 
+        AND a.spa_id = c.spa_id
         LEFT JOIN services s
             ON a.service_id = s.service_id
-           AND a.spa_id = s.spa_id
+        AND a.spa_id = s.spa_id
         {filter_sql}
         ORDER BY a.appointment_time
     """, params)
@@ -23959,37 +23988,56 @@ def edit_appointment(appointment_id):
     if role != "master_admin":
         filter_sql += " AND spa_id = %s"
         params.append(spa_id)
-             
+
+
     if request.method == "POST":
+        service_type = request.form["service_type"].strip()
+        price_at_booking = request.form["price_at_booking"].strip()
         appointment_date = request.form["appointment_date"]
         appointment_time = request.form["appointment_time"]
         duration = request.form["duration"]
         room_number = request.form["room_number"]
-        notes = request.form["notes"]
-            
-        
-        cur.execute("""
+        notes = request.form["notes"].strip()
+
+        duration_value = int(duration) if duration else None
+        price_value = float(price_at_booking) if price_at_booking else None
+
+        # Get the appointment before changing it
+        cur.execute(f"""
             SELECT
                 client_id,
                 appointment_date,
                 appointment_time,
-                status
+                status,
+                service_type,
+                price_at_booking,
+                duration_minutes
             FROM appointments
-            WHERE appointment_id = %s
-              AND spa_id = %s
-        """, (appointment_id, spa_id))
+            {filter_sql}
+        """, params)
 
         old_appt = cur.fetchone()
 
-        client_id = old_appt[0]
+        if not old_appt:
+            cur.close()
+            conn.close()
+            flash("Appointment not found.", "warning")
+            return redirect(url_for("calendar_view"))
 
+        client_id = old_appt[0]
         old_date = old_appt[1]
         old_time = old_appt[2]
         old_status = old_appt[3]
+        old_service_type = old_appt[4]
+        old_price = old_appt[5]
+        old_duration = old_appt[6]
 
         cur.execute(f"""
             UPDATE appointments
-            SET appointment_date = %s,
+            SET
+                service_type = %s,
+                price_at_booking = %s,
+                appointment_date = %s,
                 appointment_time = %s,
                 duration_minutes = %s,
                 room_number = %s,
@@ -23997,9 +24045,11 @@ def edit_appointment(appointment_id):
                 updated_at = CURRENT_TIMESTAMP
             {filter_sql}
         """, (
+            service_type,
+            price_value,
             appointment_date,
             appointment_time,
-            duration,
+            duration_value,
             room_number,
             notes,
             *params
@@ -24012,9 +24062,24 @@ def edit_appointment(appointment_id):
             action_type="appointment_updated",
             table_name="appointments",
             record_id=appointment_id,
-            old_value=f"{old_date} {old_time}",
-            new_value=f"{appointment_date} {appointment_time}",
+            old_value=(
+                f"{old_date} {old_time} | "
+                f"{old_service_type or 'No service'} | "
+                f"${old_price or 0} | "
+                f"{old_duration or 0} minutes"
+            ),
+            new_value=(
+                f"{appointment_date} {appointment_time} | "
+                f"{service_type or 'No service'} | "
+                f"${price_value or 0} | "
+                f"{duration_value or 0} minutes"
+            ),
             notes="Appointment updated"
+        )
+
+        was_rescheduled = (
+            str(old_date) != appointment_date
+            or old_time.strftime("%H:%M") != appointment_time
         )
 
         log_appointment_history(
@@ -24023,7 +24088,7 @@ def edit_appointment(appointment_id):
             appointment_id=appointment_id,
             client_id=client_id,
             user_id=user_id,
-            action_type="rescheduled",
+            action_type="rescheduled" if was_rescheduled else "updated",
             old_date=old_date,
             old_time=old_time,
             new_date=appointment_date,
@@ -24033,23 +24098,24 @@ def edit_appointment(appointment_id):
             notes="Appointment edited"
         )
 
-    
-        if cur.rowcount == 0:
-            conn.rollback()
-            cur.close()
-            conn.close()
-            flash("Appointment not found or not authorized.", "error")
-            return redirect(url_for("appointments"))
-        
         conn.commit()
         cur.close()
         conn.close()
-        
+
+        flash("Appointment updated successfully.", "success")
         return redirect(url_for("daily_schedule", date=appointment_date))
-        
+
+
     cur.execute(f"""
-        SELECT appointment_id, appointment_date, appointment_time,
-               duration_minutes, room_number, notes
+        SELECT
+            appointment_id,
+            appointment_date,
+            appointment_time,
+            duration_minutes,
+            room_number,
+            notes,
+            service_type,
+            price_at_booking
         FROM appointments
         {filter_sql}
     """, params)

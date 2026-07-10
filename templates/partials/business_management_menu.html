@@ -16,8 +16,8 @@
         <div class="user-menu-divider"></div>
 
         <div class="user-menu-muted" style="padding:6px 12px;">Employee Admin</div>
-        <a href="{{ url_for('employees_home') }}">Employee Home</a>
         <a href="{{ url_for('add_employee') }}">Add New Employee</a>
+        <a href="{{ url_for('employees_home') }}">Employee Home</a>       
         <a href="{{ url_for('compensation_types_report') }}">Manage Compensation Types</a>
 
               
@@ -27,12 +27,13 @@
         <a href="{{ url_for('add_employee_compensation') }}">Add Employee Compensation</a>
         <a href="{{ url_for('employee_compensation_report') }}">Compensation Report</a>
         <a href="{{ url_for('employee_pay_summary') }}">Employee Pay Summary</a>
-
+        <br>
         <div class="user-menu-divider"></div>
 
         <div class="user-menu-muted" style="padding:6px 12px;">📝 Business</div>
         <a href="{{ url_for('business_coach_profile') }}">🍑 Business Coach Profile</a>
         <a href="{{ url_for('business_schedule') }}">🗓️ Business Schedule</a>
+        <br>
         <a href="{{ url_for('business_goals') }}">Goals</a>
         <a href="{{ url_for('admin') }}">Admin Settings</a>
         <a href="{{ url_for('client_contact_preferences') }}">vacant</a>

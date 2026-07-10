@@ -3,27 +3,92 @@
 {% block content %}
 <h2>Edit Appointment</h2>
 
+<span style="color: red; font-size: x-small;">* Required Field</span>
+
 <form method="POST">
 
-    <label>Date <span style="color: red;">*</span></label>
-    <input type="date" name="appointment_date" value="{{ appt[1].strftime('%Y-%m-%d') }}" required>
+    <label for="service_type">
+        Service Type <span style="color: red;">*</span>
+    </label>
+    <input
+        type="text"
+        id="service_type"
+        name="service_type"
+        value="{{ appt[6] or '' }}"
+        required
+    >
 
-    <label>Time <span style="color: red;">*</span></label>
-    <input type="time" name="appointment_time" value="{{ appt[2].strftime('%H:%M') }}" required>
+    <label for="price_at_booking">
+        Service Price <span style="color: red;">*</span>
+    </label>
+    <input
+        type="number"
+        id="price_at_booking"
+        name="price_at_booking"
+        value="{{ '%.2f'|format(appt[7] or 0) }}"
+        min="0"
+        step="0.01"
+        required
+    >
 
-    <label>Duration (minutes) <span style="color: red;">*</span></label>
-    <input type="text" name="duration" value="{{ appt[3] or 60 }}" min="1" required>
+    <label for="appointment_date">
+        Date <span style="color: red;">*</span>
+    </label>
+    <input
+        type="date"
+        id="appointment_date"
+        name="appointment_date"
+        value="{{ appt[1].strftime('%Y-%m-%d') }}"
+        required
+    >
 
-    <label>Room</label>
-    <input type="text" name="room_number" value="{{ appt[4] or 1 }}">
+    <label for="appointment_time">
+        Time <span style="color: red;">*</span>
+    </label>
+    <input
+        type="time"
+        id="appointment_time"
+        name="appointment_time"
+        value="{{ appt[2].strftime('%H:%M') }}"
+        required
+    >
 
-    <label>Notes</label>
-    <textarea name="notes">{{ appt[5] }}</textarea>
+    <label for="duration">
+        Duration (minutes) <span style="color: red;">*</span>
+    </label>
+    <input
+        type="number"
+        id="duration"
+        name="duration"
+        value="{{ appt[3] or 60 }}"
+        min="1"
+        required
+    >
+
+    <label for="room_number">Room</label>
+    <input
+        type="text"
+        id="room_number"
+        name="room_number"
+        value="{{ appt[4] or 1 }}"
+    >
+
+    <label for="notes">Notes</label>
+    <textarea
+        id="notes"
+        name="notes"
+    >{{ appt[5] or '' }}</textarea>
 
     <br><br>
 
     <button type="submit" class="btn">Update Appointment</button>
-    <a href="{{ url_for('daily_schedule', date=appt[1]) }}" class="btn">Cancel</a>
+
+    <a
+        href="{{ url_for('daily_schedule', date=appt[1]) }}"
+        class="btn"
+    >
+        Cancel
+    </a>
 
 </form>
 {% endblock %}

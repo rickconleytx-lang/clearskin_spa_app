@@ -30,6 +30,7 @@ nano daily_schedule.html{% extends "base.html" %}
                 <th>Room</th>
                 <th>Status</th>
                 <th>Notes</th>
+                <th>Price at Booking</th>
                 <th>Actions</th>
             </tr>
         </thead>
@@ -43,6 +44,15 @@ nano daily_schedule.html{% extends "base.html" %}
                 <td>{{ appt[7] or '' }}</td>
                 <td>{{ appt[8]|title if appt[8] else '' }}</td>
                 <td>{{ appt[9] or '' }}</td>
+
+                <td>
+                {% if appt[10] is not none %}
+                    ${{ "%.2f"|format(appt[10]) }}
+                {% else %}
+                    Price not entered
+                {% endif %}
+                </td>
+                
                 <td>
                     <a class="btn"
                        href="{{ url_for('client_health_profile',

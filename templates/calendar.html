@@ -344,38 +344,7 @@
 
                                     <div style="margin-top: 8px;">
 
-                                    <a href="{{ url_for('add_income', appointment_id=appt[6], date=selected_date) }}"
-                                        class="btn btn-sm"
-                                        style="background: green; color: white;">
-                                        Finish Session
-                                     </a>
-
-                                   
-                                    {% if appt[5] == 'booked' and is_past %}
-                                    <form method="POST"
-                                          action="{{ url_for('complete_appointment', appointment_id=appt[6]) }}"
-                                          style="display:inline;">
-                                        <button type="submit"
-                                                class="btn btn-sm"
-                                                style="background: orange;"
-                                                onclick="return confirm('Mark this appointment complete?')">
-                                            Complete
-                                        </button>
-                                    </form>
-                                    {% endif %}
-
-                                    {% if appt[5] == 'booked' and is_future %}
-                                    <form method="POST"
-                                          action="{{ url_for('cancel_appointment', appointment_id=appt[6]) }}"
-                                          style="display:inline;">
-                                        <button type="submit"
-                                                class="btn btn-sm"
-                                                style="background: #cc0000;"
-                                                onclick="return confirm('Cancel this appointment?')">
-                                            Cancel
-                                        </button>
-                                    </form>
-                                    {% endif %}
+                                    
                                 </div>
                             </div>
                         {% endif %}
@@ -389,14 +358,23 @@
 
 <div id="appointmentModal" class="modal-overlay" style="display:none;">
     <div class="modal-box">
+        <h1>Appointment Command Center</h1>
+        <hr>
+        <br>
         <h2 id="modalClientName"></h2>
 
         <p><strong>Phone:</strong> 📞 <a id="modalPhoneLink"></a></p>
         <p><strong>Email:</strong> ✉️ <a id="modalEmailLink"></a></p>
+
+        <hr>
+
         <p><strong>Date:</strong> <span id="modalDate"></span></p>
         <p><strong>Time:</strong> <span id="modalTime"></span></p>
         <p><strong>Service:</strong> <span id="modalService"></span></p>
+        <p><strong>Duration:</strong> <span id="modalDuration"></span></p>
+        <p><strong>Price at Booking:</strong> <span id="modalPrice"></span></p>
         <p><strong>Status:</strong> <span id="modalStatus" class="status-badge"></span></p>
+
         <p><strong>Appointment Notes:</strong></p>
         <div id="modalNotes"
             style="background:#f7f7f7; padding:10px; border-radius:8px; white-space:pre-wrap;">
@@ -408,11 +386,11 @@
     <h3>Quick Reschedule</h3>
 
     <form method="POST" id="modalRescheduleForm">
-        <label>New Date</label><br>
-        <input type="date" name="appointment_date" id="modalRescheduleDate" required><br><br>
+        <label><p style="color: red;">New Date</p></label>
+        <input type="date" name="appointment_date" id="modalRescheduleDate" required>
 
-        <label>New Time</label><br>
-        <input type="time" name="appointment_time" id="modalRescheduleTime" required><br><br>
+        <label><p style="color: red;">New Time</p></label>
+        <input type="time" name="appointment_time" id="modalRescheduleTime" required>
 
         <button type="submit"
             class="btn"
@@ -420,6 +398,9 @@
             onclick="return confirm('Reschedule this appointment?')">
         Reschedule
     </button>
+    <hr>
+    <br>
+
 </form>    
             
     <div class="form-buttons">
@@ -434,16 +415,7 @@
 
             <a id="modalEditBtn" class="btn">Edit Appointment</a>
             <a id="modalPaymentBtn" class="btn">Finish Session</a>
-            <a id="modalWrapUpBtn" class="btn">Wrap-Up</a>
-     
-
-
-            <form method="POST" id="modalCompleteForm" style="display:inline;">
-                <button type="submit" class="btn" style="background: orange;"
-                        onclick="return confirm('Mark this appointment complete?')">
-                    Mark Complete
-                </button>
-            </form>
+            
 
             <form method="POST" id="modalCancelForm" style="display:inline;">
                 <button type="submit" class="btn" style="background: #cc0000; color: white;"
@@ -522,6 +494,24 @@ function openAppointmentModal(appointmentId) {
             setText("modalDate", data.appointment_date);
             setText("modalTime", data.start_time);
             setText("modalService", data.service_name);
+
+            setText(
+                "modalDuration",
+                data.duration_minutes
+                    ? `${data.duration_minutes} minutes`
+                    : "Not entered"
+            );
+
+            setText(
+                "modalPrice",
+                data.price_at_booking !== null &&
+                data.price_at_booking !== undefined &&
+                data.price_at_booking !== ""
+                    ? `$${Number(data.price_at_booking).toFixed(2)}`
+                    : "Not entered"
+            );
+
+
             setText("modalNotes", data.notes || "No appointment notes entered.");
 
             const phoneLink = document.getElementById("modalPhoneLink");
@@ -572,11 +562,9 @@ function openAppointmentModal(appointmentId) {
 
             document.getElementById("modalEditBtn").href = `/edit_appointment/${appointmentId}`;
             document.getElementById("modalPaymentBtn").href = `/add_income/${appointmentId}`;
-            document.getElementById("modalWrapUpBtn").href = `/post_appointment_wrap_up/${appointmentId}`;
-
-            document.getElementById("modalCompleteForm").action = `/complete_appointment/${appointmentId}`;
-            document.getElementById("modalCancelForm").action = `/cancel_appointment/${appointmentId}`;
-
+            
+        
+            
             const godaddyBtn = document.getElementById("godaddyImportBtn");
 
             if (godaddyBtn) {
