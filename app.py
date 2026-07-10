@@ -4,6 +4,7 @@ from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
 from apscheduler.schedulers.background import BackgroundScheduler
 from q_launch_registry import Q_LAUNCH_ITEMS
+from services.coach import build_coach
 import os
 from decimal import Decimal
 import csv
@@ -21530,6 +21531,53 @@ def morning_briefing():
 
     business_schedule_upcoming = cur.fetchall()
 
+    priority_actions = []
+
+    coach = build_coach(
+        dashboard=dashboard,
+        business_schedule_due=business_schedule_due,
+        business_schedule_upcoming=business_schedule_upcoming,
+        priority_actions=priority_actions
+    )
+
+    if dashboard.get("birthdays_today", 0) > 0:
+        priority_actions.append({
+            "icon": "🎂",
+                "label": "Birthday today",
+            "value": dashboard.get("birthdays_today", 0),
+            "url": None
+        })
+
+    if dashboard.get("appointments_tomorrow", 0) > 0:
+        priority_actions.append({
+            "icon": "📅",
+            "label": "Appointments tomorrow",
+            "value": dashboard.get("appointments_tomorrow", 0),
+            "url": url_for("calendar_view")
+        })
+
+    godaddy_unreviewed_count = 0
+
+    cur.execute("""
+        SELECT COUNT(*)
+        FROM appointments
+        WHERE spa_id = %s
+        AND external_source = 'godaddy'
+        AND COALESCE(import_reviewed, FALSE) = FALSE
+    """, (spa_id,))
+
+    godaddy_unreviewed_count = cur.fetchone()[0] or 0
+
+    if godaddy_unreviewed_count > 0:
+        priority_actions.append({
+            "icon": "📨",
+            "label": "GoDaddy imports need review",
+            "value": godaddy_unreviewed_count,
+            "url": url_for("godaddy_imports")
+        })
+
+
+
     cur.close()
     conn.close()
 
@@ -21539,8 +21587,78 @@ def morning_briefing():
         business_health=business_health,
         today=today,
         business_schedule_due=business_schedule_due,
-        business_schedule_upcoming=business_schedule_upcoming
+        business_schedule_upcoming=business_schedule_upcoming,
+        priority_actions=priority_actions,
+        godaddy_unreviewed_count=godaddy_unreviewed_count,
+        coach=coach
     )
+
+
+
+######################################
+#
+#   DAILY BRIEFING - - TODAY
+#
+#
+###########################################
+
+
+@app.route("/daily-briefing/today")
+@login_required
+@spa_required
+def daily_briefing_today():
+
+    spa_id = session["spa_id"]
+    today = date.today()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            a.appointment_id,
+            a.appointment_date,
+            a.appointment_time,
+            a.service_type,
+            a.duration_minutes,
+            a.price_at_booking,
+            a.status,
+            c.client_id,
+            c.first_name,
+            c.last_name,
+            c.phone,
+            c.email
+        FROM appointments a
+        LEFT JOIN clients c
+            ON a.client_id = c.client_id
+        WHERE a.spa_id = %s
+          AND a.appointment_date = %s
+          AND COALESCE(a.status, '') NOT IN ('Cancelled', 'Canceled')
+        ORDER BY a.appointment_time ASC
+    """, (spa_id, today))
+
+    appointments = cur.fetchall()
+
+    projected_revenue = sum(
+        appt[5] or 0 for appt in appointments
+    )
+
+    appointment_count = len(appointments)
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "daily_briefing_today.html",
+        today=today,
+        appointments=appointments,
+        appointment_count=appointment_count,
+        projected_revenue=projected_revenue,
+        action_url=url_for("priority_actions")
+    )
+
+
+
 
 
 
@@ -22203,14 +22321,6 @@ def confirm_delete_business_schedule(schedule_id):
 
 
 
-
-
-
-
-
-
-
-
 ##################################
 #
 #   DELETE BUSINESS SCHEDULE ITEM
@@ -22291,18 +22401,6 @@ def confirm_duplicate_business_schedule(schedule_id):
         "duplicate_business_schedule.html",
         item=item
     )
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -23579,11 +23677,28 @@ def add_appointment():
     if request.method == "POST":
         client_id = (request.form.get("client_id") or "").strip()
         service_type_id = (request.form.get("service_type_id") or "").strip()
-        appointment_date = (request.form.get("appointment_date") or "").strip()
-        appointment_time = (request.form.get("appointment_time") or "").strip()
+
+        duration_minutes_raw = (
+            request.form.get("duration_minutes") or ""
+        ).strip()
+
+        price_at_booking_raw = (
+            request.form.get("price_at_booking") or ""
+        ).strip()
+
+        appointment_date = (
+            request.form.get("appointment_date") or ""
+        ).strip()
+        
+        appointment_time = (
+            request.form.get("appointment_time") or ""
+        ).strip()
+
         status = (request.form.get("status") or "booked").strip()
         notes = (request.form.get("notes") or "").strip()
-        incoming_booking_id = (request.form.get("incoming_booking_id") or "").strip()
+        incoming_booking_id = (
+            request.form.get("incoming_booking_id") or ""
+        ).strip()
 
         if not client_id:
             flash("Client is required.", "error")
@@ -23602,6 +23717,51 @@ def add_appointment():
             cur.close()
             conn.close()
             return redirect(url_for("add_appointment", selected_date=selected_date))
+        
+        try:
+            duration_minutes = int(duration_minutes_raw)
+        except (TypeError, ValueError):
+            flash("Session length must be entered in minutes.", "error")
+            cur.close()
+            conn.close()
+
+            return redirect(url_for(
+                "add_appointment",
+                selected_date=selected_date
+            ))
+
+        if duration_minutes <= 0:
+            flash("Session length must be greater than zero.", "error")
+            cur.close()
+            conn.close()
+
+            return redirect(url_for(
+                "add_appointment",
+                selected_date=selected_date
+            ))
+
+        try:
+            price_at_booking = float(price_at_booking_raw)
+        except (TypeError, ValueError):
+            flash("Service price must be a valid amount.", "error")
+            cur.close()
+            conn.close()
+
+            return redirect(url_for(
+                "add_appointment",
+                selected_date=selected_date
+            ))
+
+        if price_at_booking < 0:
+            flash("Service price cannot be negative.", "error")
+            cur.close()
+            conn.close()
+
+            return redirect(url_for(
+                "add_appointment",
+                selected_date=selected_date
+            ))
+
     
         cur.execute("""
             SELECT 1
@@ -23634,17 +23794,21 @@ def add_appointment():
                 spa_id,
                 client_id,   
                 service_type_id,
+                duration_minutes,
+                price_at_booking,
                 appointment_date,
                 appointment_time,
                 status,
                 notes
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s,%s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING appointment_id
         """, (
             spa_id,
             client_id,
             service_type_id,
+            duration_minutes,
+            price_at_booking,
             appointment_date,
             appointment_time,
             status,

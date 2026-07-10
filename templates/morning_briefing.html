@@ -1,11 +1,13 @@
 {% extends "base.html" %}
-{% block title %}Daily Briefing | Peach Suite Pro{% endblock %}
+{% block title %}Peach Suite Pro | Daily Briefing{% endblock %}
 
 {% block content %}
 
 <div class="page-title">
     <h1>🌅 Daily Briefing</h1>
 </div>
+
+
 
 <p style="color:#777; margin-top:4px;">
     What you need to know before you start your business day.
@@ -49,7 +51,10 @@
 <div class="briefing-grid">
 
     <div class="dashboard-card">
-        <h2>📅 Today</h2>
+        <a href="{{ url_for('daily_briefing_today') }}" class="briefing-card">
+            <h2>📆 Today's Schedule</h2>
+            <p>View appointments, projected revenue, and Coach opportunities.</p>
+        </a>
 
         <p>
             Appointments:
@@ -82,21 +87,26 @@
     <div class="dashboard-card">
         <h2>✅ Priority Actions</h2>
 
-        <p>
-            🎂 Birthdays Today:
-            <strong>{{ dashboard.birthdays_today }}</strong>
-        </p>
+        {% if priority_actions %}
+            {% for action in priority_actions %}
+                <p>
+                    {{ action.icon }}
+                    {{ action.label }}:
+                    <strong>{{ action.value }}</strong>
+                </p>
 
-        <p>
-            📅 Appointments Tomorrow:
-            <strong>{{ dashboard.appointments_tomorrow }}</strong>
-        </p>
-
-        <p>
-            📨 GoDaddy Imports:
-            <strong>{{ godaddy_unreviewed_count|default(0) }}</strong>
-        </p>
+                {% if action.url %}
+                    <a class="btn btn-small" href="{{ action.url }}">
+                        View
+                    </a>
+                {% endif %}
+            {% endfor %}
+        {% else %}
+            <p>No priority actions right now.</p>
+        {% endif %}
     </div>
+
+
 
     <div class="dashboard-card">
         <h2>📊 Business Snapshot</h2>
@@ -112,19 +122,9 @@
         </p>
 
         <p style="color:#777;">
-            More weekly and monthly KPIs coming next.
+            View weekly and monthly performance in Business Summary.
         </p>
     </div>
-
-    <div class="dashboard-card">
-        <h2>🍑 Coach Note</h2>
-
-        <p>
-            Start with today’s appointments, review any birthdays or imports,
-            and check open time on the calendar before the day gets busy.
-        </p>
-    </div>
-
 
 
     <div class="dashboard-card">
@@ -168,6 +168,29 @@
     </div>
 
 
+    <div class="dashboard-card coach-card">
+    <h2>🍑 Coach</h2>
+
+    <p>{{ coach.message }}</p>
+
+    {% if coach.question %}
+        <p><strong>{{ coach.question }}</strong></p>
+
+        {% if coach.yes_url %}
+            <a class="btn btn-small" href="{{ coach.yes_url }}">
+                {{ coach.yes_label }}
+            </a>
+        {% else %}
+            <button class="btn btn-small" type="button">
+                {{ coach.yes_label }}
+            </button>
+        {% endif %}
+
+        <button class="btn btn-small btn-secondary" type="button">
+            {{ coach.no_label }}
+        </button>
+    {% endif %}
+</div>
 
 
 
@@ -175,8 +198,5 @@
 
 <br>
 
-<a class="btn" href="{{ url_for('calendar_view') }}">
-    Go to Calendar
-</a>
 
 {% endblock %}

@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block title %}Today's Schedule{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+    <h1>Today's Schedule</h1>
+    <p>Your appointments, revenue, and Coach opportunities for today.</p>
+</div>
+
+<div class="page-actions">
+    <a href="{{ url_for('morning_briefing') }}" class="btn btn-secondary">
+        Back to Daily Briefing
+    </a>
+
+    <a href="{{ url_for('calendar_view') }}" class="btn btn-primary">
+        View Full Calendar
+    </a>
+</div>
+
+<div class="summary-grid">
+    <div class="summary-card">
+        <div class="summary-label">Appointments</div>
+        <div class="summary-value">{{ appointment_count }}</div>
+    </div>
+
+    <div class="summary-card">
+        <div class="summary-label">Projected Revenue</div>
+        <div class="summary-value">${{ "%.2f"|format(projected_revenue or 0) }}</div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Appointments</h2>
+
+    {% if appointments %}
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Service</th>
+                    <th>Length</th>
+                    <th>Client</th>
+                    <th>Projected Revenue</th>
+                    <th>Coach Opportunity</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for appt in appointments %}
+                    <tr>
+                        <td>
+                            {{ appt[2].strftime("%I:%M %p") if appt[2] else "" }}
+                        </td>
+                        <td>{{ appt[3] or "Appointment" }}</td>
+                        <td>
+                            {% if appt[4] %}
+                                {{ appt[4] }} min
+                            {% else %}
+                                —
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if appt[8] or appt[9] %}
+                                {{ appt[8] or "" }} {{ appt[9] or "" }}
+                            {% else %}
+                                —
+                            {% endif %}
+                        </td>
+                        <td>
+                            ${{ "%.2f"|format(appt[5] or 0) }}
+                        </td>
+                        <td>
+                            <span class="muted-text">
+                                Coach review coming soon
+                            </span>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p class="muted-text">
+            No appointments scheduled for today.
+        </p>
+    {% endif %}
+</div>
+
+{% endblock %}

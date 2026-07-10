@@ -3231,3 +3231,7 @@ td:nth-child(3) {
     padding: 0 !important;
     font-weight: normal !important;
 }
+
+.user-menu-button {
+    text-decoration: none;
+}
