@@ -7,6 +7,7 @@ from q_launch_registry import Q_LAUNCH_ITEMS
 from services.coach import build_coach
 import os
 from decimal import Decimal
+import time
 import csv
 import io
 import imaplib
@@ -426,6 +427,80 @@ def get_messaging_footer(footer_type):
     conn.close()
 
     return row[0] if row else ""
+
+
+
+
+
+
+
+
+
+    ####################################
+    #
+    #   LOG BOOKING IMPORT
+    #
+    #####################################
+
+
+def log_booking_import(
+    spa_id,
+    source,
+    status,
+    email_id=None,
+    external_order_id=None,
+    email_subject=None,
+    appointment_id=None,
+    client_id=None,
+    parser_version=None,
+    error_message=None,
+    processing_time_ms=None
+):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            INSERT INTO booking_import_logs (
+                spa_id,
+                source,
+                email_id,
+                external_order_id,
+                email_subject,
+                status,
+                appointment_id,
+                client_id,
+                parser_version,
+                error_message,
+                processing_time_ms
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            spa_id,
+            source,
+            email_id,
+            external_order_id,
+            email_subject,
+            status,
+            appointment_id,
+            client_id,
+            parser_version,
+            error_message,
+            processing_time_ms
+        ))
+
+        conn.commit()
+
+    except Exception as e:
+        conn.rollback()
+        log_godaddy(f"Failed to write booking import log: {e}")
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
 
 
 
@@ -8286,7 +8361,7 @@ def parse_godaddy_booking_email(body):
         data["appointment_datetime"] = dt
         data["duration_minutes"] = duration_minutes
 
-        
+
     payment_match = re.search(r"Payment status:\s*(.+)", body)
     if payment_match:
         data["payment_status"] = payment_match.group(1).strip()
@@ -8889,8 +8964,9 @@ def import_godaddy_booking(body, spa_id, subject=""):
             import_status
         )
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING appointment_id
     """, (
-        spa_id,
+            spa_id,
         client_id,
         booking["appointment_datetime"].date(),
         booking["appointment_datetime"].time(),
@@ -8912,8 +8988,6 @@ def import_godaddy_booking(body, spa_id, subject=""):
         "Imported"
     ))
 
-    
-
 
     conn.commit()
     cur.close()
@@ -8923,7 +8997,8 @@ def import_godaddy_booking(body, spa_id, subject=""):
         "status": "imported",
         "message": "GoDaddy booking imported successfully.",
         "order_number": booking["order_number"],
-        "client_id": client_id
+        "client_id": client_id,
+        "appointment_id":appointment_id
     }
 
 
@@ -9257,13 +9332,12 @@ def mark_godaddy_import_reviewed(appointment_id):
 
 #   --------------------------
 #
-#           
-#     GMAIL TEST
+#       RENDER GET MAIL
+#    GET MAIL FROM GMAIL
 #
-#           
+#     GODADAY MAIL        
 #
 #   ----------------------
-
 
 
 
@@ -9277,10 +9351,10 @@ def poll_gmail_for_godaddy_bookings(spa_id):
     mail.login(gmail_user, gmail_pass)
     mail.select("inbox")
 
-    status, messages = mail.search(None, "UNSEEN")
+    status, messages = mail.search(None, "ALL")
     email_ids = messages[0].split()
 
-    log_godaddy(f"Unread booking emails found: {len(email_ids)}")
+    log_godaddy(f"Booking emails found in inbox: {len(email_ids)}")
 
     if not email_ids:
         mail.logout()
@@ -9289,7 +9363,10 @@ def poll_gmail_for_godaddy_bookings(spa_id):
 
     results = []
 
-    for email_id in email_ids:
+    # Newest emails first
+    for email_id in reversed(email_ids):
+        started_at = time.perf_counter()
+
         log_godaddy(f"Checking email ID: {email_id.decode()}")
 
         status, msg_data = mail.fetch(email_id, "(RFC822)")
@@ -9311,7 +9388,10 @@ def poll_gmail_for_godaddy_bookings(spa_id):
                 content_type = part.get_content_type()
                 content_disposition = str(part.get("Content-Disposition"))
 
-                if content_type == "text/plain" and "attachment" not in content_disposition:
+                if (
+                    content_type == "text/plain"
+                    and "attachment" not in content_disposition
+                ):
                     body = part.get_payload(decode=True).decode(errors="ignore")
                     break
         else:
@@ -9354,9 +9434,23 @@ def poll_gmail_for_godaddy_bookings(spa_id):
 
             log_godaddy(f"Import result: {result}")
 
-            if result["status"] in ("imported", "duplicate"):
-                mail.store(email_id, "+FLAGS", "\\Seen")
-                log_godaddy("Email marked as read.")
+            processing_time_ms = int(
+                (time.perf_counter() - started_at) * 1000
+            )
+
+            log_booking_import(
+                spa_id=spa_id,
+                source="godaddy",
+                email_id=email_id.decode(),
+                external_order_id=result.get("order_number"),
+                email_subject=subject,
+                status=result.get("status"),
+                appointment_id=result.get("appointment_id"),
+                client_id=result.get("client_id"),
+                parser_version="godaddy_v1",
+                error_message=None,
+                processing_time_ms=processing_time_ms
+            )
 
             results.append({
                 "email_id": email_id.decode(),
@@ -9366,7 +9460,26 @@ def poll_gmail_for_godaddy_bookings(spa_id):
 
         except KeyError as e:
             log_godaddy(f"Parse failed. Missing field: {e}")
-            log_godaddy("Email left unread for retry.")
+            log_godaddy(
+                "Email will be checked again during the next poll."
+            )
+
+            processing_time_ms = int(
+                (time.perf_counter() - started_at) * 1000
+            )
+
+            log_booking_import(
+                spa_id=spa_id,
+                source="godaddy",
+                email_id=email_id.decode(),
+                external_order_id=None,
+                email_subject=subject,
+                status="parse_failed",
+                parser_version="godaddy_v1",
+                error_message=f"Missing field: {e}",
+                processing_time_ms=processing_time_ms
+            )
+
             results.append({
                 "email_id": email_id.decode(),
                 "subject": subject,
@@ -9376,13 +9489,34 @@ def poll_gmail_for_godaddy_bookings(spa_id):
 
         except Exception as e:
             log_godaddy(f"Import failed: {e}")
-            log_godaddy("Email left unread for retry.")
-            results.append({
-                "email_id": email_id.decode(),
-                "subject": subject,
-                "status": "import_failed",
-                "error": str(e)
-            })
+            log_godaddy(
+                "Email will be checked again during the next poll."
+            )
+
+            processing_time_ms = int(
+                (time.perf_counter() - started_at) * 1000
+            )
+
+            log_booking_import(
+                spa_id=spa_id,
+                source="godaddy",
+                email_id=email_id.decode(),
+                external_order_id=None,
+                email_subject=subject,
+                status="import_failed",
+                appointment_id=None,
+                client_id=None,
+                parser_version="godaddy_v1",
+                error_message=str(e),
+                processing_time_ms=processing_time_ms
+            )
+
+        results.append({
+            "email_id": email_id.decode(),
+            "subject": subject,
+            "status": "import_failed",
+            "error": str(e)
+        })
 
     mail.logout()
 
@@ -9393,6 +9527,12 @@ def poll_gmail_for_godaddy_bookings(spa_id):
         "processed_count": len(results),
         "results": results
     }
+
+
+
+
+
+
 
 
 
