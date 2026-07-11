@@ -9511,12 +9511,12 @@ def poll_gmail_for_godaddy_bookings(spa_id):
                 processing_time_ms=processing_time_ms
             )
 
-        results.append({
-            "email_id": email_id.decode(),
-            "subject": subject,
-            "status": "import_failed",
-            "error": str(e)
-        })
+            results.append({
+                "email_id": email_id.decode(),
+                "subject": subject,
+                "status": "import_failed",
+                "error": str(e)
+            })
 
     mail.logout()
 
