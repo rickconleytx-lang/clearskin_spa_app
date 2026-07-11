@@ -9181,14 +9181,16 @@ def mark_godaddy_import_reviewed(appointment_id):
             UPDATE appointments
             SET
                 import_reviewed = TRUE,
-                import_reviewed_at = NOW(),
-                import_reviewed_by = %s,
+                import_reviewed_at = COALESCE(import_reviewed_at, NOW()),
+                import_reviewed_by = COALESCE(import_reviewed_by, %s),
+                owner_reviewed = TRUE,
+                owner_reviewed_at = COALESCE(owner_reviewed_at, NOW()),
                 import_status = 'Reviewed'
             WHERE appointment_id = %s
-              AND spa_id = %s
-              AND LOWER(COALESCE(external_source, '')) = 'godaddy'
+            AND spa_id = %s
+            AND LOWER(COALESCE(external_source, '')) = 'godaddy'
         """, (
-            user_id,
+            session.get("user_id"),
             appointment_id,
             spa_id
         ))
@@ -21102,8 +21104,8 @@ def quick_reschedule_appointment(appointment_id):
 #  -----------------------------
 #
 #   MODAL ROUTE
-#
-#
+#. APPOINTMENT COMMAND MODAL
+#   CALENDAR MODAL
 #      APPOINTMENT DETAILS
 #     
 #  4/28 cleaned
@@ -21166,12 +21168,25 @@ def appointment_details(appointment_id):
     cur.execute("""
         UPDATE appointments
         SET
+            import_reviewed = TRUE,
+            import_reviewed_at = COALESCE(import_reviewed_at, NOW()),
+            import_reviewed_by = COALESCE(import_reviewed_by, %s),
             owner_reviewed = TRUE,
-            owner_reviewed_at = CURRENT_TIMESTAMP
+            owner_reviewed_at = COALESCE(owner_reviewed_at, NOW()),
+            import_status = 'Reviewed'
         WHERE appointment_id = %s
-          AND spa_id = %s
-          AND owner_reviewed IS DISTINCT FROM TRUE
-    """, (appointment_id, spa_id))
+        AND spa_id = %s
+        AND LOWER(COALESCE(external_source, '')) = 'godaddy'
+        AND (
+                COALESCE(import_reviewed, FALSE) = FALSE
+            OR COALESCE(owner_reviewed, FALSE) = FALSE
+            OR COALESCE(import_status, '') <> 'Reviewed'
+        )
+    """, (
+        session.get("user_id"),
+        appointment_id,
+        spa_id
+    ))
 
     conn.commit()
 
