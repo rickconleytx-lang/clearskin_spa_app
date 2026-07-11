@@ -475,6 +475,8 @@ def log_booking_import(
                 processing_time_ms
             )
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (spa_id, source, email_id, status)
+            DO NOTHING
         """, (
             spa_id,
             source,
@@ -8835,7 +8837,7 @@ def booking_email_import():
 #    GoDaddy TEST CREATE APPOINTMENT
 #           
 #      GODADDY IMPORT
-#           TODO remove prints
+#           
 #   -----------------------------------------------
 
 
@@ -8844,7 +8846,7 @@ def booking_email_import():
 def import_godaddy_booking(body, spa_id, subject=""):
     booking = parse_godaddy_booking_email(body)
 
-    print("BOOKING:", booking, flush=True)
+    
 
     price_at_booking = booking.get("subtotal") or booking.get("order_total")
     from datetime import datetime
@@ -8930,13 +8932,6 @@ def import_godaddy_booking(body, spa_id, subject=""):
     # Parser returns True/False
     paid_at_checkout = bool(booking.get("paid_at_checkout"))
 
-   
-    print(
-        "ABOUT TO INSERT:",
-        booking["appointment_datetime"],
-        booking["order_number"],
-        flush=True
-    )
     
 
     # 4. Insert appointment
