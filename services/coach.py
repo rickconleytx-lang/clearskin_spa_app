@@ -51,6 +51,39 @@ def add_observation(
     })
 
 
+
+def add_recommendation(
+    recommendations,
+    category,
+    priority,
+    summary,
+    question,
+    action_label=None,
+    action_url=None,
+    recommendation_key=None
+):
+    recommendations.append({
+        "category": category,
+        "priority": priority,
+        "summary": summary,
+        "question": question,
+        "action_label": action_label,
+        "action_url": action_url,
+        "recommendation_key": recommendation_key
+    })
+
+
+def select_top_recommendation(recommendations):
+    if not recommendations:
+        return None
+
+    return sorted(
+        recommendations,
+        key=lambda item: item.get("priority", 0),
+        reverse=True
+    )[0]
+
+
 def review_business_schedule(
     observations,
     business_schedule_due=None,
@@ -169,11 +202,77 @@ def review_priority_actions(
         )
 
 
+def review_overdue_appointments(observations, dashboard):
+    overdue_appointments = (
+        dashboard.get("overdue_appointments", [])
+        or []
+    )
+
+    overdue_count = len(overdue_appointments)
+
+    if overdue_count == 0:
+        return
+
+    add_observation(
+        observations,
+        category="Overdue Appointments",
+        priority=100,
+        status="attention",
+        message=(
+            f"You have {overdue_count} overdue appointment"
+            f"{'' if overdue_count == 1 else 's'} "
+            "that still need to be closed out."
+        ),
+        action_url=None
+
+
+    )
+
+def review_overdue_appointments(observations, dashboard):
+    print(
+        "COACH DASHBOARD KEYS:",
+        dashboard.keys(),
+        flush=True
+    )
+
+    overdue_appointments = (
+        dashboard.get("overdue_appointments", [])
+        or []
+    )
+
+    print(
+        "COACH OVERDUE APPOINTMENTS:",
+        overdue_appointments,
+        flush=True
+    )
+
+    overdue_count = len(overdue_appointments)
+
+    if overdue_count == 0:
+        return
+
+    add_observation(
+        observations,
+        category="Overdue Appointments",
+        priority=100,
+        status="attention",
+        message=(
+            f"You have {overdue_count} past appointment"
+            f"{'' if overdue_count == 1 else 's'} "
+            "that are still marked as booked and need to be closed out."
+        ),
+        action_url=None
+    )
+
+
+
+
 def review_today_schedule(observations, dashboard):
     appointment_count = dashboard.get("appointments_today", 0) or 0
     projected_revenue = dashboard.get("expected_income_today", 0) or 0
     next_appointment = dashboard.get("next_appointment")
 
+   
     if appointment_count == 0:
         add_observation(
             observations,
@@ -332,6 +431,21 @@ def build_coach(
     # ---------------------------------------------------------
     # Complete the business review
     # ---------------------------------------------------------
+    review_overdue_appointments(
+        observations,
+        dashboard=dashboard
+    )
+
+    review_today_schedule(
+        observations,
+        dashboard=dashboard
+    )
+    
+
+
+    # ---------------------------------------------------------
+    # Complete the business review
+    # ---------------------------------------------------------
     review_today_schedule(
         observations,
         dashboard=dashboard
@@ -414,52 +528,74 @@ def build_coach(
         recommendation_intro["summary"]
     ])
 
+    # ---------------------------------------------------------
+    # Build the opening Coach interaction
+    # ---------------------------------------------------------
+    if current_recommendation:
+        opening_question = "Would you like to review it?"
+        conversation_state = "recommendation_offer"
+    else:
+        opening_question = None
+        conversation_state = "complete"
+
     return {
-    "title": "🍑 Coach",
-    "greeting": greeting,
-    "appointment_summary": (
-        today_summary["appointment_summary"]
-    ),
-    "next_appointment_summary": (
-        today_summary["next_appointment_summary"]
-    ),
-    "day_assessment": day_assessment,
-    "recommendation_summary": (
-        recommendation_intro["summary"]
-    ),
-    "message": message,
-    "question": recommendation_intro["question"],
-    "yes_label": "Yes",
-    "no_label": "No",
-    "yes_url": (
-        current_recommendation.get("action_url")
-        if current_recommendation
-        else None
-    ),
-    "reason": (
-        current_recommendation.get("category")
-        if current_recommendation
-        else "All Clear"
-    ),
-    "priority": (
-        current_recommendation.get("priority", 10)
-        if current_recommendation
-        else 10
-    ),
-    "conversation_state": (
-        "recommendations_ready"
-        if recommendations
-        else "complete"
-    ),
-    "current_recommendation_index": 0,
-    "total_recommendations": len(recommendations),
-    "current_recommendation": current_recommendation,
-    "recommendations": recommendations,
-    "recommendation_count": (
-        recommendation_intro["count"]
-    ),
-    "informational_observations": (
-        informational_observations
-    ),
-    "observations": observations
-}
+        "title": "🍑 Coach",
+        "greeting": greeting,
+
+        "appointment_summary": (
+            today_summary["appointment_summary"]
+        ),
+
+        "next_appointment_summary": (
+            today_summary["next_appointment_summary"]
+        ),
+
+        "day_assessment": day_assessment,
+
+        "recommendation_summary": (
+            recommendation_intro["summary"]
+        ),
+
+        "message": message,
+
+        # Opening Yes / No question
+        "question": opening_question,
+        "yes_label": "Yes",
+        "no_label": "No",
+
+        # Do not navigate when the user first selects Yes.
+        # Yes should reveal the recommendation.
+        "yes_url": None,
+
+        "reason": (
+            current_recommendation.get("category")
+            if current_recommendation
+            else "All Clear"
+        ),
+
+        "priority": (
+            current_recommendation.get("priority", 10)
+            if current_recommendation
+            else 10
+        ),
+
+        "conversation_state": conversation_state,
+
+        "current_recommendation_index": 0,
+        "total_recommendations": len(recommendations),
+
+        # Full recommendation that will be revealed
+        "current_recommendation": current_recommendation,
+
+        "recommendations": recommendations,
+
+        "recommendation_count": (
+            recommendation_intro["count"]
+        ),
+
+        "informational_observations": (
+            informational_observations
+        ),
+
+        "observations": observations
+    }

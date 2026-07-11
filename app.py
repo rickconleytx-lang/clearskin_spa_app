@@ -9171,32 +9171,43 @@ def test_godaddy_create_appointment():
 @spa_required
 def mark_godaddy_import_reviewed(appointment_id):
     spa_id = current_spa_id()
+    user_id = session.get("user_id")
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute("""
-        UPDATE appointments
-        SET
-            import_reviewed = TRUE,
-            import_reviewed_at = NOW(),
-            import_reviewed_by = %s,
-            import_status = 'Reviewed'
-        WHERE appointment_id = %s
-          AND spa_id = %s
-          AND external_source = 'godaddy'
-    """, (
-        current_user.id,
-        appointment_id,
-        spa_id
-    ))
+    try:
+        cur.execute("""
+            UPDATE appointments
+            SET
+                import_reviewed = TRUE,
+                import_reviewed_at = NOW(),
+                import_reviewed_by = %s,
+                import_status = 'Reviewed'
+            WHERE appointment_id = %s
+              AND spa_id = %s
+              AND LOWER(COALESCE(external_source, '')) = 'godaddy'
+        """, (
+            user_id,
+            appointment_id,
+            spa_id
+        ))
 
-    conn.commit()
+        if cur.rowcount == 0:
+            conn.rollback()
+            flash("The GoDaddy appointment could not be found.", "warning")
+        else:
+            conn.commit()
+            flash("GoDaddy import marked as reviewed.", "success")
 
-    cur.close()
-    conn.close()
+    except Exception as e:
+        conn.rollback()
+        print(f"MARK GODADDY IMPORT REVIEWED ERROR: {e}")
+        flash("The GoDaddy import could not be marked as reviewed.", "danger")
 
-    flash("GoDaddy import marked as reviewed.", "success")
+    finally:
+        cur.close()
+        conn.close()
 
     return redirect(url_for("godaddy_imports"))
 
@@ -20785,34 +20796,43 @@ def calendar_view():
         date_filter_sql += " AND a.spa_id = %s"
         date_params.append(spa_id)
 
+        
         cur.execute(f"""
-            SELECT     
-                a.appointment_date,
-                a.appointment_time,
-                c.first_name,
-                c.last_name,
+            SELECT
+                a.appointment_date,                             -- 0
+                a.appointment_time,                             -- 1
+                c.first_name,                                   -- 2
+                c.last_name,                                    -- 3
                 COALESCE(
+                    NULLIF(snt.service_name, ''),
                     NULLIF(a.service_type, ''),
                     NULLIF(a.external_service_name, ''),
                     s.service_name,
                     'Service not entered'
-                ) AS service_name,
-                a.status,
-                a.appointment_id,
-                a.duration_minutes,
-                a.price_at_booking,
-                a.owner_reviewed,
-                a.owner_reviewed_at
+                ) AS service_name,                              -- 4
+                a.status,                                       -- 5
+                a.appointment_id,                               -- 6
+                a.duration_minutes,                             -- 7
+                a.price_at_booking,                             -- 8
+                a.owner_reviewed,                               -- 9
+                a.owner_reviewed_at                             -- 10
             FROM appointments a
             JOIN clients c
                 ON a.client_id = c.client_id
-               AND a.spa_id = c.spa_id
+            AND a.spa_id = c.spa_id
+
+            LEFT JOIN service_name_types snt
+                ON a.service_type_id = snt.service_type_id
+            AND a.spa_id = snt.spa_id
+
             LEFT JOIN services s
                 ON a.service_id = s.service_id
-               AND a.spa_id = s.spa_id
+            AND a.spa_id = s.spa_id
+
             {date_filter_sql}
+
             ORDER BY a.appointment_date, a.appointment_time
-        """, date_params)
+        """, week_params)
 
         filtered_appointments = cur.fetchall()
             
@@ -20824,6 +20844,7 @@ def calendar_view():
             c.first_name,                                   -- 2
             c.last_name,                                    -- 3
             COALESCE(
+                NULLIF(snt.service_name, ''),
                 NULLIF(a.service_type, ''),
                 NULLIF(a.external_service_name, ''),
                 s.service_name,
@@ -20832,15 +20853,24 @@ def calendar_view():
             a.status,                                       -- 5
             a.appointment_id,                               -- 6
             a.duration_minutes,                             -- 7
-            a.price_at_booking                              -- 8
+            a.price_at_booking,                             -- 8
+            a.owner_reviewed,                               -- 9
+            a.owner_reviewed_at                             -- 10
         FROM appointments a
         JOIN clients c
             ON a.client_id = c.client_id
         AND a.spa_id = c.spa_id
+
+        LEFT JOIN service_name_types snt
+            ON a.service_type_id = snt.service_type_id
+        AND a.spa_id = snt.spa_id
+
         LEFT JOIN services s
             ON a.service_id = s.service_id
         AND a.spa_id = s.spa_id
+
         {filter_sql}
+
         ORDER BY a.appointment_date, a.appointment_time
     """, week_params)
 
@@ -20862,32 +20892,41 @@ def calendar_view():
     next_filter_sql += " AND a.spa_id = %s"
     next_params.append(spa_id)
 
+    
     cur.execute(f"""
         SELECT
-            c.first_name,
-            c.last_name,
-            a.appointment_date,
-            a.appointment_time,
+            c.first_name,                                   -- 0
+            c.last_name,                                    -- 1
+            a.appointment_date,                             -- 2
+            a.appointment_time,                             -- 3
             COALESCE(
+                NULLIF(snt.service_name, ''),
                 NULLIF(a.service_type, ''),
                 NULLIF(a.external_service_name, ''),
                 s.service_name,
                 'Service not entered'
-            ) AS service_name
+            ) AS service_name                               -- 4
         FROM appointments a
         JOIN clients c
             ON a.client_id = c.client_id
-           AND a.spa_id = c.spa_id
+        AND a.spa_id = c.spa_id
+
+        LEFT JOIN service_name_types snt
+            ON a.service_type_id = snt.service_type_id
+        AND a.spa_id = snt.spa_id
+
         LEFT JOIN services s
             ON a.service_id = s.service_id
-           AND a.spa_id = s.spa_id
+        AND a.spa_id = s.spa_id
+
         {next_filter_sql}
+
         ORDER BY a.appointment_date, a.appointment_time
         LIMIT 1
     """, next_params)
 
     next_appt = cur.fetchone()
-        
+            
     # Overdue booked appointment count
     overdue_filter_sql = """
         WHERE status = 'booked'
@@ -20928,7 +20967,6 @@ def calendar_view():
         current_timezone=current_timezone,
         next_appt=next_appt,
         overdue_count=overdue_count,
-        filtered_appointments=filtered_appointments,
         goto_date=goto_date,
         start_of_week=start_of_week,
         current_week_start=current_week_start,
@@ -21072,15 +21110,16 @@ def quick_reschedule_appointment(appointment_id):
 #  -----------------------------
 
 
+     
 @app.route("/appointment-details/<int:appointment_id>")
 @login_required
 @spa_required
 def appointment_details(appointment_id):
     spa_id = current_spa_id()
-        
+
     conn = get_db_connection()
     cur = conn.cursor()
-    
+
     cur.execute("""
         SELECT
             a.appointment_id,
@@ -21092,6 +21131,7 @@ def appointment_details(appointment_id):
             c.phone,
             c.email,
             COALESCE(
+                NULLIF(snt.service_name, ''),
                 NULLIF(a.service_type, ''),
                 NULLIF(a.external_service_name, ''),
                 s.service_name,
@@ -21104,22 +21144,40 @@ def appointment_details(appointment_id):
         FROM appointments a
         JOIN clients c
             ON a.client_id = c.client_id
-           AND a.spa_id = c.spa_id
+        AND a.spa_id = c.spa_id
+        LEFT JOIN service_name_types snt
+            ON a.service_type_id = snt.service_type_id
+        AND a.spa_id = snt.spa_id
         LEFT JOIN services s
             ON a.service_id = s.service_id
-           AND a.spa_id = s.spa_id
+        AND a.spa_id = s.spa_id
         WHERE a.appointment_id = %s
-          AND a.spa_id = %s
+        AND a.spa_id = %s
     """, (appointment_id, spa_id))
-   
+
     appt = cur.fetchone()
-    
+
+    if not appt:
+        cur.close()
+        conn.close()
+        return {"error": "Appointment not found."}, 404
+
+    # Opening the Appointment Command Center counts as owner review.
+    cur.execute("""
+        UPDATE appointments
+        SET
+            owner_reviewed = TRUE,
+            owner_reviewed_at = CURRENT_TIMESTAMP
+        WHERE appointment_id = %s
+          AND spa_id = %s
+          AND owner_reviewed IS DISTINCT FROM TRUE
+    """, (appointment_id, spa_id))
+
+    conn.commit()
+
     cur.close()
     conn.close()
 
-    if not appt:
-        return {"error": "Appointment not found."}, 404
-    
     return {
         "appointment_id": appt[0],
         "appointment_date": appt[1].strftime("%Y-%m-%d") if appt[1] else "",
@@ -21136,7 +21194,6 @@ def appointment_details(appointment_id):
         "duration_minutes": appt[11],
         "price_at_booking": appt[12]
     }
-
 
 
 
@@ -21630,7 +21687,35 @@ def morning_briefing():
             "priority": 90
         })
 
+
     # ---------------------------------------------------------
+    # Overdue appointments awaiting closeout
+    # ---------------------------------------------------------
+    cur.execute("""
+        SELECT
+            a.appointment_id,
+            a.appointment_date,
+            a.appointment_time,
+            a.status,
+            c.first_name,
+            c.last_name
+        FROM appointments a
+        LEFT JOIN clients c
+            ON c.client_id = a.client_id
+        WHERE a.spa_id = %s
+        AND a.appointment_date < %s
+        AND LOWER(COALESCE(a.status, '')) = 'booked'
+        ORDER BY
+            a.appointment_date ASC,
+            a.appointment_time ASC
+    """, (spa_id, today))
+
+    overdue_appointments = cur.fetchall()
+
+    dashboard["overdue_appointments"] = overdue_appointments
+
+
+   # ---------------------------------------------------------
     # Coach performs the review only after all data is collected
     # ---------------------------------------------------------
     coach = build_coach(
@@ -23858,16 +23943,23 @@ def add_appointment():
         cur.execute("""
             INSERT INTO appointments (
                 spa_id,
-                client_id,   
+                client_id,
                 service_type_id,
                 duration_minutes,
                 price_at_booking,
                 appointment_date,
                 appointment_time,
                 status,
-                notes
+                notes,
+                owner_reviewed,
+                owner_reviewed_at
             )
-            VALUES (%s,%s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (
+                %s, %s, %s, %s,
+                %s, %s, %s, %s, %s,
+                TRUE,
+                CURRENT_TIMESTAMP
+            )
             RETURNING appointment_id
         """, (
             spa_id,
@@ -26940,15 +27032,14 @@ def test_godaddy_secure_post():
                 "X-Webhook-Secret": os.getenv("GODADDY_WEBHOOK_SECRET")
             }
         )
-
     return response.get_data(as_text=True)
-
 
 
 
 
 if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or os.environ.get("RENDER"):
     start_scheduler()
+
 
 if __name__ == "__main__":
     app.run(debug=True, port=5001)

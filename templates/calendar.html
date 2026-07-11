@@ -326,50 +326,57 @@
                 <div class="calendar-events">
                     {% for appt in appointments %}
                         {% if appt[0] == day %}
-                            {% set is_past = (appt[0] < today) or (appt[0] == today and appt[1] < now_time) %}
-                            {% set is_future = (appt[0] > today) or (appt[0] == today and appt[1] > now_time) %}
+                            {% set is_past = (appt[0] < today) or
+                                (appt[0] == today and appt[1] < now_time) %}
 
                             <div class="
                                 calendar-event
                                 {% if appt[5] == 'completed' %}
                                     completed
-                                {% elif appt[5] == 'booked' and is_past %}
-                                    overdue
                                 {% elif appt[5] == 'booked' and not appt[9] %}
                                     unreviewed
+                                {% elif appt[5] == 'booked' and is_past %}
+                                    overdue
                                 {% else %}
                                     booked
                                 {% endif %}
                             ">
-                       
-                                    <button type="button"
-                                            class="calendar-event-link"
-                                            onclick="openAppointmentModal({{ appt[6] }})">
-                                        <strong>{{ appt[1].strftime('%I:%M %p') }}</strong><br>
-                                        {{ appt[2] }} {{ appt[3] }}<br>
-                                        <small>{{ appt[4] or 'Service' }}</small><br>
-                                 
-                                        <small>{{ appt[4] or 'Service' }}</small><br>
+                                <button
+                                    type="button"
+                                    class="calendar-event-link"
+                                    onclick="openAppointmentModal({{ appt[6] }}, this)"
+                                >
+                                    <strong>
+                                        {{ appt[1].strftime('%I:%M %p') }}
+                                    </strong>
+                                    <br>
 
-                                        {% if appt[5] == 'booked' and not appt[9] %}
-                                            <small class="appointment-review-badge">
-                                                Imported · Needs Review
-                                            </small>
-                                            <br>
-                                        {% endif %}
+                                    {{ appt[2] }} {{ appt[3] }}
+                                    <br>
 
-                                        <small>Status: {{ appt[5]|title }}</small>
-                                 
-                                        <small>Status: {{ appt[5]|title }}</small>
-                                    </button>
+                                    <small>
+                                        {{ appt[4] or 'Service' }}
+                                    </small>
+                                    <br>
 
-                                    <div style="margin-top: 8px;">
+                                    {% if appt[5] == 'booked' and not appt[9] %}
+                                        <small class="appointment-review-badge">
+                                            Imported · Needs Review
+                                        </small>
+                                        <br>
+                                    {% endif %}
 
-                                </div>
+                                    <small>
+                                        Status: {{ appt[5]|title }}
+                                    </small>
+                                </button>
+
+                                <div style="margin-top: 8px;"></div>
                             </div>
                         {% endif %}
                     {% endfor %}
                 </div>
+
             {% endif %}
         </div>
     {% endfor %}
@@ -489,6 +496,25 @@
     border-radius: 6px;
     font-size: 12px;
 }
+
+
+.calendar-event.unreviewed {
+    background: #fff3b0;
+    border-left: 4px solid #d6a700;
+}
+
+.appointment-review-badge {
+    display: inline-block;
+    margin-top: 3px;
+    padding: 2px 6px;
+    border-radius: 8px;
+    background: #d6a700;
+    color: #2f2a00;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+
 </style>
 
 <script>
@@ -499,15 +525,46 @@ function setText(id, value) {
     }
 }
 
-function openAppointmentModal(appointmentId) {
+
+function openAppointmentModal(appointmentId, clickedElement) {
     fetch(`/appointment-details/${appointmentId}`)
-        .then(response => response.json())
+        .then(response => {
+            if (!response.ok) {
+                throw new Error("Unable to load appointment details.");
+            }
+
+            return response.json();
+        })
         .then(data => {
-           
-            console.log("appointment data:", data); 
+            console.log("appointment data:", data);
+
             if (data.error) {
                 alert(data.error);
                 return;
+            }
+
+            /*
+             * Opening the modal marks the appointment reviewed in the database.
+             * Now immediately update the calendar card visually.
+             */
+            if (clickedElement) {
+                const calendarCard = clickedElement.closest(".calendar-event");
+
+                if (
+                    calendarCard &&
+                    calendarCard.classList.contains("unreviewed")
+                ) {
+                    calendarCard.classList.remove("unreviewed");
+                    calendarCard.classList.add("booked");
+
+                    const importIndicator = calendarCard.querySelector(
+                        ".appointment-review-badge"
+                    );
+
+                    if (importIndicator) {
+                        importIndicator.remove();
+                    }
+                }
             }
 
             setText("modalClientName", data.client_name);
@@ -531,79 +588,111 @@ function openAppointmentModal(appointmentId) {
                     : "Not entered"
             );
 
-
-            setText("modalNotes", data.notes || "No appointment notes entered.");
+            setText(
+                "modalNotes",
+                data.notes || "No appointment notes entered."
+            );
 
             const phoneLink = document.getElementById("modalPhoneLink");
+
             if (phoneLink) {
                 phoneLink.innerText = data.phone || "";
                 phoneLink.href = data.phone ? `tel:${data.phone}` : "#";
             }
 
             const emailLink = document.getElementById("modalEmailLink");
+
             if (emailLink) {
                 emailLink.innerText = data.email || "";
-                emailLink.href = data.email ? `mailto:${data.email}` : "#";
+                emailLink.href = data.email
+                    ? `mailto:${data.email}`
+                    : "#";
             }
 
             const statusEl = document.getElementById("modalStatus");
+
             if (statusEl) {
                 statusEl.innerText = data.status || "";
-                statusEl.className = "status-badge " + (data.status || "");
+                statusEl.className =
+                    "status-badge " + (data.status || "");
             }
-
 
             const status = (data.status || "").toLowerCase();
 
-            const completeForm = document.getElementById("modalCompleteForm");
+            const completeForm =
+                document.getElementById("modalCompleteForm");
+
             if (completeForm) {
-                completeForm.style.display = status === "booked" ? "inline" : "none";
+                completeForm.style.display =
+                    status === "booked" ? "inline" : "none";
             }
 
-            const cancelForm = document.getElementById("modalCancelForm");
+            const cancelForm =
+                document.getElementById("modalCancelForm");
+
             if (cancelForm) {
-                cancelForm.style.display = status === "booked" ? "inline" : "none";
+                cancelForm.style.display =
+                    status === "booked" ? "inline" : "none";
             }
 
-            const rescheduleForm = document.getElementById("modalRescheduleForm");
+            const rescheduleForm =
+                document.getElementById("modalRescheduleForm");
+
             if (rescheduleForm) {
-                rescheduleForm.action = `/quick_reschedule_appointment/${appointmentId}`;
+                rescheduleForm.action =
+                    `/quick_reschedule_appointment/${appointmentId}`;
             }
 
-            const rescheduleDate = document.getElementById("modalRescheduleDate");
+            const rescheduleDate =
+                document.getElementById("modalRescheduleDate");
+
             if (rescheduleDate) {
-                rescheduleDate.value = data.appointment_date || "";
+                rescheduleDate.value =
+                    data.appointment_date || "";
             }
 
-            const rescheduleTime = document.getElementById("modalRescheduleTime");
+            const rescheduleTime =
+                document.getElementById("modalRescheduleTime");
+
             if (rescheduleTime && data.raw_time) {
                 rescheduleTime.value = data.raw_time;
-            } 
+            }
 
-            document.getElementById("modalEditBtn").href = `/edit_appointment/${appointmentId}`;
-            document.getElementById("modalPaymentBtn").href = `/add_income/${appointmentId}`;
-            
-        
-            
-            const godaddyBtn = document.getElementById("godaddyImportBtn");
+            document.getElementById("modalEditBtn").href =
+                `/edit_appointment/${appointmentId}`;
+
+            document.getElementById("modalPaymentBtn").href =
+                `/add_income/${appointmentId}`;
+
+            const godaddyBtn =
+                document.getElementById("godaddyImportBtn");
 
             if (godaddyBtn) {
-                if ((data.external_source || "").toLowerCase() === "godaddy") {
+                if (
+                    (data.external_source || "").toLowerCase() ===
+                    "godaddy"
+                ) {
                     godaddyBtn.style.display = "inline-block";
-                    godaddyBtn.href = `/godaddy-imports/${appointmentId}/raw`;
+                    godaddyBtn.href =
+                        `/godaddy-imports/${appointmentId}/raw`;
                 } else {
                     godaddyBtn.style.display = "none";
                     godaddyBtn.removeAttribute("href");
                 }
             }
 
-            document.getElementById("appointmentModal").style.display = "flex";
+            document.getElementById(
+                "appointmentModal"
+            ).style.display = "flex";
         })
         .catch(error => {
             console.error(error);
-            alert("modal error");
+            alert("Modal error");
         });
 }
+
+
+
 
 function closeAppointmentModal() {
     document.getElementById("appointmentModal").style.display = "none";

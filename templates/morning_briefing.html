@@ -84,11 +84,20 @@
         {% endif %}
     </div>
 
-    <div class="dashboard-card">
-        <h2>✅ Priority Actions</h2>
+ <div class="dashboard-card"
+     id="coach-recommendations-card">
 
-        {% if priority_actions %}
-            {% for action in priority_actions %}
+    <h2>✅ Coach Recommendations</h2>
+
+    {% set has_priority_actions = priority_actions|length > 0 %}
+    {% set has_coach_recommendations = coach.recommendations|length > 0 %}
+
+    {% if has_priority_actions or has_coach_recommendations %}
+
+        <!-- Existing priority actions -->
+        {% for action in priority_actions %}
+            <div class="coach-action-item">
+
                 <p>
                     {{ action.icon }}
                     {{ action.label }}:
@@ -96,16 +105,54 @@
                 </p>
 
                 {% if action.url %}
-                    <a class="btn btn-small" href="{{ action.url }}">
+                    <a class="btn btn-small"
+                       href="{{ action.url }}">
                         View
                     </a>
                 {% endif %}
-            {% endfor %}
-        {% else %}
-            <p>No priority actions right now.</p>
-        {% endif %}
-    </div>
 
+            </div>
+        {% endfor %}
+
+        <!-- Coach-generated recommendations -->
+        {% for recommendation in coach.recommendations %}
+
+            <div class="coach-action-item"
+                 {% if loop.first %}
+                     id="coach-current-card-item"
+                     hidden
+                 {% endif %}>
+
+                <p>
+                    <strong>
+                        {{ recommendation.category }}
+                    </strong>
+                </p>
+
+                <p>
+                    {{ recommendation.message }}
+                </p>
+
+                {% if recommendation.action_url %}
+                    <a class="btn btn-small"
+                       href="{{ recommendation.action_url }}">
+                        Review
+                    </a>
+                {% endif %}
+
+            </div>
+
+        {% endfor %}
+
+    {% else %}
+
+        <p id="no-coach-recommendations">
+            No Coach recommendations right now.
+        </p>
+
+    {% endif %}
+
+</div>
 
 
     <div class="dashboard-card">
@@ -165,35 +212,118 @@
     </div>
 
 
-    <div class="coach-card">
 
-    <h2>🍑 Coach</h2>
+{% if coach %}
+    <section class="coach-card">
 
-    <p id="coach-message">
-        {{ coach.message }}
-    </p>
+        <div class="coach-card-header">
+            <h2>{{ coach.title }}</h2>
+        </div>
 
-    <p id="coach-question" {% if not coach.question %}hidden{% endif %}>
-        <strong>{{ coach.question or "" }}</strong>
-    </p>
+        <div class="coach-message">
+            <p>{{ coach.message }}</p>
+        </div>
 
-    <div id="coach-actions" {% if not coach.question %}hidden{% endif %}>
-        <button
-            id="coach-yes-button"
-            class="btn btn-small"
-            type="button"
-        >
-            {{ coach.yes_label }}
-        </button>
+        {% if coach.conversation_state == "recommendation_offer"
+              and coach.current_recommendation %}
 
-        <button
-            id="coach-no-button"
-            class="btn btn-small btn-secondary"
-            type="button"
-        >
-            {{ coach.no_label }}
-        </button>
-    </div>
+            <!-- Initial Coach question -->
+            <div id="coach-offer">
+                <p class="coach-question">
+                    {{ coach.question }}
+                </p>
+
+                <div class="coach-response-buttons">
+                    <button type="button"
+                            class="btn"
+                            onclick="showCoachRecommendation()">
+                        {{ coach.yes_label }}
+                    </button>
+
+                    <button type="button"
+                            class="btn btn-secondary"
+                            onclick="dismissCoachRecommendation()">
+                        {{ coach.no_label }}
+                    </button>
+                </div>
+            </div>
+
+            <!-- Recommendation revealed after initial Yes -->
+            <div id="coach-recommendation"
+                 class="coach-recommendation"
+                 hidden>
+
+                <p class="coach-recommendation-category">
+                    {{ coach.current_recommendation.category }}
+                </p>
+
+                <p class="coach-recommendation-message">
+                    {{ coach.current_recommendation.message }}
+                </p>
+
+                {% if coach.current_recommendation.action_url %}
+                    <p class="coach-question">
+                        Would you like to take care of this now?
+                    </p>
+
+                    <div class="coach-response-buttons">
+                        <a href="{{ coach.current_recommendation.action_url }}"
+                           class="btn">
+                            Yes
+                        </a>
+
+                        <button type="button"
+                                class="btn btn-secondary"
+                                onclick="closeCoachRecommendation()">
+                            No
+                        </button>
+                    </div>
+                {% else %}
+                    <div class="coach-response-buttons">
+                        <button type="button"
+                                class="btn"
+                                onclick="closeCoachRecommendation()">
+                            Okay
+                        </button>
+                    </div>
+                {% endif %}
+            </div>
+
+            <!-- Final response after No -->
+            <div id="coach-dismissed"
+                 class="coach-response"
+                 hidden>
+
+                <p>
+                    Okay. I’ll leave it for now.
+                </p>
+            </div>
+
+            <!-- Final response after recommendation No -->
+            <div id="coach-deferred"
+                 class="coach-response"
+                 hidden>
+
+                <p>
+                    Okay. You can return to it when you’re ready.
+                </p>
+            </div>
+
+                    <div id="coach-deferred"
+                 class="coach-response"
+                 hidden>
+
+                <p>
+                    Okay. You can return to it when you’re ready.
+                </p>
+            </div>
+
+        {% endif %}
+
+    </section>
+{% endif %}
+
+
 
 
     <script>
@@ -433,6 +563,131 @@ document.addEventListener("DOMContentLoaded", function () {
 </div>
 
 <br>
+<script>
+    function showCoachRecommendation() {
+        const offer = document.getElementById("coach-offer");
+        const recommendation = document.getElementById(
+            "coach-recommendation"
+        );
+        const dismissed = document.getElementById(
+            "coach-dismissed"
+        );
+        const deferred = document.getElementById(
+            "coach-deferred"
+        );
 
+        if (offer) {
+            offer.hidden = true;
+        }
+
+        if (dismissed) {
+            dismissed.hidden = true;
+        }
+
+        if (deferred) {
+            deferred.hidden = true;
+        }
+
+        if (recommendation) {
+            recommendation.hidden = false;
+        }
+    }
+
+
+    <script>
+    function dismissCoachRecommendation() {
+        const offer = document.getElementById(
+            "coach-offer"
+        );
+
+        const recommendation = document.getElementById(
+            "coach-recommendation"
+        );
+
+        const dismissed = document.getElementById(
+            "coach-dismissed"
+        );
+
+        const cardItem = document.getElementById(
+            "coach-current-card-item"
+        );
+
+        const emptyMessage = document.getElementById(
+            "no-coach-recommendations"
+        );
+
+        if (offer) {
+            offer.hidden = true;
+        }
+
+        if (recommendation) {
+            recommendation.hidden = true;
+        }
+
+        if (cardItem) {
+            cardItem.hidden = false;
+        }
+
+        if (emptyMessage) {
+            emptyMessage.hidden = true;
+        }
+
+        if (dismissed) {
+            dismissed.hidden = false;
+
+            dismissed.innerHTML = `
+                <p>
+                    Understood. I’ve added it to your
+                    Coach Recommendations.
+                </p>
+            `;
+        }
+    }
+</script>
+
+
+    <script>
+    function closeCoachRecommendation() {
+        const recommendation = document.getElementById(
+            "coach-recommendation"
+        );
+
+        const deferred = document.getElementById(
+            "coach-deferred"
+        );
+
+        const cardItem = document.getElementById(
+            "coach-current-card-item"
+        );
+
+        const emptyMessage = document.getElementById(
+            "no-coach-recommendations"
+        );
+
+        if (recommendation) {
+            recommendation.hidden = true;
+        }
+
+        if (cardItem) {
+            cardItem.hidden = false;
+        }
+
+        if (emptyMessage) {
+            emptyMessage.hidden = true;
+        }
+
+        if (deferred) {
+            deferred.hidden = false;
+
+            deferred.innerHTML = `
+                <p>
+                    Understood. I’ve added it to your
+                    Coach Recommendations.
+                </p>
+            `;
+        }
+    }
+
+</script>
 
 {% endblock %}

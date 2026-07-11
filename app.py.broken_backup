@@ -3474,8 +3474,8 @@ def add_general_income():
 from datetime import date, timedelta, datetime
 from flask import render_template, request, redirect, url_for
 
-@app.route("/calendar")
-def calendar_view():
+#@app.route("/calendar")
+def calendar_view_legacy():
     spa_id = get_current_spa_id()
     week_start_str = request.args.get("week_start")
     goto_date = request.args.get("goto_date")

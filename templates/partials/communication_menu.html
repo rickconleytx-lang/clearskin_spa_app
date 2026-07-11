@@ -11,9 +11,9 @@
 
 
         <div class="user-menu-muted" style="padding:6px 12px;">📨 Send</div>
-        <a href="{{ url_for('sms_home') }}">Send SMS</a>
+        <a href="{{ url_for('sms_home') }}">⚡️ Send SMS</a>
         <br>
-        <a href="{{ url_for('general_email') }}">Send Email</a>
+        <a href="{{ url_for('general_email') }}">✉️ Send Email</a>
 
         <div class="user-menu-divider"></div>
 
@@ -37,6 +37,12 @@
         <br>
         <a href="{{ url_for('messaging_compliance_dashboard') }}">🛡️ Messaging Compliance</a>
         <a href="{{ url_for('communications') }}">📡 Communications Home</a>
+
+        <div class="user-menu-divider"></div>
+
+        <div class="user-menu-muted" style="padding:6px 12px;">📝 Opt-In/Out</div>
+        <a href="{{ url_for('client_contact_preferences') }}">Contact Preferences</a>
+
 
     </div>
 </div>
