@@ -8963,8 +8963,12 @@ def import_godaddy_booking(body, spa_id, subject=""):
             parser_version,
             import_status
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING appointment_id
+        VALUES (%s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, 
+                %s, %s, %s, %s, %s, 
+                %s, %s, %s, %s, %s
+        )
+        RETURNING appointment_id
     """, (
             spa_id,
         client_id,
@@ -8987,6 +8991,8 @@ def import_godaddy_booking(body, spa_id, subject=""):
         "godaddy_v1",
         "Imported"
     ))
+
+    appointment_id = cur.fetchone()[0]
 
 
     conn.commit()
