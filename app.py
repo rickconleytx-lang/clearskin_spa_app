@@ -8247,10 +8247,16 @@ def parse_godaddy_booking_email(body):
     if service_match:
         data["service"] = service_match.group(1).strip()
 
-    when_match = re.search(r"When:\s*(.+?)\s*\((\d+)\s*hour", body)
+    when_match = re.search(
+        r"When:\s*(.+?)\s*\((\d+)\s*(mins?|minutes?|hours?|hrs?)\)",
+        body,
+        re.IGNORECASE
+    )
+
     if when_match:
         raw_when = when_match.group(1).strip()
-        duration_hours = int(when_match.group(2))
+        duration_value = int(when_match.group(2))
+        duration_unit = when_match.group(3).lower()
 
         date_formats = [
             "%A, %B %d, %Y at %I:%M%p",   # 4:00PM
@@ -8268,11 +8274,19 @@ def parse_godaddy_booking_email(body):
                 continue
 
         if dt is None:
-            raise ValueError(f"Could not parse GoDaddy appointment datetime: {raw_when}")
+            raise ValueError(
+                f"Could not parse GoDaddy appointment datetime: {raw_when}"
+            )
+
+        if duration_unit.startswith(("hour", "hr")):
+            duration_minutes = duration_value * 60
+        else:
+            duration_minutes = duration_value
 
         data["appointment_datetime"] = dt
-        data["duration_minutes"] = duration_hours * 60
+        data["duration_minutes"] = duration_minutes
 
+        
     payment_match = re.search(r"Payment status:\s*(.+)", body)
     if payment_match:
         data["payment_status"] = payment_match.group(1).strip()
