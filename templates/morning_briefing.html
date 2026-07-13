@@ -151,133 +151,37 @@
 <br><br>
 
 
-
-
+<h2>Today's Priorities</h2>
 
 <div class="briefing-grid">
 
-    <div class="dashboard-card">
-        <a href="{{ url_for('daily_briefing_today') }}" class="briefing-card">
-            <h2>📆 Today's Schedule</h2>
-            <p>View appointments, projected revenue, and Coach opportunities.</p>
-        </a>
+    {% for card in action_cards %}
 
-        <p>
-            Appointments:
-            <strong>{{ dashboard.appointments_today }}</strong>
-        </p>
+        <div class="dashboard-card">
 
-        <p>
-            Expected Revenue:
-            <strong>${{ '%.2f'|format(dashboard.expected_revenue) }}</strong>
-        </p>
+            <h3>
+                {{ card.icon }} {{ card.title }}
+            </h3>
 
-        {% if dashboard.next_appointment %}
-            <p>
-                Next Appointment:
-                <strong>
-                    {{ dashboard.next_appointment[0].strftime('%-I:%M %p') }}
-                    —
-                    {{ dashboard.next_appointment[1] }}
-                    {{ dashboard.next_appointment[2] }}
-                </strong>
-            </p>
-        {% else %}
-            <p>
-                Next Appointment:
-                <strong>None remaining today</strong>
-            </p>
-        {% endif %}
-    </div>
+            <p>{{ card.message }}</p>
 
+            {% if card.url %}
+                <a href="{{ card.url }}"
+                   class="btn">
+                    {{ card.button }}
+                </a>
+            {% endif %}
 
-    <div class="dashboard-card">
-        <h2>📊 Business Snapshot</h2>
+        </div>
 
-        <p>
-            Today’s expected revenue:
-            <strong>${{ '%.2f'|format(dashboard.expected_revenue) }}</strong>
-        </p>
-
-        <p>
-            Scheduled activity:
-            <strong>{{ dashboard.appointments_today }} appointment(s)</strong>
-        </p>
-
-        <p style="color:#777;">
-            View weekly and monthly performance in Business Summary.
-        </p>
-    </div>
-
- <div class="dashboard-card"
-     id="coach-recommendations-card">
-
-    <h2>✅ Coach Recommendations</h2>
-
-    {% set has_priority_actions = priority_actions|length > 0 %}
-    {% set has_coach_recommendations = coach.recommendations|length > 0 %}
-
-    {% if has_priority_actions or has_coach_recommendations %}
-
-        <!-- Existing priority actions -->
-        {% for action in priority_actions %}
-            <div class="coach-action-item">
-
-                <p>
-                    {{ action.icon }}
-                    {{ action.label }}:
-                    <strong>{{ action.value }}</strong>
-                </p>
-
-                {% if action.url %}
-                    <a class="btn btn-small"
-                       href="{{ action.url }}">
-                        View
-                    </a>
-                {% endif %}
-
-            </div>
-        {% endfor %}
-
-        <!-- Coach-generated recommendations -->
-        {% for recommendation in coach.recommendations %}
-
-            <div class="coach-action-item"
-                 {% if loop.first %}
-                     id="coach-current-card-item"
-                     hidden
-                 {% endif %}>
-
-                <p>
-                    <strong>
-                        {{ recommendation.category }}
-                    </strong>
-                </p>
-
-                <p>
-                    {{ recommendation.message }}
-                </p>
-
-                {% if recommendation.action_url %}
-                    <a class="btn btn-small"
-                       href="{{ recommendation.action_url }}">
-                        Review
-                    </a>
-                {% endif %}
-
-            </div>
-
-        {% endfor %}
-
-    {% else %}
-
-        <p id="no-coach-recommendations">
-            No Coach recommendations right now.
-        </p>
-
-    {% endif %}
+    {% endfor %}
 
 </div>
+
+
+
+
+
 
 
     

@@ -8,6 +8,36 @@
 
 <p>Bookings imported from GoDaddy emails.</p>
 
+{% if review_filter == "unreviewed" and from_coach %}
+    <section class="coach-card">
+        <div class="coach-card-header">
+            <h2>🍑 Coach</h2>
+        </div>
+
+        <div class="coach-message">
+            <p>
+                I've filtered the list to show the GoDaddy bookings awaiting your review.
+            </p>
+
+            <p>
+                Review each booking individually.
+            </p>
+        </div>
+    </section>
+{% endif %}
+
+
+{% if review_filter == "unreviewed" %}
+    <div class="godaddy-filter-heading">
+        <h2>GoDaddy Imports Awaiting Review</h2>
+
+        <p>
+            {{ import_count }} booking{{ '' if import_count == 1 else 's' }}
+            require review.
+        </p>
+    </div>
+{% endif %}
+
 <table>
     <thead>
         <tr>
@@ -61,11 +91,30 @@
 
         </tr>
         {% else %}
-        <tr>
-            <td colspan="11">No GoDaddy bookings imported yet.</td>
-        </tr>
+        <td colspan="11">
+            {% if review_filter == "unreviewed" %}
+                Nice work. There are no GoDaddy bookings awaiting review.
+            {% else %}
+                No GoDaddy bookings imported yet.
+            {% endif %}
+        </td>
         {% endfor %}
     </tbody>
 </table>
+
+<style>
+.godaddy-filter-heading {
+    margin: 15px 0 18px;
+}
+
+.godaddy-filter-heading h2 {
+    margin-bottom: 4px;
+}
+
+.godaddy-filter-heading p {
+    margin: 0;
+    color: #555;
+}
+</style>
 
 {% endblock %}

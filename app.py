@@ -4,7 +4,7 @@ from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
 from apscheduler.schedulers.background import BackgroundScheduler
 from q_launch_registry import Q_LAUNCH_ITEMS
-from services.coach import build_coach
+from services.coach import build_coach, build_action_cards
 import os
 from decimal import Decimal
 import time
@@ -8277,10 +8277,13 @@ def mailgun_godaddy_booking():
 def godaddy_imports():
     spa_id = current_spa_id()
 
+    review_filter = request.args.get("review", "").strip().lower()
+    from_coach = request.args.get("from_coach", "").strip() == "1"    
+
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute("""
+    query = """
         SELECT
             a.appointment_id,
             a.appointment_date,
@@ -8293,22 +8296,39 @@ def godaddy_imports():
             a.external_order_id,
             a.status,
             a.notes,
-        COALESCE(a.import_reviewed, FALSE) AS import_reviewed
+            COALESCE(a.import_reviewed, FALSE) AS import_reviewed
         FROM appointments a
         JOIN clients c
             ON a.client_id = c.client_id
-           AND a.spa_id = c.spa_id
+        AND a.spa_id = c.spa_id
         WHERE a.spa_id = %s
-          AND a.external_source = 'godaddy'
-        ORDER BY a.appointment_date DESC, a.appointment_time DESC
-    """, (spa_id,))
+        AND a.external_source = 'godaddy'
+    """
 
+    params = [spa_id]
+
+    if review_filter == "unreviewed":
+        query += """
+            AND COALESCE(a.import_reviewed, FALSE) = FALSE
+        """
+
+    query += """
+        ORDER BY a.appointment_date DESC, a.appointment_time DESC
+    """
+
+    cur.execute(query, tuple(params))
     imports = cur.fetchall()
 
     cur.close()
     conn.close()
 
-    return render_template("godaddy_imports.html", imports=imports)
+    return render_template(
+        "godaddy_imports.html",
+        imports=imports,
+        review_filter=review_filter,
+        import_count=len(imports),
+        from_coach=from_coach
+    )
 
 
 
@@ -22106,6 +22126,12 @@ def morning_briefing():
         spa_now=spa_now
     )
 
+    action_cards = build_action_cards(
+        dashboard=dashboard,
+        priority_actions=priority_actions
+    )
+
+
     cur.close()
     conn.close()
 
@@ -22119,7 +22145,8 @@ def morning_briefing():
         priority_actions=priority_actions,
         godaddy_unreviewed_count=godaddy_unreviewed_count,
         coach=coach,
-        spa_now=spa_now
+        spa_now=spa_now,
+        action_cards=action_cards
     )
 
 
@@ -24126,7 +24153,19 @@ def appointments():
     start_date = request.args.get("start_date", "").strip()
     end_date = request.args.get("end_date", "").strip()
     show_all = request.args.get("show_all", "").strip()
-    today_str = date.today().isoformat()
+
+    from_coach = request.args.get("from_coach", "").strip() == "1"
+
+
+    status_filter = request.args.get(
+        "status",
+        request.args.get("filter", "")
+    ).strip().lower()
+
+    # Use the same business-local time helper used by Daily Briefing.
+    spa_now = get_spa_now(spa_id)
+    today = spa_now.date()
+    today_str = today.isoformat()
     
     conn = get_db_connection()
     cur = conn.cursor()
@@ -24158,13 +24197,34 @@ def appointments():
         query += " AND a.spa_id = %s"
         params.append(spa_id)
                 
-    if show_all != "1":
+    # Overdue is a calculated status and always searches past dates.
+    if status_filter == "overdue":
+        query += """
+            AND a.appointment_date < %s
+            AND LOWER(COALESCE(a.status, '')) = 'booked'
+        """
+        params.append(today)
+
+    else:
+        # Standard status filter.
+        if status_filter:
+            query += """
+                AND LOWER(COALESCE(a.status, '')) = %s
+            """
+            params.append(status_filter)
+
+        # Apply an entered date range.
         if start_date and end_date:
-            query += " AND a.appointment_date BETWEEN %s AND %s"
+            query += """
+                AND a.appointment_date BETWEEN %s AND %s
+            """
             params.extend([start_date, end_date])
-        else:
+
+        # With no status, no dates, and no Show All request,
+        # default the page to today's appointments.
+        elif not status_filter and show_all != "1":
             query += " AND a.appointment_date = %s"
-            params.append(today_str)  
+            params.append(today)
         
     query += " ORDER BY a.appointment_date, a.appointment_time"
         
@@ -24179,7 +24239,10 @@ def appointments():
         appointments=appointments,
         start_date=start_date,
         end_date=end_date,
-        today_str=today_str
+        today_str=today_str,
+        status_filter=status_filter,
+        status_count=len(appointments),
+        from_coach=from_coach
     )
 
 

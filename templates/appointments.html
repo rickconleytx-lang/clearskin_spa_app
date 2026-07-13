@@ -26,6 +26,39 @@
             <label for="end_date">To</label>
             <input type="date" id="end_date" name="end_date" value="{{ end_date or '' }}">
 
+            <label for="status">Status</label>
+            <select id="status" name="status">
+                <option value="" {% if not status_filter %}selected{% endif %}>
+                    Select Status
+                </option>
+
+                <option value="booked"
+                        {% if status_filter == "booked" %}selected{% endif %}>
+                    Booked
+                </option>
+
+                <option value="completed"
+                        {% if status_filter == "completed" %}selected{% endif %}>
+                    Completed
+                </option>
+
+                <option value="cancelled"
+                        {% if status_filter == "cancelled" %}selected{% endif %}>
+                    Cancelled
+                </option>
+
+                <option value="no show"
+                        {% if status_filter == "no show" %}selected{% endif %}>
+                    No Show
+                </option>
+
+                <option value="overdue"
+                        {% if status_filter == "overdue" %}selected{% endif %}>
+                    Overdue
+                </option>
+            </select>
+
+
              <button type="submit" class="btn">Filter</button>
 
             <a href="{{ url_for('appointments', start_date=today_str, end_date=today_str) }}" class="btn">
@@ -51,6 +84,46 @@
 </div>
 
 
+
+{% if status_filter == "overdue" and from_coach %}
+    <section class="coach-card">
+        <div class="coach-card-header">
+            <h2>🍑 Coach</h2>
+        </div>
+
+        <div class="coach-message">
+            <p>
+                I've filtered the list to show the overdue appointments that need your attention.
+            </p>
+
+            <p>
+                Review each appointment individually.
+            </p>
+        </div>
+    </section>
+{% endif %}
+
+
+{% if status_filter == "overdue" %}
+    <div class="appointment-filter-heading overdue-filter-heading">
+        <h2>⚠ Overdue Appointments</h2>
+
+        <p>
+            {{ status_count }} appointment{{ '' if status_count == 1 else 's' }}
+            require review.
+        </p>
+    </div>
+
+{% elif status_filter %}
+    <div class="appointment-filter-heading">
+        <h2>{{ status_filter|title }} Appointments</h2>
+
+        <p>
+            {{ status_count }} appointment{{ '' if status_count == 1 else 's' }}
+            found.
+        </p>
+    </div>
+{% endif %}
 
 
 
@@ -142,7 +215,13 @@
                 {% endfor %}
             {% else %}
                 <tr>
-                    <td colspan="7" class="empty-message">No appointments found.</td>
+                    <td colspan="7" class="empty-message">
+                        {% if status_filter == "overdue" %}
+                            Nice work. There are no overdue appointments requiring your attention.
+                        {% else %}
+                            No appointments found.
+                        {% endif %}
+                    </td>
                 </tr>
             {% endif %}
         </tbody>
@@ -248,6 +327,25 @@ function toggleNote(noteId) {
 
 .btn-delete:hover {
     background-color: #5e1414;
+}
+
+.appointment-filter-heading {
+    margin: 15px 0 18px;
+}
+
+.appointment-filter-heading h2 {
+    margin-bottom: 4px;
+    color: #222;
+}
+
+.appointment-filter-heading p {
+    margin: 0;
+    color: #555;
+}
+
+.overdue-filter-heading h2,
+.overdue-filter-heading p {
+    color: #b42318;
 }
 </style>
 

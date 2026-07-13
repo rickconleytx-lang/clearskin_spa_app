@@ -267,26 +267,15 @@ def review_overdue_appointments(observations, dashboard):
         ),
         action_url=None
 
-
     )
 
-def review_overdue_appointments(observations, dashboard):
-    print(
-        "COACH DASHBOARD KEYS:",
-        dashboard.keys(),
-        flush=True
-    )
 
     overdue_appointments = (
         dashboard.get("overdue_appointments", [])
         or []
     )
 
-    print(
-        "COACH OVERDUE APPOINTMENTS:",
-        overdue_appointments,
-        flush=True
-    )
+    
 
     overdue_count = len(overdue_appointments)
 
@@ -492,6 +481,7 @@ def build_day_assessment(
 
     return "Overall, today looks well balanced."
 
+
 def build_coach(
     dashboard,
     business_schedule_due=None,
@@ -499,6 +489,7 @@ def build_coach(
     priority_actions=None,
     spa_now=None
 ):
+   
     if spa_now is None:
         raise ValueError("build_coach requires spa_now")
 
@@ -674,3 +665,73 @@ def build_coach(
 
         "observations": observations
     }
+
+def build_action_cards(
+    dashboard,
+    priority_actions=None
+):
+    """
+    Build the four highest-priority action cards for
+    the Daily Briefing.
+    """
+
+    priority_actions = priority_actions or []
+
+    cards = []
+
+    # Existing priority actions become cards
+    for action in priority_actions:
+        cards.append({
+            "priority": action.get("priority", 50),
+            "icon": action.get("icon", "📌"),
+            "title": action.get("label", "Action"),
+            "message": str(action.get("value", "")),
+            "button": "View",
+            "url": action.get("url")
+        })
+
+    # Overdue Appointments Card
+    overdue_appointments = dashboard.get(
+        "overdue_appointments",
+        []
+    )
+
+    overdue_count = len(overdue_appointments)
+
+    if overdue_count > 0:
+        cards.append({
+            "priority": 100,
+            "icon": "⚠️",
+            "title": "Overdue Appointments",
+            "message": (
+                f"{overdue_count} appointment"
+                f"{'' if overdue_count == 1 else 's'} "
+                "require review."
+            ),
+            "button": "Review",
+            "url": "/appointments?filter=overdue&from_coach=1"
+        })
+
+    # Revenue Card
+    if dashboard["appointments_today"] > 0:
+
+        cards.append({
+            "priority": 20,
+            "icon": "💰",
+            "title": "Today's Revenue",
+            "message": (
+                f"{dashboard['appointments_today']} appointment"
+                f"{'' if dashboard['appointments_today'] == 1 else 's'} • "
+                f"${dashboard['expected_revenue']:.2f} projected"
+            ),
+            "button": "View",
+            "url": "/reports"
+        })
+
+
+    cards.sort(
+        key=lambda c: c["priority"],
+        reverse=True
+    )
+
+    return cards[:4]
