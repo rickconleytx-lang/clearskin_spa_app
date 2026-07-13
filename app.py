@@ -8450,11 +8450,6 @@ def parse_godaddy_booking_email(body):
 
     raw_when_line = when_line_match.group(1).strip()
 
-    print(
-        "[GODADDY PARSER] RAW WHEN LINE:",
-        repr(raw_when_line)
-    )
-
 
     duration_match = re.search(
         r"\(\s*"
@@ -9033,7 +9028,7 @@ def booking_email_import():
 #    GoDaddy TEST CREATE APPOINTMENT
 #           
 #      GODADDY IMPORT
-#           
+#               PARSER VERSION GODADDY_V2
 #   -----------------------------------------------
 
 
@@ -9179,7 +9174,7 @@ def import_godaddy_booking(body, spa_id, subject=""):
         paid_at_checkout,
         datetime.now(),
         False,
-        "godaddy_v1",
+        "godaddy_v2",
         "Imported"
     ))
 
@@ -23112,7 +23107,8 @@ from datetime import date, datetime, timedelta
 @login_required
 @spa_required
 def reports():
-    spa_id = current_spa_id()
+    spa_id = session.get("spa_id")
+    spa_now = get_spa_now(spa_id)
     dashboard = get_dashboard_data(
     spa_id,
     spa_now=spa_now
