@@ -2819,17 +2819,21 @@ def validate_sms_length(message_body):
 # Add new dashboard metrics here.
 # =======================================================
         
-def get_dashboard_data(spa_id):
+def get_dashboard_data(spa_id, spa_now):
+    if spa_now is None:
+        raise ValueError("get_dashboard_data requires spa_now")
     
     conn = get_db_connection()
     cur = conn.cursor()
     
     dashboard = {}
     
-    from datetime import date, timedelta
-    
-    
-    today = date.today()
+    from datetime import timedelta
+
+    today = spa_now.date()
+    current_time = spa_now.time().replace(tzinfo=None)
+    tomorrow = today + timedelta(days=1)
+
     week_start = today - timedelta(days=today.weekday())
     week_end = week_start + timedelta(days=6)
     # Month boundaries
@@ -2932,6 +2936,116 @@ def get_dashboard_data(spa_id):
     ####################################################
 
 
+        #####################################################
+    #
+    #   TODAY AND TOMORROW
+    #
+    #####################################################
+
+    # Total appointments scheduled today
+    cur.execute("""
+        SELECT COUNT(*)
+        FROM appointments
+        WHERE appointment_date = %s
+          AND spa_id = %s
+          AND LOWER(status) IN ('booked', 'completed')
+    """, (today, spa_id))
+
+    dashboard["appointments_today"] = cur.fetchone()[0] or 0
+
+
+    # Appointments remaining today
+    cur.execute("""
+        SELECT COUNT(*)
+        FROM appointments
+        WHERE appointment_date = %s
+          AND appointment_time >= %s
+          AND spa_id = %s
+          AND LOWER(status) = 'booked'
+    """, (today, current_time, spa_id))
+
+    dashboard["appointments_remaining_today"] = (
+        cur.fetchone()[0] or 0
+    )
+
+
+    # Expected revenue for all valid appointments today
+    cur.execute("""
+        SELECT COALESCE(SUM(price_at_booking), 0)
+        FROM appointments
+        WHERE appointment_date = %s
+          AND spa_id = %s
+          AND LOWER(status) NOT IN ('cancelled', 'no show')
+    """, (today, spa_id))
+
+    expected_income_today = cur.fetchone()[0] or 0
+
+    dashboard["expected_income_today"] = expected_income_today
+    dashboard["expected_revenue"] = expected_income_today
+
+
+    # Expected revenue remaining today
+    cur.execute("""
+        SELECT COALESCE(SUM(price_at_booking), 0)
+        FROM appointments
+        WHERE appointment_date = %s
+          AND appointment_time >= %s
+          AND spa_id = %s
+          AND LOWER(status) = 'booked'
+    """, (today, current_time, spa_id))
+
+    dashboard["expected_income_remaining_today"] = (
+        cur.fetchone()[0] or 0
+    )
+
+
+    # Appointments tomorrow
+    cur.execute("""
+        SELECT COUNT(*)
+        FROM appointments
+        WHERE appointment_date = %s
+          AND spa_id = %s
+          AND LOWER(status) IN ('booked', 'completed')
+    """, (tomorrow, spa_id))
+
+    dashboard["appointments_tomorrow"] = (
+        cur.fetchone()[0] or 0
+    )
+
+
+    # Expected revenue tomorrow
+    cur.execute("""
+        SELECT COALESCE(SUM(price_at_booking), 0)
+        FROM appointments
+        WHERE appointment_date = %s
+          AND spa_id = %s
+          AND LOWER(status) NOT IN ('cancelled', 'no show')
+    """, (tomorrow, spa_id))
+
+    dashboard["expected_income_tomorrow"] = (
+        cur.fetchone()[0] or 0
+    )
+
+
+    # Next appointment remaining today
+    cur.execute("""
+        SELECT
+            a.appointment_time,
+            c.first_name,
+            c.last_name
+        FROM appointments a
+        JOIN clients c
+          ON a.client_id = c.client_id
+         AND a.spa_id = c.spa_id
+        WHERE a.appointment_date = %s
+          AND a.appointment_time >= %s
+          AND a.spa_id = %s
+          AND LOWER(a.status) = 'booked'
+        ORDER BY a.appointment_time
+        LIMIT 1
+    """, (today, current_time, spa_id))
+
+    dashboard["next_appointment"] = cur.fetchone()
 
 
     # Birthdays today
@@ -2939,10 +3053,14 @@ def get_dashboard_data(spa_id):
         SELECT COUNT(*)
         FROM clients
         WHERE spa_id = %s
-          AND birth_date IS NOT NULL
-          AND EXTRACT(MONTH FROM birth_date) = EXTRACT(MONTH FROM CURRENT_DATE)
-          AND EXTRACT(DAY FROM birth_date) = EXTRACT(DAY FROM CURRENT_DATE)
-    """, (spa_id,))
+        AND birth_date IS NOT NULL
+        AND EXTRACT(MONTH FROM birth_date) = %s
+        AND EXTRACT(DAY FROM birth_date) = %s
+    """, (
+        spa_id,
+        today.month,
+        today.day
+    ))
 
     dashboard["birthdays_today"] = cur.fetchone()[0] or 0
 
@@ -2961,18 +3079,7 @@ def get_dashboard_data(spa_id):
 
 
 
-    # Upcoming appointments tomorrow
-    tomorrow = today + timedelta(days=1)
-
-    cur.execute("""
-        SELECT COUNT(*)
-        FROM appointments
-        WHERE appointment_date = %s
-          AND spa_id = %s
-          AND status IN ('booked', 'completed')
-    """, (tomorrow, spa_id))
-
-    dashboard["appointments_tomorrow"] = cur.fetchone()[0] or 0
+    
  
 
     # Cancelled appointments today
@@ -3001,25 +3108,7 @@ def get_dashboard_data(spa_id):
 
 
 
-    # Next appointment today
-    cur.execute("""
-        SELECT
-            a.appointment_time,
-            c.first_name,
-            c.last_name
-        FROM appointments a
-        JOIN clients c
-          ON a.client_id = c.client_id
-         AND a.spa_id = c.spa_id
-        WHERE a.appointment_date = %s
-          AND a.spa_id = %s
-          AND a.status = 'booked'
-          AND a.appointment_time >= CURRENT_TIME
-        ORDER BY a.appointment_time
-        LIMIT 1
-    """, (today, spa_id))
-
-    dashboard["next_appointment"] = cur.fetchone()
+    
 
 
 
@@ -8298,88 +8387,186 @@ def parse_money(value):
 #   --------------------------------------------
     
 
+
+
 import re
 from datetime import datetime
+
 
 def parse_godaddy_booking_email(body):
     data = {}
 
-    order_match = re.search(r"Order #\s+(.+)", body)
+    # ---------------------------------------------------------
+    # Basic booking fields
+    # ---------------------------------------------------------
+    order_match = re.search(
+        r"Order #\s+(.+)",
+        body
+    )
     if order_match:
         data["order_number"] = order_match.group(1).strip()
 
-    name_match = re.search(r"Name:\s*(.+)", body)
+    name_match = re.search(
+        r"Name:\s*(.+)",
+        body
+    )
     if name_match:
         data["customer_name"] = name_match.group(1).strip()
 
-    phone_match = re.search(r"Phone:\s*(.+)", body)
+    phone_match = re.search(
+        r"Phone:\s*(.+)",
+        body
+    )
     if phone_match:
         data["phone"] = phone_match.group(1).strip()
 
-    email_match = re.search(r"Email:\s*(.+)", body)
+    email_match = re.search(
+        r"Email:\s*(.+)",
+        body
+    )
     if email_match:
         data["email"] = email_match.group(1).strip()
 
-    service_match = re.search(r"What:\s*(.+)", body)
+    service_match = re.search(
+        r"What:\s*(.+)",
+        body
+    )
     if service_match:
         data["service"] = service_match.group(1).strip()
 
-    when_match = re.search(
-        r"When:\s*(.+?)\s*\((\d+)\s*(mins?|minutes?|hours?|hrs?)\)",
+    # ---------------------------------------------------------
+    # Appointment date, time, and duration
+    # ---------------------------------------------------------
+    when_line_match = re.search(
+        r"^When:\s*(.+)$",
         body,
+        re.IGNORECASE | re.MULTILINE
+    )
+
+    if not when_line_match:
+        raise ValueError(
+            "GoDaddy booking email is missing the When field."
+        )
+
+    raw_when_line = when_line_match.group(1).strip()
+
+    print(
+        "[GODADDY PARSER] RAW WHEN LINE:",
+        repr(raw_when_line)
+    )
+
+    duration_match = re.search(
+        r"\(\s*(\d+)\s*"
+        r"(mins?|minutes?|hours?|hrs?)\s*\)\s*$",
+        raw_when_line,
         re.IGNORECASE
     )
 
-    if when_match:
-        raw_when = when_match.group(1).strip()
-        duration_value = int(when_match.group(2))
-        duration_unit = when_match.group(3).lower()
+    if not duration_match:
+        raise ValueError(
+            "Could not parse GoDaddy appointment duration: "
+            f"{raw_when_line!r}"
+        )
 
-        date_formats = [
-            "%A, %B %d, %Y at %I:%M%p",   # 4:00PM
-            "%A, %B %d, %Y at %I:%M %p",  # 4:00 PM
-            "%A, %B %d, %Y at %H:%M",     # 16:00
-        ]
+    duration_value = int(duration_match.group(1))
+    duration_unit = duration_match.group(2).lower()
 
-        dt = None
+    raw_when = raw_when_line[
+        :duration_match.start()
+    ].strip()
 
-        for fmt in date_formats:
-            try:
-                dt = datetime.strptime(raw_when, fmt)
-                break
-            except ValueError:
-                continue
+    raw_when = re.sub(
+        r"\s+",
+        " ",
+        raw_when
+    ).strip()
 
-        if dt is None:
-            raise ValueError(
-                f"Could not parse GoDaddy appointment datetime: {raw_when}"
+    raw_when = re.sub(
+        r"(\d)(AM|PM)\b",
+        r"\1 \2",
+        raw_when,
+        flags=re.IGNORECASE
+    )
+
+    date_formats = [
+        "%A, %B %d, %Y at %I:%M %p",
+        "%A, %B %d, %Y at %I %p",
+        "%A, %B %d, %Y at %H:%M",
+        "%B %d, %Y at %I:%M %p",
+        "%B %d, %Y at %I %p",
+        "%m/%d/%Y at %I:%M %p",
+        "%m/%d/%Y %I:%M %p",
+    ]
+
+    appointment_datetime = None
+
+    for fmt in date_formats:
+        try:
+            appointment_datetime = datetime.strptime(
+                raw_when,
+                fmt
             )
+            break
+        except ValueError:
+            continue
 
-        if duration_unit.startswith(("hour", "hr")):
-            duration_minutes = duration_value * 60
-        else:
-            duration_minutes = duration_value
+    if appointment_datetime is None:
+        raise ValueError(
+            "Could not parse GoDaddy appointment datetime: "
+            f"{raw_when!r}. Full When value: "
+            f"{raw_when_line!r}"
+        )
 
-        data["appointment_datetime"] = dt
-        data["duration_minutes"] = duration_minutes
+    if duration_unit.startswith(("hour", "hr")):
+        duration_minutes = duration_value * 60
+    else:
+        duration_minutes = duration_value
 
+    data["appointment_datetime"] = appointment_datetime
+    data["duration_minutes"] = duration_minutes
 
-    payment_match = re.search(r"Payment status:\s*(.+)", body)
+    # ---------------------------------------------------------
+    # Payment information
+    # ---------------------------------------------------------
+    payment_match = re.search(
+        r"Payment status:\s*(.+)",
+        body
+    )
     if payment_match:
-        data["payment_status"] = payment_match.group(1).strip()
+        data["payment_status"] = (
+            payment_match.group(1).strip()
+        )
 
-    subtotal_match = re.search(r"Subtotal\s+\$([\d,]+\.\d{2})", body)
+    subtotal_match = re.search(
+        r"Subtotal\s+\$([\d,]+\.\d{2})",
+        body
+    )
     if subtotal_match:
-        data["subtotal"] = parse_money(subtotal_match.group(1))
+        data["subtotal"] = parse_money(
+            subtotal_match.group(1)
+        )
 
-    order_total_match = re.search(r"Order Total\s+\$([\d,]+\.\d{2})", body)
+    order_total_match = re.search(
+        r"Order Total\s+\$([\d,]+\.\d{2})",
+        body
+    )
     if order_total_match:
-        data["order_total"] = parse_money(order_total_match.group(1))
+        data["order_total"] = parse_money(
+            order_total_match.group(1)
+        )
 
-    paid_checkout_match = re.search(r"Paid at checkout\s+\$([\d,]+\.\d{2})", body)
+    paid_checkout_match = re.search(
+        r"Paid at checkout\s+\$([\d,]+\.\d{2})",
+        body
+    )
+
     if paid_checkout_match:
-        data["paid_at_checkout"] = True
-        data["paid_at_checkout_amount"] = parse_money(paid_checkout_match.group(1))
+        paid_amount = parse_money(
+            paid_checkout_match.group(1)
+        )
+
+        data["paid_at_checkout_amount"] = paid_amount
+        data["paid_at_checkout"] = paid_amount > 0
     else:
         data["paid_at_checkout"] = False
         data["paid_at_checkout_amount"] = 0
@@ -8387,9 +8574,6 @@ def parse_godaddy_booking_email(body):
     data["raw_email_body"] = body
 
     return data
-
-
-
 
 
 
@@ -21751,9 +21935,15 @@ def dashboard():
 def morning_briefing():
 
     spa_id = session["spa_id"]
-    today = date.today()
 
-    dashboard = get_dashboard_data(spa_id)
+    spa_now = get_spa_now(spa_id)
+    today = spa_now.date()
+    now_time = spa_now.time()
+
+    dashboard = get_dashboard_data(
+    spa_id,
+    spa_now=spa_now
+)
 
     business_health = {
         "score": None,
@@ -21905,7 +22095,8 @@ def morning_briefing():
         dashboard=dashboard,
         business_schedule_due=business_schedule_due,
         business_schedule_upcoming=business_schedule_upcoming,
-        priority_actions=priority_actions
+        priority_actions=priority_actions,
+        spa_now=spa_now
     )
 
     cur.close()
@@ -21920,7 +22111,8 @@ def morning_briefing():
         business_schedule_upcoming=business_schedule_upcoming,
         priority_actions=priority_actions,
         godaddy_unreviewed_count=godaddy_unreviewed_count,
-        coach=coach
+        coach=coach,
+        spa_now=spa_now
     )
 
 
@@ -21943,7 +22135,8 @@ def morning_briefing():
 def daily_briefing_today():
 
     spa_id = session["spa_id"]
-    today = date.today()
+    spa_now = get_spa_now(spa_id)
+    today = spa_now.date()
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -22908,7 +23101,10 @@ from datetime import date, datetime, timedelta
 @spa_required
 def reports():
     spa_id = current_spa_id()
-    dashboard = get_dashboard_data(spa_id)
+    dashboard = get_dashboard_data(
+    spa_id,
+    spa_now=spa_now
+)
     role = session.get("role")
 
     conn = get_db_connection()
