@@ -22,14 +22,56 @@ def format_appointment_time(value):
     return str(value)
 
 
-def get_day_greeting():
-    hour = datetime.now().hour
+def get_day_greeting(spa_now):
+    hour = spa_now.hour
 
     if hour < 12:
         return "Good morning."
     elif hour < 17:
-        return "Good afternoon."
-    return "Good evening."
+        return "Good afternoon." 
+    return "Good evening." 
+
+
+def get_review_intro(spa_now):
+    """
+    Returns Coach's opening business review statement
+    based on the business-local time.
+    """
+
+    hour = spa_now.hour
+
+    if hour < 12:
+        return "I've completed today's business review."
+
+    elif hour < 17:
+        return "I've updated your business review."
+
+    return (
+        "I've wrapped up today's business review "
+        "and looked ahead to tomorrow."
+    )
+
+
+def get_day_assessment_intro(spa_now):
+    hour = spa_now.hour
+
+    if hour < 12:
+        return (
+            "Today may be a good opportunity to focus on "
+            "client follow-up and business development."
+        )
+
+    elif hour < 17:
+        return (
+            "There is still time today to focus on "
+            "client follow-up and business development."
+        )
+
+    return (
+        "This may be a good time to focus on client "
+        "follow-up, business development, or preparing "
+        "for tomorrow."
+    )
 
 
 def add_observation(
@@ -265,56 +307,121 @@ def review_overdue_appointments(observations, dashboard):
     )
 
 
+def review_today_schedule(
+    observations,
+    dashboard,
+    spa_now
+):
+    if spa_now is None:
+        raise ValueError(
+            "review_today_schedule requires spa_now"
+        )
 
+    appointment_count = (
+        dashboard.get("appointments_today", 0) or 0
+    )
 
-def review_today_schedule(observations, dashboard):
-    appointment_count = dashboard.get("appointments_today", 0) or 0
-    projected_revenue = dashboard.get("expected_income_today", 0) or 0
+    remaining_count = (
+        dashboard.get("appointments_remaining_today", 0) or 0
+    )
+
+    tomorrow_count = (
+        dashboard.get("appointments_tomorrow", 0) or 0
+    )
+
+    projected_revenue = (
+        dashboard.get("expected_income_today", 0) or 0
+    )
+
+    remaining_revenue = (
+        dashboard.get("expected_income_remaining_today", 0) or 0
+    )
+
+    tomorrow_revenue = (
+        dashboard.get("expected_income_tomorrow", 0) or 0
+    )
+
     next_appointment = dashboard.get("next_appointment")
 
-   
-    if appointment_count == 0:
+    # ---------------------------------------------------------
+    # Appointments remain today
+    # ---------------------------------------------------------
+    if remaining_count > 0:
+        if remaining_count >= 5:
+            message = (
+                f"You have a full remaining schedule with "
+                f"{remaining_count} appointments still scheduled today"
+            )
+        else:
+            message = (
+                f"You have {remaining_count} appointment"
+                f"{'' if remaining_count == 1 else 's'} "
+                f"remaining today"
+            )
+
+        if remaining_revenue > 0:
+            message += (
+                f", with projected remaining revenue of "
+                f"${remaining_revenue:,.2f}"
+            )
+        elif projected_revenue > 0:
+            message += (
+                f". Total projected revenue for today is "
+                f"${projected_revenue:,.2f}"
+            )
+
+        message += "."
+
+        if next_appointment:
+            next_time = format_appointment_time(
+                next_appointment[0]
+            )
+
+            if next_time:
+                message += (
+                    f" Your next appointment begins at "
+                    f"{next_time}."
+                )
+
         add_observation(
             observations,
             category="Today's Schedule",
-            priority=60,
-            status="opportunity",
-            message=(
-                "There are no appointments scheduled today, "
-                "giving you an opportunity to focus on your business."
-            ),
+            priority=40,
+            status="informational",
+            message=message,
             action_url=None
         )
         return
 
-    if appointment_count >= 5:
-        message = (
-            f"You have a full schedule today with "
-            f"{appointment_count} appointments"
-        )
+    # ---------------------------------------------------------
+    # No appointments remain today — look ahead to tomorrow
+    # ---------------------------------------------------------
+    if appointment_count > 0:
+        message = "Today's appointments are complete."
     else:
-        message = (
-            f"You have {appointment_count} appointment"
-            f"{'' if appointment_count == 1 else 's'} scheduled today"
-        )
+        message = "There are no appointments scheduled today."
 
-    if projected_revenue > 0:
+    if tomorrow_count > 0:
         message += (
-            f", with projected revenue of "
-            f"${projected_revenue:,.2f}"
+            f" Tomorrow you have {tomorrow_count} appointment"
+            f"{'' if tomorrow_count == 1 else 's'} scheduled"
         )
 
-    message += "."
+        if tomorrow_revenue > 0:
+            message += (
+                f", with projected revenue of "
+                f"${tomorrow_revenue:,.2f}"
+            )
 
-    if next_appointment:
-        next_time = format_appointment_time(next_appointment[0])
-
-        if next_time:
-            message += f" Your next appointment begins at {next_time}."
+        message += "."
+    else:
+        message += (
+            " You don't have any appointments scheduled for tomorrow."
+        )
 
     add_observation(
         observations,
-        category="Today's Schedule",
+        category="Tomorrow's Schedule",
         priority=30,
         status="informational",
         message=message,
@@ -323,49 +430,17 @@ def review_today_schedule(observations, dashboard):
 
 
 
-
 def build_today_summary(dashboard):
-    appointment_count = dashboard.get("appointments_today", 0) or 0
-    projected_revenue = dashboard.get("expected_income_today", 0) or 0
-    next_appointment = dashboard.get("next_appointment")
-
-    if appointment_count == 1:
-        appointment_summary = (
-            f"You have 1 appointment scheduled today with projected "
-            f"revenue of ${projected_revenue:,.2f}."
-        )
-    else:
-        appointment_summary = (
-            f"You have {appointment_count} appointments scheduled today "
-            f"with projected revenue of ${projected_revenue:,.2f}."
-        )
-
-    next_appointment_time = None
-
-    if next_appointment and next_appointment[0]:
-        next_appointment_time = format_appointment_time(
-            next_appointment[0]
-        )
-
-    if next_appointment_time:
-        next_appointment_summary = (
-            f"Your next appointment begins at "
-            f"{next_appointment_time}."
-        )
-    elif appointment_count > 0:
-        next_appointment_summary = (
-            "There are no additional appointments remaining today."
-        )
-    else:
-        next_appointment_summary = (
-            "You do not have any appointments scheduled today."
-        )
-
     return {
-        "appointment_count": appointment_count,
-        "projected_revenue": projected_revenue,
-        "appointment_summary": appointment_summary,
-        "next_appointment_summary": next_appointment_summary
+        "appointment_count": (
+            dashboard.get("appointments_today", 0) or 0
+        ),
+        "projected_revenue": (
+            dashboard.get("expected_income_today", 0) or 0
+        ),
+        "next_appointment": (
+            dashboard.get("next_appointment")
+        )
     }
 
 
@@ -396,16 +471,15 @@ def build_recommendation_summary(recommendations):
         "question": None
     }
 
-
-
-def build_day_assessment(appointment_count, recommendations):
+def build_day_assessment(
+    appointment_count,
+    recommendations,
+    spa_now
+):
     recommendation_count = len(recommendations)
 
     if appointment_count == 0:
-        return (
-            "Today may be a good opportunity to focus on client "
-            "follow-up and business development."
-        )
+        return get_day_assessment_intro(spa_now)
 
     if recommendation_count >= 3:
         return (
@@ -418,14 +492,16 @@ def build_day_assessment(appointment_count, recommendations):
 
     return "Overall, today looks well balanced."
 
-
-
 def build_coach(
     dashboard,
     business_schedule_due=None,
     business_schedule_upcoming=None,
-    priority_actions=None
+    priority_actions=None,
+    spa_now=None
 ):
+    if spa_now is None:
+        raise ValueError("build_coach requires spa_now")
+
     observations = []
 
     # ---------------------------------------------------------
@@ -433,22 +509,13 @@ def build_coach(
     # ---------------------------------------------------------
     review_overdue_appointments(
         observations,
-        dashboard=dashboard
+        dashboard=dashboard,
     )
 
     review_today_schedule(
         observations,
-        dashboard=dashboard
-    )
-    
-
-
-    # ---------------------------------------------------------
-    # Complete the business review
-    # ---------------------------------------------------------
-    review_today_schedule(
-        observations,
-        dashboard=dashboard
+        dashboard=dashboard,
+        spa_now=spa_now
     )
 
     review_business_schedule(
@@ -487,7 +554,6 @@ def build_coach(
             f"recommendation_{index}"
         )
 
-
     informational_observations = [
         item for item in observations
         if item.get("status") in (
@@ -500,11 +566,14 @@ def build_coach(
     # ---------------------------------------------------------
     # Build the executive summary
     # ---------------------------------------------------------
-    today_summary = build_today_summary(dashboard)
+    today_summary = build_today_summary(
+        dashboard,
+    )
 
     day_assessment = build_day_assessment(
         appointment_count=today_summary["appointment_count"],
-        recommendations=recommendations
+        recommendations=recommendations,
+        spa_now=spa_now
     )
 
     recommendation_intro = build_recommendation_summary(
@@ -517,16 +586,33 @@ def build_coach(
         else None
     )
 
-    greeting = get_day_greeting()
+    greeting = get_day_greeting(spa_now)
 
-    message = " ".join([
+    schedule_observation = next(
+        (
+            item["message"]
+            for item in observations
+            if item["category"] in (
+                "Today's Schedule",
+                "Tomorrow's Schedule"
+            )
+        ),
+        ""
+    )
+
+    message_parts = [
         greeting,
-        "I've completed today's business review.",
-        today_summary["appointment_summary"],
-        today_summary["next_appointment_summary"],
+        get_review_intro(spa_now),
+        schedule_observation,
         day_assessment,
         recommendation_intro["summary"]
-    ])
+    ]
+
+    message = " ".join(
+        part.strip()
+        for part in message_parts
+        if part and part.strip()
+    )
 
     # ---------------------------------------------------------
     # Build the opening Coach interaction
@@ -542,13 +628,6 @@ def build_coach(
         "title": "🍑 Coach",
         "greeting": greeting,
 
-        "appointment_summary": (
-            today_summary["appointment_summary"]
-        ),
-
-        "next_appointment_summary": (
-            today_summary["next_appointment_summary"]
-        ),
 
         "day_assessment": day_assessment,
 
@@ -558,13 +637,11 @@ def build_coach(
 
         "message": message,
 
-        # Opening Yes / No question
         "question": opening_question,
         "yes_label": "Yes",
         "no_label": "No",
 
-        # Do not navigate when the user first selects Yes.
-        # Yes should reveal the recommendation.
+        # Yes reveals the recommendation without navigating.
         "yes_url": None,
 
         "reason": (
@@ -584,9 +661,7 @@ def build_coach(
         "current_recommendation_index": 0,
         "total_recommendations": len(recommendations),
 
-        # Full recommendation that will be revealed
         "current_recommendation": current_recommendation,
-
         "recommendations": recommendations,
 
         "recommendation_count": (

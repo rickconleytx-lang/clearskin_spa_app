@@ -8455,9 +8455,13 @@ def parse_godaddy_booking_email(body):
         repr(raw_when_line)
     )
 
+
     duration_match = re.search(
-        r"\(\s*(\d+)\s*"
-        r"(mins?|minutes?|hours?|hrs?)\s*\)\s*$",
+        r"\(\s*"
+        r"(?:(\d+)\s*(hours?|hrs?))?"
+        r"\s*"
+        r"(?:(\d+)\s*(mins?|minutes?))?"
+        r"\s*\)\s*$",
         raw_when_line,
         re.IGNORECASE
     )
@@ -8468,12 +8472,24 @@ def parse_godaddy_booking_email(body):
             f"{raw_when_line!r}"
         )
 
-    duration_value = int(duration_match.group(1))
-    duration_unit = duration_match.group(2).lower()
+    hours_value = int(duration_match.group(1) or 0)
+    minutes_value = int(duration_match.group(3) or 0)
+
+    if hours_value == 0 and minutes_value == 0:
+        raise ValueError(
+            "GoDaddy appointment duration was empty: "
+            f"{raw_when_line!r}"
+        )
+
+    duration_minutes = (
+        hours_value * 60
+        + minutes_value
+    )
 
     raw_when = raw_when_line[
         :duration_match.start()
     ].strip()
+
 
     raw_when = re.sub(
         r"\s+",
@@ -8517,10 +8533,6 @@ def parse_godaddy_booking_email(body):
             f"{raw_when_line!r}"
         )
 
-    if duration_unit.startswith(("hour", "hr")):
-        duration_minutes = duration_value * 60
-    else:
-        duration_minutes = duration_value
 
     data["appointment_datetime"] = appointment_datetime
     data["duration_minutes"] = duration_minutes

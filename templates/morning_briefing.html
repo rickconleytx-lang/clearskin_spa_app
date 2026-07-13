@@ -10,15 +10,21 @@
 
 
 <p style="color:#777; margin-top:4px;">
-    What you need to know before you start your business day.
+    Prepared by Coach<br>
+    Your Business Operations Assistant
 </p>
 
 <div class="briefing-hero">
 
     <div>
-        <h2>Good Morning!</h2>
+        <h2>{{ coach.greeting }}</h2>
+
         <p>
-            <strong>{{ today.strftime('%A, %B %d, %Y') }}</strong>
+            <strong>{{ spa_now.strftime('%A, %B %d, %Y') }}</strong><br>
+            <span style="color:#666;">
+                Local Business Time:
+                {{ spa_now.strftime('%-I:%M %p') }}
+            </span>
         </p>
     </div>
 
@@ -47,171 +53,6 @@
 </div>
 
 </div>
-
-<div class="briefing-grid">
-
-    <div class="dashboard-card">
-        <a href="{{ url_for('daily_briefing_today') }}" class="briefing-card">
-            <h2>📆 Today's Schedule</h2>
-            <p>View appointments, projected revenue, and Coach opportunities.</p>
-        </a>
-
-        <p>
-            Appointments:
-            <strong>{{ dashboard.appointments_today }}</strong>
-        </p>
-
-        <p>
-            Expected Revenue:
-            <strong>${{ '%.2f'|format(dashboard.expected_revenue) }}</strong>
-        </p>
-
-        {% if dashboard.next_appointment %}
-            <p>
-                Next Appointment:
-                <strong>
-                    {{ dashboard.next_appointment[0].strftime('%-I:%M %p') }}
-                    —
-                    {{ dashboard.next_appointment[1] }}
-                    {{ dashboard.next_appointment[2] }}
-                </strong>
-            </p>
-        {% else %}
-            <p>
-                Next Appointment:
-                <strong>None remaining today</strong>
-            </p>
-        {% endif %}
-    </div>
-
- <div class="dashboard-card"
-     id="coach-recommendations-card">
-
-    <h2>✅ Coach Recommendations</h2>
-
-    {% set has_priority_actions = priority_actions|length > 0 %}
-    {% set has_coach_recommendations = coach.recommendations|length > 0 %}
-
-    {% if has_priority_actions or has_coach_recommendations %}
-
-        <!-- Existing priority actions -->
-        {% for action in priority_actions %}
-            <div class="coach-action-item">
-
-                <p>
-                    {{ action.icon }}
-                    {{ action.label }}:
-                    <strong>{{ action.value }}</strong>
-                </p>
-
-                {% if action.url %}
-                    <a class="btn btn-small"
-                       href="{{ action.url }}">
-                        View
-                    </a>
-                {% endif %}
-
-            </div>
-        {% endfor %}
-
-        <!-- Coach-generated recommendations -->
-        {% for recommendation in coach.recommendations %}
-
-            <div class="coach-action-item"
-                 {% if loop.first %}
-                     id="coach-current-card-item"
-                     hidden
-                 {% endif %}>
-
-                <p>
-                    <strong>
-                        {{ recommendation.category }}
-                    </strong>
-                </p>
-
-                <p>
-                    {{ recommendation.message }}
-                </p>
-
-                {% if recommendation.action_url %}
-                    <a class="btn btn-small"
-                       href="{{ recommendation.action_url }}">
-                        Review
-                    </a>
-                {% endif %}
-
-            </div>
-
-        {% endfor %}
-
-    {% else %}
-
-        <p id="no-coach-recommendations">
-            No Coach recommendations right now.
-        </p>
-
-    {% endif %}
-
-</div>
-
-
-    <div class="dashboard-card">
-        <h2>📊 Business Snapshot</h2>
-
-        <p>
-            Today’s expected revenue:
-            <strong>${{ '%.2f'|format(dashboard.expected_revenue) }}</strong>
-        </p>
-
-        <p>
-            Scheduled activity:
-            <strong>{{ dashboard.appointments_today }} appointment(s)</strong>
-        </p>
-
-        <p style="color:#777;">
-            View weekly and monthly performance in Business Summary.
-        </p>
-    </div>
-
-
-    <div class="dashboard-card">
-        <h2>Business Schedule</h2>
-
-        {% if business_schedule_due %}
-
-            <p>Business schedule items need attention today.</p>
-
-        {% elif business_schedule_upcoming %}
-
-            <p>
-                Your next business schedule item is
-                {{ business_schedule_upcoming[0][2] }},
-                due {{ business_schedule_upcoming[0][4].strftime('%B %-d, %Y') }}.
-            </p>
-
-        {% else %}
-
-            <p>Your business schedule is clear for the next 14 days.</p>
-
-        {% endif %}
-
-        {% if business_schedule_upcoming %}
-            <hr>
-            <p>Coming up:</p>
-
-            {% for item in business_schedule_upcoming %}
-                <p>
-                    {{ item[2] }}
-                    <br>
-                    <span style="color:#777;">
-                        {{ item[1] }} · Due {{ item[4].strftime("%b %d, %Y") }}
-                    </span>
-                </p>
-            {% endfor %}
-        {% endif %}
-    </div>
-
-
 
 {% if coach %}
     <section class="coach-card">
@@ -289,25 +130,8 @@
                 {% endif %}
             </div>
 
-            <!-- Final response after No -->
-            <div id="coach-dismissed"
-                 class="coach-response"
-                 hidden>
-
-                <p>
-                    Okay. I’ll leave it for now.
-                </p>
-            </div>
-
+            
             <!-- Final response after recommendation No -->
-            <div id="coach-deferred"
-                 class="coach-response"
-                 hidden>
-
-                <p>
-                    Okay. You can return to it when you’re ready.
-                </p>
-            </div>
 
                     <div id="coach-deferred"
                  class="coach-response"
@@ -324,236 +148,177 @@
 {% endif %}
 
 
+<br><br>
 
 
-    <script>
-document.addEventListener("DOMContentLoaded", function () {
-    const messageElement = document.getElementById("coach-message");
-    const questionElement = document.getElementById("coach-question");
-    const actionsElement = document.getElementById("coach-actions");
-    const yesButton = document.getElementById("coach-yes-button");
-    const noButton = document.getElementById("coach-no-button");
-    const recommendationsData = document.getElementById(
-        "coach-recommendations-data"
-    );
-
-    if (
-        !messageElement ||
-        !questionElement ||
-        !actionsElement ||
-        !yesButton ||
-        !noButton ||
-        !recommendationsData
-    ) {
-        return;
-    }
-
-    let recommendations = [];
-
-    try {
-        recommendations = JSON.parse(
-            recommendationsData.textContent
-        );
-    } catch (error) {
-        console.error(
-            "Unable to load Coach recommendations:",
-            error
-        );
-        return;
-    }
-
-    let currentRecommendationIndex = -1;
-    let conversationState = "introduction";
-
-    function hideCoachActions() {
-        questionElement.hidden = true;
-        actionsElement.hidden = true;
-    }
-
-    function showCoachActions() {
-        questionElement.hidden = false;
-        actionsElement.hidden = false;
-    }
-
-    function showRecommendation(index) {
-        const recommendation = recommendations[index];
-
-        if (!recommendation) {
-            finishConversation();
-            return;
-        }
-
-        currentRecommendationIndex = index;
-        conversationState = "recommendation";
-
-        const position = index + 1;
-        const total = recommendations.length;
-
-        messageElement.textContent =
-            `Recommendation ${position} of ${total}: ` +
-            recommendation.message;
-
-        questionElement.querySelector("strong").textContent =
-            recommendation.question ||
-            "Would you like to review this item?";
-
-        if (recommendation.action_url) {
-            yesButton.textContent = "Review";
-        } else {
-            yesButton.textContent = "Yes";
-        }
-
-        noButton.textContent = "No";
-
-        showCoachActions();
-    }
-
-    function showNextRecommendation() {
-        const nextIndex = currentRecommendationIndex + 1;
-
-        if (nextIndex < recommendations.length) {
-            showRecommendation(nextIndex);
-        } else {
-            finishConversation();
-        }
-    }
-
-    function finishConversation() {
-        conversationState = "complete";
-
-        messageElement.textContent =
-            "That completes today's recommendations. " +
-            "I'll continue monitoring your business throughout the day.";
-
-        hideCoachActions();
-    }
-
-    function handleRecommendationYes() {
-        const recommendation =
-            recommendations[currentRecommendationIndex];
-
-        if (!recommendation) {
-            finishConversation();
-            return;
-        }
-
-        if (recommendation.action_url) {
-            window.location.href = recommendation.action_url;
-            return;
-        }
-
-        messageElement.textContent =
-            "I've noted that recommendation. " +
-            "This action will be available as Coach gains " +
-            "additional capabilities.";
-
-        questionElement.querySelector("strong").textContent =
-            "Would you like to review the next recommendation?";
-
-        yesButton.textContent = "Yes";
-        noButton.textContent = "No";
-
-        conversationState = "continue_after_yes";
-    }
-
-    function handleRecommendationNo() {
-        const recommendation =
-            recommendations[currentRecommendationIndex];
-
-        const category = recommendation?.category || "this item";
-
-        messageElement.textContent =
-            `Understood. We'll skip ${category.toLowerCase()} for now.`;
-
-        if (
-            currentRecommendationIndex + 1 <
-            recommendations.length
-        ) {
-            questionElement.querySelector("strong").textContent =
-                "Would you like to review the next recommendation?";
-
-            if (recommendation.action_url) {
-                yesButton.textContent = "Review";
-            } else {
-                yesButton.textContent = "Yes";
-            }
-
-            noButton.textContent = "No";
-
-            conversationState = "continue_after_no";
-        } else {
-            finishConversation();
-        }
-    }
-
-    yesButton.addEventListener("click", function () {
-        if (conversationState === "introduction") {
-            if (recommendations.length === 0) {
-                finishConversation();
-                return;
-            }
-
-            const firstRecommendation = recommendations[0];
-
-            if (
-                recommendations.length === 1 &&
-                firstRecommendation.action_url
-            ) {
-                window.location.href = firstRecommendation.action_url;
-                return;
-            }
-
-            showRecommendation(0);
-            return;
-        }
-
-        if (conversationState === "recommendation") {
-            handleRecommendationYes();
-            return;
-        }
-
-        if (
-            conversationState === "continue_after_yes" ||
-            conversationState === "continue_after_no"
-        ) {
-            showNextRecommendation();
-        }
-    });
-
-    noButton.addEventListener("click", function () {
-        if (conversationState === "introduction") {
-            messageElement.textContent =
-                "Understood. Your recommendations will remain " +
-                "available when you're ready.";
-
-            hideCoachActions();
-            conversationState = "complete";
-            return;
-        }
-
-        if (conversationState === "recommendation") {
-            handleRecommendationNo();
-            return;
-        }
-
-        if (
-            conversationState === "continue_after_yes" ||
-            conversationState === "continue_after_no"
-        ) {
-            messageElement.textContent =
-                "Understood. We'll stop here for now.";
-
-            hideCoachActions();
-            conversationState = "complete";
-        }
-    });
-});
-</script>
 
 
-    <script id="coach-recommendations-data" type="application/json">
-        {{ coach.recommendations | tojson }}
-    </script>
+
+<div class="briefing-grid">
+
+    <div class="dashboard-card">
+        <a href="{{ url_for('daily_briefing_today') }}" class="briefing-card">
+            <h2>📆 Today's Schedule</h2>
+            <p>View appointments, projected revenue, and Coach opportunities.</p>
+        </a>
+
+        <p>
+            Appointments:
+            <strong>{{ dashboard.appointments_today }}</strong>
+        </p>
+
+        <p>
+            Expected Revenue:
+            <strong>${{ '%.2f'|format(dashboard.expected_revenue) }}</strong>
+        </p>
+
+        {% if dashboard.next_appointment %}
+            <p>
+                Next Appointment:
+                <strong>
+                    {{ dashboard.next_appointment[0].strftime('%-I:%M %p') }}
+                    —
+                    {{ dashboard.next_appointment[1] }}
+                    {{ dashboard.next_appointment[2] }}
+                </strong>
+            </p>
+        {% else %}
+            <p>
+                Next Appointment:
+                <strong>None remaining today</strong>
+            </p>
+        {% endif %}
+    </div>
+
+
+    <div class="dashboard-card">
+        <h2>📊 Business Snapshot</h2>
+
+        <p>
+            Today’s expected revenue:
+            <strong>${{ '%.2f'|format(dashboard.expected_revenue) }}</strong>
+        </p>
+
+        <p>
+            Scheduled activity:
+            <strong>{{ dashboard.appointments_today }} appointment(s)</strong>
+        </p>
+
+        <p style="color:#777;">
+            View weekly and monthly performance in Business Summary.
+        </p>
+    </div>
+
+ <div class="dashboard-card"
+     id="coach-recommendations-card">
+
+    <h2>✅ Coach Recommendations</h2>
+
+    {% set has_priority_actions = priority_actions|length > 0 %}
+    {% set has_coach_recommendations = coach.recommendations|length > 0 %}
+
+    {% if has_priority_actions or has_coach_recommendations %}
+
+        <!-- Existing priority actions -->
+        {% for action in priority_actions %}
+            <div class="coach-action-item">
+
+                <p>
+                    {{ action.icon }}
+                    {{ action.label }}:
+                    <strong>{{ action.value }}</strong>
+                </p>
+
+                {% if action.url %}
+                    <a class="btn btn-small"
+                       href="{{ action.url }}">
+                        View
+                    </a>
+                {% endif %}
+
+            </div>
+        {% endfor %}
+
+        <!-- Coach-generated recommendations -->
+        {% for recommendation in coach.recommendations %}
+
+            <div class="coach-action-item"
+                 {% if loop.first %}
+                     id="coach-current-card-item"
+                     hidden
+                 {% endif %}>
+
+                <p>
+                    <strong>
+                        {{ recommendation.category }}
+                    </strong>
+                </p>
+
+                <p>
+                    {{ recommendation.message }}
+                </p>
+
+                {% if recommendation.action_url %}
+                    <a class="btn btn-small"
+                       href="{{ recommendation.action_url }}">
+                        Review
+                    </a>
+                {% endif %}
+
+            </div>
+
+        {% endfor %}
+
+    {% else %}
+
+        <p id="no-coach-recommendations">
+            No Coach recommendations right now.
+        </p>
+
+    {% endif %}
+
+</div>
+
+
+    
+
+
+    <div class="dashboard-card">
+        <h2>Business Schedule</h2>
+
+        {% if business_schedule_due %}
+
+            <p>Business schedule items need attention today.</p>
+
+        {% elif business_schedule_upcoming %}
+
+            <p>
+                Your next business schedule item is
+                {{ business_schedule_upcoming[0][2] }},
+                due {{ business_schedule_upcoming[0][4].strftime('%B %-d, %Y') }}.
+            </p>
+
+        {% else %}
+
+            <p>Your business schedule is clear for the next 14 days.</p>
+
+        {% endif %}
+
+        {% if business_schedule_upcoming %}
+            <hr>
+            <p>Coming up:</p>
+
+            {% for item in business_schedule_upcoming %}
+                <p>
+                    {{ item[2] }}
+                    <br>
+                    <span style="color:#777;">
+                        {{ item[1] }} · Due {{ item[4].strftime("%b %d, %Y") }}
+                    </span>
+                </p>
+            {% endfor %}
+        {% endif %}
+    </div>
 
 </div>
 </div>
@@ -563,7 +328,7 @@ document.addEventListener("DOMContentLoaded", function () {
 </div>
 
 <br>
-<script>
+<<script>
     function showCoachRecommendation() {
         const offer = document.getElementById("coach-offer");
         const recommendation = document.getElementById(
@@ -594,7 +359,6 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
 
-    <script>
     function dismissCoachRecommendation() {
         const offer = document.getElementById(
             "coach-offer"
@@ -638,15 +402,13 @@ document.addEventListener("DOMContentLoaded", function () {
             dismissed.innerHTML = `
                 <p>
                     Understood. I’ve added it to your
-                    Coach Recommendations.
+                    Coach Recommendations below.
                 </p>
             `;
         }
     }
-</script>
 
 
-    <script>
     function closeCoachRecommendation() {
         const recommendation = document.getElementById(
             "coach-recommendation"
@@ -687,7 +449,8 @@ document.addEventListener("DOMContentLoaded", function () {
             `;
         }
     }
-
 </script>
+
+
 
 {% endblock %}
