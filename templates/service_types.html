@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block title %}Service Types | Peach Suite Pro{% endblock %}
+
+{% block content %}
+
+<h1>Service Types</h1>
+
+<p>
+    Manage the default duration and price used when creating appointments.
+</p>
+
+<div style="margin-bottom: 20px;">
+    <a href="{{ url_for('add_service_type') }}" class="btn">
+        Add Service Type
+    </a>
+</div>
+
+<div class="table-container">
+    <table class="appointments-table">
+        <thead>
+            <tr>
+                <th>Service</th>
+                <th>Default Duration</th>
+                <th>Default Price</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+
+        <tbody>
+            {% for service in services %}
+                <tr>
+                    <td>{{ service[1] }}</td>
+
+                    <td>
+                        {% if service[2] is not none %}
+                            {{ service[2] }} minutes
+                        {% else %}
+                            Not set
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        {% if service[3] is not none %}
+                            ${{ '%.2f'|format(service[3]) }}
+                        {% else %}
+                            Not set
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        {% if service[4] %}
+                            Active
+                        {% else %}
+                            Inactive
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        <a href="{{ url_for(
+                            'edit_service_type',
+                            service_type_id=service[0]
+                        ) }}"
+                           class="btn">
+                            Edit
+                        </a>
+                    </td>
+                </tr>
+            {% else %}
+                <tr>
+                    <td colspan="5" class="empty-message">
+                        No service types have been added.
+                    </td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% endblock %}

@@ -5181,11 +5181,274 @@ def update_dropdown_labels():
 
 
 
+#############################
+#
+#   SERVICE TYPES LIST
+#
+#
+########################################
+
+@app.route("/service-types")
+@login_required
+@spa_required
+def service_types():
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            service_type_id,
+            service_name,
+            default_duration_minutes,
+            default_price,
+            is_active
+        FROM service_name_types
+        WHERE spa_id = %s
+        ORDER BY service_name
+    """, (spa_id,))
+
+    services = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "service_types.html",
+        services=services
+    )
 
 
 
 
 
+#################################
+#
+#
+#   ADD SERVICE TYPE 
+#
+#
+####################################
+
+@app.route("/service-types/add", methods=["GET", "POST"])
+@login_required
+@spa_required
+def add_service_type():
+    spa_id = current_spa_id()
+
+    if request.method == "POST":
+        service_name = (
+            request.form.get("service_name") or ""
+        ).strip()
+
+        duration_raw = (
+            request.form.get("default_duration_minutes") or ""
+        ).strip()
+
+        price_raw = (
+            request.form.get("default_price") or ""
+        ).strip()
+
+        is_active = request.form.get("is_active") == "1"
+
+        if not service_name:
+            flash("Service name is required.", "error")
+            return redirect(url_for("add_service_type"))
+
+        try:
+            default_duration_minutes = int(duration_raw)
+        except (TypeError, ValueError):
+            flash("Default session length must be entered in minutes.", "error")
+            return redirect(url_for("add_service_type"))
+
+        if default_duration_minutes <= 0:
+            flash("Default session length must be greater than zero.", "error")
+            return redirect(url_for("add_service_type"))
+
+        try:
+            default_price = float(price_raw)
+        except (TypeError, ValueError):
+            flash("Default service price must be valid.", "error")
+            return redirect(url_for("add_service_type"))
+
+        if default_price < 0:
+            flash("Default service price cannot be negative.", "error")
+            return redirect(url_for("add_service_type"))
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            INSERT INTO service_name_types (
+                spa_id,
+                service_name,
+                default_duration_minutes,
+                default_price,
+                is_active
+            )
+            VALUES (%s, %s, %s, %s, %s)
+        """, (
+            spa_id,
+            service_name,
+            default_duration_minutes,
+            default_price,
+            is_active
+        ))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        flash("Service type added.", "success")
+        return redirect(url_for("service_types"))
+
+    return render_template(
+        "service_type_form.html",
+        service=None
+    )
+
+
+
+
+
+
+
+
+#################################
+#
+#
+#   EDIT SERVICE TYPE
+#
+#
+####################################
+
+
+
+@app.route(
+    "/service-types/<int:service_type_id>/edit",
+    methods=["GET", "POST"]
+)
+@login_required
+@spa_required
+def edit_service_type(service_type_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    if request.method == "POST":
+        service_name = (
+            request.form.get("service_name") or ""
+        ).strip()
+
+        duration_raw = (
+            request.form.get("default_duration_minutes") or ""
+        ).strip()
+
+        price_raw = (
+            request.form.get("default_price") or ""
+        ).strip()
+
+        is_active = request.form.get("is_active") == "1"
+
+        if not service_name:
+            flash("Service name is required.", "error")
+            cur.close()
+            conn.close()
+            return redirect(url_for(
+                "edit_service_type",
+                service_type_id=service_type_id
+            ))
+
+        try:
+            default_duration_minutes = int(duration_raw)
+            default_price = float(price_raw)
+        except (TypeError, ValueError):
+            flash("Duration and price must be valid.", "error")
+            cur.close()
+            conn.close()
+            return redirect(url_for(
+                "edit_service_type",
+                service_type_id=service_type_id
+            ))
+
+        if default_duration_minutes <= 0 or default_price < 0:
+            flash("Duration and price values are invalid.", "error")
+            cur.close()
+            conn.close()
+            return redirect(url_for(
+                "edit_service_type",
+                service_type_id=service_type_id
+            ))
+
+        cur.execute("""
+            UPDATE service_name_types
+            SET
+                service_name = %s,
+                default_duration_minutes = %s,
+                default_price = %s,
+                is_active = %s
+            WHERE service_type_id = %s
+              AND spa_id = %s
+        """, (
+            service_name,
+            default_duration_minutes,
+            default_price,
+            is_active,
+            service_type_id,
+            spa_id
+        ))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        flash("Service type updated.", "success")
+        return redirect(url_for("service_types"))
+
+    cur.execute("""
+        SELECT
+            service_type_id,
+            service_name,
+            default_duration_minutes,
+            default_price,
+            is_active
+        FROM service_name_types
+        WHERE service_type_id = %s
+          AND spa_id = %s
+    """, (service_type_id, spa_id))
+
+    service = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if not service:
+        flash("Service type not found.", "error")
+        return redirect(url_for("service_types"))
+
+    return render_template(
+        "service_type_form.html",
+        service=service
+    )
+
+
+
+
+
+
+
+
+
+
+#################################
+#
+#
+#   
+#
+#
+####################################
 
                  
 #   -----------------------
@@ -6748,6 +7011,220 @@ def messaging_compliance_audit_log():
 @spa_required
 def messaging_compliance_campaign_registration():
     return render_template("admin/messaging_compliance/campaign_registration.html")
+
+
+
+
+
+
+
+############################
+#
+#   COACH MEMORY HELPERS
+#     
+#
+#############################
+
+
+def get_or_create_coach_daily_session(
+    cur,
+    spa_id,
+    user_id,
+    session_date
+):
+    """
+    Return today's Coach session.
+
+    Creates the session on the first Daily Briefing visit.
+    Updates the visit information on later visits.
+    """
+
+    cur.execute("""
+        INSERT INTO coach_daily_sessions (
+            spa_id,
+            user_id,
+            session_date
+        )
+        VALUES (%s, %s, %s)
+
+        ON CONFLICT (spa_id, user_id, session_date)
+        DO UPDATE SET
+            last_opened_at = CURRENT_TIMESTAMP,
+            open_count = coach_daily_sessions.open_count + 1
+
+        RETURNING
+            coach_session_id,
+            started_at,
+            last_opened_at,
+            last_message_at,
+            open_count,
+            current_recommendation_key,
+            session_status
+    """, (
+        spa_id,
+        user_id,
+        session_date
+    ))
+
+    row = cur.fetchone()
+
+    return {
+        "coach_session_id": row[0],
+        "started_at": row[1],
+        "last_opened_at": row[2],
+        "last_message_at": row[3],
+        "open_count": row[4],
+        "current_recommendation_key": row[5],
+        "session_status": row[6]
+    }
+
+
+
+
+
+
+############################
+#
+#   COACH MEMORY HELPERS
+#     
+#
+#############################
+
+
+
+def build_coach_recommendation_key(recommendation):
+    """
+    Create a stable key for Coach memory.
+
+    The queue position cannot be used because recommendation_1
+    may represent a different issue later in the day.
+    """
+
+    if not recommendation:
+        return None
+
+    category = str(
+        recommendation.get("category", "recommendation")
+    ).strip().lower()
+
+    action_url = str(
+        recommendation.get("action_url")
+        or recommendation.get("url")
+        or ""
+    ).strip().lower()
+
+    raw_key = f"{category}:{action_url}"
+
+    cleaned_key = "".join(
+        character
+        if character.isalnum()
+        else "_"
+        for character in raw_key
+    )
+
+    while "__" in cleaned_key:
+        cleaned_key = cleaned_key.replace("__", "_")
+
+    return cleaned_key.strip("_")[:150]
+
+
+
+
+
+
+
+
+
+
+
+############################
+#
+#   COACH MEMORY HELPERS
+#     
+#
+#############################
+
+
+
+
+
+def record_coach_interaction(
+    cur,
+    coach_session_id,
+    spa_id,
+    user_id,
+    coach,
+    message_type="briefing_open"
+):
+    """
+    Save the Coach message shown during this page visit.
+    """
+
+    current_recommendation = coach.get(
+        "current_recommendation"
+    )
+
+    recommendation_key = build_coach_recommendation_key(
+        current_recommendation
+    )
+
+    category = None
+    action_url = None
+
+    if current_recommendation:
+        category = current_recommendation.get("category")
+
+        action_url = (
+            current_recommendation.get("action_url")
+            or current_recommendation.get("url")
+        )
+
+    cur.execute("""
+        INSERT INTO coach_interactions (
+            coach_session_id,
+            spa_id,
+            user_id,
+            recommendation_key,
+            category,
+            message_type,
+            message_text,
+            action_url,
+            interaction_status
+        )
+        VALUES (
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            'presented'
+        )
+    """, (
+        coach_session_id,
+        spa_id,
+        user_id,
+        recommendation_key,
+        category,
+        message_type,
+        coach.get("message"),
+        action_url
+    ))
+
+    cur.execute("""
+        UPDATE coach_daily_sessions
+        SET
+            last_message_at = CURRENT_TIMESTAMP,
+            current_recommendation_key = %s
+        WHERE coach_session_id = %s
+    """, (
+        recommendation_key,
+        coach_session_id
+    ))
+
+
 
 
 
@@ -21962,6 +22439,7 @@ def dashboard():
 def morning_briefing():
 
     spa_id = session["spa_id"]
+    user_id = session["user_id"]
 
     spa_now = get_spa_now(spa_id)
     today = spa_now.date()
@@ -21979,6 +22457,18 @@ def morning_briefing():
 
     conn = get_db_connection()
     cur = conn.cursor()
+
+
+    # ---------------------------------------------------------
+    # Start or resume today's Coach session
+    # ---------------------------------------------------------
+    coach_session = get_or_create_coach_daily_session(
+        cur=cur,
+        spa_id=spa_id,
+        user_id=user_id,
+        session_date=today
+    )
+
 
     # ---------------------------------------------------------
     # Business schedule items due now
@@ -22123,13 +22613,28 @@ def morning_briefing():
         business_schedule_due=business_schedule_due,
         business_schedule_upcoming=business_schedule_upcoming,
         priority_actions=priority_actions,
-        spa_now=spa_now
+        spa_now=spa_now,
+        coach_session=coach_session
     )
+
+
+    record_coach_interaction(
+        cur=cur,
+        coach_session_id=coach_session["coach_session_id"],
+        spa_id=spa_id,
+        user_id=user_id,
+        coach=coach,
+        message_type="briefing_open"
+    )
+
 
     action_cards = build_action_cards(
         dashboard=dashboard,
         priority_actions=priority_actions
     )
+
+    conn.commit()
+
 
 
     cur.close()
@@ -22145,6 +22650,7 @@ def morning_briefing():
         priority_actions=priority_actions,
         godaddy_unreviewed_count=godaddy_unreviewed_count,
         coach=coach,
+        coach_session=coach_session,
         spa_now=spa_now,
         action_cards=action_cards
     )
@@ -24271,7 +24777,8 @@ def add_appointment():
 
     client_id = request.args.get("client_id") or request.form.get("client_id") or ""
     selected_date = request.args.get("selected_date") or request.form.get("selected_date") or ""
-            
+    service_type = request.form.get("service_type", "").strip()
+
     conn = get_db_connection() 
     cur = conn.cursor()
             
@@ -24395,6 +24902,7 @@ def add_appointment():
                 spa_id,
                 client_id,
                 service_type_id,
+                service_type,
                 duration_minutes,
                 price_at_booking,
                 appointment_date,
@@ -24405,7 +24913,7 @@ def add_appointment():
                 owner_reviewed_at
             )
             VALUES (
-                %s, %s, %s, %s,
+                %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s,
                 TRUE,
                 CURRENT_TIMESTAMP
@@ -24415,6 +24923,7 @@ def add_appointment():
             spa_id,
             client_id,
             service_type_id,
+            service_type,
             duration_minutes,
             price_at_booking,
             appointment_date,
@@ -24514,7 +25023,19 @@ def add_appointment():
 
         clients = cur.fetchall()              
 
-    service_types = get_dropdown_options("service_name_types", spa_id)            
+    cur.execute("""
+        SELECT
+            service_type_id,
+            service_name,
+            default_duration_minutes,
+            default_price
+        FROM service_name_types
+        WHERE spa_id = %s
+        AND is_active = TRUE
+        ORDER BY service_name
+    """, (spa_id,))
+
+    service_types = cur.fetchall()    
                 
     cur.close()
     conn.close()

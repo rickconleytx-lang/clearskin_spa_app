@@ -22,6 +22,8 @@ def format_appointment_time(value):
     return str(value)
 
 
+
+
 def get_day_greeting(spa_now):
     hour = spa_now.hour
 
@@ -32,24 +34,58 @@ def get_day_greeting(spa_now):
     return "Good evening." 
 
 
-def get_review_intro(spa_now):
+
+def get_review_intro(
+    spa_now,
+    coach_open_count=1
+):
     """
-    Returns Coach's opening business review statement
-    based on the business-local time.
+    Returns Coach's opening statement based on local time
+    and today's Daily Briefing visit count.
     """
 
     hour = spa_now.hour
 
-    if hour < 12:
-        return "I've completed today's business review."
+    # First visit of the business day
+    if coach_open_count <= 1:
+        if hour < 12:
+            return "I've completed today's business review."
 
-    elif hour < 17:
-        return "I've updated your business review."
+        if hour < 17:
+            return "I've updated your business review."
+
+        return (
+            "I've wrapped up today's business review "
+            "and looked ahead to tomorrow."
+        )
+
+    # Rotate return-visit wording
+    return_visit_number = (coach_open_count - 2) % 4
+
+    if return_visit_number == 0:
+        return (
+            "Welcome back. I've reviewed the latest "
+            "business activity."
+        )
+
+    if return_visit_number == 1:
+        return (
+            "I've taken another look at today's priorities "
+            "and current schedule."
+        )
+
+    if return_visit_number == 2:
+        return (
+            "Welcome back. I've refreshed your business review "
+            "and checked for anything new."
+        )
 
     return (
-        "I've wrapped up today's business review "
-        "and looked ahead to tomorrow."
+        "I've reviewed the business again and updated "
+        "today's operational picture."
     )
+
+
 
 
 def get_day_assessment_intro(spa_now):
@@ -433,32 +469,30 @@ def build_today_summary(dashboard):
     }
 
 
-
 def build_recommendation_summary(recommendations):
+    """
+    Builds a short internal summary.
+
+    Coach immediately presents the first recommendation instead
+    of announcing that a recommendation queue exists.
+    """
+
     recommendation_count = len(recommendations)
 
-    if recommendation_count == 1:
+    if recommendation_count == 0:
         return {
-            "count": 1,
-            "summary": "I have one recommendation ready.",
-            "question": "Would you like to review it?"
-        }
-
-    if recommendation_count > 1:
-        return {
-            "count": recommendation_count,
-            "summary": (
-                f"I have {recommendation_count} "
-                "recommendations ready."
-            ),
-            "question": "Would you like to review them?"
+            "count": 0,
+            "summary": "Nothing needs your attention right now.",
+            "question": None
         }
 
     return {
-        "count": 0,
-        "summary": "Nothing needs your attention right now.",
+        "count": recommendation_count,
+        "summary": "",
         "question": None
     }
+
+
 
 def build_day_assessment(
     appointment_count,
@@ -487,11 +521,27 @@ def build_coach(
     business_schedule_due=None,
     business_schedule_upcoming=None,
     priority_actions=None,
-    spa_now=None
+    spa_now=None,
+    coach_session=None
 ):
    
     if spa_now is None:
         raise ValueError("build_coach requires spa_now")
+    
+    coach_session = coach_session or {}
+
+    coach_open_count = coach_session.get(
+        "open_count",
+        1
+    )
+
+    print(
+        "[COACH DEBUG] open_count:",
+        coach_open_count
+    )
+
+
+    is_return_visit = coach_open_count > 1
 
     observations = []
 
@@ -579,6 +629,7 @@ def build_coach(
 
     greeting = get_day_greeting(spa_now)
 
+
     schedule_observation = next(
         (
             item["message"]
@@ -591,13 +642,32 @@ def build_coach(
         ""
     )
 
+    review_intro = get_review_intro(
+        spa_now,
+        coach_open_count=coach_open_count
+    )
+
+    print(
+        "[COACH DEBUG] open_count:",
+        coach_open_count
+    )
+
+    print(
+        "[COACH DEBUG] review_intro:",
+        review_intro
+    )
+
     message_parts = [
         greeting,
-        get_review_intro(spa_now),
+        review_intro,
         schedule_observation,
-        day_assessment,
-        recommendation_intro["summary"]
+        day_assessment
     ]
+
+    if not current_recommendation:
+        message_parts.append(
+            recommendation_intro["summary"]
+        )
 
     message = " ".join(
         part.strip()
@@ -605,66 +675,88 @@ def build_coach(
         if part and part.strip()
     )
 
+
     # ---------------------------------------------------------
     # Build the opening Coach interaction
     # ---------------------------------------------------------
+    recommendation_title = None
+    recommendation_message = None
+    opening_question = None
+
     if current_recommendation:
-        opening_question = "Would you like to review it?"
+        recommendation_title = current_recommendation.get(
+            "category",
+            "Business Recommendation"
+        )
+
+        recommendation_message = current_recommendation.get(
+            "message",
+            "This item needs your attention."
+        )
+
+        opening_question = (
+            "Would you like to review it now?"
+        )
+
         conversation_state = "recommendation_offer"
+
     else:
-        opening_question = None
         conversation_state = "complete"
 
     return {
-        "title": "🍑 Coach",
-        "greeting": greeting,
+    "title": "🍑 Coach",
+    "greeting": greeting,
 
+    "day_assessment": day_assessment,
 
-        "day_assessment": day_assessment,
+    "recommendation_summary": (
+        recommendation_intro["summary"]
+    ),
 
-        "recommendation_summary": (
-            recommendation_intro["summary"]
-        ),
+    "message": message,
 
-        "message": message,
+    "recommendation_title": recommendation_title,
+    "recommendation_message": recommendation_message,
 
-        "question": opening_question,
-        "yes_label": "Yes",
-        "no_label": "No",
+    "is_return_visit": is_return_visit,
+    "open_count": coach_open_count,
 
-        # Yes reveals the recommendation without navigating.
-        "yes_url": None,
+    "question": opening_question,
+    "yes_label": "Yes",
+    "no_label": "No",
 
-        "reason": (
-            current_recommendation.get("category")
-            if current_recommendation
-            else "All Clear"
-        ),
+    "yes_url": None,
 
-        "priority": (
-            current_recommendation.get("priority", 10)
-            if current_recommendation
-            else 10
-        ),
+    "reason": (
+        current_recommendation.get("category")
+        if current_recommendation
+        else "All Clear"
+    ),
 
-        "conversation_state": conversation_state,
+    "priority": (
+        current_recommendation.get("priority", 10)
+        if current_recommendation
+        else 10
+    ),
 
-        "current_recommendation_index": 0,
-        "total_recommendations": len(recommendations),
+    "conversation_state": conversation_state,
 
-        "current_recommendation": current_recommendation,
-        "recommendations": recommendations,
+    "current_recommendation_index": 0,
+    "total_recommendations": len(recommendations),
 
-        "recommendation_count": (
-            recommendation_intro["count"]
-        ),
+    "current_recommendation": current_recommendation,
+    "recommendations": recommendations,
 
-        "informational_observations": (
-            informational_observations
-        ),
+    "recommendation_count": (
+        recommendation_intro["count"]
+    ),
 
-        "observations": observations
-    }
+    "informational_observations":
+        informational_observations,
+
+    "observations": observations
+}
+
 
 def build_action_cards(
     dashboard,

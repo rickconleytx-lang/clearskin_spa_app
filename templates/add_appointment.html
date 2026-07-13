@@ -58,6 +58,9 @@
                 {{ client[2] }}, {{ client[1] }}
             </option>
         {% endfor %}
+
+
+
     </select>
 
     {% if prefill_service_name %}
@@ -70,15 +73,43 @@
         Service<span style="color: red;"> *</span>
     </label>
 
-    <select name="service_type_id" id="service_type_id" required>
+
+    <select id="service_type_id"
+        name="service_type_id"
+        onchange="populateServiceDetails()"
+        required>
+
         <option value="">Select Service</option>
 
         {% for service in service_types %}
-            <option value="{{ service[0] }}">
+            <option value="{{ service[0] }}"
+                    data-service-name="{{ service[1] }}"
+                    data-duration="{{ service[2] or '' }}"
+                    data-price="{{ service[3] if service[3] is not none else '' }}">
+
                 {{ service[1] }}
+
+                {% if service[2] is not none %}
+                    — {{ service[2] }} minutes
+                {% endif %}
+
+                {% if service[3] is not none %}
+                    — ${{ '%.2f'|format(service[3]) }}
+                {% endif %}
             </option>
         {% endfor %}
     </select>
+
+    <label for="service_type">
+        Service Type<span style="color: red;"> *</span>
+    </label>
+
+    <input type="text"
+        id="service_type"
+        name="service_type"
+        value="{{ service_type or '' }}"
+        required>
+
 
     <label for="duration_minutes">
         Session Length<span style="color: red;"> *</span>
@@ -135,6 +166,10 @@
     </select>
     
    
+
+
+
+
     {# REVIEW LATER:
     <label for="square_appointment_id">Square Appointment ID</label>
     <input type="text" id="square_appointment_id" name="square_appointment_id">
@@ -153,4 +188,32 @@
         <a href="{{ url_for('client_management') }}" class="btn">Cancel</a>
     {% endif %}
 </form>
+
+<script>
+function populateServiceDetails() {
+    const dropdown = document.getElementById("service_type_id");
+    const selectedOption = dropdown.options[dropdown.selectedIndex];
+
+    const serviceTypeField = document.getElementById("service_type");
+    const durationField = document.getElementById("duration_minutes");
+    const priceField = document.getElementById("price_at_booking");
+
+    if (!selectedOption.value) {
+        serviceTypeField.value = "";
+        durationField.value = "";
+        priceField.value = "";
+        return;
+    }
+
+    serviceTypeField.value =
+        selectedOption.dataset.serviceName || "";
+
+    durationField.value =
+        selectedOption.dataset.duration || "";
+
+    priceField.value =
+        selectedOption.dataset.price || "";
+}
+</script>
+
 {% endblock %}
