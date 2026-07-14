@@ -8094,10 +8094,7 @@ def feedback():
 
             conn.commit()
 
-            print("FEEDBACK ROUTE HIT")
-            print("REQUEST METHOD:", request.method)
-            print("ABOUT TO CHECK EMAIL ALERT")
-
+          
             if severity == "High":
                 try:
                     response = send_email(
@@ -20111,12 +20108,15 @@ def expense_report():
 #         EDIT EXPENSES
 #  good 4/27/26
 #  ------------------------------------------
-            
+
+
+
 @app.route("/expenses/edit/<int:expense_id>", methods=["GET", "POST"])
 @login_required
-@spa_required 
+@spa_required
 def edit_expense(expense_id):
     spa_id = current_spa_id()
+
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -20140,8 +20140,8 @@ def edit_expense(expense_id):
                 payment_method = %s,
                 receipt_file = %s,
                 notes = %s
-            WHERE spa_id =%s
-               AND expense_id = %s
+            WHERE spa_id = %s
+              AND expense_id = %s
         """, (
             expense_date,
             vendor_name,
@@ -20151,8 +20151,20 @@ def edit_expense(expense_id):
             payment_method,
             receipt_file,
             notes,
+            spa_id,
             expense_id
         ))
+
+        if cur.rowcount == 0:
+            conn.rollback()
+            cur.close()
+            conn.close()
+
+            flash(
+                "Expense not found or not authorized.",
+                "error"
+            )
+            return redirect(url_for("expenses_home"))
 
         conn.commit()
         cur.close()
@@ -20174,24 +20186,41 @@ def edit_expense(expense_id):
             notes,
             created_at
         FROM expenses
-        WHERE spa_id =%s
-           AND expense_id = %s
-    """, (expense_id,))
+        WHERE spa_id = %s
+          AND expense_id = %s
+    """, (
+        spa_id,
+        expense_id
+    ))
+
     expense = cur.fetchone()
 
     if not expense:
         cur.close()
         conn.close()
+
         flash("Expense not found.", "error")
         return redirect(url_for("expenses_home"))
 
-    cur.execute("SELECT vendors_name FROM vendor_name ORDER BY vendors_name ASC")
+    cur.execute("""
+        SELECT vendors_name
+        FROM vendor_name
+        ORDER BY vendors_name ASC
+    """)
     vendors = cur.fetchall()
 
-    cur.execute("SELECT expense_cat_name FROM expense_categories ORDER BY expense_cat_name ASC")
+    cur.execute("""
+        SELECT expense_cat_name
+        FROM expense_categories
+        ORDER BY expense_cat_name ASC
+    """)
     categories = cur.fetchall()
 
-    cur.execute("SELECT payment_method FROM payment_methods ORDER BY payment_method ASC")
+    cur.execute("""
+        SELECT payment_method
+        FROM payment_methods
+        ORDER BY payment_method ASC
+    """)
     payment_methods = cur.fetchall()
 
     cur.close()
@@ -20203,7 +20232,10 @@ def edit_expense(expense_id):
         vendors=vendors,
         categories=categories,
         payment_methods=payment_methods
-    )    
+    )
+
+
+
 
 
 #  ------------------------------------------

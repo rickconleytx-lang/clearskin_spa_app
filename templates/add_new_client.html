@@ -86,17 +86,6 @@
         <input type="text" name="zip" value="{{ step1_data.get('zip', '') }}">
     </p>
 
-        <label>Current Location:</label><br>
-        <select name="spa_location_id">
-            <option value="">Select Location</option>
-            {% for location in locations %}
-                <option value="{{ location[0] }}"
-                    {% if step1_data.get('spa_location_id', '')|string == location[0]|string %}selected{% endif %}>
-                    {{ location[1] }}
-                </option>
-            {% endfor %}
-        </select>   
-    </p>
     
     <p>
         <label>Preferred Location:</label><br>
@@ -159,7 +148,25 @@
             OK to Call
         </label>
         <br>
-       
+    
+         <button type="submit" name="action" value="next">
+            Next Page
+        </button>
+
+        <button type="submit" name="action" value="save">
+            Save Client
+        </button>
+
+        <button type="reset"
+                onclick="return confirm('Are you sure you want to clear this form?')">
+            Clear Form
+        </button>
+
+        <a href="{{ url_for('cancel_new_client') }}" class="btn cancel-btn"
+           onclick="return confirm('Are you sure you want to cancel? Any unsaved information will be lost.')">
+            Cancel
+        </a>
+
         
     <div class="info-box" style="margin:15px 0; padding:12px; border:1px solid #ccc; background:#f8f8f8;">
         <strong>SMS and Email Consent Notice</strong><br>
