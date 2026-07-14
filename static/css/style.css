@@ -3251,3 +3251,65 @@ td:nth-child(3) {
     font-size: 10px;
     font-weight: 600;
 }
+
+.schedule-description {
+    margin-top: 12px;
+    padding: 10px 12px;
+    background: #f7f7f7;
+    border-radius: 6px;
+    font-size: 0.95rem;
+}
+
+.schedule-preview {
+    margin-top: 18px;
+}
+
+.schedule-preview h3 {
+    margin-bottom: 10px;
+    font-size: 1rem;
+}
+
+.schedule-preview-dates {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.schedule-preview-date {
+    padding: 7px 10px;
+    border: 1px solid #d8d8d8;
+    border-radius: 6px;
+    background: #ffffff;
+    font-size: 0.9rem;
+}
+
+.processing-options {
+    display: grid;
+    gap: 12px;
+}
+
+.processing-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid #dddddd;
+    border-radius: 7px;
+    cursor: pointer;
+}
+
+.processing-option input {
+    margin-top: 4px;
+}
+
+.processing-option-title {
+    display: block;
+    font-weight: 600;
+}
+
+.processing-option-description {
+    display: block;
+    margin-top: 3px;
+    font-size: 0.9rem;
+    color: #666666;
+}

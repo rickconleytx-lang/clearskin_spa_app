@@ -1,0 +1,531 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page_title }} | Peach Suite Pro{% endblock %}
+
+{% block content %}
+
+<div class="page-header-row">
+    <div>
+        <h1>{{ page_title }}</h1>
+
+        <p class="page-subtitle">
+            Schedule a repeating expense or reminder.
+        </p>
+    </div>
+
+    <div>
+        <a href="{{ url_for('automatic_expenses') }}"
+           class="btn">
+            Back to Recurring Expenses
+        </a>
+    </div>
+</div>
+
+<form method="POST"
+      action="{{ form_action }}"
+      id="recurring-expense-form">
+
+    <div class="form-card">
+        <h2>Expense Information</h2>
+
+        <div class="form-grid">
+
+            <div class="form-group">
+                <label for="expense_name">
+                    Expense Name
+                    <span class="required">*</span>
+                </label>
+
+                <input type="text"
+                       id="expense_name"
+                       name="expense_name"
+                       value="{{ form_data.expense_name }}"
+                       maxlength="100"
+                       required
+                       placeholder="Example: Spa Room Rent">
+            </div>
+
+            <div class="form-group">
+                <label for="vendor_name">
+                    Vendor
+                </label>
+
+                <input type="text"
+                       id="vendor_name"
+                       name="vendor_name"
+                       value="{{ form_data.vendor_name }}"
+                       maxlength="100"
+                       placeholder="Example: Salon Suites">
+            </div>
+
+            <div class="form-group">
+                <label for="expense_cat_id">
+                    Expense Category
+                    <span class="required">*</span>
+                </label>
+
+                <select id="expense_cat_id"
+                        name="expense_cat_id"
+                        required>
+
+                    <option value="">
+                        Select Expense Category
+                    </option>
+
+                    {% for category in expense_categories %}
+                        <option value="{{ category[0] }}"
+                            {% if form_data.expense_cat_id|string
+                                  == category[0]|string %}
+                                selected
+                            {% endif %}>
+                            {{ category[1] }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="payment_method_id">
+                    Payment Method
+                </label>
+
+                <select id="payment_method_id"
+                        name="payment_method_id">
+
+                    <option value="">
+                        Select Payment Method
+                    </option>
+
+                    {% for method in payment_methods %}
+                        <option value="{{ method[0] }}"
+                            {% if form_data.payment_method_id|string
+                                  == method[0]|string %}
+                                selected
+                            {% endif %}>
+                            {{ method[1] }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="amount">
+                    Amount
+                    <span class="required">*</span>
+                </label>
+
+                <input type="number"
+                       id="amount"
+                       name="amount"
+                       value="{{ form_data.amount }}"
+                       min="0.01"
+                       step="0.01"
+                       required
+                       placeholder="0.00">
+            </div>
+
+        </div>
+    </div>
+
+    <div class="form-card">
+        <h2>Schedule</h2>
+
+        <div class="form-grid">
+
+            <div class="form-group">
+                <label for="frequency">
+                    Frequency
+                    <span class="required">*</span>
+                </label>
+
+                <select id="frequency"
+                        name="frequency"
+                        required>
+
+                    <option value="">
+                        Select Frequency
+                    </option>
+
+                    <option value="weekly"
+                        {% if form_data.frequency == "weekly" %}
+                            selected
+                        {% endif %}>
+                        Weekly
+                    </option>
+
+                    <option value="monthly"
+                        {% if form_data.frequency == "monthly" %}
+                            selected
+                        {% endif %}>
+                        Monthly
+                    </option>
+
+                    <option value="quarterly"
+                        {% if form_data.frequency == "quarterly" %}
+                            selected
+                        {% endif %}>
+                        Quarterly
+                    </option>
+
+                    <option value="annual"
+                        {% if form_data.frequency == "annual" %}
+                            selected
+                        {% endif %}>
+                        Annual
+                    </option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="start_date">
+                    Start Date
+                    <span class="required">*</span>
+                </label>
+
+                <input type="date"
+                       id="start_date"
+                       name="start_date"
+                       value="{{ form_data.start_date }}"
+                       required>
+            </div>
+
+            <div class="form-group">
+                <label for="end_date">
+                    End Date
+                </label>
+
+                <input type="date"
+                       id="end_date"
+                       name="end_date"
+                       value="{{ form_data.end_date }}">
+
+                <div class="field-help">
+                    Leave blank if the expense does not have an end date.
+                </div>
+            </div>
+
+        </div>
+
+        <div id="schedule-description"
+             class="schedule-description"
+             hidden>
+        </div>
+
+        <div id="schedule-preview"
+             class="schedule-preview"
+             hidden>
+
+            <h3>Upcoming Scheduled Dates</h3>
+
+            <div id="schedule-preview-dates"
+                 class="schedule-preview-dates">
+            </div>
+        </div>
+    </div>
+
+    <div class="form-card">
+        <h2>Processing</h2>
+
+        <div class="processing-options">
+
+            <label class="processing-option">
+                <input type="radio"
+                       name="processing_type"
+                       value="auto_alert"
+                       {% if form_data.processing_type == "auto_alert" %}
+                           checked
+                       {% endif %}>
+
+                <span>
+                    <span class="processing-option-title">
+                        Auto-post + Coach Alert
+                    </span>
+
+                    <span class="processing-option-description">
+                        Peach Suite Pro posts the expense and Coach
+                        reports that it was completed.
+                    </span>
+                </span>
+            </label>
+
+            <label class="processing-option">
+                <input type="radio"
+                       name="processing_type"
+                       value="auto_silent"
+                       {% if form_data.processing_type == "auto_silent" %}
+                           checked
+                       {% endif %}>
+
+                <span>
+                    <span class="processing-option-title">
+                        Auto-post Silently
+                    </span>
+
+                    <span class="processing-option-description">
+                        Peach Suite Pro posts the expense without
+                        adding a Coach alert.
+                    </span>
+                </span>
+            </label>
+
+            <label class="processing-option">
+                <input type="radio"
+                       name="processing_type"
+                       value="reminder_only"
+                       {% if form_data.processing_type == "reminder_only" %}
+                           checked
+                       {% endif %}>
+
+                <span>
+                    <span class="processing-option-title">
+                        Reminder Only
+                    </span>
+
+                    <span class="processing-option-description">
+                        Coach reminds the owner, but the expense is
+                        posted manually.
+                    </span>
+                </span>
+            </label>
+
+        </div>
+    </div>
+
+    <div class="form-card">
+        <h2>Details</h2>
+
+        <div class="form-group">
+            <label for="description">
+                Description
+            </label>
+
+            <textarea id="description"
+                      name="description"
+                      rows="3"
+                      placeholder="Optional description">{{ form_data.description }}</textarea>
+        </div>
+
+        <div class="form-group">
+            <label for="notes">
+                Notes
+            </label>
+
+            <textarea id="notes"
+                      name="notes"
+                      rows="4"
+                      placeholder="Internal notes">{{ form_data.notes }}</textarea>
+        </div>
+    </div>
+
+    <div class="form-actions">
+        <button type="submit"
+                class="btn btn-primary">
+            {{ submit_label }}
+        </button>
+
+        <a href="{{ url_for('automatic_expenses') }}"
+           class="btn">
+            Cancel
+        </a>
+    </div>
+
+</form>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const frequencyField = document.getElementById("frequency");
+    const startDateField = document.getElementById("start_date");
+    const endDateField = document.getElementById("end_date");
+    const descriptionBox = document.getElementById("schedule-description");
+    const previewBox = document.getElementById("schedule-preview");
+    const previewDates = document.getElementById("schedule-preview-dates");
+
+    if (
+        !frequencyField ||
+        !startDateField ||
+        !endDateField ||
+        !descriptionBox ||
+        !previewBox ||
+        !previewDates
+    ) {
+        console.error("Recurring expense preview fields were not found.");
+        return;
+    }
+
+    function parseLocalDate(value) {
+        if (!value) {
+            return null;
+        }
+
+        const parts = value.split("-");
+
+        return new Date(
+            Number(parts[0]),
+            Number(parts[1]) - 1,
+            Number(parts[2])
+        );
+    }
+
+    function formatDate(dateValue) {
+        return dateValue.toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric"
+        });
+    }
+
+    function addMonths(originalDate, months) {
+        const originalDay = originalDate.getDate();
+
+        const result = new Date(
+            originalDate.getFullYear(),
+            originalDate.getMonth() + months,
+            1
+        );
+
+        const lastDay = new Date(
+            result.getFullYear(),
+            result.getMonth() + 1,
+            0
+        ).getDate();
+
+        result.setDate(
+            Math.min(originalDay, lastDay)
+        );
+
+        return result;
+    }
+
+    function getOccurrence(startDate, frequency, index) {
+        if (frequency === "weekly") {
+            const result = new Date(startDate);
+
+            result.setDate(
+                result.getDate() + (index * 7)
+            );
+
+            return result;
+        }
+
+        if (frequency === "monthly") {
+            return addMonths(startDate, index);
+        }
+
+        if (frequency === "quarterly") {
+            return addMonths(startDate, index * 3);
+        }
+
+        if (frequency === "annual") {
+            return addMonths(startDate, index * 12);
+        }
+
+        return null;
+    }
+
+    function getScheduleDescription(startDate, frequency) {
+        const weekday = startDate.toLocaleDateString(
+            "en-US",
+            { weekday: "long" }
+        );
+
+        const month = startDate.toLocaleDateString(
+            "en-US",
+            { month: "long" }
+        );
+
+        const day = startDate.getDate();
+
+        if (frequency === "weekly") {
+            return `Occurs every ${weekday}.`;
+        }
+
+        if (frequency === "monthly") {
+            return `Occurs on day ${day} of each month.`;
+        }
+
+        if (frequency === "quarterly") {
+            return `Occurs every three months beginning ${month} ${day}.`;
+        }
+
+        if (frequency === "annual") {
+            return `Occurs every year on ${month} ${day}.`;
+        }
+
+        return "";
+    }
+
+    function updateSchedulePreview() {
+        const frequency = frequencyField.value;
+        const startDate = parseLocalDate(startDateField.value);
+        const endDate = parseLocalDate(endDateField.value);
+
+        previewDates.innerHTML = "";
+
+        if (!frequency || !startDate) {
+            descriptionBox.style.display = "none";
+            previewBox.style.display = "none";
+            return;
+        }
+
+        descriptionBox.textContent =
+            getScheduleDescription(
+                startDate,
+                frequency
+            );
+
+        descriptionBox.style.display = "block";
+
+        let addedDates = 0;
+
+        for (let index = 0; index < 5; index += 1) {
+            const occurrence = getOccurrence(
+                startDate,
+                frequency,
+                index
+            );
+
+            if (
+                endDate &&
+                occurrence > endDate
+            ) {
+                break;
+            }
+
+            const item = document.createElement("div");
+
+            item.className = "schedule-preview-date";
+            item.textContent = formatDate(occurrence);
+
+            previewDates.appendChild(item);
+            addedDates += 1;
+        }
+
+        if (addedDates === 0) {
+            previewDates.textContent =
+                "No scheduled dates fall within this date range.";
+        }
+
+        previewBox.style.display = "block";
+    }
+
+    frequencyField.addEventListener(
+        "change",
+        updateSchedulePreview
+    );
+
+    startDateField.addEventListener(
+        "change",
+        updateSchedulePreview
+    );
+
+    endDateField.addEventListener(
+        "change",
+        updateSchedulePreview
+    );
+
+    updateSchedulePreview();
+});
+</script>
+
+
+{% endblock %}

@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}Automatic Expenses | Peach Suite Pro{% endblock %}
+
+{% block content %}
+
+<div class="page-header-row">
+    <div>
+        <h1> 📆 Recurring Expenses</h1>
+        <p class="page-subtitle">
+            Manage recurring business expenses and scheduled reminders.
+        </p>
+    </div>
+
+    <div>
+        <a href="{{ url_for('add_automatic_expense') }}" class="btn">
+            Add Automatic Expense
+        </a>
+    </div>
+</div>
+
+{% if automatic_expenses %}
+
+    <div class="command-card-list">
+
+    {% for expense in automatic_expenses %}
+
+        Command Card
+
+    {% endfor %}
+
+</div>
+
+{% else %}
+
+    <div class="empty-state">
+        <h2>No Automatic Expenses Yet</h2>
+
+        <p>
+            Add recurring rent, subscriptions, insurance, and other repeating
+            business expenses.
+        </p>
+
+        <a href="{{ url_for('reports') }}" class="btn">
+            Add Automatic Expense
+        </a>
+    </div>
+
+{% endif %}
+
+{% endblock %}

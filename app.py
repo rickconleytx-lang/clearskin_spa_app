@@ -6,7 +6,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from q_launch_registry import Q_LAUNCH_ITEMS
 from services.coach import build_coach, build_action_cards
 import os
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 import time
 import csv
 import io
@@ -1391,6 +1391,7 @@ def get_client_statuses(spa_id):
 #
 ##################################
 
+
 def get_email_eligible_clients(
     spa_id,
     search="",
@@ -1399,7 +1400,9 @@ def get_email_eligible_clients(
 ):
     clients = []
 
-    if not search and not show_all:
+    # Allow a status selection to load clients even when
+    # there is no search and Show All was not selected.
+    if not search and not show_all and not client_status:
         return clients
 
     conn = get_db_connection()
@@ -1414,11 +1417,11 @@ def get_email_eligible_clients(
             cs.status_name
         FROM clients c
         LEFT JOIN client_statuses cs
-            ON c.client_status = cs.status_name
+            ON TRIM(c.client_status) = TRIM(cs.status_name)
+           AND cs.spa_id = c.spa_id
         WHERE c.spa_id = %s
           AND c.email_opt_in = TRUE
           AND COALESCE(c.email_opt_out, FALSE) = FALSE
-          AND c.active_client = TRUE
           AND c.email IS NOT NULL
           AND TRIM(c.email) <> ''
     """
@@ -1434,28 +1437,33 @@ def get_email_eligible_clients(
           )
         """
 
+        search_value = f"%{search.lower()}%"
+
         params.extend([
-            f"%{search.lower()}%",
-            f"%{search.lower()}%",
-            f"%{search.lower()}%"
+            search_value,
+            search_value,
+            search_value
         ])
 
     if client_status:
-        query += " AND c.client_status = %s"
+        query += """
+          AND cs.client_status_id = %s
+        """
         params.append(client_status)
 
-    query += " ORDER BY c.last_name, c.first_name"
+    query += """
+        ORDER BY
+            c.last_name,
+            c.first_name
+    """
 
     cur.execute(query, params)
-
     clients = cur.fetchall()
 
     cur.close()
     conn.close()
 
     return clients
-
-
 
 
 #################################
@@ -11957,6 +11965,21 @@ def send_gift_certificate_email(gift_cert_id):
 def general_email():
     spa_id = current_spa_id()
 
+    search = request.args.get(
+        "search",
+        ""
+    ).strip()
+
+    show_all = request.args.get("show_all")
+
+    filter_status = request.args.get("filter_status")
+
+    client_status_id = request.args.get(
+        "client_status",
+        ""
+    ).strip()
+
+
     if not sms_email_terms_accepted(spa_id):
         flash(
             "You must accept the SMS and Email Terms and Conditions before using messaging features.",
@@ -11964,39 +11987,73 @@ def general_email():
         )
         return redirect(url_for("sms_email_terms"))
 
+    template_type = request.args.get(
+        "template_type",
+        ""
+    )
 
-    template_type = request.args.get("template_type", "")
-    template_id = request.args.get("template_id", "")
-    search = request.args.get("search", "").strip()
+    template_id = request.args.get(
+        "template_id",
+        ""
+    )
+
+    search = request.args.get(
+        "search",
+        ""
+    ).strip()
+
     show_all = request.args.get("show_all")
-    client_status_id = request.args.get("client_status", "")
+
+    client_status_id = request.args.get(
+        "client_status",
+        ""
+    ).strip()
+
+    if client_status_id:
+        try:
+            client_status_id = int(client_status_id)
+
+        except ValueError:
+            client_status_id = ""
+    else:
+        client_status_id = ""
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    template_types = get_active_messaging_template_types(spa_id, "email")
-    templates = get_active_messaging_templates(spa_id, "email")
-
-
-    # Get client statuses for dropdown
-    cur.execute("""
-        SELECT client_status_id, status_name
-        FROM client_statuses
-        WHERE spa_id = %s
-        ORDER BY status_name
-    """, (spa_id,))
-    client_statuses = cur.fetchall()
-
- 
- 
-    # Search clients
-    clients = get_email_eligible_clients(
-        spa_id=spa_id,
-        search=search,
-        client_status=client_status_id,
-        show_all=show_all
+    template_types = get_active_messaging_template_types(
+        spa_id,
+        "email"
     )
 
+    templates = get_active_messaging_templates(
+        spa_id,
+        "email"
+    )
+
+    # Get active client statuses for the dropdown.
+    cur.execute("""
+        SELECT
+            client_status_id,
+            status_name
+        FROM client_statuses
+        WHERE spa_id = %s
+          AND is_active = TRUE
+        ORDER BY status_name
+    """, (spa_id,))
+
+    client_statuses = cur.fetchall()
+
+    clients = get_email_eligible_clients(
+        spa_id=spa_id,
+        search=search if not show_all else "",
+        client_status=(
+            client_status_id
+            if filter_status
+            else ""
+        ),
+        show_all=bool(show_all)
+    )
 
     cur.close()
     conn.close()
@@ -12013,7 +12070,6 @@ def general_email():
         client_statuses=client_statuses,
         client_status_id=client_status_id
     )
-
 
 
 
@@ -20505,6 +20561,979 @@ def export_expense_report_xlsx():
         download_name=filename,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
+
+
+
+
+################################
+#
+#   AUTOMATIC EXPENSES
+#
+#
+################################
+
+
+
+@app.route("/automatic-expenses")
+@login_required
+@spa_required
+def automatic_expenses():
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            ae.automatic_expense_id,          -- 0
+            ae.expense_name,                  -- 1
+            ae.vendor_name,                   -- 2
+            ec.expense_cat_name,              -- 3
+            ae.amount,                        -- 4
+            ae.frequency,                     -- 5
+            ae.next_post_date,                -- 6
+            ae.last_processed_date,           -- 7
+            ae.processing_type,               -- 8
+            ae.is_active,                     -- 9
+            ae.skip_next_occurrence,           -- 10
+            ae.skipped_occurrence_date,        -- 11
+            ae.last_error_message,             -- 12
+            ae.last_error_at,                  -- 13
+            ae.last_success_at,                -- 14
+            pm.payment_method                  -- 15
+        FROM automatic_expenses ae
+        LEFT JOIN expense_categories ec
+            ON ae.expense_cat_id = ec.expense_cat_id
+           AND ec.spa_id = ae.spa_id
+        LEFT JOIN payment_methods pm
+            ON ae.payment_method_id = pm.payment_method_id
+           AND pm.spa_id = ae.spa_id
+        WHERE ae.spa_id = %s
+        ORDER BY
+            ae.is_active DESC,
+            ae.next_post_date ASC,
+            ae.expense_name ASC
+    """, (spa_id,))
+
+    automatic_expense_rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    automatic_expense_list = []
+
+    spa_now = get_spa_now(spa_id)
+    today = spa_now.date()
+    now_time = spa_now.time()
+
+
+    annual_multipliers = {
+        "weekly": 52,
+        "monthly": 12,
+        "quarterly": 4,
+        "annual": 1,
+    }
+
+    for row in automatic_expense_rows:
+        amount = row[4] or 0
+        frequency = row[5]
+        next_post_date = row[6]
+        is_active = row[9]
+        skip_next = row[10]
+        last_error_message = row[12]
+
+        annual_total = amount * annual_multipliers.get(frequency, 0)
+
+        if not is_active:
+            status = "Inactive"
+            status_class = "inactive"
+        elif last_error_message:
+            status = "Processing Failed"
+            status_class = "failed"
+        elif next_post_date and next_post_date < today:
+            status = "Past Due"
+            status_class = "past-due"
+        elif next_post_date == today:
+            status = "Due Today"
+            status_class = "due-today"
+        elif skip_next:
+            status = "Next Occurrence Skipped"
+            status_class = "skipped"
+        else:
+            status = "On Schedule"
+            status_class = "on-schedule"
+
+        processing_labels = {
+            "auto_alert": "Auto-post + Coach Alert",
+            "auto_silent": "Auto-post Silently",
+            "reminder_only": "Reminder Only",
+        }
+
+        automatic_expense_list.append({
+            "automatic_expense_id": row[0],
+            "expense_name": row[1],
+            "vendor_name": row[2],
+            "expense_category": row[3],
+            "amount": amount,
+            "frequency": frequency,
+            "next_post_date": next_post_date,
+            "last_processed_date": row[7],
+            "processing_type": row[8],
+            "processing_label": processing_labels.get(
+                row[8],
+                row[8]
+            ),
+            "is_active": is_active,
+            "skip_next_occurrence": skip_next,
+            "skipped_occurrence_date": row[11],
+            "last_error_message": last_error_message,
+            "last_error_at": row[13],
+            "last_success_at": row[14],
+            "payment_method": row[15],
+            "estimated_annual_total": annual_total,
+            "status": status,
+            "status_class": status_class,
+        })
+
+    return render_template(
+        "automatic_expenses.html",
+        automatic_expenses=automatic_expense_list,
+        today=today
+    )
+
+
+
+
+
+
+
+################################
+#
+#   ADD AUTOMATIC EXPENSES
+#
+################################
+
+
+
+@app.route("/automatic-expenses/add", methods=["GET", "POST"])
+@login_required
+@spa_required
+def add_automatic_expense():
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Load tenant-safe dropdown values.
+    cur.execute("""
+        SELECT
+            expense_cat_id,
+            expense_cat_name
+        FROM expense_categories
+        WHERE spa_id = %s
+          AND is_active = TRUE
+        ORDER BY expense_cat_name
+    """, (spa_id,))
+    expense_categories = cur.fetchall()
+
+    cur.execute("""
+        SELECT
+            payment_method_id,
+            payment_method
+        FROM payment_methods
+        WHERE spa_id = %s
+          AND is_active = TRUE
+        ORDER BY payment_method
+    """, (spa_id,))
+    payment_methods = cur.fetchall()
+
+    form_data = {
+        "expense_name": "",
+        "vendor_name": "",
+        "expense_cat_id": "",
+        "payment_method_id": "",
+        "amount": "",
+        "frequency": "",
+        "start_date": "",
+        "end_date": "",
+        "processing_type": "auto_alert",
+        "description": "",
+        "notes": "",
+    }
+
+    if request.method == "POST":
+        form_data = {
+            "expense_name": request.form.get(
+                "expense_name",
+                ""
+            ).strip(),
+
+            "vendor_name": request.form.get(
+                "vendor_name",
+                ""
+            ).strip(),
+
+            "expense_cat_id": request.form.get(
+                "expense_cat_id",
+                ""
+            ).strip(),
+
+            "payment_method_id": request.form.get(
+                "payment_method_id",
+                ""
+            ).strip(),
+
+            "amount": request.form.get(
+                "amount",
+                ""
+            ).strip(),
+
+            "frequency": request.form.get(
+                "frequency",
+                ""
+            ).strip().lower(),
+
+            "start_date": request.form.get(
+                "start_date",
+                ""
+            ).strip(),
+
+            "end_date": request.form.get(
+                "end_date",
+                ""
+            ).strip(),
+
+            "processing_type": request.form.get(
+                "processing_type",
+                ""
+            ).strip().lower(),
+
+            "description": request.form.get(
+                "description",
+                ""
+            ).strip(),
+
+            "notes": request.form.get(
+                "notes",
+                ""
+            ).strip(),
+        }
+
+        errors = []
+
+        allowed_frequencies = {
+            "weekly",
+            "monthly",
+            "quarterly",
+            "annual",
+        }
+
+        allowed_processing_types = {
+            "auto_alert",
+            "auto_silent",
+            "reminder_only",
+        }
+
+        if not form_data["expense_name"]:
+            errors.append("Expense Name is required.")
+
+        if not form_data["expense_cat_id"]:
+            errors.append("Expense Category is required.")
+
+        if form_data["frequency"] not in allowed_frequencies:
+            errors.append("Select a valid frequency.")
+
+        if form_data["processing_type"] not in allowed_processing_types:
+            errors.append("Select a valid processing option.")
+
+        amount = None
+
+        try:
+            amount = Decimal(form_data["amount"])
+
+            if amount <= 0:
+                errors.append("Amount must be greater than zero.")
+
+        except (InvalidOperation, TypeError):
+            errors.append("Enter a valid amount.")
+
+        start_date = None
+        end_date = None
+
+        try:
+            start_date = date.fromisoformat(
+                form_data["start_date"]
+            )
+        except (TypeError, ValueError):
+            errors.append("Start Date is required.")
+
+        if form_data["end_date"]:
+            try:
+                end_date = date.fromisoformat(
+                    form_data["end_date"]
+                )
+            except (TypeError, ValueError):
+                errors.append("Enter a valid End Date.")
+
+        if (
+            start_date
+            and end_date
+            and end_date < start_date
+        ):
+            errors.append(
+                "End Date cannot be before Start Date."
+            )
+
+        expense_cat_id = None
+
+        if form_data["expense_cat_id"]:
+            try:
+                expense_cat_id = int(
+                    form_data["expense_cat_id"]
+                )
+            except ValueError:
+                errors.append(
+                    "Select a valid expense category."
+                )
+
+        payment_method_id = None
+
+        if form_data["payment_method_id"]:
+            try:
+                payment_method_id = int(
+                    form_data["payment_method_id"]
+                )
+            except ValueError:
+                errors.append(
+                    "Select a valid payment method."
+                )
+
+        # Confirm the category belongs to this business.
+        if expense_cat_id is not None:
+            cur.execute("""
+                SELECT 1
+                FROM expense_categories
+                WHERE expense_cat_id = %s
+                  AND spa_id = %s
+                  AND is_active = TRUE
+            """, (
+                expense_cat_id,
+                spa_id,
+            ))
+
+            if cur.fetchone() is None:
+                errors.append(
+                    "The selected expense category is not available."
+                )
+
+        # Confirm the payment method belongs to this business.
+        if payment_method_id is not None:
+            cur.execute("""
+                SELECT 1
+                FROM payment_methods
+                WHERE payment_method_id = %s
+                  AND spa_id = %s
+                  AND is_active = TRUE
+            """, (
+                payment_method_id,
+                spa_id,
+            ))
+
+            if cur.fetchone() is None:
+                errors.append(
+                    "The selected payment method is not available."
+                )
+
+        if errors:
+            for error in errors:
+                flash(error, "error")
+
+            cur.close()
+            conn.close()
+
+            return render_template(
+                "add_automatic_expense.html",
+                expense_categories=expense_categories,
+                payment_methods=payment_methods,
+                form_data=form_data,
+                page_title="Add Recurring Expense",
+                form_action=url_for("add_automatic_expense"),
+                submit_label="Save Recurring Expense",
+                is_edit=False
+            )
+
+        try:
+            cur.execute("""
+                INSERT INTO automatic_expenses (
+                    spa_id,
+                    expense_name,
+                    vendor_name,
+                    expense_cat_id,
+                    payment_method_id,
+                    amount,
+                    description,
+                    notes,
+                    frequency,
+                    start_date,
+                    end_date,
+                    next_post_date,
+                    processing_type,
+                    is_active
+                )
+                VALUES (
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, TRUE
+                )
+                RETURNING automatic_expense_id
+            """, (
+                spa_id,
+                form_data["expense_name"],
+                form_data["vendor_name"] or None,
+                expense_cat_id,
+                payment_method_id,
+                amount,
+                form_data["description"] or None,
+                form_data["notes"] or None,
+                form_data["frequency"],
+                start_date,
+                end_date,
+                start_date,
+                form_data["processing_type"],
+            ))
+
+            automatic_expense_id = cur.fetchone()[0]
+
+            conn.commit()
+
+        except Exception:
+            conn.rollback()
+            cur.close()
+            conn.close()
+
+            app.logger.exception(
+                "Failed to add recurring expense."
+            )
+
+            flash(
+                "The recurring expense could not be saved.",
+                "error"
+            )
+
+            return render_template(
+                "add_automatic_expense.html",
+                expense_categories=expense_categories,
+                payment_methods=payment_methods,
+                form_data=form_data,
+                page_title="Add Recurring Expense",
+                form_action=url_for("add_automatic_expense"),
+                submit_label="Save Recurring Expense",
+                is_edit=False
+            )
+
+        cur.close()
+        conn.close()
+
+        flash(
+            "Recurring expense added successfully.",
+            "success"
+        )
+
+        return redirect(
+            url_for("automatic_expenses")
+        )
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "add_automatic_expense.html",
+        expense_categories=expense_categories,
+        payment_methods=payment_methods,
+        form_data=form_data,
+        page_title="Add Recurring Expense",
+        form_action=url_for("add_automatic_expense"),
+        submit_label="Save Recurring Expense",
+        is_edit=False
+    )
+
+
+
+
+
+
+
+
+
+
+
+################################
+#
+#   EDIT AUTOMATIN EXPENSE
+#
+################################
+
+
+
+@app.route(
+    "/automatic-expenses/<int:automatic_expense_id>/edit",
+    methods=["GET", "POST"]
+)
+@login_required
+@spa_required
+def edit_automatic_expense(automatic_expense_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Load the recurring expense tenant-safely.
+    cur.execute("""
+        SELECT
+            automatic_expense_id,       -- 0
+            expense_name,               -- 1
+            vendor_name,                -- 2
+            expense_cat_id,             -- 3
+            payment_method_id,          -- 4
+            amount,                     -- 5
+            frequency,                  -- 6
+            start_date,                 -- 7
+            end_date,                   -- 8
+            next_post_date,             -- 9
+            processing_type,            -- 10
+            description,                -- 11
+            notes,                      -- 12
+            is_active                   -- 13
+        FROM automatic_expenses
+        WHERE automatic_expense_id = %s
+          AND spa_id = %s
+    """, (
+        automatic_expense_id,
+        spa_id,
+    ))
+
+    automatic_expense = cur.fetchone()
+
+    if automatic_expense is None:
+        cur.close()
+        conn.close()
+
+        flash(
+            "Recurring expense not found or not authorized.",
+            "error"
+        )
+
+        return redirect(
+            url_for("automatic_expenses")
+        )
+
+    original_frequency = automatic_expense[6]
+    original_start_date = automatic_expense[7]
+    original_next_post_date = automatic_expense[9]
+
+    # Load tenant-safe dropdown values.
+    cur.execute("""
+        SELECT
+            expense_cat_id,
+            expense_cat_name
+        FROM expense_categories
+        WHERE spa_id = %s
+          AND is_active = TRUE
+        ORDER BY expense_cat_name
+    """, (spa_id,))
+
+    expense_categories = cur.fetchall()
+
+    cur.execute("""
+        SELECT
+            payment_method_id,
+            payment_method
+        FROM payment_methods
+        WHERE spa_id = %s
+          AND is_active = TRUE
+        ORDER BY payment_method
+    """, (spa_id,))
+
+    payment_methods = cur.fetchall()
+
+    form_data = {
+        "expense_name": automatic_expense[1] or "",
+        "vendor_name": automatic_expense[2] or "",
+        "expense_cat_id": automatic_expense[3] or "",
+        "payment_method_id": automatic_expense[4] or "",
+        "amount": automatic_expense[5] or "",
+        "frequency": automatic_expense[6] or "",
+        "start_date": (
+            automatic_expense[7].isoformat()
+            if automatic_expense[7]
+            else ""
+        ),
+        "end_date": (
+            automatic_expense[8].isoformat()
+            if automatic_expense[8]
+            else ""
+        ),
+        "processing_type": automatic_expense[10] or "auto_alert",
+        "description": automatic_expense[11] or "",
+        "notes": automatic_expense[12] or "",
+    }
+
+    if request.method == "POST":
+        form_data = {
+            "expense_name": request.form.get(
+                "expense_name",
+                ""
+            ).strip(),
+
+            "vendor_name": request.form.get(
+                "vendor_name",
+                ""
+            ).strip(),
+
+            "expense_cat_id": request.form.get(
+                "expense_cat_id",
+                ""
+            ).strip(),
+
+            "payment_method_id": request.form.get(
+                "payment_method_id",
+                ""
+            ).strip(),
+
+            "amount": request.form.get(
+                "amount",
+                ""
+            ).strip(),
+
+            "frequency": request.form.get(
+                "frequency",
+                ""
+            ).strip().lower(),
+
+            "start_date": request.form.get(
+                "start_date",
+                ""
+            ).strip(),
+
+            "end_date": request.form.get(
+                "end_date",
+                ""
+            ).strip(),
+
+            "processing_type": request.form.get(
+                "processing_type",
+                ""
+            ).strip().lower(),
+
+            "description": request.form.get(
+                "description",
+                ""
+            ).strip(),
+
+            "notes": request.form.get(
+                "notes",
+                ""
+            ).strip(),
+        }
+
+        errors = []
+
+        allowed_frequencies = {
+            "weekly",
+            "monthly",
+            "quarterly",
+            "annual",
+        }
+
+        allowed_processing_types = {
+            "auto_alert",
+            "auto_silent",
+            "reminder_only",
+        }
+
+        if not form_data["expense_name"]:
+            errors.append("Expense Name is required.")
+
+        if not form_data["expense_cat_id"]:
+            errors.append("Expense Category is required.")
+
+        if form_data["frequency"] not in allowed_frequencies:
+            errors.append("Select a valid frequency.")
+
+        if (
+            form_data["processing_type"]
+            not in allowed_processing_types
+        ):
+            errors.append("Select a valid processing option.")
+
+        amount = None
+
+        try:
+            amount = Decimal(form_data["amount"])
+
+            if amount <= 0:
+                errors.append(
+                    "Amount must be greater than zero."
+                )
+
+        except (InvalidOperation, TypeError):
+            errors.append("Enter a valid amount.")
+
+        start_date = None
+        end_date = None
+
+        try:
+            start_date = date.fromisoformat(
+                form_data["start_date"]
+            )
+
+        except (TypeError, ValueError):
+            errors.append("Start Date is required.")
+
+        if form_data["end_date"]:
+            try:
+                end_date = date.fromisoformat(
+                    form_data["end_date"]
+                )
+
+            except (TypeError, ValueError):
+                errors.append("Enter a valid End Date.")
+
+        if (
+            start_date
+            and end_date
+            and end_date < start_date
+        ):
+            errors.append(
+                "End Date cannot be before Start Date."
+            )
+
+        expense_cat_id = None
+
+        if form_data["expense_cat_id"]:
+            try:
+                expense_cat_id = int(
+                    form_data["expense_cat_id"]
+                )
+
+            except ValueError:
+                errors.append(
+                    "Select a valid expense category."
+                )
+
+        payment_method_id = None
+
+        if form_data["payment_method_id"]:
+            try:
+                payment_method_id = int(
+                    form_data["payment_method_id"]
+                )
+
+            except ValueError:
+                errors.append(
+                    "Select a valid payment method."
+                )
+
+        # Confirm category belongs to this business.
+        if expense_cat_id is not None:
+            cur.execute("""
+                SELECT 1
+                FROM expense_categories
+                WHERE expense_cat_id = %s
+                  AND spa_id = %s
+                  AND is_active = TRUE
+            """, (
+                expense_cat_id,
+                spa_id,
+            ))
+
+            if cur.fetchone() is None:
+                errors.append(
+                    "The selected expense category is not available."
+                )
+
+        # Confirm payment method belongs to this business.
+        if payment_method_id is not None:
+            cur.execute("""
+                SELECT 1
+                FROM payment_methods
+                WHERE payment_method_id = %s
+                  AND spa_id = %s
+                  AND is_active = TRUE
+            """, (
+                payment_method_id,
+                spa_id,
+            ))
+
+            if cur.fetchone() is None:
+                errors.append(
+                    "The selected payment method is not available."
+                )
+
+        if errors:
+            for error in errors:
+                flash(error, "error")
+
+            cur.close()
+            conn.close()
+
+            return render_template(
+                "add_automatic_expense.html",
+                expense_categories=expense_categories,
+                payment_methods=payment_methods,
+                form_data=form_data,
+                page_title="Edit Recurring Expense",
+                form_action=url_for(
+                    "edit_automatic_expense",
+                    automatic_expense_id=automatic_expense_id
+                ),
+                submit_label="Save Changes",
+                is_edit=True
+            )
+
+        schedule_changed = (
+            form_data["frequency"] != original_frequency
+            or start_date != original_start_date
+        )
+
+        if schedule_changed:
+            next_post_date = start_date
+        else:
+            next_post_date = original_next_post_date
+
+        try:
+            cur.execute("""
+                UPDATE automatic_expenses
+                SET
+                    expense_name = %s,
+                    vendor_name = %s,
+                    expense_cat_id = %s,
+                    payment_method_id = %s,
+                    amount = %s,
+                    description = %s,
+                    notes = %s,
+                    frequency = %s,
+                    start_date = %s,
+                    end_date = %s,
+                    next_post_date = %s,
+                    processing_type = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE automatic_expense_id = %s
+                  AND spa_id = %s
+            """, (
+                form_data["expense_name"],
+                form_data["vendor_name"] or None,
+                expense_cat_id,
+                payment_method_id,
+                amount,
+                form_data["description"] or None,
+                form_data["notes"] or None,
+                form_data["frequency"],
+                start_date,
+                end_date,
+                next_post_date,
+                form_data["processing_type"],
+                automatic_expense_id,
+                spa_id,
+            ))
+
+            if cur.rowcount == 0:
+                raise ValueError(
+                    "Recurring expense was not updated."
+                )
+
+            conn.commit()
+
+        except Exception:
+            conn.rollback()
+
+            app.logger.exception(
+                "Failed to edit recurring expense."
+            )
+
+            flash(
+                "The recurring expense could not be updated.",
+                "error"
+            )
+
+            cur.close()
+            conn.close()
+
+            return render_template(
+                "add_automatic_expense.html",
+                expense_categories=expense_categories,
+                payment_methods=payment_methods,
+                form_data=form_data,
+                page_title="Edit Recurring Expense",
+                form_action=url_for(
+                    "edit_automatic_expense",
+                    automatic_expense_id=automatic_expense_id
+                ),
+                submit_label="Save Changes",
+                is_edit=True
+            )
+
+        cur.close()
+        conn.close()
+
+        flash(
+            "Recurring expense updated successfully.",
+            "success"
+        )
+
+        return redirect(
+            url_for("automatic_expenses")
+        )
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "add_automatic_expense.html",
+        expense_categories=expense_categories,
+        payment_methods=payment_methods,
+        form_data=form_data,
+        page_title="Edit Recurring Expense",
+        form_action=url_for(
+            "edit_automatic_expense",
+            automatic_expense_id=automatic_expense_id
+        ),
+        submit_label="Save Changes",
+        is_edit=True
+    )
+
+
+
+
+
+
+
+
+
+################################
+#
+#   
+#
+################################
+
+
+
+################################
+#
+#   
+#
+################################
+
+
+
+
+
+
+
+
+
+
 
 
 

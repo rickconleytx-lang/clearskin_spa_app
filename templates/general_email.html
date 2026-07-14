@@ -89,36 +89,59 @@
 
             </div>
 
-            
-            <label>Client Status</label><br>
-            <select name="client_status">
-                <option value="">All Statuses</option>
+            <form method="GET"
+                action="{{ url_for('general_email') }}">
 
-                {% for status in client_statuses %}
-                    <option value="{{ status[0] }}"
-                        {% if client_status_id and client_status_id|int == status[0] %}selected{% endif %}>
-                        {{ status[1] }}
-                    </option>
-                {% endfor %}
-            </select>
+                <label for="search">Search Clients</label>
+
+                <input type="text"
+                    id="search"
+                    name="search"
+                    value="{{ search }}"
+                    placeholder="Enter client name">
+
+                <button type="submit"
+                        name="search_clients"
+                        value="1"
+                        class="tool-pill">
+                    Search
+                </button>
+
+                <button type="submit"
+                        name="show_all"
+                        value="1"
+                        class="tool-pill">
+                    Show All Clients
+                </button>
+
+                <label for="client_status">Client Status</label>
+
+                <select id="client_status"
+                        name="client_status">
+
+                    <option value="">All Statuses</option>
+
+                    {% for status in client_statuses %}
+                        <option value="{{ status[0] }}"
+                            {% if client_status_id|string == status[0]|string %}
+                                selected
+                            {% endif %}>
+                            {{ status[1] }}
+                        </option>
+                    {% endfor %}
+                </select>
+
+                <button type="submit"
+                        name="filter_status"
+                        value="1"
+                        class="tool-pill">
+                    Filter Status
+                </button>
+
+            </form>
+
 
             <br><br>
-
-            <label>Search Clients</label><br>
-            <input type="text"
-                   name="search"
-                   value="{{ search or '' }}">
-
-            <br><br>
-
-            <button type="submit" class="btn">Search</button>
-
-            <button type="submit"
-                    name="show_all"
-                    value="1"
-                    class="btn">
-                Show All Clients
-            </button>
 
         </form>
 
