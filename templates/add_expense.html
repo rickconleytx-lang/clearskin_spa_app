@@ -8,9 +8,18 @@
 
 <h1>Add Expense</h1>
 
+    <div>
     <button type="submit" class="btn">Save Expense</button>
-    <a class="btn" href="{{ url_for('expenses_home') }}">Cancel</a>
 
+    <a href="{{ url_for('expenses_home') }}" class="tool-pill tool-pill-large">
+        Cancel
+    </a>
+
+    <a href="{{ url_for('add_automatic_expense') }}" class="tool-pill tool-pill-large">
+        Add Recurring Expense
+    </a>
+
+    </div>
 
 <form method="POST" action="{{ url_for('add_expense') }}">
     <div class="form-group">
