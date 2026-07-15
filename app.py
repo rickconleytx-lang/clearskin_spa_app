@@ -8942,7 +8942,7 @@ def parse_godaddy_booking_email(body):
         re.IGNORECASE
     )
 
-    booking["provider_name_at_booking"] = (
+    data["provider_name_at_booking"] = (
         staff_match.group(1).strip()
         if staff_match
         else None
