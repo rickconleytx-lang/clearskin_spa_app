@@ -9497,11 +9497,6 @@ def parse_godaddy_email_body(body):
         booking["duration_minutes"] = None
 
 
-    print(
-        "[GODADDY PARSER] Provider:",
-        booking.get("provider_name_at_booking")
-    )
-
     payment_match = re.search(r"Payment status:\s*(.+)", body)
     booking["payment_status"] = payment_match.group(1).strip() if payment_match else None
 
@@ -9577,7 +9572,11 @@ def booking_email_import():
 def import_godaddy_booking(body, spa_id, subject=""):
     booking = parse_godaddy_booking_email(body)
 
-    
+    print(
+        "[GODADDY IMPORT] Provider:",
+        booking.get("provider_name_at_booking")
+    )
+
 
     price_at_booking = booking.get("subtotal") or booking.get("order_total")
     from datetime import datetime
