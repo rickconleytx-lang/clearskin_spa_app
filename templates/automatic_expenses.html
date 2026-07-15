@@ -6,37 +6,300 @@
 
 <div class="page-header-row">
     <div>
-        <h1> 📆 Recurring Expenses</h1>
+        <h1>📆 Recurring Expenses</h1>
         <p class="page-subtitle">
             Manage recurring business expenses and scheduled reminders.
         </p>
     </div>
 
-    <div>
-        <a href="{{ url_for('add_automatic_expense') }}" class="tool-pill tool-pill-large">
-            Add Automatic Expense
+    <div class="page-tool-pills">
+        <a href="{{ url_for('add_automatic_expense') }}"
+           class="tool-pill tool-pill-large">
+            Add Recurring Expense
         </a>
-        <a href="{{ url_for('expenses_home') }}" class="tool-pill tool-pill-large">
+
+        <a href="{{ url_for('expenses_home') }}"
+           class="tool-pill tool-pill-large">
             Expenses Home
         </a>
     </div>
+</div>
+
+<div class="summary-card-grid">
+
+    <div class="summary-card">
+        <div class="summary-card-title">
+            Active Expenses
+        </div>
+
+        <div class="summary-card-value">
+            {{ summary.active_expenses }}
+        </div>
+    </div>
+
+
+    <div class="summary-card">
+        <div class="summary-card-title">
+            Monthly Total
+        </div>
+
+        <div class="summary-card-value">
+            ${{ "{:,.2f}".format(summary.monthly_total or 0) }}
+        </div>
+    </div>
+
+
+    <div class="summary-card">
+        <div class="summary-card-title">
+            Due This Week
+        </div>
+
+        <div class="summary-card-value">
+            {{ summary.due_this_week }}
+        </div>
+    </div>
+
+
+    <div class="summary-card">
+        <div class="summary-card-title">
+            Reminder Only
+        </div>
+
+        <div class="summary-card-value">
+            {{ summary.reminder_only }}
+        </div>
+    </div>
+
+</div>
+
+<div class="coach-panel">
+
+    <h2>🍑 Coach Peach</h2>
+
+    <p>
+        {{ coach_message }}
+    </p>
+
 </div>
 
 {% if automatic_expenses %}
 
     <div class="command-card-list">
 
-    {% for expense in automatic_expenses %}
+        {% for expense in automatic_expenses %}
 
-        Command Card
+            <div class="command-card">
 
-    {% endfor %}
+                <div class="command-card-header">
 
-</div>
+                    <div>
+                        <h2 class="command-card-title">
+                            {{ expense.expense_name }}
+                        </h2>
+
+                        <div class="command-card-subtitle">
+                            {% if expense.vendor_name %}
+                                {{ expense.vendor_name }}
+                            {% else %}
+                                No vendor assigned
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <div class="command-card-amount">
+                        ${{ "%.2f"|format(expense.amount) }}
+                    </div>
+
+                </div>
+
+
+                <div class="command-card-body">
+
+                    <div class="command-card-details">
+
+                        <div class="command-detail">
+                            <span class="command-detail-label">
+                                Frequency
+                            </span>
+
+                            <span class="command-detail-value">
+                                {{ expense.frequency|title }}
+                            </span>
+                        </div>
+
+
+                        <div class="command-detail">
+                            <span class="command-detail-label">
+                                Next Scheduled Date
+                            </span>
+
+                            <span class="command-detail-value">
+                                {% if expense.next_posting_date %}
+                                    {{ expense.next_posting_date.strftime('%B %d, %Y') }}
+                                {% else %}
+                                    Not scheduled
+                                {% endif %}
+                            </span>
+                        </div>
+
+
+                        <div class="command-detail">
+                            <span class="command-detail-label">
+                                Processing
+                            </span>
+
+                            <span class="command-detail-value">
+
+                                {% if expense.processing_type == "auto_alert" %}
+                                    Auto-post + Coach Alert
+
+                                {% elif expense.processing_type == "auto_silent" %}
+                                    Auto-post Silently
+
+                                {% elif expense.processing_type == "reminder_only" %}
+                                    Reminder Only
+
+                                {% else %}
+                                    {{ expense.processing_type }}
+                                {% endif %}
+
+                            </span>
+                        </div>
+
+
+                        <div class="command-detail">
+                            <span class="command-detail-label">
+                                Start Date
+                            </span>
+
+                            <span class="command-detail-value">
+                                {% if expense.start_date %}
+                                    {{ expense.start_date.strftime('%B %d, %Y') }}
+                                {% else %}
+                                    Not available
+                                {% endif %}
+                            </span>
+                        </div>
+
+
+                        <div class="command-detail">
+                            <span class="command-detail-label">
+                                End Date
+                            </span>
+
+                            <span class="command-detail-value">
+                                {% if expense.end_date %}
+                                    {{ expense.end_date.strftime('%B %d, %Y') }}
+                                {% else %}
+                                    No end date
+                                {% endif %}
+                            </span>
+                        </div>
+
+
+                        <div class="command-detail">
+                            <span class="command-detail-label">
+                                Payment Health
+                            </span>
+
+                            <span class="command-detail-value payment-health-{{ expense.payment_health_class }}">
+                                {% if expense.payment_health == "Processing Failed" %}
+                                    🔴
+                                {% elif expense.payment_health == "Past Due" %}
+                                    🟠
+                                {% elif expense.payment_health == "Due Today" %}
+                                    🟡
+                                {% elif expense.payment_health == "Next Occurrence Skipped" %}
+                                    🔵
+                                {% elif expense.payment_health == "On Schedule" %}
+                                    🟢
+                                {% else %}
+                                    ⚪
+                                {% endif %}
+
+                                {{ expense.payment_health }}
+                            </span>
+                        </div>
+
+                        <div class="command-detail">
+                            <span class="command-detail-label">
+                                Status
+                            </span>
+
+                            <span class="command-detail-value">
+                                {{ expense.operating_status }}
+                            </span>
+                        </div>
+                    </div>
+
+
+                    {% if expense.description or expense.notes %}
+
+                        <div class="command-card-notes">
+
+                            {% if expense.description %}
+                                <div>
+                                    {{ expense.description }}
+                                </div>
+                            {% endif %}
+
+                            {% if expense.notes %}
+                                <div class="command-card-note">
+                                    {{ expense.notes }}
+                                </div>
+                            {% endif %}
+
+                        </div>
+
+                    {% endif %}
+
+                </div>
+
+
+                <div class="command-card-footer">
+
+                    <div class="command-card-status">
+
+                        {% if expense.processing_type == "auto_alert" %}
+                            Coach Peach will alert you when this expense posts.
+
+                        {% elif expense.processing_type == "auto_silent" %}
+                            This expense will post automatically without an alert.
+
+                        {% elif expense.processing_type == "reminder_only" %}
+                            Coach Peach will remind you to record this expense.
+
+                        {% endif %}
+
+                    </div>
+
+
+                    <div class="command-card-tools">
+
+                        <a href="{{ url_for(
+                            'edit_automatic_expense',
+                            automatic_expense_id=expense.automatic_expense_id
+                        ) }}"
+                           class="tool-pill tool-pill-small">
+                            Edit
+                        </a>
+
+                        
+
+                    </div>
+
+                </div>
+
+            </div>
+
+        {% endfor %}
+
+    </div>
 
 {% else %}
 
     <div class="empty-state">
+
         <h2>No Automatic Expenses Yet</h2>
 
         <p>
@@ -44,9 +307,11 @@
             business expenses.
         </p>
 
-        <a href="{{ url_for('reports') }}" class="btn">
+        <a href="{{ url_for('add_automatic_expense') }}"
+           class="tool-pill tool-pill-large">
             Add Automatic Expense
         </a>
+
     </div>
 
 {% endif %}

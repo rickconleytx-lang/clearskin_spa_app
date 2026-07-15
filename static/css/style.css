@@ -1,3 +1,4 @@
+
 body {
     font-family: Arial, sans-serif;
     margin: 0;
@@ -3312,4 +3313,146 @@ td:nth-child(3) {
     margin-top: 3px;
     font-size: 0.9rem;
     color: #666666;
+}
+
+.command-card-list{
+    display:flex;
+    flex-direction:column;
+    gap:18px;
+    margin-top:20px;
+}
+
+.command-card{
+    background:#fff;
+    border:1px solid #e6ddd3;
+    border-radius:14px;
+    padding:22px;
+    box-shadow:0 2px 8px rgba(0,0,0,.05);
+}
+
+.command-card-header{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    margin-bottom:18px;
+}
+
+.command-card-title{
+    margin:0;
+    font-size:1.55rem;
+    color:#5b4242;
+}
+
+.command-card-subtitle{
+    margin-top:4px;
+    color:#777;
+}
+
+.command-card-amount{
+    font-size:2rem;
+    font-weight:700;
+    color:#2d6a4f;
+}
+
+.command-card-details{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+    gap:16px;
+    margin-bottom:20px;
+}
+
+.command-detail{
+    background:#faf8f5;
+    border-radius:10px;
+    padding:12px;
+}
+
+.command-detail-label{
+    display:block;
+    font-size:.78rem;
+    color:#888;
+    text-transform:uppercase;
+    letter-spacing:.04em;
+    margin-bottom:4px;
+}
+
+.command-detail-value{
+    font-size:1rem;
+    font-weight:600;
+    color:#444;
+}
+
+.command-card-notes{
+    background:#fffdf8;
+    border-left:4px solid #f2b261;
+    padding:14px;
+    border-radius:8px;
+    margin-bottom:18px;
+}
+
+.command-card-footer{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    border-top:1px solid #ece7df;
+    padding-top:16px;
+}
+
+.command-card-status{
+    color:#666;
+    font-size:.95rem;
+}
+
+.command-card-tools{
+    display:flex;
+    gap:8px;
+}
+
+.summary-card-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+    gap:18px;
+    margin:25px 0;
+}
+
+.summary-card{
+    background:#fff;
+    border:1px solid #e6ddd3;
+    border-radius:12px;
+    padding:18px;
+    text-align:center;
+    box-shadow:0 2px 6px rgba(0,0,0,.05);
+}
+
+.summary-card-title{
+    font-size:.85rem;
+    color:#777;
+    text-transform:uppercase;
+    letter-spacing:.04em;
+    margin-bottom:10px;
+}
+
+.summary-card-value{
+    font-size:2rem;
+    font-weight:700;
+    color:#5b4242;
+}
+
+.coach-panel{
+    background:#fffdf7;
+    border-left:6px solid #f2b261;
+    border-radius:12px;
+    padding:20px 24px;
+    margin-bottom:25px;
+    box-shadow:0 2px 6px rgba(0,0,0,.05);
+}
+
+.coach-panel h2{
+    margin:0 0 10px 0;
+    color:#5b4242;
+}
+
+.coach-panel p{
+    margin:0;
+    line-height:1.6;
 }

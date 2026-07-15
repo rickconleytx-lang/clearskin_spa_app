@@ -9449,6 +9449,26 @@ def parse_godaddy_email_body(body):
     what_match = re.search(r"What:\s*(.+)", body)
     booking["service_name"] = what_match.group(1).strip() if what_match else None
 
+
+    what_match = re.search(r"What:\s*(.+)", body)
+    booking["service_name"] = what_match.group(1).strip() if what_match else None
+
+    staff_match = re.search(
+        r"Staff:\s*\n\s*([^\r\n]+)",
+        body,
+        re.IGNORECASE
+    )
+
+    booking["provider_name_at_booking"] = (
+        staff_match.group(1).strip()
+        if staff_match
+        else None
+    )
+
+    when_match = re.search(r"When:\s*(.+?)\s*\((\d+)\s*hour", body)
+
+
+
     when_match = re.search(r"When:\s*(.+?)\s*\((\d+)\s*hour", body)
     if when_match:
         when_text = when_match.group(1).strip()
@@ -20646,23 +20666,25 @@ def automatic_expenses():
         annual_total = amount * annual_multipliers.get(frequency, 0)
 
         if not is_active:
-            status = "Inactive"
-            status_class = "inactive"
+            payment_health = "Not Scheduled"
+            payment_health_class = "inactive"
         elif last_error_message:
-            status = "Processing Failed"
-            status_class = "failed"
+            payment_health = "Processing Failed"
+            payment_health_class = "failed"
         elif next_post_date and next_post_date < today:
-            status = "Past Due"
-            status_class = "past-due"
+            payment_health = "Past Due"
+            payment_health_class = "past-due"
         elif next_post_date == today:
-            status = "Due Today"
-            status_class = "due-today"
+            payment_health = "Due Today"
+            payment_health_class = "due-today"
         elif skip_next:
-            status = "Next Occurrence Skipped"
-            status_class = "skipped"
+            payment_health = "Next Occurrence Skipped"
+            payment_health_class = "skipped"
         else:
-            status = "On Schedule"
-            status_class = "on-schedule"
+            payment_health = "On Schedule"
+            payment_health_class = "on-schedule"
+
+        operating_status = "Active" if is_active else "Paused"
 
         processing_labels = {
             "auto_alert": "Auto-post + Coach Alert",
@@ -20692,14 +20714,177 @@ def automatic_expenses():
             "last_success_at": row[14],
             "payment_method": row[15],
             "estimated_annual_total": annual_total,
-            "status": status,
-            "status_class": status_class,
+            "payment_health": payment_health,
+            "payment_health_class": payment_health_class,
+            "operating_status": operating_status,
         })
+
+    from datetime import timedelta
+
+    week_end = today + timedelta(days=6)
+
+    active_expenses = [
+        expense
+        for expense in automatic_expense_list
+        if expense["is_active"]
+    ]
+
+    monthly_total = 0
+
+    for expense in active_expenses:
+        amount = expense["amount"] or 0
+        frequency = expense["frequency"]
+
+        if frequency == "weekly":
+            monthly_total += amount * 52 / 12
+        elif frequency == "monthly":
+            monthly_total += amount
+        elif frequency == "quarterly":
+            monthly_total += amount * 4 / 12
+        elif frequency == "annual":
+            monthly_total += amount / 12
+
+    due_this_week = sum(
+        1
+        for expense in active_expenses
+        if expense["next_post_date"]
+        and today <= expense["next_post_date"] <= week_end
+    )
+
+    reminder_only = sum(
+        1
+        for expense in active_expenses
+        if expense["processing_type"] == "reminder_only"
+    )
+
+    summary = {
+        "active_expenses": len(active_expenses),
+        "monthly_total": monthly_total,
+        "due_this_week": due_this_week,
+        "reminder_only": reminder_only,
+    }
+
+    #coach message 
+
+    past_due_expenses = [
+        expense
+        for expense in active_expenses
+        if expense["next_post_date"]
+        and expense["next_post_date"] < today
+    ]
+
+    due_today_expenses = [
+        expense
+        for expense in active_expenses
+        if expense["next_post_date"] == today
+    ]
+
+    failed_expenses = [
+        expense
+        for expense in active_expenses
+        if expense["last_error_message"]
+    ]
+
+    if failed_expenses:
+        count = len(failed_expenses)
+
+        if count == 1:
+            coach_message = (
+                f"{failed_expenses[0]['expense_name']} encountered a processing problem. "
+                "Please review the expense before its next scheduled posting."
+            )
+        else:
+            coach_message = (
+                f"{count} recurring expenses encountered processing problems. "
+                "Please review them before their next scheduled postings."
+            )
+
+    elif past_due_expenses:
+        count = len(past_due_expenses)
+
+        if count == 1:
+            coach_message = (
+                f"{past_due_expenses[0]['expense_name']} is past due. "
+                "Please review its schedule and processing status."
+            )
+        else:
+            coach_message = (
+                f"{count} recurring expenses are past due. "
+                "Please review their schedules and processing status."
+            )
+
+    elif due_today_expenses:
+        count = len(due_today_expenses)
+
+        if count == 1:
+            expense = due_today_expenses[0]
+
+            if expense["processing_type"] == "reminder_only":
+                coach_message = (
+                    f"{expense['expense_name']} is due today. "
+                    "This expense requires you to record it manually."
+                )
+            else:
+                coach_message = (
+                    f"{expense['expense_name']} is scheduled to post today. "
+                    "I’ll continue monitoring its processing status."
+                )
+        else:
+            coach_message = (
+                f"{count} recurring expenses are scheduled today. "
+                "I’ll continue monitoring their processing status."
+            )
+
+    elif due_this_week == 1:
+        upcoming_expense = next(
+            expense
+            for expense in active_expenses
+            if expense["next_post_date"]
+            and today <= expense["next_post_date"] <= week_end
+        )
+
+        formatted_date = upcoming_expense["next_post_date"].strftime(
+            "%A, %B %d"
+        )
+
+        if upcoming_expense["processing_type"] == "reminder_only":
+            coach_message = (
+                f"{upcoming_expense['expense_name']} is due {formatted_date}. "
+                "I’ll remind you to record it."
+            )
+        elif upcoming_expense["processing_type"] == "auto_silent":
+            coach_message = (
+                f"{upcoming_expense['expense_name']} is scheduled to post "
+                f"{formatted_date}. No action is needed."
+            )
+        else:
+            coach_message = (
+                f"{upcoming_expense['expense_name']} is scheduled to post "
+                f"{formatted_date}. I’ll let you know after it has been recorded."
+            )
+
+    elif due_this_week > 1:
+        coach_message = (
+            f"You have {due_this_week} recurring expenses scheduled during "
+            "the next seven days. Everything is currently on schedule."
+        )
+
+    elif active_expenses:
+        coach_message = (
+            "Everything looks good. None of your recurring expenses are "
+            "scheduled during the next seven days."
+        )
+
+    else:
+        coach_message = (
+            "You do not currently have any active recurring expenses."
+        )
 
     return render_template(
         "automatic_expenses.html",
         automatic_expenses=automatic_expense_list,
-        today=today
+        summary=summary,
+        coach_message=coach_message
     )
 
 
