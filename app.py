@@ -10226,35 +10226,35 @@ def poll_gmail_for_godaddy_bookings(spa_id):
             })
 
         except Exception as e:
-            log_godaddy(f"Import failed: {e}")
-            log_godaddy(
-                "Email will be checked again during the next poll."
-            )
+            import traceback
 
-            processing_time_ms = int(
-                (time.perf_counter() - started_at) * 1000
-            )
+            print(f"[GODADDY IMPORT] Import failed: {e}")
+            traceback.print_exc()
 
-            log_booking_import(
-                spa_id=spa_id,
-                source="godaddy",
-                email_id=email_id.decode(),
-                external_order_id=None,
-                email_subject=subject,
-                status="import_failed",
-                appointment_id=None,
-                client_id=None,
-                parser_version="godaddy_v1",
-                error_message=str(e),
-                processing_time_ms=processing_time_ms
-            )
+        processing_time_ms = int(
+            (time.perf_counter() - started_at) * 1000
+        )
 
-            results.append({
-                "email_id": email_id.decode(),
-                "subject": subject,
-                "status": "import_failed",
-                "error": str(e)
-            })
+        log_booking_import(
+            spa_id=spa_id,
+            source="godaddy",
+            email_id=email_id.decode(),
+            external_order_id=None,
+            email_subject=subject,
+            status="import_failed",
+            appointment_id=None,
+            client_id=None,
+            parser_version="godaddy_v1",
+            error_message=str(e),
+            processing_time_ms=processing_time_ms
+        )
+
+        results.append({
+            "email_id": email_id.decode(),
+            "subject": subject,
+            "status": "import_failed",
+            "error": str(e)
+        })
 
     mail.logout()
 
