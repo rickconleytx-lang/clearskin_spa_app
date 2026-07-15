@@ -74,7 +74,7 @@
 
 <table>
     <tr>
-        <th>Client</th>
+        <th>Booked By</th>
         <td>{{ appointment.client_name or '--' }}</td>
     </tr>
     <tr>
@@ -85,6 +85,13 @@
         <th>Email</th>
         <td>{{ appointment.email or '--' }}</td>
     </tr>
+
+    <tr>
+        <th>Appointment For</th>
+        <td>{{ appointment.email or '--' }}</td>
+    </tr>
+
+
     <tr>
         <th>Service</th>
         <td>{{ appointment.external_service_name or '--' }}</td>

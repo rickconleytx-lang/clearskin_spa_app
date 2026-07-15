@@ -8774,6 +8774,7 @@ def godaddy_imports():
             c.last_name,
             c.phone,
             c.email,
+            a.appointment_for,
             a.external_service_name,
             a.external_order_id,
             a.status,
@@ -9669,6 +9670,7 @@ def import_godaddy_booking(body, spa_id, subject=""):
         INSERT INTO appointments (
             spa_id,
             client_id,
+            appointment_for,
             appointment_date,
             appointment_time,
             duration_minutes,
@@ -9693,12 +9695,13 @@ def import_godaddy_booking(body, spa_id, subject=""):
                 %s, %s, %s, %s, %s, 
                 %s, %s, %s, %s, %s, 
                 %s, %s, %s, %s, %s,
-                %s
+                %s, %s
         )
         RETURNING appointment_id
     """, (
         spa_id,
         client_id,
+        booking.get("customer_name"),
         booking["appointment_datetime"].date(),
         booking["appointment_datetime"].time(),
         booking["duration_minutes"],
