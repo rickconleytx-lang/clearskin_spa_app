@@ -8936,6 +8936,18 @@ def parse_godaddy_booking_email(body):
     if service_match:
         data["service"] = service_match.group(1).strip()
 
+    staff_match = re.search(
+        r"Staff:\s*\r?\n\s*([^\r\n]+)",
+        body,
+        re.IGNORECASE
+    )
+
+    booking["provider_name_at_booking"] = (
+        staff_match.group(1).strip()
+        if staff_match
+        else None
+    )
+
     # ---------------------------------------------------------
     # Appointment date, time, and duration
     # ---------------------------------------------------------
@@ -9454,7 +9466,7 @@ def parse_godaddy_email_body(body):
     booking["service_name"] = what_match.group(1).strip() if what_match else None
 
     staff_match = re.search(
-        r"Staff:\s*\n\s*([^\r\n]+)",
+        r"Staff:\s*\r?\n\s*([^\r\n]+)",
         body,
         re.IGNORECASE
     )
@@ -9483,6 +9495,12 @@ def parse_godaddy_email_body(body):
         booking["appointment_date"] = None
         booking["appointment_time"] = None
         booking["duration_minutes"] = None
+
+
+    print(
+        "[GODADDY PARSER] Provider:",
+        booking.get("provider_name_at_booking")
+    )
 
     payment_match = re.search(r"Payment status:\s*(.+)", body)
     booking["payment_status"] = payment_match.group(1).strip() if payment_match else None
@@ -9656,6 +9674,7 @@ def import_godaddy_booking(body, spa_id, subject=""):
             appointment_time,
             duration_minutes,
             external_service_name,
+            provider_name_at_booking,
             status,
             notes,
             external_source,
@@ -9674,18 +9693,24 @@ def import_godaddy_booking(body, spa_id, subject=""):
         VALUES (%s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s, 
                 %s, %s, %s, %s, %s, 
-                %s, %s, %s, %s, %s
+                %s, %s, %s, %s, %s,
+                %s
         )
         RETURNING appointment_id
     """, (
-            spa_id,
+        spa_id,
         client_id,
         booking["appointment_datetime"].date(),
         booking["appointment_datetime"].time(),
         booking["duration_minutes"],
         booking["service"],
+        booking.get("provider_name_at_booking"),
         "booked",
-        f"Imported from GoDaddy. Service: {booking['service']}. Payment status: {booking['payment_status']}",
+        (
+            f"Imported from GoDaddy. "
+            f"Service: {booking['service']}. "
+            f"Payment status: {booking['payment_status']}"
+        ),
         "godaddy",
         booking["order_number"],
         subject,
@@ -9696,7 +9721,7 @@ def import_godaddy_booking(body, spa_id, subject=""):
         paid_at_checkout,
         datetime.now(),
         False,
-        "godaddy_v2",
+        "godaddy_v3",
         "Imported"
     ))
 
