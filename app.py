@@ -9792,6 +9792,8 @@ def godaddy_import_raw(appointment_id):
             a.subtotal,
             a.order_total,
             a.paid_at_checkout,
+            a.provider_name_at_booking,
+            a.appointment_for,
             c.first_name,
             c.last_name,
             c.phone,
@@ -9838,10 +9840,14 @@ def godaddy_import_raw(appointment_id):
         "order_total": row[18],
         "paid_at_checkout": row[19],
 
+        # Booking identity fields
+        "provider_name_at_booking": row[20],
+        "appointment_for": row[21],
+
         # Client fields
-        "client_name": f"{row[20] or ''} {row[21] or ''}".strip(),
-        "phone": row[22],
-        "email": row[23],
+        "client_name": f"{row[22] or ''} {row[23] or ''}".strip(),
+        "phone": row[24],
+        "email": row[25],
     }
 
     if appointment["phone"] and len(appointment["phone"]) == 10:

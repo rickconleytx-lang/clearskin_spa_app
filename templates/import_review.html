@@ -77,10 +77,12 @@
         <th>Booked By</th>
         <td>{{ appointment.client_name or '--' }}</td>
     </tr>
+
     <tr>
         <th>Phone</th>
         <td>{{ appointment.phone or '--' }}</td>
     </tr>
+
     <tr>
         <th>Email</th>
         <td>{{ appointment.email or '--' }}</td>
@@ -91,24 +93,25 @@
         <td>{{ appointment.appointment_for or '--' }}</td>
     </tr>
 
-
     <tr>
         <th>Service</th>
         <td>{{ appointment.external_service_name or '--' }}</td>
     </tr>
+
     <tr>
         <th>Date</th>
         <td>{{ appointment.appointment_date.strftime('%m/%d/%Y') if appointment.appointment_date else '--' }}</td>
     </tr>
+
     <tr>
         <th>Time</th>
         <td>{{ appointment.appointment_time.strftime('%I:%M %p') if appointment.appointment_time else '--' }}</td>
     </tr>
+    
     <tr>
         <th>Duration</th>
         <td>{{ appointment.duration_minutes or '--' }} minutes</td>
     </tr>
-
 
     <tr>
         <th>Provider</th>
