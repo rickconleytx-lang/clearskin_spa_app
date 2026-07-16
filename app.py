@@ -8775,6 +8775,7 @@ def godaddy_imports():
             c.phone,
             c.email,
             a.appointment_for,
+            a.provider_name_at_booking,
             a.external_service_name,
             a.external_order_id,
             a.status,

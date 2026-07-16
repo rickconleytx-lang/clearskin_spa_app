@@ -88,7 +88,7 @@
 
     <tr>
         <th>Appointment For</th>
-        <td>{{ appointment.email or '--' }}</td>
+        <td>{{ appointment.appointment_for or '--' }}</td>
     </tr>
 
 
@@ -109,6 +109,11 @@
         <td>{{ appointment.duration_minutes or '--' }} minutes</td>
     </tr>
 
+
+    <tr>
+        <th>Provider</th>
+        <td>{{ appointment.provider_name_at_booking or '--' }}</td>
+    </tr>
     
 
     <tr>
