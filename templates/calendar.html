@@ -360,7 +360,15 @@
                                     </strong>
                                     <br>
 
-                                    {{ appt[2] }} {{ appt[3] }}
+                                    {{ appt[11] or ((appt[2] or '') ~ ' ' ~ (appt[3] or ''))|trim }}
+                                    <br>
+
+                                    {% if appt[12] %}
+                                        <br>
+                                        <small>
+                                            Provider: {{ appt[12] }}
+                                        </small>
+                                    {% endif %}
                                     <br>
 
                                     <small>

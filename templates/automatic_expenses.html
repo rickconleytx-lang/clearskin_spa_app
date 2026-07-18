@@ -44,7 +44,7 @@
         </div>
 
         <div class="summary-card-value">
-            ${{ "{:,.2f}".format(summary.monthly_total or 0) }}
+            {{ summary.monthly_total|currency }}
         </div>
     </div>
 

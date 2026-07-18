@@ -79,7 +79,7 @@
 </form>
 
 
-<h3>Total: ${{ '%.2f'|format(report_total or 0) }}</h3>
+<h3>Total: {{ report_total|currency }}</h3>
 
 <table>
     <thead>
@@ -102,7 +102,7 @@
             <td>{{ row[2] or '' }}</td>
             <td>{{ row[3] or '' }}</td>
             <td>{{ row[4] or '' }}</td>
-            <td>${{ '%.2f'|format(row[5] or 0) }}</td>
+            <td>{{ row[5]|currency }}</td>
             <td>{{ row[6] or '' }}</td>
             <td>{{ row[7] or '' }}</td>
             <td>{{ row[8] or '' }}</td>

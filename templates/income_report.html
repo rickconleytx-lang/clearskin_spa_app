@@ -107,42 +107,42 @@
 
         <div class="summary-card">
             <h3>Service Sales</h3>
-            <p>${{ '%.2f'|format(summary[1]) }}</p>
+            <p>{{ summary[1]|currency }}</p>
         </div>
 
         <div class="summary-card">
             <h3>Retail Sales</h3>
-            <p>${{ '%.2f'|format(summary[2]) }}</p>
+            <p>{{ summary[2]|currency }}</p>
         </div>
 
         <div class="summary-card">
             <h3>Tips Collected</h3>
-            <p>${{ '%.2f'|format(summary[3]) }}</p>
+            <p>{{ summary[3]|currency }}</p>
         </div>
 
         <div class="summary-card">
             <h3>Tax Collected</h3>
-            <p>${{ '%.2f'|format(summary[4]) }}</p>
+            <p>{{ summary[4]|currency }}</p>
         </div>
 
         <div class="summary-card">
             <h3>Gross Collected</h3>
-            <p>${{ '%.2f'|format(summary[5]) }}</p>
+            <p>{{ summary[5]|currency }}</p>
         </div>
 
         <div class="summary-card">
             <h3>Processor Fees</h3>
-            <p>${{ '%.2f'|format(summary[6]) }}</p>
+            <p>{{ summary[6]|currency }}</p>
         </div>
 
         <div class="summary-card">
             <h3>Net Received</h3>
-            <p>${{ '%.2f'|format(summary[7]) }}</p>
+            <p>{{ summary[7]|currency }}</p>
         </div>
 
         <div class="summary-card">
             <h3>Spa Income</h3>
-            <p>${{ '%.2f'|format(summary[8]) }}</p>
+            <p>{{ summary[8]|currency }}</p>
         </div>
     </div>
 
@@ -168,11 +168,11 @@
                             <tr>
                                 <td>{{ row[0] }}</td>
                                 <td>{{ row[1] }}</td>
-                                <td>${{ '%.2f'|format(row[2]) }}</td>
-                                <td>${{ '%.2f'|format(row[3]) }}</td>
-                                <td>${{ '%.2f'|format(row[4]) }}</td>
-                                <td>${{ '%.2f'|format(row[5]) }}</td>
-                                <td>${{ '%.2f'|format(row[6]) }}</td>
+                                <td>{{ row[2]|currency }}</td>
+                                <td>{{ row[3]|currency }}</td>
+                                <td>{{ row[4]|currency }}</td>
+                                <td>{{ row[5]|currency }}</td>
+                                <td>{{ row[6]|currency }}</td>
                             </tr>
                             {% endfor %}
 
@@ -207,11 +207,11 @@
                             <tr>
                                 <td>{{ row[0] }}</td>
                                 <td>{{ row[1] }}</td>
-                                <td>${{ '%.2f'|format(row[2]) }}</td>
-                                <td>${{ '%.2f'|format(row[3]) }}</td>
-                                <td>${{ '%.2f'|format(row[4]) }}</td>
-                                <td>${{ '%.2f'|format(row[5]) }}</td>
-                                <td>${{ '%.2f'|format(row[6]) }}</td>
+                                <td>{{ row[2]|currency }}</td>
+                                <td>{{ row[3]|currency }}</td>
+                                <td>{{ row[4]|currency }}</td>
+                                <td>{{ row[5]|currency }}</td>
+                                <td>{{ row[6]|currency }}</td>
                             </tr>
                             {% endfor %}
                         {% else %}
@@ -244,9 +244,9 @@
                         <tr>
                             <td>{{ row[0] }}</td>
                             <td>{{ row[1] }}</td>
-                            <td>${{ '%.2f'|format(row[2]) }}</td>
-                            <td>${{ '%.2f'|format(row[3]) }}</td>
-                            <td>${{ '%.2f'|format(row[4]) }}</td>
+                            <td>{{ row[2]|currency }}</td>
+                            <td>{{ row[3]|currency }}</td>
+                            <td>{{ row[4]|currency }}</td>                              
                         </tr>
                         {% endfor %}
                     {% else %}
@@ -303,13 +303,13 @@
                                     <span class="muted-text">—</span>
                                 {% endif %}
                             </td>
-                            <td class="amount-cell">${{ '%.2f'|format(row[9]) }}</td>
-                            <td class="amount-cell">${{ '%.2f'|format(row[10]) }}</td>
-                            <td class="amount-cell">${{ '%.2f'|format(row[11]) }}</td>
-                            <td class="amount-cell">${{ '%.2f'|format(row[12]) }}</td>
-                            <td class="amount-cell total-highlight">${{ '%.2f'|format(row[13]) }}</td>
-                            <td class="amount-cell">${{ '%.2f'|format(row[14]) }}</td>
-                            <td class="amount-cell">${{ '%.2f'|format(row[15]) }}</td>
+                            <td class="amount-cell">{{ row[9]|currency }}</td>
+                            <td class="amount-cell">{{ row[10]|currency }}</td>
+                            <td class="amount-cell">{{ row[11]|currency }}</td>
+                            <td class="amount-cell">{{ row[12]|currency }}</td>
+                            <td class="amount-cell total-highlight">{{ row[13]|currency }}</td>
+                            <td class="amount-cell">{{ row[14]|currency }}</td>
+                            <td class="amount-cell">{{ row[15]|currency }}</td>
                             <td>
                                 {% if row[16] %}
                                     {{ row[16] }}

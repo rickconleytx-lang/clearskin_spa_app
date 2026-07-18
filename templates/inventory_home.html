@@ -41,14 +41,14 @@
                         <div class="summary-card">
                             <span class="summary-label">Wholesale Value</span>
                             <span class="summary-value">
-                                ${{ "{:,.2f}".format(total_wholesale_value or 0) }}
+                                {{ total_wholesale_value|currency }}
                             </span>
                         </div>
 
                         <div class="summary-card">
                             <span class="summary-label">Retail Value</span>
                             <span class="summary-value">
-                                ${{ "{:,.2f}".format(total_retail_value or 0) }}
+                                {{ total_retail_value|currency }}
                             </span>
                 </div>
                     
@@ -98,8 +98,8 @@
                             <td>{{ row[3] or '—' }}</td>
                             <td>{{ row[4] or '—' }}</td>
                             <td>{{ row[5] or '—' }}</td>
-                            <td class="amount-cell">${{ '%.2f'|format(row[6]) }}</td>
-                            <td class="amount-cell">${{ '%.2f'|format(row[7]) }}</td>
+                            <td class="amount-cell">{{ row[6]|currency }}</td>
+                            <td class="amount-cell">{{ row[7]|currency }}</td>
                             <td>{{ row[8] }}</td>
                             <td>{{ row[9] }}</td>
                             <td>{{ row[10] }}</td>
@@ -124,7 +124,7 @@
                             <td class="amount-cell">${{ '%.2f'|format(row[12]) }}</td>
 
                             <td>
-                                ${{ "{:,.2f}".format(row[13] or 0) }}
+                                {{ row[13]|currency }}
                             </td>
                             <td>{{ row[8].strftime('%Y-%m-%d') if row[8] else '—' }}</td>
 

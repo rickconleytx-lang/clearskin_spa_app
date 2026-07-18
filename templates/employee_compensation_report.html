@@ -55,52 +55,52 @@
     <div class="summary-cards">
         <div class="summary-card">
             <h3>Services Billed</h3>
-            <p>${{ '%.2f'|format(services_billed_total) }}</p>
+            <p>{{ services_billed_total|currency }}</p>
         </div>
 
         <div class="summary-card">
             <h3>Tips Earned</h3>
-            <p>${{ '%.2f'|format(tips_earned_total) }}</p>
+            <p>{{ tips_earned_total|currency }}</p>
         </div>
 
         <div class="summary-card">
             <h3>Tip Payouts Paid</h3>
-            <p>${{ '%.2f'|format(tip_payouts_paid_total) }}</p>
+            <p>{{ tip_payouts_paid_total|currency }}</p>
         </div>
 
         <div class="summary-card">
             <h3>Owner Draws Paid</h3>
-            <p>${{ '%.2f'|format(owner_draws_paid_total) }}</p>
+            <p>{{ owner_draws_paid_total|currency }}</p>
         </div>
 
         <div class="summary-card">
             <h3>Bonus Paid</h3>
-            <p>${{ '%.2f'|format(bonus_paid_total) }}</p>
+            <p>{{ bonus_paid_total|currency }}</p>
         </div>
 
         <div class="summary-card">
             <h3>Std Compedsation Paid</h3>
-            <p>${{ '%.2f'|format(extra_pay_paid_total) }}</p>
+            <p>{{ extra_pay_paid_total|currency }}</p>
         </div>
 
         <div class="summary-card">
             <h3>Total Paid</h3>
-            <p>${{ '%.2f'|format(total_comp_paid) }}</p>
+            <p>{{ total_comp_paid|currency }}</p>
         </div>
 
         <div class="summary-card">
             <h3>Outstanding Tips</h3>
-            <p>${{ '%.2f'|format(outstanding_tips) }}</p>
+            <p>{{ outstanding_tips|currency }}</p>
         </div>
 
         <div class="summary-card">
             <h3>Net Cash Taken</h3>
-            <p>${{ '%.2f'|format(total_comp_paid) }}</p>
+            <p>{{ total_comp_paid|currency }}</p>
         </div>
 
         <div class="summary-card">
             <h3>YTD Employee Compensation</h3>
-            <p>${{ "{:,.2f}".format(ytd_employee_compensation or 0) }}</p>
+            <p>{{ ytd_employee_compensation|currency }}</p>
         </div>
 
     </div>
@@ -131,16 +131,16 @@
                     {% for row in summary_rows %}
                     <tr>
                         <td>{{ row[1] }}</td>
-                        <td class="amount-cell">${{ '%.2f'|format(row[2]) }}</td>
-                        <td class="amount-cell">${{ '%.2f'|format(row[3]) }}</td>
-                        <td class="amount-cell">${{ '%.2f'|format(row[4]) }}</td>
-                        <td class="amount-cell">${{ '%.2f'|format(row[5]) }}</td>
-                        <td class="amount-cell">${{ '%.2f'|format(row[6]) }}</td>
-                        <td class="amount-cell">${{ '%.2f'|format(row[7]) }}</td>
-                        <td class="amount-cell">${{ '%.2f'|format(row[8]) }}</td>
-                        <td class="amount-cell">${{ '%.2f'|format(row[9]) }}</td>
-                        <td class="amount-cell total-highlight">${{ '%.2f'|format(row[10]) }}</td>
-                        <td class="amount-cell total-highlight">${{ '%.2f'|format(row[11]) }}</td>
+                        <td class="amount-cell">{{ row[2]|currency }}</td>
+                        <td class="amount-cell">{{ row[3]|currency }}</td>
+                        <td class="amount-cell">{{ row[4]|currency }}</td>
+                        <td class="amount-cell">{{ row[5]|currency }}</td>
+                        <td class="amount-cell">{{ row[6]|currency }}</td>
+                        <td class="amount-cell">{{ row[7]|currency }}</td>
+                        <td class="amount-cell">{{ row[8]|currency }}</td>
+                        <td class="amount-cell">{{ row[9]|currency }}</td>
+                        <td class="amount-cell total-highlight">{{ row[10]|currency }}</td>
+                        <td class="amount-cell total-highlight">{{ row[11]|currency }}</td>
                     </tr>
                     {% endfor %}
                 {% else %}
@@ -174,7 +174,7 @@
                             <td>{{ row[1].strftime('%Y-%m-%d') if row[1] else '' }}</td>
                             <td>{{ row[2] }}</td>
                             <td>{{ row[3] if row[3] else '—' }}</td>
-                            <td class="amount-cell">${{ '%.2f'|format(row[4]) }}</td>
+                            <td class="amount-cell">{{ row[4]|currency }}</td>
                             <td>{{ row[5] if row[5] else '—' }}</td>
                         </tr>
                         {% endfor %}

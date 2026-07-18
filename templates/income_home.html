@@ -32,18 +32,18 @@
 
         <div class="summary-card">
             <h3>YTD Income</h3>
-            <p>${{ "%.2f"|format(total_income) }}</p>
+            <p>{{ total_income|currency }}</p>
         </div>
 
         <div class="summary-card">
             <h3>YTD Expenses</h3>
-            <p>${{ "%.2f"|format(total_expenses) }}</p>
+            <p>{{ total_expenses|currency }}</p>
         </div>
 
         <div class="summary-card">
             <h3>Difference</h3>
             <p style="color: {{ 'green' if net_total >= 0 else 'red' }};">
-                ${{ "%.2f"|format(net_total) }}
+                {{ net_total|currency }}
             </p>
         </div>
 

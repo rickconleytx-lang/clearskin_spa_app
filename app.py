@@ -304,6 +304,41 @@ def log_event(category, message, severity="INFO", spa_id=None, related_type=None
 #  --------------------
 
 
+##################################
+#
+#   THOUSANDS SEPARATER
+#
+#
+#
+####################################
+
+@app.template_filter("currency")
+def currency_filter(value):
+    try:
+        return "${:,.2f}".format(float(value or 0))
+    except (TypeError, ValueError):
+        return "$0.00"
+
+
+@app.template_filter("number")
+def number_filter(value):
+    try:
+        return "{:,.2f}".format(float(value or 0))
+    except (TypeError, ValueError):
+        return "0.00"
+
+
+@app.template_filter("integer")
+def integer_filter(value):
+    try:
+        return "{:,.0f}".format(float(value or 0))
+    except (TypeError, ValueError):
+        return "0"
+    
+
+
+
+
 
 
 
@@ -22953,7 +22988,9 @@ def calendar_view():
                 a.duration_minutes,                             -- 7
                 a.price_at_booking,                             -- 8
                 a.owner_reviewed,                               -- 9
-                a.owner_reviewed_at                             -- 10
+                a.owner_reviewed_at,                            -- 10
+                a.appointment_for,                              -- 11
+                a.provider_name_at_booking                      -- 12
             FROM appointments a
             JOIN clients c
                 ON a.client_id = c.client_id
@@ -22970,7 +23007,12 @@ def calendar_view():
             {date_filter_sql}
 
             ORDER BY a.appointment_date, a.appointment_time
-        """, week_params)
+        """, date_params)
+
+
+
+
+
 
         filtered_appointments = cur.fetchall()
             
@@ -22993,7 +23035,9 @@ def calendar_view():
             a.duration_minutes,                             -- 7
             a.price_at_booking,                             -- 8
             a.owner_reviewed,                               -- 9
-            a.owner_reviewed_at                             -- 10
+            a.owner_reviewed_at,                            -- 10
+            a.appointment_for,                              -- 11
+            a.provider_name_at_booking                      -- 12
         FROM appointments a
         JOIN clients c
             ON a.client_id = c.client_id
@@ -23011,6 +23055,8 @@ def calendar_view():
 
         ORDER BY a.appointment_date, a.appointment_time
     """, week_params)
+
+
 
     appointments = cur.fetchall()
     

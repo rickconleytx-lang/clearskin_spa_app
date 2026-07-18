@@ -35,17 +35,18 @@
 <div class="summary-card-container">
     <div class="summary-card">
         <h3>Total Contributions</h3>
-        <p>${{ "%.2f"|format(total_contributions) }}</p>
+        <P>{{ total_contributions|currency }}</P>
+        
     </div>
 
     <div class="summary-card">
         <h3>Total Reimbursements</h3>
-        <p>${{ "%.2f"|format(total_reimbursements) }}</p>
+        <p>{{ total_reimbursements|currency }}</p>
     </div>
 
     <div class="summary-card">
         <h3>Net Owner Funding</h3>
-        <p>${{ "%.2f"|format(net_owner_funding) }}</p>
+        <p>{{ net_owner_funding|currency }}</p>
     </div>
 </div>
 
