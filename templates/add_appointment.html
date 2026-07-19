@@ -100,6 +100,38 @@
         {% endfor %}
     </select>
 
+    <label for="provider_employee_id">Provider</label>
+
+    <select id="provider_employee_id"
+            name="provider_employee_id">
+
+        {% if providers|length == 0 %}
+
+            <option value="">No Active Providers</option>
+
+        {% elif providers|length == 1 %}
+
+            <option value="{{ providers[0][0] }}" selected>
+                {{ providers[0][3]
+                or (providers[0][1] ~ " " ~ providers[0][2]) }}
+            </option>
+
+        {% else %}
+
+            <option value="">Any Available</option>
+
+            {% for provider in providers %}
+                <option value="{{ provider[0] }}">
+                    {{ provider[3]
+                    or (provider[1] ~ " " ~ provider[2]) }}
+                </option>
+            {% endfor %}
+
+        {% endif %}
+
+    </select>
+
+
     <label for="service_type">
         Service Type<span style="color: red;"> *</span>
     </label>

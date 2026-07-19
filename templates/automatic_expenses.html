@@ -107,7 +107,7 @@
                     </div>
 
                     <div class="command-card-amount">
-                        ${{ "%.2f"|format(expense.amount) }}
+                        {{ expense.amount|currency }}
                     </div>
 
                 </div>
@@ -134,8 +134,8 @@
                             </span>
 
                             <span class="command-detail-value">
-                                {% if expense.next_posting_date %}
-                                    {{ expense.next_posting_date.strftime('%B %d, %Y') }}
+                                {% if expense.next_post_date %}
+                                    {{ expense.next_post_date.strftime('%B %d, %Y') }}
                                 {% else %}
                                     Not scheduled
                                 {% endif %}

@@ -4792,6 +4792,18 @@ DROPDOWN_CONFIG = {
     },
 
 
+    "employee_roles": {
+        "title": "Employee Roles",
+        "table": "employee_roles",
+        "pk": "employee_role_id",
+        "value": "role_name",
+        "label": "Role Name",
+        "spa_scoped": True,
+        "active_column": "is_active",
+        "order_by": "display_order, role_name"
+    },
+
+
 #  ---------
 #  clean up the following
 #   --------
@@ -18461,46 +18473,54 @@ def send_birthday_offer(client_id):
 @spa_required
 def employees_home():
     spa_id = current_spa_id()
+
     conn = get_db_connection()
-    cur = conn.cursor()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
 
     cur.execute("""
         SELECT
-            employee_id,
-            first_name,
-            last_name,
-            phone,
-            email,
-            job_title,
-            hire_date,
-            termination_date,
-            status,
-            birthday,
-            esthetician_license_number,
-            license_expiration_date,
-            pay_type,
-            pay_rate,
-            created_at
-        FROM employees
-        WHERE spa_id = %s
-        ORDER BY last_name ASC, first_name ASC
+            e.employee_id,
+            e.first_name,
+            e.last_name,
+            e.employee_nickname,
+            er.role_name,
+            e.provider_color_code,
+            e.phone,
+            e.email,
+            e.hire_date,
+            e.license_expiration_date,
+            e.is_active,
+            e.created_at
+        FROM employees e
+        LEFT JOIN employee_roles er
+            ON er.employee_role_id = e.employee_role_id
+           AND er.spa_id = e.spa_id
+        WHERE e.spa_id = %s
+        ORDER BY
+            e.is_active DESC,
+            e.last_name ASC,
+            e.first_name ASC
     """, (spa_id,))
+
     employees = cur.fetchall()
 
-    cur.execute("""
-        SELECT COUNT(*)
-        FROM employees
-        WHERE spa_id = %s
-    """, (spa_id,))
-    total_employees = cur.fetchone()[0]
 
     cur.execute("""
-        SELECT COUNT(*)
+        SELECT COUNT(*) AS total
         FROM employees
         WHERE spa_id = %s
-          AND status = 'Active'
     """, (spa_id,))
-    active_employees = cur.fetchone()[0]
+
+    total_employees = cur.fetchone()["total"]
+
+    cur.execute("""
+        SELECT COUNT(*) AS total
+        FROM employees
+        WHERE spa_id = %s
+          AND is_active = TRUE
+    """, (spa_id,))
+
+    active_employees = cur.fetchone()["total"]
 
     cur.close()
     conn.close()
@@ -19628,6 +19648,10 @@ def add_employee():
         pay_type = request.form.get("pay_type")
         pay_rate = request.form.get("pay_rate")
         notes = request.form.get("notes")
+        employee_nickname = request.form.get("employee_nickname", "").strip()
+        employee_role_id = request.form.get("employee_role_id")
+        provider_color_code = request.form.get("provider_color_code", "").strip()
+        is_active = request.form.get("is_active") == "on"
 
         if not first_name or not last_name:
             flash("First name and last name are required.", "error")
@@ -19640,6 +19664,10 @@ def add_employee():
                 spa_id,
                 first_name,
                 last_name,
+                employee_nickname,
+                employee_role_id,
+                provider_color_code,
+                is_active,
                 address_line1,
                 address_line2,
                 city,
@@ -19661,11 +19689,22 @@ def add_employee():
                 pay_rate,
                 notes
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (
+                    %s, %s, %s, %s, %s, 
+                    %s, %s, %s, %s, %s, 
+                    %s, %s, %s, %s, %s, 
+                    %s, %s, %s, %s, %s, 
+                    %s, %s, %s, %s, %s, 
+                    %s, %s
+            )
         """, (
             spa_id,
             first_name,
             last_name,
+            employee_nickname or None,
+            employee_role_id,
+            provider_color_code or None,
+            is_active,
             address_line1,
             address_line2,
             city,
@@ -19696,6 +19735,18 @@ def add_employee():
         return redirect(url_for("employees_home"))
 
     cur.execute("""
+        SELECT
+            employee_role_id,
+            role_name
+        FROM employee_roles
+        WHERE spa_id = %s
+        AND is_active = TRUE
+        ORDER BY display_order, role_name
+    """, (spa_id,))
+
+    employee_roles = cur.fetchall()
+
+    cur.execute("""
         SELECT status_name
         FROM employee_status
         WHERE spa_id = %s
@@ -19706,7 +19757,11 @@ def add_employee():
     cur.close()
     conn.close()
 
-    return render_template("add_employee.html", statuses=statuses)
+    return render_template(
+        "add_employee.html", 
+        statuses=statuses,
+        employee_roles=employee_roles
+        )
 
 
 
@@ -19735,6 +19790,11 @@ def edit_employee(employee_id):
     if request.method == "POST":
         first_name = request.form.get("first_name")
         last_name = request.form.get("last_name")
+        employee_nickname = request.form.get("employee_nickname", "").strip()
+        employee_role_id = request.form.get("employee_role_id")
+        provider_color_code = request.form.get("provider_color_code", "").strip()
+        is_active = request.form.get("is_active") == "on"
+        employee_role_id = int(employee_role_id) if employee_role_id else None    
         address_line1 = request.form.get("address_line1")
         address_line2 = request.form.get("address_line2")
         city = request.form.get("city")
@@ -19758,8 +19818,13 @@ def edit_employee(employee_id):
 
         cur.execute("""
             UPDATE employees
-            SET first_name = %s,
+            SET 
+                first_name = %s,
                 last_name = %s,
+                employee_nickname = %s,
+                employee_role_id = %s,
+                provider_color_code = %s,
+                is_active = %s,
                 address_line1 = %s,
                 address_line2 = %s,
                 city = %s,
@@ -19781,10 +19846,14 @@ def edit_employee(employee_id):
                 pay_rate = %s,
                 notes = %s
             WHERE employee_id = %s
-              AND spa_id = %
+              AND spa_id = %s
         """, (
             first_name,
             last_name,
+            employee_nickname or None,
+            employee_role_id,
+            provider_color_code or None,
+            is_active,
             address_line1,
             address_line2,
             city,
@@ -19805,7 +19874,8 @@ def edit_employee(employee_id):
             pay_type,
             pay_rate or None,
             notes,
-            employee_id
+            employee_id,
+            spa_id
         ))
 
         conn.commit()
@@ -19814,38 +19884,48 @@ def edit_employee(employee_id):
 
         flash("Employee updated successfully.", "success")
         return redirect(url_for("employees_home"))
-
+    
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
     cur.execute("""
         SELECT
-            employee_id,
-            first_name,
-            last_name,
-            address_line1,
-            address_line2,
-            city,
-            state,
-            zip_code,
-            phone,
-            email,
-            job_title,
-            hire_date,
-            termination_date,
-            status,
-            birthday,
-            ssn_on_file,
-            esthetician_license_number,
-            license_expiration_date,
-            year_graduated,
-            certifications,
-            pay_type,
-            pay_rate,
-            notes,
-            created_at
+            employee_id,                    -- 0
+            first_name,                     -- 1
+            last_name,                      -- 2
+            employee_nickname,              -- 3
+            employee_role_id,               -- 4
+            provider_color_code,            -- 5
+            is_active,                      -- 6
+            address_line1,                  -- 7
+            address_line2,                  -- 8
+            city,                           -- 9
+            state,                          -- 10
+            zip_code,                       -- 11
+            phone,                          -- 12
+            email,                          -- 13
+            job_title,                      -- 14
+            hire_date,                      -- 15
+            termination_date,               -- 16
+            status,                         -- 17
+            birthday,                       -- 18
+            ssn_on_file,                    -- 19
+            esthetician_license_number,     -- 20
+            license_expiration_date,        -- 21
+            year_graduated,                 -- 22
+            certifications,                 -- 23
+            pay_type,                       -- 24
+            pay_rate,                       -- 25
+            notes,                          -- 26
+            created_at                      -- 27
         FROM employees
         WHERE employee_id = %s
-          AND spa_id = %s
-    """, (employee_id,))
+        AND spa_id = %s
+    """, (employee_id, spa_id))
     employee = cur.fetchone()
+
+    print(employee)
+    print(type(employee["provider_color_code"]))
+    print(repr(employee["provider_color_code"]))
 
     if not employee:
         cur.close()
@@ -19853,13 +19933,35 @@ def edit_employee(employee_id):
         flash("Employee not found.", "error")
         return redirect(url_for("employees_home"))
 
+    cur.execute("""
+        SELECT
+            employee_role_id,
+            role_name
+        FROM employee_roles
+        WHERE spa_id = %s
+        OR employee_role_id = %s
+        ORDER BY role_name
+    """, (
+        spa_id,
+        employee["employee_role_id"]
+    ))
+
+    employee_roles = cur.fetchall()
+
+
+
     cur.execute("SELECT status_name FROM employee_status ORDER BY status_name ASC")
     statuses = cur.fetchall()
 
     cur.close()
     conn.close()
 
-    return render_template("edit_employee.html", employee=employee, statuses=statuses)
+    return render_template(
+        "edit_employee.html", 
+        employee=employee, 
+        statuses=statuses,
+        employee_roles=employee_roles
+    )
 
 
 
@@ -19885,6 +19987,90 @@ def delete_employee(employee_id):
 
     flash("Employee deleted successfully.", "success")
     return redirect(url_for("employees_home"))
+
+
+
+
+
+
+
+##############################
+#
+#   EMPLOYEE COMMAND CENTER
+#
+#
+################################
+
+
+
+@app.route("/employees/<int:employee_id>")
+@login_required
+@spa_required
+def employee_command_center(employee_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    cur.execute("""
+        SELECT
+            e.employee_id,
+            e.first_name,
+            e.last_name,
+            e.employee_nickname,
+            e.employee_role_id,
+            er.role_name,
+            e.provider_color_code,
+            e.is_active,
+            e.address_line1,
+            e.address_line2,
+            e.city,
+            e.state,
+            e.zip_code,
+            e.phone,
+            e.email,
+            e.job_title,
+            e.hire_date,
+            e.termination_date,
+            e.status,
+            e.birthday,
+            e.ssn_on_file,
+            e.esthetician_license_number,
+            e.license_expiration_date,
+            e.year_graduated,
+            e.certifications,
+            e.pay_type,
+            e.pay_rate,
+            e.notes,
+            e.created_at
+        FROM employees e
+        LEFT JOIN employee_roles er
+            ON er.employee_role_id = e.employee_role_id
+           AND er.spa_id = e.spa_id
+        WHERE e.employee_id = %s
+          AND e.spa_id = %s
+    """, (employee_id, spa_id))
+
+    employee = cur.fetchone()
+
+    if not employee:
+        cur.close()
+        conn.close()
+
+        flash("Employee not found.", "error")
+        return redirect(url_for("employees_home"))
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "employee_command_center.html",
+        employee=employee,
+        today=date.today()
+    )
+
+
+
 
 
 
@@ -20690,7 +20876,8 @@ def automatic_expenses():
             ae.last_error_message,             -- 12
             ae.last_error_at,                  -- 13
             ae.last_success_at,                -- 14
-            pm.payment_method                  -- 15
+            pm.payment_method,                  -- 15
+            ae.start_date                       --16
         FROM automatic_expenses ae
         LEFT JOIN expense_categories ec
             ON ae.expense_cat_id = ec.expense_cat_id
@@ -20782,6 +20969,7 @@ def automatic_expenses():
             "last_error_at": row[13],
             "last_success_at": row[14],
             "payment_method": row[15],
+            "start_date": row[16],
             "estimated_annual_total": annual_total,
             "payment_health": payment_health,
             "payment_health_class": payment_health_class,
@@ -23089,7 +23277,8 @@ def calendar_view():
                 NULLIF(a.external_service_name, ''),
                 s.service_name,
                 'Service not entered'
-            ) AS service_name                               -- 4
+            ) AS service_name,                               -- 4
+            a.provider_name_at_booking                      --5
         FROM appointments a
         JOIN clients c
             ON a.client_id = c.client_id
@@ -23306,25 +23495,27 @@ def appointment_details(appointment_id):
 
     cur.execute("""
         SELECT
-            a.appointment_id,
-            a.appointment_date,
-            a.appointment_time,
-            a.status,
-            c.first_name,
-            c.last_name,
-            c.phone,
-            c.email,
+            a.appointment_id,                 -- 0
+            a.appointment_date,               -- 1
+            a.appointment_time,               -- 2
+            a.status,                         -- 3
+            c.first_name,                     -- 4
+            c.last_name,                      -- 5
+            c.phone,                          -- 6
+            c.email,                          -- 7
             COALESCE(
                 NULLIF(snt.service_name, ''),
                 NULLIF(a.service_type, ''),
                 NULLIF(a.external_service_name, ''),
                 s.service_name,
                 'Service not entered'
-            ) AS service_name,
-            a.notes,
-            a.external_source,
-            a.duration_minutes,
-            a.price_at_booking
+            ) AS service_name,                -- 8
+            a.notes,                          -- 9
+            a.external_source,                -- 10
+            a.duration_minutes,               -- 11
+            a.price_at_booking,               -- 12
+            a.appointment_for,                -- 13
+            a.provider_name_at_booking        -- 14
         FROM appointments a
         JOIN clients c
             ON a.client_id = c.client_id
@@ -23338,6 +23529,9 @@ def appointment_details(appointment_id):
         WHERE a.appointment_id = %s
         AND a.spa_id = %s
     """, (appointment_id, spa_id))
+
+
+
 
     appt = cur.fetchone()
 
@@ -23381,11 +23575,14 @@ def appointment_details(appointment_id):
         "start_time": appt[2].strftime("%I:%M %p") if appt[2] else "",
         "raw_time": appt[2].strftime("%H:%M") if appt[2] else "",
         "status": appt[3] or "",
+
         "client_name": f"{appt[4]} {appt[5]}",
+        "appointment_for": appt[13] or f"{appt[4] or ''} {appt[5] or ''}".strip(),
+        
         "phone": appt[6] or "",
         "email": appt[7] or "",
-        "service_name": appt[8] or "",
-        "provider_name": "",
+        "service_name": appt[8] or "",        
+        "provider_name": appt[14] or "",
         "notes": appt[9] or "",
         "external_source": appt[10] or "",
         "duration_minutes": appt[11],
@@ -23444,7 +23641,8 @@ def daily_schedule():
             a.room_number,                                 -- 7
             a.status,                                      -- 8
             a.notes,                                       -- 9
-            a.price_at_booking                             -- 10
+            a.price_at_booking,                             -- 10
+            a.provider_name_at_booking                      --11 
         FROM appointments a
         JOIN clients c
             ON a.client_id = c.client_id
@@ -26107,6 +26305,10 @@ def add_appointment():
 
     conn = get_db_connection() 
     cur = conn.cursor()
+
+    clients = []
+    providers = []
+    service_types = []
             
     if request.method == "POST":
         client_id = (request.form.get("client_id") or "").strip()
@@ -26133,6 +26335,66 @@ def add_appointment():
         incoming_booking_id = (
             request.form.get("incoming_booking_id") or ""
         ).strip()
+
+        provider_employee_id_raw = (
+        request.form.get("provider_employee_id") or ""
+        ).strip()
+
+        provider_employee_id = None
+        provider_name_at_booking = "Any Available"
+
+
+        print(f"Current spa_id = {spa_id}")
+        print(f"Submitted provider ID = {provider_employee_id_raw!r}")
+
+
+        if provider_employee_id_raw:
+            try:
+                provider_employee_id = int(provider_employee_id_raw)
+            except (TypeError, ValueError):
+                flash("Please select a valid provider.", "error")
+                cur.close()
+                conn.close()
+
+                return redirect(url_for(
+                    "add_appointment",
+                    selected_date=selected_date
+                ))
+
+            cur.execute("""
+                SELECT
+                    employee_id,
+                    employee_nickname,
+                    first_name,
+                    last_name
+                FROM employees
+                WHERE employee_id = %s
+                AND spa_id = %s
+                AND is_active = TRUE
+            """, (provider_employee_id, spa_id))
+
+            provider = cur.fetchone()
+            
+            print("Selected provider:", provider)
+
+
+            if not provider:
+                flash("The selected provider was not found or is inactive.", "error")
+                cur.close()
+                conn.close()
+
+                return redirect(url_for(
+                    "add_appointment",
+                    selected_date=selected_date
+                ))
+
+            provider_name_at_booking = (
+                provider[1]
+                or f"{provider[2] or ''} {provider[3] or ''}".strip()
+                or "Provider"
+            )
+
+        print(f"Current spa_id = {spa_id}")
 
         if not client_id:
             flash("Client is required.", "error")
@@ -26235,12 +26497,15 @@ def add_appointment():
                 appointment_time,
                 status,
                 notes,
+                provider_employee_id,
+                provider_name_at_booking,
                 owner_reviewed,
                 owner_reviewed_at
             )
             VALUES (
                 %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s,
+                %s, %s,
                 TRUE,
                 CURRENT_TIMESTAMP
             )
@@ -26255,7 +26520,9 @@ def add_appointment():
             appointment_date,
             appointment_time,
             status,
-            notes
+            notes,
+            provider_employee_id,
+            provider_name_at_booking
         ))
 
         appointment_id = cur.fetchone()[0]
@@ -26308,6 +26575,10 @@ def add_appointment():
     prefill_service_name = request.args.get("service_name", "")
             
 
+
+
+
+
     client_search = request.args.get("client_search", "").strip()
 
     if client_search:
@@ -26315,8 +26586,8 @@ def add_appointment():
             SELECT client_id, first_name, last_name
             FROM clients
             WHERE spa_id = %s
-              AND active_client = TRUE
-              AND last_name ILIKE %s
+            AND active_client = TRUE
+            AND last_name ILIKE %s
             ORDER BY last_name, first_name
         """, (spa_id, f"%{client_search}%"))
 
@@ -26332,23 +26603,42 @@ def add_appointment():
             flash("No client found. Please add the client first.", "warning")
 
             return redirect(url_for(
-                "add_new_client", 
-                selected_date=selected_date 
+                "add_new_client",
+                selected_date=selected_date
             ))
 
     else:
-
         cur.execute("""
             SELECT client_id, first_name, last_name
             FROM clients
             WHERE spa_id = %s
-              AND active_client = TRUE
+            AND active_client = TRUE
             ORDER BY last_name, first_name
             LIMIT 25
         """, (spa_id,))
 
-        clients = cur.fetchall()              
+        clients = cur.fetchall()
 
+    # Always load providers
+    cur.execute("""
+        SELECT
+            employee_id,
+            first_name,
+            last_name,
+            employee_nickname
+        FROM employees
+        WHERE spa_id = %s
+        AND is_active = TRUE
+        ORDER BY
+            COALESCE(NULLIF(employee_nickname, ''), first_name),
+            last_name
+    """, (spa_id,))
+
+    providers = cur.fetchall()
+
+    print("Provider dropdown rows:", providers)
+
+    # Always load service types
     cur.execute("""
         SELECT
             service_type_id,
@@ -26361,11 +26651,10 @@ def add_appointment():
         ORDER BY service_name
     """, (spa_id,))
 
-    service_types = cur.fetchall()    
-                
-    cur.close()
-    conn.close()
-                
+    service_types = cur.fetchall()
+
+
+
     return render_template(
         "add_appointment.html",
         clients=clients,
@@ -26375,7 +26664,8 @@ def add_appointment():
         incoming_booking_id=incoming_booking_id,
         prefill_date=prefill_date,
         prefill_time=prefill_time,
-        prefill_service_name=prefill_service_name
+        prefill_service_name=prefill_service_name,
+        providers=providers
     )
 
 
@@ -27101,101 +27391,6 @@ def complete_appointment(appointment_id):
 
 
 
-
-
-#  ------------------
-#     
-#   COMPLETE OVERDUE APPOINTMENTS 
-#   6/2/26  spa_id good
-#  -----------------
-
-
-@app.route("/complete_overdue_appointments", methods=["POST"])
-@login_required
-@spa_required
-def complete_overdue_appointments():
-    spa_id = current_spa_id()
-    user_id = session.get("user_id")
-    role = session.get("role")
-        
-    conn = get_db_connection() 
-    cur = conn.cursor()
-     
-    filter_sql = """
-        WHERE status = 'booked'
-          AND (appointment_date + appointment_time) < CURRENT_TIMESTAMP
-    """
-        
-    params = []
-    
-    if role != "master_admin":
-        filter_sql += " AND spa_id = %s"
-        params.append(spa_id)
-
-    cur.execute(f"""
-        SELECT appointment_id, spa_id, client_id, appointment_date, appointment_time, status
-        FROM appointments
-        {filter_sql}
-    """, params)
-
-    overdue_appointments = cur.fetchall()
-
-    cur.execute(f"""
-        UPDATE appointments
-        SET status = 'completed',
-            updated_at = CURRENT_TIMESTAMP
-        {filter_sql}
-    """, params)
-
-    updated_count = cur.rowcount
-
-    if updated_count:
-        for appt in overdue_appointments:
-            appt_id = appt[0]
-            appt_spa_id = appt[1]
-            client_id = appt[2]
-            old_date = appt[3]
-            old_time = appt[4]
-            old_status = appt[5]
-
-            log_audit(
-                cur,
-                spa_id=appt_spa_id,
-                user_id=user_id,
-                action_type="appointment_completed_overdue",
-                table_name="appointments",
-                record_id=appt_id,
-                old_value=old_status,
-                new_value="completed",
-                notes="Overdue appointment marked completed"
-            )
-
-            log_appointment_history(
-                cur,
-                spa_id=appt_spa_id,
-                appointment_id=appt_id,
-                client_id=client_id,
-                user_id=user_id,
-                action_type="completed_overdue",
-                old_date=old_date,
-                old_time=old_time,
-                new_date=old_date,
-                new_time=old_time,
-                old_status=old_status,
-                new_status="completed",
-                notes="Overdue appointment marked completed"
-            )
-
-    conn.commit()
-    cur.close()
-    conn.close()
-        
-    if updated_count:
-        flash(f"{updated_count} overdue appointment(s) marked completed.", "success")
-    else:
-        flash("No overdue appointments to complete.", "info")
-
-    return redirect(url_for("calendar_view", offset=0))
 
 
 

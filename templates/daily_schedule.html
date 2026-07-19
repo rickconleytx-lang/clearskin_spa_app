@@ -26,6 +26,7 @@ nano daily_schedule.html{% extends "base.html" %}
                 <th>Time</th>
                 <th>Client</th>
                 <th>Service</th>
+                <th>Provider</th>
                 <th>Duration</th>
                 <th>Room</th>
                 <th>Status</th>
@@ -40,6 +41,7 @@ nano daily_schedule.html{% extends "base.html" %}
                 <td>{{ appt[5].strftime('%I:%M %p') if appt[5] else '' }}</td>
                 <td>{{ appt[3] }}, {{ appt[2] }}</td>
                 <td>{{ appt[4] or '' }}</td>
+                <td>{{ appt[11] or 'Any Available' }}</td>
                 <td>{{ appt[6] or '' }}</td>
                 <td>{{ appt[7] or '' }}</td>
                 <td>{{ appt[8]|title if appt[8] else '' }}</td>

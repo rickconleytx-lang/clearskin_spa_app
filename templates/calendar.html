@@ -180,26 +180,15 @@
 
 
         {% if overdue_count > 0 %}
-        <div class="next-appointment"
-             style="background-color:#ffe5e5; border-left:5px solid #cc0000; margin-top:15px;">
+        <div class="alert alert-danger">
+            <strong>{{ overdue_count }}</strong> overdue appointments.
 
-            <strong>Overdue Booked Appointments:</strong> {{ overdue_count }}
-        </div>
-
-        <div style="margin-top:10px;">
-            <form method="POST"
-                  action="{{ url_for('complete_overdue_appointments') }}"
-                  style="display:inline;">
-
-                <button type="submit"
-                        class="btn"
-                        style="background:#cc0000;"
-                        onclick="return confirm('Mark all overdue booked appointments as complete?')">
-
-                    Mark All Overdue Complete
-
-                </button>
-            </form>
+            <a href="{{ url_for('appointments',
+                                status='overdue',
+                                fromcoach=1) }}"
+            class="btn btn-danger">
+                Review Overdue Appointments
+            </a>
         </div>
         {% endif %}
 
@@ -222,6 +211,7 @@
                     <th>Time</th>
                     <th>Client</th>
                     <th>Service</th>
+                    <th>Provider</th>
                     <th>Status</th>
                     <th>Actions</th>
                 </tr>
@@ -234,9 +224,10 @@
                     <td>{{ appt[2] }} {{ appt[3] }}</td>
                     <td>{{ appt[4] or '' }}</td>
                     <td>{{ appt[5]|title }}</td>
+                    <td>{{ appt[6]|title }}</td>
                     <td>
-                        <a href="{{ url_for('edit_appointment', appointment_id=appt[6]) }}" class="btn btn-sm">Edit</a>
-                        <a href="{{ url_for('add_income', appointment_id=appt[6], date=appt[0].strftime('%Y-%m-%d')) }}" class="btn btn-sm" style="background: green; color: white;">
+                        <a href="{{ url_for('edit_appointment', appointment_id=appt[7]) }}" class="btn btn-sm">Edit</a>
+                        <a href="{{ url_for('add_income', appointment_id=appt[7], date=appt[0].strftime('%Y-%m-%d')) }}" class="btn btn-sm" style="background: green; color: white;">
                             Add Payment
                         </a>
                     </td>
@@ -260,6 +251,7 @@
     on {{ next_appt[2].strftime('%B %d, %Y') }}
     at {{ next_appt[3].strftime('%I:%M %p') }}
     ({{ next_appt[4] or 'Service' }})
+    with {{ next_appt[5] or 'Any Available' }}
 </div>
 <br>
 {% endif %}
@@ -411,10 +403,12 @@
         <p><strong>Email:</strong> ✉️ <a id="modalEmailLink"></a></p>
 
         <hr>
+        <p><strong>Service:</strong> <span id="modalService"></span></p>
+        <p><strong>Provider:</strong> <span id="modalProvider"></span></p>
 
         <p><strong>Date:</strong> <span id="modalDate"></span></p>
         <p><strong>Time:</strong> <span id="modalTime"></span></p>
-        <p><strong>Service:</strong> <span id="modalService"></span></p>
+        
         <p><strong>Duration:</strong> <span id="modalDuration"></span></p>
         <p><strong>Price at Booking:</strong> <span id="modalPrice"></span></p>
         <p><strong>Status:</strong> <span id="modalStatus" class="status-badge"></span></p>
@@ -588,6 +582,8 @@ function openAppointmentModal(appointmentId, clickedElement) {
             setText("modalDate", data.appointment_date);
             setText("modalTime", data.start_time);
             setText("modalService", data.service_name);
+            setText("modalProvider", data.provider_name || "Any Available");
+
 
             setText(
                 "modalDuration",

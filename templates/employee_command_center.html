@@ -1,0 +1,864 @@
+{% extends "base.html" %}
+
+{% block title %}
+    {{ employee.first_name }} {{ employee.last_name }} | Employee Command Center
+{% endblock %}
+
+{% block content %}
+
+<style>
+    .employee-command-center {
+        max-width: 1250px;
+        margin: 0 auto;
+    }
+
+    .employee-hero {
+        position: relative;
+        overflow: hidden;
+        padding: 30px;
+        margin-bottom: 24px;
+        border: 1px solid #e6e1ea;
+        border-radius: 18px;
+        background:
+            linear-gradient(
+                135deg,
+                rgba(121, 74, 147, 0.10),
+                rgba(255, 255, 255, 0.95)
+            );
+        box-shadow: 0 8px 24px rgba(45, 31, 54, 0.08);
+    }
+
+    .employee-hero::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 8px;
+        height: 100%;
+        background-color: {{ employee.provider_color_code or '#8b5cf6' }};
+    }
+
+    .employee-hero-content {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+        flex-wrap: wrap;
+    }
+
+    .employee-identity {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+    }
+
+    .employee-avatar {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 72px;
+        height: 72px;
+        flex-shrink: 0;
+        border: 4px solid rgba(255, 255, 255, 0.9);
+        border-radius: 50%;
+        background-color: {{ employee.provider_color_code or '#8b5cf6' }};
+        color: #ffffff;
+        font-size: 27px;
+        font-weight: 700;
+        box-shadow: 0 5px 15px rgba(45, 31, 54, 0.18);
+    }
+
+    .employee-title h1 {
+        margin: 0 0 5px;
+        font-size: 30px;
+        line-height: 1.2;
+    }
+
+    .employee-title p {
+        margin: 0;
+        color: #66606b;
+        font-size: 15px;
+    }
+
+    .status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        padding: 7px 13px;
+        border-radius: 999px;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+    }
+
+    .status-pill.active {
+        background: #e9f8ef;
+        color: #237846;
+        border: 1px solid #bde8cc;
+    }
+
+    .status-pill.inactive {
+        background: #fbeaea;
+        color: #9e3535;
+        border: 1px solid #efc2c2;
+    }
+
+    .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: currentColor;
+    }
+
+    .employee-summary-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 16px;
+        margin-bottom: 24px;
+    }
+
+    .summary-card {
+        min-height: 112px;
+        padding: 20px;
+        border: 1px solid #e8e4eb;
+        border-radius: 16px;
+        background: #ffffff;
+        box-shadow: 0 5px 18px rgba(45, 31, 54, 0.06);
+    }
+
+    .summary-label {
+        margin-bottom: 10px;
+        color: #77717c;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+    }
+
+    .summary-value {
+        color: #2f2933;
+        font-size: 20px;
+        font-weight: 700;
+        line-height: 1.25;
+        word-break: break-word;
+    }
+
+    .summary-detail {
+        margin-top: 7px;
+        color: #817a85;
+        font-size: 13px;
+    }
+
+    .provider-color-display {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+    }
+
+    .provider-color-swatch {
+        width: 24px;
+        height: 24px;
+        border: 2px solid #ffffff;
+        border-radius: 7px;
+        background-color: {{ employee.provider_color_code or '#8b5cf6' }};
+        box-shadow: 0 0 0 1px #c9c4cc;
+    }
+
+    .employee-section {
+        margin-bottom: 24px;
+        padding: 24px;
+        border: 1px solid #e8e4eb;
+        border-radius: 16px;
+        background: #ffffff;
+        box-shadow: 0 5px 18px rgba(45, 31, 54, 0.05);
+    }
+
+    .section-heading {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 0 0 20px;
+        padding-bottom: 14px;
+        border-bottom: 1px solid #eeeaf0;
+        color: #332c37;
+        font-size: 19px;
+    }
+
+    .section-icon {
+        font-size: 21px;
+    }
+
+    .quick-action-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+    }
+
+    .quick-action {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 76px;
+        padding: 16px;
+        border: 1px solid #e1dbe5;
+        border-radius: 13px;
+        background: #faf8fb;
+        color: #3d3342;
+        text-decoration: none;
+        transition:
+            transform 0.15s ease,
+            box-shadow 0.15s ease,
+            border-color 0.15s ease;
+    }
+
+    .quick-action:hover {
+        transform: translateY(-2px);
+        border-color: #bdaac8;
+        box-shadow: 0 8px 18px rgba(54, 38, 64, 0.10);
+        text-decoration: none;
+    }
+
+    .quick-action-icon {
+        font-size: 25px;
+    }
+
+    .quick-action-title {
+        display: block;
+        margin-bottom: 3px;
+        font-weight: 700;
+    }
+
+    .quick-action-description {
+        display: block;
+        color: #77717c;
+        font-size: 12px;
+    }
+
+    .information-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 24px;
+    }
+
+    .detail-list {
+        display: grid;
+        gap: 0;
+    }
+
+    .detail-row {
+        display: grid;
+        grid-template-columns: 155px minmax(0, 1fr);
+        gap: 18px;
+        padding: 12px 0;
+        border-bottom: 1px solid #f0edf1;
+    }
+
+    .detail-row:last-child {
+        border-bottom: none;
+    }
+
+    .detail-label {
+        color: #77717c;
+        font-size: 13px;
+        font-weight: 700;
+    }
+
+    .detail-value {
+        color: #302a33;
+        font-size: 14px;
+        overflow-wrap: anywhere;
+    }
+
+    .detail-value a {
+        color: inherit;
+    }
+
+    .license-valid {
+        color: #237846;
+        font-weight: 700;
+    }
+
+    .license-expired {
+        color: #9e3535;
+        font-weight: 700;
+    }
+
+    .notes-box {
+        min-height: 85px;
+        padding: 16px;
+        border: 1px solid #eee9f0;
+        border-radius: 12px;
+        background: #faf9fb;
+        color: #47404b;
+        line-height: 1.6;
+        white-space: pre-wrap;
+    }
+
+    .employee-footer-actions {
+        display: flex;
+        justify-content: space-between;
+        gap: 14px;
+        margin-top: 8px;
+        flex-wrap: wrap;
+    }
+
+    @media (max-width: 1000px) {
+        .employee-summary-grid,
+        .quick-action-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+    }
+
+    @media (max-width: 760px) {
+        .information-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .detail-row {
+            grid-template-columns: 1fr;
+            gap: 4px;
+        }
+
+        .employee-hero {
+            padding: 24px 20px 24px 28px;
+        }
+
+        .employee-avatar {
+            width: 60px;
+            height: 60px;
+            font-size: 22px;
+        }
+
+        .employee-title h1 {
+            font-size: 24px;
+        }
+    }
+
+    @media (max-width: 520px) {
+        .employee-summary-grid,
+        .quick-action-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .employee-identity {
+            align-items: flex-start;
+        }
+    }
+</style>
+
+
+<div class="employee-command-center">
+
+    <!-- Hero Header -->
+    <section class="employee-hero">
+
+        <div class="employee-hero-content">
+
+            <div class="employee-identity">
+
+                <div class="employee-avatar">
+                    {{ employee.first_name[0] | upper
+                       if employee.first_name else "E" }}
+                    {{ employee.last_name[0] | upper
+                       if employee.last_name else "" }}
+                </div>
+
+                <div class="employee-title">
+
+                    <h1>
+                        {{ employee.first_name }}
+                        {{ employee.last_name }}
+                    </h1>
+
+                    <p>
+                        {{ employee.role_name or employee.job_title or "No role assigned" }}
+
+                        {% if employee.employee_nickname %}
+                            · Goes by {{ employee.employee_nickname }}
+                        {% endif %}
+                    </p>
+
+                </div>
+
+            </div>
+
+            <div>
+                {% if employee.is_active %}
+                    <span class="status-pill active">
+                        <span class="status-dot"></span>
+                        Active Employee
+                    </span>
+                {% else %}
+                    <span class="status-pill inactive">
+                        <span class="status-dot"></span>
+                        Inactive Employee
+                    </span>
+                {% endif %}
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <!-- Summary Cards -->
+    <section class="employee-summary-grid">
+
+        <div class="summary-card">
+            <div class="summary-label">Employment Status</div>
+
+            <div class="summary-value">
+                {% if employee.is_active %}
+                    Active
+                {% else %}
+                    Inactive
+                {% endif %}
+            </div>
+
+            <div class="summary-detail">
+                {{ employee.status or "Employee record status" }}
+            </div>
+        </div>
+
+
+        <div class="summary-card">
+            <div class="summary-label">Employee Role</div>
+
+            <div class="summary-value">
+                {{ employee.role_name or "Not Assigned" }}
+            </div>
+
+            <div class="summary-detail">
+                {{ employee.job_title or "No job title entered" }}
+            </div>
+        </div>
+
+
+        <div class="summary-card">
+            <div class="summary-label">Pay Type</div>
+
+            <div class="summary-value">
+                {{ employee.pay_type or "Not Entered" }}
+            </div>
+
+            <div class="summary-detail">
+                {% if employee.pay_rate is not none %}
+                    Current rate: ${{ "{:,.2f}".format(employee.pay_rate) }}
+                {% else %}
+                    No pay rate entered
+                {% endif %}
+            </div>
+        </div>
+
+
+        <div class="summary-card">
+            <div class="summary-label">Provider Color</div>
+
+            <div class="summary-value provider-color-display">
+
+                <span class="provider-color-swatch"></span>
+
+                <span>
+                    {{ employee.provider_color_code or "Default" }}
+                </span>
+
+            </div>
+
+            <div class="summary-detail">
+                Calendar identification color
+            </div>
+        </div>
+
+    </section>
+
+
+    <!-- Quick Actions -->
+    <section class="employee-section">
+
+        <h2 class="section-heading">
+            <span class="section-icon">⚡</span>
+            Quick Actions
+        </h2>
+
+        <div class="quick-action-grid">
+
+            <a class="quick-action"
+               href="{{ url_for(
+                   'edit_employee',
+                   employee_id=employee.employee_id
+               ) }}">
+
+                <span class="quick-action-icon">✏️</span>
+
+                <span>
+                    <span class="quick-action-title">
+                        Edit Employee
+                    </span>
+
+                    <span class="quick-action-description">
+                        Update employee information
+                    </span>
+                </span>
+
+            </a>
+
+
+            <a class="quick-action"
+               href="{{ url_for('employee_compensation_report') }}">
+
+                <span class="quick-action-icon">💵</span>
+
+                <span>
+                    <span class="quick-action-title">
+                        Compensation Report
+                    </span>
+
+                    <span class="quick-action-description">
+                        Review earnings and payments
+                    </span>
+                </span>
+
+            </a>
+
+
+            <a class="quick-action"
+               href="{{ url_for('calendar_view') }}">
+
+                <span class="quick-action-icon">📅</span>
+
+                <span>
+                    <span class="quick-action-title">
+                        View Calendar
+                    </span>
+
+                    <span class="quick-action-description">
+                        Review scheduled appointments
+                    </span>
+                </span>
+
+            </a>
+
+
+            <a class="quick-action"
+               href="{{ url_for('employees_home') }}">
+
+                <span class="quick-action-icon">👥</span>
+
+                <span>
+                    <span class="quick-action-title">
+                        All Employees
+                    </span>
+
+                    <span class="quick-action-description">
+                        Return to Employee Home
+                    </span>
+                </span>
+
+            </a>
+
+        </div>
+
+    </section>
+
+
+    <!-- Two-Column Information Area -->
+    <div class="information-grid">
+
+        <!-- Contact -->
+        <section class="employee-section">
+
+            <h2 class="section-heading">
+                <span class="section-icon">📇</span>
+                Contact Information
+            </h2>
+
+            <div class="detail-list">
+
+                <div class="detail-row">
+                    <div class="detail-label">Phone</div>
+
+                    <div class="detail-value">
+                        {% if employee.phone %}
+                            <a href="tel:{{ employee.phone }}">
+                                {{ employee.phone }}
+                            </a>
+                        {% else %}
+                            Not provided
+                        {% endif %}
+                    </div>
+                </div>
+
+
+                <div class="detail-row">
+                    <div class="detail-label">Email</div>
+
+                    <div class="detail-value">
+                        {% if employee.email %}
+                            <a href="mailto:{{ employee.email }}">
+                                {{ employee.email }}
+                            </a>
+                        {% else %}
+                            Not provided
+                        {% endif %}
+                    </div>
+                </div>
+
+
+                <div class="detail-row">
+                    <div class="detail-label">Address</div>
+
+                    <div class="detail-value">
+
+                        {% if employee.address_line1 %}
+                            {{ employee.address_line1 }}<br>
+                        {% endif %}
+
+                        {% if employee.address_line2 %}
+                            {{ employee.address_line2 }}<br>
+                        {% endif %}
+
+                        {% if employee.city or employee.state or employee.zip_code %}
+                            {{ employee.city or "" }}
+                            {% if employee.city and employee.state %},{% endif %}
+                            {{ employee.state or "" }}
+                            {{ employee.zip_code or "" }}
+                        {% elif not employee.address_line1 %}
+                            Not provided
+                        {% endif %}
+
+                    </div>
+                </div>
+
+
+                <div class="detail-row">
+                    <div class="detail-label">Birthday</div>
+
+                    <div class="detail-value">
+                        {{ employee.birthday.strftime('%B %d')
+                           if employee.birthday else "Not provided" }}
+                    </div>
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <!-- Employment -->
+        <section class="employee-section">
+
+            <h2 class="section-heading">
+                <span class="section-icon">💼</span>
+                Employment Information
+            </h2>
+
+            <div class="detail-list">
+
+                <div class="detail-row">
+                    <div class="detail-label">Employee Role</div>
+
+                    <div class="detail-value">
+                        {{ employee.role_name or "Not assigned" }}
+                    </div>
+                </div>
+
+
+                <div class="detail-row">
+                    <div class="detail-label">Job Title</div>
+
+                    <div class="detail-value">
+                        {{ employee.job_title or "Not provided" }}
+                    </div>
+                </div>
+
+
+                <div class="detail-row">
+                    <div class="detail-label">Hire Date</div>
+
+                    <div class="detail-value">
+                        {{ employee.hire_date.strftime('%B %d, %Y')
+                           if employee.hire_date else "Not provided" }}
+                    </div>
+                </div>
+
+
+                <div class="detail-row">
+                    <div class="detail-label">Termination Date</div>
+
+                    <div class="detail-value">
+                        {{ employee.termination_date.strftime('%B %d, %Y')
+                           if employee.termination_date else "Not applicable" }}
+                    </div>
+                </div>
+
+
+                <div class="detail-row">
+                    <div class="detail-label">Nickname</div>
+
+                    <div class="detail-value">
+                        {{ employee.employee_nickname or "Not provided" }}
+                    </div>
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <!-- Professional -->
+        <section class="employee-section">
+
+            <h2 class="section-heading">
+                <span class="section-icon">📜</span>
+                Professional Information
+            </h2>
+
+            <div class="detail-list">
+
+                <div class="detail-row">
+                    <div class="detail-label">License Number</div>
+
+                    <div class="detail-value">
+                        {{ employee.esthetician_license_number or "Not provided" }}
+                    </div>
+                </div>
+
+
+                <div class="detail-row">
+                    <div class="detail-label">License Expires</div>
+
+                    <div class="detail-value">
+                        {% if employee.license_expiration_date %}
+
+                            <span class="{% if employee.license_expiration_date < today %}license-expired{% else %}license-valid{% endif %}">
+                                {{ employee.license_expiration_date.strftime('%B %d, %Y') }}
+                            </span>
+
+                        {% else %}
+                            Not provided
+                        {% endif %}
+                    </div>
+                </div>
+
+
+                <div class="detail-row">
+                    <div class="detail-label">Year Graduated</div>
+
+                    <div class="detail-value">
+                        {{ employee.year_graduated or "Not provided" }}
+                    </div>
+                </div>
+
+
+                <div class="detail-row">
+                    <div class="detail-label">Certifications</div>
+
+                    <div class="detail-value">
+                        {{ employee.certifications or "Not provided" }}
+                    </div>
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <!-- Compensation -->
+        <section class="employee-section">
+
+            <h2 class="section-heading">
+                <span class="section-icon">💰</span>
+                Compensation Setup
+            </h2>
+
+            <div class="detail-list">
+
+                <div class="detail-row">
+                    <div class="detail-label">Pay Type</div>
+
+                    <div class="detail-value">
+                        {{ employee.pay_type or "Not provided" }}
+                    </div>
+                </div>
+
+
+                <div class="detail-row">
+                    <div class="detail-label">Pay Rate</div>
+
+                    <div class="detail-value">
+                        {% if employee.pay_rate is not none %}
+                            ${{ "{:,.2f}".format(employee.pay_rate) }}
+                        {% else %}
+                            Not provided
+                        {% endif %}
+                    </div>
+                </div>
+
+
+                <div class="detail-row">
+                    <div class="detail-label">SSN Status</div>
+
+                    <div class="detail-value">
+                        {% if employee.ssn_on_file %}
+                            On file
+                        {% else %}
+                            Not on file
+                        {% endif %}
+                    </div>
+                </div>
+
+
+                <div class="detail-row">
+                    <div class="detail-label">Compensation History</div>
+
+                    <div class="detail-value">
+                        <a href="{{ url_for('employee_compensation_report') }}">
+                            Open compensation report
+                        </a>
+                    </div>
+                </div>
+
+            </div>
+
+        </section>
+
+    </div>
+
+
+    <!-- Notes -->
+    <section class="employee-section">
+
+        <h2 class="section-heading">
+            <span class="section-icon">📝</span>
+            Employee Notes
+        </h2>
+
+        <div class="notes-box">
+            {{ employee.notes or "No employee notes have been entered." }}
+        </div>
+
+    </section>
+
+
+    <!-- Bottom Actions -->
+    <div class="employee-footer-actions">
+
+        <a class="btn"
+           href="{{ url_for('employees_home') }}">
+            ← Back to Employees
+        </a>
+
+        <a class="btn"
+           href="{{ url_for(
+               'edit_employee',
+               employee_id=employee.employee_id
+           ) }}">
+            Edit Employee
+        </a>
+
+    </div>
+
+</div>
+
+{% endblock %}

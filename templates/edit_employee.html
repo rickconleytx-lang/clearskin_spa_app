@@ -5,65 +5,166 @@
 {% block content %}
 <h1>Edit Employee</h1>
 
-<form method="POST" action="{{ url_for('edit_employee', employee_id=employee[0]) }}">
+<form method="POST" action="{{ url_for('edit_employee', employee_id=employee.employee_id) }}">
+
     <div class="form-group">
         <label for="first_name">First Name</label>
-        <input type="text" id="first_name" name="first_name" value="{{ employee[1] or '' }}" required>
+        <input type="text" 
+            id="first_name" 
+            name="first_name" 
+            value="{{ employee.first_name or '' }}" 
+            required>
     </div>
 
     <div class="form-group">
         <label for="last_name">Last Name</label>
-        <input type="text" id="last_name" name="last_name" value="{{ employee[2] or '' }}" required>
+        <input type="text"
+            id="last_name"
+            name="last_name"
+            value="{{ employee.last_name or '' }}"
+            required>
     </div>
 
     <div class="form-group">
+        <label for="employee_nickname">Nickname</label>
+
+        <input type="text"
+            id="employee_nickname"
+            name="employee_nickname"
+            value="{{ employee.employee_nickname or '' }}">
+    </div>
+
+    <div class="form-group">
+        <label for="employee_role_id">Employee Role</label>
+        <select id="employee_role_id"
+                name="employee_role_id"
+                required>
+            <option value="">Select Employee Role</option>
+
+            {% for role in employee_roles %}
+                <option value="{{ role.employee_role_id }}"
+                        {% if employee.employee_role_id == role.employee_role_id %}selected{% endif %}>
+                    {{ role.role_name }}
+                </option>
+            {% endfor %}
+        </select>
+   
+    <br>
+    <div class="form-group">
+    <label for="provider_color_code">Provider Color</label>
+        <span style="color: red; font-size: 0.8em;">Click textbox below to select color</span>
+    <div style="display: flex; align-items: center; gap: 10px;">
+        <input type="color"
+               id="provider_color_code"
+               name="provider_color_code"
+               value="{{ employee.provider_color_code or '#8B5CF6' }}">
+
+        <span id="provider_color_preview"
+              style="
+                  display: inline-block;
+                  width: 32px;
+                  height: 32px;
+                  border: 1px solid #999;
+                  border-radius: 6px;
+                  background-color: {{ employee.provider_color_code or '#8B5CF6' }};
+              ">
+        </span>
+
+        <span id="provider_color_text">
+            {{ employee.provider_color_code or '#8B5CF6' }}
+        </span>
+    </div>
+
+    <br>
+
+    <div class="form-group">
+        <label class="checkbox-label">
+            <input type="checkbox"
+                name="is_active"
+                {% if employee.is_active %}checked{% endif %}>
+            Active Employee
+        </label>
+    </div>
+    <br>
+
+    <div class="form-group">
         <label for="address_line1">Address Line 1</label>
-        <input type="text" id="address_line1" name="address_line1" value="{{ employee[3] or '' }}">
+        <input type="text"
+            id="address_line1"
+            name="address_line1"
+            value="{{ employee.address_line1 or '' }}">
     </div>
 
     <div class="form-group">
         <label for="address_line2">Address Line 2</label>
-        <input type="text" id="address_line2" name="address_line2" value="{{ employee[4] or '' }}">
+        <input type="text"
+            id="address_line2"
+            name="address_line2"
+            value="{{ employee.address_line2 or '' }}">
     </div>
 
     <div class="form-group">
         <label for="city">City</label>
-        <input type="text" id="city" name="city" value="{{ employee[5] or '' }}">
+        <input type="text" 
+            id="city"   
+            name="city" 
+            value="{{ employee.city or '' }}">
     </div>
 
     <div class="form-group">
         <label for="state">State</label>
-        <input type="text" id="state" name="state" value="{{ employee[6] or '' }}">
+        <input type="text" 
+            id="state"  
+            name="state" 
+            value="{{ employee.state or '' }}">
     </div>
 
     <div class="form-group">
         <label for="zip_code">Zip Code</label>
-        <input type="text" id="zip_code" name="zip_code" value="{{ employee[7] or '' }}">
+        <input type="text" 
+            id="zip_code" 
+            name="zip_code" 
+            value="{{ employee.zip_code or '' }}">
     </div>
 
     <div class="form-group">
         <label for="phone">Phone</label>
-        <input type="text" id="phone" name="phone" value="{{ employee[8] or '' }}">
+        <input type="text" 
+            id="phone" 
+            name="phone" 
+            value="{{ employee.phone or '' }}">
     </div>
 
     <div class="form-group">
         <label for="email">Email</label>
-        <input type="email" id="email" name="email" value="{{ employee[9] or '' }}">
+        <input type="email" 
+            id="email" 
+            name="email" 
+            value="{{ employee.email or '' }}">
     </div>
 
     <div class="form-group">
         <label for="job_title">Job Title</label>
-        <input type="text" id="job_title" name="job_title" value="{{ employee[10] or '' }}">
+        <input type="text" 
+            id="job_title" 
+            name="job_title" 
+            value="{{ employee.job_title or '' }}">
     </div>
 
     <div class="form-group">
         <label for="hire_date">Hire Date</label>
-        <input type="date" id="hire_date" name="hire_date" value="{{ employee[11].isoformat() if employee[11] else '' }}">
+        <input type="date"  
+            id="hire_date" 
+            name="hire_date" 
+            value="{{ employee.hire_date.isoformat() if employee.hire_date else '' }}">
     </div>
 
     <div class="form-group">
         <label for="termination_date">Termination Date</label>
-        <input type="date" id="termination_date" name="termination_date" value="{{ employee[12].isoformat() if employee[12] else '' }}">
+        <input type="date" 
+            id="termination_date" 
+            name="termination_date" 
+            value="{{ employee.termination_date.isoformat() if employee.termination_date else '' }}">
     </div>
 
     <div class="form-group">
@@ -71,60 +172,105 @@
         <select id="status" name="status">
             <option value="">Select Status</option>
             {% for row in statuses %}
-            <option value="{{ row[0] }}" {% if employee[13] == row[0] %}selected{% endif %}>{{ row[0] }}</option>
+                <option value="{{ row.status_name }}"
+                        {% if employee.status == row.status_name %}selected{% endif %}>
+                    {{ row.status_name }}
+                </option>
             {% endfor %}
         </select>
     </div>
 
     <div class="form-group">
         <label for="birthday">Birthday</label>
-        <input type="date" id="birthday" name="birthday" value="{{ employee[14].isoformat() if employee[14] else '' }}">
+        <input type="text"
+            id="birthday"
+            name="birthday"
+            value="{{ employee.birthday.strftime('%Y-%m-%d') if employee.birthday else '' }}"
+            placeholder="YYYY-MM-DD">
     </div>
 
     <div class="form-group">
         <label>
-            <input type="checkbox" name="ssn_on_file" {% if employee[15] %}checked{% endif %}>
+            <input type="checkbox" name="ssn_on_file" {% if employee.ssn_on_file %}checked{% endif %}>
             SSN On File
         </label>
     </div>
 
     <div class="form-group">
         <label for="esthetician_license_number">Esthetician License Number</label>
-        <input type="text" id="esthetician_license_number" name="esthetician_license_number" value="{{ employee[16] or '' }}">
+        <input type="text" 
+            id="esthetician_license_number" 
+            name="esthetician_license_number" 
+            value="{{ employee.esthetician_license_number or '' }}">
     </div>
 
     <div class="form-group">
         <label for="license_expiration_date">License Expiration Date</label>
-        <input type="date" id="license_expiration_date" name="license_expiration_date" value="{{ employee[17].isoformat() if employee[17] else '' }}">
+        <input type="date" 
+            id="license_expiration_date" 
+            name="license_expiration_date" 
+            value="{{ employee.license_expiration_date.isoformat() if employee.license_expiration_date else '' }}">
     </div>
 
     <div class="form-group">
         <label for="year_graduated">Year Graduated</label>
-        <input type="number" id="year_graduated" name="year_graduated" value="{{ employee[18] or '' }}">
+        <input type="number" 
+            id="year_graduated" 
+            name="year_graduated" 
+            value="{{ employee.year_graduated or '' }}">
     </div>
 
     <div class="form-group">
         <label for="certifications">Certifications</label>
-        <input type="text" id="certifications" name="certifications" value="{{ employee[19] or '' }}">
+        <input type="text" 
+            id="certifications" 
+            name="certifications" 
+            value="{{ employee.certifications or '' }}">
     </div>
 
     <div class="form-group">
         <label for="pay_type">Pay Type</label>
-        <input type="text" id="pay_type" name="pay_type" value="{{ employee[20] or '' }}">
+        <input type="text" 
+            id="pay_type" 
+            name="pay_type" 
+            value="{{ employee.pay_type or '' }}">
     </div>
 
     <div class="form-group">
         <label for="pay_rate">Pay Rate</label>
-        <input type="number" step="0.01" id="pay_rate" name="pay_rate" value="{{ employee[21] or '' }}">
+        <input type="number" 
+            step="0.01" 
+            id="pay_rate" 
+            name="pay_rate" 
+            value="{{ employee.pay_rate or '' }}">
     </div>
 
     <div class="form-group">
         <label for="notes">Notes</label>
-        <textarea id="notes" name="notes" rows="4">{{ employee[22] or '' }}</textarea>
+        <textarea id="notes" 
+            name="notes" rows="4">{{ employee.notes or '' }}</textarea>
     </div>
 
     <br>
-    <button type="submit" class="btn">Update Employee</button>
-    <a class="btn" href="{{ url_for('employees_home') }}">Cancel</a>
+    <div>
+        <button type="submit" class="btn">Update Employee</button>
+        <a class="btn" href="{{ url_for('employees_home') }}">Cancel</a>
+    </div>
+
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const picker = document.getElementById("provider_color_code");
+    const preview = document.getElementById("provider_color_preview");
+    const text = document.getElementById("provider_color_text");
+
+    picker.addEventListener("input", function () {
+        preview.style.backgroundColor = picker.value;
+        text.textContent = picker.value;
+    });
+});
+</script>
+
 </form>
+
 {% endblock %}

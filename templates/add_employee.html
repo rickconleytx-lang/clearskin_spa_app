@@ -21,6 +21,46 @@
     </div>
 
     <div class="form-group">
+        <label for="employee_nickname">Nickname</label>
+        <input type="text"
+            id="employee_nickname"
+            name="employee_nickname">
+    </div>
+
+    <div class="form-group">
+        <label for="employee_role_id">Employee Role</label>
+        <select id="employee_role_id"
+                name="employee_role_id"
+                required>
+            <option value="">Select Employee Role</option>
+
+            {% for role in employee_roles %}
+                <option value="{{ role[0] }}">
+                    {{ role[1] }}
+                </option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label for="provider_color_code">Provider Color</label>
+        <input type="color"
+            id="provider_color_code"
+            name="provider_color_code"
+            value="#8B5CF6">
+    </div>
+
+
+    <div class="form-group">
+        <label>
+            <input type="checkbox"
+                name="is_active"
+                checked>
+            Active Employee
+        </label>
+    </div>
+
+    <div class="form-group">
         <label for="address_line1">Address Line 1</label>
         <input type="text" id="address_line1" name="address_line1">
     </div>
