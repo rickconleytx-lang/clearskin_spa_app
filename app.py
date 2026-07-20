@@ -375,6 +375,320 @@ def log_event(category, message, severity="INFO", spa_id=None, related_type=None
 #  --------------------
 
 
+
+
+
+
+#   ---------------------------
+#
+#     LOGIN     REQUIRED
+#
+#
+#   ---------------------------
+
+
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if "user_id" not in session:
+            flash("Please log in first.", "error")
+            return redirect(url_for("login"))
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+
+
+
+
+
+
+
+
+
+#####################################
+###########################################
+#
+#   GLOBAL SUITE VERSION
+#
+#
+#############################################
+
+PEACH_SUITE_VERSION = os.getenv(
+    "PEACH_SUITE_VERSION",
+    "1.0"
+)
+
+
+@app.context_processor
+def inject_about_modal_data():
+    about_business = {
+        "spa_name": None,
+        "registration_number": None,
+        "subscription_status": None
+    }
+
+    if "user_id" not in session:
+        return {
+            "about_business": about_business,
+            "peach_suite_version": PEACH_SUITE_VERSION
+        }
+
+    conn = None
+    cur = None
+
+    try:
+        spa_id = current_spa_id()
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute(
+            """
+            SELECT
+                spa_name,
+                registration_number,
+                subscription_status
+            FROM spas
+            WHERE spa_id = %s
+            """,
+            (spa_id,)
+        )
+
+        row = cur.fetchone()
+
+        if row:
+            about_business = {
+                "spa_name": row[0],
+                "registration_number": row[1],
+                "subscription_status": row[2]
+            }
+
+    except Exception as error:
+        print(
+            "[ABOUT MODAL DATA ERROR]",
+            error,
+            flush=True
+        )
+
+    finally:
+        if cur:
+            cur.close()
+
+        if conn:
+            conn.close()
+
+    return {
+        "about_business": about_business,
+        "peach_suite_version": PEACH_SUITE_VERSION
+    }
+
+
+
+
+
+
+#########################
+#
+#       HELP MODAL
+#
+#
+###################################
+
+
+
+HELP_CONTEXT_MAP = {
+    "client_contact_preferences": {
+        "title": "Client Contact Preferences",
+        "description": (
+            "Review communication consent, marketing permissions, "
+            "SMS availability, and consent history."
+        ),
+        "topics": [
+            {
+                "page_key": "client_contact_preferences",
+                "title": "Client Contact Preferences"
+            },
+            {
+                "page_key": "edit_contact_preferences",
+                "title": "Edit Contact Preferences"
+            },
+            {
+                "page_key": "sms_consent_guidelines",
+                "title": "SMS Consent, Opt-In & Opt-Out Guidelines"
+            },
+            {
+                "page_key": "sms_10dlc_compliance",
+                "title": "SMS Setup & 10DLC Compliance"
+            }
+        ]
+    },
+
+    "edit_client_contact_preferences": {
+        "title": "Edit Contact Preferences",
+        "description": (
+            "Learn how to record service communication, marketing "
+            "consent, opt-outs, and SMS availability."
+        ),
+        "topics": [
+            {
+                "page_key": "edit_contact_preferences",
+                "title": "Edit Contact Preferences"
+            },
+            {
+                "page_key": "client_contact_preferences",
+                "title": "Client Contact Preferences"
+            },
+            {
+                "page_key": "sms_consent_guidelines",
+                "title": "SMS Consent, Opt-In & Opt-Out Guidelines"
+            },
+            {
+                "page_key": "sms_10dlc_compliance",
+                "title": "SMS Setup & 10DLC Compliance"
+            }
+        ]
+    }
+}
+
+#################################################
+############################################################
+
+
+
+@app.context_processor
+def inject_help_modal_context():
+    help_context = HELP_CONTEXT_MAP.get(
+        request.endpoint,
+        {
+            "title": "Help & Knowledge Base",
+            "description": (
+                "Search Peach Suite Pro help topics or open the "
+                "full Knowledge Base."
+            ),
+            "topics": []
+        }
+    )
+
+    return {
+        "help_modal_context": help_context
+    }
+
+
+
+
+####################################
+#
+#   HELP TOPICS FOR MODAL
+#
+#
+############################################
+
+
+
+@app.route("/api/help-topics")
+@login_required
+def help_topics_api():
+    search_text = request.args.get(
+        "q",
+        ""
+    ).strip()
+
+    language = session.get(
+        "preferred_language",
+        "EN"
+    )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        if search_text:
+            like_search = f"%{search_text}%"
+
+            cur.execute(
+                """
+                SELECT
+                    page_key,
+                    title
+                FROM help_pages
+                WHERE title ILIKE %s
+                OR page_key ILIKE %s
+                ORDER BY
+                    COALESCE(display_order, 9999),
+                    title
+                LIMIT 40
+                """,
+                (
+                    like_search,
+                    like_search
+                )
+            )
+
+        else:
+            cur.execute(
+                """
+                SELECT
+                    page_key,
+                    title
+                FROM help_pages
+                ORDER BY
+                    COALESCE(display_order, 9999),
+                    title
+                LIMIT 40
+                """
+            )
+
+        rows = cur.fetchall()
+
+        topics = [
+            {
+                "page_key": row[0],
+                "title": row[1]
+            }
+            for row in rows
+        ]
+
+        return jsonify(
+            {
+                "success": True,
+                "topics": topics
+            }
+        )
+
+    except Exception as error:
+        print(
+            "[HELP TOPICS API ERROR]",
+            error,
+            flush=True
+        )
+
+        return jsonify(
+            {
+                "success": False,
+                "topics": [],
+                "message": (
+                    "Help topics could not be loaded."
+                )
+            }
+        ), 500
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
+
+
+
+
+
+
+
+
+
 #########################
 #
 #   MASTER ADMIN REQUIRED
@@ -444,6 +758,39 @@ def integer_filter(value):
 
 
 
+######################################
+#
+#   BUILD REGISTRATION NUMBER
+#
+#
+##########################################
+
+
+
+def build_registration_number(spa_name, spa_id):
+    words = spa_name.split()
+
+    initials = "".join(
+        word[0].upper()
+        for word in words
+        if word and word[0].isalnum()
+    )
+
+    initials = initials[:3]
+
+    if not initials:
+        initials = "BUS"
+
+    return f"PSP-{initials}-{spa_id:06d}"
+
+
+
+
+
+
+
+
+
 
 
 
@@ -456,14 +803,6 @@ def integer_filter(value):
 
 def log_godaddy(message):
     print(f"[GODADDY IMPORT] {message}", flush=True)
-
-
-
-
-
-
-
-
 
 
 
@@ -3919,23 +4258,6 @@ def get_spa_name(spa_id):
         conn.close()
 
 
-#   ---------------------------
-#
-#     LOGIN HELPERS
-#
-#
-#   ---------------------------
-
-
-def login_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if "user_id" not in session:
-            flash("Please log in first.", "error")
-            return redirect(url_for("login"))
-        return f(*args, **kwargs)
-    return decorated_function
-
 
         
 #   -------------------------
@@ -6190,6 +6512,25 @@ def master_admin_add_business():
 
         spa_id = cur.fetchone()[0]
 
+        registration_number = build_registration_number(
+            spa_name,
+            spa_id
+        )
+
+        cur.execute(
+            """
+            UPDATE spas
+            SET registration_number = %s
+            WHERE spa_id = %s
+            """,
+            (
+                registration_number,
+                spa_id
+            )
+        )
+
+
+
         # -----------------------------------------
         # Create business administrator
         # -----------------------------------------
@@ -6233,6 +6574,7 @@ def master_admin_add_business():
         flash(
             (
                 f"{spa_name} was created successfully. "
+                f"Registration Number: {registration_number}. "
                 f"Business ID: {spa_id}. "
                 f"Administrator ID: {user_id}."
             ),
@@ -14709,6 +15051,8 @@ def business_goals():
 #           
 #   --------------------------------------------------
 
+
+
 @app.route("/client-contact-preferences")
 @login_required
 @spa_required
@@ -14716,84 +15060,241 @@ def client_contact_preferences():
     spa_id = current_spa_id()
 
     search = request.args.get("search", "").strip()
-    filter_status = request.args.get("filter_status", "").strip()
+    filter_status = request.args.get(
+        "filter_status",
+        ""
+    ).strip()
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    query = """
-        SELECT
-            client_id,
-            first_name,
-            last_name,
-            phone,
-            email,
-            sms_opt_in,
-            email_opt_in,
-            ok_to_call
-        FROM clients
-        WHERE spa_id = %s
-          AND active_client = TRUE
-    """
+    try:
+        # -----------------------------------------
+        # Business SMS / 10DLC availability
+        # -----------------------------------------
+        sms_10dlc_approved = False
+        sms_marketing_10dlc_approved = False
 
-    params = [spa_id]
+        cur.execute(
+            """
+            SELECT
+                sms_10dlc_status,
+                sms_number_assignment_status,
+                sms_marketing_allowed,
+                sms_service_suspended,
+                sms_marketing_suspended
+            FROM spas
+            WHERE spa_id = %s
+            """,
+            (spa_id,)
+        )
 
-    if search:
-        query += """
-            AND (
-                first_name ILIKE %s OR
-                last_name ILIKE %s OR
-                phone ILIKE %s OR
-                email ILIKE %s
+        messaging_status = cur.fetchone()
+
+        if messaging_status:
+            sms_10dlc_approved = (
+                messaging_status[0] == "approved"
+                and messaging_status[1] == "assigned"
+                and not messaging_status[3]
             )
-        """
-        like_search = f"%{search}%"
-        params.extend([like_search, like_search, like_search, like_search])
 
-    if filter_status == "sms_yes":
-        query += """
-            AND sms_opt_in = TRUE
-            AND COALESCE(sms_opt_out, FALSE) = FALSE
-        """
-    elif filter_status == "sms_no":
-        query += """
-            AND (
-                sms_opt_out = TRUE
-                OR COALESCE(sms_opt_in, FALSE) = FALSE
+            sms_marketing_10dlc_approved = (
+                sms_10dlc_approved
+                and messaging_status[2]
+                and not messaging_status[4]
             )
+
+        # -----------------------------------------
+        # Client contact preferences
+        # -----------------------------------------
+        query = """
+            SELECT
+                c.client_id,                              -- 0
+                c.first_name,                             -- 1
+                c.last_name,                              -- 2
+                c.phone,                                  -- 3
+                c.email,                                  -- 4
+                COALESCE(c.sms_opt_in, FALSE),            -- 5
+                COALESCE(c.sms_opt_out, FALSE),           -- 6
+                COALESCE(c.email_opt_in, FALSE),          -- 7
+                COALESCE(c.email_opt_out, FALSE),         -- 8
+                COALESCE(c.ok_to_call, TRUE),             -- 9
+                COALESCE(
+                    c.sms_marketing_status,
+                    'opt_out'
+                ),                                        -- 10
+                COALESCE(
+                    c.email_marketing_status,
+                    'not_set'
+                )                                         -- 11
+            FROM clients c
+            WHERE c.spa_id = %s
+              AND c.active_client = TRUE
         """
-    elif filter_status == "email_yes":
-        query += """
-            AND email_opt_in = TRUE
-            AND COALESCE(email_opt_out, FALSE) = FALSE
-        """
-    elif filter_status == "email_no":
-        query += """
-            AND (
-                email_opt_out = TRUE
-                OR COALESCE(email_opt_in, FALSE) = FALSE
+
+        params = [spa_id]
+
+        if search:
+            query += """
+                AND (
+                    c.first_name ILIKE %s
+                    OR c.last_name ILIKE %s
+                    OR c.phone ILIKE %s
+                    OR c.email ILIKE %s
+                )
+            """
+
+            like_search = f"%{search}%"
+
+            params.extend(
+                [
+                    like_search,
+                    like_search,
+                    like_search,
+                    like_search
+                ]
             )
+
+        # -----------------------------------------
+        # Communication filters
+        # -----------------------------------------
+        if filter_status == "sms_yes":
+            query += """
+                AND c.sms_opt_in = TRUE
+                AND COALESCE(c.sms_opt_out, FALSE) = FALSE
+            """
+
+        elif filter_status == "sms_no":
+            query += """
+                AND COALESCE(c.sms_opt_out, FALSE) = TRUE
+            """
+
+        elif filter_status == "sms_unset":
+            query += """
+                AND COALESCE(c.sms_opt_in, FALSE) = FALSE
+                AND COALESCE(c.sms_opt_out, FALSE) = FALSE
+            """
+
+        elif filter_status == "email_yes":
+            query += """
+                AND c.email_opt_in = TRUE
+                AND COALESCE(c.email_opt_out, FALSE) = FALSE
+            """
+
+        elif filter_status == "email_no":
+            query += """
+                AND COALESCE(c.email_opt_out, FALSE) = TRUE
+            """
+
+        elif filter_status == "email_unset":
+            query += """
+                AND COALESCE(c.email_opt_in, FALSE) = FALSE
+                AND COALESCE(c.email_opt_out, FALSE) = FALSE
+            """
+
+        # -----------------------------------------
+        # Marketing filters
+        # -----------------------------------------
+        elif filter_status == "sms_marketing_yes":
+            query += """
+                AND COALESCE(
+                    c.sms_marketing_status,
+                    'opt_out'
+                ) = 'opt_in'
+            """
+
+        elif filter_status == "sms_marketing_no":
+            query += """
+                AND COALESCE(
+                    c.sms_marketing_status,
+                    'opt_out'
+                ) = 'opt_out'
+            """
+
+        elif filter_status == "sms_marketing_unset":
+            query += """
+                AND COALESCE(
+                    c.sms_marketing_status,
+                    'opt_out'
+                ) = 'not_set'
+            """
+
+        elif filter_status == "email_marketing_yes":
+            query += """
+                AND COALESCE(
+                    c.email_marketing_status,
+                    'not_set'
+                ) = 'opt_in'
+            """
+
+        elif filter_status == "email_marketing_no":
+            query += """
+                AND COALESCE(
+                    c.email_marketing_status,
+                    'not_set'
+                ) = 'opt_out'
+            """
+
+        elif filter_status == "email_marketing_unset":
+            query += """
+                AND COALESCE(
+                    c.email_marketing_status,
+                    'not_set'
+                ) = 'not_set'
+            """
+
+        # -----------------------------------------
+        # Phone and missing-data filters
+        # -----------------------------------------
+        elif filter_status == "phone_yes":
+            query += """
+                AND COALESCE(c.ok_to_call, TRUE) = TRUE
+            """
+
+        elif filter_status == "phone_no":
+            query += """
+                AND COALESCE(c.ok_to_call, TRUE) = FALSE
+            """
+
+        elif filter_status == "missing_phone":
+            query += """
+                AND (
+                    c.phone IS NULL
+                    OR TRIM(c.phone) = ''
+                )
+            """
+
+        elif filter_status == "missing_email":
+            query += """
+                AND (
+                    c.email IS NULL
+                    OR TRIM(c.email) = ''
+                )
+            """
+
+        query += """
+            ORDER BY
+                c.last_name,
+                c.first_name
         """
-    elif filter_status == "missing_phone":
-        query += " AND (phone IS NULL OR TRIM(phone) = '')"
-    elif filter_status == "missing_email":
-        query += " AND (email IS NULL OR TRIM(email) = '')"
 
-    query += " ORDER BY last_name, first_name"
+        cur.execute(query, params)
+        clients = cur.fetchall()
 
-    cur.execute(query, params)
-    clients = cur.fetchall()
+        return render_template(
+            "client_contact_preferences.html",
+            clients=clients,
+            search=search,
+            filter_status=filter_status,
+            sms_10dlc_approved=sms_10dlc_approved,
+            sms_marketing_10dlc_approved=(
+                sms_marketing_10dlc_approved
+            )
+        )
 
-    cur.close()
-    conn.close()
-
-    return render_template(
-        "client_contact_preferences.html",
-        clients=clients,
-        search=search,
-        filter_status=filter_status
-    )
-
+    finally:
+        cur.close()
+        conn.close()
 
 
 
@@ -14806,174 +15307,426 @@ def client_contact_preferences():
 
 
 
-
-
+########################################
 #   -------------------------------
 #
 #   EDIT PREFERENCES
 #   FOR SMS - EMAIL -CALL
 #
 #   ------------------------------
+#########################################
 
-@app.route("/client-contact-preferences/edit/<int:client_id>", methods=["GET", "POST"])
+
+
+@app.route(
+    "/client-contact-preferences/edit/<int:client_id>",
+    methods=["GET", "POST"]
+)
 @login_required
 @spa_required
 def edit_client_contact_preferences(client_id):
     spa_id = current_spa_id()
+    user_id = session.get("user_id")
+
+    valid_statuses = {
+        "opt_in",
+        "opt_out",
+        "not_set"
+    }
+
+    def status_from_pair(opt_in, opt_out):
+        if opt_out:
+            return "opt_out"
+
+        if opt_in:
+            return "opt_in"
+
+        return "not_set"
+
+    def status_label(status):
+        return {
+            "opt_in": "Opted In",
+            "opt_out": "Opted Out",
+            "not_set": "Not Set"
+        }.get(status, "Not Set")
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    if request.method == "POST":
-        sms_opt_in = request.form.get("sms_opt_in") == "on"
-        sms_opt_out = request.form.get("sms_opt_out") == "on"
-        email_opt_in = request.form.get("email_opt_in") == "on"
-        email_opt_out = request.form.get("email_opt_out") == "on"
-        ok_to_call = request.form.get("ok_to_call") == "on"
+    try:
+        # -----------------------------------------
+        # Business SMS / 10DLC availability
+        # -----------------------------------------
+        sms_10dlc_approved = False
+        sms_marketing_10dlc_approved = False
 
-        print("FORM DATA:", request.form, flush=True)
-        print("EMAIL OPT IN:", email_opt_in, flush=True)
-        print("EMAIL OPT OUT:", email_opt_out, flush=True)
-
-
-
-
-        cur.execute("""
+        cur.execute(
+            """
             SELECT
+                sms_10dlc_status,
+                sms_number_assignment_status,
+                sms_marketing_allowed,
+                sms_service_suspended,
+                sms_marketing_suspended
+            FROM spas
+            WHERE spa_id = %s
+            """,
+            (spa_id,)
+        )
+
+        messaging_status = cur.fetchone()
+
+        if messaging_status:
+            sms_10dlc_status = messaging_status[0]
+            sms_number_assignment_status = messaging_status[1]
+            sms_marketing_allowed = messaging_status[2]
+            sms_service_suspended = messaging_status[3]
+            sms_marketing_suspended = messaging_status[4]
+
+            sms_10dlc_approved = (
+                sms_10dlc_status == "approved"
+                and sms_number_assignment_status == "assigned"
+                and not sms_service_suspended
+            )
+
+            sms_marketing_10dlc_approved = (
+                sms_10dlc_approved
+                and sms_marketing_allowed
+                and not sms_marketing_suspended
+            )
+
+        if request.method == "POST":
+           
+            # -----------------------------------------
+            # Read the single status controls
+            # -----------------------------------------
+            phone_status = request.form.get(
+                "phone_status",
+                "opt_in"
+            )
+
+            email_status = request.form.get(
+                "email_status",
+                "opt_in"
+            )
+
+            email_marketing_status = request.form.get(
+                "email_marketing_status",
+                "not_set"
+            )
+
+            sms_status = request.form.get(
+                "sms_status",
+                "opt_out"
+            )
+
+            sms_marketing_status = request.form.get(
+                "sms_marketing_status",
+                "opt_out"
+            )
+
+            # -----------------------------------------
+            # Validate submitted values
+            # -----------------------------------------
+            if phone_status not in {"opt_in", "opt_out"}:
+                phone_status = "opt_in"
+
+            if email_status not in valid_statuses:
+                email_status = "opt_in"
+
+            if email_marketing_status not in valid_statuses:
+                email_marketing_status = "not_set"
+
+            if sms_status not in valid_statuses:
+                sms_status = "opt_out"
+
+            if sms_marketing_status not in valid_statuses:
+                sms_marketing_status = "opt_out"
+
+            # The server enforces SMS locking.
+            # Hidden form values alone are not trusted.
+            if not sms_10dlc_approved:
+                sms_status = "opt_out"
+
+            if not sms_marketing_10dlc_approved:
+                sms_marketing_status = "opt_out"
+
+            # -----------------------------------------
+            # Convert statuses to existing booleans
+            # -----------------------------------------
+            ok_to_call = phone_status == "opt_in"
+
+            email_opt_in = email_status == "opt_in"
+            email_opt_out = email_status == "opt_out"
+
+            sms_opt_in = sms_status == "opt_in"
+            sms_opt_out = sms_status == "opt_out"
+
+            # -----------------------------------------
+            # Read existing preferences
+            # -----------------------------------------
+            cur.execute(
+                """
+                SELECT
+                    sms_opt_in,
+                    sms_opt_out,
+                    email_opt_in,
+                    email_opt_out,
+                    ok_to_call,
+                    COALESCE(
+                        sms_marketing_status,
+                        'opt_out'
+                    ),
+                    COALESCE(
+                        email_marketing_status,
+                        'not_set'
+                    )
+                FROM clients
+                WHERE client_id = %s
+                  AND spa_id = %s
+                  AND active_client = TRUE
+                """,
+                (client_id, spa_id)
+            )
+
+            old_prefs = cur.fetchone()
+
+            if not old_prefs:
+                flash("Client not found.", "error")
+                return redirect(
+                    url_for("client_contact_preferences")
+                )
+
+            old_sms_status = status_from_pair(
+                old_prefs[0],
+                old_prefs[1]
+            )
+
+            old_email_status = status_from_pair(
+                old_prefs[2],
+                old_prefs[3]
+            )
+
+            old_phone_status = (
+                "opt_in"
+                if old_prefs[4]
+                else "opt_out"
+            )
+
+            old_sms_marketing_status = old_prefs[5]
+            old_email_marketing_status = old_prefs[6]
+
+            # -----------------------------------------
+            # Save preferences
+            # -----------------------------------------
+            cur.execute(
+                """
+                UPDATE clients
+                SET
+                    sms_opt_in = %s,
+                    sms_opt_out = %s,
+                    email_opt_in = %s,
+                    email_opt_out = %s,
+                    ok_to_call = %s,
+                    sms_marketing_status = %s,
+                    email_marketing_status = %s
+                WHERE client_id = %s
+                  AND spa_id = %s
+                  AND active_client = TRUE
+                """,
+                (
+                    sms_opt_in,
+                    sms_opt_out,
+                    email_opt_in,
+                    email_opt_out,
+                    ok_to_call,
+                    sms_marketing_status,
+                    email_marketing_status,
+                    client_id,
+                    spa_id
+                )
+            )
+
+            # -----------------------------------------
+            # Consent history
+            # One record per channel change
+            # -----------------------------------------
+            if old_sms_status != sms_status:
+                add_consent_record(
+                    cur,
+                    spa_id,
+                    client_id,
+                    "SMS",
+                    sms_status == "opt_in",
+                    "Admin Updated",
+                    (
+                        "SMS communication changed from "
+                        f"{status_label(old_sms_status)} to "
+                        f"{status_label(sms_status)}."
+                    ),
+                    user_id
+                )
+
+            if old_email_status != email_status:
+                add_consent_record(
+                    cur,
+                    spa_id,
+                    client_id,
+                    "Email",
+                    email_status == "opt_in",
+                    "Admin Updated",
+                    (
+                        "Email communication changed from "
+                        f"{status_label(old_email_status)} to "
+                        f"{status_label(email_status)}."
+                    ),
+                    user_id
+                )
+
+            if old_phone_status != phone_status:
+                add_consent_record(
+                    cur,
+                    spa_id,
+                    client_id,
+                    "Phone",
+                    phone_status == "opt_in",
+                    "Admin Updated",
+                    (
+                        "Phone preference changed from "
+                        f"{status_label(old_phone_status)} to "
+                        f"{status_label(phone_status)}."
+                    ),
+                    user_id
+                )
+
+            if (
+                old_sms_marketing_status
+                != sms_marketing_status
+            ):
+                add_consent_record(
+                    cur,
+                    spa_id,
+                    client_id,
+                    "SMS Marketing",
+                    sms_marketing_status == "opt_in",
+                    "Admin Updated",
+                    (
+                        "SMS marketing changed from "
+                        f"{status_label(old_sms_marketing_status)} "
+                        "to "
+                        f"{status_label(sms_marketing_status)}."
+                    ),
+                    user_id
+                )
+
+            if (
+                old_email_marketing_status
+                != email_marketing_status
+            ):
+                add_consent_record(
+                    cur,
+                    spa_id,
+                    client_id,
+                    "Email Marketing",
+                    email_marketing_status == "opt_in",
+                    "Admin Updated",
+                    (
+                        "Email marketing changed from "
+                        f"{status_label(old_email_marketing_status)} "
+                        "to "
+                        f"{status_label(email_marketing_status)}."
+                    ),
+                    user_id
+                )
+
+            conn.commit()
+
+            flash(
+                "Contact preferences updated.",
+                "success"
+            )
+
+            return redirect(
+                url_for("client_contact_preferences")
+            )
+
+        # -----------------------------------------
+        # GET — Load client preferences
+        # -----------------------------------------
+        cur.execute(
+            """
+            SELECT
+                client_id,
+                first_name,
+                last_name,
+                phone,
+                email,
                 sms_opt_in,
                 sms_opt_out,
                 email_opt_in,
                 email_opt_out,
-                ok_to_call
+                ok_to_call,
+                COALESCE(
+                    sms_marketing_status,
+                    'opt_out'
+                ),
+                COALESCE(
+                    email_marketing_status,
+                    'not_set'
+                )
             FROM clients
             WHERE client_id = %s
               AND spa_id = %s
-        """, (client_id, spa_id))
+              AND active_client = TRUE
+            """,
+            (client_id, spa_id)
+        )
 
-        old_prefs = cur.fetchone()
+        client = cur.fetchone()
 
-        if not old_prefs:
-            cur.close()
-            conn.close()
+        if not client:
             flash("Client not found.", "error")
-            return redirect(url_for("client_contact_preferences"))
-
-        old_sms_opt_in = old_prefs[0]
-        old_sms_opt_out = old_prefs[1]
-        old_email_opt_in = old_prefs[2]
-        old_email_opt_out = old_prefs[3]
-        old_call = old_prefs[4]
-
-        cur.execute("""
-            UPDATE clients
-            SET
-                sms_opt_in = %s,
-                sms_opt_out = %s,
-                email_opt_in = %s,
-                email_opt_out = %s,
-                ok_to_call = %s
-            WHERE client_id = %s
-              AND spa_id = %s
-        """, (
-            sms_opt_in,
-            sms_opt_out,
-            email_opt_in,
-            email_opt_out,
-            ok_to_call,
-            client_id,
-            spa_id
-        ))
-
-        updated_by = session.get("user_id")
-
-        if old_sms_opt_in != sms_opt_in:
-            add_consent_record(
-                cur, spa_id, client_id,
-                "SMS", sms_opt_in,
-                "Admin Updated",
-                "SMS opt-in updated from contact preferences page.",
-                updated_by
+            return redirect(
+                url_for("client_contact_preferences")
             )
 
-        if old_sms_opt_out != sms_opt_out:
-            add_consent_record(
-                cur, spa_id, client_id,
-                "SMS", not sms_opt_out,
-                "Admin Updated",
-                "SMS opt-out updated from contact preferences page.",
-                updated_by
+        return render_template(
+            "edit_client_contact_preferences.html",
+            client=client,
+            sms_10dlc_approved=sms_10dlc_approved,
+            sms_marketing_10dlc_approved=(
+                sms_marketing_10dlc_approved
             )
+        )
 
-        if old_email_opt_in != email_opt_in:
-            add_consent_record(
-                cur, spa_id, client_id,
-                "Email", email_opt_in,
-                "Admin Updated",
-                "Email opt-in updated from contact preferences page.",
-                updated_by
-            )
+    except Exception as error:
+        conn.rollback()
 
-        if old_email_opt_out != email_opt_out:
-            add_consent_record(
-                cur, spa_id, client_id,
-                "Email", not email_opt_out,
-                "Admin Updated",
-                "Email opt-out updated from contact preferences page.",
-                updated_by
-            )
+        print(
+            "[CONTACT PREFERENCES ERROR]",
+            error,
+            flush=True
+        )
 
-        if old_call != ok_to_call:
-            add_consent_record(
-                cur, spa_id, client_id,
-                "Phone", ok_to_call,
-                "Admin Updated",
-                "Phone contact consent updated from contact preferences page.",
-                updated_by
-            )
+        flash(
+            "Contact preferences could not be updated.",
+            "error"
+        )
 
-        conn.commit()
+        return redirect(
+            url_for("client_contact_preferences")
+        )
+
+    finally:
         cur.close()
         conn.close()
 
-        flash("Contact preferences updated.", "success")
-        return redirect(url_for("client_contact_preferences"))
-
-    cur.execute("""
-        SELECT
-            client_id,
-            first_name,
-            last_name,
-            phone,
-            email,
-            sms_opt_in,
-            sms_opt_out,
-            email_opt_in,
-            email_opt_out,
-            ok_to_call
-        FROM clients
-        WHERE client_id = %s
-          AND spa_id = %s
-          AND active_client = TRUE
-    """, (client_id, spa_id))
 
 
 
 
 
 
-    client = cur.fetchone()
-
-    cur.close()
-    conn.close()
-
-    if not client:
-        flash("Client not found.", "error")
-        return redirect(url_for("client_contact_preferences"))
-
-    return render_template(
-        "edit_client_contact_preferences.html",
-        client=client
-    )
 
 
 

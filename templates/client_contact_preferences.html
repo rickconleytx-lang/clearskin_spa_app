@@ -1,115 +1,542 @@
 {% extends "base.html" %}
-{% block title %}Calendar | Peach Suite Pro{% endblock %}
+{% block title %}Contact Preferences | Peach Suite Pro{% endblock %}
 
 {% block content %}
 
+{% macro consent_pill(status, description) %}
 
-  
+    {% if status == "opt_in" %}
+        <span
+            class="consent-mini consent-mini-in"
+            title="{{ description }}: Opted In"
+            aria-label="{{ description }}: Opted In"
+        >
+            ✓
+        </span>
+
+    {% elif status == "opt_out" %}
+        <span
+            class="consent-mini consent-mini-out"
+            title="{{ description }}: Opted Out"
+            aria-label="{{ description }}: Opted Out"
+        >
+            ✕
+        </span>
+
+    {% elif status == "locked" %}
+        <span
+            class="consent-mini consent-mini-locked"
+            title="{{ description }}: Unavailable due to business messaging status"
+            aria-label="{{ description }}: Locked"
+        >
+            🔒
+        </span>
+
+    {% else %}
+        <span
+            class="consent-mini consent-mini-unset"
+            title="{{ description }}: Not Set"
+            aria-label="{{ description }}: Not Set"
+        >
+            —
+        </span>
+    {% endif %}
+
+{% endmacro %}
+
+
 <h1>Client Contact Preferences</h1>
 
+<div class="contact-status-legend">
+    <span>
+        {{ consent_pill("opt_in", "Status") }}
+        Opted In
+    </span>
+
+    <span>
+        {{ consent_pill("opt_out", "Status") }}
+        Opted Out
+    </span>
+
+    <span>
+        {{ consent_pill("not_set", "Status") }}
+        Not Set
+    </span>
+
+    <span>
+        {{ consent_pill("locked", "Status") }}
+        Unavailable
+    </span>
+</div>
+
+
 <form method="GET" class="filter-form">
-    <input type="text"
-           name="search"
-           placeholder="Search name, phone, or email"
-           value="{{ search }}">
+
+    <input
+        type="text"
+        name="search"
+        placeholder="Search name, phone, or email"
+        value="{{ search }}"
+    >
 
     <select name="filter_status">
-        <option value="">All Clients</option>
-        <option value="sms_yes" {% if filter_status == "sms_yes" %}selected{% endif %}>SMS Opted In</option>
-        <option value="sms_no" {% if filter_status == "sms_no" %}selected{% endif %}>SMS Opted Out</option>
-        <option value="email_yes" {% if filter_status == "email_yes" %}selected{% endif %}>Email Opted In</option>
-        <option value="email_no" {% if filter_status == "email_no" %}selected{% endif %}>Email Opted Out</option>
-        <option value="missing_phone" {% if filter_status == "missing_phone" %}selected{% endif %}>Missing Phone</option>
-        <option value="missing_email" {% if filter_status == "missing_email" %}selected{% endif %}>Missing Email</option>
+
+        <option value="">
+            All Clients
+        </option>
+
+        <optgroup label="SMS Communication">
+            <option
+                value="sms_yes"
+                {% if filter_status == "sms_yes" %}selected{% endif %}
+            >
+                SMS Opted In
+            </option>
+
+            <option
+                value="sms_no"
+                {% if filter_status == "sms_no" %}selected{% endif %}
+            >
+                SMS Opted Out
+            </option>
+
+            <option
+                value="sms_unset"
+                {% if filter_status == "sms_unset" %}selected{% endif %}
+            >
+                SMS Not Set
+            </option>
+        </optgroup>
+
+        <optgroup label="SMS Marketing">
+            <option
+                value="sms_marketing_yes"
+                {% if filter_status == "sms_marketing_yes" %}selected{% endif %}
+            >
+                SMS Marketing Opted In
+            </option>
+
+            <option
+                value="sms_marketing_no"
+                {% if filter_status == "sms_marketing_no" %}selected{% endif %}
+            >
+                SMS Marketing Opted Out
+            </option>
+
+            <option
+                value="sms_marketing_unset"
+                {% if filter_status == "sms_marketing_unset" %}selected{% endif %}
+            >
+                SMS Marketing Not Set
+            </option>
+        </optgroup>
+
+        <optgroup label="Email Communication">
+            <option
+                value="email_yes"
+                {% if filter_status == "email_yes" %}selected{% endif %}
+            >
+                Email Opted In
+            </option>
+
+            <option
+                value="email_no"
+                {% if filter_status == "email_no" %}selected{% endif %}
+            >
+                Email Opted Out
+            </option>
+
+            <option
+                value="email_unset"
+                {% if filter_status == "email_unset" %}selected{% endif %}
+            >
+                Email Not Set
+            </option>
+        </optgroup>
+
+        <optgroup label="Email Marketing">
+            <option
+                value="email_marketing_yes"
+                {% if filter_status == "email_marketing_yes" %}selected{% endif %}
+            >
+                Email Marketing Opted In
+            </option>
+
+            <option
+                value="email_marketing_no"
+                {% if filter_status == "email_marketing_no" %}selected{% endif %}
+            >
+                Email Marketing Opted Out
+            </option>
+
+            <option
+                value="email_marketing_unset"
+                {% if filter_status == "email_marketing_unset" %}selected{% endif %}
+            >
+                Email Marketing Not Set
+            </option>
+        </optgroup>
+
+        <optgroup label="Phone">
+            <option
+                value="phone_yes"
+                {% if filter_status == "phone_yes" %}selected{% endif %}
+            >
+                Phone Allowed
+            </option>
+
+            <option
+                value="phone_no"
+                {% if filter_status == "phone_no" %}selected{% endif %}
+            >
+                Phone Not Allowed
+            </option>
+        </optgroup>
+
+        <optgroup label="Missing Information">
+            <option
+                value="missing_phone"
+                {% if filter_status == "missing_phone" %}selected{% endif %}
+            >
+                Missing Phone
+            </option>
+
+            <option
+                value="missing_email"
+                {% if filter_status == "missing_email" %}selected{% endif %}
+            >
+                Missing Email
+            </option>
+        </optgroup>
+
     </select>
 
-    <button type="submit" class="btn">Filter</button>
-    <a href="{{ url_for('client_contact_preferences') }}" class="btn secondary">Clear</a>
+    <button type="submit" class="btn">
+        Filter
+    </button>
+
+    <a
+        href="{{ url_for('client_contact_preferences') }}"
+        class="btn secondary"
+    >
+        Clear
+    </a>
+
 </form>
+
 
 <div class="table-container">
 
-<table class="styled-table">
-    <thead>
-        <tr>
-            <th>Client</th>
-            <th>Phone</th>
-            <th>Email</th>
-            <th>SMS</th>
-            <th>Email Opt-In</th>
-            <th>Phone Contact</th>
-            <th>Action</th>
-        </tr>
-    </thead>
+    <table class="styled-table contact-preferences-table">
 
-    <tbody>
-        {% for c in clients %}
-        <tr>
-            <td>{{ c[1] }} {{ c[2] }}</td>
+        <thead>
+            <tr>
+                <th>Client</th>
+                <th>Phone</th>
+                <th>Email</th>
 
-            <td>
-                {% if c[3] %}
-                    {{ c[3] }}
-                {% else %}
-                    <span class="badge missing">Missing</span>
-                {% endif %}
-            </td> 
+                <th title="SMS Communication">
+                    SMS
+                </th>
 
-            <td>
-                {% if c[4] %}
-                    {{ c[4] }}
-                {% else %}
-                    <span class="badge missing">Missing</span>
-                {% endif %}
-            </td>   
+                <th title="SMS Marketing">
+                    SMS Mktg
+                </th>
 
+                <th title="Email Communication">
+                    Email
+                </th>
 
-            <td>
-                {% if c[5] %}
-                    <span class="badge success">Opted In</span>
-                {% else %}
-                    <span class="badge danger">Opted Out</span>
-                {% endif %}
-            </td>
+                <th title="Email Marketing">
+                    Email Mktg
+                </th>
 
-            <td>
-                {% if c[6] %}
-                    <span class="badge success">Opted In</span>
-                {% else %}
-                    <span class="badge danger">Opted Out</span>
-                {% endif %}
-            </td>
+                <th title="Phone Calls">
+                    Call
+                </th>
 
-            <td>
-                {% if c[7] %}
-                    <span class="badge success">Allowed</span>
-                {% else %}
-                    <span class="badge danger">No</span>
-                {% endif %}
-            </td>
+                <th>Action</th>
+            </tr>
+        </thead>
 
-            <td>
-                <a class="btn small"
-                   href="{{ url_for('edit_client_contact_preferences', client_id=c[0]) }}">
-                    Edit
-                </a>
+        <tbody>
 
-                <a class="btn small secondary"
-                    href="{{ url_for('client_consent_history', client_id=c[0]) }}">
-                    History
-                 </a>
+            {% for c in clients %}
 
+                {% set sms_status =
+                    "opt_out" if c[6]
+                    else "opt_in" if c[5]
+                    else "not_set"
+                %}
 
-            </td>
-        </tr>
-        {% else %}
-        <tr>
-            <td colspan="7">No clients found.</td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
+                {% set email_status =
+                    "opt_out" if c[8]
+                    else "opt_in" if c[7]
+                    else "not_set"
+                %}
+
+                {% set phone_status =
+                    "opt_in" if c[9]
+                    else "opt_out"
+                %}
+
+                {% set sms_marketing_status =
+                    c[10] or "opt_out"
+                %}
+
+                {% set email_marketing_status =
+                    c[11] or "not_set"
+                %}
+
+                <tr>
+
+                    <td class="client-name-cell">
+                        {{ c[1] }} {{ c[2] }}
+                    </td>
+
+                    <td class="contact-value-cell">
+                        {% if c[3] %}
+                            {{ c[3] }}
+                        {% else %}
+                            <span
+                                class="missing-mini"
+                                title="Phone number is missing"
+                            >
+                                Missing
+                            </span>
+                        {% endif %}
+                    </td>
+
+                    <td class="contact-value-cell">
+                        {% if c[4] %}
+                            {{ c[4] }}
+                        {% else %}
+                            <span
+                                class="missing-mini"
+                                title="Email address is missing"
+                            >
+                                Missing
+                            </span>
+                        {% endif %}
+                    </td>
+
+                    <td class="status-cell">
+                        {% if sms_10dlc_approved %}
+                            {{
+                                consent_pill(
+                                    sms_status,
+                                    "SMS Communication"
+                                )
+                            }}
+                        {% else %}
+                            {{
+                                consent_pill(
+                                    "locked",
+                                    "SMS Communication"
+                                )
+                            }}
+                        {% endif %}
+                    </td>
+
+                    <td class="status-cell">
+                        {% if sms_marketing_10dlc_approved %}
+                            {{
+                                consent_pill(
+                                    sms_marketing_status,
+                                    "SMS Marketing"
+                                )
+                            }}
+                        {% else %}
+                            {{
+                                consent_pill(
+                                    "locked",
+                                    "SMS Marketing"
+                                )
+                            }}
+                        {% endif %}
+                    </td>
+
+                    <td class="status-cell">
+                        {{
+                            consent_pill(
+                                email_status,
+                                "Email Communication"
+                            )
+                        }}
+                    </td>
+
+                    <td class="status-cell">
+                        {{
+                            consent_pill(
+                                email_marketing_status,
+                                "Email Marketing"
+                            )
+                        }}
+                    </td>
+
+                    <td class="status-cell">
+                        {{
+                            consent_pill(
+                                phone_status,
+                                "Phone Calls"
+                            )
+                        }}
+                    </td>
+
+                    <td class="contact-action-cell">
+
+                        <a
+                            class="btn small"
+                            href="{{
+                                url_for(
+                                    'edit_client_contact_preferences',
+                                    client_id=c[0]
+                                )
+                            }}"
+                        >
+                            Edit
+                        </a>
+
+                        <a
+                            class="btn small secondary"
+                            href="{{
+                                url_for(
+                                    'client_consent_history',
+                                    client_id=c[0]
+                                )
+                            }}"
+                        >
+                            History
+                        </a>
+
+                    </td>
+
+                </tr>
+
+            {% else %}
+
+                <tr>
+                    <td colspan="9">
+                        No clients found.
+                    </td>
+                </tr>
+
+            {% endfor %}
+
+        </tbody>
+
+    </table>
 
 </div>
+
+
+<style>
+    .contact-status-legend {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        flex-wrap: wrap;
+        margin: 10px 0 18px;
+        padding: 10px 12px;
+        border: 1px solid #dddddd;
+        border-radius: 8px;
+        background: #f8f8f8;
+        font-size: 0.82rem;
+    }
+
+    .contact-status-legend span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .contact-preferences-table th {
+        white-space: nowrap;
+        text-align: center;
+    }
+
+    .contact-preferences-table th:first-child,
+    .contact-preferences-table th:nth-child(2),
+    .contact-preferences-table th:nth-child(3) {
+        text-align: left;
+    }
+
+    .client-name-cell {
+        min-width: 140px;
+        white-space: nowrap;
+        font-weight: 600;
+    }
+
+    .contact-value-cell {
+        max-width: 220px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .status-cell {
+        width: 62px;
+        text-align: center;
+    }
+
+    .contact-action-cell {
+        min-width: 135px;
+        white-space: nowrap;
+    }
+
+    .consent-mini {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 25px;
+        height: 25px;
+        border-radius: 50%;
+        font-size: 0.78rem;
+        font-weight: 700;
+        cursor: help;
+        box-sizing: border-box;
+    }
+
+    .consent-mini-in {
+        color: #176b35;
+        background: #dff4e6;
+        border: 1px solid #94d3aa;
+    }
+
+    .consent-mini-out {
+        color: #9a2525;
+        background: #fbe2e2;
+        border: 1px solid #e5a3a3;
+    }
+
+    .consent-mini-unset {
+        color: #555555;
+        background: #eeeeee;
+        border: 1px solid #cccccc;
+    }
+
+    .consent-mini-locked {
+        color: #555555;
+        background: #e5e5e5;
+        border: 1px solid #bdbdbd;
+        font-size: 0.65rem;
+    }
+
+    .missing-mini {
+        display: inline-block;
+        padding: 3px 7px;
+        border-radius: 999px;
+        background: #eeeeee;
+        color: #666666;
+        font-size: 0.72rem;
+        font-weight: 600;
+    }
+
+    @media (max-width: 900px) {
+        .contact-preferences-table {
+            min-width: 1050px;
+        }
+    }
+</style>
 
 {% endblock %}

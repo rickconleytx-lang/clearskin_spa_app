@@ -168,8 +168,12 @@
         <a href="/help">Help Center</a>
         <span>•</span>
 
-        <a href="{{ url_for('view_help_page', page_key='release_notes') }}">
-            Release Notes
+        <a
+            href="#"
+            class="btn secondary"
+            onclick="return false;"
+        >
+            View Full Knowledge Base
         </a>
 
         <a href="https://peachsuitepro.com"
@@ -378,6 +382,608 @@ document.addEventListener("keydown", function(event) {
     }
 });
 </script>
+
+
+<script>
+function openAboutPeachSuiteModal() {
+    const modal = document.getElementById(
+        "aboutPeachSuiteModal"
+    );
+
+    if (!modal) {
+        return;
+    }
+
+    modal.showModal();
+}
+
+document.addEventListener(
+    "DOMContentLoaded",
+    function () {
+        const modal = document.getElementById(
+            "aboutPeachSuiteModal"
+        );
+
+        if (!modal) {
+            return;
+        }
+
+        modal.addEventListener(
+            "click",
+            function (event) {
+                const bounds = modal.getBoundingClientRect();
+
+                const clickedInside = (
+                    event.clientX >= bounds.left
+                    && event.clientX <= bounds.right
+                    && event.clientY >= bounds.top
+                    && event.clientY <= bounds.bottom
+                );
+
+                if (!clickedInside) {
+                    modal.close();
+                }
+            }
+        );
+    }
+);
+</script>
+
+
+
+
+
+
+<dialog
+    id="aboutPeachSuiteModal"
+    class="about-peach-modal"
+    aria-labelledby="aboutPeachSuiteTitle"
+>
+    <div class="about-peach-modal-content">
+
+        <div class="about-peach-modal-header">
+            <div>
+                <h2 id="aboutPeachSuiteTitle">
+                    Peach Suite Pro
+                </h2>
+
+                <div class="about-peach-subtitle">
+                    Business Operations Management
+                </div>
+            </div>
+
+            <form method="dialog">
+                <button
+                    type="submit"
+                    class="about-peach-close"
+                    title="Close"
+                    aria-label="Close About Peach Suite Pro"
+                >
+                    &times;
+                </button>
+            </form>
+        </div>
+
+
+        <div class="about-peach-brand">
+
+            <div class="about-peach-logo">
+                🍑
+            </div>
+
+            <div>
+                <strong>Peach Suite Pro</strong>
+
+                <div>
+                    Powered by Just Peachy Data
+                </div>
+            </div>
+
+        </div>
+
+
+        <div class="about-peach-registration">
+
+            <div class="about-peach-detail-row">
+                <span>Registered to</span>
+
+                <strong>
+                    {{
+                        about_business.spa_name
+                        or "Not Available"
+                    }}
+                </strong>
+            </div>
+
+            <div class="about-peach-detail-row">
+                <span>Registration Number</span>
+
+                <strong>
+                    {{
+                        about_business.registration_number
+                        or "Not Assigned"
+                    }}
+                </strong>
+            </div>
+
+            <div class="about-peach-detail-row">
+                <span>Subscription Level</span>
+
+                <strong>
+                    {{
+                        about_business.subscription_status
+                        or "Not Available"
+                    }}
+                </strong>
+            </div>
+
+            <div class="about-peach-detail-row">
+                <span>Version</span>
+
+                <strong>
+                    {{ peach_suite_version }}
+                </strong>
+            </div>
+
+        </div>
+
+
+        <div class="about-peach-coach">
+            <strong>Coach Peach</strong>
+
+            <p>
+                Your business operations coach, helping you monitor
+                appointments, finances, communication, compliance,
+                and important business activity.
+            </p>
+        </div>
+
+
+        <div class="about-peach-footer">
+            <div>
+                Peach Suite Pro is developed and supported by
+                Just Peachy Data.
+            </div>
+
+            <form method="dialog">
+                <button type="submit" class="btn">
+                    Close
+                </button>
+            </form>
+        </div>
+
+    </div>
+</dialog>
+
+
+<dialog
+    id="peachHelpModal"
+    class="peach-help-modal"
+    aria-labelledby="peachHelpModalTitle"
+>
+    <div class="peach-help-modal-content">
+
+        <div class="peach-help-modal-header">
+
+            <div>
+                <h2 id="peachHelpModalTitle">
+                    Help & Knowledge Base
+                </h2>
+
+                <div class="peach-help-modal-subtitle">
+                    Peach Suite Pro assistance
+                </div>
+            </div>
+
+            <form method="dialog">
+                <button
+                    type="submit"
+                    class="peach-help-close"
+                    title="Close Help"
+                    aria-label="Close Help"
+                >
+                    &times;
+                </button>
+            </form>
+
+        </div>
+
+
+        <div class="peach-help-search-section">
+
+            <label for="peachHelpSearch">
+                Search the Knowledge Base
+            </label>
+
+            <div class="peach-help-search-row">
+
+                <input
+                    type="search"
+                    id="peachHelpSearch"
+                    placeholder="Search appointments, SMS, expenses..."
+                    autocomplete="off"
+                >
+
+                <button
+                    type="button"
+                    class="btn"
+                    id="peachHelpSearchButton"
+                >
+                    Search
+                </button>
+
+            </div>
+
+        </div>
+
+
+        <div class="peach-help-body">
+
+            <section class="peach-help-context-section">
+
+                <div class="peach-help-section-label">
+                    Help for this page
+                </div>
+
+                <h3>
+                    {{ help_modal_context.title }}
+                </h3>
+
+                <p>
+                    {{ help_modal_context.description }}
+                </p>
+
+                {% if help_modal_context.topics %}
+
+                    <div class="peach-help-topic-grid">
+
+                        {% for topic in help_modal_context.topics %}
+
+                            <a
+                                class="peach-help-topic-card"
+                                href="{{
+                                    url_for(
+                                        'view_help_page',
+                                        page_key=topic.page_key
+                                    )
+                                }}"
+                            >
+                                <span class="peach-help-topic-icon">
+                                    ?
+                                </span>
+
+                                <span>
+                                    {{ topic.title }}
+                                </span>
+                            </a>
+
+                        {% endfor %}
+
+                    </div>
+
+                {% else %}
+
+                    <div class="peach-help-empty-context">
+                        Search the Knowledge Base below or open the
+                        complete Help Center.
+                    </div>
+
+                {% endif %}
+
+            </section>
+
+
+            <section class="peach-help-results-section">
+
+                <div class="peach-help-section-heading">
+
+                    <div class="peach-help-section-label">
+                        Knowledge Base Topics
+                    </div>
+
+                    <span id="peachHelpResultCount"></span>
+
+                </div>
+
+                <div
+                    id="peachHelpLoading"
+                    class="peach-help-loading"
+                    hidden
+                >
+                    Loading help topics...
+                </div>
+
+                <div
+                    id="peachHelpResults"
+                    class="peach-help-results"
+                ></div>
+
+                <div
+                    id="peachHelpNoResults"
+                    class="peach-help-no-results"
+                    hidden
+                >
+                    No matching help topics were found.
+                </div>
+
+            </section>
+
+        </div>
+
+
+        <div class="peach-help-modal-footer">
+
+            <a
+                href="{{ url_for('help_center') }}"
+                class="btn secondary"
+            >
+                View Full Knowledge Base
+            </a>
+
+            <div class="peach-help-footer-actions">
+
+                <button
+                    type="button"
+                    class="btn secondary"
+                    title="Ask Coach Peach is coming soon"
+                    disabled
+                >
+                    Ask Coach Peach
+                </button>
+
+                <form method="dialog">
+                    <button type="submit" class="btn">
+                        Close
+                    </button>
+                </form>
+
+            </div>
+
+        </div>
+
+    </div>
+</dialog>
+
+
+<script>
+const peachHelpApiUrl = "{{
+    url_for('help_topics_api')
+}}";
+
+const peachHelpPageTemplate = "{{
+    url_for(
+        'view_help_page',
+        page_key='__HELP_PAGE_KEY__'
+    )
+}}";
+
+let peachHelpSearchTimer = null;
+
+
+function buildPeachHelpPageUrl(pageKey) {
+    return peachHelpPageTemplate.replace(
+        "__HELP_PAGE_KEY__",
+        encodeURIComponent(pageKey)
+    );
+}
+
+
+function openPeachHelpModal() {
+    const modal = document.getElementById(
+        "peachHelpModal"
+    );
+
+    if (!modal) {
+        return;
+    }
+
+    modal.showModal();
+
+    const searchInput = document.getElementById(
+        "peachHelpSearch"
+    );
+
+    loadPeachHelpTopics(
+        searchInput ? searchInput.value : ""
+    );
+
+    window.setTimeout(
+        function () {
+            if (searchInput) {
+                searchInput.focus();
+            }
+        },
+        100
+    );
+}
+
+
+async function loadPeachHelpTopics(searchText) {
+    const results = document.getElementById(
+        "peachHelpResults"
+    );
+
+    const loading = document.getElementById(
+        "peachHelpLoading"
+    );
+
+    const noResults = document.getElementById(
+        "peachHelpNoResults"
+    );
+
+    const resultCount = document.getElementById(
+        "peachHelpResultCount"
+    );
+
+    if (!results || !loading || !noResults) {
+        return;
+    }
+
+    results.innerHTML = "";
+    loading.hidden = false;
+    noResults.hidden = true;
+
+    if (resultCount) {
+        resultCount.textContent = "";
+    }
+
+    try {
+        const response = await fetch(
+            peachHelpApiUrl
+            + "?q="
+            + encodeURIComponent(searchText || "")
+        );
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+            throw new Error(
+                data.message || "Help search failed."
+            );
+        }
+
+        const topics = data.topics || [];
+
+        loading.hidden = true;
+
+        if (resultCount) {
+            resultCount.textContent =
+                topics.length
+                + (
+                    topics.length === 1
+                    ? " topic"
+                    : " topics"
+                );
+        }
+
+        if (!topics.length) {
+            noResults.hidden = false;
+            return;
+        }
+
+        topics.forEach(function (topic) {
+            const link = document.createElement("a");
+
+            link.className = "peach-help-result-link";
+
+            link.href = buildPeachHelpPageUrl(
+                topic.page_key
+            );
+
+            const title = document.createElement("span");
+
+            title.textContent = topic.title;
+
+            const arrow = document.createElement("span");
+
+            arrow.className = "peach-help-result-arrow";
+            arrow.textContent = "›";
+
+            link.appendChild(title);
+            link.appendChild(arrow);
+
+            results.appendChild(link);
+        });
+
+    } catch (error) {
+        loading.hidden = true;
+        noResults.hidden = false;
+        noResults.textContent = (
+            "Help topics could not be loaded."
+        );
+
+        console.error(
+            "[HELP MODAL ERROR]",
+            error
+        );
+    }
+}
+
+
+document.addEventListener(
+    "DOMContentLoaded",
+    function () {
+        const modal = document.getElementById(
+            "peachHelpModal"
+        );
+
+        const searchInput = document.getElementById(
+            "peachHelpSearch"
+        );
+
+        const searchButton = document.getElementById(
+            "peachHelpSearchButton"
+        );
+
+        if (searchButton && searchInput) {
+            searchButton.addEventListener(
+                "click",
+                function () {
+                    loadPeachHelpTopics(
+                        searchInput.value
+                    );
+                }
+            );
+        }
+
+        if (searchInput) {
+            searchInput.addEventListener(
+                "input",
+                function () {
+                    window.clearTimeout(
+                        peachHelpSearchTimer
+                    );
+
+                    peachHelpSearchTimer =
+                        window.setTimeout(
+                            function () {
+                                loadPeachHelpTopics(
+                                    searchInput.value
+                                );
+                            },
+                            250
+                        );
+                }
+            );
+
+            searchInput.addEventListener(
+                "keydown",
+                function (event) {
+                    if (event.key === "Enter") {
+                        event.preventDefault();
+
+                        loadPeachHelpTopics(
+                            searchInput.value
+                        );
+                    }
+                }
+            );
+        }
+
+        if (modal) {
+            modal.addEventListener(
+                "click",
+                function (event) {
+                    const bounds =
+                        modal.getBoundingClientRect();
+
+                    const clickedInside = (
+                        event.clientX >= bounds.left
+                        && event.clientX <= bounds.right
+                        && event.clientY >= bounds.top
+                        && event.clientY <= bounds.bottom
+                    );
+
+                    if (!clickedInside) {
+                        modal.close();
+                    }
+                }
+            );
+        }
+    }
+);
+</script>
+
 </body>
 
 </html>

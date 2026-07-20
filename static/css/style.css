@@ -3655,3 +3655,389 @@ button.tool-pill:hover {
     border-color: #ddd;
     color: #222;
 }
+
+.about-peach-modal {
+    width: min(540px, calc(100% - 30px));
+    padding: 0;
+    border: none;
+    border-radius: 14px;
+    background: #ffffff;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+}
+
+.about-peach-modal::backdrop {
+    background: rgba(0, 0, 0, 0.48);
+}
+
+.about-peach-modal-content {
+    padding: 0;
+}
+
+.about-peach-modal-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 22px 24px 18px;
+    border-bottom: 1px solid #e4e4e4;
+}
+
+.about-peach-modal-header h2 {
+    margin: 0;
+}
+
+.about-peach-subtitle {
+    margin-top: 4px;
+    color: #666666;
+    font-size: 0.9rem;
+}
+
+.about-peach-close {
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: #eeeeee;
+    color: #444444;
+    font-size: 1.5rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.about-peach-close:hover {
+    background: #dddddd;
+}
+
+.about-peach-brand {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 22px 24px;
+}
+
+.about-peach-logo {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 54px;
+    height: 54px;
+    border-radius: 14px;
+    background: #fff1e8;
+    font-size: 2rem;
+}
+
+.about-peach-registration {
+    margin: 0 24px 22px;
+    border: 1px solid #dddddd;
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.about-peach-detail-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 12px 14px;
+    border-bottom: 1px solid #eeeeee;
+}
+
+.about-peach-detail-row:last-child {
+    border-bottom: none;
+}
+
+.about-peach-detail-row span {
+    color: #666666;
+}
+
+.about-peach-detail-row strong {
+    text-align: right;
+}
+
+.about-peach-coach {
+    margin: 0 24px 22px;
+    padding: 15px;
+    border-radius: 10px;
+    background: #f8f8f8;
+}
+
+.about-peach-coach p {
+    margin: 7px 0 0;
+    line-height: 1.5;
+}
+
+.about-peach-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 18px 24px;
+    border-top: 1px solid #e4e4e4;
+    color: #666666;
+    font-size: 0.86rem;
+}
+
+.about-peach-footer form {
+    margin: 0;
+}
+
+@media (max-width: 600px) {
+    .about-peach-detail-row {
+        display: block;
+    }
+
+    .about-peach-detail-row strong {
+        display: block;
+        margin-top: 4px;
+        text-align: left;
+    }
+
+    .about-peach-footer {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+}
+
+.peach-help-modal {
+    width: min(760px, calc(100% - 30px));
+    max-height: calc(100vh - 40px);
+    padding: 0;
+    border: none;
+    border-radius: 14px;
+    background: #ffffff;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+}
+
+.peach-help-modal::backdrop {
+    background: rgba(0, 0, 0, 0.48);
+}
+
+.peach-help-modal-content {
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 40px);
+}
+
+.peach-help-modal-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 22px 24px 18px;
+    border-bottom: 1px solid #e4e4e4;
+}
+
+.peach-help-modal-header h2 {
+    margin: 0;
+}
+
+.peach-help-modal-subtitle {
+    margin-top: 4px;
+    color: #666666;
+    font-size: 0.9rem;
+}
+
+.peach-help-close {
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: #eeeeee;
+    color: #444444;
+    font-size: 1.5rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.peach-help-close:hover {
+    background: #dddddd;
+}
+
+.peach-help-search-section {
+    padding: 18px 24px;
+    border-bottom: 1px solid #eeeeee;
+    background: #fafafa;
+}
+
+.peach-help-search-section label {
+    display: block;
+    margin-bottom: 7px;
+    font-weight: 700;
+}
+
+.peach-help-search-row {
+    display: flex;
+    gap: 10px;
+}
+
+.peach-help-search-row input {
+    flex: 1;
+    min-width: 0;
+}
+
+.peach-help-body {
+    overflow-y: auto;
+    padding: 22px 24px;
+}
+
+.peach-help-context-section {
+    margin-bottom: 26px;
+    padding: 18px;
+    border: 1px solid #dddddd;
+    border-radius: 12px;
+    background: #fffaf6;
+}
+
+.peach-help-context-section h3 {
+    margin: 5px 0 7px;
+}
+
+.peach-help-context-section p {
+    margin: 0 0 15px;
+    color: #555555;
+    line-height: 1.5;
+}
+
+.peach-help-section-label {
+    color: #777777;
+    font-size: 0.75rem;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+.peach-help-topic-grid {
+    display: grid;
+    grid-template-columns: repeat(
+        2,
+        minmax(0, 1fr)
+    );
+    gap: 10px;
+}
+
+.peach-help-topic-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 11px 12px;
+    border: 1px solid #dddddd;
+    border-radius: 8px;
+    background: #ffffff;
+    color: inherit;
+    text-decoration: none;
+}
+
+.peach-help-topic-card:hover {
+    border-color: #bbbbbb;
+    background: #f8f8f8;
+}
+
+.peach-help-topic-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 25px;
+    height: 25px;
+    border-radius: 50%;
+    background: #fff1e8;
+    font-size: 0.8rem;
+    font-weight: 800;
+}
+
+.peach-help-empty-context {
+    color: #666666;
+    font-size: 0.9rem;
+}
+
+.peach-help-section-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 15px;
+    margin-bottom: 10px;
+}
+
+#peachHelpResultCount {
+    color: #777777;
+    font-size: 0.8rem;
+}
+
+.peach-help-results {
+    display: grid;
+    gap: 8px;
+}
+
+.peach-help-result-link {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 15px;
+    padding: 11px 13px;
+    border: 1px solid #e1e1e1;
+    border-radius: 8px;
+    background: #ffffff;
+    color: inherit;
+    text-decoration: none;
+}
+
+.peach-help-result-link:hover {
+    border-color: #bbbbbb;
+    background: #f8f8f8;
+}
+
+.peach-help-result-arrow {
+    color: #888888;
+    font-weight: 700;
+}
+
+.peach-help-loading,
+.peach-help-no-results {
+    padding: 18px;
+    border-radius: 8px;
+    background: #f5f5f5;
+    color: #666666;
+    text-align: center;
+}
+
+.peach-help-modal-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 18px 24px;
+    border-top: 1px solid #e4e4e4;
+    background: #ffffff;
+}
+
+.peach-help-footer-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.peach-help-footer-actions form {
+    margin: 0;
+}
+
+@media (max-width: 650px) {
+    .peach-help-topic-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .peach-help-search-row {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .peach-help-modal-footer {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .peach-help-footer-actions {
+        justify-content: flex-end;
+    }
+}

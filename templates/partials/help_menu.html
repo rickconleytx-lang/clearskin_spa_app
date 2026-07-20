@@ -20,14 +20,26 @@
             </button>
         <div class="user-menu-divider"></div>
 
-        <div class="user-menu-muted" style="padding:6px 12px;"></div>
-        <a href="{{ url_for('help_center') }}">❓ Peach Suite Pro Help</a>
+        <a
+            href="#"
+            onclick="openPeachHelpModal(); return false;"
+        >
+            Help & Knowledge Base
+        </a>
 
 
         <div class="user-menu-divider"></div>
 
-        <div class="user-menu-muted" style="padding:6px 12px;"></div>
-        <a href="{{ url_for('godaddy_imports') }}">About</a>
+
+        <a
+            href="#"
+            onclick="openAboutPeachSuiteModal(); return false;"
+        >
+            About Peach Suite Pro
+        </a>
+
+
+        <div class="user-menu-divider"></div>
 
          <div class="user-menu-muted" style="padding:6px 12px;"></div>
         <a href="{{ url_for('feedback') }}">Feedback</a>

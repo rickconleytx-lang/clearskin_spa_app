@@ -2,59 +2,622 @@
 
 {% block content %}
 
+{% set sms_status =
+    "opt_in" if client[5]
+    else "opt_out" if client[6]
+    else "not_set"
+%}
+
+{% set email_status =
+    "opt_in" if client[7]
+    else "opt_out" if client[8]
+    else "not_set"
+%}
+
+{% set phone_status =
+    "opt_in" if client[9]
+    else "opt_out"
+%}
+
+{# These will become client[10] and client[11] after we update the route. #}
+{% set sms_marketing_status =
+    client[10]|default("opt_out", true)
+%}
+
+{% set email_marketing_status =
+    client[11]|default("not_set", true)
+%}
+
+
 <h1>Edit Contact Preferences</h1>
 
-<div class="card">
-    <p><strong>Client:</strong> {{ client[1] }} {{ client[2] }}</p>
-    <p><strong>Phone:</strong> {{ client[3] or "-" }}</p>
-    <p><strong>Email:</strong> {{ client[4] or "-" }}</p>
+<div class="card contact-client-card">
+    <p>
+        <strong>Client:</strong>
+        {{ client[1] }} {{ client[2] }}
+    </p>
+
+    <p>
+        <strong>Phone:</strong>
+        {{ client[3] or "-" }}
+    </p>
+
+    <p>
+        <strong>Email:</strong>
+        {{ client[4] or "-" }}
+    </p>
 </div>
+
 
 <form method="POST" class="styled-form">
 
-    <div class="info-box" style="margin:15px 0; padding:12px; border:1px solid #ccc; background:#f8f8f8;">
-    <strong>Consent Required</strong><br>
-    SMS and Email opt-in settings should only be enabled when the client has provided proper consent.
-    Opt-out settings override opt-in settings.
-</div>
+    <div class="contact-consent-info">
+        <strong>Contact Consent and Preferences</strong>
 
-<div class="form-group checkbox-row">
-    <label>
-        <input type="checkbox" name="sms_opt_in" {% if client[5] %}checked{% endif %}>
-        SMS Opted In
-    </label>
-</div>
+        <p>
+            Service communications and marketing communications are
+            managed separately.
+        </p>
 
-<div class="form-group checkbox-row">
-    <label>
-        <input type="checkbox" name="sms_opt_out" {% if client[6] %}checked{% endif %}>
-        SMS Opted Out
-    </label>
-</div>
+        <p>
+            SMS options may be unavailable until the business has the
+            appropriate 10DLC registration and campaign approval.
+        </p>
 
-<div class="form-group checkbox-row">
-    <label>
-        <input type="checkbox" name="email_opt_in" {% if client[7] %}checked{% endif %}>
-        Email Opted In
-    </label>
-</div>
+        <p>
+            A client's opt-out preference always overrides an opt-in
+            preference.
+        </p>
+    </div>
 
-<div class="form-group checkbox-row">
-    <label>
-        <input type="checkbox" name="email_opt_out" {% if client[8] %}checked{% endif %}>
-        Email Opted Out
-    </label>
-</div>
 
-<div class="form-group checkbox-row">
-    <label>
-        <input type="checkbox" name="ok_to_call" {% if client[9] %}checked{% endif %}>
-        OK to Call
-    </label>
-</div>
-    <button type="submit" class="btn">Save Preferences</button>
-    <a href="{{ url_for('client_contact_preferences') }}" class="btn secondary">Cancel</a>
+    <!-- =====================================================
+         PHONE
+    ====================================================== -->
+
+    <div class="contact-preference-row">
+
+        <div class="contact-preference-heading">
+            <div>
+                <strong>Phone Calls</strong>
+
+                <div class="contact-preference-description">
+                    Permission to call this client regarding appointments,
+                    services, or other business matters.
+                </div>
+            </div>
+
+            <span
+                class="consent-status"
+                data-status-badge="phone_status"
+            >
+                {% if phone_status == "opt_in" %}
+                    Opted In
+                {% else %}
+                    Opted Out
+                {% endif %}
+            </span>
+        </div>
+
+        <label for="phone_status">
+            Phone Preference
+        </label>
+
+        <select
+            id="phone_status"
+            name="phone_status"
+            data-status-select="phone_status"
+        >
+            <option
+                value="opt_in"
+                {% if phone_status == "opt_in" %}selected{% endif %}
+            >
+                Opted In
+            </option>
+
+            <option
+                value="opt_out"
+                {% if phone_status == "opt_out" %}selected{% endif %}
+            >
+                Opted Out
+            </option>
+        </select>
+
+    </div>
+
+
+    <!-- =====================================================
+         EMAIL COMMUNICATION
+    ====================================================== -->
+
+    <div class="contact-preference-row">
+
+        <div class="contact-preference-heading">
+            <div>
+                <strong>Email Communication</strong>
+
+                <div class="contact-preference-description">
+                    Appointment confirmations, receipts, account notices,
+                    and other service-related email communication.
+                </div>
+            </div>
+
+            <span
+                class="consent-status"
+                data-status-badge="email_status"
+            >
+                {% if email_status == "opt_in" %}
+                    Opted In
+                {% elif email_status == "opt_out" %}
+                    Opted Out
+                {% else %}
+                    Not Set
+                {% endif %}
+            </span>
+        </div>
+
+        <label for="email_status">
+            Email Communication Preference
+        </label>
+
+        <select
+            id="email_status"
+            name="email_status"
+            data-status-select="email_status"
+        >
+            <option
+                value="opt_in"
+                {% if email_status == "opt_in" %}selected{% endif %}
+            >
+                Opted In
+            </option>
+
+            <option
+                value="opt_out"
+                {% if email_status == "opt_out" %}selected{% endif %}
+            >
+                Opted Out
+            </option>
+
+            <option
+                value="not_set"
+                {% if email_status == "not_set" %}selected{% endif %}
+            >
+                Not Set
+            </option>
+        </select>
+
+    </div>
+
+
+    <!-- =====================================================
+         EMAIL MARKETING
+    ====================================================== -->
+
+    <div class="contact-preference-row">
+
+        <div class="contact-preference-heading">
+            <div>
+                <strong>Email Marketing</strong>
+
+                <div class="contact-preference-description">
+                    Promotions, newsletters, special offers, and other
+                    marketing email.
+                </div>
+            </div>
+
+            <span
+                class="consent-status"
+                data-status-badge="email_marketing_status"
+            >
+                {% if email_marketing_status == "opt_in" %}
+                    Opted In
+                {% elif email_marketing_status == "opt_out" %}
+                    Opted Out
+                {% else %}
+                    Not Set
+                {% endif %}
+            </span>
+        </div>
+
+        <label for="email_marketing_status">
+            Email Marketing Preference
+        </label>
+
+        <select
+            id="email_marketing_status"
+            name="email_marketing_status"
+            data-status-select="email_marketing_status"
+        >
+            <option
+                value="not_set"
+                {% if email_marketing_status == "not_set" %}selected{% endif %}
+            >
+                Not Set
+            </option>
+
+            <option
+                value="opt_in"
+                {% if email_marketing_status == "opt_in" %}selected{% endif %}
+            >
+                Opted In
+            </option>
+
+            <option
+                value="opt_out"
+                {% if email_marketing_status == "opt_out" %}selected{% endif %}
+            >
+                Opted Out
+            </option>
+        </select>
+
+    </div>
+
+
+    <!-- =====================================================
+         SMS COMMUNICATION
+    ====================================================== -->
+
+    <div class="contact-preference-row">
+
+        <div class="contact-preference-heading">
+            <div>
+                <strong>SMS Communication</strong>
+
+                <div class="contact-preference-description">
+                    Appointment confirmations, reminders, and other
+                    service-related text messages.
+                </div>
+            </div>
+
+            {% if not sms_10dlc_approved %}
+                <span class="consent-status consent-locked">
+                    Locked
+                </span>
+            {% else %}
+                <span
+                    class="consent-status"
+                    data-status-badge="sms_status"
+                >
+                    {% if sms_status == "opt_in" %}
+                        Opted In
+                    {% elif sms_status == "opt_out" %}
+                        Opted Out
+                    {% else %}
+                        Not Set
+                    {% endif %}
+                </span>
+            {% endif %}
+        </div>
+
+        {% if not sms_10dlc_approved %}
+
+            <div class="consent-lock-message">
+                🔒 SMS communication is unavailable until the business
+                has approved 10DLC messaging.
+            </div>
+
+            <input
+                type="hidden"
+                name="sms_status"
+                value="opt_out"
+            >
+
+            <select disabled>
+                <option selected>
+                    Opted Out — 10DLC approval required
+                </option>
+            </select>
+
+        {% else %}
+
+            <label for="sms_status">
+                SMS Communication Preference
+            </label>
+
+            <select
+                id="sms_status"
+                name="sms_status"
+                data-status-select="sms_status"
+            >
+                <option
+                    value="opt_out"
+                    {% if sms_status == "opt_out" %}selected{% endif %}
+                >
+                    Opted Out
+                </option>
+
+                <option
+                    value="opt_in"
+                    {% if sms_status == "opt_in" %}selected{% endif %}
+                >
+                    Opted In
+                </option>
+
+                <option
+                    value="not_set"
+                    {% if sms_status == "not_set" %}selected{% endif %}
+                >
+                    Not Set
+                </option>
+            </select>
+
+        {% endif %}
+
+    </div>
+
+
+    <!-- =====================================================
+         SMS MARKETING
+    ====================================================== -->
+
+    <div class="contact-preference-row">
+
+        <div class="contact-preference-heading">
+            <div>
+                <strong>SMS Marketing</strong>
+
+                <div class="contact-preference-description">
+                    Promotional offers, announcements, campaigns, and
+                    other marketing text messages.
+                </div>
+            </div>
+
+            {% if not sms_marketing_10dlc_approved %}
+                <span class="consent-status consent-locked">
+                    Locked
+                </span>
+            {% else %}
+                <span
+                    class="consent-status"
+                    data-status-badge="sms_marketing_status"
+                >
+                    {% if sms_marketing_status == "opt_in" %}
+                        Opted In
+                    {% elif sms_marketing_status == "opt_out" %}
+                        Opted Out
+                    {% else %}
+                        Not Set
+                    {% endif %}
+                </span>
+            {% endif %}
+        </div>
+
+        {% if not sms_marketing_10dlc_approved %}
+
+            <div class="consent-lock-message">
+                🔒 SMS marketing is unavailable until the business has
+                an approved 10DLC marketing campaign.
+            </div>
+
+            <input
+                type="hidden"
+                name="sms_marketing_status"
+                value="opt_out"
+            >
+
+            <select disabled>
+                <option selected>
+                    Opted Out — marketing approval required
+                </option>
+            </select>
+
+        {% else %}
+
+            <label for="sms_marketing_status">
+                SMS Marketing Preference
+            </label>
+
+            <select
+                id="sms_marketing_status"
+                name="sms_marketing_status"
+                data-status-select="sms_marketing_status"
+            >
+                <option
+                    value="opt_out"
+                    {% if sms_marketing_status == "opt_out" %}selected{% endif %}
+                >
+                    Opted Out
+                </option>
+
+                <option
+                    value="opt_in"
+                    {% if sms_marketing_status == "opt_in" %}selected{% endif %}
+                >
+                    Opted In
+                </option>
+
+                <option
+                    value="not_set"
+                    {% if sms_marketing_status == "not_set" %}selected{% endif %}
+                >
+                    Not Set
+                </option>
+            </select>
+
+        {% endif %}
+
+    </div>
+
+
+    <div class="form-actions">
+        <button type="submit" class="btn">
+            Save Preferences
+        </button>
+
+        <a
+            href="{{ url_for('client_contact_preferences') }}"
+            class="btn secondary"
+        >
+            Cancel
+        </a>
+    </div>
 
 </form>
+
+
+<style>
+    .contact-client-card {
+        margin-bottom: 18px;
+    }
+
+    .contact-consent-info {
+        margin: 15px 0 20px;
+        padding: 14px;
+        border: 1px solid #cccccc;
+        border-radius: 8px;
+        background: #f8f8f8;
+    }
+
+    .contact-consent-info p {
+        margin: 7px 0 0;
+    }
+
+    .contact-preference-row {
+        margin-bottom: 18px;
+        padding: 16px;
+        border: 1px solid #dddddd;
+        border-radius: 10px;
+        background: #ffffff;
+    }
+
+    .contact-preference-heading {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 15px;
+        margin-bottom: 14px;
+    }
+
+    .contact-preference-description {
+        margin-top: 5px;
+        color: #666666;
+        font-size: 0.9rem;
+        line-height: 1.4;
+    }
+
+    .consent-status {
+        display: inline-block;
+        flex-shrink: 0;
+        padding: 5px 10px;
+        border: 1px solid #cccccc;
+        border-radius: 999px;
+        background: #eeeeee;
+        color: #555555;
+        font-size: 0.82rem;
+        font-weight: 700;
+        white-space: nowrap;
+    }
+
+    .consent-status.consent-in {
+        border-color: #94d3aa;
+        background: #dff4e6;
+        color: #176b35;
+    }
+
+    .consent-status.consent-out {
+        border-color: #e5a3a3;
+        background: #fbe2e2;
+        color: #9a2525;
+    }
+
+    .consent-status.consent-unset {
+        border-color: #cccccc;
+        background: #eeeeee;
+        color: #555555;
+    }
+
+    .consent-status.consent-locked {
+        border-color: #c9c9c9;
+        background: #e8e8e8;
+        color: #555555;
+    }
+
+    .consent-lock-message {
+        margin-bottom: 10px;
+        padding: 10px 12px;
+        border: 1px solid #d0d0d0;
+        border-radius: 6px;
+        background: #f3f3f3;
+        color: #555555;
+        font-size: 0.9rem;
+    }
+
+    .contact-preference-row select {
+        width: 100%;
+        max-width: 420px;
+    }
+
+    .form-actions {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-top: 20px;
+    }
+
+    @media (max-width: 600px) {
+        .contact-preference-heading {
+            display: block;
+        }
+
+        .consent-status {
+            margin-top: 10px;
+        }
+    }
+</style>
+
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const statusLabels = {
+        opt_in: "Opted In",
+        opt_out: "Opted Out",
+        not_set: "Not Set"
+    };
+
+    function updateBadge(selectElement) {
+        const badgeName = selectElement.dataset.statusSelect;
+
+        const badge = document.querySelector(
+            '[data-status-badge="' + badgeName + '"]'
+        );
+
+        if (!badge) {
+            return;
+        }
+
+        const value = selectElement.value;
+
+        badge.textContent = statusLabels[value] || "Not Set";
+
+        badge.classList.remove(
+            "consent-in",
+            "consent-out",
+            "consent-unset"
+        );
+
+        if (value === "opt_in") {
+            badge.classList.add("consent-in");
+        } else if (value === "opt_out") {
+            badge.classList.add("consent-out");
+        } else {
+            badge.classList.add("consent-unset");
+        }
+    }
+
+    document
+        .querySelectorAll("[data-status-select]")
+        .forEach(function (selectElement) {
+            updateBadge(selectElement);
+
+            selectElement.addEventListener(
+                "change",
+                function () {
+                    updateBadge(selectElement);
+                }
+            );
+        });
+});
+</script>
 
 {% endblock %}
