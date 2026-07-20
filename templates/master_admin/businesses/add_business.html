@@ -1,0 +1,265 @@
+{% extends "base.html" %}
+
+{% block title %}
+Add Business | Peach Suite Pro
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+    <div>
+        <h1>Add Business</h1>
+
+        <p>
+            Create a new Peach Suite Pro business workspace
+            and its initial business administrator.
+        </p>
+    </div>
+</div>
+
+{% if error_message %}
+    <div class="alert alert-error">
+        {{ error_message }}
+    </div>
+{% endif %}
+
+<form method="POST"
+      action=""
+      class="standard-form">
+
+    <section class="form-card">
+        <h2>Business Information</h2>
+
+        <div class="form-group">
+            <label for="spa_name">
+                Business Name
+                <span class="required">*</span>
+            </label>
+
+            <input type="text"
+                   id="spa_name"
+                   name="spa_name"
+                   value="{{ form_data.get('spa_name', '') }}"
+                   maxlength="150"
+                   required
+                   autofocus>
+        </div>
+
+        <div class="form-group">
+            <label for="owner_phone">
+                Business or Owner Phone
+            </label>
+
+            <input type="tel"
+                   id="owner_phone"
+                   name="owner_phone"
+                   value="{{ form_data.get('owner_phone', '') }}"
+                   maxlength="30">
+        </div>
+
+        <div class="form-group">
+            <label for="timezone_name">
+                Business Time Zone
+                <span class="required">*</span>
+            </label>
+
+            <select id="timezone_name"
+                    name="timezone_name"
+                    required>
+
+                <option value="America/New_York"
+                    {% if form_data.get('timezone_name') == 'America/New_York' %}
+                        selected
+                    {% endif %}>
+                    Eastern Time
+                </option>
+
+                <option value="America/Chicago"
+                    {% if form_data.get(
+                        'timezone_name',
+                        'America/Chicago'
+                    ) == 'America/Chicago' %}
+                        selected
+                    {% endif %}>
+                    Central Time
+                </option>
+
+                <option value="America/Denver"
+                    {% if form_data.get('timezone_name') == 'America/Denver' %}
+                        selected
+                    {% endif %}>
+                    Mountain Time
+                </option>
+
+                <option value="America/Phoenix"
+                    {% if form_data.get('timezone_name') == 'America/Phoenix' %}
+                        selected
+                    {% endif %}>
+                    Arizona Time
+                </option>
+
+                <option value="America/Los_Angeles"
+                    {% if form_data.get('timezone_name') == 'America/Los_Angeles' %}
+                        selected
+                    {% endif %}>
+                    Pacific Time
+                </option>
+
+                <option value="America/Anchorage"
+                    {% if form_data.get('timezone_name') == 'America/Anchorage' %}
+                        selected
+                    {% endif %}>
+                    Alaska Time
+                </option>
+
+                <option value="Pacific/Honolulu"
+                    {% if form_data.get('timezone_name') == 'Pacific/Honolulu' %}
+                        selected
+                    {% endif %}>
+                    Hawaii Time
+                </option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="subscription_status">
+                Subscription Status
+                <span class="required">*</span>
+            </label>
+
+            <select id="subscription_status"
+                    name="subscription_status"
+                    required>
+
+                <option value="Trial"
+                    {% if form_data.get(
+                        'subscription_status',
+                        'Trial'
+                    ) == 'Trial' %}
+                        selected
+                    {% endif %}>
+                    Trial
+                </option>
+
+                <option value="Active"
+                    {% if form_data.get('subscription_status') == 'Active' %}
+                        selected
+                    {% endif %}>
+                    Active
+                </option>
+
+                <option value="Complimentary"
+                    {% if form_data.get('subscription_status') == 'Complimentary' %}
+                        selected
+                    {% endif %}>
+                    Complimentary
+                </option>
+            </select>
+        </div>
+    </section>
+
+    <section class="form-card">
+        <h2>Business Administrator</h2>
+
+        <p>
+            This user will receive administrator access only
+            to the new business workspace.
+        </p>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label for="owner_first_name">
+                    First Name
+                    <span class="required">*</span>
+                </label>
+
+                <input type="text"
+                       id="owner_first_name"
+                       name="owner_first_name"
+                       value="{{ form_data.get('owner_first_name', '') }}"
+                       maxlength="100"
+                       required>
+            </div>
+
+            <div class="form-group">
+                <label for="owner_last_name">
+                    Last Name
+                    <span class="required">*</span>
+                </label>
+
+                <input type="text"
+                       id="owner_last_name"
+                       name="owner_last_name"
+                       value="{{ form_data.get('owner_last_name', '') }}"
+                       maxlength="100"
+                       required>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="owner_email">
+                Login Email
+                <span class="required">*</span>
+            </label>
+
+            <input type="email"
+                   id="owner_email"
+                   name="owner_email"
+                   value="{{ form_data.get('owner_email', '') }}"
+                   maxlength="255"
+                   autocomplete="email"
+                   required>
+
+            <small>
+                The email must not already belong to another
+                Peach Suite Pro user.
+            </small>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label for="temporary_password">
+                    Temporary Password
+                    <span class="required">*</span>
+                </label>
+
+                <input type="password"
+                       id="temporary_password"
+                       name="temporary_password"
+                       minlength="10"
+                       autocomplete="new-password"
+                       required>
+            </div>
+
+            <div class="form-group">
+                <label for="confirm_password">
+                    Confirm Password
+                    <span class="required">*</span>
+                </label>
+
+                <input type="password"
+                       id="confirm_password"
+                       name="confirm_password"
+                       minlength="10"
+                       autocomplete="new-password"
+                       required>
+            </div>
+        </div>
+    </section>
+
+    <div class="form-actions">
+        <button type="submit"
+                class="btn">
+            Create Business
+        </button>
+
+        <button type="button"
+                class="btn btn-secondary"
+                onclick="history.back()">
+            Cancel
+        </button>
+    </div>
+
+</form>
+
+{% endblock %}

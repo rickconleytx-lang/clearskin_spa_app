@@ -1,29 +1,87 @@
-from flask import Flask, render_template, request, Response, send_file, redirect, url_for, session, flash, abort, g
-from datetime import date, timedelta, datetime
-from psycopg2 import sql
-from psycopg2.extras import RealDictCursor
-from apscheduler.schedulers.background import BackgroundScheduler
-from q_launch_registry import Q_LAUNCH_ITEMS
-from services.coach import build_coach, build_action_cards
 import os
-from decimal import Decimal, InvalidOperation
 import time
 import csv
 import io
 import imaplib
 import email
+
+from datetime import date, timedelta, datetime
+from decimal import Decimal, InvalidOperation
 from email.header import decode_header
+from functools import wraps
+
+from flask import (
+    Flask,
+    render_template,
+    request,
+    Response,
+    send_file,
+    redirect,
+    url_for,
+    session,
+    flash,
+    abort,
+    jsonify,
+    g
+)
+
+from werkzeug.security import (
+    generate_password_hash,
+    check_password_hash
+)
+
+from psycopg2 import sql
+from psycopg2.extras import RealDictCursor
+
+from apscheduler.schedulers.background import (
+    BackgroundScheduler
+)
+
 from openpyxl import Workbook
-from dotenv import load_dotenv
 from openpyxl.styles import Font
+
+from dotenv import load_dotenv
+
 from db import get_db_connection
-output = io.StringIO()
-file_data = io.BytesIO()
-load_dotenv()
+from q_launch_registry import Q_LAUNCH_ITEMS
+from services.coach import (
+    build_coach,
+    build_action_cards
+)
 from services.sms_service import send_sms_telnyx
 
 
+# --------------------------------------------------
+# Environment
+# --------------------------------------------------
+
+load_dotenv()
+
+
+# --------------------------------------------------
+# In-memory file objects
+# --------------------------------------------------
+
+output = io.StringIO()
+file_data = io.BytesIO()
+
+
+# --------------------------------------------------
+# Flask application
+# --------------------------------------------------
+
 app = Flask(__name__)
+
+
+app.secret_key = os.environ.get("SECRET_KEY", "local-dev-key")
+
+
+
+if not app.secret_key:
+    raise RuntimeError(
+        "FLASK_SECRET_KEY is not configured."
+    )
+
 
 # --------------------------------------------------
 # Application Branding
@@ -35,31 +93,49 @@ app.config["APP_VERSION"] = "1.0.0"
 app.config["TAGLINE"] = "Helping Your Business Bear Fruit™"
 
 
-# Mailgun config
+# --------------------------------------------------
+# Mailgun configuration
+# --------------------------------------------------
+
 MAILGUN_API_KEY = os.getenv("MAILGUN_API_KEY")
 MAILGUN_DOMAIN = os.getenv("MAILGUN_DOMAIN")
 MAILGUN_FROM = os.getenv("MAILGUN_FROM")
 
-SMS_ENABLED = os.getenv("SMS_ENABLED", "false").lower() == "true"
+
+# --------------------------------------------------
+# SMS configuration
+# --------------------------------------------------
+
+SMS_ENABLED = (
+    os.getenv("SMS_ENABLED", "false").lower()
+    == "true"
+)
 
 
-app.secret_key = os.environ.get("SECRET_KEY", "local-dev-key")
+print(
+    "APP.PY LOADED - SWITCH TEST VERSION",
+    flush=True
+)
+
+print(
+    "MAILGUN CONFIGURED:",
+    bool(
+        MAILGUN_API_KEY
+        and MAILGUN_DOMAIN
+        and MAILGUN_FROM
+    ),
+    flush=True
+)
 
 
-from werkzeug.security import generate_password_hash, check_password_hash
-from functools import wraps
+
+##################################################
+#################################################################
+###########################################################################
 
 
 
-print("APP.PY LOADED - SWITCH TEST VERSION", flush=True)
 
-print("APP FILE LOADED")
-
-
-print("GENERAL EMAIL SEND HIT", flush=True)
-print("MAILGUN DOMAIN:", MAILGUN_DOMAIN, flush=True)
-print("MAILGUN FROM:", MAILGUN_FROM, flush=True)
-print("MAILGUN KEY STARTS:", MAILGUN_API_KEY[:4] if MAILGUN_API_KEY else None, flush=True)
 
 
 
@@ -91,11 +167,6 @@ def build_q_launch_items():
             )
 
     return items
-
-
-
-
-
 
 
 
@@ -302,6 +373,37 @@ def log_event(category, message, severity="INFO", spa_id=None, related_type=None
 #  ---------------------
 #        HELPERS
 #  --------------------
+
+
+#########################
+#
+#   MASTER ADMIN REQUIRED
+#
+#
+###################################
+
+
+def master_admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        user_role = (
+            session.get("role")
+            or session.get("user_role")
+        )
+
+        if user_role != "master_admin":
+            abort(403)
+
+        return f(*args, **kwargs)
+
+    return decorated_function
+
+
+
+
+
+
+
 
 
 ##################################
@@ -2892,40 +2994,6 @@ def get_dashboard_data(spa_id, spa_now):
             month=month_start.month + 1
        )    
 
-    
-    cur.execute("""
-    SELECT COUNT(*)
-    FROM appointments
-    WHERE appointment_date=%s
-    AND spa_id=%s
-    AND status IN ('booked','completed')
-    """,(today,spa_id))  
- 
-    dashboard["appointments_today"] = cur.fetchone()[0] or 0
-
-        # Expected revenue today
-    cur.execute("""
-        SELECT COALESCE(SUM(price_at_booking), 0)
-        FROM appointments
-        WHERE spa_id = %s
-        AND appointment_date = CURRENT_DATE
-        AND status NOT IN ('Cancelled', 'No Show')
-    """, (spa_id,))
-
-    expected_income_today = cur.fetchone()[0] or 0
-
-
-
-    cur.execute("""
-        SELECT COALESCE(SUM(price_at_booking), 0)
-        FROM appointments
-        WHERE appointment_date = %s
-          AND spa_id = %s
-          AND status IN ('booked', 'completed')
-    """, (today, spa_id))
-
-    dashboard["expected_revenue"] = cur.fetchone()[0] or 0
-
 
     cur.execute("""
         SELECT
@@ -2955,18 +3023,7 @@ def get_dashboard_data(spa_id, spa_now):
 
     dashboard["total_clients"]  = cur.fetchone()[0] or 0
     dashboard["appointment_status_chart"] = appointment_status_chart
-    dashboard["expected_income_today"] = expected_income_today
-
-
-
-
-
-
-
-
-
-
-
+    
 
 
 
@@ -3151,10 +3208,6 @@ def get_dashboard_data(spa_id, spa_now):
 
 
 
-    
-
-
-
      # Daily Revenue
     cur.execute("""
         SELECT COALESCE(SUM(price_at_booking), 0)
@@ -3167,7 +3220,118 @@ def get_dashboard_data(spa_id, spa_now):
     dashboard["daily_revenue"] = cur.fetchone()[0] or 0   
 
 
+        #####################################################
+    #
+    #   FORWARD LOOKING — NEXT 7 DAYS
+    #
+    #####################################################
 
+    seven_day_start = today
+    seven_day_end = today + timedelta(days=6)
+
+    cur.execute("""
+        SELECT
+            appointment_date,
+            COUNT(*) AS appointment_count,
+            COALESCE(SUM(price_at_booking), 0) AS projected_revenue
+        FROM appointments
+        WHERE appointment_date BETWEEN %s AND %s
+          AND spa_id = %s
+          AND LOWER(status) = 'booked'
+          AND (
+                appointment_date > %s
+                OR (
+                    appointment_date = %s
+                    AND appointment_time >= %s
+                )
+          )
+        GROUP BY appointment_date
+        ORDER BY appointment_date
+    """, (
+        seven_day_start,
+        seven_day_end,
+        spa_id,
+        today,
+        today,
+        current_time
+    ))
+
+    seven_day_rows = cur.fetchall() or []
+
+    seven_day_lookup = {
+        row[0]: {
+            "appointment_count": int(row[1] or 0),
+            "projected_revenue": float(row[2] or 0)
+        }
+        for row in seven_day_rows
+    }
+
+    seven_day_days = []
+
+    for day_offset in range(7):
+        outlook_date = seven_day_start + timedelta(days=day_offset)
+
+        day_data = seven_day_lookup.get(
+            outlook_date,
+            {
+                "appointment_count": 0,
+                "projected_revenue": 0.0
+            }
+        )
+
+        seven_day_days.append({
+            "date": outlook_date,
+            "day_name": outlook_date.strftime("%A"),
+            "date_display": (
+                outlook_date.strftime("%B %d").replace(" 0", " ")
+            ),
+            "appointment_count": day_data["appointment_count"],
+            "projected_revenue": day_data["projected_revenue"]
+        })
+
+    seven_day_total_appointments = sum(
+        day["appointment_count"]
+        for day in seven_day_days
+    )
+
+    seven_day_projected_revenue = sum(
+        day["projected_revenue"]
+        for day in seven_day_days
+    )
+
+    seven_day_booked_days = [
+        day
+        for day in seven_day_days
+        if day["appointment_count"] > 0
+    ]
+
+    seven_day_open_days = [
+        day
+        for day in seven_day_days
+        if day["appointment_count"] == 0
+    ]
+
+    seven_day_busiest_day = None
+
+    if seven_day_booked_days:
+        seven_day_busiest_day = max(
+            seven_day_booked_days,
+            key=lambda day: (
+                day["appointment_count"],
+                day["projected_revenue"]
+            )
+        )
+
+    dashboard["seven_day_outlook"] = {
+        "start_date": seven_day_start,
+        "end_date": seven_day_end,
+        "days": seven_day_days,
+        "total_appointments": seven_day_total_appointments,
+        "projected_revenue": seven_day_projected_revenue,
+        "busiest_day": seven_day_busiest_day,
+        "open_days": seven_day_open_days,
+        "open_day_count": len(seven_day_open_days)
+    }
 
 
    #####################################################
@@ -3199,7 +3363,7 @@ def get_dashboard_data(spa_id, spa_now):
 
 
     # Weekly revenue
-    cur.execute(f"""
+    cur.execute("""
         SELECT COALESCE(SUM(a.price_at_booking), 0)
         FROM appointments a
         WHERE a.appointment_date BETWEEN %s AND %s
@@ -3248,7 +3412,7 @@ def get_dashboard_data(spa_id, spa_now):
 
 
     # Monthly revenue
-    cur.execute(f"""
+    cur.execute("""
         SELECT COALESCE(SUM(a.price_at_booking), 0)
         FROM appointments a
         WHERE a.appointment_date >= %s
@@ -5755,36 +5919,30 @@ def eports_all():
 
 
 
-
 #########################################
 #   MASTER ADMIN HOME
-#
-#######################################
-
+#########################################
 
 @app.route("/master_admin_home")
 @login_required
-@spa_required  
-
+@master_admin_required
 def master_admin_home():
-    return render_template("master_admin_home.html")
-
-
+    return render_template(
+        "master_admin_home.html"
+    )
 
 
 #########################################
-#   MASTER ADMIN 
-#
 #   MASTER ADMIN SETTINGS
-#
-#######################################
-
+#########################################
 
 @app.route("/master-admin/settings")
 @login_required
-@spa_required
+@master_admin_required
 def master_admin_settings():
-    supported_languages = get_supported_languages(active_only=False)
+    supported_languages = get_supported_languages(
+        active_only=False
+    )
 
     return render_template(
         "master_admin_settings.html",
@@ -5792,6 +5950,280 @@ def master_admin_settings():
     )
 
 
+
+################################
+#
+#   MASTER ADMIN ADD
+#
+#
+############################################
+
+
+@app.route(
+    "/master-admin/businesses/add",
+    methods=["GET", "POST"]
+)
+@login_required
+@master_admin_required
+def master_admin_add_business():
+
+    if request.method == "GET":
+        return render_template(
+            "master_admin/businesses/add_business.html",
+            form_data={},
+            error_message=None
+        )
+
+    # -----------------------------------------
+    # Read submitted form
+    # -----------------------------------------
+    form_data = request.form.to_dict()
+
+    spa_name = request.form.get("spa_name", "").strip()
+    owner_first_name = request.form.get(
+        "owner_first_name",
+        ""
+    ).strip()
+    owner_last_name = request.form.get(
+        "owner_last_name",
+        ""
+    ).strip()
+    owner_phone = request.form.get(
+        "owner_phone",
+        ""
+    ).strip()
+    owner_email = request.form.get(
+        "owner_email",
+        ""
+    ).strip().lower()
+
+    timezone_name = request.form.get(
+        "timezone_name",
+        "America/Chicago"
+    ).strip()
+
+    subscription_status = request.form.get(
+        "subscription_status",
+        "Trial"
+    ).strip()
+
+    temporary_password = request.form.get(
+        "temporary_password",
+        ""
+    )
+
+    confirm_password = request.form.get(
+        "confirm_password",
+        ""
+    )
+
+    # Never send passwords back to the template
+    form_data.pop("temporary_password", None)
+    form_data.pop("confirm_password", None)
+
+    # -----------------------------------------
+    # Validation
+    # -----------------------------------------
+    if not spa_name:
+        return render_template(
+            "master_admin/businesses/add_business.html",
+            form_data=form_data,
+            error_message="Business name is required."
+        )
+
+    if not owner_first_name or not owner_last_name:
+        return render_template(
+            "master_admin/businesses/add_business.html",
+            form_data=form_data,
+            error_message=(
+                "Administrator first and last name are required."
+            )
+        )
+
+    if not owner_email:
+        return render_template(
+            "master_admin/businesses/add_business.html",
+            form_data=form_data,
+            error_message="Administrator email is required."
+        )
+
+    if len(temporary_password) < 10:
+        return render_template(
+            "master_admin/businesses/add_business.html",
+            form_data=form_data,
+            error_message=(
+                "Temporary password must contain at least "
+                "10 characters."
+            )
+        )
+
+    if temporary_password != confirm_password:
+        return render_template(
+            "master_admin/businesses/add_business.html",
+            form_data=form_data,
+            error_message="The temporary passwords do not match."
+        )
+
+    conn = None
+    cur = None
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # -----------------------------------------
+        # Prevent duplicate business
+        # -----------------------------------------
+        cur.execute(
+            """
+            SELECT spa_id
+            FROM spas
+            WHERE LOWER(spa_name) = LOWER(%s)
+            LIMIT 1
+            """,
+            (spa_name,)
+        )
+
+        if cur.fetchone():
+            return render_template(
+                "master_admin/businesses/add_business.html",
+                form_data=form_data,
+                error_message=(
+                    "A business with this name already exists."
+                )
+            )
+
+        # -----------------------------------------
+        # Prevent duplicate administrator login
+        # -----------------------------------------
+        cur.execute(
+            """
+            SELECT user_id
+            FROM users
+            WHERE LOWER(email) = LOWER(%s)
+               OR LOWER(username) = LOWER(%s)
+            LIMIT 1
+            """,
+            (owner_email, owner_email)
+        )
+
+        if cur.fetchone():
+            return render_template(
+                "master_admin/businesses/add_business.html",
+                form_data=form_data,
+                error_message=(
+                    "A user with this email address already exists."
+                )
+            )
+
+        # -----------------------------------------
+        # Create business
+        # -----------------------------------------
+        cur.execute(
+            """
+            INSERT INTO spas (
+                spa_name,
+                owner_first_name,
+                owner_last_name,
+                owner_phone,
+                owner_email,
+                timezone_name,
+                subscription_status,
+                active
+            )
+            VALUES (
+                %s, %s, %s, %s, %s, %s, %s, TRUE
+            )
+            RETURNING spa_id
+            """,
+            (
+                spa_name,
+                owner_first_name,
+                owner_last_name,
+                owner_phone or None,
+                owner_email,
+                timezone_name,
+                subscription_status
+            )
+        )
+
+        spa_id = cur.fetchone()[0]
+
+        # -----------------------------------------
+        # Create business administrator
+        # -----------------------------------------
+        password_hash = generate_password_hash(
+            temporary_password
+        )
+
+        cur.execute(
+            """
+            INSERT INTO users (
+                spa_id,
+                first_name,
+                last_name,
+                email,
+                username,
+                password_hash,
+                role,
+                active,
+                preferred_language
+            )
+            VALUES (
+                %s, %s, %s, %s, %s, %s,
+                'admin', TRUE, 'EN'
+            )
+            RETURNING user_id
+            """,
+            (
+                spa_id,
+                owner_first_name,
+                owner_last_name,
+                owner_email,
+                owner_email,
+                password_hash
+            )
+        )
+
+        user_id = cur.fetchone()[0]
+
+        conn.commit()
+
+        flash(
+            (
+                f"{spa_name} was created successfully. "
+                f"Business ID: {spa_id}. "
+                f"Administrator ID: {user_id}."
+            ),
+            "success"
+        )
+
+        return redirect(url_for("master_admin_home"))
+
+    except Exception as error:
+        if conn:
+            conn.rollback()
+
+        print(
+            "[MASTER ADMIN CREATE BUSINESS ERROR]",
+            error
+        )
+
+        return render_template(
+            "master_admin/businesses/add_business.html",
+            form_data=form_data,
+            error_message=(
+                "The business could not be created. "
+                "No changes were saved."
+            )
+        )
+
+    finally:
+        if cur:
+            cur.close()
+
+        if conn:
+            conn.close()
 
 
 
@@ -23140,24 +23572,23 @@ def calendar_view():
     conn = get_db_connection()
     cur = conn.cursor()
                     
-    filtered_appointments = []
 
-    # Base spa filters
+
+    # Base spa filters for the displayed week
     filter_sql = "WHERE a.appointment_date BETWEEN %s AND %s"
     week_params = [week_days[0], week_days[-1]]
-
 
     filter_sql += " AND a.spa_id = %s"
     week_params.append(spa_id)
 
+
     if start_date and end_date:
-        date_filter_sql = "WHERE a.appointment_date BETWEEN %s AND %s"
-        date_params = [start_date, end_date]
+        date_filter_sql = """
+            WHERE a.appointment_date BETWEEN %s AND %s
+            AND a.spa_id = %s
+        """
+        date_params = [start_date, end_date, spa_id]
 
-        date_filter_sql += " AND a.spa_id = %s"
-        date_params.append(spa_id)
-
-        
         cur.execute(f"""
             SELECT
                 a.appointment_date,                             -- 0
@@ -23180,6 +23611,7 @@ def calendar_view():
                 a.appointment_for,                              -- 11
                 a.provider_name_at_booking                      -- 12
             FROM appointments a
+
             JOIN clients c
                 ON a.client_id = c.client_id
             AND a.spa_id = c.spa_id
@@ -23197,56 +23629,51 @@ def calendar_view():
             ORDER BY a.appointment_date, a.appointment_time
         """, date_params)
 
+        appointments = cur.fetchall()
 
+    else:
+        # Show appointments for the displayed week
+        cur.execute(f"""
+            SELECT
+                a.appointment_date,                             -- 0
+                a.appointment_time,                             -- 1
+                c.first_name,                                   -- 2
+                c.last_name,                                    -- 3
+                COALESCE(
+                    NULLIF(snt.service_name, ''),
+                    NULLIF(a.service_type, ''),
+                    NULLIF(a.external_service_name, ''),
+                    s.service_name,
+                    'Service not entered'
+                ) AS service_name,                              -- 4
+                a.status,                                       -- 5
+                a.appointment_id,                               -- 6
+                a.duration_minutes,                             -- 7
+                a.price_at_booking,                             -- 8
+                a.owner_reviewed,                               -- 9
+                a.owner_reviewed_at,                            -- 10
+                a.appointment_for,                              -- 11
+                a.provider_name_at_booking                      -- 12
+            FROM appointments a
 
+            JOIN clients c
+                ON a.client_id = c.client_id
+            AND a.spa_id = c.spa_id
 
+            LEFT JOIN service_name_types snt
+                ON a.service_type_id = snt.service_type_id
+            AND a.spa_id = snt.spa_id
 
+            LEFT JOIN services s
+                ON a.service_id = s.service_id
+            AND a.spa_id = s.spa_id
 
-        filtered_appointments = cur.fetchall()
-            
-    # Show booked appointments for the displayed week
-    cur.execute(f"""
-        SELECT
-            a.appointment_date,                             -- 0
-            a.appointment_time,                             -- 1
-            c.first_name,                                   -- 2
-            c.last_name,                                    -- 3
-            COALESCE(
-                NULLIF(snt.service_name, ''),
-                NULLIF(a.service_type, ''),
-                NULLIF(a.external_service_name, ''),
-                s.service_name,
-                'Service not entered'
-            ) AS service_name,                              -- 4
-            a.status,                                       -- 5
-            a.appointment_id,                               -- 6
-            a.duration_minutes,                             -- 7
-            a.price_at_booking,                             -- 8
-            a.owner_reviewed,                               -- 9
-            a.owner_reviewed_at,                            -- 10
-            a.appointment_for,                              -- 11
-            a.provider_name_at_booking                      -- 12
-        FROM appointments a
-        JOIN clients c
-            ON a.client_id = c.client_id
-        AND a.spa_id = c.spa_id
+            {filter_sql}
 
-        LEFT JOIN service_name_types snt
-            ON a.service_type_id = snt.service_type_id
-        AND a.spa_id = snt.spa_id
+            ORDER BY a.appointment_date, a.appointment_time
+        """, week_params)
 
-        LEFT JOIN services s
-            ON a.service_id = s.service_id
-        AND a.spa_id = s.spa_id
-
-        {filter_sql}
-
-        ORDER BY a.appointment_date, a.appointment_time
-    """, week_params)
-
-
-
-    appointments = cur.fetchall()
+        appointments = cur.fetchall()
     
     # Next booked appointment banner
     next_filter_sql = """
@@ -23328,6 +23755,7 @@ def calendar_view():
     conn.close()
               
     formatted_spa_time = spa_now.strftime("%A, %B %d, %Y %I:%M %p")
+
         
     return render_template(
         "calendar.html",
@@ -24132,8 +24560,19 @@ def morning_briefing():
    # ---------------------------------------------------------
     # Coach performs the review only after all data is collected
     # ---------------------------------------------------------
+
+    coach_session = coach_session or {}
+
+    coach_session["acknowledged_categories"] = (
+        get_coach_acknowledgments(
+            spa_id=spa_id,
+            spa_now=spa_now
+        )
+    )
+
+
     coach = build_coach(
-        dashboard=dashboard,
+        dashboard,
         business_schedule_due=business_schedule_due,
         business_schedule_upcoming=business_schedule_upcoming,
         priority_actions=priority_actions,
@@ -24178,6 +24617,161 @@ def morning_briefing():
         spa_now=spa_now,
         action_cards=action_cards
     )
+
+
+
+
+
+def get_coach_acknowledgments(
+    spa_id,
+    spa_now
+):
+    """
+    Return Coach recommendation categories acknowledged
+    today for the current spa.
+    """
+
+    today_key = spa_now.date().isoformat()
+    spa_key = str(spa_id)
+
+    all_acknowledgments = session.get(
+        "coach_acknowledgments",
+        {}
+    )
+
+    spa_acknowledgments = all_acknowledgments.get(
+        spa_key,
+        {}
+    )
+
+    # Begin a fresh acknowledgment list each day.
+    if spa_acknowledgments.get("date") != today_key:
+        spa_acknowledgments = {
+            "date": today_key,
+            "categories": []
+        }
+
+        all_acknowledgments[spa_key] = (
+            spa_acknowledgments
+        )
+
+        session["coach_acknowledgments"] = (
+            all_acknowledgments
+        )
+
+        session.modified = True
+
+    return spa_acknowledgments.get(
+        "categories",
+        []
+    )
+
+
+def save_coach_acknowledgment(
+    spa_id,
+    spa_now,
+    category
+):
+    """
+    Mark one Coach recommendation category as acknowledged
+    for the remainder of the current business day.
+    """
+
+    today_key = spa_now.date().isoformat()
+    spa_key = str(spa_id)
+
+    all_acknowledgments = session.get(
+        "coach_acknowledgments",
+        {}
+    )
+
+    spa_acknowledgments = all_acknowledgments.get(
+        spa_key,
+        {}
+    )
+
+    if spa_acknowledgments.get("date") != today_key:
+        spa_acknowledgments = {
+            "date": today_key,
+            "categories": []
+        }
+
+    categories = set(
+        spa_acknowledgments.get(
+            "categories",
+            []
+        )
+    )
+
+    categories.add(category)
+
+    spa_acknowledgments["categories"] = list(
+        categories
+    )
+
+    all_acknowledgments[spa_key] = (
+        spa_acknowledgments
+    )
+
+    session["coach_acknowledgments"] = (
+        all_acknowledgments
+    )
+
+    session.modified = True
+
+
+#####################################
+#
+#
+#   COACH ACKNOWLEDGE
+#
+#
+########################################
+
+
+
+@app.route(
+    "/coach/acknowledge",
+    methods=["POST"]
+)
+@login_required
+@spa_required
+def acknowledge_coach_recommendation():
+    data = request.get_json(silent=True) or {}
+
+    category = str(
+        data.get("category") or ""
+    ).strip()
+
+    if not category:
+        return jsonify({
+            "status": "error",
+            "message": "Recommendation category is required."
+        }), 400
+
+    if len(category) > 100:
+        return jsonify({
+            "status": "error",
+            "message": "Invalid recommendation category."
+        }), 400
+
+    spa_id = current_spa_id()
+    spa_now = get_spa_now()
+
+    save_coach_acknowledgment(
+        spa_id=spa_id,
+        spa_now=spa_now,
+        category=category
+    )
+
+    return jsonify({
+        "status": "success",
+        "category": category
+    })
+
+
+
+
 
 
 

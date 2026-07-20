@@ -5,6 +5,15 @@
 
 {% block content %}
 
+<div class="page-tool-pills" style="margin-top:5px;">
+    <a href="{{ url_for('calendar_view') }}" class="tool-pill tool-pill-small">
+        Calendar
+    </a>
+
+    <a href="{{ url_for('godaddy_imports') }}" class="tool-pill tool-pill-small">
+        Appointment Imports
+    </a>
+</div>
 
 <h1>Appointments</h1>
 
@@ -12,12 +21,7 @@
     
     <!-- LEFT SIDE -->
     <div style="flex: 1; min-width: 0;">
-            
-                
-        <div class="narrow-cards">
-            {{ section_card("Calendar", "",  url_for('calendar_view')) }}
-            {{ section_card("GoDaddy Imports", "", url_for('godaddy_imports')) }}
-        </div>
+        
 
         <form method="GET" style="margin-bottom: 20px;">
             <label for="start_date">From</label>
@@ -61,17 +65,21 @@
 
              <button type="submit" class="btn">Filter</button>
 
-            <a href="{{ url_for('appointments', start_date=today_str, end_date=today_str) }}" class="btn">
+            <a href="{{ url_for('appointments', start_date=today_str, end_date=today_str) }}" class="tool-pill tool-pill-small">
                 Today
             </a>
 
-            <a href="{{ url_for('appointments', show_all=1) }}" class="btn">
+            <a href="{{ url_for('appointments', show_all=1) }}" class="tool-pill tool-pill-small">
                 Show All Appointments
             </a>
+            
+
+        
         </form>
 
         <div style="margin-bottom: 20px;">
-            <a href="{{ url_for('add_appointment') }}" class="btn">Add Appointment</a>
+            <a href="{{ url_for('add_appointment') }}" class="tool-pill tool-pill-small">
+                Add Appointment</a>
         </div>
     </div>
             

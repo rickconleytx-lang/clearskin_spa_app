@@ -7,54 +7,6 @@
 
 <meta http-equiv="refresh" content="30">
 
-<!-- =========================================================
-     PAGE HEADER
-========================================================= -->
-
-<div style="margin-bottom:15px;">
-
-<div class="page-title">
-    <h1>Calendar</h1>
-
-    <span class="help-icon"
-          onclick="toggleHelp('calendarHelp')">
-        ❔
-    </span>
-</div>
-
-
-<div class="page-tool-pills" style="margin-top:10px;">
-    <a href="{{ url_for('appointments') }}" class="tool-pill tool-pill-large">
-        Appointments
-    </a>
-</div>
-
-
-
-    <div id="calendarHelp"
-         class="help-popover"
-         style="display:none;">
-        This is a test<br>
-        where is my text?
-    </div>
-
-
-<h3>
-    Currently Displaying:
-    {{ week_days[0].strftime('%B %d, %Y') }} -
-    {{ week_days[6].strftime('%B %d, %Y') }}
-</h3>
-
-
-
-</div>
-<br>
-<br>
-
-<!-- =========================================================
-     PAGE TOOLS / IMAGE
-========================================================= -->
-
 <div style="
     display:flex;
     justify-content:space-between;
@@ -63,40 +15,63 @@
     margin-bottom:20px;
 ">
 
+<!-- =========================================================
+     PAGE HEADER
+========================================================= -->
+
     <!-- LEFT SIDE -->
-    <div style="flex:1; min-width:0;">
+    <div style="flex:1;"">
 
         <div style="margin-bottom:15px;">
 
-            <a class="btn"
-               href="{{ url_for('calendar_view', week_start=current_week_start.strftime('%Y-%m-%d')) }}#week-view">
-                Today
+        <div class="page-tool-pills" style="margin-top:10px;">
+            <a href="{{ url_for('appointments') }}" class="tool-pill tool-pill-small">
+                Appointments
             </a>
+        </div>
+        <br>
+        <div class="page-title">
+            <h1>Calendar</h1>
 
-            <a class="btn"
-               href="{{ url_for('calendar_view', week_start=prev_week_start.strftime('%Y-%m-%d')) }}#week-view">
-                Previous Week
-            </a>
+            <span class="help-icon"
+                onclick="toggleHelp('calendarHelp')">
+                ❔
+            </span>
+        </div>
 
-            <a class="btn"
-               href="{{ url_for('calendar_view', week_start=next_week_start.strftime('%Y-%m-%d')) }}#week-view">
-                Next Week
-            </a>
+            <div id="calendarHelp"
+                class="help-popover"
+                style="display:none;">
+                This is a test<br>
+                where is my text?
+            </div>
 
-            <a class="btn"
-               href="{{ url_for('calendar_view', week_start=current_week_start.strftime('%Y-%m-%d')) }}#week-view">
-                Current Week
-            </a>
+        <br>
+        <h3>
+            Currently Displaying:
+            {{ week_days[0].strftime('%B %d, %Y') }} -
+            {{ week_days[6].strftime('%B %d, %Y') }}
+        </h3>
+
+        </div>
+
+
+<!-- =========================================================
+     PAGE TOOLS / IMAGE
+========================================================= -->
+
+        <div style="margin-bottom:15px;">
 
             <form method="GET"
-                  action="{{ url_for('calendar_view') }}"
-                  style="display:inline-block; margin-left:10px;">
+                action="{{ url_for('calendar_view') }}"
+                style="display:inline-block; margin-left:10px;">
 
                 <input type="date"
-                       name="goto_date"
-                       value="{{ goto_date if goto_date else '' }}">
+                    name="goto_date"
+                    value="{{ goto_date if goto_date else '' }}">
 
-                <button type="submit" class="btn">
+                <button type="submit" 
+                        class="tool-pill tool-pill-small">
                     Go To Date
                 </button>
 
@@ -104,49 +79,38 @@
 
         </div>
 
-<br>
+            <a class="tool-pill tool-pill-small"
+               href="{{ url_for('calendar_view', week_start=prev_week_start.strftime('%Y-%m-%d')) }}#week-view">
+                Previous Week
+            </a>
 
+            <a class="tool-pill tool-pill-small"
+               href="{{ url_for('calendar_view', week_start=current_week_start.strftime('%Y-%m-%d')) }}#week-view">
+                Current Week
+            </a>
 
+            <a class="tool-pill tool-pill-small"
+               href="{{ url_for('calendar_view', week_start=next_week_start.strftime('%Y-%m-%d')) }}#week-view">
+                Next Week
+            </a>
+            
+        <div style="margin-top: 2rem;"></div>
 
-        <div style="margin-bottom:20px;">
+        {% if overdue_count > 0 %}
+        <div class="alert alert-danger">
+            
+            <p><strong style="color: red;">{{ overdue_count }} overdue appointments.</strong></p>
 
-            <form method="GET"
-                  action="{{ url_for('calendar_view') }}">
-
-                <label for="start_date">
-                    <strong>Search Appointments From:</strong>
-                </label>
-
-                <input type="date"
-                       id="start_date"
-                       name="start_date"
-                       value="{{ request.args.get('start_date', '') }}">
-
-                <label for="end_date"
-                       style="margin-left:10px;">
-                    <strong>To:</strong>
-                </label>
-
-                <input type="date"
-                       id="end_date"
-                       name="end_date"
-                       value="{{ request.args.get('end_date', '') }}">
-
-                <button type="submit" class="btn">
-                    Search
-                </button>
-
-                <a class="btn"
-                   href="{{ url_for('calendar_view', offset=offset) }}">
-                    Clear
-                </a>
-
-            </form>
-
+            <a href="{{ url_for('appointments',
+                                status='overdue',
+                                fromcoach=1) }}"
+            class="tool-pill tool-pill-small">
+                Review Overdue Appointments
+            </a>
         </div>
+        {% endif %}
 
     </div>
-
 
     <!-- RIGHT IMAGE -->
 
@@ -172,30 +136,10 @@
 <!-- =========================================================
      CALENDAR CONTENT CONTINUES BELOW
 ========================================================= -->     
-
-
-
-
-
-
-
-        {% if overdue_count > 0 %}
-        <div class="alert alert-danger">
-            <strong>{{ overdue_count }}</strong> overdue appointments.
-
-            <a href="{{ url_for('appointments',
-                                status='overdue',
-                                fromcoach=1) }}"
-            class="btn btn-danger">
-                Review Overdue Appointments
-            </a>
-        </div>
-        {% endif %}
+       
 
     </div>
-
-
-    
+   
 
 </div>
 

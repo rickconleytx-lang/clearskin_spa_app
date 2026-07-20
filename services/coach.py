@@ -299,9 +299,14 @@ def review_overdue_appointments(observations, dashboard):
         message=(
             f"You have {overdue_count} overdue appointment"
             f"{'' if overdue_count == 1 else 's'} "
-            "that still need to be closed out."
+            "that are still marked as booked and need to be closed out."
         ),
-        action_url=None
+        question=(
+            "Would you like to review "
+            f"{'this overdue appointment' if overdue_count == 1 else 'these overdue appointments'} "
+            "now?"
+        ),
+        action_url="/appointments?filter=overdue&from_coach=1"
 
     )
 
@@ -327,6 +332,11 @@ def review_overdue_appointments(observations, dashboard):
             f"You have {overdue_count} past appointment"
             f"{'' if overdue_count == 1 else 's'} "
             "that are still marked as booked and need to be closed out."
+        ),
+        question=(
+            "Would you like to review "
+            f"{'this overdue appointment' if overdue_count == 1 else 'these overdue appointments'} "
+            "now?"
         ),
         action_url=None
     )
@@ -515,6 +525,105 @@ def build_day_assessment(
 
     return "Overall, today looks well balanced."
 
+def review_seven_day_outlook(
+    observations,
+    dashboard
+):
+    """
+    Review the rolling seven-day appointment outlook.
+
+    This first version is informational. It does not assume
+    that a day without appointments is a business problem.
+    """
+
+    outlook = dashboard.get("seven_day_outlook") or {}
+
+    if not outlook:
+        return
+
+    total_appointments = int(
+        outlook.get("total_appointments") or 0
+    )
+
+    projected_revenue = float(
+        outlook.get("projected_revenue") or 0
+    )
+
+    busiest_day = outlook.get("busiest_day")
+
+    open_days = outlook.get("open_days") or []
+    open_day_count = len(open_days)
+
+    if total_appointments == 0:
+        observations.append({
+            "category": "7-Day Outlook",
+            "status": "informational",
+            "priority": 20,
+            "message": (
+                "There are currently no booked appointments "
+                "during the next seven days."
+            )
+        })
+
+        return
+
+    appointment_word = (
+        "appointment"
+        if total_appointments == 1
+        else "appointments"
+    )
+
+    message_parts = [
+        (
+            f"You have {total_appointments} "
+            f"{appointment_word} scheduled during the next "
+            f"seven days with projected revenue of "
+            f"${projected_revenue:,.2f}."
+        )
+    ]
+
+    if busiest_day:
+        busiest_count = int(
+            busiest_day.get("appointment_count") or 0
+        )
+
+        busiest_word = (
+            "appointment"
+            if busiest_count == 1
+            else "appointments"
+        )
+
+        message_parts.append(
+            (
+                f"{busiest_day.get('day_name', 'The busiest day')} "
+                f"is currently the busiest day with "
+                f"{busiest_count} {busiest_word}."
+            )
+        )
+
+    if open_day_count == 1:
+        message_parts.append(
+            "One day currently has no booked appointments."
+        )
+
+    elif open_day_count > 1:
+        message_parts.append(
+            (
+                f"{open_day_count} days currently have no "
+                "booked appointments."
+            )
+        )
+
+    observations.append({
+        "category": "7-Day Outlook",
+        "status": "upcoming",
+        "priority": 30,
+        "message": " ".join(message_parts)
+    })
+
+
+
+
 
 def build_coach(
     dashboard,
@@ -559,6 +668,24 @@ def build_coach(
         spa_now=spa_now
     )
 
+    review_today_schedule(
+        observations,
+        dashboard=dashboard,
+        spa_now=spa_now
+    )
+
+    review_seven_day_outlook(
+        observations,
+        dashboard=dashboard
+    )
+
+    review_business_schedule(
+        observations,
+        business_schedule_due=business_schedule_due,
+        business_schedule_upcoming=business_schedule_upcoming
+    )
+
+
     review_business_schedule(
         observations,
         business_schedule_due=business_schedule_due,
@@ -578,12 +705,28 @@ def build_coach(
         reverse=True
     )
 
+    acknowledged_categories = set(
+        coach_session.get(
+            "acknowledged_categories",
+            []
+        ) or []
+    )
+
+    print(
+        "[COACH ACK DEBUG]",
+        acknowledged_categories
+    )
+
+
+
     recommendations = [
         item for item in observations
         if item.get("status") in (
             "attention",
             "opportunity"
         )
+        and item.get("category")
+        not in acknowledged_categories
     ]
 
     for index, recommendation in enumerate(
@@ -629,14 +772,14 @@ def build_coach(
 
     greeting = get_day_greeting(spa_now)
 
-
     schedule_observation = next(
         (
             item["message"]
             for item in observations
-            if item["category"] in (
+            if item.get("category") in (
                 "Today's Schedule",
-                "Tomorrow's Schedule"
+                "Tomorrow's Schedule",
+                "7-Day Outlook"
             )
         ),
         ""
@@ -695,7 +838,8 @@ def build_coach(
         )
 
         opening_question = (
-            "Would you like to review it now?"
+            current_recommendation.get("question")
+            or "Would you like to review this recommendation now?"
         )
 
         conversation_state = "recommendation_offer"
@@ -725,7 +869,11 @@ def build_coach(
     "yes_label": "Yes",
     "no_label": "No",
 
-    "yes_url": None,
+    "yes_url": (
+        current_recommendation.get("action_url")
+        if current_recommendation
+        else None
+    ),
 
     "reason": (
         current_recommendation.get("category")
@@ -820,6 +968,68 @@ def build_action_cards(
             "url": "/reports"
         })
 
+        # Seven-Day Outlook Card
+    seven_day_outlook = (
+        dashboard.get("seven_day_outlook") or {}
+    )
+
+    seven_day_appointments = int(
+        seven_day_outlook.get(
+            "total_appointments",
+            0
+        ) or 0
+    )
+
+    seven_day_revenue = float(
+        seven_day_outlook.get(
+            "projected_revenue",
+            0
+        ) or 0
+    )
+
+    seven_day_start = seven_day_outlook.get(
+        "start_date"
+    )
+
+    seven_day_end = seven_day_outlook.get(
+        "end_date"
+    )
+
+    appointments_tomorrow = int(
+        dashboard.get(
+            "appointments_tomorrow",
+            0
+        ) or 0
+    )
+
+    if (
+        seven_day_appointments > appointments_tomorrow
+        and seven_day_start
+        and seven_day_end
+    ):
+        cards.append({
+            "priority": 15,
+            "icon": "📅",
+            "title": "Next 7 Days",
+            "message": (
+                f"{seven_day_appointments} appointment"
+                f"{'' if seven_day_appointments == 1 else 's'} • "
+                f"${seven_day_revenue:,.2f} projected"
+            ),
+            "button": "View",
+            "url": (
+                "/appointments?"
+                f"start_date={seven_day_start.isoformat()}"
+                f"&end_date={seven_day_end.isoformat()}"
+                "&from_coach=1"
+            )
+        })
+
+    appointments_tomorrow = int(
+    dashboard.get("appointments_tomorrow", 0) or 0
+    )
+
+    
 
     cards.sort(
         key=lambda c: c["priority"],

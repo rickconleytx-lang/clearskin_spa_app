@@ -83,53 +83,66 @@
 
                     <button type="button"
                             class="btn btn-secondary"
-                            onclick="dismissCoachRecommendation()">
-                        {{ coach.no_label }}
+                            onclick='dismissCoachRecommendation(
+                                {{ coach.current_recommendation.category|tojson }}
+                            )'>
+                        No
                     </button>
                 </div>
             </div>
 
-            <!-- Recommendation revealed after initial Yes -->
-            <div id="coach-recommendation"
-                 class="coach-recommendation"
-                 hidden>
+    <!-- Recommendation revealed after initial Yes -->
+    <div id="coach-recommendation"
+        class="coach-recommendation"
+        hidden>
 
-                <p class="coach-recommendation-category">
-                    {{ coach.current_recommendation.category }}
-                </p>
+        <p class="coach-recommendation-category">
+            {{ coach.current_recommendation.category }}
+        </p>
 
-                <p class="coach-recommendation-message">
-                    {{ coach.current_recommendation.message }}
-                </p>
+        <p class="coach-recommendation-message">
+            {{ coach.current_recommendation.message }}
+        </p>
 
-                {% if coach.current_recommendation.action_url %}
-                    <p class="coach-question">
-                        Would you like to take care of this now?
-                    </p>
+        {% if coach.current_recommendation.action_url %}
 
-                    <div class="coach-response-buttons">
-                        <a href="{{ coach.current_recommendation.action_url }}"
-                           class="btn">
-                            Yes
-                        </a>
+            <p class="coach-question">
+                Would you like to take care of this now?
+            </p>
 
-                        <button type="button"
-                                class="btn btn-secondary"
-                                onclick="closeCoachRecommendation()">
-                            No
-                        </button>
-                    </div>
-                {% else %}
-                    <div class="coach-response-buttons">
-                        <button type="button"
-                                class="btn"
-                                onclick="closeCoachRecommendation()">
-                            Okay
-                        </button>
-                    </div>
-                {% endif %}
+            <div class="coach-response-buttons">
+                <button type="button"
+                        class="btn"
+                        onclick='openCoachRecommendation(
+                            {{ coach.current_recommendation.action_url|tojson }},
+                            {{ coach.current_recommendation.category|tojson }}
+                        )'>
+                    Yes
+                </button>
+
+                <button type="button"
+                        class="btn btn-secondary"
+                        onclick='dismissCoachRecommendation(
+                            {{ coach.current_recommendation.category|tojson }}
+                        )'>
+                    No
+                </button>
             </div>
 
+        {% else %}
+
+            <div class="coach-response-buttons">
+                <button type="button"
+                        class="btn"
+                        onclick='dismissCoachRecommendation(
+                            {{ coach.current_recommendation.category|tojson }}
+                        )'>
+                    Okay
+                </button>
+            </div>
+
+        {% endif %}
+    </div>
             
             <!-- Final response after recommendation No -->
 
@@ -179,12 +192,6 @@
 </div>
 
 
-
-
-
-
-
-    
 
 
     <div class="dashboard-card">
@@ -262,55 +269,145 @@
         }
     }
 
+async function openCoachRecommendation(
+    url,
+    category
+) {
+    category = (category || "").trim();
 
-    function dismissCoachRecommendation() {
-        const offer = document.getElementById(
-            "coach-offer"
-        );
+    if (category) {
+        try {
+            const response = await fetch(
+                "/coach/acknowledge",
+                {
+                    method: "POST",
+                    credentials: "same-origin",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        category: category
+                    })
+                }
+            );
 
-        const recommendation = document.getElementById(
-            "coach-recommendation"
-        );
+            console.log(
+                "Coach acknowledgment:",
+                category,
+                response.status
+            );
 
-        const dismissed = document.getElementById(
-            "coach-dismissed"
-        );
+            if (!response.ok) {
+                console.error(
+                    "Coach acknowledgment was not saved."
+                );
+            }
 
-        const cardItem = document.getElementById(
-            "coach-current-card-item"
-        );
-
-        const emptyMessage = document.getElementById(
-            "no-coach-recommendations"
-        );
-
-        if (offer) {
-            offer.hidden = true;
-        }
-
-        if (recommendation) {
-            recommendation.hidden = true;
-        }
-
-        if (cardItem) {
-            cardItem.hidden = false;
-        }
-
-        if (emptyMessage) {
-            emptyMessage.hidden = true;
-        }
-
-        if (dismissed) {
-            dismissed.hidden = false;
-
-            dismissed.innerHTML = `
-                <p>
-                    Understood. I’ve added it to your
-                    Coach Recommendations below.
-                </p>
-            `;
+        } catch (error) {
+            console.error(
+                "Coach acknowledgment error:",
+                error
+            );
         }
     }
+
+    if (url) {
+        window.location.href = url;
+    }
+}
+
+
+
+
+
+
+
+ async function dismissCoachRecommendation(category) {
+    category = (category || "").trim();
+
+    if (category) {
+        try {
+            const response = await fetch(
+                "/coach/acknowledge",
+                {
+                    method: "POST",
+                    credentials: "same-origin",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        category: category
+                    })
+                }
+            );
+
+            console.log(
+                "Coach acknowledgment:",
+                category,
+                response.status
+            );
+
+            if (!response.ok) {
+                console.error(
+                    "Coach acknowledgment was not saved."
+                );
+            }
+
+        } catch (error) {
+            console.error(
+                "Coach acknowledgment error:",
+                error
+            );
+        }
+    }
+
+    const offer = document.getElementById(
+        "coach-offer"
+    );
+
+    const recommendation = document.getElementById(
+        "coach-recommendation"
+    );
+
+    const dismissed = document.getElementById(
+        "coach-dismissed"
+    );
+
+    const cardItem = document.getElementById(
+        "coach-current-card-item"
+    );
+
+    const emptyMessage = document.getElementById(
+        "no-coach-recommendations"
+    );
+
+    if (offer) {
+        offer.hidden = true;
+    }
+
+    if (recommendation) {
+        recommendation.hidden = true;
+    }
+
+    if (cardItem) {
+        cardItem.hidden = false;
+    }
+
+    if (emptyMessage) {
+        emptyMessage.hidden = true;
+    }
+
+    if (dismissed) {
+        dismissed.hidden = false;
+
+        dismissed.innerHTML = `
+            <p>
+                Understood. I’ve added it to your
+                Coach Recommendations below.
+            </p>
+        `;
+    }
+}
 
 
     function closeCoachRecommendation() {
