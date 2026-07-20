@@ -7,7 +7,96 @@
     <h1>🌅 Daily Briefing</h1>
 </div>
 
+{% if show_coach_welcome %}
+    <div class="card" style="margin-bottom: 20px;">
+        <div class="card-body">
 
+            <h2>
+                Welcome to Peach Suite Pro! 🍑
+            </h2>
+
+            <p>
+                Hi! I’m Coach Peach, your business operations coach.
+            </p>
+
+            <p>
+                Your new workspace is ready. It may look a little
+                empty right now, but that is exactly where we should
+                begin.
+            </p>
+
+            <p>
+                I’ll help you set up your business, keep important
+                work from falling through the cracks, and provide
+                clear recommendations as your business grows.
+            </p>
+
+            <h3>A good place to start:</h3>
+
+            <ol>
+                <li>Review your Business Information.</li>
+                <li>Add your services and standard pricing.</li>
+                <li>Add employees or providers.</li>
+                <li>
+                    Set up your business dropdowns and preferences.
+                </li>
+                <li>Add your first client or appointment.</li>
+            </ol>
+
+            <p>
+                As activity is added, I’ll begin helping you monitor
+                appointments, revenue, expenses, reminders, overdue
+                work, and other important business needs.
+            </p>
+
+            <p>
+                <strong>
+                    Welcome aboard. Let’s get your business set up
+                    for success.
+                </strong>
+            </p>
+
+            <p>
+                — Coach Peach
+            </p>
+
+            <div style="
+                display: flex;
+                gap: 10px;
+                flex-wrap: wrap;
+                margin-top: 18px;
+            ">
+                <form
+                    method="POST"
+                    action="{{
+                        url_for('coach_welcome_get_started')
+                    }}"
+                    style="margin: 0;"
+                >
+                    <button type="submit" class="btn">
+                        Get Started
+                    </button>
+                </form>
+
+                <form
+                    method="POST"
+                    action="{{
+                        url_for('coach_welcome_remind_later')
+                    }}"
+                    style="margin: 0;"
+                >
+                    <button
+                        type="submit"
+                        class="btn btn-secondary"
+                    >
+                        Remind Me Later
+                    </button>
+                </form>
+            </div>
+
+        </div>
+    </div>
+{% endif %}
 
 <p style="color:#777; margin-top:4px;">
     Prepared by Coach<br>

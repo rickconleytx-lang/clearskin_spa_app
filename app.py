@@ -543,6 +543,47 @@ def get_messaging_onboarding(spa_id):
 
 
 
+
+# ############################################
+#
+#  COACH WELCOME NEW USERS
+#
+#  
+###############################################
+
+def user_needs_coach_welcome(user_id):
+    if not user_id:
+        return False
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT coach_welcome_seen_at
+            FROM users
+            WHERE user_id = %s
+              AND active = TRUE
+            """,
+            (user_id,)
+        )
+
+        row = cur.fetchone()
+
+        return bool(row and row[0] is None)
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
+
+
+
+
 ##################################################
 #
 #   SMS  & EMAIL OPT OUT FOOTER FROM MASTER ADMIN
@@ -24599,6 +24640,16 @@ def morning_briefing():
     conn.commit()
 
 
+    show_coach_welcome = (
+        user_needs_coach_welcome(
+            session.get("user_id")
+        )
+        and not session.get(
+            "coach_welcome_dismissed",
+            False
+        )
+    )
+
 
     cur.close()
     conn.close()
@@ -24615,11 +24666,15 @@ def morning_briefing():
         coach=coach,
         coach_session=coach_session,
         spa_now=spa_now,
-        action_cards=action_cards
+        action_cards=action_cards,
+        show_coach_welcome=show_coach_welcome
     )
 
 
-
+####################################################
+#
+#
+#################################################
 
 
 def get_coach_acknowledgments(
@@ -24665,6 +24720,10 @@ def get_coach_acknowledgments(
         "categories",
         []
     )
+
+###############################################################
+
+
 
 
 def save_coach_acknowledgment(
@@ -24718,6 +24777,74 @@ def save_coach_acknowledgment(
     )
 
     session.modified = True
+
+
+
+
+#####################################
+#
+#
+#   COACH WELCOME GET STARTED
+#
+#
+########################################
+
+
+@app.route("/coach/welcome/get-started", methods=["POST"])
+@login_required
+def coach_welcome_get_started():
+    user_id = session.get("user_id")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            UPDATE users
+            SET coach_welcome_seen_at = CURRENT_TIMESTAMP
+            WHERE user_id = %s
+              AND active = TRUE
+            """,
+            (user_id,)
+        )
+
+        conn.commit()
+
+    except Exception as error:
+        conn.rollback()
+        print("[COACH WELCOME ERROR]", error)
+        flash(
+            "The welcome could not be completed.",
+            "error"
+        )
+
+        return redirect(url_for("daily_briefing"))
+
+    finally:
+        cur.close()
+        conn.close()
+
+    session.pop("coach_welcome_dismissed", None)
+
+    return redirect(url_for("business_coach_profile"))
+
+################################################################
+
+
+
+
+
+@app.route("/coach/welcome/remind-later", methods=["POST"])
+@login_required
+def coach_welcome_remind_later():
+    session["coach_welcome_dismissed"] = True
+
+    return redirect(url_for("daily_briefing"))
+
+
+
+
 
 
 #####################################
