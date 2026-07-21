@@ -1,0 +1,406 @@
+{% extends "base.html" %}
+
+{% block title %}
+Businesses | Master Admin
+{% endblock %}
+
+{% block content %}
+
+<div class="page-title">
+    <h1>Businesses</h1>
+</div>
+
+
+<div class="page-tool-pills">
+
+    <a
+        href="{{ url_for('master_admin_home') }}"
+        class="tool-pill tool-pill-small"
+    >
+        Master Admin
+    </a>
+
+    <a
+        href="{{ url_for('master_admin_add_business') }}"
+        class="tool-pill tool-pill-small"
+    >
+        Add Business
+    </a>
+
+</div>
+
+<br>
+
+
+<div class="master-business-summary">
+
+    <div class="summary-card">
+        <span>Total Businesses</span>
+
+        <strong>
+            {{ businesses|length }}
+        </strong>
+    </div>
+
+    <div class="summary-card">
+        <span>SMS Enabled</span>
+
+        <strong>
+            {{
+                businesses
+                |selectattr(
+                    "sms_service_enabled",
+                    "equalto",
+                    true
+                )
+                |list
+                |length
+            }}
+        </strong>
+    </div>
+
+    <div class="summary-card">
+        <span>10DLC Pending</span>
+
+        <strong>
+            {{
+                businesses
+                |selectattr(
+                    "sms_10dlc_status",
+                    "equalto",
+                    "pending"
+                )
+                |list
+                |length
+            }}
+        </strong>
+    </div>
+
+</div>
+
+
+<div class="command-card">
+
+    <div class="business-list-heading">
+
+        <div>
+            <h2>Registered Businesses</h2>
+
+            <p>
+                Manage tenant registration, subscription status,
+                and SMS compliance.
+            </p>
+        </div>
+
+    </div>
+
+
+    {% if businesses %}
+
+        <div class="table-responsive">
+
+            <table class="business-directory-table">
+
+                <thead>
+                    <tr>
+                        <th>Business</th>
+                        <th>Registration</th>
+                        <th>Subscription</th>
+                        <th>Business Status</th>
+                        <th>SMS Agreement</th>
+                        <th>10DLC</th>
+                        <th>SMS Service</th>
+                        <th>SMS Marketing</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+
+                    {% for business in businesses %}
+
+                        <tr>
+
+                            <td>
+                                <strong>
+                                    {{ business.spa_name }}
+                                </strong>
+
+                                <div class="business-id">
+                                    Business ID:
+                                    {{ business.spa_id }}
+                                </div>
+                            </td>
+
+
+                            <td>
+                                {{
+                                    business.registration_number
+                                    or "Not Assigned"
+                                }}
+                            </td>
+
+
+                            <td>
+                                {{
+                                    business.subscription_status
+                                    or "Not Set"
+                                }}
+                            </td>
+
+
+                            <td>
+                                {% if business.active %}
+
+                                    <span class="status-badge status-active">
+                                        Active
+                                    </span>
+
+                                {% else %}
+
+                                    <span class="status-badge status-disabled">
+                                        Inactive
+                                    </span>
+
+                                {% endif %}
+                            </td>
+
+
+                            <td>
+                                {% if business.sms_agreement_status == "accepted" %}
+
+                                    <span class="status-badge status-active">
+                                        Accepted
+                                    </span>
+
+                                {% else %}
+
+                                    <span class="status-badge status-disabled">
+                                        {{
+                                            business.sms_agreement_status
+                                            |replace("_", " ")
+                                            |title
+                                        }}
+                                    </span>
+
+                                {% endif %}
+                            </td>
+
+
+
+                            <td>
+                                <span class="status-badge">
+
+                                    {{
+                                        business.sms_10dlc_status
+                                        |replace("_", " ")
+                                        |title
+                                    }}
+
+                                </span>
+                            </td>
+
+
+                            <td>
+                                {% if business.sms_service_enabled %}
+
+                                    <span class="status-badge status-active">
+                                        Enabled
+                                    </span>
+
+                                {% elif business.sms_service_suspended %}
+
+                                    <span class="status-badge status-warning">
+                                        Suspended
+                                    </span>
+
+                                {% else %}
+
+                                    <span class="status-badge status-disabled">
+                                        Disabled
+                                    </span>
+
+                                {% endif %}
+                            </td>
+
+
+                            <td>
+                                {% if business.sms_marketing_enabled %}
+
+                                    <span class="status-badge status-active">
+                                        Enabled
+                                    </span>
+
+                                {% elif business.sms_marketing_suspended %}
+
+                                    <span class="status-badge status-warning">
+                                        Suspended
+                                    </span>
+
+                                {% else %}
+
+                                    <span class="status-badge status-disabled">
+                                        Disabled
+                                    </span>
+
+                                {% endif %}
+                            </td>
+
+
+                            <td>
+                                <a
+                                    href="{{
+                                        url_for(
+                                            'master_admin_sms_compliance',
+                                            spa_id=business.spa_id
+                                        )
+                                    }}"
+                                    class="btn btn-small"
+                                >
+                                    SMS Compliance
+                                </a>
+                            </td>
+
+                        </tr>
+
+                    {% endfor %}
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+    {% else %}
+
+        <div class="empty-state">
+            No businesses have been registered.
+        </div>
+
+    {% endif %}
+
+</div>
+
+
+<style>
+.master-business-summary {
+    display: grid;
+    grid-template-columns: repeat(
+        3,
+        minmax(0, 1fr)
+    );
+    gap: 14px;
+    margin-bottom: 20px;
+}
+
+.summary-card {
+    padding: 17px;
+    border: 1px solid #dddddd;
+    border-radius: 10px;
+    background: #ffffff;
+}
+
+.summary-card span {
+    display: block;
+    margin-bottom: 6px;
+    color: #666666;
+    font-size: 0.85rem;
+}
+
+.summary-card strong {
+    font-size: 1.35rem;
+}
+
+.command-card {
+    padding: 20px;
+    border: 1px solid #dddddd;
+    border-radius: 12px;
+    background: #ffffff;
+}
+
+.business-list-heading h2 {
+    margin: 0;
+}
+
+.business-list-heading p {
+    margin: 6px 0 18px;
+    color: #666666;
+}
+
+.table-responsive {
+    overflow-x: auto;
+}
+
+.business-directory-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.business-directory-table th,
+.business-directory-table td {
+    padding: 12px 10px;
+    border-bottom: 1px solid #eeeeee;
+    text-align: left;
+    vertical-align: middle;
+}
+
+.business-directory-table th {
+    color: #555555;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+}
+
+.business-id {
+    margin-top: 3px;
+    color: #888888;
+    font-size: 0.75rem;
+}
+
+.status-badge {
+    display: inline-block;
+    padding: 5px 9px;
+    border-radius: 999px;
+    background: #eeeeee;
+    color: #555555;
+    font-size: 0.76rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.status-active {
+    background: #e3f5e9;
+    color: #247245;
+}
+
+.status-disabled {
+    background: #f3e5e5;
+    color: #9d3d3d;
+}
+
+.status-warning {
+    background: #fff2d6;
+    color: #8a641b;
+}
+
+.btn-small {
+    padding: 7px 10px;
+    font-size: 0.78rem;
+    white-space: nowrap;
+}
+
+.empty-state {
+    padding: 28px;
+    border-radius: 9px;
+    background: #f7f7f7;
+    color: #666666;
+    text-align: center;
+}
+
+@media (max-width: 700px) {
+    .master-business-summary {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
+
+{% endblock %}

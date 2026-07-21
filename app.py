@@ -720,6 +720,1088 @@ def master_admin_required(f):
 
 
 
+#########################
+#
+#   MASTER ADMIN SMS COMPLIANCE CENTER
+#
+#
+###################################
+
+
+
+@app.route(
+    "/master-admin/businesses/<int:spa_id>/sms-compliance",
+    methods=["GET", "POST"]
+)
+@login_required
+@master_admin_required
+def master_admin_sms_compliance(spa_id):
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                spa_id,                              -- 0
+                spa_name,                            -- 1
+                subscription_status,                 -- 2
+
+                sms_agreement_status,                -- 3
+                sms_agreement_version,               -- 4
+                sms_agreement_accepted_by,           -- 5
+                sms_agreement_accepted_at,           -- 6
+                sms_agreement_revoked_at,            -- 7
+                sms_agreement_notes,                 -- 8
+
+                sms_10dlc_status,                    -- 9
+                sms_telnyx_campaign_id,              -- 10
+                sms_tcr_campaign_id,                 -- 11
+                sms_10dlc_use_case,                  -- 12
+                sms_number_assignment_status,        -- 13
+                sms_marketing_allowed,               -- 14
+                sms_10dlc_verified_at,               -- 15
+                sms_10dlc_verified_by,               -- 16
+
+                sms_service_suspended,               -- 17
+                sms_service_suspension_reason,       -- 18
+                sms_service_suspended_at,            -- 19
+                sms_service_suspended_by,            -- 20
+
+                sms_marketing_suspended,             -- 21
+                sms_marketing_suspension_reason,     -- 22
+                sms_marketing_suspended_at,          -- 23
+                sms_marketing_suspended_by           -- 24
+
+            FROM spas
+            WHERE spa_id = %s
+            """,
+            (spa_id,)
+        )
+
+        row = cur.fetchone()
+
+        if not row:
+            flash(
+                "Business not found.",
+                "error"
+            )
+
+            return redirect(
+                url_for("master_admin_businesses")
+            )
+
+
+        business = {
+            "spa_id": row[0],
+            "spa_name": row[1],
+            "subscription_status": row[2],
+
+            "sms_agreement_status": (
+                row[3] or "not_sent"
+            ),
+            "sms_agreement_version": row[4],
+            "sms_agreement_accepted_by": row[5],
+            "sms_agreement_accepted_at": row[6],
+            "sms_agreement_revoked_at": row[7],
+            "sms_agreement_notes": row[8],
+
+            "sms_10dlc_status": (
+                row[9] or "not_submitted"
+            ),
+            "sms_telnyx_campaign_id": row[10],
+            "sms_tcr_campaign_id": row[11],
+            "sms_10dlc_use_case": row[12],
+            "sms_number_assignment_status": (
+                row[13] or "not_assigned"
+            ),
+            "sms_marketing_allowed": bool(row[14]),
+            "sms_10dlc_verified_at": row[15],
+            "sms_10dlc_verified_by": row[16],
+
+            "sms_service_suspended": bool(row[17]),
+            "sms_service_suspension_reason": row[18],
+            "sms_service_suspended_at": row[19],
+            "sms_service_suspended_by": row[20],
+
+            "sms_marketing_suspended": bool(row[21]),
+            "sms_marketing_suspension_reason": row[22],
+            "sms_marketing_suspended_at": row[23],
+            "sms_marketing_suspended_by": row[24]
+        }
+
+
+        if request.method == "POST":
+
+
+            valid_agreement_statuses = {
+                "not_sent",
+                "pending",
+                "accepted",
+                "declined",
+                "revoked"
+            }
+
+            new_agreement_status = request.form.get(
+                "sms_agreement_status",
+                "not_sent"
+            ).strip().lower()
+
+            agreement_version = request.form.get(
+                "sms_agreement_version",
+                ""
+            ).strip() or None
+
+            agreement_notes = request.form.get(
+                "sms_agreement_notes",
+                ""
+            ).strip() or None
+
+
+
+
+            valid_10dlc_statuses = {
+                "not_submitted",
+                "pending",
+                "approved",
+                "rejected"
+            }
+
+            valid_assignment_statuses = {
+                "not_assigned",
+                "assigned"
+            }
+
+            new_10dlc_status = request.form.get(
+                "sms_10dlc_status",
+                "not_submitted"
+            ).strip().lower()
+
+            new_assignment_status = request.form.get(
+                "sms_number_assignment_status",
+                "not_assigned"
+            ).strip().lower()
+
+            telnyx_campaign_id = request.form.get(
+                "sms_telnyx_campaign_id",
+                ""
+            ).strip() or None
+
+            tcr_campaign_id = request.form.get(
+                "sms_tcr_campaign_id",
+                ""
+            ).strip() or None
+
+            use_case = request.form.get(
+                "sms_10dlc_use_case",
+                ""
+            ).strip() or None
+
+            marketing_allowed = (
+                request.form.get(
+                    "sms_marketing_allowed"
+                ) == "1"
+            )
+
+            service_suspended = (
+                request.form.get(
+                    "sms_service_suspended"
+                ) == "1"
+            )
+
+            service_suspension_reason = (
+                request.form.get(
+                    "sms_service_suspension_reason",
+                    ""
+                ).strip() or None
+            )
+
+            marketing_suspended = (
+                request.form.get(
+                    "sms_marketing_suspended"
+                ) == "1"
+            )
+
+            marketing_suspension_reason = (
+                request.form.get(
+                    "sms_marketing_suspension_reason",
+                    ""
+                ).strip() or None
+            )
+
+            change_reason = request.form.get(
+                "change_reason",
+                ""
+            ).strip() or None
+
+
+            if (
+                new_agreement_status
+                not in valid_agreement_statuses
+            ):
+                flash(
+                    "Invalid SMS agreement status.",
+                    "error"
+                )
+
+                return redirect(
+                    url_for(
+                        "master_admin_sms_compliance",
+                        spa_id=spa_id
+                    )
+                )
+
+
+            if (
+                new_agreement_status == "accepted"
+                and not agreement_version
+            ):
+                flash(
+                    (
+                        "The agreement version is required "
+                        "before the agreement can be accepted."
+                    ),
+                    "error"
+                )
+
+                return redirect(
+                    url_for(
+                        "master_admin_sms_compliance",
+                        spa_id=spa_id
+                    )
+                )
+
+
+            if new_10dlc_status not in valid_10dlc_statuses:
+                flash(
+                    "Invalid 10DLC status.",
+                    "error"
+                )
+
+                return redirect(
+                    url_for(
+                        "master_admin_sms_compliance",
+                        spa_id=spa_id
+                    )
+                )
+
+            if (
+                new_assignment_status
+                not in valid_assignment_statuses
+            ):
+                flash(
+                    "Invalid number assignment status.",
+                    "error"
+                )
+
+                return redirect(
+                    url_for(
+                        "master_admin_sms_compliance",
+                        spa_id=spa_id
+                    )
+                )
+
+            if new_10dlc_status == "approved":
+
+                if not telnyx_campaign_id:
+                    flash(
+                        (
+                            "A Telnyx Campaign ID is required "
+                            "before 10DLC can be approved."
+                        ),
+                        "error"
+                    )
+
+                    return redirect(
+                        url_for(
+                            "master_admin_sms_compliance",
+                            spa_id=spa_id
+                        )
+                    )
+
+                if not tcr_campaign_id:
+                    flash(
+                        (
+                            "A TCR Campaign ID is required "
+                            "before 10DLC can be approved."
+                        ),
+                        "error"
+                    )
+
+                    return redirect(
+                        url_for(
+                            "master_admin_sms_compliance",
+                            spa_id=spa_id
+                        )
+                    )
+
+            if (
+                service_suspended
+                and not service_suspension_reason
+            ):
+                flash(
+                    (
+                        "A reason is required when suspending "
+                        "service SMS."
+                    ),
+                    "error"
+                )
+
+                return redirect(
+                    url_for(
+                        "master_admin_sms_compliance",
+                        spa_id=spa_id
+                    )
+                )
+
+            if (
+                marketing_suspended
+                and not marketing_suspension_reason
+            ):
+                flash(
+                    (
+                        "A reason is required when suspending "
+                        "SMS marketing."
+                    ),
+                    "error"
+                )
+
+                return redirect(
+                    url_for(
+                        "master_admin_sms_compliance",
+                        spa_id=spa_id
+                    )
+                )
+
+            changed_by = session.get("user_id")
+            changed_at = datetime.now()
+
+            agreement_accepted_by = business[
+                "sms_agreement_accepted_by"
+            ]
+
+            agreement_accepted_at = business[
+                "sms_agreement_accepted_at"
+            ]
+
+            agreement_revoked_at = business[
+                "sms_agreement_revoked_at"
+            ]
+
+
+            if new_agreement_status == "accepted":
+
+                if business["sms_agreement_status"] != "accepted":
+                    agreement_accepted_by = changed_by
+                    agreement_accepted_at = changed_at
+
+                agreement_revoked_at = None
+
+
+            elif new_agreement_status == "revoked":
+
+                if business["sms_agreement_status"] != "revoked":
+                    agreement_revoked_at = changed_at
+
+
+            else:
+                agreement_accepted_by = None
+                agreement_accepted_at = None
+                agreement_revoked_at = None
+
+
+            approval_details_changed = any(
+                [
+                    business["sms_10dlc_status"]
+                    != new_10dlc_status,
+
+                    business["sms_telnyx_campaign_id"]
+                    != telnyx_campaign_id,
+
+                    business["sms_tcr_campaign_id"]
+                    != tcr_campaign_id,
+
+                    business["sms_10dlc_use_case"]
+                    != use_case,
+
+                    business[
+                        "sms_number_assignment_status"
+                    ]
+                    != new_assignment_status
+                ]
+            )
+
+            verified_at = business[
+                "sms_10dlc_verified_at"
+            ]
+
+            verified_by = business[
+                "sms_10dlc_verified_by"
+            ]
+
+            if new_10dlc_status == "approved":
+
+                if approval_details_changed:
+                    verified_at = changed_at
+                    verified_by = changed_by
+
+            else:
+                verified_at = None
+                verified_by = None
+
+            service_suspended_at = business[
+                "sms_service_suspended_at"
+            ]
+
+            service_suspended_by = business[
+                "sms_service_suspended_by"
+            ]
+
+            if service_suspended:
+
+                if not business["sms_service_suspended"]:
+                    service_suspended_at = changed_at
+                    service_suspended_by = changed_by
+
+            else:
+                service_suspension_reason = None
+                service_suspended_at = None
+                service_suspended_by = None
+
+            marketing_suspended_at = business[
+                "sms_marketing_suspended_at"
+            ]
+
+            marketing_suspended_by = business[
+                "sms_marketing_suspended_by"
+            ]
+
+            if marketing_suspended:
+
+                if not business[
+                    "sms_marketing_suspended"
+                ]:
+                    marketing_suspended_at = changed_at
+                    marketing_suspended_by = changed_by
+
+            else:
+                marketing_suspension_reason = None
+                marketing_suspended_at = None
+                marketing_suspended_by = None
+
+            cur.execute(
+                """
+                UPDATE spas
+                SET
+                    sms_agreement_status = %s,
+                    sms_agreement_version = %s,
+                    sms_agreement_accepted_by = %s,
+                    sms_agreement_accepted_at = %s,
+                    sms_agreement_revoked_at = %s,
+                    sms_agreement_notes = %s,
+                    sms_10dlc_status = %s,
+                    sms_telnyx_campaign_id = %s,
+                    sms_tcr_campaign_id = %s,
+                    sms_10dlc_use_case = %s,
+                    sms_number_assignment_status = %s,
+                    sms_marketing_allowed = %s,
+                    sms_10dlc_verified_at = %s,
+                    sms_10dlc_verified_by = %s,
+                    sms_service_suspended = %s,
+                    sms_service_suspension_reason = %s,
+                    sms_service_suspended_at = %s,
+                    sms_service_suspended_by = %s,
+                    sms_marketing_suspended = %s,
+                    sms_marketing_suspension_reason = %s,
+                    sms_marketing_suspended_at = %s,
+                    sms_marketing_suspended_by = %s
+                WHERE spa_id = %s
+                """,
+                (
+                    new_agreement_status,
+                    agreement_version,
+                    agreement_accepted_by,
+                    agreement_accepted_at,
+                    agreement_revoked_at,
+                    agreement_notes,
+                    new_10dlc_status,
+                    telnyx_campaign_id,
+                    tcr_campaign_id,
+                    use_case,
+                    new_assignment_status,
+                    marketing_allowed,
+                    verified_at,
+                    verified_by,
+                    service_suspended,
+                    service_suspension_reason,
+                    service_suspended_at,
+                    service_suspended_by,
+                    marketing_suspended,
+                    marketing_suspension_reason,
+                    marketing_suspended_at,
+                    marketing_suspended_by,
+                    spa_id
+                )
+            )
+
+            if (
+                business["sms_agreement_status"]
+                != new_agreement_status
+            ):
+                write_messaging_compliance_audit(
+                    cur=cur,
+                    spa_id=spa_id,
+                    channel="sms_agreement",
+                    action="agreement_status_changed",
+                    old_status=business[
+                        "sms_agreement_status"
+                    ],
+                    new_status=new_agreement_status,
+                    reason=(
+                        agreement_notes
+                        or change_reason
+                    ),
+                    changed_by=changed_by
+                )
+
+
+            if (
+                business["sms_agreement_version"]
+                != agreement_version
+            ):
+                write_messaging_compliance_audit(
+                    cur=cur,
+                    spa_id=spa_id,
+                    channel="sms_agreement",
+                    action="agreement_version_changed",
+                    old_status=business[
+                        "sms_agreement_version"
+                    ],
+                    new_status=agreement_version,
+                    reason=change_reason,
+                    changed_by=changed_by
+                )
+
+
+
+
+            if (
+                business["sms_10dlc_status"]
+                != new_10dlc_status
+            ):
+                write_messaging_compliance_audit(
+                    cur=cur,
+                    spa_id=spa_id,
+                    channel="sms_service",
+                    action="10dlc_status_changed",
+                    old_status=business[
+                        "sms_10dlc_status"
+                    ],
+                    new_status=new_10dlc_status,
+                    reason=change_reason,
+                    changed_by=changed_by
+                )
+
+            if (
+                business[
+                    "sms_number_assignment_status"
+                ]
+                != new_assignment_status
+            ):
+                write_messaging_compliance_audit(
+                    cur=cur,
+                    spa_id=spa_id,
+                    channel="sms_service",
+                    action="number_assignment_changed",
+                    old_status=business[
+                        "sms_number_assignment_status"
+                    ],
+                    new_status=new_assignment_status,
+                    reason=change_reason,
+                    changed_by=changed_by
+                )
+
+            if (
+                business["sms_marketing_allowed"]
+                != marketing_allowed
+            ):
+                write_messaging_compliance_audit(
+                    cur=cur,
+                    spa_id=spa_id,
+                    channel="sms_marketing",
+                    action="marketing_permission_changed",
+                    old_status=(
+                        "allowed"
+                        if business[
+                            "sms_marketing_allowed"
+                        ]
+                        else "not_allowed"
+                    ),
+                    new_status=(
+                        "allowed"
+                        if marketing_allowed
+                        else "not_allowed"
+                    ),
+                    reason=change_reason,
+                    changed_by=changed_by
+                )
+
+            if (
+                business["sms_service_suspended"]
+                != service_suspended
+            ):
+                write_messaging_compliance_audit(
+                    cur=cur,
+                    spa_id=spa_id,
+                    channel="sms_service",
+                    action="suspension_changed",
+                    old_status=(
+                        "suspended"
+                        if business[
+                            "sms_service_suspended"
+                        ]
+                        else "active"
+                    ),
+                    new_status=(
+                        "suspended"
+                        if service_suspended
+                        else "active"
+                    ),
+                    reason=(
+                        service_suspension_reason
+                        or change_reason
+                        or "Service SMS re-enabled."
+                    ),
+                    changed_by=changed_by
+                )
+
+            if (
+                business["sms_marketing_suspended"]
+                != marketing_suspended
+            ):
+                write_messaging_compliance_audit(
+                    cur=cur,
+                    spa_id=spa_id,
+                    channel="sms_marketing",
+                    action="suspension_changed",
+                    old_status=(
+                        "suspended"
+                        if business[
+                            "sms_marketing_suspended"
+                        ]
+                        else "active"
+                    ),
+                    new_status=(
+                        "suspended"
+                        if marketing_suspended
+                        else "active"
+                    ),
+                    reason=(
+                        marketing_suspension_reason
+                        or change_reason
+                        or "SMS marketing re-enabled."
+                    ),
+                    changed_by=changed_by
+                )
+
+            conn.commit()
+
+            flash(
+                (
+                    f"SMS compliance settings for "
+                    f"{business['spa_name']} were updated."
+                ),
+                "success"
+            )
+
+            return redirect(
+                url_for(
+                    "master_admin_sms_compliance",
+                    spa_id=spa_id
+                )
+            )
+
+        cur.execute(
+            """
+            SELECT
+                audit_id,
+                channel,
+                action,
+                old_status,
+                new_status,
+                reason,
+                changed_by,
+                changed_at
+            FROM messaging_compliance_audit
+            WHERE spa_id = %s
+            ORDER BY changed_at DESC
+            LIMIT 100
+            """,
+            (spa_id,)
+        )
+
+        audit_rows = cur.fetchall()
+
+        audit_history = [
+            {
+                "audit_id": audit[0],
+                "channel": audit[1],
+                "action": audit[2],
+                "old_status": audit[3],
+                "new_status": audit[4],
+                "reason": audit[5],
+                "changed_by": audit[6],
+                "changed_at": audit[7]
+            }
+            for audit in audit_rows
+        ]
+
+        sms_service_enabled = (
+            business["sms_agreement_status"] == "accepted"
+            and business["sms_10dlc_status"] == "approved"
+            and business[
+                "sms_number_assignment_status"
+            ] == "assigned"
+            and not business["sms_service_suspended"]
+        )
+
+        sms_marketing_enabled = (
+            sms_service_enabled
+            and business["sms_marketing_allowed"]
+            and not business[
+                "sms_marketing_suspended"
+            ]
+        )
+
+        return render_template(
+            "master_admin/businesses/sms_compliance.html",
+            business=business,
+            audit_history=audit_history,
+            sms_service_enabled=sms_service_enabled,
+            sms_marketing_enabled=sms_marketing_enabled
+        )
+
+    except Exception as error:
+        conn.rollback()
+
+        print(
+            "[MASTER ADMIN SMS COMPLIANCE ERROR]",
+            error,
+            flush=True
+        )
+
+        flash(
+            "SMS compliance settings could not be loaded.",
+            "error"
+        )
+
+        return redirect(
+            url_for("master_admin_home")
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
+
+#########################
+#
+#   MASTER ADMIN MESSAGING CONTROLER
+#
+#  GET SMS BUSINESS PERMISSIONS
+###################################
+
+
+def get_sms_business_permissions(spa_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                sms_agreement_status,
+                sms_10dlc_status,
+                sms_number_assignment_status,
+                sms_marketing_allowed,
+                sms_service_suspended,
+                sms_marketing_suspended
+            FROM spas
+            WHERE spa_id = %s
+            """,
+            (spa_id,)
+        )
+
+        row = cur.fetchone()
+
+        if not row:
+            return {
+                "service_sms_enabled": False,
+                "marketing_sms_enabled": False,
+                "reason": "Business SMS settings were not found."
+            }
+
+        agreement_status = row[0] or "not_sent"
+        ten_dlc_status = row[1] or "not_submitted"
+        assignment_status = row[2] or "not_assigned"
+        marketing_allowed = bool(row[3])
+        service_suspended = bool(row[4])
+        marketing_suspended = bool(row[5])
+
+        service_sms_enabled = (
+            agreement_status == "accepted"
+            and ten_dlc_status == "approved"
+            and assignment_status == "assigned"
+            and not service_suspended
+        )
+
+        marketing_sms_enabled = (
+            service_sms_enabled
+            and marketing_allowed
+            and not marketing_suspended
+        )
+
+        reason = None
+
+        if agreement_status != "accepted":
+            reason = (
+                "The Peach Suite Pro SMS Agreement "
+                "has not been accepted."
+            )
+
+        elif ten_dlc_status != "approved":
+            reason = (
+                "The business does not have approved "
+                "10DLC registration."
+            )
+
+        elif assignment_status != "assigned":
+            reason = (
+                "An approved SMS number has not been assigned."
+            )
+
+        elif service_suspended:
+            reason = (
+                "SMS service has been disabled by "
+                "Peach Suite Pro."
+            )
+
+        return {
+            "service_sms_enabled": service_sms_enabled,
+            "marketing_sms_enabled": marketing_sms_enabled,
+            "reason": reason
+        }
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
+
+
+
+
+
+#########################
+#
+#   MASTER ADMIN MESSAGING CONTROLER
+#
+#   MESSAGING COMPLIANCE AUDIT
+###################################
+
+
+
+def write_messaging_compliance_audit(
+    cur,
+    spa_id,
+    channel,
+    action,
+    old_status,
+    new_status,
+    reason,
+    changed_by
+):
+    cur.execute(
+        """
+        INSERT INTO messaging_compliance_audit (
+            spa_id,
+            channel,
+            action,
+            old_status,
+            new_status,
+            reason,
+            changed_by,
+            changed_at
+        )
+        VALUES (
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            CURRENT_TIMESTAMP
+        )
+        """,
+        (
+            spa_id,
+            channel,
+            action,
+            old_status,
+            new_status,
+            reason,
+            changed_by
+        )
+    )
+
+
+
+
+
+
+
+#########################
+#
+#   MASTER ADMIN BUSINESS LIST
+#
+#   
+###################################
+
+
+
+@app.route("/master-admin/businesses")
+@login_required
+@master_admin_required
+def master_admin_businesses():
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                spa_id,                              -- 0
+                spa_name,                            -- 1
+                registration_number,                 -- 2
+                subscription_status,                 -- 3
+                active,                              -- 4
+                sms_agreement_status,                 -- 5    
+                sms_10dlc_status,                    -- 6
+                sms_number_assignment_status,        -- 7
+                sms_marketing_allowed,               -- 8
+                sms_service_suspended,               -- 9
+                sms_marketing_suspended              -- 10
+            FROM spas
+            ORDER BY
+                spa_name
+            """
+        )
+
+        rows = cur.fetchall()
+
+        businesses = []
+
+        for row in rows:
+
+            agreement_status = (
+                row[5] or "not_sent"
+            )
+
+            ten_dlc_status = (
+                row[6] or "not_submitted"
+            )
+
+            assignment_status = (
+                row[7] or "not_assigned"
+            )
+
+            sms_service_enabled = (
+                agreement_status == "accepted"
+                and ten_dlc_status == "approved"
+                and assignment_status == "assigned"
+                and not bool(row[9])
+            )
+
+            sms_marketing_enabled = (
+                sms_service_enabled
+                and bool(row[8])
+                and not bool(row[10])
+            )
+
+            businesses.append(
+                {
+                    "spa_id": row[0],
+                    "spa_name": row[1],
+                    "registration_number": row[2],
+                    "subscription_status": row[3],
+                    "active": bool(row[4]),
+
+                    "sms_agreement_status": agreement_status,
+                    "sms_10dlc_status": ten_dlc_status,
+                    "sms_number_assignment_status": (
+                        assignment_status
+                    ),
+
+                    "sms_marketing_allowed": bool(row[8]),
+                    "sms_service_suspended": bool(row[9]),
+                    "sms_marketing_suspended": bool(row[10]),
+
+                    "sms_service_enabled": (
+                        sms_service_enabled
+                    ),
+                    "sms_marketing_enabled": (
+                        sms_marketing_enabled
+                    )
+                }
+            )
+
+        return render_template(
+            "master_admin/businesses/businesses.html",
+            businesses=businesses
+        )
+
+    except Exception as error:
+
+        print(
+            "[MASTER ADMIN BUSINESS LIST ERROR]",
+            error,
+            flush=True
+        )
+
+        flash(
+            "The business directory could not be loaded.",
+            "error"
+        )
+
+        return redirect(
+            url_for("master_admin_home")
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ##################################
 #
 #   THOUSANDS SEPARATER
@@ -1039,9 +2121,39 @@ def log_booking_import(
 
 
 
+####################################
+#
+#   CHECK FOR MARKETING KEYWORDS
+#
+######################################
+
+import re
 
 
+def sms_contains_marketing_content(message_body):
+    text = (message_body or "").lower()
 
+    marketing_patterns = [
+        r"\bfree gift\b",
+        r"\bfree product\b",
+        r"\bdiscount\b",
+        r"\bcoupon\b",
+        r"\bpromo(?:tion)?\b",
+        r"\bspecial offer\b",
+        r"\blimited[- ]time\b",
+        r"\bsave \$?\d+",
+        r"\b\d+%\s*off\b",
+        r"\bbuy one\b",
+        r"\bbook (?:now|today)\b",
+        r"\bcomplimentary\b",
+        r"\bdeal\b",
+        r"\bsale\b"
+    ]
+
+    return any(
+        re.search(pattern, text)
+        for pattern in marketing_patterns
+    )
 
 
 
@@ -2488,7 +3600,7 @@ def send_birthday_reminder_sms(reminder_id, spa_id):
         template_type="birthday_message",
         merge_data=merge_data,
         client_id=client_id,
-        message_type="birthday_message"
+        message_type="marketing"
     )
 
     success = result.get("success", False)
@@ -3146,17 +4258,104 @@ def merge_template_preview(message_text, merge_data):
 #
 # Do NOT call send_sms_message() directly from routes.
 # ==========================================================
+#
+#   REWORKED ON JULY 21, 2026
+#
+################################################
+
+
+
+def send_compliant_sms(
+    spa_id,
+    client_id,
+    recipient_phone,
+    message_body,
+    message_type="manual"
+):
+    if not spa_id:
+        raise ValueError(
+            "send_compliant_sms requires spa_id."
+        )
+
+    sms_permissions = get_sms_business_permissions(
+        spa_id
+    )
+
+    print(
+        "[SMS COMPLIANCE CHECK]",
+        {
+            "spa_id": spa_id,
+            "message_type": message_type,
+            "service_enabled": sms_permissions.get(
+                "service_sms_enabled"
+            ),
+            "marketing_enabled": sms_permissions.get(
+                "marketing_sms_enabled"
+            ),
+            "reason": sms_permissions.get("reason")
+        },
+        flush=True
+    )
+
+    normalized_message_type = (
+        message_type or "manual"
+    ).strip().lower()
+
+    
 
 
 
 
+    normalized_message_type = (
+        message_type or "manual"
+    ).strip().lower()
 
-def send_compliant_sms(spa_id, client_id, recipient_phone, message_body, message_type="manual"):
-    """
-    Central SMS sending pipeline:
-    1. Send already-built compliant SMS body
-    2. Return provider result with final message body
-    """
+    marketing_message_types = {
+        "marketing",
+        "promotion",
+        "promotional",
+        "campaign",
+        "mass_marketing"
+    }
+
+    explicitly_marketing = (
+        normalized_message_type
+        in marketing_message_types
+    )
+
+    marketing_content_detected = (
+        sms_contains_marketing_content(
+            message_body
+        )
+    )
+
+    is_marketing_message = (
+        explicitly_marketing
+        or marketing_content_detected
+    )
+
+    if is_marketing_message:
+
+        if not sms_permissions[
+            "marketing_sms_enabled"
+        ]:
+            raise PermissionError(
+                (
+                "This message contains promotional "
+                "content, but SMS marketing is not "
+                "approved for this business."
+                )
+            )
+
+    else:
+
+        if not sms_permissions[
+            "service_sms_enabled"
+        ]:
+            raise PermissionError(
+                sms_permissions["reason"]
+                or "SMS service is currently unavailable."
+            )
 
     final_message = message_body
 
@@ -3165,12 +4364,20 @@ def send_compliant_sms(spa_id, client_id, recipient_phone, message_body, message
         final_message
     )
 
+    if not isinstance(result, dict):
+        result = {
+            "provider_result": result
+        }
+
+    result["spa_id"] = spa_id
     result["client_id"] = client_id
-    result["message_type"] = message_type
+    result["message_type"] = normalized_message_type
     result["final_message_body"] = final_message
+    result["is_marketing_message"] = (
+        is_marketing_message
+    )
 
     return result
-
 
 
 
@@ -10043,10 +11250,18 @@ def get_sms_template(spa_id, template_type):
 # ==========================================================
 
 
-
 def send_sms_message(to_phone, message_body):
+    """
+    Low-level SMS delivery function.
 
-    sms_enabled = os.getenv("SMS_ENABLED", "false").lower() == "true"
+    Business compliance must be verified by
+    send_compliant_sms() before this function is called.
+    """
+
+    sms_enabled = (
+        os.getenv("SMS_ENABLED", "false").lower()
+        == "true"
+    )
 
     final_message_body = message_body
 
@@ -10057,37 +11272,67 @@ def send_sms_message(to_phone, message_body):
             "provider_message_id": None,
             "provider_status": None,
             "provider_error_code": None,
-            "provider_error_message": "SMS sending disabled",
+            "provider_error_message": (
+                "SMS sending is disabled by the "
+                "Peach Suite Pro system switch."
+            ),
             "final_message_body": final_message_body
         }
 
     try:
-        
-        print("FINAL SMS BODY BEING SENT:", final_message_body, flush=True)
-        result = send_sms_telnyx(to_phone, final_message_body)
+        print(
+            "FINAL SMS BODY BEING SENT:",
+            final_message_body,
+            flush=True
+        )
 
-        print("TELNYX RESULT:", result, flush=True)
+        result = send_sms_telnyx(
+            to_phone,
+            final_message_body
+        )
 
-        message_data = result.get("data", result)
+        print(
+            "TELNYX RESULT:",
+            result,
+            flush=True
+        )
+
+        message_data = result.get(
+            "data",
+            result
+        )
 
         return {
             "success": True,
             "status": "sent",
-            "provider_message_id": message_data.get("id"),
-            "provider_status": message_data.get("record_type", "accepted"),
+            "provider_message_id": (
+                message_data.get("id")
+            ),
+            "provider_status": (
+                message_data.get(
+                    "record_type",
+                    "accepted"
+                )
+            ),
             "provider_error_code": None,
             "provider_error_message": None,
             "final_message_body": final_message_body
         }
 
-    except Exception as e:
+    except Exception as error:
+        print(
+            "[SMS DELIVERY ERROR]",
+            error,
+            flush=True
+        )
+
         return {
             "success": False,
             "status": "failed",
             "provider_message_id": None,
             "provider_status": None,
             "provider_error_code": None,
-            "provider_error_message": str(e),
+            "provider_error_message": str(error),
             "final_message_body": final_message_body
         }
 
@@ -12319,8 +13564,6 @@ def sms_group_send():
             )
 
 
-            print("SMS SEND RESULT:", result, flush=True)
-
             if result.get("success"):
                 sent_count += 1
             else:
@@ -12329,9 +13572,46 @@ def sms_group_send():
         flash(f"SMS sent: {sent_count}. Failed: {failed_count}.", "success")
         return redirect(url_for("sms_history_all"))
 
+    except PermissionError as error:
+        print(
+            "SMS GROUP SEND BLOCKED:",
+            error,
+            flush=True
+        )
+
+        flash(
+            (
+                "No SMS messages were sent. "
+                f"{error}"
+            ),
+            "warning"
+        )
+
+        return redirect(
+            request.referrer or "/sms"
+        )
+
+
     except Exception as error:
-        print("SMS GROUP SEND ERROR:", error, flush=True)
-        flash("Something went wrong while sending SMS messages.", "danger")
+        print(
+            "SMS GROUP SEND ERROR:",
+            error,
+            flush=True
+        )
+
+        flash(
+            (
+                "SMS messages could not be sent because "
+                "of an unexpected error."
+            ),
+            "error"
+        )
+
+        return redirect(
+            request.referrer or "/sms"
+        )
+
+
         return redirect(url_for(
             "sms_home",
             template_type=template_type,
@@ -12569,8 +13849,10 @@ def refresh_all_sms_statuses():
 #       
 #   -----------------------------------------------
 
-
-@app.route("/sms/resend/<int:sms_log_id>", methods=["POST"])
+@app.route(
+    "/sms/resend/<int:sms_log_id>",
+    methods=["POST"]
+)
 @login_required
 @spa_required
 def resend_sms(sms_log_id):
@@ -12578,15 +13860,22 @@ def resend_sms(sms_log_id):
 
     if not sms_email_terms_accepted(spa_id):
         flash(
-            "You must accept the SMS and Email Terms and Conditions before using messaging features.",
+            (
+                "You must accept the SMS and Email Terms "
+                "and Conditions before using messaging features."
+            ),
             "warning"
         )
-        return redirect(url_for("sms_email_terms"))
+
+        return redirect(
+            url_for("sms_email_terms")
+        )
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute("""
+    cur.execute(
+        """
         SELECT
             sms_log_id,
             client_id,
@@ -12596,53 +13885,128 @@ def resend_sms(sms_log_id):
         FROM sms_log
         WHERE sms_log_id = %s
           AND spa_id = %s
-    """, (sms_log_id, spa_id))
+        """,
+        (
+            sms_log_id,
+            spa_id
+        )
+    )
 
     old_sms = cur.fetchone()
 
     if not old_sms:
         cur.close()
         conn.close()
-        flash("SMS log not found.", "error")
-        return redirect(url_for("sms_history_all"))
 
-    old_sms_log_id, client_id, phone_number, message_body, sms_type = old_sms
+        flash(
+            "SMS log not found.",
+            "error"
+        )
 
-    # Verify client still allows SMS
-    cur.execute("""
-        SELECT sms_opt_in, sms_opt_out
+        return redirect(
+            url_for("sms_history_all")
+        )
+
+    (
+        old_sms_log_id,
+        client_id,
+        phone_number,
+        message_body,
+        sms_type
+    ) = old_sms
+
+    # -----------------------------------------
+    # Verify the client still permits SMS
+    # -----------------------------------------
+
+    cur.execute(
+        """
+        SELECT
+            sms_opt_in,
+            sms_opt_out
         FROM clients
         WHERE client_id = %s
           AND spa_id = %s
           AND active_client = TRUE
-    """, (client_id, spa_id))
+        """,
+        (
+            client_id,
+            spa_id
+        )
+    )
 
     client = cur.fetchone()
 
     if not client:
         cur.close()
         conn.close()
-        flash("Client not found or inactive.", "error")
-        return redirect(url_for("sms_history_all"))
 
-    ok_to_text, sms_opt_in, sms_opt_out = client
+        flash(
+            "Client not found or inactive.",
+            "error"
+        )
 
-    if not ok_to_text or not sms_opt_in or sms_opt_out:
+        return redirect(
+            url_for("sms_history_all")
+        )
+
+    sms_opt_in, sms_opt_out = client
+
+
+    if not sms_opt_in or sms_opt_out:
         cur.close()
         conn.close()
-        flash("SMS not resent. Client is not opted in for SMS.", "error")
-        return redirect(url_for("sms_history", client_id=client_id))
+
+        flash(
+            (
+                "SMS not resent. The client is not "
+                "opted in for SMS."
+            ),
+            "error"
+        )
+
+        return redirect(
+            url_for(
+                "sms_history",
+                client_id=client_id
+            )
+        )
+
+    # -----------------------------------------
+    # Preserve original compliance classification
+    # -----------------------------------------
+
+    original_message_type = (
+        sms_type or "manual"
+    ).strip().lower()
+
+    while original_message_type.endswith("_resend"):
+        original_message_type = (
+            original_message_type[:-7]
+        )
+
+    resend_log_type = (
+        f"{original_message_type}_resend"
+    )
 
     try:
-        result = send_communication(
+        result = send_compliant_sms(
             spa_id=spa_id,
-            channel="sms",
             client_id=client_id,
-            recipient=phone_number,
+            recipient_phone=phone_number,
             message_body=message_body,
-            message_type=f"{sms_type or 'manual'}_resend"
+            message_type=original_message_type
         )
-        cur.execute("""
+
+        if not result.get("success"):
+            raise RuntimeError(
+                result.get("provider_error_message")
+                or result.get("error")
+                or "The SMS provider did not send the message."
+            )
+
+        cur.execute(
+            """
             INSERT INTO sms_log (
                 spa_id,
                 client_id,
@@ -12653,29 +14017,60 @@ def resend_sms(sms_log_id):
                 provider_message_id,
                 created_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
-        """, (
-            spa_id,
-            client_id,
-            phone_number,
-            result.get("final_message_body"),
-            f"{sms_type or 'manual'}_resend",
-            result.get("status"),
-            result.get("provider_message_id")
-        ))
+            VALUES (
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                NOW()
+            )
+            """,
+            (
+                spa_id,
+                client_id,
+                phone_number,
+                result.get(
+                    "final_message_body",
+                    message_body
+                ),
+                resend_log_type,
+                result.get("status"),
+                result.get("provider_message_id")
+            )
+        )
 
         conn.commit()
-        flash("SMS resent successfully.", "success")
 
-    except Exception as e:
+        flash(
+            "SMS resent successfully.",
+            "success"
+        )
+
+    except Exception as error:
         conn.rollback()
-        flash(f"SMS resend failed: {e}", "error")
+
+        flash(
+            f"SMS resend failed: {error}",
+            "error"
+        )
 
     finally:
         cur.close()
         conn.close()
 
-    return redirect(url_for("sms_history", client_id=client_id))
+    return redirect(
+        url_for(
+            "sms_history",
+            client_id=client_id
+        )
+    )
+
+
+
+
 
 
 

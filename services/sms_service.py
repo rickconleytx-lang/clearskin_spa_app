@@ -19,7 +19,12 @@ def format_us_phone(phone):
 
 
 
-
+################################################
+#
+#   SEND SMS TELNYX
+#
+#
+######################################################
 
 def send_sms_telnyx(to_phone, message_body):
     api_key = os.getenv("TELNYX_API_KEY")
@@ -44,35 +49,99 @@ def send_sms_telnyx(to_phone, message_body):
         "Content-Type": "application/json"
     }
 
+    print("TELNYX PAYLOAD:", payload)
 
-    print("TELNYX PAYLOAD:", payload)    
-
-    response = requests.post(url, json=payload, headers=headers, timeout=15)
+    response = requests.post(
+        url,
+        json=payload,
+        headers=headers,
+        timeout=15
+    )
 
     try:
         data = response.json()
     except Exception:
-        data = {"raw_response": response.text}
+        data = {
+            "raw_response": response.text
+        }
 
     if response.status_code not in (200, 201, 202):
-        raise Exception(f"Telnyx SMS failed: {data}")
+        raise Exception(
+            f"Telnyx SMS failed: {data}"
+        )
 
     return data
 
 
-
-
 ######################################
 #   SEND SMS TO PHONE
-#####################################
+######################################
 
 
+def send_sms(
+    to_phone,
+    message_body,
+    spa_id=None,
+    client_id=None,
+    message_type="service"
+):
+    if not spa_id:
+        raise ValueError(
+            "send_sms requires spa_id for SMS compliance verification."
+        )
 
+    sms_permissions = get_sms_business_permissions(
+        spa_id
+    )
 
-def send_sms(to_phone, message_body, spa_id=None, client_id=None, message_type="manual"):
-    provider = os.getenv("SMS_PROVIDER", "telnyx").lower()
+    marketing_message_types = {
+        "marketing",
+        "promotion",
+        "promotional",
+        "campaign",
+        "mass_marketing"
+    }
+
+    normalized_message_type = (
+        message_type or "service"
+    ).strip().lower()
+
+    is_marketing_message = (
+        normalized_message_type
+        in marketing_message_types
+    )
+
+    if is_marketing_message:
+        if not sms_permissions[
+            "marketing_sms_enabled"
+        ]:
+            raise PermissionError(
+                (
+                    "SMS marketing is not approved "
+                    "for this business."
+                )
+            )
+
+    else:
+        if not sms_permissions[
+            "service_sms_enabled"
+        ]:
+            raise PermissionError(
+                sms_permissions["reason"]
+                or "SMS service is currently unavailable."
+            )
+
+    provider = os.getenv(
+        "SMS_PROVIDER",
+        "telnyx"
+    ).lower()
 
     if provider == "telnyx":
-        return send_sms_telnyx(to_phone, message_body)
+        return send_sms_telnyx(
+            to_phone,
+            message_body
+        )
 
-    raise ValueError(f"Unsupported SMS_PROVIDER: {provider}")
+    raise ValueError(
+        f"Unsupported SMS_PROVIDER: {provider}"
+    )

@@ -1,0 +1,814 @@
+{% extends "base.html" %}
+
+{% block title %}
+SMS Compliance | Peach Suite Pro
+{% endblock %}
+
+{% block content %}
+
+<div class="page-title">
+    <h1>SMS Compliance</h1>
+</div>
+
+<div class="page-tool-pills">
+    <a
+        href="{{ url_for('master_admin_home') }}"
+        class="tool-pill tool-pill-small"
+    >
+        Master Admin
+    </a>
+</div>
+
+<br>
+
+<div class="sms-compliance-heading">
+    <div>
+        <h2>{{ business.spa_name }}</h2>
+
+        <p>
+            Master Administrator controls for SMS service,
+            10DLC approval, number assignment, marketing
+            permission, and platform suspensions.
+        </p>
+    </div>
+</div>
+
+
+<div class="sms-status-grid">
+
+    <div class="sms-status-card">
+
+        <span>SMS Agreement</span>
+
+        {% if business.sms_agreement_status == "accepted" %}
+
+            <strong class="status-enabled">
+                Accepted
+            </strong>
+
+        {% else %}
+
+            <strong class="status-disabled">
+                {{
+                    business.sms_agreement_status
+                    |replace("_", " ")
+                    |title
+                }}
+            </strong>
+
+        {% endif %}
+
+    </div>
+
+
+    <div class="sms-status-card">
+        <span>Service SMS</span>
+
+        {% if sms_service_enabled %}
+            <strong class="status-enabled">
+                Enabled
+            </strong>
+        {% else %}
+            <strong class="status-disabled">
+                Disabled
+            </strong>
+        {% endif %}
+    </div>
+
+    <div class="sms-status-card">
+        <span>SMS Marketing</span>
+
+        {% if sms_marketing_enabled %}
+            <strong class="status-enabled">
+                Enabled
+            </strong>
+        {% else %}
+            <strong class="status-disabled">
+                Disabled
+            </strong>
+        {% endif %}
+    </div>
+
+    <div class="sms-status-card">
+        <span>10DLC Status</span>
+
+        <strong>
+            {{
+                business.sms_10dlc_status
+                |replace("_", " ")
+                |title
+            }}
+        </strong>
+    </div>
+
+    <div class="sms-status-card">
+        <span>Number Assignment</span>
+
+        <strong>
+            {{
+                business.sms_number_assignment_status
+                |replace("_", " ")
+                |title
+            }}
+        </strong>
+    </div>
+
+</div>
+
+
+<form method="POST" class="sms-compliance-form">
+
+    <div class="command-card">
+
+    <h3>Peach Suite Pro SMS Agreement</h3>
+
+    <p class="field-help">
+        The business must accept the Peach Suite Pro SMS
+        Agreement before SMS service can be enabled.
+    </p>
+
+
+    <div class="form-grid">
+
+        <div class="form-group">
+
+            <label for="sms_agreement_status">
+                Agreement Status
+            </label>
+
+            <select
+                id="sms_agreement_status"
+                name="sms_agreement_status"
+                required
+            >
+
+                <option
+                    value="not_sent"
+                    {% if business.sms_agreement_status == "not_sent" %}
+                        selected
+                    {% endif %}
+                >
+                    Not Sent
+                </option>
+
+                <option
+                    value="pending"
+                    {% if business.sms_agreement_status == "pending" %}
+                        selected
+                    {% endif %}
+                >
+                    Pending Acceptance
+                </option>
+
+                <option
+                    value="accepted"
+                    {% if business.sms_agreement_status == "accepted" %}
+                        selected
+                    {% endif %}
+                >
+                    Accepted
+                </option>
+
+                <option
+                    value="declined"
+                    {% if business.sms_agreement_status == "declined" %}
+                        selected
+                    {% endif %}
+                >
+                    Declined
+                </option>
+
+                <option
+                    value="revoked"
+                    {% if business.sms_agreement_status == "revoked" %}
+                        selected
+                    {% endif %}
+                >
+                    Revoked
+                </option>
+
+            </select>
+
+        </div>
+
+
+        <div class="form-group">
+
+            <label for="sms_agreement_version">
+                Agreement Version
+            </label>
+
+            <input
+                type="text"
+                id="sms_agreement_version"
+                name="sms_agreement_version"
+                value="{{
+                    business.sms_agreement_version
+                    or ''
+                }}"
+                placeholder="Example: 1.0"
+            >
+
+        </div>
+
+    </div>
+
+
+    <div class="form-group agreement-notes-field">
+
+        <label for="sms_agreement_notes">
+            Agreement Notes
+        </label>
+
+        <textarea
+            id="sms_agreement_notes"
+            name="sms_agreement_notes"
+            rows="3"
+            placeholder="Acceptance method, signer information, or administrative notes..."
+        >{{ business.sms_agreement_notes or '' }}</textarea>
+
+    </div>
+
+
+    {% if business.sms_agreement_accepted_at %}
+
+        <div class="agreement-status-note agreement-accepted">
+
+            Accepted:
+            {{ business.sms_agreement_accepted_at }}
+
+            {% if business.sms_agreement_accepted_by %}
+                · Recorded by User
+                #{{ business.sms_agreement_accepted_by }}
+            {% endif %}
+
+        </div>
+
+    {% endif %}
+
+
+    {% if business.sms_agreement_revoked_at %}
+
+        <div class="agreement-status-note agreement-revoked">
+
+            Revoked:
+            {{ business.sms_agreement_revoked_at }}
+
+        </div>
+
+    {% endif %}
+
+</div>
+
+
+
+    <div class="command-card">
+
+        <h3>Carrier Registration</h3>
+
+        <div class="form-grid">
+
+            <div class="form-group">
+                <label for="sms_10dlc_status">
+                    10DLC Status
+                </label>
+
+                <select
+                    id="sms_10dlc_status"
+                    name="sms_10dlc_status"
+                    required
+                >
+                    <option
+                        value="not_submitted"
+                        {% if business.sms_10dlc_status == "not_submitted" %}
+                            selected
+                        {% endif %}
+                    >
+                        Not Submitted
+                    </option>
+
+                    <option
+                        value="pending"
+                        {% if business.sms_10dlc_status == "pending" %}
+                            selected
+                        {% endif %}
+                    >
+                        Pending
+                    </option>
+
+                    <option
+                        value="approved"
+                        {% if business.sms_10dlc_status == "approved" %}
+                            selected
+                        {% endif %}
+                    >
+                        Approved
+                    </option>
+
+                    <option
+                        value="rejected"
+                        {% if business.sms_10dlc_status == "rejected" %}
+                            selected
+                        {% endif %}
+                    >
+                        Rejected
+                    </option>
+                </select>
+            </div>
+
+
+            <div class="form-group">
+                <label for="sms_number_assignment_status">
+                    Number Assignment
+                </label>
+
+                <select
+                    id="sms_number_assignment_status"
+                    name="sms_number_assignment_status"
+                    required
+                >
+                    <option
+                        value="not_assigned"
+                        {% if business.sms_number_assignment_status == "not_assigned" %}
+                            selected
+                        {% endif %}
+                    >
+                        Not Assigned
+                    </option>
+
+                    <option
+                        value="assigned"
+                        {% if business.sms_number_assignment_status == "assigned" %}
+                            selected
+                        {% endif %}
+                    >
+                        Assigned
+                    </option>
+                </select>
+            </div>
+
+
+            <div class="form-group campaign-id-field campaign-id-wide">
+                <label for="sms_telnyx_campaign_id">
+                    Telnyx Campaign ID
+                </label>
+
+                <input
+                    type="text"
+                    id="sms_telnyx_campaign_id"
+                    name="sms_telnyx_campaign_id"
+                    value="{{
+                        business.sms_telnyx_campaign_id
+                        or ''
+                    }}"
+                    autocomplete="off"
+                >
+            </div>
+
+
+            <div class="form-group campaign-id-field">
+                <label for="sms_tcr_campaign_id">
+                    TCR Campaign ID
+                </label>
+
+                <input
+                    type="text"
+                    id="sms_tcr_campaign_id"
+                    name="sms_tcr_campaign_id"
+                    value="{{
+                        business.sms_tcr_campaign_id
+                        or ''
+                    }}"
+                    size="20"
+                    autocomplete="off"
+                >
+            </div>
+
+
+            <div class="form-group">
+                <label for="sms_10dlc_use_case">
+                    Approved Use Case
+                </label>
+
+                <input
+                    type="text"
+                    id="sms_10dlc_use_case"
+                    name="sms_10dlc_use_case"
+                    value="{{
+                        business.sms_10dlc_use_case
+                        or ''
+                    }}"
+                    placeholder="Low Volume Mixed"
+                >
+            </div>
+
+        </div>
+
+        {% if business.sms_10dlc_verified_at %}
+            <div class="verification-note">
+                Verified:
+                {{ business.sms_10dlc_verified_at }}
+
+                {% if business.sms_10dlc_verified_by %}
+                    by User
+                    #{{ business.sms_10dlc_verified_by }}
+                {% endif %}
+            </div>
+        {% endif %}
+
+    </div>
+
+
+    <div class="command-card">
+
+        <h3>Marketing Permission</h3>
+
+        <label class="switch-row">
+
+            <input
+                type="checkbox"
+                name="sms_marketing_allowed"
+                value="1"
+                {% if business.sms_marketing_allowed %}
+                    checked
+                {% endif %}
+            >
+
+            <span>
+                The approved carrier use case allows
+                SMS marketing.
+            </span>
+
+        </label>
+
+        <p class="field-help">
+            Client marketing consent is still required.
+            This setting only confirms that the business’s
+            carrier registration allows marketing messages.
+        </p>
+
+    </div>
+
+
+    <div class="command-card">
+
+        <h3>Platform Suspensions</h3>
+
+        <div class="suspension-grid">
+
+            <div class="suspension-panel">
+
+                <label class="switch-row">
+
+                    <input
+                        type="checkbox"
+                        name="sms_service_suspended"
+                        value="1"
+                        {% if business.sms_service_suspended %}
+                            checked
+                        {% endif %}
+                    >
+
+                    <span>
+                        Suspend all service SMS
+                    </span>
+
+                </label>
+
+                <label for="sms_service_suspension_reason">
+                    Service Suspension Reason
+                </label>
+
+                <textarea
+                    id="sms_service_suspension_reason"
+                    name="sms_service_suspension_reason"
+                    rows="3"
+                >{{ business.sms_service_suspension_reason or '' }}</textarea>
+
+            </div>
+
+
+            <div class="suspension-panel">
+
+                <label class="switch-row">
+
+                    <input
+                        type="checkbox"
+                        name="sms_marketing_suspended"
+                        value="1"
+                        {% if business.sms_marketing_suspended %}
+                            checked
+                        {% endif %}
+                    >
+
+                    <span>
+                        Suspend SMS marketing only
+                    </span>
+
+                </label>
+
+                <label for="sms_marketing_suspension_reason">
+                    Marketing Suspension Reason
+                </label>
+
+                <textarea
+                    id="sms_marketing_suspension_reason"
+                    name="sms_marketing_suspension_reason"
+                    rows="3"
+                >{{ business.sms_marketing_suspension_reason or '' }}</textarea>
+
+            </div>
+
+        </div>
+
+    </div>
+
+
+    <div class="command-card">
+
+        <h3>Administrative Note</h3>
+
+        <div class="form-group">
+            <label for="change_reason">
+                Reason for Change
+            </label>
+
+            <textarea
+                id="change_reason"
+                name="change_reason"
+                rows="3"
+                placeholder="Telnyx approval confirmed, campaign updated, service restored..."
+            ></textarea>
+        </div>
+
+    </div>
+
+
+    <div class="form-actions">
+        <button type="submit" class="btn">
+            Save SMS Compliance Settings
+        </button>
+    </div>
+
+</form>
+
+
+<div class="command-card audit-card">
+
+    <h3>Compliance Audit History</h3>
+
+    {% if audit_history %}
+
+        <div class="table-responsive">
+
+            <table>
+
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Channel</th>
+                        <th>Action</th>
+                        <th>Previous</th>
+                        <th>New</th>
+                        <th>Reason</th>
+                        <th>User</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+
+                    {% for audit in audit_history %}
+
+                        <tr>
+                            <td>
+                                {{ audit.changed_at }}
+                            </td>
+
+                            <td>
+                                {{
+                                    audit.channel
+                                    |replace("_", " ")
+                                    |title
+                                }}
+                            </td>
+
+                            <td>
+                                {{
+                                    audit.action
+                                    |replace("_", " ")
+                                    |title
+                                }}
+                            </td>
+
+                            <td>
+                                {{
+                                    audit.old_status
+                                    or "—"
+                                }}
+                            </td>
+
+                            <td>
+                                {{
+                                    audit.new_status
+                                    or "—"
+                                }}
+                            </td>
+
+                            <td>
+                                {{
+                                    audit.reason
+                                    or "—"
+                                }}
+                            </td>
+
+                            <td>
+                                {% if audit.changed_by %}
+                                    #{{ audit.changed_by }}
+                                {% else %}
+                                    System
+                                {% endif %}
+                            </td>
+                        </tr>
+
+                    {% endfor %}
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+    {% else %}
+
+        <p>
+            No SMS compliance changes have been recorded.
+        </p>
+
+    {% endif %}
+
+</div>
+
+
+<style>
+.sms-compliance-heading {
+    margin-bottom: 20px;
+}
+
+.sms-compliance-heading h2 {
+    margin-bottom: 5px;
+}
+
+.sms-compliance-heading p {
+    margin: 0;
+    color: #666666;
+}
+
+.sms-status-grid {
+    display: grid;
+    grid-template-columns: repeat(
+        4,
+        minmax(0, 1fr)
+    );
+    gap: 14px;
+    margin-bottom: 20px;
+}
+
+.sms-status-card {
+    padding: 16px;
+    border: 1px solid #dddddd;
+    border-radius: 10px;
+    background: #ffffff;
+}
+
+.sms-status-card span {
+    display: block;
+    margin-bottom: 6px;
+    color: #666666;
+    font-size: 0.84rem;
+}
+
+.sms-status-card strong {
+    font-size: 1.05rem;
+}
+
+.status-enabled {
+    color: #24824a;
+}
+
+.status-disabled {
+    color: #b13d3d;
+}
+
+.sms-compliance-form {
+    display: grid;
+    gap: 18px;
+}
+
+.command-card {
+    padding: 20px;
+    border: 1px solid #dddddd;
+    border-radius: 12px;
+    background: #ffffff;
+}
+
+.command-card h3 {
+    margin-top: 0;
+}
+
+.form-grid {
+    display: grid;
+    grid-template-columns: repeat(
+        2,
+        minmax(0, 1fr)
+    );
+    gap: 16px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 6px;
+    font-weight: 700;
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+    width: 100%;
+}
+
+.switch-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+}
+
+.switch-row input {
+    width: auto;
+}
+
+.field-help,
+.verification-note {
+    margin-top: 10px;
+    color: #666666;
+    font-size: 0.88rem;
+}
+
+.suspension-grid {
+    display: grid;
+    grid-template-columns: repeat(
+        2,
+        minmax(0, 1fr)
+    );
+    gap: 18px;
+}
+
+.suspension-panel {
+    padding: 15px;
+    border: 1px solid #e1e1e1;
+    border-radius: 9px;
+    background: #fafafa;
+}
+
+.suspension-panel label:not(.switch-row) {
+    display: block;
+    margin: 14px 0 6px;
+    font-weight: 700;
+}
+
+.suspension-panel textarea {
+    width: 100%;
+}
+
+.form-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.audit-card {
+    margin-top: 24px;
+}
+
+.table-responsive {
+    overflow-x: auto;
+}
+
+@media (max-width: 850px) {
+    .sms-status-grid {
+        grid-template-columns: repeat(
+            2,
+            minmax(0, 1fr)
+        );
+    }
+}
+
+@media (max-width: 650px) {
+    .form-grid,
+    .suspension-grid,
+    .sms-status-grid {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
+
+{% endblock %}

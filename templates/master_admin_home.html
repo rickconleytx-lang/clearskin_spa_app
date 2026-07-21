@@ -66,6 +66,15 @@
     <!-- 🔹 HEADER 4 -->
     <h2 style="margin-top: 30px;">Admin - Spa Management</h2>
 
+    <a
+    href="{{ url_for('master_admin_businesses') }}"
+    class="tool-pill tool-pill-small"
+    >
+        Businesses
+    </a>
+
+    
+
     <div class="narrow-cards">
         {{ section_card("Admin", "Admin Home", url_for('admin')) }}
         {{ section_card("Spa Management", "Spa Management", url_for('spa_management')) }}
