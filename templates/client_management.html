@@ -141,35 +141,44 @@
             </td>
 
             <td>
-                <a class="btn" href="{{ url_for('add_appointment', client_id=row[0]) }}">
-                    Add Appt
-                </a>
+                <div class="page-tool-pills" style="gap: 6px; flex-wrap: wrap;">
 
-                <a class="btn" href="{{ url_for('client_health_profile', client_id=row[0]) }}">
-                    Health-Intake
-                </a>
+                    <a href="{{ url_for('add_appointment', client_id=row[0]) }}"
+                    class="tool-pill tool-pill-small">
+                        Add Appt
+                    </a>
 
-                <a class="btn" href="{{ url_for('client_history_detail', client_id=row[0]) }}">
-                    Visit Summaries
-                </a>
+                    <a href="{{ url_for('client_health_profile', client_id=row[0]) }}"
+                    class="tool-pill tool-pill-small">
+                        Health-Intake
+                    </a>
 
-                <br>
+                    <a href="{{ url_for('client_history_detail', client_id=row[0]) }}"
+                    class="tool-pill tool-pill-small">
+                        Visit Summaries
+                    </a>
 
-                <a class="btn" href="{{ url_for('edit_client', client_id=row[0]) }}">
-                    FULL Summary-Edit
-                </a>
+                    <a href="{{ url_for('edit_client', client_id=row[0]) }}"
+                    class="tool-pill tool-pill-small">
+                        Full Summary-Edit
+                    </a>
 
-                <a class="btn" href="{{ url_for('edit_client_full', client_id=row[0]) }}">
-                    Full Record
-                </a>
+                    <a href="{{ url_for('edit_client_full', client_id=row[0]) }}"
+                    class="tool-pill tool-pill-small">
+                        Full Record
+                    </a>
 
-                <a class="btn" href="{{ url_for('client_forms', client_id=row[0]) }}">
-                    Forms
-                </a>
+                    <a href="{{ url_for('client_forms', client_id=row[0]) }}"
+                    class="tool-pill tool-pill-small">
+                        Forms
+                    </a>
 
-                <a class="btn" href="{{ url_for('client_messaging_settings', client_id=row[0]) }}">
-                    Consent History
-                </a>
+                    <a href="{{ url_for('client_messaging_settings', client_id=row[0]) }}"
+                    class="tool-pill tool-pill-small">
+                        Consent History
+                    </a>
+
+                </div>
             </td>
         </tr>
         {% endfor %}

@@ -5,10 +5,11 @@ import io
 import imaplib
 import email
 
-from datetime import date, timedelta, datetime
+from datetime import date, timedelta, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from email.header import decode_header
 from functools import wraps
+from zoneinfo import ZoneInfo
 
 from flask import (
     Flask,
@@ -2439,6 +2440,45 @@ def get_approved_email_template(
 
 
 
+#################################
+#
+#   LOCAL DATETIME
+#
+#
+##################################
+
+
+
+@app.template_filter("local_datetime")
+def local_datetime(value, format_string="%m/%d/%Y %I:%M %p"):
+    if not value:
+        return ""
+
+    # Handle timestamp strings if one is returned by a query.
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(
+                value.replace("Z", "+00:00")
+            )
+        except ValueError:
+            return value
+
+    # PostgreSQL TIMESTAMP columns may return a datetime
+    # without timezone information. These values are stored as UTC.
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+
+    local_value = value.astimezone(
+        ZoneInfo("America/Chicago")
+    )
+
+    return local_value.strftime(format_string)
+
+
+
+
+
+
 
 
 
@@ -3666,7 +3706,7 @@ def send_template_sms(
 #     SEND appointment reminder sms
 #
 #################################
-
+ 
 
 def send_appointment_reminder_sms(reminder_id, spa_id):
     conn = get_db_connection()
@@ -3675,6 +3715,7 @@ def send_appointment_reminder_sms(reminder_id, spa_id):
     cur.execute("""
         SELECT
             rq.reminder_id,
+            rq.appointment_id,
             rq.client_id,
             rq.recipient_phone,
             a.appointment_date,
@@ -3703,7 +3744,8 @@ def send_appointment_reminder_sms(reminder_id, spa_id):
         return False, "Reminder not found."
 
     (
-        reminder_id,
+       reminder_id,
+        appointment_id,
         client_id,
         recipient_phone,
         appointment_date,
@@ -3756,6 +3798,60 @@ def send_appointment_reminder_sms(reminder_id, spa_id):
             WHERE reminder_id = %s
               AND spa_id = %s
         """, (str(result), reminder_id, spa_id))
+
+
+        cur.execute("""
+            INSERT INTO appointment_reminders (
+                spa_id,
+                appointment_id,
+                client_id,
+                channel,
+                reminder_type,
+                status,
+                appointment_date_at_send,
+                appointment_time_at_send,
+                recipient,
+                message_body,
+                sent_at,
+                sms_log_id
+            )
+            SELECT
+                %s,
+                %s,
+                %s,
+                'sms',
+                'appointment_reminder',
+                'sent',
+                %s,
+                %s,
+                %s,
+                %s,
+                NOW(),
+                %s
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM appointment_reminders
+                WHERE spa_id = %s
+                  AND appointment_id = %s
+                  AND channel = 'sms'
+                  AND status = 'sent'
+                  AND appointment_date_at_send = %s
+                  AND appointment_time_at_send = %s
+            )
+        """, (
+            spa_id,
+            appointment_id,
+            client_id,
+            appointment_date,
+            appointment_time,
+            recipient_phone,
+            result.get("final_message_body"),
+            result.get("sms_log_id"),
+            spa_id,
+            appointment_id,
+            appointment_date,
+            appointment_time
+        ))
 
     conn.commit()
     cur.close()
@@ -4717,22 +4813,130 @@ def get_dashboard_data(spa_id, spa_now):
     # Next appointment remaining today
     cur.execute("""
         SELECT
-            a.appointment_time,
-            c.first_name,
-            c.last_name
+            a.appointment_id,                    -- 0
+            a.appointment_time,                  -- 1
+            a.client_id,                         -- 2
+            c.first_name,                        -- 3
+            c.last_name,                         -- 4
+            c.phone,                             -- 5
+            c.email,                             -- 6
+            c.sms_opt_in,                        -- 7
+            c.sms_opt_out,                       -- 8
+            c.email_opt_in,                      -- 9
+            c.email_opt_out,                     -- 10
+            a.service_type,                      -- 11
+            a.external_service_name,             -- 12
+            a.appointment_for                    -- 13
         FROM appointments a
         JOIN clients c
-          ON a.client_id = c.client_id
-         AND a.spa_id = c.spa_id
+        ON a.client_id = c.client_id
+        AND a.spa_id = c.spa_id
         WHERE a.appointment_date = %s
-          AND a.appointment_time >= %s
-          AND a.spa_id = %s
-          AND LOWER(a.status) = 'booked'
+        AND a.appointment_time >= %s
+        AND a.spa_id = %s
+        AND LOWER(a.status) = 'booked'
         ORDER BY a.appointment_time
         LIMIT 1
-    """, (today, current_time, spa_id))
+    """, (
+        today,
+        current_time,
+        spa_id
+    ))
 
-    dashboard["next_appointment"] = cur.fetchone()
+    next_appointment_row = cur.fetchone()
+
+    if next_appointment_row:
+
+        client_name = " ".join(
+            part
+            for part in (
+                next_appointment_row[3],
+                next_appointment_row[4]
+            )
+            if part
+        ).strip()
+
+        appointment_name = (
+            next_appointment_row[13]
+            or client_name
+        )
+
+        service_name = (
+            next_appointment_row[11]
+            or next_appointment_row[12]
+            or "Appointment"
+        )
+
+        dashboard["next_appointment"] = {
+            "appointment_id": next_appointment_row[0],
+            "appointment_time": next_appointment_row[1],
+            "client_id": next_appointment_row[2],
+            "client_name": client_name,
+            "appointment_for": appointment_name,
+            "phone": next_appointment_row[5],
+            "email": next_appointment_row[6],
+            "sms_opt_in": bool(next_appointment_row[7]),
+            "sms_opt_out": bool(next_appointment_row[8]),
+            "email_opt_in": bool(next_appointment_row[9]),
+            "email_opt_out": bool(next_appointment_row[10]),
+            "service_name": service_name
+        }
+
+        appointment_id = dashboard["next_appointment"][
+            "appointment_id"
+        ]
+
+        appointment_time = dashboard["next_appointment"][
+            "appointment_time"
+        ]
+
+        cur.execute(
+            """
+            SELECT
+                appointment_reminder_id,
+                channel,
+                sent_at
+            FROM appointment_reminders
+            WHERE spa_id = %s
+            AND appointment_id = %s
+            AND status = 'sent'
+            AND appointment_date_at_send = %s
+            AND appointment_time_at_send = %s
+            ORDER BY sent_at DESC
+            LIMIT 1
+            """,
+            (
+                spa_id,
+                appointment_id,
+                today,
+                appointment_time
+            )
+        )
+
+        reminder_row = cur.fetchone()
+
+        dashboard["next_appointment"][
+            "reminder_sent"
+        ] = bool(reminder_row)
+
+        dashboard["next_appointment"][
+            "reminder_channel"
+        ] = (
+            reminder_row[1]
+            if reminder_row
+            else None
+        )
+
+        dashboard["next_appointment"][
+            "reminder_sent_at"
+        ] = (
+            reminder_row[2]
+            if reminder_row
+            else None
+        )
+
+    else:
+        dashboard["next_appointment"] = None
 
 
     # Birthdays today
@@ -4816,39 +5020,56 @@ def get_dashboard_data(spa_id, spa_now):
     seven_day_start = today
     seven_day_end = today + timedelta(days=6)
 
-    cur.execute("""
+    seven_day_start = today
+    seven_day_end = today + timedelta(days=6)
+
+    cur.execute(
+        """
         SELECT
             appointment_date,
             COUNT(*) AS appointment_count,
-            COALESCE(SUM(price_at_booking), 0) AS projected_revenue
+            COALESCE(
+                SUM(price_at_booking),
+                0
+            ) AS projected_revenue,
+            MIN(appointment_time) AS first_appointment_time,
+            MAX(appointment_time) AS last_appointment_time
         FROM appointments
         WHERE appointment_date BETWEEN %s AND %s
-          AND spa_id = %s
-          AND LOWER(status) = 'booked'
-          AND (
+        AND spa_id = %s
+        AND LOWER(status) = 'booked'
+        AND (
                 appointment_date > %s
                 OR (
                     appointment_date = %s
                     AND appointment_time >= %s
                 )
-          )
+        )
         GROUP BY appointment_date
         ORDER BY appointment_date
-    """, (
-        seven_day_start,
-        seven_day_end,
-        spa_id,
-        today,
-        today,
-        current_time
-    ))
+        """,
+        (
+            seven_day_start,
+            seven_day_end,
+            spa_id,
+            today,
+            today,
+            current_time
+        )
+    )
 
     seven_day_rows = cur.fetchall() or []
 
     seven_day_lookup = {
         row[0]: {
-            "appointment_count": int(row[1] or 0),
-            "projected_revenue": float(row[2] or 0)
+            "appointment_count": int(
+                row[1] or 0
+            ),
+            "projected_revenue": float(
+                row[2] or 0
+            ),
+            "first_appointment_time": row[3],
+            "last_appointment_time": row[4]
         }
         for row in seven_day_rows
     }
@@ -4856,24 +5077,84 @@ def get_dashboard_data(spa_id, spa_now):
     seven_day_days = []
 
     for day_offset in range(7):
-        outlook_date = seven_day_start + timedelta(days=day_offset)
+        outlook_date = (
+            seven_day_start
+            + timedelta(days=day_offset)
+        )
 
         day_data = seven_day_lookup.get(
             outlook_date,
             {
                 "appointment_count": 0,
-                "projected_revenue": 0.0
+                "projected_revenue": 0.0,
+                "first_appointment_time": None,
+                "last_appointment_time": None
             }
+        )
+
+        appointment_count = (
+            day_data["appointment_count"]
+        )
+
+        projected_revenue = (
+            day_data["projected_revenue"]
+        )
+
+        first_appointment_time = (
+            day_data["first_appointment_time"]
+        )
+
+        last_appointment_time = (
+            day_data["last_appointment_time"]
         )
 
         seven_day_days.append({
             "date": outlook_date,
-            "day_name": outlook_date.strftime("%A"),
-            "date_display": (
-                outlook_date.strftime("%B %d").replace(" 0", " ")
+
+            "day_name": (
+                outlook_date.strftime("%A")
             ),
-            "appointment_count": day_data["appointment_count"],
-            "projected_revenue": day_data["projected_revenue"]
+
+            "date_display": (
+                outlook_date
+                .strftime("%B %d")
+                .replace(" 0", " ")
+            ),
+
+            "display_date": (
+                outlook_date
+                .strftime("%A, %B %d")
+                .replace(" 0", " ")
+            ),
+
+            "appointment_count": (
+                appointment_count
+            ),
+
+            "projected_revenue": (
+                projected_revenue
+            ),
+
+            "first_appointment_time": (
+                first_appointment_time
+            ),
+
+            "last_appointment_time": (
+                last_appointment_time
+            ),
+
+            "is_open": (
+                appointment_count == 0
+            ),
+
+            "is_today": (
+                outlook_date == today
+            ),
+
+            "is_tomorrow": (
+                outlook_date
+                == today + timedelta(days=1)
+            )
         })
 
     seven_day_total_appointments = sum(
@@ -4909,17 +5190,112 @@ def get_dashboard_data(spa_id, spa_now):
             )
         )
 
+    seven_day_highest_revenue_day = None
+
+    if seven_day_booked_days:
+        seven_day_highest_revenue_day = max(
+            seven_day_booked_days,
+            key=lambda day: (
+                day["projected_revenue"],
+                day["appointment_count"]
+            )
+        )
+
+    seven_day_next_open_day = next(
+        (
+            day
+            for day in seven_day_open_days
+            if day["date"] > today
+        ),
+        None
+    )
+
+    seven_day_next_booked_day = next(
+        (
+            day
+            for day in seven_day_booked_days
+            if day["date"] > today
+        ),
+        None
+    )
+
+    seven_day_booked_day_count = len(
+        seven_day_booked_days
+    )
+
+    seven_day_open_day_count = len(
+        seven_day_open_days
+    )
+
+    average_appointments_per_booked_day = 0.0
+
+    if seven_day_booked_day_count > 0:
+        average_appointments_per_booked_day = (
+            seven_day_total_appointments
+            / seven_day_booked_day_count
+        )
+
+    average_revenue_per_appointment = 0.0
+
+    if seven_day_total_appointments > 0:
+        average_revenue_per_appointment = (
+            seven_day_projected_revenue
+            / seven_day_total_appointments
+        )
+
     dashboard["seven_day_outlook"] = {
         "start_date": seven_day_start,
         "end_date": seven_day_end,
-        "days": seven_day_days,
-        "total_appointments": seven_day_total_appointments,
-        "projected_revenue": seven_day_projected_revenue,
-        "busiest_day": seven_day_busiest_day,
-        "open_days": seven_day_open_days,
-        "open_day_count": len(seven_day_open_days)
-    }
 
+        "days": seven_day_days,
+        "days_in_window": len(
+            seven_day_days
+        ),
+
+        "total_appointments": (
+            seven_day_total_appointments
+        ),
+
+        "projected_revenue": (
+            seven_day_projected_revenue
+        ),
+
+        "busiest_day": (
+            seven_day_busiest_day
+        ),
+
+        "highest_revenue_day": (
+            seven_day_highest_revenue_day
+        ),
+
+        "next_open_day": (
+            seven_day_next_open_day
+        ),
+
+        "next_booked_day": (
+            seven_day_next_booked_day
+        ),
+
+        "open_days": (
+            seven_day_open_days
+        ),
+
+        "open_day_count": (
+            seven_day_open_day_count
+        ),
+
+        "booked_day_count": (
+            seven_day_booked_day_count
+        ),
+
+        "average_appointments_per_booked_day": (
+            average_appointments_per_booked_day
+        ),
+
+        "average_revenue_per_appointment": (
+            average_revenue_per_appointment
+        )
+    }
 
    #####################################################
     
@@ -12313,8 +12689,12 @@ def poll_gmail_for_godaddy_bookings(spa_id):
                 "result": result
             })
 
+
         except KeyError as e:
-            log_godaddy(f"Parse failed. Missing field: {e}")
+            log_godaddy(
+                f"Parse failed. Missing field: {e}"
+            )
+
             log_godaddy(
                 "Email will be checked again during the next poll."
             )
@@ -12335,43 +12715,51 @@ def poll_gmail_for_godaddy_bookings(spa_id):
                 processing_time_ms=processing_time_ms
             )
 
-            results.append({
-                "email_id": email_id.decode(),
-                "subject": subject,
-                "status": "parse_failed",
-                "missing_field": str(e)
-            })
+            results.append(
+                {
+                    "email_id": email_id.decode(),
+                    "subject": subject,
+                    "status": "parse_failed",
+                    "missing_field": str(e)
+                }
+            )
 
         except Exception as e:
             import traceback
 
-            print(f"[GODADDY IMPORT] Import failed: {e}")
+            print(
+                f"[GODADDY IMPORT] Import failed: {e}",
+                flush=True
+            )
+
             traceback.print_exc()
 
-        processing_time_ms = int(
-            (time.perf_counter() - started_at) * 1000
-        )
+            processing_time_ms = int(
+                (time.perf_counter() - started_at) * 1000
+            )
 
-        log_booking_import(
-            spa_id=spa_id,
-            source="godaddy",
-            email_id=email_id.decode(),
-            external_order_id=None,
-            email_subject=subject,
-            status="import_failed",
-            appointment_id=None,
-            client_id=None,
-            parser_version="godaddy_v1",
-            error_message=str(e),
-            processing_time_ms=processing_time_ms
-        )
+            log_booking_import(
+                spa_id=spa_id,
+                source="godaddy",
+                email_id=email_id.decode(),
+                external_order_id=None,
+                email_subject=subject,
+                status="import_failed",
+                appointment_id=None,
+                client_id=None,
+                parser_version="godaddy_v1",
+                error_message=str(e),
+                processing_time_ms=processing_time_ms
+            )
 
-        results.append({
-            "email_id": email_id.decode(),
-            "subject": subject,
-            "status": "import_failed",
-            "error": str(e)
-        })
+            results.append(
+                {
+                    "email_id": email_id.decode(),
+                    "subject": subject,
+                    "status": "import_failed",
+                    "error": str(e)
+                }
+            )
 
     mail.logout()
 
@@ -15604,6 +15992,142 @@ def send_one_reminder(reminder_id):
         conn.close()
 
     return redirect(url_for("reminder_queue"))
+
+
+
+
+
+##############################################
+#
+#   PREPARE APPOINTMENT REMINDER
+#
+#
+###########################################
+
+
+
+@app.route(
+    "/appointments/<int:appointment_id>/prepare-reminder"
+)
+@login_required
+@spa_required
+def prepare_appointment_reminder(appointment_id):
+    spa_id = current_spa_id()
+
+    if not sms_email_terms_accepted(spa_id):
+        flash(
+            "You must accept the SMS and Email Terms and "
+            "Conditions before using messaging features.",
+            "warning"
+        )
+        return redirect(url_for("sms_email_terms"))
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        # Confirm that the appointment belongs to this spa.
+        cur.execute("""
+            SELECT
+                appointment_id
+            FROM appointments
+            WHERE appointment_id = %s
+              AND spa_id = %s
+        """, (
+            appointment_id,
+            spa_id
+        ))
+
+        appointment = cur.fetchone()
+
+        if not appointment:
+            flash("Appointment not found.", "warning")
+            return redirect(url_for("appointments"))
+
+        # Find the prepared appointment reminder.
+        cur.execute("""
+            SELECT
+                reminder_id,
+                status,
+                send_method
+            FROM reminder_queue
+            WHERE spa_id = %s
+              AND appointment_id = %s
+              AND reminder_type = 'appointment_reminder'
+            ORDER BY
+                CASE
+                    WHEN status = 'pending' THEN 1
+                    WHEN status = 'failed' THEN 2
+                    WHEN status = 'sent' THEN 3
+                    ELSE 4
+                END,
+                reminder_id DESC
+            LIMIT 1
+        """, (
+            spa_id,
+            appointment_id
+        ))
+
+        reminder = cur.fetchone()
+
+        if not reminder:
+            flash(
+                "No prepared reminder was found for this "
+                "appointment. Review the Reminder Queue.",
+                "warning"
+            )
+            return redirect(
+                url_for(
+                    "reminder_queue",
+                    fromcoach=1
+                )
+            )
+
+        reminder_id, status, send_method = reminder
+
+        if status == "sent":
+            flash(
+                "The reminder queue shows that this appointment "
+                "reminder has already been sent.",
+                "warning"
+            )
+            return redirect(
+                url_for(
+                    "reminder_queue",
+                    reminder_id=reminder_id,
+                    fromcoach=1
+                )
+            )
+
+        if send_method != "sms":
+            flash(
+                "This reminder is not currently prepared for SMS.",
+                "warning"
+            )
+            return redirect(
+                url_for(
+                    "reminder_queue",
+                    reminder_id=reminder_id,
+                    fromcoach=1
+                )
+            )
+
+        flash(
+            "Coach prepared the appointment reminder for review.",
+            "success"
+        )
+
+        return redirect(
+            url_for(
+                "reminder_queue",
+                reminder_id=reminder_id,
+                fromcoach=1
+            )
+        )
+
+    finally:
+        cur.close()
+        conn.close()
 
 
 
@@ -26565,11 +27089,11 @@ def dashboard():
 
 
         
-#  ------------------------------
+# ####################################### 
 #       
-#      MORNING BRIEFING
+#      MORNING BRIEFING. DAILY BRIEFING
 #  
-#  -----------------------------
+# ##########################################
    
 
 
@@ -26760,6 +27284,13 @@ def morning_briefing():
     )
 
 
+    coach_session["recommendation_mentions"] = (
+        get_coach_recommendation_mentions(
+            spa_id=spa_id,
+            spa_now=spa_now
+        )
+    )
+
     coach = build_coach(
         dashboard,
         business_schedule_due=business_schedule_due,
@@ -26929,6 +27460,125 @@ def save_coach_acknowledgment(
 
 
 
+#################################
+#
+#   HELPERS
+#
+####################
+
+def get_coach_recommendation_mentions(
+    spa_id,
+    spa_now
+):
+    """
+    Return today's mention counts for each Coach category.
+    """
+
+    today_key = spa_now.date().isoformat()
+    spa_key = str(spa_id)
+
+    all_mentions = session.get(
+        "coach_recommendation_mentions",
+        {}
+    )
+
+    spa_mentions = all_mentions.get(
+        spa_key,
+        {}
+    )
+
+    if spa_mentions.get("date") != today_key:
+        return {}
+
+    categories = spa_mentions.get(
+        "categories",
+        {}
+    )
+
+    if not isinstance(categories, dict):
+        return {}
+
+    return categories
+
+
+
+
+#######################################
+#
+###########################
+
+
+
+def record_coach_recommendation_mention(
+    spa_id,
+    spa_now,
+    category
+):
+    """
+    Record that Coach presented a recommendation category.
+    Mention counts reset on the next local business day.
+    """
+
+    today_key = spa_now.date().isoformat()
+    spa_key = str(spa_id)
+
+    all_mentions = session.get(
+        "coach_recommendation_mentions",
+        {}
+    )
+
+    spa_mentions = all_mentions.get(
+        spa_key,
+        {}
+    )
+
+    if spa_mentions.get("date") != today_key:
+        spa_mentions = {
+            "date": today_key,
+            "categories": {}
+        }
+
+    categories = spa_mentions.get(
+        "categories",
+        {}
+    )
+
+    if not isinstance(categories, dict):
+        categories = {}
+
+    current_count = int(
+        categories.get(category) or 0
+    )
+
+    current_count += 1
+
+    categories[category] = current_count
+    spa_mentions["categories"] = categories
+    all_mentions[spa_key] = spa_mentions
+
+    session["coach_recommendation_mentions"] = (
+        all_mentions
+    )
+
+    session.modified = True
+
+    return current_count
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #####################################
 #
 #
@@ -27004,7 +27654,6 @@ def coach_welcome_remind_later():
 ########################################
 
 
-
 @app.route(
     "/coach/acknowledge",
     methods=["POST"]
@@ -27018,6 +27667,10 @@ def acknowledge_coach_recommendation():
         data.get("category") or ""
     ).strip()
 
+    action = str(
+        data.get("action") or "defer"
+    ).strip().lower()
+
     if not category:
         return jsonify({
             "status": "error",
@@ -27030,18 +27683,49 @@ def acknowledge_coach_recommendation():
             "message": "Invalid recommendation category."
         }), 400
 
+    allowed_actions = {
+        "mention",
+        "review",
+        "defer",
+        "pause_today",
+        "keep_reminding"
+    }
+
+    if action not in allowed_actions:
+        return jsonify({
+            "status": "error",
+            "message": "Invalid Coach action."
+        }), 400
+
     spa_id = current_spa_id()
     spa_now = get_spa_now()
 
-    save_coach_acknowledgment(
-        spa_id=spa_id,
-        spa_now=spa_now,
-        category=category
-    )
+    mention_count = None
+
+    if action == "mention":
+        mention_count = (
+            record_coach_recommendation_mention(
+                spa_id=spa_id,
+                spa_now=spa_now,
+                category=category
+            )
+        )
+
+    elif action == "pause_today":
+        save_coach_acknowledgment(
+            spa_id=spa_id,
+            spa_now=spa_now,
+            category=category
+        )
+
+    # review, defer, and keep_reminding do not hide
+    # the recommendation for the remainder of the day.
 
     return jsonify({
         "status": "success",
-        "category": category
+        "category": category,
+        "action": action,
+        "mention_count": mention_count
     })
 
 
@@ -29055,6 +29739,16 @@ def appointments():
 
     from_coach = request.args.get("from_coach", "").strip() == "1"
 
+    appointment_id_filter = request.args.get(
+        "appointment_id",
+        type=int
+    )
+
+    coach_action = request.args.get(
+        "coach_action",
+        ""
+    ).strip().lower()
+
 
     status_filter = request.args.get(
         "status",
@@ -29096,35 +29790,57 @@ def appointments():
         query += " AND a.spa_id = %s"
         params.append(spa_id)
                 
-    # Overdue is a calculated status and always searches past dates.
-    if status_filter == "overdue":
+    # ---------------------------------------------------------
+    # Coach-selected appointment
+    # ---------------------------------------------------------
+    # A specific appointment overrides the normal status and
+    # date filters so Coach can open past, current, or future
+    # appointments directly.
+    if appointment_id_filter:
         query += """
-            AND a.appointment_date < %s
-            AND LOWER(COALESCE(a.status, '')) = 'booked'
+            AND a.appointment_id = %s
         """
-        params.append(today)
+        params.append(appointment_id_filter)
+
 
     else:
-        # Standard status filter.
-        if status_filter:
+        # Overdue is a calculated status and always searches
+        # past dates.
+        if status_filter == "overdue":
             query += """
-                AND LOWER(COALESCE(a.status, '')) = %s
+                AND a.appointment_date < %s
+                AND LOWER(COALESCE(a.status, '')) = 'booked'
             """
-            params.append(status_filter)
-
-        # Apply an entered date range.
-        if start_date and end_date:
-            query += """
-                AND a.appointment_date BETWEEN %s AND %s
-            """
-            params.extend([start_date, end_date])
-
-        # With no status, no dates, and no Show All request,
-        # default the page to today's appointments.
-        elif not status_filter and show_all != "1":
-            query += " AND a.appointment_date = %s"
             params.append(today)
+
+        else:
+            # Standard status filter.
+            if status_filter:
+                query += """
+                    AND LOWER(COALESCE(a.status, '')) = %s
+                """
+                params.append(status_filter)
+
+            # Apply an entered date range.
+            if start_date and end_date:
+                query += """
+                    AND a.appointment_date BETWEEN %s AND %s
+                """
+                params.extend([
+                    start_date,
+                    end_date
+                ])
+
+            # With no status, no dates, and no Show All request,
+            # default the page to today's appointments.
+            elif not status_filter and show_all != "1":
+                query += """
+                    AND a.appointment_date = %s
+                """
+                params.append(today)
         
+
+
     query += " ORDER BY a.appointment_date, a.appointment_time"
         
     cur.execute(query, tuple(params))
@@ -29141,7 +29857,9 @@ def appointments():
         today_str=today_str,
         status_filter=status_filter,
         status_count=len(appointments),
-        from_coach=from_coach
+        from_coach=from_coach,
+        appointment_id_filter=appointment_id_filter,
+        coach_action=coach_action
     )
 
 

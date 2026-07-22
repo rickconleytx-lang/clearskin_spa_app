@@ -49,8 +49,8 @@
         <tr>
 
            <td>
-               {{ sms[0].strftime('%m/%d/%Y %I:%M %p') if sms[0] else '' }}<br>
-
+               {{ sms[0]|local_datetime if sms[0] else '' }}<br>
+               
                {% if sms[1] in ['inbound', 'incoming', 'reply'] %}
                    <span class="badge badge-warning">IN</span>
                {% else %}

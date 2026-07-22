@@ -409,8 +409,10 @@ def review_today_schedule(
 
         if next_appointment:
             next_time = format_appointment_time(
-                next_appointment[0]
+            next_appointment.get(
+                "appointment_time"
             )
+        )
 
             if next_time:
                 message += (
@@ -427,6 +429,8 @@ def review_today_schedule(
             action_url=None
         )
         return
+
+
 
     # ---------------------------------------------------------
     # No appointments remain today — look ahead to tomorrow
@@ -462,6 +466,126 @@ def review_today_schedule(
         message=message,
         action_url=None
     )
+
+
+
+
+
+def review_appointment_reminders(
+    observations,
+    dashboard,
+    spa_now
+):
+    """
+    Identify the next appointment that does not have a successful
+    reminder recorded for its current appointment date and time.
+    """
+
+    if spa_now is None:
+        raise ValueError(
+            "review_appointment_reminders requires spa_now"
+        )
+
+    next_appointment = (
+        dashboard.get("next_appointment") or {}
+    )
+
+    if not isinstance(next_appointment, dict):
+        return
+
+    if not next_appointment:
+        return
+
+    if next_appointment.get("reminder_sent"):
+        return
+
+    appointment_id = next_appointment.get(
+        "appointment_id"
+    )
+
+    if not appointment_id:
+        return
+
+    appointment_time = next_appointment.get(
+        "appointment_time"
+    )
+
+    appointment_for = (
+        next_appointment.get("appointment_for")
+        or next_appointment.get("client_name")
+        or "The client"
+    )
+
+    phone = (
+        next_appointment.get("phone") or ""
+    ).strip()
+
+    email = (
+        next_appointment.get("email") or ""
+    ).strip()
+
+    sms_available = (
+        bool(phone)
+        and bool(next_appointment.get("sms_opt_in"))
+        and not bool(next_appointment.get("sms_opt_out"))
+    )
+
+    email_available = (
+        bool(email)
+        and bool(next_appointment.get("email_opt_in"))
+        and not bool(next_appointment.get("email_opt_out"))
+    )
+
+    # There is no eligible reminder channel.
+    if not sms_available and not email_available:
+        return
+
+    formatted_time = format_appointment_time(
+        appointment_time
+    )
+
+    if sms_available and email_available:
+        channel_text = "SMS or email"
+
+    elif sms_available:
+        channel_text = "SMS"
+
+    else:
+        channel_text = "email"
+
+    message = (
+        f"{appointment_for} has an appointment today"
+    )
+
+    if formatted_time:
+        message += f" at {formatted_time}"
+
+    message += (
+        ", and no reminder has been recorded for the current "
+        f"appointment time. {channel_text} is available."
+    )
+
+    add_observation(
+        observations,
+        category="Appointment Reminder",
+        priority=55,
+        status="attention",
+        message=message,
+        question=(
+            "Would you like to prepare this reminder now?"
+        ),
+
+        # We will add the direct reminder URL next.
+        # Leaving this blank prevents a broken redirect.
+        action_url=(
+            f"/appointments"
+            f"?appointment_id={appointment_id}"
+            f"&from_coach=1"
+            f"&coach_action=reminder"
+        )
+    )
+
+
 
 
 
@@ -509,21 +633,100 @@ def build_day_assessment(
     recommendations,
     spa_now
 ):
-    recommendation_count = len(recommendations)
+    recommendation_count = len(
+        recommendations
+    )
 
+    highest_priority = (
+        recommendations[0]
+        if recommendations
+        else None
+    )
+
+    priority_category = (
+        highest_priority.get("category", "")
+        if highest_priority
+        else ""
+    )
+
+    # ---------------------------------------------------------
+    # No appointments scheduled today
+    # ---------------------------------------------------------
     if appointment_count == 0:
-        return get_day_assessment_intro(spa_now)
 
+        if priority_category == "Overdue Appointments":
+            return (
+                "You have overdue appointments that still need "
+                "to be closed out, so I recommend reviewing those "
+                "before moving on to client follow-up or business "
+                "development."
+            )
+
+        if priority_category == "GoDaddy Imports":
+            return (
+                "Your schedule is open today, making this a good "
+                "time to review the imported appointments that "
+                "still need your attention."
+            )
+
+        if priority_category == "Business Schedule":
+            return (
+                "Your schedule is open today, so I recommend "
+                "addressing the business tasks that are currently "
+                "due before moving on to other projects."
+            )
+
+        if priority_category == "Recurring Expenses":
+            return (
+                "Your schedule is open today, making this a good "
+                "time to review the recurring expense item that "
+                "needs your attention."
+            )
+
+        if highest_priority:
+            return (
+                "Your schedule is open today, so I recommend "
+                f"reviewing {priority_category.lower()} before "
+                "moving on to client follow-up or business "
+                "development."
+            )
+
+        return get_day_assessment_intro(
+            spa_now
+        )
+
+    # ---------------------------------------------------------
+    # Active appointment schedule
+    # ---------------------------------------------------------
     if recommendation_count >= 3:
         return (
-            "Your schedule is active, and there are a few items "
-            "that would benefit from your attention."
+            "Your schedule is active, and there are several "
+            "business items that would benefit from your attention."
+        )
+
+    if priority_category == "Overdue Appointments":
+        return (
+            "Your schedule looks manageable, but you have overdue "
+            "appointments that still need to be closed out."
+        )
+
+    if priority_category == "GoDaddy Imports":
+        return (
+            "Your schedule looks manageable, but imported "
+            "appointments are still waiting for your review."
         )
 
     if recommendation_count > 0:
-        return "Overall, today looks manageable."
+        return (
+            "Overall, today looks manageable. I found one business "
+            "item that would benefit from your attention."
+        )
 
-    return "Overall, today looks well balanced."
+    return (
+        "Overall, today looks well balanced."
+    )
+
+
 
 def review_seven_day_outlook(
     observations,
@@ -532,11 +735,14 @@ def review_seven_day_outlook(
     """
     Review the rolling seven-day appointment outlook.
 
-    This first version is informational. It does not assume
-    that a day without appointments is a business problem.
+    The main outlook remains informational. Open days may create
+    a low-priority scheduling opportunity, but they are not treated
+    as an operational problem.
     """
 
-    outlook = dashboard.get("seven_day_outlook") or {}
+    outlook = dashboard.get(
+        "seven_day_outlook"
+    ) or {}
 
     if not outlook:
         return
@@ -549,23 +755,149 @@ def review_seven_day_outlook(
         outlook.get("projected_revenue") or 0
     )
 
-    busiest_day = outlook.get("busiest_day")
+    busiest_day = (
+        outlook.get("busiest_day")
+    )
+
+    highest_revenue_day = outlook.get(
+        "highest_revenue_day"
+    )
+
+    next_open_day = outlook.get(
+        "next_open_day"
+    )
+
+    all_days = outlook.get("days") or []
 
     open_days = outlook.get("open_days") or []
-    open_day_count = len(open_days)
 
+    outlook_start_date = outlook.get(
+        "start_date"
+    )
+
+    future_open_days = []
+
+    for open_day in open_days:
+        if isinstance(open_day, dict):
+            open_day_date = open_day.get("date")
+
+            # Exclude today from the forward-looking open-day message.
+            if (
+                outlook_start_date is not None
+                and open_day_date is not None
+                and open_day_date <= outlook_start_date
+            ):
+                continue
+
+        future_open_days.append(
+            open_day
+        )
+
+    open_day_count = len(
+        future_open_days
+    )
+
+    booked_day_count = int(
+        outlook.get("booked_day_count") or 0
+    )
+
+
+    open_day_names = []
+
+    for open_day in future_open_days:
+        if isinstance(open_day, dict):
+            day_name = (
+                open_day.get("day_name")
+                or open_day.get("display_date")
+                or open_day.get("date_display")
+                or open_day.get("date")
+            )
+        else:
+            day_name = str(open_day)
+
+        if day_name:
+            open_day_names.append(
+                str(day_name)
+            )
+
+    open_day_count = len(
+        future_open_days
+    )
+
+
+    booked_day_count = int(
+        outlook.get("booked_day_count") or 0
+    )
+
+    # Used only for the future open-day wording.
+    open_day_count = len(
+        future_open_days
+    )
+
+    days_in_window = int(
+        outlook.get("days_in_window") or 7
+    )
+
+    # Use the true booked-day count from the dashboard.
+    booked_day_count = int(
+        outlook.get("booked_day_count") or 0
+    )
+
+    # ---------------------------------------------------------
+    # Format open-day names safely
+    # ---------------------------------------------------------
+    open_day_names = []
+
+    for open_day in future_open_days:
+
+        if isinstance(open_day, dict):
+            day_name = (
+                open_day.get("day_name")
+                or open_day.get("display_date")
+                or open_day.get("date")
+            )
+        else:
+            day_name = str(open_day)
+
+        if day_name:
+            open_day_names.append(
+                str(day_name)
+            )
+
+    # ---------------------------------------------------------
+    # Completely open seven-day schedule
+    # ---------------------------------------------------------
     if total_appointments == 0:
+
         observations.append({
             "category": "7-Day Outlook",
             "status": "informational",
             "priority": 20,
             "message": (
                 "There are currently no booked appointments "
-                "during the next seven days."
+                "during the next seven days. Your upcoming "
+                "schedule remains open."
             )
         })
 
         return
+
+    # ---------------------------------------------------------
+    # Informational scheduling opportunity
+    # ---------------------------------------------------------
+    if open_day_count >= 3:
+        observations.append({
+            "category": "Scheduling Opportunity",
+            "status": "informational",
+            "priority": 25,
+            "message": (
+                f"You currently have {open_day_count} future "
+                "open days during the next seven days. Consider "
+                "using that availability for client follow-up, "
+                "rebooking outreach, or business development."
+            )
+        })
+
 
     appointment_word = (
         "appointment"
@@ -577,36 +909,201 @@ def review_seven_day_outlook(
         (
             f"You have {total_appointments} "
             f"{appointment_word} scheduled during the next "
-            f"seven days with projected revenue of "
+            f"seven days, with projected revenue of "
             f"${projected_revenue:,.2f}."
         )
     ]
+
+    # ---------------------------------------------------------
+    # Busiest day
+    # ---------------------------------------------------------
 
     if busiest_day:
         busiest_count = int(
             busiest_day.get("appointment_count") or 0
         )
 
-        busiest_word = (
-            "appointment"
-            if busiest_count == 1
-            else "appointments"
+        busiest_day_name = (
+            busiest_day.get("day_name")
+            or busiest_day.get("display_date")
+            or "The busiest day"
+        )
+
+        days_with_busiest_count = [
+            day
+            for day in outlook.get("days", [])
+            if int(day.get("appointment_count") or 0)
+            == busiest_count
+            and busiest_count > 0
+        ]
+
+        if (
+            busiest_count == 1
+            and len(days_with_busiest_count) > 1
+        ):
+            message_parts.append(
+                (
+                    f"The appointments are evenly spread across "
+                    f"{len(days_with_busiest_count)} days, with one "
+                    "appointment scheduled on each day."
+                )
+            )
+
+        elif len(days_with_busiest_count) > 1:
+            tied_day_names = ", ".join(
+                day.get("day_name", "")
+                for day in days_with_busiest_count
+                if day.get("day_name")
+            )
+
+            message_parts.append(
+                (
+                    f"{tied_day_names} are tied as the busiest days "
+                    f"with {busiest_count} appointments each."
+                )
+            )
+
+        else:
+            busiest_word = (
+                "appointment"
+                if busiest_count == 1
+                else "appointments"
+            )
+
+            message_parts.append(
+                (
+                    f"{busiest_day_name} is currently the busiest "
+                    f"day with {busiest_count} {busiest_word}."
+                )
+            )
+
+        if highest_revenue_day:
+            highest_revenue_amount = float(
+                highest_revenue_day.get(
+                    "projected_revenue"
+                ) or 0
+            )
+
+            highest_revenue_name = (
+                highest_revenue_day.get("day_name")
+                or highest_revenue_day.get("display_date")
+                or "The highest-revenue day"
+            )
+
+            busiest_date = (
+                busiest_day.get("date")
+                if busiest_day
+                else None
+            )
+
+            highest_revenue_date = (
+                highest_revenue_day.get("date")
+            )
+
+            # Mention it separately only when it adds new information.
+            if (
+                highest_revenue_amount > 0
+                and highest_revenue_date != busiest_date
+            ):
+                message_parts.append(
+                    (
+                        f"{highest_revenue_name} currently has the "
+                        f"highest projected revenue at "
+                        f"${highest_revenue_amount:,.2f}."
+                    )
+                )   
+
+    # ---------------------------------------------------------
+    # Active and open days
+    # ---------------------------------------------------------
+    
+
+    if open_day_count > 0:
+
+        next_open_day_name = None
+
+        if next_open_day:
+            next_open_day_name = (
+                next_open_day.get("day_name")
+                or next_open_day.get("display_date")
+                or next_open_day.get("date_display")
+            )
+
+        if next_open_day_name:
+            if open_day_count == 1:
+                message_parts.append(
+                    (
+                        f"Your next open day is "
+                        f"{next_open_day_name}."
+                    )
+                )
+            else:
+                remaining_open_days = (
+                    open_day_count - 1
+                )
+
+                message_parts.append(
+                    (
+                        f"Your next open day is "
+                        f"{next_open_day_name}, with "
+                        f"{remaining_open_days} additional open "
+                        f"{'day' if remaining_open_days == 1 else 'days'} "
+                        f"during the outlook period."
+                    )
+                )
+
+    elif open_day_names:
+        if len(open_day_names) == 1:
+            message_parts.append(
+                (
+                    f"{open_day_names[0]} currently has no "
+                    "booked appointments."
+                )
+            )
+        else:
+            open_days_text = ", ".join(
+                open_day_names[:3]
+            )
+
+            remaining_count = max(
+                len(open_day_names) - 3,
+                0
+            )
+
+            if remaining_count:
+                message_parts.append(
+                    (
+                        f"Open days include {open_days_text}, "
+                        f"with {remaining_count} additional "
+                        f"open {'day' if remaining_count == 1 else 'days'}."
+                    )
+                )
+            else:
+                message_parts.append(
+                    (
+                        f"The open days are currently "
+                        f"{open_days_text}."
+                    )
+                )
+
+    elif open_day_names:
+        first_open_days = ", ".join(
+            open_day_names[:3]
+        )
+
+        remaining_count = (
+            len(open_day_names) - 3
         )
 
         message_parts.append(
             (
-                f"{busiest_day.get('day_name', 'The busiest day')} "
-                f"is currently the busiest day with "
-                f"{busiest_count} {busiest_word}."
+                f"Open days include {first_open_days}, "
+                f"with {remaining_count} additional "
+                f"open {'day' if remaining_count == 1 else 'days'}."
             )
         )
 
-    if open_day_count == 1:
-        message_parts.append(
-            "One day currently has no booked appointments."
-        )
-
-    elif open_day_count > 1:
+    else:
         message_parts.append(
             (
                 f"{open_day_count} days currently have no "
@@ -618,10 +1115,36 @@ def review_seven_day_outlook(
         "category": "7-Day Outlook",
         "status": "upcoming",
         "priority": 30,
-        "message": " ".join(message_parts)
+        "message": " ".join(
+            message_parts
+        )
     })
 
+    # ---------------------------------------------------------
+    # Informational scheduling opportunity
+    # ---------------------------------------------------------
+    if open_day_count >= 3:
 
+        observations.append({
+            "category": "Scheduling Opportunity",
+            "status": "informational",
+            "priority": 25,
+            "message": (
+                f"You currently have {open_day_count} future "
+                "open days during the next seven days. Consider "
+                "using that availability for client follow-up, "
+                "rebooking outreach, or business development."
+            )
+        })
+
+
+#############################################
+#################################################
+#
+#   BUILD COACH
+#
+#
+###############################################
 
 
 
@@ -633,24 +1156,23 @@ def build_coach(
     spa_now=None,
     coach_session=None
 ):
-   
+
     if spa_now is None:
         raise ValueError("build_coach requires spa_now")
-    
+
     coach_session = coach_session or {}
 
     coach_open_count = coach_session.get(
         "open_count",
         1
-    )
+    ) or 1
+
+    is_return_visit = coach_open_count > 1
 
     print(
         "[COACH DEBUG] open_count:",
         coach_open_count
     )
-
-
-    is_return_visit = coach_open_count > 1
 
     observations = []
 
@@ -659,7 +1181,7 @@ def build_coach(
     # ---------------------------------------------------------
     review_overdue_appointments(
         observations,
-        dashboard=dashboard,
+        dashboard=dashboard
     )
 
     review_today_schedule(
@@ -668,7 +1190,7 @@ def build_coach(
         spa_now=spa_now
     )
 
-    review_today_schedule(
+    review_appointment_reminders(
         observations,
         dashboard=dashboard,
         spa_now=spa_now
@@ -685,17 +1207,38 @@ def build_coach(
         business_schedule_upcoming=business_schedule_upcoming
     )
 
-
-    review_business_schedule(
-        observations,
-        business_schedule_due=business_schedule_due,
-        business_schedule_upcoming=business_schedule_upcoming
-    )
-
     review_priority_actions(
         observations,
         priority_actions=priority_actions
     )
+
+    # ---------------------------------------------------------
+    # Remove duplicate observations
+    # ---------------------------------------------------------
+    unique_observations = []
+    seen_observations = set()
+
+    for observation in observations:
+
+        observation_key = (
+            observation.get("category"),
+            observation.get("status"),
+            observation.get("message"),
+            observation.get("action_url")
+        )
+
+        if observation_key in seen_observations:
+            continue
+
+        seen_observations.add(
+            observation_key
+        )
+
+        unique_observations.append(
+            observation
+        )
+
+    observations = unique_observations
 
     # ---------------------------------------------------------
     # Prioritize all observations
@@ -712,21 +1255,63 @@ def build_coach(
         ) or []
     )
 
+
+    recommendation_mentions = (
+        coach_session.get(
+            "recommendation_mentions",
+            {}
+        ) or {}
+    )
+
+    if not isinstance(
+        recommendation_mentions,
+        dict
+    ):
+        recommendation_mentions = {}
+
+    try:
+        overdue_mention_count = int(
+            recommendation_mentions.get(
+                "Overdue Appointments",
+                0
+            ) or 0
+        )
+    except (TypeError, ValueError):
+        overdue_mention_count = 0
+
+    auto_paused_categories = set()
+
+    if overdue_mention_count >= 1:
+        auto_paused_categories.add(
+            "Overdue Appointments"
+        )
+
+    print(
+        "[COACH MENTION DEBUG]",
+        recommendation_mentions
+    )
+
+    print(
+        "[COACH AUTO PAUSED]",
+        auto_paused_categories
+    )
+
     print(
         "[COACH ACK DEBUG]",
         acknowledged_categories
     )
 
-
-
     recommendations = [
-        item for item in observations
+        item
+        for item in observations
         if item.get("status") in (
             "attention",
             "opportunity"
         )
         and item.get("category")
         not in acknowledged_categories
+        and item.get("category")
+        not in auto_paused_categories
     ]
 
     for index, recommendation in enumerate(
@@ -739,7 +1324,8 @@ def build_coach(
         )
 
     informational_observations = [
-        item for item in observations
+        item
+        for item in observations
         if item.get("status") in (
             "informational",
             "good",
@@ -751,36 +1337,124 @@ def build_coach(
     # Build the executive summary
     # ---------------------------------------------------------
     today_summary = build_today_summary(
-        dashboard,
+        dashboard
     )
 
     day_assessment = build_day_assessment(
-        appointment_count=today_summary["appointment_count"],
+        appointment_count=today_summary[
+            "appointment_count"
+        ],
         recommendations=recommendations,
         spa_now=spa_now
     )
 
-    recommendation_intro = build_recommendation_summary(
-        recommendations
+    recommendation_intro = (
+        build_recommendation_summary(
+            recommendations
+        )
     )
 
-    current_recommendation = (
-        recommendations[0]
-        if recommendations
-        else None
+    # ---------------------------------------------------------
+    # Rotate recommendations when Coach is reopened
+    # ---------------------------------------------------------
+    current_recommendation_index = 0
+    current_recommendation = None
+
+    current_recommendation_mention_count = 0
+    is_pause_offer = False
+
+    if recommendations:
+
+        saved_index = coach_session.get(
+            "current_recommendation_index"
+        )
+
+        if saved_index is not None:
+            try:
+                current_recommendation_index = int(
+                    saved_index
+                )
+            except (TypeError, ValueError):
+                current_recommendation_index = 0
+
+            current_recommendation_index %= len(
+                recommendations
+            )
+
+        else:
+            current_recommendation_index = (
+                coach_open_count - 1
+            ) % len(recommendations)
+
+        current_recommendation = recommendations[
+            current_recommendation_index
+        ]
+
+        # ---------------------------------------------------------
+        # Check how often this recommendation was mentioned today
+        # ---------------------------------------------------------
+        recommendation_mentions = (
+            coach_session.get(
+                "recommendation_mentions",
+                {}
+            ) or {}
+        )
+
+        if not isinstance(
+            recommendation_mentions,
+            dict
+        ):
+            recommendation_mentions = {}
+
+        current_recommendation_mention_count = 0
+        
+
+        if current_recommendation:
+            current_category = (
+                current_recommendation.get(
+                    "category",
+                    ""
+                )
+            )
+
+            try:
+                current_recommendation_mention_count = int(
+                    recommendation_mentions.get(
+                        current_category,
+                        0
+                    ) or 0
+                )
+            except (TypeError, ValueError):
+                current_recommendation_mention_count = 0
+
+
+
+
+
+    greeting = get_day_greeting(
+        spa_now
     )
 
-    greeting = get_day_greeting(spa_now)
-
+    # ---------------------------------------------------------
+    # Select the most useful schedule message
+    # ---------------------------------------------------------
     schedule_observation = next(
         (
-            item["message"]
+            item.get("message", "")
             for item in observations
             if item.get("category") in (
                 "Today's Schedule",
-                "Tomorrow's Schedule",
-                "7-Day Outlook"
+                "Tomorrow's Schedule"
             )
+        ),
+        ""
+    )
+
+    seven_day_observation = next(
+        (
+            item.get("message", "")
+            for item in observations
+            if item.get("category") == "7-Day Outlook"
         ),
         ""
     )
@@ -788,11 +1462,6 @@ def build_coach(
     review_intro = get_review_intro(
         spa_now,
         coach_open_count=coach_open_count
-    )
-
-    print(
-        "[COACH DEBUG] open_count:",
-        coach_open_count
     )
 
     print(
@@ -804,6 +1473,7 @@ def build_coach(
         greeting,
         review_intro,
         schedule_observation,
+        seven_day_observation,
         day_assessment
     ]
 
@@ -818,7 +1488,6 @@ def build_coach(
         if part and part.strip()
     )
 
-
     # ---------------------------------------------------------
     # Build the opening Coach interaction
     # ---------------------------------------------------------
@@ -826,84 +1495,152 @@ def build_coach(
     recommendation_message = None
     opening_question = None
 
+
+
+    yes_label = "Yes"
+    no_label = "No"
+
     if current_recommendation:
-        recommendation_title = current_recommendation.get(
-            "category",
-            "Business Recommendation"
+
+        recommendation_title = (
+            current_recommendation.get(
+                "category",
+                "Business Recommendation"
+            )
         )
 
-        recommendation_message = current_recommendation.get(
-            "message",
-            "This item needs your attention."
+        recommendation_message = (
+            current_recommendation.get(
+                "message",
+                "This item needs your attention."
+            )
         )
 
-        opening_question = (
-            current_recommendation.get("question")
-            or "Would you like to review this recommendation now?"
-        )
+        if is_pause_offer:
+            recommendation_title = (
+                "Overdue Appointment Reminders"
+            )
 
-        conversation_state = "recommendation_offer"
+            opening_question = (
+                "I’ve mentioned the overdue appointments "
+                "a few times today. Would you like me to "
+                "pause these reminders until tomorrow?"
+            )
+
+            yes_label = "Pause Until Tomorrow"
+            no_label = "Keep Reminding Me"
+            conversation_state = "pause_offer"
+
+        else:
+            opening_question = (
+                current_recommendation.get(
+                    "question"
+                )
+                or
+                "Would you like to review this recommendation now?"
+            )
+
+            conversation_state = (
+                "recommendation_offer"
+            )
 
     else:
         conversation_state = "complete"
 
     return {
-    "title": "🍑 Coach",
-    "greeting": greeting,
+        "title": "🍑 Coach",
+        "greeting": greeting,
 
-    "day_assessment": day_assessment,
+        "day_assessment": day_assessment,
 
-    "recommendation_summary": (
-        recommendation_intro["summary"]
-    ),
+        "recommendation_summary": (
+            recommendation_intro["summary"]
+        ),
 
-    "message": message,
+        "message": message,
 
-    "recommendation_title": recommendation_title,
-    "recommendation_message": recommendation_message,
+        "recommendation_title": (
+            recommendation_title
+        ),
 
-    "is_return_visit": is_return_visit,
-    "open_count": coach_open_count,
+        "recommendation_message": (
+            recommendation_message
+        ),
 
-    "question": opening_question,
-    "yes_label": "Yes",
-    "no_label": "No",
+        "is_return_visit": is_return_visit,
+        "open_count": coach_open_count,
 
-    "yes_url": (
-        current_recommendation.get("action_url")
-        if current_recommendation
-        else None
-    ),
+        "question": opening_question,
+        "yes_label": yes_label,
+        "no_label": no_label,
 
-    "reason": (
-        current_recommendation.get("category")
-        if current_recommendation
-        else "All Clear"
-    ),
+        "is_pause_offer": is_pause_offer,
 
-    "priority": (
-        current_recommendation.get("priority", 10)
-        if current_recommendation
-        else 10
-    ),
+        "current_recommendation_mention_count": (
+            current_recommendation_mention_count
+        ),
 
-    "conversation_state": conversation_state,
+        "yes_url": (
+            current_recommendation.get(
+                "action_url"
+            )
+            if current_recommendation
+            else None
+        ),
 
-    "current_recommendation_index": 0,
-    "total_recommendations": len(recommendations),
+        "reason": (
+            current_recommendation.get(
+                "category"
+            )
+            if current_recommendation
+            else "All Clear"
+        ),
 
-    "current_recommendation": current_recommendation,
-    "recommendations": recommendations,
+        "priority": (
+            current_recommendation.get(
+                "priority",
+                10
+            )
+            if current_recommendation
+            else 10
+        ),
 
-    "recommendation_count": (
-        recommendation_intro["count"]
-    ),
+        "conversation_state": (
+            conversation_state
+        ),
 
-    "informational_observations":
-        informational_observations,
+        "current_recommendation_index": (
+            current_recommendation_index
+        ),
 
-    "observations": observations
-}
+        "total_recommendations": len(
+            recommendations
+        ),
+
+        "has_more_recommendations": (
+            len(recommendations) > 1
+        ),
+
+        "current_recommendation": (
+            current_recommendation
+        ),
+
+        "recommendations": recommendations,
+
+        "recommendation_count": (
+            recommendation_intro["count"]
+        ),
+
+        "informational_observations": (
+            informational_observations
+        ),
+
+        "observations": observations
+    }
+
+
+
+
 
 
 def build_action_cards(

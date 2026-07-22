@@ -164,6 +164,27 @@
                 </p>
 
                 <div class="coach-response-buttons">
+
+                {% if coach.is_pause_offer %}
+
+                    <button type="button"
+                            class="btn"
+                            onclick='pauseCoachRecommendation(
+                                {{ coach.current_recommendation.category|tojson }}
+                            )'>
+                        {{ coach.yes_label }}
+                    </button>
+
+                    <button type="button"
+                            class="btn btn-secondary"
+                            onclick='keepCoachRecommendation(
+                                {{ coach.current_recommendation.category|tojson }}
+                            )'>
+                        {{ coach.no_label }}
+                    </button>
+
+                {% else %}
+
                     <button type="button"
                             class="btn"
                             onclick="showCoachRecommendation()">
@@ -175,9 +196,12 @@
                             onclick='dismissCoachRecommendation(
                                 {{ coach.current_recommendation.category|tojson }}
                             )'>
-                        No
+                        {{ coach.no_label }}
                     </button>
-                </div>
+
+                {% endif %}
+
+</div>
             </div>
 
     <!-- Recommendation revealed after initial Yes -->
@@ -328,15 +352,77 @@
 </div>
 
 <br>
-<<script>
+
+
+<script>
+    async function sendCoachAction(
+        category,
+        action
+    ) {
+        category = (category || "").trim();
+        action = (action || "").trim();
+
+        if (!category || !action) {
+            return false;
+        }
+
+        try {
+            const response = await fetch(
+                "/coach/acknowledge",
+                {
+                    method: "POST",
+                    credentials: "same-origin",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        category: category,
+                        action: action
+                    })
+                }
+            );
+
+            console.log(
+                "Coach action:",
+                category,
+                action,
+                response.status
+            );
+
+            if (!response.ok) {
+                console.error(
+                    "Coach action was not saved."
+                );
+
+                return false;
+            }
+
+            return true;
+
+        } catch (error) {
+            console.error(
+                "Coach action error:",
+                error
+            );
+
+            return false;
+        }
+    }
+
+
     function showCoachRecommendation() {
-        const offer = document.getElementById("coach-offer");
+        const offer = document.getElementById(
+            "coach-offer"
+        );
+
         const recommendation = document.getElementById(
             "coach-recommendation"
         );
+
         const dismissed = document.getElementById(
             "coach-dismissed"
         );
+
         const deferred = document.getElementById(
             "coach-deferred"
         );
@@ -358,145 +444,172 @@
         }
     }
 
-async function openCoachRecommendation(
-    url,
-    category
-) {
-    category = (category || "").trim();
 
-    if (category) {
-        try {
-            const response = await fetch(
-                "/coach/acknowledge",
-                {
-                    method: "POST",
-                    credentials: "same-origin",
-                    headers: {
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify({
-                        category: category
-                    })
-                }
-            );
+    async function openCoachRecommendation(
+        url,
+        category
+    ) {
+        await sendCoachAction(
+            category,
+            "review"
+        );
 
-            console.log(
-                "Coach acknowledgment:",
-                category,
-                response.status
-            );
-
-            if (!response.ok) {
-                console.error(
-                    "Coach acknowledgment was not saved."
-                );
-            }
-
-        } catch (error) {
-            console.error(
-                "Coach acknowledgment error:",
-                error
-            );
+        if (url) {
+            window.location.href = url;
         }
     }
 
-    if (url) {
-        window.location.href = url;
-    }
-}
 
+    async function dismissCoachRecommendation(
+        category
+    ) {
+        await sendCoachAction(
+            category,
+            "defer"
+        );
 
+        const offer = document.getElementById(
+            "coach-offer"
+        );
 
+        const recommendation = document.getElementById(
+            "coach-recommendation"
+        );
 
+        const dismissed = document.getElementById(
+            "coach-dismissed"
+        );
 
+        const cardItem = document.getElementById(
+            "coach-current-card-item"
+        );
 
+        const emptyMessage = document.getElementById(
+            "no-coach-recommendations"
+        );
 
- async function dismissCoachRecommendation(category) {
-    category = (category || "").trim();
+        if (offer) {
+            offer.hidden = true;
+        }
 
-    if (category) {
-        try {
-            const response = await fetch(
-                "/coach/acknowledge",
-                {
-                    method: "POST",
-                    credentials: "same-origin",
-                    headers: {
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify({
-                        category: category
-                    })
-                }
-            );
+        if (recommendation) {
+            recommendation.hidden = true;
+        }
 
-            console.log(
-                "Coach acknowledgment:",
-                category,
-                response.status
-            );
+        if (cardItem) {
+            cardItem.hidden = false;
+        }
 
-            if (!response.ok) {
-                console.error(
-                    "Coach acknowledgment was not saved."
-                );
-            }
+        if (emptyMessage) {
+            emptyMessage.hidden = true;
+        }
 
-        } catch (error) {
-            console.error(
-                "Coach acknowledgment error:",
-                error
-            );
+        if (dismissed) {
+            dismissed.hidden = false;
+
+            dismissed.innerHTML = `
+                <p>
+                    Understood. I’ve added it to your
+                    Coach Recommendations below.
+                </p>
+            `;
         }
     }
 
-    const offer = document.getElementById(
-        "coach-offer"
-    );
 
-    const recommendation = document.getElementById(
-        "coach-recommendation"
-    );
+    async function pauseCoachRecommendation(
+        category
+    ) {
+        await sendCoachAction(
+            category,
+            "pause_today"
+        );
 
-    const dismissed = document.getElementById(
-        "coach-dismissed"
-    );
+        const offer = document.getElementById(
+            "coach-offer"
+        );
 
-    const cardItem = document.getElementById(
-        "coach-current-card-item"
-    );
+        const recommendation = document.getElementById(
+            "coach-recommendation"
+        );
 
-    const emptyMessage = document.getElementById(
-        "no-coach-recommendations"
-    );
+        const dismissed = document.getElementById(
+            "coach-dismissed"
+        );
 
-    if (offer) {
-        offer.hidden = true;
+        const cardItem = document.getElementById(
+            "coach-current-card-item"
+        );
+
+        if (offer) {
+            offer.hidden = true;
+        }
+
+        if (recommendation) {
+            recommendation.hidden = true;
+        }
+
+        /*
+        Keep the operational recommendation card visible.
+        Only Coach's conversational reminder is paused.
+        */
+        if (cardItem) {
+            cardItem.hidden = false;
+        }
+
+        if (dismissed) {
+            dismissed.hidden = false;
+
+            dismissed.innerHTML = `
+                <p>
+                    Understood. I’ll pause Overdue Appointment
+                    reminders until tomorrow. The recommendation
+                    card will remain available below.
+                </p>
+            `;
+        }
     }
 
-    if (recommendation) {
-        recommendation.hidden = true;
-    }
 
-    if (cardItem) {
-        cardItem.hidden = false;
-    }
+    async function keepCoachRecommendation(
+        category
+    ) {
+        await sendCoachAction(
+            category,
+            "keep_reminding"
+        );
 
-    if (emptyMessage) {
-        emptyMessage.hidden = true;
-    }
+        const offer = document.getElementById(
+            "coach-offer"
+        );
 
-    if (dismissed) {
-        dismissed.hidden = false;
+        const dismissed = document.getElementById(
+            "coach-dismissed"
+        );
 
-        dismissed.innerHTML = `
-            <p>
-                Understood. I’ve added it to your
-                Coach Recommendations below.
-            </p>
-        `;
+        const cardItem = document.getElementById(
+            "coach-current-card-item"
+        );
+
+        if (offer) {
+            offer.hidden = true;
+        }
+
+        if (cardItem) {
+            cardItem.hidden = false;
+        }
+
+        if (dismissed) {
+            dismissed.hidden = false;
+
+            dismissed.innerHTML = `
+                <p>
+                    Understood. I’ll keep Overdue Appointments
+                    on today’s radar.
+                </p>
+            `;
+        }
     }
-}
 
 
     function closeCoachRecommendation() {
@@ -539,6 +652,23 @@ async function openCoachRecommendation(
             `;
         }
     }
+
+
+    /*
+    Record one mention whenever Coach presents the current
+    recommendation on the Daily Briefing page.
+    */
+    {% if coach.current_recommendation %}
+    document.addEventListener(
+        "DOMContentLoaded",
+        function () {
+            sendCoachAction(
+                {{ coach.current_recommendation.category|tojson }},
+                "mention"
+            );
+        }
+    );
+    {% endif %}
 </script>
 
 

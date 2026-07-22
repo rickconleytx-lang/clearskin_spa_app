@@ -12,13 +12,25 @@
     </div>
 
     <!-- Navigation -->
-        <div class="form-buttons">
-        <button type="submit" class="btn">Save General Income</button>
-        <a href="{{ url_for('income_report') }}" class="btn btn-secondary">View Income Report</a>
-        <a href="{{ url_for('accounting_home') }}" class="btn btn-secondary">Accounting Home</a>
+    <div class="page-tool-pills" style="margin-top: 15px;">
 
-     </div>
+        <button type="submit"
+                class="tool-pill tool-pill-small">
+            Save General Income
+        </button>
 
+        <a href="{{ url_for('income_report') }}"
+        class="tool-pill tool-pill-small">
+            View Income Report
+        </a>
+
+        <a href="{{ url_for('accounting_home') }}"
+        class="tool-pill tool-pill-small">
+            Accounting Home
+        </a>
+
+    </div>
+<br>
 
     <div class="form-card">
         <form method="POST" class="general-income-form">

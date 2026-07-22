@@ -66,29 +66,35 @@
                 </select>
             </div>
 
-            <div class="filter-buttons">
-                <button type="submit" class="btn">Run Report</button>
+            <div class="page-tool-pills"
+                style="margin-top: 15px; gap: 6px; flex-wrap: wrap;">
 
-                <a class="btn btn-secondary"
-                   href="{{ url_for('income_report') }}">
+                <button type="submit"
+                        class="tool-pill tool-pill-small">
+                    Run Report
+                </button>
+
+                <a href="{{ url_for('income_report') }}"
+                class="tool-pill tool-pill-small">
                     Reset
                 </a>
 
-                <a class="btn"
-                   href="{{ url_for('income_report_csv',
-                       start_date=start_date,
-                       end_date=end_date,
-                       income_type=income_type) }}">
+                <a href="{{ url_for('income_report_csv',
+                    start_date=start_date,
+                    end_date=end_date,
+                    income_type=income_type) }}"
+                class="tool-pill tool-pill-small">
                     Export to CSV
                 </a>
 
-                <a class="btn"
-                   href="{{ url_for('income_report_excel',
-                       start_date=start_date,
-                       end_date=end_date,
-                       income_type=income_type) }}">
+                <a href="{{ url_for('income_report_excel',
+                    start_date=start_date,
+                    end_date=end_date,
+                    income_type=income_type) }}"
+                class="tool-pill tool-pill-small">
                     Export to Excel
                 </a>
+
             </div>
 
         </form>

@@ -9,15 +9,26 @@ nano daily_schedule.html{% extends "base.html" %}
 
 <h3>{{ display_date.strftime('%A, %B %d, %Y') }}</h3>
 
-<div style="margin-bottom: 15px;">
-    <a class="btn" href="{{ url_for('schedule_appointment_start', selected_date=display_date.strftime('%Y-%m-%d')) }}">
+
+<div class="page-tool-pills">
+
+    <a
+        href="{{  url_for('schedule_appointment_start', selected_date=display_date.strftime('%Y-%m-%d')) }}"
+        class="tool-pill tool-pill-small"
+    >
         Schedule Appointment for This Date
     </a>
 
-    <a class="btn" href="{{ url_for('calendar_view') }}">
+    <a
+        href="{{ url_for('calendar_view') }}"
+        class="tool-pill tool-pill-small"
+    >
         Back to Calendar
     </a>
+
 </div>
+
+
 
 {% if appointments %}
     <table>

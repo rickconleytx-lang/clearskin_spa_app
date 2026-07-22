@@ -162,7 +162,7 @@
         <label>Sun Exposure Level</label><br>
         <input type="text" name="sun_exposure_level" value="{{ health[17] if health else '' }}"><br><br>
 
-        <label>Last Facial Date</label><br>
+        <label>Last Appointment Date</label><br>
         <input type="date" name="last_facial_date" value="{{ health[18].strftime('%Y-%m-%d') if health and health[18] else '' }}"><br><br>
     </div>
 
@@ -260,15 +260,15 @@
 
     <!-- HEALTH NOTES -->
     <div style="border:1px solid #ccc; padding:15px; margin-bottom:20px; border-radius:8px;">
-        <h2>Health Notes</h2>
+        <h2>Notes</h2>
 
-        <label>Health Notes 1</label><br>
+        <label>Notes 1</label><br>
         <textarea name="health_notes1" rows="3">{{ health[19] if health else '' }}</textarea><br><br>
 
-        <label>Health Notes 2</label><br>
+        <label>Notes 2</label><br>
         <textarea name="health_notes2" rows="3">{{ health[20] if health else '' }}</textarea><br><br>
 
-        <label>Health Notes 3</label><br>
+        <label>Notes 3</label><br>
         <textarea name="health_notes3" rows="3">{{ health[21] if health else '' }}</textarea>
     </div>
 
@@ -276,19 +276,19 @@
     <div style="border:1px solid #ccc; padding:15px; margin-bottom:20px; border-radius:8px; background:#f9f9f9;">
         <h2>Record Info</h2>
 
-        <p><strong>Client Created At:</strong>
+        <p><strong>Client Record Created At:</strong>
             {{ client[17].strftime('%m/%d/%Y %I:%M %p') if client and client[17] else '-' }}
         </p>
 
-        <p><strong>Client Updated At:</strong>
+        <p><strong>Client Record Updated At:</strong>
             {{ client[18].strftime('%m/%d/%Y %I:%M %p') if client and client[18] else '-' }}
         </p>
 
-        <p><strong>Health Profile Last Updated:</strong>
+        <p><strong>Client Profile Last Updated:</strong>
             {{ health[22].strftime('%m/%d/%Y') if health and health[22] else '-' }}
         </p>
 
-        <p><strong>Health Profile Created At:</strong>
+        <p><strong>Client Profile Created At:</strong>
             {{ health[23].strftime('%m/%d/%Y %I:%M %p') if health and health[23] else '-' }}
         </p>
     </div>

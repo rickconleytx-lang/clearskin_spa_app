@@ -8,11 +8,26 @@
 
 <h1>Business Summary Dashboard</h1>
 
-<div style="margin-bottom: 20px;">
-    <a class="btn" href="{{ url_for('reports') }}">Standard Reports</a>
-    <a class="btn" href="{{ url_for('reports_range') }}">Custom Date Range</a>
-    <button type="button" class="btn" onclick="window.print()">Print Report</button>
+<div>
+    <a
+        href="{{ url_for('reports') }}"
+        class="tool-pill tool-pill-small"
+    >
+        Standard Reports
+    </a>
+
+    <a
+        href="{{ url_for('reports_range') }}"
+        class="tool-pill tool-pill-small"
+    >
+        Custom Date Range
+    </a>
+
+    <button type="btn" onclick="window.print()">Print Report</button>
+
 </div>
+<br>
+
 
 <div class="health-container">
 
