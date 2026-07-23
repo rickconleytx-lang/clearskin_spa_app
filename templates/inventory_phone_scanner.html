@@ -1,0 +1,410 @@
+{% extends "base.html" %}
+
+{% block title %}Peach Suite Pro | Phone Inventory Scanner{% endblock %}
+
+{% block content %}
+
+<div class="form-page">
+
+    <div class="page-header">
+        <div>
+            <h1>📱 Phone Inventory Scanner</h1>
+
+            <p class="page-subtitle">
+                Scan product barcodes and send them to the inventory
+                session open on your computer.
+            </p>
+        </div>
+    </div>
+
+    <div class="styled-form">
+
+        <div class="form-group">
+
+            <p>
+                <strong>Pairing Code:</strong>
+                {{ pairing_code }}
+            </p>
+
+            <p id="scanner-status"
+               style="color:#666;">
+                Ready to scan.
+            </p>
+
+        </div>
+
+        <div class="form-group">
+
+            <button type="button"
+                    id="start-phone-scanner"
+                    class="tool-pill tool-pill-small"
+                    onclick="startPhoneScanner()">
+                Start Scanner
+            </button>
+
+            <button type="button"
+                    id="stop-phone-scanner"
+                    class="tool-pill tool-pill-small"
+                    onclick="stopPhoneScanner()"
+                    hidden>
+                Stop Scanner
+            </button>
+
+        </div>
+
+        <div class="form-group">
+
+            <video id="phone-scanner-video"
+                   playsinline
+                   muted
+                   style="
+                        width:100%;
+                        max-width:500px;
+                        min-height:260px;
+                        background:#111;
+                        border-radius:12px;
+                        border:1px solid #ccc;
+                   ">
+            </video>
+
+        </div>
+
+        <div class="form-group">
+
+            <label for="manual-barcode">
+                Enter Barcode Manually
+            </label>
+
+            <input type="text"
+                   id="manual-barcode"
+                   autocomplete="off"
+                   inputmode="numeric"
+                   placeholder="Enter SKU or barcode">
+
+            <button type="button"
+                    class="tool-pill tool-pill-small"
+                    onclick="submitManualBarcode()">
+                Send Barcode
+            </button>
+
+        </div>
+
+        <div id="last-scan-panel"
+             class="card"
+             style="display:none; margin-top:18px;">
+
+            <div class="card-body">
+
+                <strong>Last Barcode Sent</strong>
+
+                <p id="last-scan-value"
+                   style="font-size:1.15rem; margin-bottom:0;">
+                </p>
+
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+<script src="https://unpkg.com/@zxing/library@latest"></script>
+
+<script>
+
+let phoneCodeReader = null;
+let phoneScannerActive = false;
+let lastSubmittedBarcode = null;
+let lastSubmittedAt = 0;
+
+
+function setPhoneScannerStatus(
+    message,
+    isError = false
+) {
+    const statusElement = document.getElementById(
+        "scanner-status"
+    );
+
+    if (!statusElement) {
+        return;
+    }
+
+    statusElement.textContent = message;
+
+    statusElement.style.color = (
+        isError
+            ? "#a33"
+            : "#666"
+    );
+}
+
+
+async function sendBarcodeToDesktop(
+    barcode
+) {
+    barcode = String(
+        barcode || ""
+    ).trim();
+
+    if (!barcode) {
+        setPhoneScannerStatus(
+            "No barcode was detected.",
+            true
+        );
+
+        return;
+    }
+
+    const currentTime = Date.now();
+
+    if (
+        barcode === lastSubmittedBarcode
+        && currentTime - lastSubmittedAt < 2000
+    ) {
+        return;
+    }
+
+    lastSubmittedBarcode = barcode;
+    lastSubmittedAt = currentTime;
+
+    setPhoneScannerStatus(
+        "Sending barcode to computer..."
+    );
+
+    try {
+        const response = await fetch(
+            {{
+                url_for(
+                    "submit_inventory_phone_scan",
+                    token=scanner_token
+                )|tojson
+            }},
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    barcode: barcode
+                })
+            }
+        );
+
+        const result = await response.json();
+
+        if (
+            !response.ok
+            || result.status === "error"
+        ) {
+            throw new Error(
+                result.message
+                || "The barcode could not be sent."
+            );
+        }
+
+        if (result.status === "expired") {
+            setPhoneScannerStatus(
+                "This scanner session has expired.",
+                true
+            );
+
+            stopPhoneScanner();
+            return;
+        }
+
+        const lastScanPanel = document.getElementById(
+            "last-scan-panel"
+        );
+
+        const lastScanValue = document.getElementById(
+            "last-scan-value"
+        );
+
+        if (lastScanValue) {
+            lastScanValue.textContent = barcode;
+        }
+
+        if (lastScanPanel) {
+            lastScanPanel.style.display = "block";
+        }
+
+        setPhoneScannerStatus(
+            "Barcode sent successfully. Ready for another scan."
+        );
+
+        if (
+            navigator.vibrate
+        ) {
+            navigator.vibrate(120);
+        }
+
+    } catch (error) {
+        console.error(
+            "Phone scanner submission error:",
+            error
+        );
+
+        setPhoneScannerStatus(
+            error.message
+            || "The barcode could not be sent.",
+            true
+        );
+    }
+}
+
+
+async function startPhoneScanner() {
+    if (phoneScannerActive) {
+        return;
+    }
+
+    phoneCodeReader = new ZXing.BrowserBarcodeReader();
+
+    phoneScannerActive = true;
+
+    document.getElementById(
+        "start-phone-scanner"
+    ).hidden = true;
+
+    document.getElementById(
+        "stop-phone-scanner"
+    ).hidden = false;
+
+    setPhoneScannerStatus(
+        "Starting camera..."
+    );
+
+    try {
+        await phoneCodeReader.decodeFromVideoDevice(
+            null,
+            "phone-scanner-video",
+            async (
+                result,
+                error
+            ) => {
+                if (result) {
+                    await sendBarcodeToDesktop(
+                        result.text
+                    );
+                }
+
+                if (
+                    error
+                    && !(
+                        error instanceof
+                        ZXing.NotFoundException
+                    )
+                ) {
+                    console.error(
+                        "Phone scanner error:",
+                        error
+                    );
+                }
+            }
+        );
+
+        setPhoneScannerStatus(
+            "Scanner active. Point the camera at a barcode."
+        );
+
+    } catch (error) {
+        console.error(
+            "Unable to start phone scanner:",
+            error
+        );
+
+        setPhoneScannerStatus(
+            "Camera access could not be started.",
+            true
+        );
+
+        stopPhoneScanner();
+    }
+}
+
+
+function stopPhoneScanner() {
+    if (phoneCodeReader) {
+        phoneCodeReader.reset();
+    }
+
+    phoneScannerActive = false;
+
+    const startButton = document.getElementById(
+        "start-phone-scanner"
+    );
+
+    const stopButton = document.getElementById(
+        "stop-phone-scanner"
+    );
+
+    if (startButton) {
+        startButton.hidden = false;
+    }
+
+    if (stopButton) {
+        stopButton.hidden = true;
+    }
+
+    setPhoneScannerStatus(
+        "Scanner stopped."
+    );
+}
+
+
+function submitManualBarcode() {
+    const input = document.getElementById(
+        "manual-barcode"
+    );
+
+    if (!input) {
+        return;
+    }
+
+    const barcode = input.value.trim();
+
+    sendBarcodeToDesktop(
+        barcode
+    );
+
+    input.value = "";
+    input.focus();
+}
+
+
+document.addEventListener(
+    "DOMContentLoaded",
+    function () {
+        const manualInput = document.getElementById(
+            "manual-barcode"
+        );
+
+        if (manualInput) {
+            manualInput.addEventListener(
+                "keydown",
+                function (event) {
+                    if (event.key === "Enter") {
+                        event.preventDefault();
+                        submitManualBarcode();
+                    }
+                }
+            );
+        }
+    }
+);
+
+
+window.addEventListener(
+    "beforeunload",
+    function () {
+        if (phoneCodeReader) {
+            phoneCodeReader.reset();
+        }
+    }
+);
+
+</script>
+
+{% endblock %}

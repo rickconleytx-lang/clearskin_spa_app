@@ -6,6 +6,10 @@ import imaplib
 import email
 import calendar
 import click
+import secrets
+
+
+
 
 from datetime import date, timedelta, datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -17945,9 +17949,9 @@ def client_consent_history(client_id):
 
 
 
-
-
-#   --------------------------------------------------
+#################################################
+########################################################
+##############################################################
 #
 #             >>>>>  INVENTORY   <<<<<<<<<<<<<<<
 #
@@ -18686,8 +18690,8 @@ def edit_inventory_product(product_id):
 
 
 
-
-#   --------------------------------------
+###################################################
+##############################################
 #   INVENTORY SCAN
 #   
 #   --------------------------------------
@@ -18743,6 +18747,626 @@ def inventory_scan_result():
 
     flash(f"SKU not found: {scanned_sku}", "warning")
     return redirect(url_for("add_inventory_product") + f"?sku={scanned_sku}")
+
+
+
+
+
+############################################
+#
+#   INVENTORY PHONE SCANNER
+#
+#
+####################################################
+
+# =========================================================
+# INVENTORY — PHONE SCANNER SESSION
+# =========================================================
+
+
+
+
+@app.route(
+    "/inventory/phone-scanner/session",
+    methods=["POST"]
+)
+@login_required
+@spa_required
+def create_inventory_phone_scan_session():
+    spa_id = current_spa_id()
+    user_id = session["user_id"]
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        # Close any older scanner session opened by this user.
+        cur.execute("""
+            UPDATE inventory_scan_sessions
+            SET
+                status = 'closed',
+                closed_at = CURRENT_TIMESTAMP
+            WHERE spa_id = %s
+              AND created_by = %s
+              AND status = 'active'
+        """, (
+            spa_id,
+            user_id,
+        ))
+
+        session_token = secrets.token_urlsafe(32)
+
+        pairing_code = None
+
+        # Find an unused six-digit pairing code.
+        for _ in range(20):
+            proposed_code = str(
+                secrets.randbelow(900000) + 100000
+            )
+
+            cur.execute("""
+                SELECT 1
+                FROM inventory_scan_sessions
+                WHERE pairing_code = %s
+                  AND status = 'active'
+                  AND expires_at > CURRENT_TIMESTAMP
+            """, (proposed_code,))
+
+            if cur.fetchone() is None:
+                pairing_code = proposed_code
+                break
+
+        if pairing_code is None:
+            raise RuntimeError(
+                "Could not generate a scanner pairing code."
+            )
+
+        cur.execute("""
+            INSERT INTO inventory_scan_sessions (
+                spa_id,
+                created_by,
+                session_token,
+                pairing_code,
+                status,
+                expires_at,
+                last_activity_at
+            )
+            VALUES (
+                %s,
+                %s,
+                %s,
+                %s,
+                'active',
+                CURRENT_TIMESTAMP + INTERVAL '20 minutes',
+                CURRENT_TIMESTAMP
+            )
+            RETURNING
+                scan_session_id,
+                expires_at
+        """, (
+            spa_id,
+            user_id,
+            session_token,
+            pairing_code,
+        ))
+
+        row = cur.fetchone()
+
+        conn.commit()
+
+        phone_url = url_for(
+            "inventory_phone_scanner",
+            token=session_token,
+            _external=True
+        )
+
+        return jsonify({
+            "status": "success",
+            "scan_session_id": row[0],
+            "pairing_code": pairing_code,
+            "phone_url": phone_url,
+            "poll_url": url_for(
+                "poll_inventory_phone_scan",
+                scan_session_id=row[0]
+            ),
+            "close_url": url_for(
+                "close_inventory_phone_scan_session",
+                scan_session_id=row[0]
+            ),
+            "expires_at": row[1].isoformat(),
+        })
+
+    except Exception:
+        conn.rollback()
+
+        app.logger.exception(
+            "Failed to create inventory phone scanner session."
+        )
+
+        return jsonify({
+            "status": "error",
+            "message": (
+                "The phone scanner session could not be created."
+            )
+        }), 500
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
+
+
+
+
+
+
+
+
+
+# =========================================================
+# INVENTORY — PHONE SCANNER PAGE
+# =========================================================
+
+
+
+
+@app.route(
+    "/inventory/phone-scanner/<token>"
+)
+def inventory_phone_scanner(token):
+    token = str(token or "").strip()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            UPDATE inventory_scan_sessions
+            SET
+                status = 'expired',
+                closed_at = CURRENT_TIMESTAMP
+            WHERE session_token = %s
+              AND status = 'active'
+              AND expires_at <= CURRENT_TIMESTAMP
+        """, (token,))
+
+        cur.execute("""
+            SELECT
+                scan_session_id,
+                pairing_code,
+                expires_at
+            FROM inventory_scan_sessions
+            WHERE session_token = %s
+              AND status = 'active'
+              AND expires_at > CURRENT_TIMESTAMP
+        """, (token,))
+
+        scanner_session = cur.fetchone()
+
+        conn.commit()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if scanner_session is None:
+        return render_template(
+            "inventory_phone_scanner_expired.html"
+        ), 410
+
+    return render_template(
+        "inventory_phone_scanner.html",
+        scanner_token=token,
+        pairing_code=scanner_session[1],
+        expires_at=scanner_session[2]
+    )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# =========================================================
+# INVENTORY — PHONE SUBMITS A BARCODE
+# ====
+# =====================================================
+
+
+
+
+@app.route(
+    "/inventory/phone-scanner/<token>/submit",
+    methods=["POST"]
+)
+def submit_inventory_phone_scan(token):
+    data = request.get_json(silent=True) or {}
+
+    barcode = str(
+        data.get("barcode") or ""
+    ).strip()
+
+    if not barcode:
+        return jsonify({
+            "status": "error",
+            "message": "No barcode was received."
+        }), 400
+
+    if len(barcode) > 255:
+        return jsonify({
+            "status": "error",
+            "message": "The scanned barcode is too long."
+        }), 400
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                scan_session_id,
+                spa_id
+            FROM inventory_scan_sessions
+            WHERE session_token = %s
+              AND status = 'active'
+              AND expires_at > CURRENT_TIMESTAMP
+            FOR UPDATE
+        """, (token,))
+
+        scanner_session = cur.fetchone()
+
+        if scanner_session is None:
+            conn.rollback()
+
+            return jsonify({
+                "status": "expired",
+                "message": (
+                    "This scanner session has expired "
+                    "or was closed."
+                )
+            }), 410
+
+        scan_session_id = scanner_session[0]
+        spa_id = scanner_session[1]
+
+        # Prevent the camera callback from sending the same
+        # barcode repeatedly within a short period.
+        cur.execute("""
+            SELECT 1
+            FROM inventory_scan_events
+            WHERE scan_session_id = %s
+              AND barcode = %s
+              AND created_at >=
+                    CURRENT_TIMESTAMP - INTERVAL '2 seconds'
+            LIMIT 1
+        """, (
+            scan_session_id,
+            barcode,
+        ))
+
+        duplicate_scan = cur.fetchone()
+
+        if duplicate_scan:
+            conn.commit()
+
+            return jsonify({
+                "status": "duplicate",
+                "barcode": barcode
+            })
+
+        cur.execute("""
+            INSERT INTO inventory_scan_events (
+                scan_session_id,
+                spa_id,
+                barcode,
+                status
+            )
+            VALUES (
+                %s,
+                %s,
+                %s,
+                'pending'
+            )
+            RETURNING scan_event_id
+        """, (
+            scan_session_id,
+            spa_id,
+            barcode,
+        ))
+
+        scan_event_id = cur.fetchone()[0]
+
+        cur.execute("""
+            UPDATE inventory_scan_sessions
+            SET last_activity_at = CURRENT_TIMESTAMP
+            WHERE scan_session_id = %s
+        """, (scan_session_id,))
+
+        conn.commit()
+
+        return jsonify({
+            "status": "success",
+            "scan_event_id": scan_event_id,
+            "barcode": barcode
+        })
+
+    except Exception:
+        conn.rollback()
+
+        app.logger.exception(
+            "Failed to receive inventory phone scan."
+        )
+
+        return jsonify({
+            "status": "error",
+            "message": "The barcode could not be sent."
+        }), 500
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
+
+
+
+
+# =========================================================
+# INVENTORY — DESKTOP POLLS FOR PHONE SCANS
+# =========================================================
+
+
+
+
+@app.route(
+    "/inventory/phone-scanner/session/"
+    "<int:scan_session_id>/poll"
+)
+@login_required
+@spa_required
+def poll_inventory_phone_scan(scan_session_id):
+    spa_id = current_spa_id()
+    user_id = session["user_id"]
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            UPDATE inventory_scan_sessions
+            SET
+                status = 'expired',
+                closed_at = CURRENT_TIMESTAMP
+            WHERE scan_session_id = %s
+              AND spa_id = %s
+              AND created_by = %s
+              AND status = 'active'
+              AND expires_at <= CURRENT_TIMESTAMP
+        """, (
+            scan_session_id,
+            spa_id,
+            user_id,
+        ))
+
+        cur.execute("""
+            SELECT status
+            FROM inventory_scan_sessions
+            WHERE scan_session_id = %s
+              AND spa_id = %s
+              AND created_by = %s
+        """, (
+            scan_session_id,
+            spa_id,
+            user_id,
+        ))
+
+        session_row = cur.fetchone()
+
+        if session_row is None:
+            conn.rollback()
+
+            return jsonify({
+                "status": "not_found"
+            }), 404
+
+        if session_row[0] != "active":
+            conn.commit()
+
+            return jsonify({
+                "status": session_row[0]
+            })
+
+        cur.execute("""
+            SELECT
+                scan_event_id,
+                barcode
+            FROM inventory_scan_events
+            WHERE scan_session_id = %s
+              AND spa_id = %s
+              AND status = 'pending'
+            ORDER BY scan_event_id ASC
+            LIMIT 1
+            FOR UPDATE SKIP LOCKED
+        """, (
+            scan_session_id,
+            spa_id,
+        ))
+
+        scan_event = cur.fetchone()
+
+        if scan_event is None:
+            conn.commit()
+
+            return jsonify({
+                "status": "waiting"
+            })
+
+        cur.execute("""
+            UPDATE inventory_scan_events
+            SET
+                status = 'processed',
+                processed_at = CURRENT_TIMESTAMP
+            WHERE scan_event_id = %s
+              AND spa_id = %s
+        """, (
+            scan_event[0],
+            spa_id,
+        ))
+
+        cur.execute("""
+            UPDATE inventory_scan_sessions
+            SET last_activity_at = CURRENT_TIMESTAMP
+            WHERE scan_session_id = %s
+              AND spa_id = %s
+        """, (
+            scan_session_id,
+            spa_id,
+        ))
+
+        conn.commit()
+
+        return jsonify({
+            "status": "scan_received",
+            "barcode": scan_event[1]
+        })
+
+    except Exception:
+        conn.rollback()
+
+        app.logger.exception(
+            "Failed to poll inventory phone scanner."
+        )
+
+        return jsonify({
+            "status": "error"
+        }), 500
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
+
+
+
+
+
+# =========================================================
+# INVENTORY — CLOSE PHONE SCANNER SESSION
+# =========================================================
+
+@app.route(
+    "/inventory/phone-scanner/session/"
+    "<int:scan_session_id>/close",
+    methods=["POST"]
+)
+@login_required
+@spa_required
+def close_inventory_phone_scan_session(
+    scan_session_id
+):
+    spa_id = current_spa_id()
+    user_id = session["user_id"]
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            UPDATE inventory_scan_sessions
+            SET
+                status = 'closed',
+                closed_at = CURRENT_TIMESTAMP
+            WHERE scan_session_id = %s
+              AND spa_id = %s
+              AND created_by = %s
+              AND status = 'active'
+        """, (
+            scan_session_id,
+            spa_id,
+            user_id,
+        ))
+
+        conn.commit()
+
+        return jsonify({
+            "status": "success"
+        })
+
+    except Exception:
+        conn.rollback()
+
+        app.logger.exception(
+            "Failed to close inventory phone scanner session."
+        )
+
+        return jsonify({
+            "status": "error"
+        }), 500
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
+
+
+
+
+
+
+
+
+############################################
+#
+#  
+#
+#
+####################################################
+
+
+
+
+
+
+
+############################################
+#
+#
+#
+#
+####################################################
+
+
+
+
+
+
+
+############################################
+#
+#
+#
+#
+####################################################
+
 
 
 
@@ -28296,6 +28920,230 @@ def dashboard():
    
 
 
+def calculate_business_health(
+    dashboard,
+    business_schedule_due=None,
+    godaddy_unreviewed_count=0
+):
+    business_schedule_due = (
+        business_schedule_due or []
+    )
+
+    score = 100
+    factors = []
+
+    def add_deduction(
+        category,
+        count,
+        points,
+        message
+    ):
+        nonlocal score
+
+        if count <= 0:
+            return
+
+        score -= points
+
+        factors.append({
+            "category": category,
+            "count": count,
+            "points": points,
+            "message": message,
+        })
+
+    # ---------------------------------------------------------
+    # Recurring-expense processing failures
+    # ---------------------------------------------------------
+    failed_recurring = len(
+        dashboard.get(
+            "recurring_expenses_failed",
+            []
+        ) or []
+    )
+
+    add_deduction(
+        category="Recurring Expense Failures",
+        count=failed_recurring,
+        points=min(
+            failed_recurring * 20,
+            40
+        ),
+        message=(
+            f"{failed_recurring} recurring expense "
+            f"{'has' if failed_recurring == 1 else 'have'} "
+            "a processing failure."
+        )
+    )
+
+    # ---------------------------------------------------------
+    # Past-due recurring expenses
+    # ---------------------------------------------------------
+    past_due_recurring = len(
+        dashboard.get(
+            "recurring_expenses_past_due",
+            []
+        ) or []
+    )
+
+    add_deduction(
+        category="Past-Due Recurring Expenses",
+        count=past_due_recurring,
+        points=min(
+            past_due_recurring * 12,
+            36
+        ),
+        message=(
+            f"{past_due_recurring} recurring "
+            f"{'expense is' if past_due_recurring == 1 else 'expenses are'} "
+            "past due."
+        )
+    )
+
+    # ---------------------------------------------------------
+    # Reminder-only expenses due today
+    # ---------------------------------------------------------
+    due_today_recurring = (
+        dashboard.get(
+            "recurring_expenses_due_today",
+            []
+        )
+        or []
+    )
+
+    reminder_only_due_today = sum(
+        1
+        for expense in due_today_recurring
+        if expense.get(
+            "processing_type"
+        ) == "reminder_only"
+    )
+
+    add_deduction(
+        category="Recurring Expenses Due Today",
+        count=reminder_only_due_today,
+        points=min(
+            reminder_only_due_today * 5,
+            15
+        ),
+        message=(
+            f"{reminder_only_due_today} recurring "
+            f"{'expense requires' if reminder_only_due_today == 1 else 'expenses require'} "
+            "manual posting today."
+        )
+    )
+
+    # ---------------------------------------------------------
+    # Overdue appointments
+    # ---------------------------------------------------------
+    overdue_appointments = len(
+        dashboard.get(
+            "overdue_appointments",
+            []
+        ) or []
+    )
+
+    add_deduction(
+        category="Overdue Appointments",
+        count=overdue_appointments,
+        points=min(
+            overdue_appointments * 10,
+            30
+        ),
+        message=(
+            f"{overdue_appointments} "
+            f"{'appointment needs' if overdue_appointments == 1 else 'appointments need'} "
+            "closeout."
+        )
+    )
+
+    # ---------------------------------------------------------
+    # Unreviewed GoDaddy imports
+    # ---------------------------------------------------------
+    godaddy_unreviewed_count = int(
+        godaddy_unreviewed_count or 0
+    )
+
+    add_deduction(
+        category="GoDaddy Imports",
+        count=godaddy_unreviewed_count,
+        points=min(
+            godaddy_unreviewed_count * 5,
+            20
+        ),
+        message=(
+            f"{godaddy_unreviewed_count} imported "
+            f"{'appointment needs' if godaddy_unreviewed_count == 1 else 'appointments need'} "
+            "review."
+        )
+    )
+
+    # ---------------------------------------------------------
+    # Business schedule responsibilities due
+    # ---------------------------------------------------------
+    business_schedule_due_count = len(
+        business_schedule_due
+    )
+
+    add_deduction(
+        category="Business Schedule",
+        count=business_schedule_due_count,
+        points=min(
+            business_schedule_due_count * 6,
+            18
+        ),
+        message=(
+            f"{business_schedule_due_count} business "
+            f"{'responsibility is' if business_schedule_due_count == 1 else 'responsibilities are'} "
+            "due."
+        )
+    )
+
+    score = max(
+        0,
+        min(100, score)
+    )
+
+    if score >= 90:
+        label = "Excellent"
+    elif score >= 80:
+        label = "Good"
+    elif score >= 65:
+        label = "Needs Attention"
+    else:
+        label = "At Risk"
+
+    if factors:
+        summary = factors[0]["message"]
+    else:
+        summary = (
+            "All monitored business operations are current."
+        )
+
+    return {
+        "score": score,
+        "label": label,
+        "summary": summary,
+        "issue_count": len(factors),
+
+        "affected_item_count": sum(
+            factor["count"]
+            for factor in factors
+        ),
+        "factors": factors,
+    }
+
+
+
+
+####################################################
+###################################################
+#
+#    MORNING BRIEFING
+#
+#############################################
+
+
 
 @app.route("/morning_briefing")
 @login_required
@@ -28667,9 +29515,44 @@ def morning_briefing():
         recurring_expense_alerts
     )
 
+    # ---------------------------------------------------------
+    # Calculate Business Health
+    # ---------------------------------------------------------
+    business_health = calculate_business_health(
+        dashboard=dashboard,
+        business_schedule_due=business_schedule_due,
+        godaddy_unreviewed_count=(
+            godaddy_unreviewed_count
+        )
+    )
 
 
-   # ---------------------------------------------------------
+
+    print(
+        "[BUSINESS HEALTH DEBUG]",
+        business_health,
+        flush=True
+    )
+
+    print(
+        "[TODAY BUSINESS DEBUG]",
+        {
+            key: value
+            for key, value in dashboard.items()
+            if any(
+                word in key.lower()
+                for word in (
+                    "today",
+                    "appointment",
+                    "revenue"
+                )
+            )
+        },
+        flush=True
+    )
+
+
+    # ---------------------------------------------------------
     # Coach performs the review only after all data is collected
     # ---------------------------------------------------------
 
@@ -34423,6 +35306,14 @@ def clear_new_client():
 #    END   END   END   END   END
 #  --------------------------------
 
+
+############################################
+#
+#       SCHEDULED
+#
+#
+#############################################
+
 def scheduled_send_pending_reminders():
     print("Running scheduled reminder queue...", flush=True)
 
@@ -34561,7 +35452,8 @@ def start_scheduler():
         replace_existing=True,
         coalesce=True,
         max_instances=1,
-        misfire_grace_time=3600
+        misfire_grace_time=3600,
+        next_run_time=datetime.now()
     )
 
 

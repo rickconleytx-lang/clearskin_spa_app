@@ -4098,3 +4098,225 @@ button.tool-pill:hover {
         minmax(170px, 1fr)
     );
 }
+
+/* =========================================================
+   DAILY BRIEFING — EXECUTIVE SUMMARY
+========================================================= */
+
+.briefing-hero {
+    display: grid;
+    grid-template-columns:
+        minmax(250px, 1.25fr)
+        repeat(3, minmax(180px, 1fr));
+    gap: 22px;
+    align-items: stretch;
+
+    padding: 28px 34px;
+    margin: 28px 0 30px;
+
+    background: #fffaf5;
+    border: 1px solid #efc5a7;
+    border-radius: 18px;
+}
+
+.briefing-hero-intro {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.briefing-hero-intro h2 {
+    margin: 0 0 18px;
+}
+
+.briefing-hero-intro p {
+    margin: 0;
+}
+
+.briefing-local-time {
+    color: #666;
+}
+
+.briefing-summary-card {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+
+    min-height: 130px;
+    padding: 20px;
+
+    text-align: center;
+
+    background: #ffffff;
+    border: 1px solid #efc5a7;
+    border-radius: 16px;
+}
+
+.briefing-card-title {
+    margin-bottom: 10px;
+
+    color: #666;
+    font-size: 0.95rem;
+    font-weight: 600;
+}
+
+.briefing-card-value {
+    color: #4d2c20;
+    font-size: 1.15rem;
+    font-weight: 700;
+}
+
+.briefing-card-detail {
+    margin-top: 8px;
+
+    color: #777;
+    font-size: 0.9rem;
+}
+
+
+/* Tablet */
+@media (max-width: 1050px) {
+
+    .briefing-hero {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+}
+
+
+/* Phone */
+@media (max-width: 650px) {
+
+    .briefing-hero {
+        grid-template-columns: 1fr;
+        padding: 22px;
+    }
+
+    .briefing-hero-intro {
+        text-align: center;
+    }
+
+}
+
+.briefing-hero {
+    gap: 16px;
+    padding: 20px 26px;
+}
+
+.briefing-summary-card {
+    min-height: 105px;
+    padding: 14px 16px;
+}
+
+.briefing-card-value {
+    font-size: 1rem;
+}
+
+/* =========================================================
+   BUSINESS HEALTH DETAILS
+========================================================= */
+
+.briefing-summary-card-button {
+    width: 100%;
+    margin: 0;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+    appearance: none;
+}
+
+.briefing-summary-card-button:hover {
+    border-color: #d99970;
+    transform: translateY(-1px);
+}
+
+.briefing-summary-card-button:focus-visible {
+    outline: 3px solid rgba(217, 153, 112, 0.35);
+    outline-offset: 3px;
+}
+
+.briefing-card-link {
+    margin-top: 9px;
+    color: #9a5e3c;
+    font-size: 0.82rem;
+    font-weight: 600;
+}
+
+.business-health-details {
+    padding: 20px 24px;
+    margin: -12px 0 26px;
+
+    background: #fffaf5;
+    border: 1px solid #efc5a7;
+    border-radius: 16px;
+}
+
+.business-health-details-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 18px;
+}
+
+.business-health-details-header h2 {
+    margin: 0 0 6px;
+}
+
+.business-health-details-header p {
+    margin: 0;
+    color: #666;
+}
+
+.business-health-score-summary {
+    margin-top: 18px;
+    padding: 14px 16px;
+
+    background: #ffffff;
+    border: 1px solid #efc5a7;
+    border-radius: 12px;
+}
+
+.business-health-score-summary p {
+    margin: 6px 0 0;
+}
+
+.business-health-factor-list {
+    display: grid;
+    gap: 12px;
+    margin-top: 14px;
+}
+
+.business-health-factor {
+    padding: 14px 16px;
+
+    background: #ffffff;
+    border: 1px solid #ead8ca;
+    border-radius: 12px;
+}
+
+.business-health-factor-heading {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.business-health-factor-heading span {
+    color: #9a5e3c;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.business-health-factor p {
+    margin: 7px 0 0;
+    color: #666;
+}
+
+@media (max-width: 650px) {
+
+    .business-health-details-header,
+    .business-health-factor-heading {
+        flex-direction: column;
+    }
+
+}

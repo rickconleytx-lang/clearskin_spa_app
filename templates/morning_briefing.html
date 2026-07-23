@@ -103,42 +103,232 @@
     Your Business Operations Assistant
 </p>
 
+{% set today_appointment_count =
+    dashboard.get(
+        "appointments_today",
+        dashboard.get(
+            "today_appointment_count",
+            0
+        )
+    ) or 0
+%}
+
+{% set today_projected_revenue =
+    dashboard.get(
+        "projected_revenue_today",
+        dashboard.get(
+            "today_projected_revenue",
+            0
+        )
+    ) or 0
+%}
+
+{% set attention_count =
+    action_cards|length
+%}
+
+
 <div class="briefing-hero">
 
-    <div>
-        <h2>{{ coach.greeting }}</h2>
+    <!-- Date and local business time -->
+    <div class="briefing-hero-intro">
+
+        <h2>
+            {{ coach.greeting }}
+        </h2>
 
         <p>
-            <strong>{{ spa_now.strftime('%A, %B %d, %Y') }}</strong><br>
-            <span style="color:#666;">
+            <strong>
+                {{ spa_now.strftime('%A, %B %d, %Y') }}
+            </strong>
+
+            <br>
+
+            <span class="briefing-local-time">
                 Local Business Time:
                 {{ spa_now.strftime('%-I:%M %p') }}
             </span>
         </p>
+
     </div>
 
-    <div class="briefing-health-score">
-        <div class="briefing-score-subtitle">
-            Business Health
+
+        <!-- Business Health -->
+    <div class="briefing-summary-card">
+
+    
+                <!-- Business Health -->
+        <button type="button"
+                id="business-health-card"
+                class="briefing-summary-card briefing-summary-card-button"
+                aria-controls="business-health-details"
+                aria-expanded="false"
+                onclick="toggleBusinessHealthDetails()">
+
+            <div class="briefing-card-title">
+                Business Health
+            </div>
+
+            <div class="briefing-card-value">
+                {{ business_health.score }}/100
+            </div>
+
+            <div class="briefing-card-detail">
+                {{ business_health.label }}
+            </div>
+
+            <div class="briefing-card-detail">
+                {% if business_health.issue_count %}
+                    {{ business_health.issue_count }}
+
+                    {% if business_health.issue_count == 1 %}
+                        area affecting score
+                    {% else %}
+                        areas affecting score
+                    {% endif %}
+                {% else %}
+                    All monitored operations current
+                {% endif %}
+            </div>
+
+            <div class="briefing-card-link">
+                View details
+            </div>
+
+        </button>
+
+    </div>
+
+    <div id="business-health-details"
+        class="business-health-details"
+        hidden>
+
+        <div class="business-health-details-header">
+
+            <div>
+                <h2>🍑 Business Health Review</h2>
+
+                <p>
+                    Coach Peach reviewed the operational areas
+                    currently included in your Business Health score.
+                </p>
+            </div>
+
+            <button type="button"
+                    class="tool-pill tool-pill-small"
+                    onclick="closeBusinessHealthDetails()">
+                Close
+            </button>
+
         </div>
 
-        {% if business_health.score %}
-            <div class="briefing-score-number">
-                {{ business_health.score }}
-            </div>
+        <div class="business-health-score-summary">
 
-            <div class="briefing-score-label">
+            <strong>
+                {{ business_health.score }}/100 —
                 {{ business_health.label }}
-            </div>
-        {% else %}
-            <div class="briefing-score-label">
-                {{ business_health.label }}
-            </div>
+            </strong>
 
-            <p style="color:#777; font-size:0.9rem; margin-top:8px;">
-                Coming soon
+            <p>
+                {{ business_health.summary }}
             </p>
+
+        </div>
+
+        {% if business_health.factors %}
+
+            <div class="business-health-factor-list">
+
+                {% for factor in business_health.factors %}
+
+                    <div class="business-health-factor">
+
+                        <div class="business-health-factor-heading">
+
+                            <strong>
+                                {{ factor.category }}
+                            </strong>
+
+                            <span>
+                                −{{ factor.points }} points
+                            </span>
+
+                        </div>
+
+                        <p>
+                            {{ factor.message }}
+                        </p>
+
+                    </div>
+
+                {% endfor %}
+
+            </div>
+
+        {% else %}
+
+            <p>
+                All monitored business operations are current.
+                No deductions are affecting the score.
+            </p>
+
         {% endif %}
+
+    </div>
+
+
+
+
+    <!-- Today's Business -->
+    <div class="briefing-summary-card">
+
+        <div class="briefing-card-title">
+            Today’s Business
+        </div>
+
+        <div class="briefing-card-value">
+            {{ today_appointment_count }}
+            {% if today_appointment_count == 1 %}
+                Appointment
+            {% else %}
+                Appointments
+            {% endif %}
+        </div>
+
+        <div class="briefing-card-detail">
+            ${{ "{:,.2f}".format(today_projected_revenue) }}
+            Projected Revenue
+        </div>
+
+    </div>
+
+
+    <!-- Needs Attention -->
+    <div class="briefing-summary-card">
+
+        <div class="briefing-card-title">
+            Needs Attention
+        </div>
+
+        <div class="briefing-card-value">
+            {{ attention_count }}
+            {% if attention_count == 1 %}
+                Item
+            {% else %}
+                Items
+            {% endif %}
+        </div>
+
+        <div class="briefing-card-detail">
+            {% if attention_count %}
+                Review with Coach
+            {% else %}
+                All clear
+            {% endif %}
+        </div>
+
+    </div>
+
 </div>
 
 </div>
@@ -692,6 +882,58 @@ async function dismissCoachRecommendation(
                     Coach Recommendations.
                 </p>
             `;
+        }
+    }
+
+    function toggleBusinessHealthDetails() {
+        const details = document.getElementById(
+            "business-health-details"
+        );
+
+        const card = document.getElementById(
+            "business-health-card"
+        );
+
+        if (!details || !card) {
+            return;
+        }
+
+        const shouldOpen = details.hidden;
+
+        details.hidden = !shouldOpen;
+
+        card.setAttribute(
+            "aria-expanded",
+            shouldOpen ? "true" : "false"
+        );
+
+        if (shouldOpen) {
+            details.scrollIntoView({
+                behavior: "smooth",
+                block: "nearest"
+            });
+        }
+    }
+
+
+    function closeBusinessHealthDetails() {
+        const details = document.getElementById(
+            "business-health-details"
+        );
+
+        const card = document.getElementById(
+            "business-health-card"
+        );
+
+        if (details) {
+            details.hidden = true;
+        }
+
+        if (card) {
+            card.setAttribute(
+                "aria-expanded",
+                "false"
+            );
         }
     }
 

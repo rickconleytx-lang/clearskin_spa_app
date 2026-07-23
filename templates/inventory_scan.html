@@ -7,28 +7,43 @@
 <div class="form-page">
 
     <div class="page-header">
+
         <div>
             <h1>Scan Inventory SKU</h1>
 
             <p class="page-subtitle">
-                Use your iPhone camera to scan a product barcode
+                Scan with this device or pair a phone with
+                the inventory session open on this computer.
             </p>
         </div>
 
-        <div class="form-buttons">
+        <div class="page-tool-pills">
             <a href="{{ url_for('inventory_home') }}"
-               class="btn btn-secondary">
+               class="tool-pill tool-pill-small">
                 Back to Inventory
             </a>
         </div>
+
     </div>
 
+
+    <!-- =================================================
+         SCAN WITH THIS DEVICE
+    ================================================== -->
+
     <div class="styled-form">
+
+        <h2>Scan With This Device</h2>
+
+        <p>
+            Use the camera on this device to scan a product
+            SKU or barcode.
+        </p>
 
         <div class="form-group">
 
             <button type="button"
-                    class="btn"
+                    class="tool-pill tool-pill-small"
                     onclick="startScanner()">
                 Scan Product
             </button>
@@ -38,9 +53,13 @@
         <div class="form-group">
 
             <video id="scanner-video"
+                   playsinline
+                   muted
                    style="
                         width:100%;
                         max-width:450px;
+                        min-height:220px;
+                        background:#111;
                         border-radius:12px;
                         border:1px solid #ccc;
                    ">
@@ -50,36 +69,519 @@
 
     </div>
 
+
+    <!-- =================================================
+         USE PHONE AS SCANNER
+    ================================================== -->
+
+    <div class="styled-form"
+         style="margin-top:24px;">
+
+        <h2>Use Phone as Scanner</h2>
+
+        <p>
+            Pair your phone with this computer. A barcode
+            scanned on the phone will be sent back to this
+            inventory session.
+        </p>
+
+        <div id="phone-scanner-start-panel">
+
+            <button type="button"
+                    id="start-phone-session-button"
+                    class="tool-pill tool-pill-small"
+                    onclick="startInventoryPhoneSession()">
+                Start Phone Scanner
+            </button>
+
+        </div>
+
+
+        <div id="phone-scanner-pairing-panel"
+             hidden
+             style="margin-top:20px;">
+
+            <div style="
+                display:flex;
+                flex-wrap:wrap;
+                align-items:flex-start;
+                gap:24px;
+            ">
+
+                <div id="inventory-phone-qr-code"
+                     style="
+                        padding:12px;
+                        background:#fff;
+                        border:1px solid #ddd;
+                        border-radius:12px;
+                     ">
+                </div>
+
+
+                <div style="flex:1; min-width:240px;">
+
+                    <h3 style="margin-top:0;">
+                        Connect Your Phone
+                    </h3>
+
+                    <p>
+                        Open the camera on your phone and scan
+                        the QR code.
+                    </p>
+
+                    <p>
+                        <strong>Pairing Code:</strong>
+                        <span id="inventory-phone-pairing-code">
+                            —
+                        </span>
+                    </p>
+
+                    <p id="inventory-phone-desktop-status">
+                        Waiting for a barcode from your phone.
+                    </p>
+
+                    <div class="page-tool-pills">
+
+                        <button type="button"
+                                class="tool-pill tool-pill-small"
+                                onclick="copyInventoryPhoneLink()">
+                            Copy Phone Link
+                        </button>
+
+                        <button type="button"
+                                class="tool-pill tool-pill-small"
+                                onclick="closeInventoryPhoneSession()">
+                            End Phone Session
+                        </button>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
+
 </div>
+
 
 <script src="https://unpkg.com/@zxing/library@latest"></script>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+
 <script>
+
+let deviceCodeReader = null;
+
+let inventoryPhoneSessionId = null;
+let inventoryPhonePollUrl = null;
+let inventoryPhoneCloseUrl = null;
+let inventoryPhoneUrl = null;
+let inventoryPhonePollTimer = null;
+let inventoryPhonePollActive = false;
+
+
+/* =========================================================
+   SCAN WITH THIS DEVICE
+========================================================= */
 
 function startScanner() {
 
-    const codeReader = new ZXing.BrowserBarcodeReader();
+    if (deviceCodeReader) {
+        deviceCodeReader.reset();
+    }
 
-    codeReader.decodeFromVideoDevice(
+    deviceCodeReader =
+        new ZXing.BrowserBarcodeReader();
+
+    deviceCodeReader.decodeFromVideoDevice(
         null,
-        'scanner-video',
-        (result, err) => {
+        "scanner-video",
+        function (result, error) {
 
             if (result) {
 
                 const scannedSKU = result.text;
 
+                deviceCodeReader.reset();
+
                 window.location.href =
-                    "/inventory/scan-result?sku=" +
-                    encodeURIComponent(scannedSKU);
+                    {{
+                        url_for(
+                            "inventory_scan_result"
+                        )|tojson
+                    }}
+                    + "?sku="
+                    + encodeURIComponent(scannedSKU);
+
+                return;
             }
 
-            if (err && !(err instanceof ZXing.NotFoundException)) {
-                console.error(err);
+            if (
+                error
+                && !(
+                    error instanceof
+                    ZXing.NotFoundException
+                )
+            ) {
+                console.error(error);
             }
         }
     );
 }
+
+
+/* =========================================================
+   START PHONE SESSION
+========================================================= */
+
+async function startInventoryPhoneSession() {
+
+    const startButton = document.getElementById(
+        "start-phone-session-button"
+    );
+
+    const statusElement = document.getElementById(
+        "inventory-phone-desktop-status"
+    );
+
+    if (startButton) {
+        startButton.disabled = true;
+        startButton.textContent = "Starting...";
+    }
+
+    try {
+
+        const response = await fetch(
+            {{
+                url_for(
+                    "create_inventory_phone_scan_session"
+                )|tojson
+            }},
+            {
+                method: "POST",
+                headers: {
+                    "Accept": "application/json"
+                }
+            }
+        );
+
+        const result = await response.json();
+
+        if (
+            !response.ok
+            || result.status !== "success"
+        ) {
+            throw new Error(
+                result.message
+                || "The phone scanner could not be started."
+            );
+        }
+
+        inventoryPhoneSessionId =
+            result.scan_session_id;
+
+        inventoryPhonePollUrl =
+            result.poll_url;
+
+        inventoryPhoneCloseUrl =
+            result.close_url;
+
+        inventoryPhoneUrl =
+            result.phone_url;
+
+        document.getElementById(
+            "inventory-phone-pairing-code"
+        ).textContent = result.pairing_code;
+
+        const qrCodeContainer = document.getElementById(
+            "inventory-phone-qr-code"
+        );
+
+        qrCodeContainer.innerHTML = "";
+
+        new QRCode(
+            qrCodeContainer,
+            {
+                text: inventoryPhoneUrl,
+                width: 190,
+                height: 190,
+                correctLevel: QRCode.CorrectLevel.M
+            }
+        );
+
+        document.getElementById(
+            "phone-scanner-pairing-panel"
+        ).hidden = false;
+
+        document.getElementById(
+            "phone-scanner-start-panel"
+        ).hidden = true;
+
+        statusElement.textContent =
+            "Waiting for a barcode from your phone...";
+
+        inventoryPhonePollActive = true;
+
+        scheduleInventoryPhonePoll();
+
+    } catch (error) {
+
+        console.error(
+            "Phone scanner session error:",
+            error
+        );
+
+        if (statusElement) {
+            statusElement.textContent =
+                error.message
+                || "The phone scanner could not be started.";
+        }
+
+        if (startButton) {
+            startButton.disabled = false;
+            startButton.textContent =
+                "Start Phone Scanner";
+        }
+    }
+}
+
+
+/* =========================================================
+   POLL FOR PHONE SCAN
+========================================================= */
+
+function scheduleInventoryPhonePoll() {
+
+    if (!inventoryPhonePollActive) {
+        return;
+    }
+
+    clearTimeout(inventoryPhonePollTimer);
+
+    inventoryPhonePollTimer = setTimeout(
+        pollInventoryPhoneSession,
+        1000
+    );
+}
+
+
+async function pollInventoryPhoneSession() {
+
+    if (
+        !inventoryPhonePollActive
+        || !inventoryPhonePollUrl
+    ) {
+        return;
+    }
+
+    const statusElement = document.getElementById(
+        "inventory-phone-desktop-status"
+    );
+
+    try {
+
+        const response = await fetch(
+            inventoryPhonePollUrl,
+            {
+                method: "GET",
+                headers: {
+                    "Accept": "application/json"
+                }
+            }
+        );
+
+        const result = await response.json();
+
+        if (result.status === "scan_received") {
+
+            inventoryPhonePollActive = false;
+
+            clearTimeout(
+                inventoryPhonePollTimer
+            );
+
+            statusElement.textContent =
+                "Barcode received: "
+                + result.barcode;
+
+            await endInventoryPhoneSessionRequest();
+
+            window.location.href =
+                {{
+                    url_for(
+                        "inventory_scan_result"
+                    )|tojson
+                }}
+                + "?sku="
+                + encodeURIComponent(
+                    result.barcode
+                );
+
+            return;
+        }
+
+        if (
+            result.status === "expired"
+            || result.status === "closed"
+            || result.status === "not_found"
+        ) {
+
+            inventoryPhonePollActive = false;
+
+            statusElement.textContent =
+                "This phone scanner session is no longer active.";
+
+            return;
+        }
+
+        if (
+            !response.ok
+            || result.status === "error"
+        ) {
+            throw new Error(
+                "Unable to check for phone scans."
+            );
+        }
+
+    } catch (error) {
+
+        console.error(
+            "Phone scanner polling error:",
+            error
+        );
+
+        statusElement.textContent =
+            "Connection interrupted. Retrying...";
+    }
+
+    scheduleInventoryPhonePoll();
+}
+
+
+/* =========================================================
+   CLOSE PHONE SESSION
+========================================================= */
+
+async function endInventoryPhoneSessionRequest() {
+
+    if (!inventoryPhoneCloseUrl) {
+        return;
+    }
+
+    try {
+
+        await fetch(
+            inventoryPhoneCloseUrl,
+            {
+                method: "POST",
+                headers: {
+                    "Accept": "application/json"
+                }
+            }
+        );
+
+    } catch (error) {
+
+        console.error(
+            "Unable to close phone scanner session:",
+            error
+        );
+    }
+}
+
+
+async function closeInventoryPhoneSession() {
+
+    inventoryPhonePollActive = false;
+
+    clearTimeout(
+        inventoryPhonePollTimer
+    );
+
+    await endInventoryPhoneSessionRequest();
+
+    inventoryPhoneSessionId = null;
+    inventoryPhonePollUrl = null;
+    inventoryPhoneCloseUrl = null;
+    inventoryPhoneUrl = null;
+
+    document.getElementById(
+        "phone-scanner-pairing-panel"
+    ).hidden = true;
+
+    document.getElementById(
+        "phone-scanner-start-panel"
+    ).hidden = false;
+
+    const startButton = document.getElementById(
+        "start-phone-session-button"
+    );
+
+    startButton.disabled = false;
+    startButton.textContent =
+        "Start Phone Scanner";
+}
+
+
+/* =========================================================
+   COPY PHONE LINK
+========================================================= */
+
+async function copyInventoryPhoneLink() {
+
+    if (!inventoryPhoneUrl) {
+        return;
+    }
+
+    const statusElement = document.getElementById(
+        "inventory-phone-desktop-status"
+    );
+
+    try {
+
+        await navigator.clipboard.writeText(
+            inventoryPhoneUrl
+        );
+
+        statusElement.textContent =
+            "Phone scanner link copied.";
+
+    } catch (error) {
+
+        console.error(
+            "Unable to copy phone scanner link:",
+            error
+        );
+
+        statusElement.textContent =
+            "The phone link could not be copied.";
+    }
+}
+
+
+/* =========================================================
+   PAGE CLEANUP
+========================================================= */
+
+window.addEventListener(
+    "beforeunload",
+    function () {
+
+        if (deviceCodeReader) {
+            deviceCodeReader.reset();
+        }
+
+        inventoryPhonePollActive = false;
+
+        clearTimeout(
+            inventoryPhonePollTimer
+        );
+    }
+);
 
 </script>
 
