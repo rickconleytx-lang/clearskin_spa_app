@@ -222,6 +222,47 @@ def review_business_schedule(
     )
 
 
+def review_recurring_expense_alerts(
+    observations,
+    dashboard
+):
+    recurring_expense_alerts = (
+        dashboard.get(
+            "recurring_expense_alerts",
+            []
+        )
+        or []
+    )
+
+    if not recurring_expense_alerts:
+        return
+
+    alert = recurring_expense_alerts[0]
+
+    observations.append({
+        "category": "Recurring Expense Posted",
+        "priority": 115,
+        "status": "attention",
+        "message": alert.get(
+            "message",
+            "A recurring expense was posted automatically."
+        ),
+        "action_url": None,
+        "question": (
+            "Would you like to review this automatic "
+            "payment update?"
+        ),
+        "recommendation_type": (
+            "recurring_expense_alert"
+        ),
+        "occurrence_id": alert.get(
+            "occurrence_id"
+        ),
+    })
+
+
+
+
 def review_priority_actions(
     observations,
     priority_actions=None
@@ -1205,6 +1246,16 @@ def build_coach(
         observations,
         business_schedule_due=business_schedule_due,
         business_schedule_upcoming=business_schedule_upcoming
+    )
+
+    review_recurring_expense_alerts(
+        observations,
+        dashboard=dashboard
+    )
+
+    review_priority_actions(
+        observations,
+        priority_actions=priority_actions
     )
 
     review_priority_actions(

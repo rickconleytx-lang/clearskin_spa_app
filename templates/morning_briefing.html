@@ -157,6 +157,8 @@
         {% if coach.conversation_state == "recommendation_offer"
               and coach.current_recommendation %}
 
+
+
             <!-- Initial Coach question -->
             <div id="coach-offer">
                 <p class="coach-question">
@@ -185,18 +187,33 @@
 
                 {% else %}
 
-                    <button type="button"
-                            class="btn"
-                            onclick="showCoachRecommendation()">
-                        {{ coach.yes_label }}
-                    </button>
+                    {% if coach.current_recommendation.action_url %}
+
+                        <button type="button"
+                                class="tool-pill tool-pill-small"
+                                onclick='openCoachRecommendation(
+                                    {{ coach.current_recommendation.action_url|tojson }},
+                                    {{ coach.current_recommendation.category|tojson }}
+                                )'>
+                            {{ coach.yes_label or "Yes" }}
+                        </button>
+
+                    {% else %}
+
+                        <button type="button"
+                                class="tool-pill tool-pill-small"
+                                onclick="showCoachRecommendation()">
+                            {{ coach.yes_label or "Yes" }}
+                        </button>
+
+                    {% endif %}
 
                     <button type="button"
-                            class="btn btn-secondary"
+                            class="tool-pill tool-pill-small"
                             onclick='dismissCoachRecommendation(
                                 {{ coach.current_recommendation.category|tojson }}
                             )'>
-                        {{ coach.no_label }}
+                        {{ coach.no_label or "No" }}
                     </button>
 
                 {% endif %}
@@ -357,13 +374,23 @@
 <script>
     async function sendCoachAction(
         category,
-        action
+        action,
+        occurrenceId = null
     ) {
         category = (category || "").trim();
         action = (action || "").trim();
 
         if (!category || !action) {
             return false;
+        }
+
+        const requestBody = {
+            category: category,
+            action: action
+        };
+
+        if (occurrenceId !== null) {
+            requestBody.occurrence_id = occurrenceId;
         }
 
         try {
@@ -375,10 +402,9 @@
                     headers: {
                         "Content-Type": "application/json"
                     },
-                    body: JSON.stringify({
-                        category: category,
-                        action: action
-                    })
+                    body: JSON.stringify(
+                        requestBody
+                    )
                 }
             );
 
@@ -386,6 +412,7 @@
                 "Coach action:",
                 category,
                 action,
+                occurrenceId,
                 response.status
             );
 
@@ -408,7 +435,6 @@
             return false;
         }
     }
-
 
     function showCoachRecommendation() {
         const offer = document.getElementById(
@@ -460,53 +486,69 @@
     }
 
 
-    async function dismissCoachRecommendation(
-        category
-    ) {
-        await sendCoachAction(
-            category,
-            "defer"
-        );
+async function dismissCoachRecommendation(
+    category,
+    occurrenceId = null
+) {
+    const action = (
+        occurrenceId
+            ? "acknowledge_alert"
+            : "defer"
+    );
 
-        const offer = document.getElementById(
-            "coach-offer"
-        );
+    await sendCoachAction(
+        category,
+        action,
+        occurrenceId
+    );
 
-        const recommendation = document.getElementById(
-            "coach-recommendation"
-        );
+    const offer = document.getElementById(
+        "coach-offer"
+    );
 
-        const dismissed = document.getElementById(
-            "coach-dismissed"
-        );
+    const recommendation = document.getElementById(
+        "coach-recommendation"
+    );
 
-        const cardItem = document.getElementById(
-            "coach-current-card-item"
-        );
+    const dismissed = document.getElementById(
+        "coach-dismissed"
+    );
 
-        const emptyMessage = document.getElementById(
-            "no-coach-recommendations"
-        );
+    const cardItem = document.getElementById(
+        "coach-current-card-item"
+    );
 
-        if (offer) {
-            offer.hidden = true;
-        }
+    const emptyMessage = document.getElementById(
+        "no-coach-recommendations"
+    );
 
-        if (recommendation) {
-            recommendation.hidden = true;
-        }
+    if (offer) {
+        offer.hidden = true;
+    }
 
-        if (cardItem) {
-            cardItem.hidden = false;
-        }
+    if (recommendation) {
+        recommendation.hidden = true;
+    }
 
-        if (emptyMessage) {
-            emptyMessage.hidden = true;
-        }
+    if (cardItem) {
+        cardItem.hidden = false;
+    }
 
-        if (dismissed) {
-            dismissed.hidden = false;
+    if (emptyMessage) {
+        emptyMessage.hidden = true;
+    }
 
+    if (dismissed) {
+        dismissed.hidden = false;
+
+        if (occurrenceId) {
+            dismissed.innerHTML = `
+                <p>
+                    Got it. I’ve marked this automatic
+                    payment update as reviewed.
+                </p>
+            `;
+        } else {
             dismissed.innerHTML = `
                 <p>
                     Understood. I’ve added it to your
@@ -515,7 +557,7 @@
             `;
         }
     }
-
+}
 
     async function pauseCoachRecommendation(
         category

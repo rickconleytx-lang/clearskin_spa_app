@@ -5,6 +5,7 @@ import io
 import imaplib
 import email
 import calendar
+import click
 
 from datetime import date, timedelta, datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -24214,15 +24215,29 @@ def export_expense_report_xlsx():
 
 
 
+
+
+
+
+
+
+
+
+###############################################################
+#######################################################
+##################################################
+#
+#   AUTOMATIC EXPENSES. - -  RECURRING EXPENSES
+#
+#
 ################################
-#
-#   AUTOMATIC EXPENSES
-#
-#
-################################
 
 
-
+######################
+#
+#   ADVANCE AUTOMATIC EXPENSE DATE
+#
+######################
 
 
 def advance_automatic_expense_date(current_date, frequency):
@@ -24274,19 +24289,19 @@ def advance_automatic_expense_date(current_date, frequency):
 
 ###################################################
 #
-#
+#   POST AUTOMATIC EXPENSE PAYMENT -  RECURRING EXPENSE
 #
 ##############################################################
-
-
-
-
 ####################################################
+
+
 
 def post_automatic_expense_payment(
     automatic_expense_id,
     spa_id,
-    posting_type
+    posting_type,
+    require_due=False,
+    create_coach_alert=False
 ):
     if posting_type not in {"scheduled", "extra"}:
         return {
@@ -24386,6 +24401,21 @@ def post_automatic_expense_payment(
                     )
                 }
 
+
+            if (
+                require_due
+                and scheduled_date > posted_date
+            ):
+                conn.rollback()
+
+                return {
+                    "success": False,
+                    "not_due": True,
+                    "message": (
+                        "This recurring expense is not due yet."
+                    )
+                }
+
             cur.execute("""
                 SELECT
                     occurrence_id,
@@ -24477,7 +24507,11 @@ def post_automatic_expense_payment(
 
         expense_id = cur.fetchone()[0]
 
+        occurrence_id = None
+
         if existing_occurrence:
+            occurrence_id = existing_occurrence[0]
+
             cur.execute("""
                 UPDATE automatic_expense_occurrences
                 SET
@@ -24512,6 +24546,7 @@ def post_automatic_expense_payment(
                     CURRENT_TIMESTAMP,
                     %s
                 )
+                RETURNING occurrence_id
             """, (
                 spa_id,
                 automatic_expense_id,
@@ -24519,6 +24554,8 @@ def post_automatic_expense_payment(
                 expense_id,
                 posting_type,
             ))
+
+            occurrence_id = cur.fetchone()[0]
 
         next_post_date = recurring_expense[7]
 
@@ -24575,6 +24612,47 @@ def post_automatic_expense_payment(
                     spa_id,
                 ))
 
+                if (
+                    create_coach_alert
+                    and posting_type == "scheduled"
+                    and occurrence_id
+                ):
+                    amount_text = f"${amount:,.2f}"
+
+                    if next_post_date:
+                        next_date_text = (
+                            f"{next_post_date.strftime('%B')} "
+                            f"{next_post_date.day}, "
+                            f"{next_post_date.year}"
+                        )
+
+                        coach_alert_message = (
+                            f"{expense_name} was posted automatically "
+                            f"for {amount_text}. Its next scheduled "
+                            f"date is {next_date_text}."
+                        )
+
+                    else:
+                        coach_alert_message = (
+                            f"{expense_name} was posted automatically "
+                            f"for {amount_text}. This recurring expense "
+                            "has reached the end of its schedule."
+                        )
+
+                    cur.execute("""
+                        UPDATE automatic_expense_occurrences
+                        SET
+                            coach_alert_required = TRUE,
+                            coach_alert_message = %s,
+                            coach_alert_acknowledged_at = NULL
+                        WHERE occurrence_id = %s
+                        AND spa_id = %s
+                    """, (
+                        coach_alert_message,
+                        occurrence_id,
+                        spa_id,
+                    ))
+
         conn.commit()
 
         return {
@@ -24613,12 +24691,9 @@ def post_automatic_expense_payment(
 
 ###################################################
 #
-#
+#       POST CURRENT AUTOMATIC EXPENSE
 #
 ##############################################################
-
-
-
 
 
 
@@ -24685,7 +24760,7 @@ def post_current_automatic_expense(automatic_expense_id):
 
 ###################################################
 #
-#
+#   POST EXTRA AUTOMATIC EXPENSE
 #
 ##############################################################
 
@@ -24749,9 +24824,366 @@ def post_extra_automatic_expense(automatic_expense_id):
 
 
 
+
+
+
+
+
+
+###############################################
+#
+#   RECORD AUTOMATIC EXPENSE PROCESSING ERROR
+#
+#
+########################################
+
+
+
+
+def record_automatic_expense_processing_error(
+    automatic_expense_id,
+    spa_id,
+    error_message
+):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            UPDATE automatic_expenses
+            SET
+                last_error_message = %s,
+                last_error_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE automatic_expense_id = %s
+              AND spa_id = %s
+        """, (
+            error_message,
+            automatic_expense_id,
+            spa_id,
+        ))
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+
+        app.logger.exception(
+            "Failed to record automatic expense error."
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
+
+
+
+##################################
+#
+#   PROCESS DUE AUTOMATIC EXPENSES
+#
+#
+###########################################
+
+def process_due_automatic_expenses(dry_run=False):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                automatic_expense_id,                -- 0
+                spa_id,                              -- 1
+                expense_name,                        -- 2
+                processing_type,                     -- 3
+                next_post_date,                      -- 4
+                frequency,                           -- 5
+                end_date,                            -- 6
+                COALESCE(skip_next_occurrence, FALSE) -- 7
+            FROM automatic_expenses
+            WHERE is_active = TRUE
+              AND processing_type IN (
+                    'auto_alert',
+                    'auto_silent'
+                  )
+              AND next_post_date IS NOT NULL
+            ORDER BY
+                spa_id,
+                next_post_date,
+                automatic_expense_id
+        """)
+
+        recurring_expenses = cur.fetchall()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    summary = {
+        "due_count": 0,
+        "posted_count": 0,
+        "alert_count": 0,
+        "silent_count": 0,
+        "failed_count": 0,
+        "skipped_count": 0,
+        "limit_reached_count": 0,
+        "details": [],
+    }
+
+    maximum_occurrences_per_expense = 60
+
+    for recurring_expense in recurring_expenses:
+        automatic_expense_id = recurring_expense[0]
+        spa_id = recurring_expense[1]
+        expense_name = recurring_expense[2]
+        processing_type = recurring_expense[3]
+        next_post_date = recurring_expense[4]
+        frequency = recurring_expense[5]
+        end_date = recurring_expense[6]
+        skip_next_occurrence = recurring_expense[7]
+
+        spa_today = get_spa_now(spa_id).date()
+
+        if next_post_date > spa_today:
+            continue
+
+        if (
+            end_date
+            and next_post_date > end_date
+        ):
+            continue
+
+        # Do not automatically post an occurrence the user marked skipped.
+        # We will connect skipped-occurrence advancement separately.
+        if skip_next_occurrence:
+            summary["skipped_count"] += 1
+
+            summary["details"].append({
+                "expense_name": expense_name,
+                "scheduled_date": next_post_date,
+                "result": "skip_requested",
+                "processing_type": processing_type,
+            })
+
+            continue
+
+        occurrence_count = 0
+        current_due_date = next_post_date
+
+        while (
+            current_due_date
+            and current_due_date <= spa_today
+            and occurrence_count
+            < maximum_occurrences_per_expense
+        ):
+            if (
+                end_date
+                and current_due_date > end_date
+            ):
+                break
+
+            summary["due_count"] += 1
+            occurrence_count += 1
+
+            if dry_run:
+                summary["details"].append({
+                    "expense_name": expense_name,
+                    "scheduled_date": current_due_date,
+                    "result": "would_post",
+                    "processing_type": processing_type,
+                })
+
+                next_preview_date = (
+                    advance_automatic_expense_date(
+                        current_due_date,
+                        frequency
+                    )
+                )
+
+                if (
+                    end_date
+                    and next_preview_date > end_date
+                ):
+                    current_due_date = None
+                else:
+                    current_due_date = next_preview_date
+
+                continue
+
+            result = post_automatic_expense_payment(
+                automatic_expense_id=(
+                    automatic_expense_id
+                ),
+                spa_id=spa_id,
+                posting_type="scheduled",
+                require_due=True,
+                create_coach_alert=(
+                    processing_type == "auto_alert"
+                )
+            )
+
+            if result.get("success"):
+                summary["posted_count"] += 1
+
+                if processing_type == "auto_alert":
+                    summary["alert_count"] += 1
+                else:
+                    summary["silent_count"] += 1
+
+                summary["details"].append({
+                    "expense_name": expense_name,
+                    "scheduled_date": current_due_date,
+                    "result": "posted",
+                    "processing_type": processing_type,
+                    "expense_id": result.get("expense_id"),
+                })
+
+                current_due_date = result.get(
+                    "next_post_date"
+                )
+
+                continue
+
+            if result.get("not_due"):
+                break
+
+            error_message = result.get(
+                "message",
+                "Automatic expense processing failed."
+            )
+
+            summary["failed_count"] += 1
+
+            summary["details"].append({
+                "expense_name": expense_name,
+                "scheduled_date": current_due_date,
+                "result": "failed",
+                "processing_type": processing_type,
+                "error_message": error_message,
+            })
+
+            record_automatic_expense_processing_error(
+                automatic_expense_id=(
+                    automatic_expense_id
+                ),
+                spa_id=spa_id,
+                error_message=error_message
+            )
+
+            break
+
+        if (
+            occurrence_count
+            >= maximum_occurrences_per_expense
+            and current_due_date
+            and current_due_date <= spa_today
+        ):
+            summary["limit_reached_count"] += 1
+
+            error_message = (
+                "Automatic processing stopped after "
+                f"{maximum_occurrences_per_expense} occurrences."
+            )
+
+            record_automatic_expense_processing_error(
+                automatic_expense_id=(
+                    automatic_expense_id
+                ),
+                spa_id=spa_id,
+                error_message=error_message
+            )
+
+    return summary
+
+
+
+
+
+
+#######################################
+#
+#   APP CLI COMMAND
+#
+#
+#####################################
+
+
+@app.cli.command(
+    "process-due-automatic-expenses"
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help=(
+        "Show which recurring expenses would post "
+        "without changing the database."
+    )
+)
+def process_due_automatic_expenses_command(
+    dry_run
+):
+    summary = process_due_automatic_expenses(
+        dry_run=dry_run
+    )
+
+    mode_text = (
+        "DRY RUN"
+        if dry_run
+        else "PROCESSING COMPLETE"
+    )
+
+    click.echo(
+        f"\nAutomatic Expenses — {mode_text}"
+    )
+
+    click.echo(
+        f"Due occurrences: "
+        f"{summary['due_count']}"
+    )
+
+    click.echo(
+        f"Posted: "
+        f"{summary['posted_count']}"
+    )
+
+    click.echo(
+        f"Auto-post + Coach Alert: "
+        f"{summary['alert_count']}"
+    )
+
+    click.echo(
+        f"Auto-post Silently: "
+        f"{summary['silent_count']}"
+    )
+
+    click.echo(
+        f"Skipped by user: "
+        f"{summary['skipped_count']}"
+    )
+
+    click.echo(
+        f"Failed: "
+        f"{summary['failed_count']}"
+    )
+
+    for detail in summary["details"]:
+        click.echo(
+            f"- {detail['expense_name']} | "
+            f"{detail['scheduled_date']} | "
+            f"{detail['result']} | "
+            f"{detail['processing_type']}"
+        )
+
+
+
+
 ###################################################
 #
-#
+#   AUTOMATIC EXPENSES
 #
 ##############################################################
 
@@ -25424,7 +25856,7 @@ def add_automatic_expense():
 
 ################################
 #
-#   EDIT AUTOMATIN EXPENSE
+#   EDIT AUTOMATIC EXPENSE
 #
 ################################
 
@@ -28044,6 +28476,199 @@ def morning_briefing():
     dashboard["overdue_appointments"] = overdue_appointments
 
 
+    # ---------------------------------------------------------
+    # Recurring expenses requiring attention
+    # ---------------------------------------------------------
+    recurring_expense_window_end = (
+        today + timedelta(days=7)
+    )
+
+    cur.execute("""
+        SELECT
+            automatic_expense_id,     -- 0
+            expense_name,             -- 1
+            vendor_name,              -- 2
+            amount,                   -- 3
+            frequency,                -- 4
+            processing_type,          -- 5
+            next_post_date,           -- 6
+            last_error_message,       -- 7
+            last_error_at             -- 8
+        FROM automatic_expenses
+        WHERE spa_id = %s
+        AND is_active = TRUE
+        AND (
+                last_error_message IS NOT NULL
+                OR next_post_date <= %s
+            )
+        ORDER BY
+            CASE
+                WHEN last_error_message IS NOT NULL THEN 1
+                WHEN next_post_date < %s THEN 2
+                WHEN next_post_date = %s THEN 3
+                ELSE 4
+            END,
+            next_post_date ASC,
+            expense_name ASC
+    """, (
+        spa_id,
+        recurring_expense_window_end,
+        today,
+        today,
+    ))
+
+    recurring_expense_rows = cur.fetchall()
+
+    recurring_expenses = [
+        {
+            "automatic_expense_id": row[0],
+            "expense_name": row[1],
+            "vendor_name": row[2],
+            "amount": row[3],
+            "frequency": row[4],
+            "processing_type": row[5],
+            "next_post_date": row[6],
+            "last_error_message": row[7],
+            "last_error_at": row[8],
+        }
+        for row in recurring_expense_rows
+    ]
+
+    recurring_expenses_failed = [
+        expense
+        for expense in recurring_expenses
+        if expense["last_error_message"]
+    ]
+
+    recurring_expenses_past_due = [
+        expense
+        for expense in recurring_expenses
+        if not expense["last_error_message"]
+        and expense["next_post_date"]
+        and expense["next_post_date"] < today
+    ]
+
+    recurring_expenses_due_today = [
+        expense
+        for expense in recurring_expenses
+        if not expense["last_error_message"]
+        and expense["next_post_date"] == today
+    ]
+
+    recurring_expenses_upcoming = [
+        expense
+        for expense in recurring_expenses
+        if not expense["last_error_message"]
+        and expense["next_post_date"]
+        and today < expense["next_post_date"]
+        <= recurring_expense_window_end
+    ]
+
+    dashboard["recurring_expenses_failed"] = (
+        recurring_expenses_failed
+    )
+
+    dashboard["recurring_expenses_past_due"] = (
+        recurring_expenses_past_due
+    )
+
+    dashboard["recurring_expenses_due_today"] = (
+        recurring_expenses_due_today
+    )
+
+    dashboard["recurring_expenses_upcoming"] = (
+        recurring_expenses_upcoming
+    )
+
+    # Add one action card using the most urgent status.
+    if recurring_expenses_failed:
+        priority_actions.append({
+            "icon": "💳",
+            "label": "Recurring expense processing failed",
+            "value": len(recurring_expenses_failed),
+            "url": url_for("automatic_expenses"),
+            "category": "Recurring Expenses",
+            "priority": 110
+        })
+
+    elif recurring_expenses_past_due:
+        priority_actions.append({
+            "icon": "💳",
+            "label": "Recurring expenses past due",
+            "value": len(recurring_expenses_past_due),
+            "url": url_for("automatic_expenses"),
+            "category": "Recurring Expenses",
+            "priority": 105
+        })
+
+    elif recurring_expenses_due_today:
+        priority_actions.append({
+            "icon": "💳",
+            "label": "Recurring expenses due today",
+            "value": len(recurring_expenses_due_today),
+            "url": url_for("automatic_expenses"),
+            "category": "Recurring Expenses",
+            "priority": 95
+        })
+
+
+    # ---------------------------------------------------------
+    # Successful automatic payments awaiting Coach review
+    # ---------------------------------------------------------
+    cur.execute("""
+        SELECT
+            aeo.occurrence_id,              -- 0
+            aeo.automatic_expense_id,       -- 1
+            aeo.scheduled_date,             -- 2
+            aeo.expense_id,                 -- 3
+            aeo.coach_alert_message,        -- 4
+            aeo.processed_at,               -- 5
+            ae.expense_name,                -- 6
+            ae.amount,                      -- 7
+            ae.next_post_date               -- 8
+        FROM automatic_expense_occurrences aeo
+
+        JOIN automatic_expenses ae
+          ON aeo.automatic_expense_id =
+             ae.automatic_expense_id
+         AND aeo.spa_id = ae.spa_id
+
+        WHERE aeo.spa_id = %s
+          AND aeo.occurrence_status = 'posted'
+          AND aeo.coach_alert_required = TRUE
+          AND aeo.coach_alert_acknowledged_at IS NULL
+          AND aeo.coach_alert_message IS NOT NULL
+
+        ORDER BY
+            aeo.processed_at DESC,
+            aeo.occurrence_id DESC
+
+        LIMIT 5
+    """, (spa_id,))
+
+    recurring_expense_alert_rows = cur.fetchall()
+
+    recurring_expense_alerts = [
+        {
+            "occurrence_id": row[0],
+            "automatic_expense_id": row[1],
+            "scheduled_date": row[2],
+            "expense_id": row[3],
+            "message": row[4],
+            "processed_at": row[5],
+            "expense_name": row[6],
+            "amount": row[7],
+            "next_post_date": row[8],
+        }
+        for row in recurring_expense_alert_rows
+    ]
+
+    dashboard["recurring_expense_alerts"] = (
+        recurring_expense_alerts
+    )
+
+
+
    # ---------------------------------------------------------
     # Coach performs the review only after all data is collected
     # ---------------------------------------------------------
@@ -28124,6 +28749,12 @@ def morning_briefing():
     )
 
 
+
+
+
+
+
+
 ####################################################
 #
 #
@@ -28173,6 +28804,13 @@ def get_coach_acknowledgments(
         "categories",
         []
     )
+
+
+
+
+
+
+
 
 ###############################################################
 
@@ -28230,6 +28868,12 @@ def save_coach_acknowledgment(
     )
 
     session.modified = True
+
+
+
+
+
+
 
 
 
@@ -28445,6 +29089,8 @@ def acknowledge_coach_recommendation():
         data.get("action") or "defer"
     ).strip().lower()
 
+    occurrence_id = data.get("occurrence_id")
+
     if not category:
         return jsonify({
             "status": "error",
@@ -28462,7 +29108,8 @@ def acknowledge_coach_recommendation():
         "review",
         "defer",
         "pause_today",
-        "keep_reminding"
+        "keep_reminding",
+        "acknowledge_alert"
     }
 
     if action not in allowed_actions:
@@ -28476,20 +29123,72 @@ def acknowledge_coach_recommendation():
 
     mention_count = None
 
-    if action == "mention":
+    if action == "acknowledge_alert":
+        try:
+            occurrence_id = int(occurrence_id)
+        except (TypeError, ValueError):
+            return jsonify({
+                "status": "error",
+                "message": "A valid occurrence ID is required."
+            }), 400
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        try:
+            cur.execute("""
+                UPDATE automatic_expense_occurrences
+                SET
+                    coach_alert_acknowledged_at =
+                        CURRENT_TIMESTAMP
+                WHERE occurrence_id = %s
+                AND spa_id = %s
+                AND coach_alert_required = TRUE
+                AND coach_alert_acknowledged_at IS NULL
+            """, (
+                occurrence_id,
+                spa_id,
+            ))
+
+            if cur.rowcount == 0:
+                conn.rollback()
+
+                return jsonify({
+                    "status": "error",
+                    "message": (
+                        "The recurring expense alert "
+                        "was not found or was already acknowledged."
+                    )
+                }), 404
+
+            conn.commit()
+
+        except Exception:
+            conn.rollback()
+
+            app.logger.exception(
+                "Failed to acknowledge recurring expense alert."
+            )
+
+            return jsonify({
+                "status": "error",
+                "message": (
+                    "The recurring expense alert "
+                    "could not be acknowledged."
+                )
+            }), 500
+
+        finally:
+            cur.close()
+            conn.close()
+
+    elif action == "mention":
         mention_count = (
             record_coach_recommendation_mention(
                 spa_id=spa_id,
                 spa_now=spa_now,
                 category=category
             )
-        )
-
-    elif action == "pause_today":
-        save_coach_acknowledgment(
-            spa_id=spa_id,
-            spa_now=spa_now,
-            category=category
         )
 
     # review, defer, and keep_reminding do not hide
@@ -33746,6 +34445,10 @@ def scheduled_send_pending_reminders():
         conn.close()
 
 
+#################################
+
+
+
 def scheduled_generate_birthdays():
     print("Running scheduled birthday generator...", flush=True)
 
@@ -33759,10 +34462,53 @@ def scheduled_generate_birthdays():
 
 
 
+#########################################
 
 
 
 
+def scheduled_process_due_automatic_expenses():
+    print(
+        "Running scheduled automatic expense processor...",
+        flush=True
+    )
+
+    try:
+        summary = process_due_automatic_expenses(
+            dry_run=False
+        )
+
+        print(
+            "[AUTOMATIC EXPENSES] "
+            f"Due: {summary['due_count']} | "
+            f"Posted: {summary['posted_count']} | "
+            f"Coach alerts: {summary['alert_count']} | "
+            f"Silent: {summary['silent_count']} | "
+            f"Skipped: {summary['skipped_count']} | "
+            f"Failed: {summary['failed_count']}",
+            flush=True
+        )
+
+        for detail in summary["details"]:
+            print(
+                "[AUTOMATIC EXPENSE] "
+                f"{detail['expense_name']} | "
+                f"{detail['scheduled_date']} | "
+                f"{detail['result']} | "
+                f"{detail['processing_type']}",
+                flush=True
+            )
+
+    except Exception:
+        app.logger.exception(
+            "Scheduled automatic expense processing failed."
+        )
+
+        print(
+            "[AUTOMATIC EXPENSES] "
+            "Scheduled processing failed.",
+            flush=True
+        )
 
 
 
@@ -33808,6 +34554,18 @@ def start_scheduler():
     )
 
     scheduler.add_job(
+        scheduled_process_due_automatic_expenses,
+        "interval",
+        hours=1,
+        id="process_due_automatic_expenses_job",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=3600
+    )
+
+
+    scheduler.add_job(
         lambda: poll_gmail_for_godaddy_bookings(1),
         "interval",
         minutes=5,
@@ -33822,6 +34580,17 @@ def start_scheduler():
 
 
     log_scheduler("System logging initialized.")
+
+
+
+
+
+
+
+
+
+
+
 #   -------------------
 #
 #  GO DADDY
