@@ -276,6 +276,46 @@
 
                     <div class="command-card-tools">
 
+                        <div class="automatic-expense-actions">
+
+                            {% if expense.is_active and expense.next_post_date %}
+                                <form method="POST"
+                                    action="{{ url_for(
+                                        'post_current_automatic_expense',
+                                        automatic_expense_id=expense.automatic_expense_id
+                                    ) }}"
+                                    style="display:inline;">
+
+                                    <button type="submit"
+                                            class="tool-pill tool-pill-small"
+                                            onclick="return confirm(
+                                                'Post the current scheduled payment?'
+                                            );">
+                                        Post Current
+                                    </button>
+                                </form>
+                            {% endif %}
+
+                            {% if expense.is_active %}
+                                <form method="POST"
+                                    action="{{ url_for(
+                                        'post_extra_automatic_expense',
+                                        automatic_expense_id=expense.automatic_expense_id
+                                    ) }}"
+                                    style="display:inline;">
+
+                                    <button type="submit"
+                                            class="tool-pill tool-pill-small"
+                                            onclick="return confirm(
+                                                'Post an extra payment without changing the next scheduled date?'
+                                            );">
+                                        Post Extra Payment
+                                    </button>
+                                </form>
+                            {% endif %}
+
+                        </div>
+
                         <a href="{{ url_for(
                             'edit_automatic_expense',
                             automatic_expense_id=expense.automatic_expense_id

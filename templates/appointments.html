@@ -93,15 +93,56 @@
 
 
 
-{% if status_filter == "overdue" and from_coach %}
+{% if from_coach and coach_action == "reminder" %}
     <section class="coach-card">
         <div class="coach-card-header">
-            <h2>🍑 Coach</h2>
+            <h2>🍑 Coach Peach</h2>
         </div>
 
         <div class="coach-message">
             <p>
-                I've filtered the list to show the overdue appointments that need your attention.
+                I've filtered the list to show the appointment that needs a reminder.
+            </p>
+
+            <p>
+                Review the appointment below and click
+                <strong>Send Reminder</strong>.
+                The SMS page will open with the client, reminder template,
+                and appointment details prepared for you.
+            </p>
+        </div>
+    </section>
+
+
+{% elif from_coach and coach_action == "tomorrow" %}
+    <section class="coach-card">
+        <div class="coach-card-header">
+            <h2>🍑 Coach Peach</h2>
+        </div>
+
+        <div class="coach-message">
+            <p>
+                I've filtered the list to show tomorrow's appointments.
+            </p>
+
+            <p>
+                Review the schedule below so you can confirm the
+                appointment times, services, and client details.
+            </p>
+        </div>
+    </section>
+
+
+{% elif status_filter == "overdue" and from_coach %}
+    <section class="coach-card">
+        <div class="coach-card-header">
+            <h2>🍑 Coach Peach</h2>
+        </div>
+
+        <div class="coach-message">
+            <p>
+                I've filtered the list to show the overdue appointments
+                that need your attention.
             </p>
 
             <p>
@@ -110,6 +151,7 @@
         </div>
     </section>
 {% endif %}
+
 
 
 {% if status_filter == "overdue" %}
@@ -199,6 +241,15 @@
 
                             <a href="{{ url_for('appointment_history', appointment_id=row[0]) }}" class="btn">History</a>
 
+                            <a href="{{ url_for(
+                                'sms_home',
+                                appointment_id=row[0],
+                                template_type='appointment_reminder',
+                                from_coach=1
+                            ) }}"
+                            class="btn">
+                                Send Reminder
+                            </a>
 
 
                             {% if row[7] != 'cancelled' %}

@@ -4,6 +4,7 @@ import csv
 import io
 import imaplib
 import email
+import calendar
 
 from datetime import date, timedelta, datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -3867,6 +3868,8 @@ def send_appointment_reminder_sms(reminder_id, spa_id):
 #
 #################################
 
+
+
 def build_appointment_reminder_merge_data(
     spa_id,
     client_id,
@@ -4299,32 +4302,34 @@ def review_template_ai_basic(template_type, message_text, channel="sms"):
 
 
 
+############################################################
+# Template preview
+############################################################
 
 
-############################################################
-#    template preview
-# # TODO: Replace sample_data with build_merge_data() when Communications Engine is complete.
-############################################################
 
 def merge_template_preview(message_text, merge_data):
+    message_text = message_text or ""
+    merge_data = merge_data or {}
 
+    for field_name, value in merge_data.items():
+        replacement_value = str(value or "")
 
-    sample = {
-        "{{ client_first_name }}": "Sarah",
-        "{{ service_name }}": "90 Minute Facial",
-        "{{ appointment_date }}": "Tuesday, June 16",
-        "{{ appointment_time }}": "2:00 PM",
-        "{{ spa_name }}": "Clear Skin Esthetics",
-        "{{ opt_out }}": "Reply STOP to opt out."
-    }
+        # Support both placeholder styles:
+        # {{client_first_name}}
+        # {{ client_first_name }}
+        placeholders = [
+            "{{" + field_name + "}}",
+            "{{ " + field_name + " }}"
+        ]
 
-    for key, value in sample.items():
-        message_text = message_text.replace(key, value)
+        for placeholder in placeholders:
+            message_text = message_text.replace(
+                placeholder,
+                replacement_value
+            )
 
     return message_text
-
-
-
 
 
 ############################################################
@@ -13436,7 +13441,7 @@ def get_active_messaging_template_types(spa_id, channel):
 ####################################
 #
 #       SMS HOME
-#
+#   SEND SMS ROUTE
 ###################################
 
 
@@ -13447,6 +13452,11 @@ def get_active_messaging_template_types(spa_id, channel):
 def sms_home():
     spa_id = current_spa_id()
     language_code = get_request_language()
+
+    appointment_id = request.args.get(
+        "appointment_id",
+        type=int
+    )
 
     template_id = request.args.get("template_id")
     template_type = request.args.get("template_type")
@@ -13468,8 +13478,65 @@ def sms_home():
     sms_templates = get_active_messaging_templates(spa_id, "sms")
     sms_template_types = get_active_messaging_template_types(spa_id, "sms")
 
+
+    # Automatically select the appointment reminder template
+    # when arriving from an appointment.
+    if (
+        appointment_id
+        and selected_template_type == "appointment_reminder"
+        and not selected_template_id
+    ):
+        for template in sms_templates:
+            if template[1] == "appointment_reminder":
+                selected_template_id = str(template[0])
+                break
+
     conn = get_db_connection()
     cur = conn.cursor()
+
+    appointment_context = None
+
+    if appointment_id:
+        cur.execute("""
+            SELECT
+                a.appointment_id,
+                a.client_id,
+                c.first_name,
+                c.last_name,
+                c.phone,
+                a.appointment_date,
+                a.appointment_time,
+                COALESCE(
+                    s.service_name,
+                    a.external_service_name
+                ) AS service_name
+            FROM appointments a
+            JOIN clients c
+            ON a.client_id = c.client_id
+            AND a.spa_id = c.spa_id
+            LEFT JOIN service_name_types s
+            ON a.service_type_id = s.service_type_id
+            AND a.spa_id = s.spa_id
+            WHERE a.appointment_id = %s
+            AND a.spa_id = %s
+        """, (
+            appointment_id,
+            spa_id
+        ))
+
+        appointment_row = cur.fetchone()
+
+        if appointment_row:
+            appointment_context = {
+                "appointment_id": appointment_row[0],
+                "client_id": appointment_row[1],
+                "client_first_name": appointment_row[2],
+                "client_last_name": appointment_row[3],
+                "phone": appointment_row[4],
+                "appointment_date": appointment_row[5],
+                "appointment_time": appointment_row[6],
+                "service_name": appointment_row[7]
+            }
 
     client_statuses = get_client_statuses(spa_id)
 
@@ -13478,8 +13545,19 @@ def sms_home():
         spa_id=spa_id,
         search=search,
         client_status=client_status,
-        show_all=show_all
-    )   
+        show_all=True if appointment_context else show_all
+    )
+
+    if appointment_context:
+        appointment_client_id = appointment_context[
+            "client_id"
+        ]
+
+        clients = [
+            client
+            for client in clients
+            if client[0] == appointment_client_id
+        ] 
 
     cur.close()
     conn.close()
@@ -13494,8 +13572,10 @@ def sms_home():
         clients=clients,
         search=search,
         show_all=show_all,
-        client_status=client_status
+        client_status=client_status,
+        appointment_context=appointment_context
     )
+
 
 
 
@@ -13849,6 +13929,11 @@ def sms_group_send():
     template_id_raw = request.form.get("template_id")
     client_ids = request.form.getlist("client_ids")
 
+    appointment_id = request.form.get(
+        "appointment_id",
+        type=int
+    )
+
     template_id = int(template_id_raw) if template_id_raw else None
 
     if not template_type:
@@ -13878,6 +13963,50 @@ def sms_group_send():
         ))
 
     client_ids = [int(x) for x in client_ids]
+
+    appointment_context = None
+
+    if appointment_id:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        try:
+            cur.execute("""
+                SELECT
+                    a.appointment_id,
+                    a.client_id,
+                    a.appointment_date,
+                    a.appointment_time,
+                    COALESCE(
+                        s.service_name,
+                        a.external_service_name
+                    ) AS service_name
+                FROM appointments a
+                LEFT JOIN service_name_types s
+                ON a.service_type_id = s.service_type_id
+                AND a.spa_id = s.spa_id
+                WHERE a.appointment_id = %s
+                AND a.spa_id = %s
+            """, (
+                appointment_id,
+                spa_id
+            ))
+
+            appointment_row = cur.fetchone()
+
+            if appointment_row:
+                appointment_context = {
+                    "appointment_id": appointment_row[0],
+                    "client_id": appointment_row[1],
+                    "appointment_date": appointment_row[2],
+                    "appointment_time": appointment_row[3],
+                    "service_name": appointment_row[4]
+                }
+
+        finally:
+            cur.close()
+            conn.close()
+
 
     sent_count = 0
     failed_count = 0
@@ -13914,6 +14043,37 @@ def sms_group_send():
                 "client_full_name": f"{first_name} {last_name}".strip(),
                 "spa_name": get_spa_name(spa_id),
             }
+
+            if (
+                appointment_context
+                and appointment_context["client_id"] == client_id
+            ):
+                appointment_merge_data = (
+                    build_appointment_reminder_merge_data(
+                        spa_id=spa_id,
+                        client_id=client_id,
+                        appointment_date=appointment_context[
+                            "appointment_date"
+                        ],
+                        appointment_time=appointment_context[
+                            "appointment_time"
+                        ],
+                        service_name=appointment_context[
+                            "service_name"
+                        ],
+                        spa_name=get_spa_name(spa_id),
+                        spa_phone=None,
+                        spa_website=None
+                    )
+                )
+
+                merge_data.update(
+                    appointment_merge_data
+                )
+
+                merge_data["appointment_id"] = (
+                    appointment_context["appointment_id"]
+                )
 
             print(
                 "SMS SEND LANGUAGE:",
@@ -13953,7 +14113,75 @@ def sms_group_send():
 
 
             if result.get("success"):
+
+                # Record a successful appointment-specific reminder
+                # so Coach does not recommend it again.
+                if (
+                    appointment_context
+                    and appointment_context["client_id"] == client_id
+                    and template_type == "appointment_reminder"
+                ):
+                    reminder_conn = get_db_connection()
+                    reminder_cur = reminder_conn.cursor()
+
+                    try:
+                        reminder_cur.execute("""
+                            INSERT INTO appointment_reminders (
+                                spa_id,
+                                appointment_id,
+                                client_id,
+                                channel,
+                                reminder_type,
+                                status,
+                                appointment_date_at_send,
+                                appointment_time_at_send,
+                                recipient,
+                                message_body,
+                                sent_at
+                            )
+                            SELECT
+                                %s,
+                                %s,
+                                %s,
+                                'sms',
+                                'appointment_reminder',
+                                'sent',
+                                %s,
+                                %s,
+                                %s,
+                                %s,
+                                NOW()
+                            WHERE NOT EXISTS (
+                                SELECT 1
+                                FROM appointment_reminders
+                                WHERE spa_id = %s
+                                AND appointment_id = %s
+                                AND status = 'sent'
+                                AND appointment_date_at_send = %s
+                                AND appointment_time_at_send = %s
+                            )
+                        """, (
+                            spa_id,
+                            appointment_context["appointment_id"],
+                            client_id,
+                            appointment_context["appointment_date"],
+                            appointment_context["appointment_time"],
+                            phone,
+                            result.get("message_body", ""),
+                            spa_id,
+                            appointment_context["appointment_id"],
+                            appointment_context["appointment_date"],
+                            appointment_context["appointment_time"]
+                        ))
+
+                        reminder_conn.commit()
+
+                    finally:
+                        reminder_cur.close()
+                        reminder_conn.close()
+
                 sent_count += 1
+
             else:
                 failed_count += 1
 
@@ -23995,6 +24223,542 @@ def export_expense_report_xlsx():
 
 
 
+
+
+def advance_automatic_expense_date(current_date, frequency):
+    if frequency == "weekly":
+        return current_date + timedelta(days=7)
+
+    months_to_add = {
+        "monthly": 1,
+        "quarterly": 3,
+        "annual": 12,
+    }.get(frequency)
+
+    if months_to_add is None:
+        raise ValueError(
+            f"Unsupported recurring expense frequency: {frequency}"
+        )
+
+    month_index = (
+        current_date.month - 1 + months_to_add
+    )
+
+    new_year = (
+        current_date.year + month_index // 12
+    )
+
+    new_month = (
+        month_index % 12 + 1
+    )
+
+    last_day_of_month = calendar.monthrange(
+        new_year,
+        new_month
+    )[1]
+
+    new_day = min(
+        current_date.day,
+        last_day_of_month
+    )
+
+    return date(
+        new_year,
+        new_month,
+        new_day
+    )
+
+
+
+
+
+###################################################
+#
+#
+#
+##############################################################
+
+
+
+
+####################################################
+
+def post_automatic_expense_payment(
+    automatic_expense_id,
+    spa_id,
+    posting_type
+):
+    if posting_type not in {"scheduled", "extra"}:
+        return {
+            "success": False,
+            "message": "Invalid recurring expense posting type."
+        }
+
+    posted_date = get_spa_now(spa_id).date()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                ae.automatic_expense_id,       -- 0
+                ae.expense_name,               -- 1
+                ae.vendor_name,                -- 2
+                ae.amount,                     -- 3
+                ae.description,                -- 4
+                ae.notes,                      -- 5
+                ae.frequency,                  -- 6
+                ae.next_post_date,             -- 7
+                ae.end_date,                   -- 8
+                ae.is_active,                  -- 9
+                ec.expense_cat_name,           -- 10
+                pm.payment_method              -- 11
+            FROM automatic_expenses ae
+
+            LEFT JOIN expense_categories ec
+              ON ae.expense_cat_id = ec.expense_cat_id
+             AND ae.spa_id = ec.spa_id
+
+            LEFT JOIN payment_methods pm
+              ON ae.payment_method_id = pm.payment_method_id
+             AND ae.spa_id = pm.spa_id
+
+            WHERE ae.automatic_expense_id = %s
+              AND ae.spa_id = %s
+
+            FOR UPDATE OF ae
+        """, (
+            automatic_expense_id,
+            spa_id,
+        ))
+
+        recurring_expense = cur.fetchone()
+
+        if recurring_expense is None:
+            conn.rollback()
+
+            return {
+                "success": False,
+                "message": "Recurring expense not found."
+            }
+
+        expense_name = recurring_expense[1]
+        vendor_name = (
+            recurring_expense[2]
+            or expense_name
+        )
+        amount = recurring_expense[3]
+        description = (
+            recurring_expense[4]
+            or expense_name
+        )
+        original_notes = recurring_expense[5]
+        frequency = recurring_expense[6]
+        scheduled_date = recurring_expense[7]
+        end_date = recurring_expense[8]
+        is_active = recurring_expense[9]
+        category_name = (
+            recurring_expense[10]
+            or "Recurring Expense"
+        )
+        payment_method = recurring_expense[11]
+
+        if posting_type == "scheduled":
+            if not is_active:
+                conn.rollback()
+
+                return {
+                    "success": False,
+                    "message": (
+                        "This recurring expense is not active."
+                    )
+                }
+
+            if scheduled_date is None:
+                conn.rollback()
+
+                return {
+                    "success": False,
+                    "message": (
+                        "This recurring expense does not have "
+                        "a scheduled posting date."
+                    )
+                }
+
+            cur.execute("""
+                SELECT
+                    occurrence_id,
+                    occurrence_status,
+                    expense_id
+                FROM automatic_expense_occurrences
+                WHERE spa_id = %s
+                  AND automatic_expense_id = %s
+                  AND scheduled_date = %s
+                  AND posting_type = 'scheduled'
+            """, (
+                spa_id,
+                automatic_expense_id,
+                scheduled_date,
+            ))
+
+            existing_occurrence = cur.fetchone()
+
+            if (
+                existing_occurrence
+                and existing_occurrence[1] == "posted"
+            ):
+                conn.rollback()
+
+                return {
+                    "success": False,
+                    "already_posted": True,
+                    "message": (
+                        "The current scheduled payment "
+                        "has already been posted."
+                    )
+                }
+
+        else:
+            existing_occurrence = None
+            scheduled_date = posted_date
+
+
+        expense_date = (
+            scheduled_date
+            if posting_type == "scheduled"
+            else posted_date
+        )
+
+        posting_description = (
+            "Scheduled recurring payment"
+            if posting_type == "scheduled"
+            else "Extra recurring payment"
+        )
+
+        notes_parts = []
+
+        if original_notes:
+            notes_parts.append(original_notes)
+
+        notes_parts.append(
+            f"{posting_description}: {expense_name}."
+        )
+
+        expense_notes = "\n".join(notes_parts)
+
+        cur.execute("""
+            INSERT INTO expenses (
+                spa_id,
+                expense_date,
+                vendor_name,
+                category,
+                description,
+                amount,
+                payment_method,
+                receipt_file,
+                notes
+            )
+            VALUES (
+                %s, %s, %s, %s, %s,
+                %s, %s, NULL, %s
+            )
+            RETURNING expense_id
+        """, (
+            spa_id,
+            expense_date,
+            vendor_name,
+            category_name,
+            description,
+            amount,
+            payment_method,
+            expense_notes,
+        ))
+
+        expense_id = cur.fetchone()[0]
+
+        if existing_occurrence:
+            cur.execute("""
+                UPDATE automatic_expense_occurrences
+                SET
+                    expense_id = %s,
+                    occurrence_status = 'posted',
+                    error_message = NULL,
+                    processed_at = CURRENT_TIMESTAMP,
+                    posting_type = 'scheduled'
+                WHERE occurrence_id = %s
+                  AND spa_id = %s
+            """, (
+                expense_id,
+                existing_occurrence[0],
+                spa_id,
+            ))
+
+        else:
+            cur.execute("""
+                INSERT INTO automatic_expense_occurrences (
+                    spa_id,
+                    automatic_expense_id,
+                    scheduled_date,
+                    expense_id,
+                    occurrence_status,
+                    error_message,
+                    processed_at,
+                    posting_type
+                )
+                VALUES (
+                    %s, %s, %s, %s,
+                    'posted', NULL,
+                    CURRENT_TIMESTAMP,
+                    %s
+                )
+            """, (
+                spa_id,
+                automatic_expense_id,
+                scheduled_date,
+                expense_id,
+                posting_type,
+            ))
+
+        next_post_date = recurring_expense[7]
+
+        if posting_type == "scheduled":
+            next_post_date = advance_automatic_expense_date(
+                recurring_expense[7],
+                frequency
+            )
+
+            if (
+                end_date
+                and next_post_date > end_date
+            ):
+                cur.execute("""
+                    UPDATE automatic_expenses
+                    SET
+                        next_post_date = NULL,
+                        last_processed_date = %s,
+                        last_success_at = CURRENT_TIMESTAMP,
+                        last_error_message = NULL,
+                        last_error_at = NULL,
+                        skip_next_occurrence = FALSE,
+                        skipped_occurrence_date = NULL,
+                        is_active = FALSE,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE automatic_expense_id = %s
+                      AND spa_id = %s
+                """, (
+                    posted_date,
+                    automatic_expense_id,
+                    spa_id,
+                ))
+
+                next_post_date = None
+
+            else:
+                cur.execute("""
+                    UPDATE automatic_expenses
+                    SET
+                        next_post_date = %s,
+                        last_processed_date = %s,
+                        last_success_at = CURRENT_TIMESTAMP,
+                        last_error_message = NULL,
+                        last_error_at = NULL,
+                        skip_next_occurrence = FALSE,
+                        skipped_occurrence_date = NULL,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE automatic_expense_id = %s
+                      AND spa_id = %s
+                """, (
+                    next_post_date,
+                    posted_date,
+                    automatic_expense_id,
+                    spa_id,
+                ))
+
+        conn.commit()
+
+        return {
+            "success": True,
+            "expense_id": expense_id,
+            "posting_type": posting_type,
+            "next_post_date": next_post_date,
+        }
+
+    except Exception:
+        conn.rollback()
+
+        app.logger.exception(
+            "Failed to post recurring expense %s.",
+            automatic_expense_id
+        )
+
+        return {
+            "success": False,
+            "message": (
+                "The recurring expense payment "
+                "could not be posted."
+            )
+        }
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
+
+
+
+
+###################################################
+#
+#
+#
+##############################################################
+
+
+
+
+
+
+
+@app.route(
+    "/automatic-expenses/<int:automatic_expense_id>/post-current",
+    methods=["POST"]
+)
+@login_required
+@spa_required
+def post_current_automatic_expense(automatic_expense_id):
+    spa_id = current_spa_id()
+
+    result = post_automatic_expense_payment(
+        automatic_expense_id=automatic_expense_id,
+        spa_id=spa_id,
+        posting_type="scheduled"
+    )
+
+    if not result.get("success"):
+        flash(
+            result.get(
+                "message",
+                "The current payment could not be posted."
+            ),
+            "error"
+        )
+
+        return redirect(
+            url_for("automatic_expenses")
+        )
+
+    next_post_date = result.get("next_post_date")
+
+    if next_post_date:
+        next_date_text = (
+            f"{next_post_date.strftime('%B')} "
+            f"{next_post_date.day}, "
+            f"{next_post_date.year}"
+        )
+
+        flash(
+            f"Payment posted. "
+            f"Next scheduled date: {next_date_text}.",
+            "success"
+        )
+
+    else:
+        flash(
+            "Payment posted. This recurring expense "
+            "has reached the end of its schedule.",
+            "success"
+        )
+
+    return redirect(
+        url_for("automatic_expenses")
+    )
+
+
+
+
+
+
+
+###################################################
+#
+#
+#
+##############################################################
+
+
+
+@app.route(
+    "/automatic-expenses/<int:automatic_expense_id>/post-extra",
+    methods=["POST"]
+)
+@login_required
+@spa_required
+def post_extra_automatic_expense(automatic_expense_id):
+    spa_id = current_spa_id()
+
+    result = post_automatic_expense_payment(
+        automatic_expense_id=automatic_expense_id,
+        spa_id=spa_id,
+        posting_type="extra"
+    )
+
+    if not result.get("success"):
+        flash(
+            result.get(
+                "message",
+                "The extra payment could not be posted."
+            ),
+            "error"
+        )
+
+        return redirect(
+            url_for("automatic_expenses")
+        )
+
+    next_post_date = result.get("next_post_date")
+
+    if next_post_date:
+        next_date_text = (
+            f"{next_post_date.strftime('%B')} "
+            f"{next_post_date.day}, "
+            f"{next_post_date.year}"
+        )
+
+        flash(
+            f"Extra payment posted. "
+            f"Next scheduled date remains {next_date_text}.",
+            "success"
+        )
+
+    else:
+        flash(
+            "Extra payment posted.",
+            "success"
+        )
+
+    return redirect(
+        url_for("automatic_expenses")
+    )
+
+
+
+
+
+
+###################################################
+#
+#
+#
+##############################################################
+
+######################################
+############################################
+###################################################
+
 @app.route("/automatic-expenses")
 @login_required
 @spa_required
@@ -24281,6 +25045,9 @@ def automatic_expenses():
         coach_message = (
             "You do not currently have any active recurring expenses."
         )
+
+
+
 
     return render_template(
         "automatic_expenses.html",
@@ -27108,6 +27875,7 @@ def morning_briefing():
 
     spa_now = get_spa_now(spa_id)
     today = spa_now.date()
+    tomorrow = today + timedelta(days=1)
     now_time = spa_now.time()
 
     dashboard = get_dashboard_data(
@@ -27214,7 +27982,13 @@ def morning_briefing():
             "icon": "📅",
             "label": "Appointments tomorrow",
             "value": dashboard.get("appointments_tomorrow", 0),
-            "url": url_for("calendar_view"),
+            "url": url_for(
+                "appointments",
+                start_date=tomorrow.isoformat(),
+                end_date=tomorrow.isoformat(),
+                from_coach=1,
+                coach_action="tomorrow"
+            ),
             "category": "Appointments",
             "priority": 60
         })

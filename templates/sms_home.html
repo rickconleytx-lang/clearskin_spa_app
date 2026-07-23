@@ -142,6 +142,13 @@
       action="{{ url_for('sms_group_send') }}"
       onsubmit="return validateSmsSelection();">
 
+    {% if appointment_context %}
+        <input type="hidden"
+            name="appointment_id"
+            value="{{ appointment_context.appointment_id }}">
+    {% endif %}
+
+
     <input type="hidden" name="template_type" value="{{ selected_template_type }}">
     <input type="hidden" name="template_id" value="{{ selected_template_id }}">
     <input type="hidden" name="search" value="{{ search or '' }}">
@@ -163,6 +170,10 @@
                     class="sms-client"
                     name="client_ids"
                     value="{{ c[0] }}"
+                    {% if appointment_context
+                        and appointment_context.client_id == c[0] %}
+                        checked
+                    {% endif %}
                     onchange="updateSelectedCount(); updateSmsLivePreview();">
             </td>
             <td>{{ c[2] }}, {{ c[1] }}</td>
@@ -241,12 +252,48 @@ function updateSmsLivePreview() {
 
     const sampleData = {
 
-        client_first_name: firstName,
-        client_full_name: fullName,
+        client_first_name:
+            {{ (
+                appointment_context.client_first_name
+                if appointment_context
+                else ""
+            )|tojson }}
+            || firstName,
 
-        appointment_date: "01/15/2026",
-        appointment_time: "2:00 PM",
-        service_name: "Facial",
+        client_full_name:
+            {{ (
+                (
+                    appointment_context.client_first_name
+                    ~ " "
+                    ~ appointment_context.client_last_name
+                )|trim
+                if appointment_context
+                else ""
+            )|tojson }}
+            || fullName,
+
+        appointment_date:
+            {{ (
+                appointment_context.appointment_date.strftime("%m/%d/%Y")
+                if appointment_context
+                and appointment_context.appointment_date
+                else ""
+            )|tojson }},
+
+        appointment_time:
+            {{ (
+                appointment_context.appointment_time.strftime("%I:%M %p").lstrip("0")
+                if appointment_context
+                and appointment_context.appointment_time
+                else ""
+            )|tojson }},
+
+        service_name:
+            {{ (
+                appointment_context.service_name
+                if appointment_context
+                else ""
+            )|tojson }},
 
         spa_name: "Clear Skin Esthetics",
         spa_phone: "(555) 555-5555",

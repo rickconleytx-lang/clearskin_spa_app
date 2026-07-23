@@ -1762,11 +1762,7 @@ def build_action_cards(
             )
         })
 
-    appointments_tomorrow = int(
-    dashboard.get("appointments_tomorrow", 0) or 0
-    )
 
-    
 
     cards.sort(
         key=lambda c: c["priority"],
