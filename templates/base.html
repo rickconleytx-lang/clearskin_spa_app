@@ -557,6 +557,10 @@ document.addEventListener(
 >
     <div class="peach-help-modal-content">
 
+        <!-- =================================================
+             HEADER
+        ================================================== -->
+
         <div class="peach-help-modal-header">
 
             <div>
@@ -564,7 +568,10 @@ document.addEventListener(
                     Help & Knowledge Base
                 </h2>
 
-                <div class="peach-help-modal-subtitle">
+                <div
+                    id="peachHelpModalSubtitle"
+                    class="peach-help-modal-subtitle"
+                >
                     Peach Suite Pro assistance
                 </div>
             </div>
@@ -583,150 +590,241 @@ document.addEventListener(
         </div>
 
 
-        <div class="peach-help-search-section">
+        <!-- =================================================
+             TOPIC SEARCH VIEW
+        ================================================== -->
 
-            <label for="peachHelpSearch">
-                Search the Knowledge Base
-            </label>
+        <div id="peachHelpTopicView">
 
-            <div class="peach-help-search-row">
+            <div
+                id="peachHelpSearchSection"
+                class="peach-help-search-section"
+            >
 
-                <input
-                    type="search"
-                    id="peachHelpSearch"
-                    placeholder="Search appointments, SMS, expenses..."
-                    autocomplete="off"
+                <label for="peachHelpSearch">
+                    Search the Knowledge Base
+                </label>
+
+                <div class="peach-help-search-row">
+
+                    <input
+                        type="search"
+                        id="peachHelpSearch"
+                        placeholder="Search appointments, SMS, expenses..."
+                        autocomplete="off"
+                    >
+
+                    <button
+                        type="button"
+                        class="tool-pill tool-pill-small"
+                        id="peachHelpSearchButton"
+                    >
+                        Search
+                    </button>
+
+                </div>
+
+            </div>
+
+
+            <div class="peach-help-body">
+
+                <!-- Help for current page -->
+
+                <section
+                    id="peachHelpContextSection"
+                    class="peach-help-context-section"
                 >
 
-                <button
-                    type="button"
-                    class="btn"
-                    id="peachHelpSearchButton"
-                >
-                    Search
-                </button>
+                    <div class="peach-help-section-label">
+                        Help for this page
+                    </div>
+
+                    <h3>
+                        {{ help_modal_context.title }}
+                    </h3>
+
+                    <p>
+                        {{ help_modal_context.description }}
+                    </p>
+
+                    {% if help_modal_context.topics %}
+
+                        <div class="peach-help-topic-grid">
+
+                            {% for topic in help_modal_context.topics %}
+
+                                <button
+                                    type="button"
+                                    class="
+                                        peach-help-topic-card
+                                        peach-help-topic-button
+                                    "
+                                    data-page-key="{{ topic.page_key }}"
+                                    onclick="openPeachHelpArticleFromButton(event, this)"
+                                >
+                                    <span class="peach-help-topic-icon">
+                                        ?
+                                    </span>
+
+                                    <span>
+                                        {{ topic.title }}
+                                    </span>
+                                </button>
+
+                            {% endfor %}
+
+                        </div>
+
+                    {% else %}
+
+                        <div class="peach-help-empty-context">
+                            Search the Knowledge Base below or open the
+                            complete Help Center.
+                        </div>
+
+                    {% endif %}
+
+                </section>
+
+
+                <!-- All searchable topics -->
+
+                <section class="peach-help-results-section">
+
+                    <div class="peach-help-section-heading">
+
+                        <div
+                            id="peachHelpResultsHeading"
+                            class="peach-help-section-label"
+                        >
+                            Knowledge Base Topics
+                        </div>
+
+                        <span id="peachHelpResultCount"></span>
+
+                    </div>
+
+                    <div
+                        id="peachHelpLoading"
+                        class="peach-help-loading"
+                        hidden
+                    >
+                        Loading help topics...
+                    </div>
+
+                    <div
+                        id="peachHelpResults"
+                        class="peach-help-results"
+                    ></div>
+
+                    <div
+                        id="peachHelpNoResults"
+                        class="peach-help-no-results"
+                        hidden
+                    >
+                        No matching help topics were found.
+                    </div>
+
+                </section>
 
             </div>
 
         </div>
 
 
-        <div class="peach-help-body">
+        <!-- =================================================
+             HELP ARTICLE VIEW
+        ================================================== -->
 
-            <section class="peach-help-context-section">
+        <div
+            id="peachHelpArticleView"
+            class="peach-help-article-view"
+            hidden
+        >
+            <div class="peach-help-article-toolbar">
+
+                <button
+                    type="button"
+                    class="tool-pill tool-pill-small"
+                    onclick="showPeachHelpTopics(event)"
+                >
+                    ← Back to Topics
+                </button>
+
+            </div>
+
+            <div
+                id="peachHelpArticleLoading"
+                class="peach-help-loading"
+                hidden
+            >
+                Loading help article...
+            </div>
+
+
+            <div
+                id="peachHelpArticleError"
+                class="peach-help-no-results"
+                hidden
+            >
+                The selected help article could not be loaded.
+            </div>
+
+
+            <article
+                id="peachHelpArticle"
+                class="peach-help-article"
+                hidden
+            >
 
                 <div class="peach-help-section-label">
-                    Help for this page
+                    Knowledge Base Article
                 </div>
 
-                <h3>
-                    {{ help_modal_context.title }}
-                </h3>
-
-                <p>
-                    {{ help_modal_context.description }}
-                </p>
-
-                {% if help_modal_context.topics %}
-
-                    <div class="peach-help-topic-grid">
-
-                        {% for topic in help_modal_context.topics %}
-
-                            <a
-                                class="peach-help-topic-card"
-                                href="{{
-                                    url_for(
-                                        'view_help_page',
-                                        page_key=topic.page_key
-                                    )
-                                }}"
-                            >
-                                <span class="peach-help-topic-icon">
-                                    ?
-                                </span>
-
-                                <span>
-                                    {{ topic.title }}
-                                </span>
-                            </a>
-
-                        {% endfor %}
-
-                    </div>
-
-                {% else %}
-
-                    <div class="peach-help-empty-context">
-                        Search the Knowledge Base below or open the
-                        complete Help Center.
-                    </div>
-
-                {% endif %}
-
-            </section>
-
-
-            <section class="peach-help-results-section">
-
-                <div class="peach-help-section-heading">
-
-                    <div class="peach-help-section-label">
-                        Knowledge Base Topics
-                    </div>
-
-                    <span id="peachHelpResultCount"></span>
-
-                </div>
+                <h2 id="peachHelpArticleTitle"></h2>
 
                 <div
-                    id="peachHelpLoading"
-                    class="peach-help-loading"
-                    hidden
-                >
-                    Loading help topics...
-                </div>
-
-                <div
-                    id="peachHelpResults"
-                    class="peach-help-results"
+                    id="peachHelpArticleContent"
+                    class="peach-help-article-content"
                 ></div>
 
-                <div
-                    id="peachHelpNoResults"
-                    class="peach-help-no-results"
-                    hidden
-                >
-                    No matching help topics were found.
-                </div>
-
-            </section>
+            </article>
 
         </div>
 
 
+        <!-- =================================================
+             FOOTER
+        ================================================== -->
+
         <div class="peach-help-modal-footer">
 
-            <a
-                href="{{ url_for('help_center') }}"
-                class="btn secondary"
+            <button
+                type="button"
+                class="tool-pill tool-pill-small"
+                onclick="showAllPeachHelpTopics(event)"
             >
-                View Full Knowledge Base
-            </a>
+                Browse All Topics
+            </button>
 
             <div class="peach-help-footer-actions">
 
                 <button
                     type="button"
-                    class="btn secondary"
-                    title="Ask Coach Peach is coming soon"
+                    id="peachHelpAskCoachButton"
+                    class="tool-pill tool-pill-small"
+                    title="Available with Coach Peach AI"
                     disabled
                 >
-                    Ask Coach Peach
+                    Ask Coach Peach - Coming Soon
                 </button>
 
                 <form method="dialog">
-                    <button type="submit" class="btn">
+                    <button
+                        type="submit"
+                        class="tool-pill tool-pill-small"
+                    >
                         Close
                     </button>
                 </form>
@@ -754,6 +852,16 @@ const peachHelpPageTemplate = "{{
 let peachHelpSearchTimer = null;
 
 
+const peachHelpArticleApiTemplate = "{{
+    url_for(
+        'help_page_api',
+        page_key='__HELP_PAGE_KEY__'
+    )
+}}";
+
+let peachHelpCurrentArticle = null;
+
+
 function buildPeachHelpPageUrl(pageKey) {
     return peachHelpPageTemplate.replace(
         "__HELP_PAGE_KEY__",
@@ -761,8 +869,16 @@ function buildPeachHelpPageUrl(pageKey) {
     );
 }
 
+function buildPeachHelpArticleApiUrl(pageKey) {
+    return peachHelpArticleApiTemplate.replace(
+        "__HELP_PAGE_KEY__",
+        encodeURIComponent(pageKey)
+    );
+}
+
 
 function openPeachHelpModal() {
+
     const modal = document.getElementById(
         "peachHelpModal"
     );
@@ -771,15 +887,40 @@ function openPeachHelpModal() {
         return;
     }
 
-    modal.showModal();
-
     const searchInput = document.getElementById(
         "peachHelpSearch"
     );
 
-    loadPeachHelpTopics(
-        searchInput ? searchInput.value : ""
+    /*
+     * Start every Help session with a clean search.
+     */
+    if (searchInput) {
+        searchInput.value = "";
+    }
+
+    showPeachHelpTopics();
+
+    const contextSection = document.getElementById(
+        "peachHelpContextSection"
     );
+
+    const resultsHeading = document.getElementById(
+        "peachHelpResultsHeading"
+    );
+
+    if (contextSection) {
+        contextSection.hidden = false;
+    }
+
+    if (resultsHeading) {
+        resultsHeading.textContent =
+            "Knowledge Base Topics";
+    }
+
+
+    modal.showModal();
+
+    loadPeachHelpTopics("");
 
     window.setTimeout(
         function () {
@@ -792,7 +933,102 @@ function openPeachHelpModal() {
 }
 
 
+
+function showAllPeachHelpTopics(event = null) {
+
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+
+    const topicView = document.getElementById(
+        "peachHelpTopicView"
+    );
+
+    const articleView = document.getElementById(
+        "peachHelpArticleView"
+    );
+
+    const contextSection = document.getElementById(
+        "peachHelpContextSection"
+    );
+
+    const searchSection = document.getElementById(
+        "peachHelpSearchSection"
+    );
+
+    const searchInput = document.getElementById(
+        "peachHelpSearch"
+    );
+
+    const resultsHeading = document.getElementById(
+        "peachHelpResultsHeading"
+    );
+
+    const subtitleElement = document.getElementById(
+        "peachHelpModalSubtitle"
+    );
+
+    peachHelpCurrentArticle = null;
+
+    if (topicView) {
+        topicView.hidden = false;
+    }
+
+    if (articleView) {
+        articleView.hidden = true;
+    }
+
+    /*
+     * Hide page-specific suggestions so the modal becomes
+     * a clean complete Knowledge Base directory.
+     */
+    if (contextSection) {
+        contextSection.hidden = true;
+    }
+
+    /*
+     * Keep search available above the complete topic list.
+     */
+    if (searchSection) {
+        searchSection.hidden = false;
+    }
+
+    if (searchInput) {
+        searchInput.value = "";
+    }
+
+    if (resultsHeading) {
+        resultsHeading.textContent =
+            "All Knowledge Base Topics";
+    }
+
+    if (subtitleElement) {
+        subtitleElement.textContent =
+            "Complete Peach Suite Pro Knowledge Base";
+    }
+
+    loadPeachHelpTopics("");
+
+    window.setTimeout(
+        function () {
+            const results = document.getElementById(
+                "peachHelpResults"
+            );
+
+            if (results) {
+                results.scrollIntoView({
+                    behavior: "smooth",
+                    block: "start"
+                });
+            }
+        },
+        100
+    );
+}
+
 async function loadPeachHelpTopics(searchText) {
+
     const results = document.getElementById(
         "peachHelpResults"
     );
@@ -803,6 +1039,10 @@ async function loadPeachHelpTopics(searchText) {
 
     const noResults = document.getElementById(
         "peachHelpNoResults"
+    );
+
+    const backButton = document.getElementById(
+    "peachHelpBackButton"
     );
 
     const resultCount = document.getElementById(
@@ -816,23 +1056,32 @@ async function loadPeachHelpTopics(searchText) {
     results.innerHTML = "";
     loading.hidden = false;
     noResults.hidden = true;
+    noResults.textContent =
+        "No matching help topics were found.";
 
     if (resultCount) {
         resultCount.textContent = "";
     }
 
     try {
+
         const response = await fetch(
             peachHelpApiUrl
             + "?q="
-            + encodeURIComponent(searchText || "")
+            + encodeURIComponent(
+                searchText || ""
+            )
         );
 
         const data = await response.json();
 
-        if (!response.ok || !data.success) {
+        if (
+            !response.ok
+            || !data.success
+        ) {
             throw new Error(
-                data.message || "Help search failed."
+                data.message
+                || "Help search failed."
             );
         }
 
@@ -845,8 +1094,8 @@ async function loadPeachHelpTopics(searchText) {
                 topics.length
                 + (
                     topics.length === 1
-                    ? " topic"
-                    : " topics"
+                        ? " topic"
+                        : " topics"
                 );
         }
 
@@ -856,39 +1105,313 @@ async function loadPeachHelpTopics(searchText) {
         }
 
         topics.forEach(function (topic) {
-            const link = document.createElement("a");
 
-            link.className = "peach-help-result-link";
+            const button =
+                document.createElement(
+                    "button"
+                );
 
-            link.href = buildPeachHelpPageUrl(
-                topic.page_key
+            button.type = "button";
+
+            button.className =
+                "peach-help-result-link "
+                + "peach-help-result-button";
+
+            button.dataset.pageKey =
+                topic.page_key;
+
+            button.addEventListener(
+                "click",
+                function (event) {
+                    openPeachHelpArticleFromButton(
+                        event,
+                        button
+                    );
+                }
             );
 
-            const title = document.createElement("span");
 
-            title.textContent = topic.title;
+            const title =
+                document.createElement(
+                    "span"
+                );
 
-            const arrow = document.createElement("span");
+            title.textContent =
+                topic.title;
 
-            arrow.className = "peach-help-result-arrow";
+
+            const arrow =
+                document.createElement(
+                    "span"
+                );
+
+            arrow.className =
+                "peach-help-result-arrow";
+
             arrow.textContent = "›";
 
-            link.appendChild(title);
-            link.appendChild(arrow);
 
-            results.appendChild(link);
+            button.appendChild(title);
+            button.appendChild(arrow);
+
+            results.appendChild(button);
+
         });
 
     } catch (error) {
+
         loading.hidden = true;
         noResults.hidden = false;
-        noResults.textContent = (
-            "Help topics could not be loaded."
-        );
+
+        noResults.textContent =
+            "Help topics could not be loaded.";
 
         console.error(
             "[HELP MODAL ERROR]",
             error
+        );
+    }
+}
+
+
+
+function openPeachHelpArticleFromButton(
+    event,
+    button
+) {
+
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+
+    if (!button) {
+        return;
+    }
+
+    const pageKey = button.dataset.pageKey;
+
+    console.log(
+        "[HELP ARTICLE CLICK]",
+        pageKey
+    );
+
+    if (!pageKey) {
+        console.error(
+            "Help topic button has no page key."
+        );
+
+        return;
+    }
+
+    loadPeachHelpArticle(
+        pageKey
+    );
+}
+
+
+
+async function loadPeachHelpArticle(pageKey) {
+
+    const topicView = document.getElementById(
+        "peachHelpTopicView"
+    );
+
+    const articleView = document.getElementById(
+        "peachHelpArticleView"
+    );
+
+    const articleElement = document.getElementById(
+        "peachHelpArticle"
+    );
+
+    const loadingElement = document.getElementById(
+        "peachHelpArticleLoading"
+    );
+
+    const errorElement = document.getElementById(
+        "peachHelpArticleError"
+    );
+
+    const titleElement = document.getElementById(
+        "peachHelpArticleTitle"
+    );
+
+    const contentElement = document.getElementById(
+        "peachHelpArticleContent"
+    );
+
+    const subtitleElement = document.getElementById(
+        "peachHelpModalSubtitle"
+    );
+
+    const coachButton = document.getElementById(
+        "peachHelpAskCoachButton"
+    );
+
+    if (
+        !topicView
+        || !articleView
+        || !articleElement
+        || !loadingElement
+        || !errorElement
+    ) {
+        return;
+    }
+
+    peachHelpCurrentArticle = null;
+
+    topicView.hidden = true;
+    articleView.hidden = false;
+
+
+
+    articleElement.hidden = true;
+    errorElement.hidden = true;
+    loadingElement.hidden = false;
+
+    if (subtitleElement) {
+        subtitleElement.textContent =
+            "Loading help article...";
+    }
+
+    if (coachButton) {
+        coachButton.disabled = true;
+        coachButton.title =
+            "Available wiwth Coach Peach AI";
+    }
+
+    try {
+
+        const response = await fetch(
+            buildPeachHelpArticleApiUrl(
+                pageKey
+            ),
+            {
+                headers: {
+                    "Accept": "application/json"
+                }
+            }
+        );
+
+        const data = await response.json();
+
+        if (
+            !response.ok
+            || !data.success
+            || !data.article
+        ) {
+            throw new Error(
+                data.message
+                || "The help article could not be loaded."
+            );
+        }
+
+        const article = data.article;
+
+        peachHelpCurrentArticle = article;
+
+        if (titleElement) {
+            titleElement.textContent =
+                article.title || "Help Article";
+        }
+
+        if (contentElement) {
+            contentElement.innerHTML =
+                article.content || "";
+        }
+
+        if (subtitleElement) {
+            subtitleElement.textContent =
+                article.language_code === "ES"
+                    ? "Artículo de ayuda de Peach Suite Pro"
+                    : "Peach Suite Pro help article";
+        }
+
+        loadingElement.hidden = true;
+        articleElement.hidden = false;
+
+        if (coachButton) {
+            coachButton.disabled = false;
+            coachButton.title =
+                "Ask Coach Peach about this article";
+        }
+
+    } catch (error) {
+
+        console.error(
+            "Help article loading error:",
+            error
+        );
+
+        loadingElement.hidden = true;
+        errorElement.hidden = false;
+
+        if (subtitleElement) {
+            subtitleElement.textContent =
+                "Help article unavailable";
+        }
+    }
+}
+
+
+function showPeachHelpTopics(event = null) {
+
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+
+    const topicView = document.getElementById(
+        "peachHelpTopicView"
+    );
+
+    const articleView = document.getElementById(
+        "peachHelpArticleView"
+    );
+
+
+    const subtitleElement = document.getElementById(
+        "peachHelpModalSubtitle"
+    );
+
+    const coachButton = document.getElementById(
+        "peachHelpAskCoachButton"
+    );
+
+    peachHelpCurrentArticle = null;
+
+    if (topicView) {
+        topicView.hidden = false;
+    }
+
+    if (articleView) {
+        articleView.hidden = true;
+    }
+
+    if (subtitleElement) {
+        subtitleElement.textContent =
+            "Peach Suite Pro assistance";
+    }
+
+    if (coachButton) {
+        coachButton.disabled = true;
+
+        coachButton.title =
+            "Open a help article before asking Coach Peach";
+    }
+
+
+    const searchInput = document.getElementById(
+        "peachHelpSearch"
+    );
+
+    if (searchInput) {
+        window.setTimeout(
+            function () {
+                searchInput.focus();
+            },
+            50
         );
     }
 }

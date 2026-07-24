@@ -32,7 +32,7 @@
     ================================================== -->
 
     <div class="styled-form">
-
+<hr>
         <h2>Scan With This Device</h2>
 
         <p>
@@ -40,16 +40,17 @@
             SKU or barcode.
         </p>
 
-        <div class="form-group">
+        <div class="form-group inventory-scan-actions">
 
             <button type="button"
-                    class="tool-pill tool-pill-small"
+                    class="tool-pill tool-pill-small inventory-scan-button"
                     onclick="startScanner()">
                 Scan Product
             </button>
 
         </div>
-
+<br>
+        Current device viewer window:
         <div class="form-group">
 
             <video id="scanner-video"
@@ -68,9 +69,10 @@
         </div>
 
     </div>
+<br><br>
 
-
-    <!-- =================================================
+<hr> 
+<!-- =================================================
          USE PHONE AS SCANNER
     ================================================== -->
 
@@ -86,6 +88,13 @@
         </p>
 
         <div id="phone-scanner-start-panel">
+
+            <p>
+                <strong>Before starting:</strong>
+                Open Peach Suite Pro on your phone and sign in.
+                Then return to this computer and click
+                <strong>Start Phone Scanner</strong>.
+            </p>
 
             <button type="button"
                     id="start-phone-session-button"

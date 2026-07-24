@@ -1,105 +1,176 @@
 {% extends "base.html" %}
 
+{% block title %}Help Center{% endblock %}
+
 {% block content %}
 
-<div class="page-card">
+<div class="page-card help-center-page">
 
-<h1>🍑 Help Center</h1>
+    <!-- =================================================
+         PAGE HEADER
+    ================================================== -->
 
-<h2>Find answers and learn how to use Peach Suite Pro.</h2>
+    <div class="page-header">
 
+        <div>
+            <h1>🍑 Help Center</h1>
 
-
-<div style="text-align:center; margin:30px 0;">
-
-    <img src="{{ url_for('static', filename='images/ps_help_center_banner.png') }}"
-         alt="Peach Suite Pro Help Center"
-         style="width:85%; max-width:1000px; height:auto; border-radius:12px;">
-
-</div>
-
-
-<div class="narrow-cards">
-    ...
-</div>
-        <div class="record-count">
-            {{ pages|length }} help topic(s) found
+            <p class="page-subtitle">
+                Find answers and learn how to use Peach Suite Pro.
+            </p>
         </div>
 
+    </div>
 
-        <form method="GET" style="margin-bottom:20px;">
 
-            <input type="text"
-               name="search"
-               value="{{ search or '' }}"
-               placeholder="Search Help Topics">
+    <!-- =================================================
+         BANNER
+    ================================================== -->
 
-        <button class="btn">Search</button>
+    <div class="help-center-banner">
 
-        <a href="{{ url_for('help_center') }}" class="btn">
-            Clear
-        </a>
+        <img
+            src="{{
+                url_for(
+                    'static',
+                    filename='images/ps_help_center_banner.png'
+                )
+            }}"
+            alt="Peach Suite Pro Help Center"
+        >
+
+    </div>
+
+
+    <!-- =================================================
+         SEARCH
+    ================================================== -->
+
+    <form
+        method="GET"
+        class="help-center-search"
+    >
+
+        <input
+            type="search"
+            name="search"
+            value="{{ search or '' }}"
+            placeholder="Search help topics"
+            autocomplete="off"
+        >
+
+        <button
+            type="submit"
+            class="tool-pill tool-pill-small"
+        >
+            Search
+        </button>
+
+        {% if search %}
+
+            <a
+                href="{{ url_for('help_center') }}"
+                class="tool-pill tool-pill-small"
+            >
+                Clear
+            </a>
+
+        {% endif %}
 
     </form>
 
+
+    <div class="help-center-directory-header">
+
+        <div>
+            <h2>
+                Knowledge Base Topics
+            </h2>
+
+            <p>
+                Select a topic to open the complete help article.
+            </p>
+        </div>
+
+        <div class="record-count">
+            {{ pages|length }}
+
+            {% if pages|length == 1 %}
+                topic
+            {% else %}
+                topics
+            {% endif %}
+        </div>
+
     </div>
 
-    <p>
-        Browse help topics below.
-    </p>
 
-    <div class="narrow-cards">
+    <!-- =================================================
+         TOPIC DIRECTORY
+    ================================================== -->
 
+    {% if pages %}
+
+        <div class="help-center-directory">
 
             {% for page in pages %}
-                <div class="card">
 
-                    <h3>
-                        {% if page[3] == 'EN' %}
-                            🇺🇸 EN
-                        {% elif page[3] == 'ES' %}
-                            🇪🇸 ES
-                        {% elif page[3] == 'FR' %}
-                            🇫🇷 FR
-                        {% elif page[3] == 'DE' %}
-                            🇩🇪 DE
-                        {% else %}
-                            {{ page[3] }}
-                        {% endif %}
+                <a
+                    href="{{
+                        url_for(
+                            'view_help_page',
+                            page_key=page[0],
+                            lang=page[3]
+                        )
+                    }}"
+                    class="help-center-directory-item"
+                >
 
-                        {{ page[1] or page[2] }}
-                    </h3>
+                    <span class="help-center-directory-title">
+                        {{ page[1] or page[2] or page[0] }}
+                    </span>
 
-                    <a href="{{ url_for('view_help_page', page_key=page[0], lang=page[3]) }}"
-                    class="btn">
-                        Open Help
-                    </a>
+                    <span class="help-center-directory-language">
+                        {{ page[3] }}
+                    </span>
 
-                </div>
+                    <span
+                        class="help-center-directory-arrow"
+                        aria-hidden="true"
+                    >
+                        ›
+                    </span>
+
+                </a>
+
             {% endfor %}
 
+        </div>
+
+    {% else %}
+
+        <div class="help-center-empty">
+
+            <strong>
+                No matching help topics were found.
+            </strong>
+
+            <p>
+                Try another search term or clear the current search.
+            </p>
+
+        </div>
+
+    {% endif %}
+
+
+    <div class="help-center-footer-message">
+
+        Can’t find what you’re looking for?
+        Try searching by page name, feature, or business task.
 
     </div>
 
 </div>
-
-
-<hr>
-
-
-
-
-
-
-
-<p style="text-align:center;color:#777;font-size:.9em;">
-
-Can't find what you're looking for?
-
-Browse all topics or use the search box above.
-
-</p>
-
-
 
 {% endblock %}

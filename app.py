@@ -592,59 +592,114 @@ def inject_help_modal_context():
 ############################################
 
 
-
 @app.route("/api/help-topics")
 @login_required
 def help_topics_api():
+
     search_text = request.args.get(
         "q",
         ""
     ).strip()
 
-    language = session.get(
-        "preferred_language",
-        "EN"
-    )
+    language = (
+        session.get(
+            "preferred_language",
+            "EN"
+        )
+        or "EN"
+    ).strip().upper()
 
     conn = get_db_connection()
     cur = conn.cursor()
 
     try:
+
+        sql = """
+            WITH ranked_help_pages AS (
+
+                SELECT
+                    help_page_id,
+                    page_key,
+                    display_name,
+                    title,
+                    content,
+                    language_code,
+                    display_order,
+
+                    ROW_NUMBER() OVER (
+                        PARTITION BY page_key
+                        ORDER BY
+                            CASE
+                                WHEN language_code = %s THEN 0
+                                WHEN language_code = 'EN' THEN 1
+                                ELSE 2
+                            END,
+                            help_page_id DESC
+                    ) AS language_rank
+
+                FROM help_pages
+
+                WHERE is_active = TRUE
+                  AND language_code IN (%s, 'EN')
+            )
+
+            SELECT
+                page_key,
+
+                COALESCE(
+                    NULLIF(title, ''),
+                    NULLIF(display_name, ''),
+                    page_key
+                ) AS topic_title
+
+            FROM ranked_help_pages
+
+            WHERE language_rank = 1
+        """
+
+        params = [
+            language,
+            language
+        ]
+
         if search_text:
+
             like_search = f"%{search_text}%"
 
-            cur.execute(
-                """
-                SELECT
-                    page_key,
-                    title
-                FROM help_pages
-                WHERE title ILIKE %s
-                OR page_key ILIKE %s
-                ORDER BY
-                    COALESCE(display_order, 9999),
-                    title
-                LIMIT 40
-                """,
-                (
-                    like_search,
-                    like_search
+            sql += """
+                AND (
+                       page_key ILIKE %s
+                    OR display_name ILIKE %s
+                    OR title ILIKE %s
+                    OR content ILIKE %s
                 )
-            )
+            """
 
-        else:
-            cur.execute(
-                """
-                SELECT
-                    page_key,
-                    title
-                FROM help_pages
-                ORDER BY
-                    COALESCE(display_order, 9999),
-                    title
-                LIMIT 40
-                """
-            )
+            params.extend([
+                like_search,
+                like_search,
+                like_search,
+                like_search
+            ])
+
+        sql += """
+            ORDER BY
+                LOWER(
+                    COALESCE(
+                        NULLIF(display_name, ''),
+                        NULLIF(title, ''),
+                        page_key
+                    )
+                ),
+                page_key
+
+            LIMIT 40
+        """
+
+        cur.execute(
+            sql,
+            tuple(params)
+        )
 
         rows = cur.fetchall()
 
@@ -656,29 +711,21 @@ def help_topics_api():
             for row in rows
         ]
 
-        return jsonify(
-            {
-                "success": True,
-                "topics": topics
-            }
+        return jsonify({
+            "success": True,
+            "topics": topics
+        })
+
+    except Exception:
+
+        app.logger.exception(
+            "Unable to load help topics."
         )
 
-    except Exception as error:
-        print(
-            "[HELP TOPICS API ERROR]",
-            error,
-            flush=True
-        )
-
-        return jsonify(
-            {
-                "success": False,
-                "topics": [],
-                "message": (
-                    "Help topics could not be loaded."
-                )
-            }
-        ), 500
+        return jsonify({
+            "success": False,
+            "message": "Help topics could not be loaded."
+        }), 500
 
     finally:
         cur.close()
@@ -690,6 +737,96 @@ def help_topics_api():
 
 
 
+# =========================================================
+# HELP ARTICLE API
+# =========================================================
+
+@app.route("/api/help-page/<page_key>")
+@login_required
+def help_page_api(page_key):
+
+    page_key = str(
+        page_key or ""
+    ).strip()
+
+    language = (
+        session.get(
+            "preferred_language",
+            "EN"
+        )
+        or "EN"
+    ).strip().upper()
+
+    if not page_key:
+        return jsonify({
+            "success": False,
+            "message": "No help topic was selected."
+        }), 400
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                page_key,
+                title,
+                content,
+                language_code
+            FROM help_pages
+            WHERE page_key = %s
+              AND is_active = TRUE
+              AND language_code IN (%s, 'EN')
+            ORDER BY
+                CASE
+                    WHEN language_code = %s THEN 0
+                    WHEN language_code = 'EN' THEN 1
+                    ELSE 2
+                END
+            LIMIT 1
+            """,
+            (
+                page_key,
+                language,
+                language
+            )
+        )
+
+        help_page = cur.fetchone()
+
+        if help_page is None:
+            return jsonify({
+                "success": False,
+                "message": "The help article was not found."
+            }), 404
+
+        return jsonify({
+            "success": True,
+            "article": {
+                "page_key": help_page[0],
+                "title": help_page[1],
+                "content": help_page[2],
+                "language_code": help_page[3]
+            }
+        })
+
+    except Exception:
+
+        app.logger.exception(
+            "Unable to load help article."
+        )
+
+        return jsonify({
+            "success": False,
+            "message": (
+                "The selected help article could not be loaded."
+            )
+        }), 500
+
+    finally:
+        cur.close()
+        conn.close()
 
 
 
@@ -10272,69 +10409,121 @@ def new_help_page():
 #   -------------------------
     
 
+
 @app.route("/help")
 @login_required
 @spa_required
 def help_center():
 
-    search = request.args.get("search", "").strip()
+    search = request.args.get(
+        "search",
+        ""
+    ).strip()
+
+    language = (
+        session.get(
+            "preferred_language",
+            "EN"
+        )
+        or "EN"
+    ).strip().upper()
 
     conn = get_db_connection()
     cur = conn.cursor()
 
+    try:
+        sql = """
+            WITH ranked_help_pages AS (
+                SELECT
+                    help_page_id,
+                    page_key,
+                    display_name,
+                    title,
+                    language_code,
+                    display_order,
+                    content,
 
-    if search:
-        search_term = f"%{search}%"
+                    ROW_NUMBER() OVER (
+                        PARTITION BY page_key
+                        ORDER BY
+                            CASE
+                                WHEN language_code = %s THEN 0
+                                WHEN language_code = 'EN' THEN 1
+                                ELSE 2
+                            END,
+                            help_page_id DESC
+                    ) AS language_rank
 
-        cur.execute("""
-            SELECT
-                page_key,
-                display_name,
-                title,
-                language_code,
-                display_order
-            FROM help_pages
-            WHERE is_active = TRUE
-            AND (
-                    page_key ILIKE %s
-                OR display_name ILIKE %s
-                OR title ILIKE %s
-                OR content ILIKE %s
+                FROM help_pages
+
+                WHERE is_active = TRUE
+                  AND language_code IN (%s, 'EN')
             )
-            ORDER BY display_order, page_key, language_code
-        """, (
-            search_term,
-            search_term,
-            search_term,
-            search_term
-        ))
 
-    else:
-        cur.execute("""
             SELECT
                 page_key,
                 display_name,
                 title,
                 language_code,
                 display_order
-            FROM help_pages
-            WHERE is_active = TRUE
-            ORDER BY display_order, display_name
-        """)
 
+            FROM ranked_help_pages
 
+            WHERE language_rank = 1
+        """
 
-    pages = cur.fetchall()
+        params = [
+            language,
+            language
+        ]
 
-    cur.close()
-    conn.close()
+        if search:
+            search_term = f"%{search}%"
+
+            sql += """
+                AND (
+                       page_key ILIKE %s
+                    OR display_name ILIKE %s
+                    OR title ILIKE %s
+                    OR content ILIKE %s
+                )
+            """
+
+            params.extend([
+                search_term,
+                search_term,
+                search_term,
+                search_term
+            ])
+
+        sql += """
+            ORDER BY
+                LOWER(
+                    COALESCE(
+                        NULLIF(display_name, ''),
+                        NULLIF(title, ''),
+                        page_key
+                    )
+                ),
+                page_key
+        """
+
+        cur.execute(
+            sql,
+            tuple(params)
+        )
+
+        pages = cur.fetchall()
+
+    finally:
+        cur.close()
+        conn.close()
 
     return render_template(
         "help_center.html",
         pages=pages,
         search=search
     )
-
 
 
 
