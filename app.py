@@ -2050,11 +2050,15 @@ def log_godaddy(message):
 def is_master_admin():
     return session.get("role") == "master_admin"
 
+#############################
+
 
 def current_spa_filter():
     if is_master_admin():
         return "", ()
     return " AND spa_id = %s ", (current_spa_id(),)
+
+##########################
 
 
 def current_spa_id():
@@ -2067,6 +2071,123 @@ def current_spa_id():
         return None
 
     return getattr(g, "spa_id", None)
+
+#################################
+
+
+
+def current_business_unit_id():
+    from flask import g, session
+
+    if "user_id" not in session:
+        return None
+
+    # Master Admin remains platform-wide for now.
+    # We will add an explicit selected-spa/workspace context later.
+    if is_master_admin():
+        return None
+
+    # Avoid repeating the database query during the same request.
+    cached_business_unit_id = getattr(g, "business_unit_id", None)
+
+    if cached_business_unit_id is not None:
+        return cached_business_unit_id
+
+    spa_id = current_spa_id()
+    user_id = session.get("user_id")
+
+    if spa_id is None or user_id is None:
+        return None
+
+    selected_business_unit_id = session.get("business_unit_id")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        # First, honor a workspace already selected in the session,
+        # but only when the user has an active membership in it.
+        if selected_business_unit_id is not None:
+            cur.execute("""
+                SELECT
+                    bu.business_unit_id
+                FROM business_units bu
+
+                JOIN business_unit_memberships bum
+                  ON bum.business_unit_id = bu.business_unit_id
+                 AND bum.spa_id = bu.spa_id
+
+                WHERE bu.business_unit_id = %s
+                  AND bu.spa_id = %s
+                  AND bu.is_active = TRUE
+                  AND bum.user_id = %s
+                  AND bum.is_active = TRUE
+
+                LIMIT 1
+            """, (
+                selected_business_unit_id,
+                spa_id,
+                user_id
+            ))
+
+            row = cur.fetchone()
+
+            if row:
+                business_unit_id = row[0]
+                g.business_unit_id = business_unit_id
+                return business_unit_id
+
+        # Otherwise, use the user's default organization workspace.
+        # For a future independent provider, this falls back to their
+        # first active authorized workspace if no default is assigned.
+        cur.execute("""
+            SELECT
+                bu.business_unit_id
+            FROM business_units bu
+
+            JOIN business_unit_memberships bum
+              ON bum.business_unit_id = bu.business_unit_id
+             AND bum.spa_id = bu.spa_id
+
+            WHERE bu.spa_id = %s
+              AND bu.is_active = TRUE
+              AND bum.user_id = %s
+              AND bum.is_active = TRUE
+
+            ORDER BY
+                CASE
+                    WHEN bu.is_default = TRUE THEN 0
+                    ELSE 1
+                END,
+                bu.business_unit_id
+
+            LIMIT 1
+        """, (
+            spa_id,
+            user_id
+        ))
+
+        row = cur.fetchone()
+
+        if not row:
+            return None
+
+        business_unit_id = row[0]
+
+        session["business_unit_id"] = business_unit_id
+        g.business_unit_id = business_unit_id
+
+        return business_unit_id
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
+
+
 
 
 
