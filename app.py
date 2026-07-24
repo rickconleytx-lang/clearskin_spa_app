@@ -2189,6 +2189,292 @@ def current_business_unit_id():
 
 
 
+#####################################
+#
+#   AUTHORIZED BUSINESS UNIT IDS
+#
+#
+#
+#######################################
+
+
+def authorized_business_unit_ids():
+    from flask import g, session
+
+    if "user_id" not in session:
+        return ()
+
+    # Master Admin will receive an explicit selected-spa/workspace
+    # context in a later phase. Deny workspace access until then.
+    if is_master_admin():
+        return ()
+
+    cached_ids = getattr(g, "_authorized_business_unit_ids", None)
+
+    if cached_ids is not None:
+        return cached_ids
+
+    spa_id = current_spa_id()
+    user_id = session.get("user_id")
+
+    if spa_id is None or user_id is None:
+        return ()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT DISTINCT
+                bu.business_unit_id
+
+            FROM business_units bu
+
+            JOIN business_unit_memberships bum
+              ON bum.business_unit_id = bu.business_unit_id
+             AND bum.spa_id = bu.spa_id
+
+            WHERE bu.spa_id = %s
+              AND bu.is_active = TRUE
+              AND bum.user_id = %s
+              AND bum.is_active = TRUE
+
+            ORDER BY bu.business_unit_id
+        """, (
+            spa_id,
+            user_id
+        ))
+
+        authorized_ids = tuple(
+            row[0]
+            for row in cur.fetchall()
+        )
+
+        g._authorized_business_unit_ids = authorized_ids
+
+        return authorized_ids
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
+
+
+
+
+#####################################
+#
+#   USER HAS BUSINESS UNIT ACCESS
+#
+#
+#
+#######################################
+
+
+
+
+def user_has_business_unit_access(
+    business_unit_id,
+    allowed_role_codes=None
+):
+    from flask import session
+
+    if "user_id" not in session:
+        return False
+
+    # Master Admin access will require an explicit selected-spa
+    # and selected-workspace context in a later phase.
+    if is_master_admin():
+        return False
+
+    try:
+        business_unit_id = int(business_unit_id)
+    except (TypeError, ValueError):
+        return False
+
+    spa_id = current_spa_id()
+    user_id = session.get("user_id")
+
+    if spa_id is None or user_id is None:
+        return False
+
+    # The simple access check can use the request-level cached list.
+    if allowed_role_codes is None:
+        return business_unit_id in authorized_business_unit_ids()
+
+    if isinstance(allowed_role_codes, str):
+        role_codes = (allowed_role_codes,)
+    else:
+        role_codes = tuple(allowed_role_codes)
+
+    if not role_codes:
+        return False
+
+    placeholders = ", ".join(
+        ["%s"] * len(role_codes)
+    )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(f"""
+            SELECT 1
+
+            FROM business_units bu
+
+            JOIN business_unit_memberships bum
+              ON bum.business_unit_id = bu.business_unit_id
+             AND bum.spa_id = bu.spa_id
+
+            WHERE bu.business_unit_id = %s
+              AND bu.spa_id = %s
+              AND bu.is_active = TRUE
+              AND bum.user_id = %s
+              AND bum.is_active = TRUE
+              AND bum.membership_role_code IN ({placeholders})
+
+            LIMIT 1
+        """, (
+            business_unit_id,
+            spa_id,
+            user_id,
+            *role_codes
+        ))
+
+        return cur.fetchone() is not None
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
+
+#####################################
+#
+#
+#   REQUIRE BUSINESS UNIT ACCESS
+# 
+#
+#
+#######################################
+
+
+
+def require_business_unit_access(
+    param_name="business_unit_id",
+    allowed_role_codes=None
+):
+    from functools import wraps
+
+    def decorator(view_function):
+
+        @wraps(view_function)
+        def wrapped_view(*args, **kwargs):
+            from flask import abort, request
+
+            business_unit_id = kwargs.get(param_name)
+
+            if (
+                business_unit_id is None
+                and request.view_args
+            ):
+                business_unit_id = request.view_args.get(param_name)
+
+            if business_unit_id is None:
+                business_unit_id = request.form.get(param_name)
+
+            if business_unit_id is None:
+                business_unit_id = request.args.get(param_name)
+
+            # Routes without a supplied workspace may use the
+            # user's current authorized workspace.
+            if business_unit_id is None:
+                business_unit_id = current_business_unit_id()
+
+            if not user_has_business_unit_access(
+                business_unit_id,
+                allowed_role_codes=allowed_role_codes
+            ):
+                abort(403)
+
+            return view_function(*args, **kwargs)
+
+        return wrapped_view
+
+    return decorator
+
+
+
+
+
+
+
+#####################################
+#
+#
+#
+#   
+#
+#######################################
+
+
+
+
+
+
+
+
+#####################################
+#
+#
+#
+#
+#
+#######################################
+
+
+
+
+
+
+
+
+
+
+#####################################
+#
+#
+#
+#
+#
+#######################################
+
+
+
+
+
+
+
+
+
+
+#####################################
+#
+#
+#
+#
+#
+#######################################
+
+
+
+
 
 
 
