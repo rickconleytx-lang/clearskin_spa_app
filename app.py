@@ -601,13 +601,7 @@ def help_topics_api():
         ""
     ).strip()
 
-    language = (
-        session.get(
-            "preferred_language",
-            "EN"
-        )
-        or "EN"
-    ).strip().upper()
+    language = get_current_language()
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -749,13 +743,7 @@ def help_page_api(page_key):
         page_key or ""
     ).strip()
 
-    language = (
-        session.get(
-            "preferred_language",
-            "EN"
-        )
-        or "EN"
-    ).strip().upper()
+    language = get_current_language()
 
     if not page_key:
         return jsonify({
@@ -803,13 +791,15 @@ def help_page_api(page_key):
 
         return jsonify({
             "success": True,
-            "article": {
-                "page_key": help_page[0],
-                "title": help_page[1],
-                "content": help_page[2],
-                "language_code": help_page[3]
-            }
-        })
+
+
+        "article": {
+            "page_key": help_page[0],
+            "title": help_page[1],
+            "content": help_page[2],
+            "language_code": help_page[3]
+        }
+    })
 
     except Exception:
 
@@ -3854,6 +3844,11 @@ def get_default_language():
             return lang["language_code"]
 
     return "EN"
+
+
+
+
+
 
 
 ##################################
@@ -10654,6 +10649,10 @@ def get_current_language():
 
 
 
+
+
+
+
 #   -------------------------
 #  
 #  
@@ -10717,9 +10716,7 @@ def view_help_page(page_key):
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # 1. Try requested language first
-    session["language_code"] = "ES"
-
+    # 1. Try the user's preferred language first
     requested_language = get_current_language()
 
     cur.execute("""
@@ -10827,13 +10824,7 @@ def help_center():
         ""
     ).strip()
 
-    language = (
-        session.get(
-            "preferred_language",
-            "EN"
-        )
-        or "EN"
-    ).strip().upper()
+    language = get_current_language()
 
     conn = get_db_connection()
     cur = conn.cursor()
