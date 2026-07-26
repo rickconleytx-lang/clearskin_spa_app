@@ -862,6 +862,236 @@ const peachHelpArticleApiTemplate = "{{
 let peachHelpCurrentArticle = null;
 
 
+function normalizeHelpText(value) {
+
+    return String(value || "")
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s]/gu, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+
+function calculateHelpRelevance(
+    topic,
+    searchText
+) {
+
+    const query = normalizeHelpText(
+        searchText
+    );
+
+    if (!query) {
+        return 0;
+    }
+
+    const title = normalizeHelpText(
+        topic.title
+    );
+
+    const keywords = normalizeHelpText(
+        Array.isArray(topic.keywords)
+            ? topic.keywords.join(" ")
+            : topic.keywords
+    );
+
+    const summary = normalizeHelpText(
+        topic.summary
+        || topic.description
+    );
+
+    /*
+     * Optional combined search text returned
+     * by the API in the future.
+     */
+    const topicSearchText = normalizeHelpText(
+        topic.search_text
+    );
+
+    const titleWords = title
+        .split(" ")
+        .filter(Boolean);
+
+    const queryWords = query
+        .split(" ")
+        .filter(Boolean);
+
+    let score = 0;
+
+
+    /*
+     * Exact and title-based matches receive
+     * the highest priority.
+     */
+    if (title === query) {
+        score += 1000;
+    }
+
+    if (title.startsWith(query)) {
+        score += 850;
+    }
+
+    if (
+        titleWords.some(function (word) {
+            return word.startsWith(query);
+        })
+    ) {
+        score += 750;
+    }
+
+    if (title.includes(query)) {
+        score += 650;
+    }
+
+
+    /*
+     * Keyword and description matches.
+     */
+    if (keywords.includes(query)) {
+        score += 500;
+    }
+
+    if (summary.includes(query)) {
+        score += 300;
+    }
+
+    if (topicSearchText.includes(query)) {
+        score += 200;
+    }
+
+
+    /*
+     * Score the individual search words.
+     */
+    queryWords.forEach(function (word) {
+
+        if (titleWords.includes(word)) {
+            score += 150;
+
+        } else if (
+            titleWords.some(function (titleWord) {
+                return titleWord.startsWith(word);
+            })
+        ) {
+            score += 120;
+
+        } else if (title.includes(word)) {
+            score += 90;
+        }
+
+        if (keywords.includes(word)) {
+            score += 70;
+        }
+
+        if (summary.includes(word)) {
+            score += 35;
+        }
+
+        if (topicSearchText.includes(word)) {
+            score += 20;
+        }
+    });
+
+
+    /*
+     * Bonus when all search words appear
+     * somewhere in the topic information.
+     */
+    const combinedText = [
+        title,
+        keywords,
+        summary,
+        topicSearchText
+    ].join(" ");
+
+    const allWordsMatch =
+        queryWords.length > 1
+        && queryWords.every(
+            function (word) {
+                return combinedText.includes(word);
+            }
+        );
+
+    if (allWordsMatch) {
+        score += 200;
+    }
+
+    return score;
+}
+
+
+function sortPeachHelpTopics(
+    topics,
+    searchText
+) {
+
+    const query = normalizeHelpText(
+        searchText
+    );
+
+    return [...topics].sort(
+        function (topicA, topicB) {
+
+            const titleA =
+                topicA.title || "";
+
+            const titleB =
+                topicB.title || "";
+
+
+            /*
+             * No search:
+             * continue sorting topics A–Z.
+             */
+            if (!query) {
+                return titleA.localeCompare(
+                    titleB,
+                    undefined,
+                    {
+                        sensitivity: "base"
+                    }
+                );
+            }
+
+
+            /*
+             * Search active:
+             * sort by relevance first.
+             */
+            const scoreA =
+                calculateHelpRelevance(
+                    topicA,
+                    query
+                );
+
+            const scoreB =
+                calculateHelpRelevance(
+                    topicB,
+                    query
+                );
+
+            if (scoreB !== scoreA) {
+                return scoreB - scoreA;
+            }
+
+
+            /*
+             * Equal relevance:
+             * sort those topics A–Z.
+             */
+            return titleA.localeCompare(
+                titleB,
+                undefined,
+                {
+                    sensitivity: "base"
+                }
+            );
+        }
+    );
+}
+
+
+
 function buildPeachHelpPageUrl(pageKey) {
     return peachHelpPageTemplate.replace(
         "__HELP_PAGE_KEY__",
@@ -1085,7 +1315,10 @@ async function loadPeachHelpTopics(searchText) {
             );
         }
 
-        const topics = data.topics || [];
+        const topics = sortPeachHelpTopics(
+            data.topics || [],
+            searchText
+        );
 
         loading.hidden = true;
 

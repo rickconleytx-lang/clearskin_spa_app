@@ -10,6 +10,25 @@
     <div class="section-header">
 
     
+     <div class="page-tool-pills" style="margin-top:5px;">
+    <a href="{{ url_for('accounting_home') }}" class="tool-pill tool-pill-small">
+        Accounting
+    </a>
+
+    <a href="{{ url_for('add_general_income') }}" class="tool-pill tool-pill-small">
+        Add General Income
+    </a>
+
+    <a href="{{ url_for('income_report') }}" class="tool-pill tool-pill-small">
+        Income Report
+    </a>
+
+    <a href="{{ url_for('gift_certificates_home') }}" class="tool-pill tool-pill-small">
+        Gift Certificates
+    </a>
+    </div>
+
+
         <h1>Income Home</h1>
 
         <p class="section-subtitle">
@@ -20,13 +39,7 @@
         </p>
     </div>
 
-    <div class="narrow-cards">
 
-       {{ section_card("Back to Accounting Department", "Income, Expenses, and Loans.", url_for('accounting_home')) }}
-       {{ section_card("Add General Income", "Record Income NOT tied to a Client visit or appointment.", url_for('add_general_income')) }}
-       {{ section_card("Income Report", "View Income totals, breakdown and detailed transaction history.", url_for('income_report')) }}
-       {{ section_card("Gift Certificates", "Add New, View All and Delete Gift Certificates.", url_for('gift_certificates_home')) }}
-    </div>
 
     <div class="money-summary">
 

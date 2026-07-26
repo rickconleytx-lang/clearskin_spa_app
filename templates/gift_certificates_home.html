@@ -13,17 +13,26 @@
 {% endif %}
 
 
-<br>
+<div class="page-tool-pills" style="margin-top:5px;">
+    <a href="{{ url_for('accounting_home') }}" class="tool-pill tool-pill-small">
+        Accounting
+    </a>
+
+    <a href="{{ url_for('gift_certificate_reminders') }}" class="tool-pill tool-pill-small">
+        Gift Certificate Reminders
+    </a>
+
+    <a href="{{ url_for('gift_certificate_reminder_history') }}" class="tool-pill tool-pill-small">
+        Gift Certificates Reminder History
+    </a>
+
+</div>
+
 <br>
 
 <h1>Gift Certificates Home</h1>
-<div class="narrow-cards">
-    {{ section_card("Gift Certificates Reminders", "",  url_for('gift_certificate_reminders')) }}
-    {{ section_card("Gift Certs Reminder History", "", url_for('gift_certificate_reminder_history')) }}
-    {{ section_card("Accounting Department", "", url_for('accounting_home')) }}
-</div>
 
-<hr>
+
 <br>
 
 <div class="summary-cards">
