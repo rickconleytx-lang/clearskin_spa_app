@@ -33,7 +33,7 @@
                 {# use this later when Mailgun is active #}
                 {#
                 <form method="POST"
-                      action="{{ url_for('send_birthday_offer', client_id=client.client_id) }}"
+                      action="{{ url_for('send_one_birthday_offer_email', client_id=client.client_id) }}"
                       style="display:inline;">
                     <button type="submit" class="btn btn-small">Send Email</button>
                 </form>

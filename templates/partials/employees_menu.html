@@ -1,0 +1,97 @@
+<div class="user-menu app-menu-category">
+
+    <button type="button"
+            class="user-menu-button app-menu-category-button"
+            onclick="toggleEmployeesMenu()">
+
+        <span class="app-menu-category-main">
+
+            <span class="app-menu-category-icon"
+                  aria-hidden="true">
+                👥
+            </span>
+
+            <span class="app-menu-category-label">
+                Employees
+            </span>
+
+        </span>
+
+        <span class="app-menu-category-chevron"
+              aria-hidden="true">
+            ›
+        </span>
+
+    </button>
+
+
+    <div id="employeesMenuDropdown"
+         class="user-menu-dropdown app-menu-submenu"
+         style="display:none;">
+
+
+        <!-- Employees -->
+        <div class="app-menu-submenu-section">
+
+            <div class="app-menu-submenu-heading">
+                👥 Employees
+            </div>
+
+            <a href="{{ url_for('employees_home') }}">
+                <span aria-hidden="true">🏠</span>
+                <span>Employee Home</span>
+            </a>
+
+            <a href="{{ url_for('add_employee') }}">
+                <span aria-hidden="true">➕</span>
+                <span>Add New Employee</span>
+            </a>
+
+            <a href="{{ url_for('employee_admin') }}">
+                <span aria-hidden="true">⚙️</span>
+                <span>Employee Administration</span>
+            </a>
+
+        </div>
+
+
+        <div class="user-menu-divider"></div>
+
+
+        <!-- Compensation -->
+        <div class="app-menu-submenu-section">
+
+            <div class="app-menu-submenu-heading">
+                💵 Employee Compensation
+            </div>
+
+            <a href="{{ url_for('add_employee_compensation') }}">
+                <span aria-hidden="true">➕</span>
+                <span>Add Employee Compensation</span>
+            </a>
+
+            <a href="{{ url_for('employee_compensation_report') }}">
+                <span aria-hidden="true">📊</span>
+                <span>Compensation Report</span>
+            </a>
+
+            <a href="{{ url_for('employee_compensation_history') }}">
+                <span aria-hidden="true">🕘</span>
+                <span>Compensation History</span>
+            </a>
+
+            <a href="{{ url_for('employee_pay_summary') }}">
+                <span aria-hidden="true">🧾</span>
+                <span>Employee Pay Summary</span>
+            </a>
+
+            <a href="{{ url_for('compensation_types_report') }}">
+                <span aria-hidden="true">⚙️</span>
+                <span>Manage Compensation Types</span>
+            </a>
+
+        </div>
+
+    </div>
+
+</div>

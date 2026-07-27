@@ -68,39 +68,70 @@
             </td>
 
             <td>
-                {% if sms[7] in ['delivered', 'sent', 'queued', 'accepted'] %}
-                    <span class="badge badge-success">{{ sms[7] }}</span>
-                {% elif sms[7] in ['failed', 'undelivered'] %}
-                    <span class="badge badge-danger">{{ sms[7] }}</span>
+                {% if sms[6] in [
+                    'delivered',
+                    'sent',
+                    'queued',
+                    'accepted'
+                ] %}
+                    <span class="badge badge-success">
+                        {{ sms[6] }}
+                    </span>
+
+                {% elif sms[6] in [
+                    'failed',
+                    'undelivered'
+                ] %}
+                    <span class="badge badge-danger">
+                        {{ sms[6] }}
+                    </span>
+
                 {% else %}
-                    <span class="badge badge-warning">{{ sms[7] or sms[6] or 'unknown' }}</span>
+                    <span class="badge badge-warning">
+                        {{ sms[6] or 'unknown' }}
+                    </span>
                 {% endif %}
-                            
-                {% if sms[7] in ['failed', 'undelivered'] %}
+
+
+                {% if sms[6] in ['failed', 'undelivered'] %}
+
                     <form method="POST"
-                        action="{{ url_for('resend_sms', sms_log_id=sms[10]) }}"
+                        action="{{ url_for(
+                            'resend_sms',
+                            sms_log_id=sms[9]
+                        ) }}"
                         style="margin-top: 6px;">
-                      <button type="submit" class="btn btn-small">
-                          Resend
-                      </button>
+
+                        <button type="submit"
+                                class="btn btn-small">
+                            Resend
+                        </button>
+
                     </form>
 
 
+                    <a href="{{ url_for(
+                        'sms_conversation',
+                        client_id=sms[10]
+                    ) }}"
+                    class="btn">
 
-                    <a href="{{ url_for('sms_conversation', client_id=sms[10]) }}" class="btn">
                         View Conversation
+
                     </a>
 
-               {% endif %}
+                {% endif %}
             </td>
 
             <td style="max-width: 300px; white-space: pre-wrap;">
-                {% if sms[8] or sms[9] %}
-                    <span class="badge badge-danger">{{ sms[8] or 'Error' }}</span><br>
-                    {{ sms[9] or '' }}
-                {% else %}
-                    <span style="color: #999;">None</span>
-                {% endif %}
+                {% if sms[7] or sms[8] %}
+                    <span class="badge badge-danger">
+                        {{ sms[7] or 'Error' }}
+                    </span>
+                    <br>
+                    {{ sms[8] or '' }}
+                        <span style="color: #999;">None</span>
+                    {% endif %}
             </td>
         </tr>
         {% endfor %}

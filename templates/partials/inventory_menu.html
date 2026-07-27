@@ -1,0 +1,62 @@
+<div class="user-menu app-menu-category">
+
+    <button type="button"
+            class="user-menu-button app-menu-category-button"
+            onclick="toggleInventoryMenu()">
+
+        <span class="app-menu-category-main">
+
+            <span class="app-menu-category-icon"
+                  aria-hidden="true">
+                📦
+            </span>
+
+            <span class="app-menu-category-label">
+                Inventory
+            </span>
+
+        </span>
+
+        <span class="app-menu-category-chevron"
+              aria-hidden="true">
+            ›
+        </span>
+
+    </button>
+
+
+    <div id="inventoryMenuDropdown"
+         class="user-menu-dropdown app-menu-submenu"
+         style="display:none;">
+
+
+        <div class="app-menu-submenu-section">
+
+            <div class="app-menu-submenu-heading">
+                📦 Inventory
+            </div>
+
+            <a href="{{ url_for('inventory_home') }}">
+                <span aria-hidden="true">🏠</span>
+                <span>Inventory Home</span>
+            </a>
+
+            <div class="user-menu-divider"></div>
+
+            <a href="{{ url_for('add_inventory_product') }}">
+                <span aria-hidden="true">➕</span>
+                <span>Add Inventory Product</span>
+            </a>
+
+            <div class="user-menu-divider"></div>
+
+            <a href="{{ url_for('inventory_scan') }}">
+                <span aria-hidden="true">📷</span>
+                <span>Scan Inventory</span>
+            </a>
+
+        </div>
+
+    </div>
+
+</div>

@@ -1,3 +1,29 @@
+{% set can_view_send_section = (
+    nav_access.can_send_sms
+    or nav_access.can_send_email
+) %}
+
+{% set can_view_template_section = (
+    nav_access.can_manage_sms_templates
+    or nav_access.can_manage_email_templates
+) %}
+
+{% set can_view_history_section = (
+    nav_access.can_view_sms_history
+    or nav_access.can_view_email_history
+) %}
+
+{% set can_view_operations_section = (
+    nav_access.can_manage_communication_automation
+    or nav_access.can_manage_messaging_compliance
+    or nav_access.can_view_communications_home
+) %}
+
+{% set can_view_preferences_section = (
+    nav_access.can_manage_contact_preferences
+) %}
+
+
 <div class="user-menu app-menu-category">
 
     <button type="button"
@@ -30,117 +56,182 @@
          style="display:none;">
 
 
-        <!-- Send -->
-        <div class="app-menu-submenu-section">
+        {% if can_view_send_section %}
 
-            <div class="app-menu-submenu-heading">
-                📨 Send
+            <div class="app-menu-submenu-section">
+
+                <div class="app-menu-submenu-heading">
+                    📨 Send
+                </div>
+
+                {% if nav_access.can_send_sms %}
+                    <a href="{{ url_for('sms_home') }}">
+                        <span aria-hidden="true">⚡️</span>
+                        <span>Send SMS</span>
+                    </a>
+                {% endif %}
+
+                {% if nav_access.can_send_email %}
+                    <a href="{{ url_for('general_email') }}">
+                        <span aria-hidden="true">✉️</span>
+                        <span>Send Email</span>
+                    </a>
+                {% endif %}
+
             </div>
 
-            <a href="{{ url_for('sms_home') }}">
-                <span aria-hidden="true">⚡️</span>
-                <span>Send SMS</span>
-            </a>
-
-            <a href="{{ url_for('general_email') }}">
-                <span aria-hidden="true">✉️</span>
-                <span>Send Email</span>
-            </a>
-
-        </div>
+        {% endif %}
 
 
-        <div class="user-menu-divider"></div>
+        {% if can_view_send_section and (
+            can_view_template_section
+            or can_view_history_section
+            or can_view_operations_section
+            or can_view_preferences_section
+        ) %}
+            <div class="user-menu-divider"></div>
+        {% endif %}
 
 
-        <!-- Templates -->
-        <div class="app-menu-submenu-section">
+        {% if can_view_template_section %}
 
-            <div class="app-menu-submenu-heading">
-                📝 Templates
+            <div class="app-menu-submenu-section">
+
+                <div class="app-menu-submenu-heading">
+                    📝 Templates
+                </div>
+
+                {% if nav_access.can_manage_sms_templates %}
+                    <a href="{{ url_for(
+                        'template_review',
+                        channel='sms'
+                    ) }}">
+                        <span aria-hidden="true">💬</span>
+                        <span>SMS Templates</span>
+                    </a>
+                {% endif %}
+
+                {% if nav_access.can_manage_email_templates %}
+                    <a href="{{ url_for(
+                        'template_review',
+                        channel='email'
+                    ) }}">
+                        <span aria-hidden="true">✉️</span>
+                        <span>Email Templates</span>
+                    </a>
+                {% endif %}
+
             </div>
 
-            <a href="{{ url_for(
-                'template_review',
-                channel='sms'
-            ) }}">
-                SMS Templates
-            </a>
-
-            <a href="{{ url_for(
-                'template_review',
-                channel='email'
-            ) }}">
-                Email Templates
-            </a>
-
-        </div>
+        {% endif %}
 
 
-        <div class="user-menu-divider"></div>
+        {% if can_view_template_section and (
+            can_view_history_section
+            or can_view_operations_section
+            or can_view_preferences_section
+        ) %}
+            <div class="user-menu-divider"></div>
+        {% endif %}
 
 
-        <!-- History -->
-        <div class="app-menu-submenu-section">
+        {% if can_view_history_section %}
 
-            <div class="app-menu-submenu-heading">
-                🕘 History
+            <div class="app-menu-submenu-section">
+
+                <div class="app-menu-submenu-heading">
+                    🕘 History
+                </div>
+
+                {% if nav_access.can_view_sms_history %}
+                    <a href="{{ url_for('sms_history_all') }}">
+                        <span aria-hidden="true">💬</span>
+                        <span>SMS History</span>
+                    </a>
+                {% endif %}
+
+                {% if nav_access.can_view_email_history %}
+                    <a href="{{ url_for('email_history') }}">
+                        <span aria-hidden="true">📧</span>
+                        <span>Email History</span>
+                    </a>
+                {% endif %}
+
             </div>
 
-            <a href="{{ url_for('sms_history_all') }}">
-                SMS History
-            </a>
-
-            <a href="{{ url_for('email_history') }}">
-                Email History
-            </a>
-
-        </div>
+        {% endif %}
 
 
-        <div class="user-menu-divider"></div>
+        {% if can_view_history_section and (
+            can_view_operations_section
+            or can_view_preferences_section
+        ) %}
+            <div class="user-menu-divider"></div>
+        {% endif %}
 
 
-        <!-- Automation and Compliance -->
-        <div class="app-menu-submenu-section">
+        {% if can_view_operations_section %}
 
-            <a href="{{ url_for('reminder_queue') }}">
-                <span aria-hidden="true">🔁</span>
-                <span>Communication Automation</span>
-            </a>
+            <div class="app-menu-submenu-section">
 
-            <a href="{{ url_for(
-                'messaging_compliance_dashboard'
-            ) }}">
-                <span aria-hidden="true">🛡️</span>
-                <span>Messaging Compliance</span>
-            </a>
+                <div class="app-menu-submenu-heading">
+                    ⚙️ Operations
+                </div>
 
-            <a href="{{ url_for('communications') }}">
-                <span aria-hidden="true">📡</span>
-                <span>Communications Home</span>
-            </a>
+                {% if nav_access.can_manage_communication_automation %}
+                    <a href="{{ url_for('reminder_queue') }}">
+                        <span aria-hidden="true">🔁</span>
+                        <span>Communication Automation</span>
+                    </a>
+                {% endif %}
 
-        </div>
+                {% if nav_access.can_manage_messaging_compliance %}
+                    <a href="{{ url_for(
+                        'messaging_compliance_dashboard'
+                    ) }}">
+                        <span aria-hidden="true">🛡️</span>
+                        <span>Messaging Compliance</span>
+                    </a>
+                {% endif %}
 
+                {% if nav_access.can_view_communications_home %}
+                    <a href="{{ url_for('communications') }}">
+                        <span aria-hidden="true">📡</span>
+                        <span>Communications Home</span>
+                    </a>
+                {% endif %}
 
-        <div class="user-menu-divider"></div>
-
-
-        <!-- Contact Preferences -->
-        <div class="app-menu-submenu-section">
-
-            <div class="app-menu-submenu-heading">
-                📝 Opt-In / Opt-Out
             </div>
 
-            <a href="{{ url_for(
-                'client_contact_preferences'
-            ) }}">
-                Contact Preferences
-            </a>
+        {% endif %}
 
-        </div>
+
+        {% if (
+            can_view_operations_section
+            and can_view_preferences_section
+        ) %}
+            <div class="user-menu-divider"></div>
+        {% endif %}
+
+
+        {% if can_view_preferences_section %}
+
+            <div class="app-menu-submenu-section">
+
+                <div class="app-menu-submenu-heading">
+                    ✅ Contact Preferences
+                </div>
+
+                <a href="{{ url_for(
+                    'client_contact_preferences'
+                ) }}">
+                    <span aria-hidden="true">📝</span>
+                    <span>Opt-In / Opt-Out Preferences</span>
+                </a>
+
+            </div>
+
+        {% endif %}
 
     </div>
 

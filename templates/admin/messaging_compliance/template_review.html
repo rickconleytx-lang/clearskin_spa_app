@@ -96,9 +96,12 @@
         <td>
             <strong>{{ t[1] }}</strong><br>
             <small style="color:#666;">
-                {{ t[4] or "Default" }}
-            </small>
-        </td>
+                {% if (t[4] or "Default")|trim|lower == "default" %}
+                    Default {{ t[12]|upper }}
+                {% else %}
+                    {{ t[4] }}
+                {% endif %}
+            </small>        </td>
 
         <td>{{ t[12] if t[12] else "-" }}</td>
 

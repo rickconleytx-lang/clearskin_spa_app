@@ -41,12 +41,20 @@
 
                 {% for t in templates %}
                     {% if template_type and t[1] == template_type %}
+
+                        {% if t[2]|trim|lower == "default" %}
+                            {% set template_display_name = "Default " ~ (t[5]|upper) %}
+                        {% else %}
+                            {% set template_display_name = t[2] %}
+                        {% endif %}
+
                         <option value="{{ t[0] }}"
                             {% if template_id|string == t[0]|string %}selected{% endif %}>
-                            {{ t[2] }}
+                            {{ template_display_name }}
                         </option>
+
                     {% endif %}
-                {% endfor %}
+                {% endfor %}            
             </select>
 
             <div id="email-live-preview-box"

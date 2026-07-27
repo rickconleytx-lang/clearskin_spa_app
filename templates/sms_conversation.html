@@ -28,7 +28,7 @@
         {% if messages %}
 
             {% for msg in messages %}
-                {% set created = msg[0] %}
+                {% set direction = msg[0] %}
                 {% set body = msg[1] %}
                 {% set status = msg[2] %}
                 {% set created_at = msg[3] %}

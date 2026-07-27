@@ -131,6 +131,8 @@
             nav_access.can_view_calendar
             or nav_access.can_view_communications
             or nav_access.can_view_clients
+            or nav_access.can_view_inventory
+            or nav_access.can_view_employees
             or nav_access.can_view_financials
             or nav_access.can_view_business_management
         ) %}
@@ -194,8 +196,19 @@
         {% endif %}
 
 
+        
         {% if nav_access.can_view_clients %}
             {% include "partials/client_management_menu.html" %}
+        {% endif %}
+
+
+        {% if nav_access.can_view_inventory %}
+            {% include "partials/inventory_menu.html" %}
+        {% endif %}
+
+
+        {% if nav_access.can_view_employees %}
+            {% include "partials/employees_menu.html" %}
         {% endif %}
 
 
@@ -445,8 +458,7 @@ document.addEventListener("DOMContentLoaded", function () {
         return;
     }
 
-
-    function openAppMenu() {
+     function openAppMenu() {
 
         menuPanel.classList.add("is-open");
 
@@ -809,9 +821,19 @@ function toggleClientManagementMenu() {
 }
 
 
+function toggleInventoryMenu() {
+    toggleAppSubmenu("inventoryMenuDropdown");
+}
+
+
+function toggleEmployeesMenu() {
+    toggleAppSubmenu("employeesMenuDropdown");
+}
+
 function toggleBusinessManagementMenu() {
     toggleAppSubmenu("businessManagementMenuDropdown");
 }
+
 
 
 function toggleUserMenu() {
@@ -822,6 +844,7 @@ function toggleUserMenu() {
 function toggleHelpMenu() {
     toggleAppSubmenu("helpMenuDropdown");
 }
+
 
 
 /*

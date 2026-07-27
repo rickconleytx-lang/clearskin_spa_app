@@ -243,9 +243,7 @@ def inject_navigation_access_context():
         current_business_unit_membership_role_code()
     )
 
-    navigation_access = build_navigation_access(
-        role_code
-    )
+    navigation_access = current_workspace_access()
 
     return {
         "current_workspace_role_code": role_code,
@@ -6593,21 +6591,46 @@ def current_business_unit_membership_role_code():
 ####################################
 
 
+
 def build_navigation_access(role_code):
     from flask import session
 
     access = {
+        # Platform
         "can_view_master_admin": False,
 
+        # Primary navigation
         "can_view_daily_briefing": False,
         "can_view_business_summary": False,
 
+        # Main business categories
         "can_view_calendar": False,
         "can_view_communications": False,
         "can_view_clients": False,
+        "can_view_inventory": False,
+        "can_view_employees": False,
         "can_view_financials": False,
         "can_view_business_management": False,
 
+        # Booking and appointment operations
+        "can_manage_booking_imports": False,
+
+        # Communications permissions
+        "can_send_sms": False,
+        "can_send_email": False,
+
+        "can_manage_sms_templates": False,
+        "can_manage_email_templates": False,
+
+        "can_view_sms_history": False,
+        "can_view_email_history": False,
+
+        "can_manage_communication_automation": False,
+        "can_manage_messaging_compliance": False,
+        "can_view_communications_home": False,
+        "can_manage_contact_preferences": False,
+
+        # Personal/support navigation
         "can_view_account": False,
         "can_view_help": True
     }
@@ -6629,14 +6652,128 @@ def build_navigation_access(role_code):
             "can_view_business_summary": True,
 
             "can_view_calendar": True,
-            "can_view_communications": True,
             "can_view_clients": True,
+            "can_view_inventory": True,
+            "can_view_employees": True,
             "can_view_financials": True,
-            "can_view_business_management": True
+            "can_view_business_management": True,
+
+            "can_manage_booking_imports": True,
+
+            # Communications
+            "can_send_sms": True,
+            "can_send_email": True,
+
+            "can_manage_sms_templates": True,
+            "can_manage_email_templates": True,
+
+            "can_view_sms_history": True,
+            "can_view_email_history": True,
+
+            "can_manage_communication_automation": True,
+            "can_manage_messaging_compliance": True,
+            "can_view_communications_home": True,
+            "can_manage_contact_preferences": True,
         })
+
+    # Show Communications only when at least one authorized
+    # Communications feature is available.
+    access["can_view_communications"] = any((
+        access["can_send_sms"],
+        access["can_send_email"],
+        access["can_manage_sms_templates"],
+        access["can_manage_email_templates"],
+        access["can_view_sms_history"],
+        access["can_view_email_history"],
+        access["can_manage_communication_automation"],
+        access["can_manage_messaging_compliance"],
+        access["can_view_communications_home"],
+        access["can_manage_contact_preferences"]
+    ))
 
     # Unknown role codes remain fail-closed.
     return access
+
+
+
+
+
+
+
+
+
+
+##########################################
+#
+#   CURRENT WORKSPACE ACCESS
+#
+#
+#####################################
+
+
+
+def current_workspace_access():
+    from flask import g
+
+    if hasattr(g, "_workspace_access"):
+        return g._workspace_access
+
+    role_code = (
+        current_business_unit_membership_role_code()
+    )
+
+    access = build_navigation_access(role_code)
+
+    g._workspace_access = access
+
+    return access
+
+
+
+
+##########################################
+#
+#   REQUIRE WORKSPACE PERMISSION
+#
+#
+#####################################
+
+
+
+
+def require_workspace_permission(permission_name):
+    from functools import wraps
+
+    def decorator(view_function):
+
+        @wraps(view_function)
+        def wrapped_view(*args, **kwargs):
+            from flask import abort
+
+            access = current_workspace_access()
+
+            # Missing or misspelled permissions fail closed.
+            if not access.get(permission_name, False):
+                abort(403)
+
+            return view_function(*args, **kwargs)
+
+        return wrapped_view
+
+    return decorator
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -8453,26 +8590,6 @@ def my_settings():
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 ####################################
 #   COMMUNICATIONS HOME
 ###################################
@@ -8480,14 +8597,11 @@ def my_settings():
 
 @app.route("/communications")
 @login_required
-@spa_required  
-
+@spa_required
+@require_workspace_permission("can_view_communications_home")
 def communications():
     return render_template("communications.html")
      
-
-
-
 
 
 
@@ -8518,8 +8632,8 @@ def business_financing_home():
 
 @app.route("/email_template_form1")
 @login_required
-@spa_required  
-
+@spa_required
+@require_workspace_permission("can_manage_email_templates")
 def email_template_form1():
     return render_template("email_template_form.html")
 
@@ -9131,6 +9245,7 @@ def review_godaddy_imports_and_calendar():
 @app.route("/godaddy-imports/dismiss", methods=["POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_booking_imports")
 def dismiss_godaddy_import_review():
     spa_id = current_spa_id()
 
@@ -9181,9 +9296,10 @@ def dismiss_godaddy_import_review():
 @app.route('/admin/messaging-compliance')
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_messaging_compliance")
 def messaging_compliance_dashboard():
 
-    spa_id = session.get("spa_id")
+    spa_id = current_spa_id()
 
     onboarding = get_messaging_onboarding(spa_id)
 
@@ -9230,9 +9346,10 @@ def messaging_compliance_dashboard():
 )
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_messaging_compliance")
 def messaging_compliance_onboarding():
 
-    spa_id = session.get("spa_id")   # use your existing helper
+    spa_id = current_spa_id()
     step = request.args.get("step", 1, type=int)
 
 
@@ -9283,6 +9400,7 @@ def messaging_compliance_onboarding():
 @app.route('/admin/messaging-compliance/overview')
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_messaging_compliance")
 def messaging_compliance_overview():
     return render_template("admin/messaging_compliance/compliance_overview.html")
 
@@ -9299,6 +9417,7 @@ def messaging_compliance_overview():
 @app.route('/admin/messaging-compliance/brand')
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_messaging_compliance")
 def messaging_compliance_brand():
     return render_template("admin/messaging_compliance/brand_registration.html")
 
@@ -9315,6 +9434,7 @@ def messaging_compliance_brand():
 @app.route('/admin/messaging-compliance/campaign')
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_messaging_compliance")
 def messaging_compliance_campaign():
     return render_template("admin/messaging_compliance/campaign_registration.html")
 
@@ -9334,6 +9454,7 @@ def messaging_compliance_campaign():
 @app.route("/admin/messaging-compliance/template-library")
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_sms_templates")
 def template_review_default():
     language_code = get_request_language()
 
@@ -9361,6 +9482,17 @@ def template_review(channel):
             channel="sms",
             language_code=language_code
         ))
+
+    required_permission = (
+        "can_manage_sms_templates"
+        if channel == "sms"
+        else "can_manage_email_templates"
+    )
+
+    access = current_workspace_access()
+
+    if not access.get(required_permission, False):
+        abort(403)
 
     page_title = (
         "SMS Messaging Template Library"
@@ -9508,6 +9640,18 @@ def edit_messaging_template_by_id(template_id):
         ))
 
     channel = template[2]
+
+    required_permission = (
+        "can_manage_sms_templates"
+        if channel == "sms"
+        else "can_manage_email_templates"
+    )
+
+    access = current_workspace_access()
+
+    if not access.get(required_permission, False):
+        abort(403)
+
     template_type = template[3]
     template_name = template[4] or "Default"
     display_name = template[15] or template_type.replace("_", " ").title()
@@ -9559,12 +9703,6 @@ def edit_messaging_template_by_id(template_id):
 
         approved_for_use = ai_result["score"] > 60
 
-        
-        ai_result = review_template_ai_basic(
-            template_type,
-            message_text,
-            channel=channel
-        )
 
         cur.execute("""
             UPDATE messaging_templates
@@ -9686,6 +9824,20 @@ def duplicate_messaging_template(template_id):
         return redirect(url_for("template_review", channel="sms"))
 
     channel = original[0]
+
+    required_permission = (
+        "can_manage_sms_templates"
+        if channel == "sms"
+        else "can_manage_email_templates"
+    )
+
+    access = current_workspace_access()
+
+    if not access.get(required_permission, False):
+        cur.close()
+        conn.close()
+        abort(403)
+
     template_type = original[1]
     template_name = original[2] or "Template"
     language_code = original[3] or "en"
@@ -9836,6 +9988,17 @@ def create_messaging_template(channel, template_type):
             channel="sms",
             language_code=language_code
         ))
+
+    required_permission = (
+        "can_manage_sms_templates"
+        if channel == "sms"
+        else "can_manage_email_templates"
+    )
+
+    access = current_workspace_access()
+
+    if not access.get(required_permission, False):
+        abort(403)
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -10035,6 +10198,18 @@ def preview_messaging_template_by_id(template_id):
         ))
 
     channel = template[1]
+
+    required_permission = (
+        "can_manage_sms_templates"
+        if channel == "sms"
+        else "can_manage_email_templates"
+    )
+
+    access = current_workspace_access()
+
+    if not access.get(required_permission, False):
+        abort(403)
+
     template_type = template[2]
     template_name = template[3] or "Default"
     language_code = normalize_language_code(template[4] or get_default_language())
@@ -10092,35 +10267,6 @@ def preview_messaging_template_by_id(template_id):
 
 
 
-############################################
-###########################################. TODO
-#####test.  test.  test. remove rick conley from below
-
-@app.route("/admin/test-template")
-@login_required
-@spa_required
-def test_template():
-
-    spa_id = session.get("spa_id")
-
-    merge_data = {
-        "client_first_name": "Rick",
-        "client_last_name": "Conley",
-        "appointment_date": "June 20, 2026",
-        "appointment_time": "10:00 AM",
-        "service_name": "Facial",
-        "spa_name": "Clear Skin Esthetics"
-    }
-
-    result = build_sms_message(
-        spa_id,
-        "appointment_reminder",
-        merge_data
-    )
-
-    return f"<pre>{result}</pre>"
-
-
 
 
 
@@ -10134,6 +10280,7 @@ def test_template():
 @app.route('/admin/messaging-compliance/migration')
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_messaging_compliance")
 def messaging_compliance_migration():
     return render_template("admin/messaging_compliance/data_migration.html")
 
@@ -10150,6 +10297,7 @@ def messaging_compliance_migration():
 @app.route('/admin/messaging-compliance/documents')
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_messaging_compliance")
 def messaging_compliance_documents():
     return render_template("admin/messaging_compliance/documents.html")
 
@@ -10167,6 +10315,7 @@ def messaging_compliance_documents():
 @app.route('/admin/messaging-compliance/audit-log')
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_messaging_compliance")
 def messaging_compliance_audit_log():
     return render_template("admin/messaging_compliance/audit_log.html")
 
@@ -10184,6 +10333,7 @@ def messaging_compliance_audit_log():
 @app.route('/admin/messaging-compliance/campaign-registration')
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_messaging_compliance")
 def messaging_compliance_campaign_registration():
     return render_template("admin/messaging_compliance/campaign_registration.html")
 
@@ -11141,6 +11291,16 @@ def sms_email_terms():
 
     if request.method == "POST":
 
+        access = current_workspace_access()
+
+        if not access.get(
+            "can_manage_messaging_compliance",
+            False
+        ):
+            cur.close()
+            conn.close()
+            abort(403)
+
         agreed = "agree_terms" in request.form
 
         if not agreed:
@@ -11971,6 +12131,7 @@ def mailgun_godaddy_booking():
 @app.route("/godaddy-imports")
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_booking_imports")
 def godaddy_imports():
     spa_id = current_spa_id()
 
@@ -12051,15 +12212,9 @@ def godaddy_imports():
 
 @app.route("/test-gmail-booking-poll")
 @login_required
-@spa_required
+@master_admin_required
 def test_gmail_booking_poll():
-    # later this will:
-    # 1. connect to Gmail
-    # 2. find GoDaddy booking emails
-    # 3. read email body
-    # 4. call import_godaddy_booking(body, spa_id, subject)
     return "Gmail booking poll test route ready."
-
 
 
 
@@ -12651,6 +12806,8 @@ def get_loan_contribution_rows(spa_id, start_date=None, end_date=None):
 #   -----------------------------------------------
 
 @app.route("/test-godaddy-parser")
+@login_required
+@master_admin_required
 def test_godaddy_parser():
 
     with open("test_booking.txt", "r") as f:
@@ -12774,6 +12931,7 @@ def parse_godaddy_email_body(body):
 @app.route("/booking-email-import", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_booking_imports")
 def booking_email_import():
     body = ""
 
@@ -13017,6 +13175,7 @@ def import_godaddy_booking(body, spa_id, subject=""):
 @app.route("/godaddy-imports/<int:appointment_id>/raw")
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_booking_imports")
 def godaddy_import_raw(appointment_id):
     spa_id = current_spa_id()
 
@@ -13139,6 +13298,7 @@ def godaddy_import_raw(appointment_id):
 @app.route("/booking-email-import/confirm", methods=["POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_booking_imports")
 def booking_email_import_confirm():
     spa_id = current_spa_id()
     body = request.form.get("email_body", "").strip()
@@ -13272,6 +13432,7 @@ def test_godaddy_create_appointment():
 @app.route("/godaddy-imports/reviewed/<int:appointment_id>", methods=["POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_booking_imports")
 def mark_godaddy_import_reviewed(appointment_id):
     spa_id = current_spa_id()
     user_id = session.get("user_id")
@@ -13684,6 +13845,7 @@ def sms_webhook():
 @app.route("/client/<int:client_id>/messaging-settings", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_contact_preferences")
 def client_messaging_settings(client_id):
     spa_id = current_spa_id()
 
@@ -13861,6 +14023,8 @@ def client_messaging_settings(client_id):
 @app.route("/birthday-sms/send-month", methods=["POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_send_sms")
+
 def send_birthday_sms_month():
     spa_id = current_spa_id()
     spa_now = get_spa_now()
@@ -13959,6 +14123,8 @@ def send_birthday_sms_month():
 @app.route("/sms/preview/<int:client_id>", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_send_sms")
+
 def sms_preview(client_id):
     spa_id = current_spa_id()
 
@@ -14106,9 +14272,10 @@ def sms_preview(client_id):
 #   ---------------------
           
 
-@app.route("/sms/conversation/<int:client_id>", methods=["GET", "POST"])
+@app.route("/sms/conversation/<int:client_id>", methods=["GET"])
 @login_required
 @spa_required
+@require_workspace_permission("can_view_sms_history")
 def sms_conversation(client_id):
     spa_id = current_spa_id()
 
@@ -14118,18 +14285,190 @@ def sms_conversation(client_id):
             "warning"
         )
         return redirect(url_for("sms_email_terms"))
+
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute("""
-        SELECT client_id, first_name, last_name, phone
-        FROM clients
-        WHERE client_id = %s
-          AND spa_id = %s
-    """, (client_id, spa_id))
+    try:
+        cur.execute("""
+            SELECT
+                client_id,
+                first_name,
+                last_name,
+                phone
+            FROM clients
+            WHERE client_id = %s
+              AND spa_id = %s
+        """, (client_id, spa_id))
 
-    client = cur.fetchone()
+        client = cur.fetchone()
 
+        if not client:
+            flash("Client not found.", "error")
+            return redirect(url_for("sms_history_all"))
+
+        spa_timezone = get_spa_timezone(spa_id)
+
+        cur.execute("""
+            SELECT
+                sl.sms_type,                                  -- 0 direction
+                sl.message_body,                              -- 1 message
+                sl.status,                                    -- 2 status
+                sl.created_at AT TIME ZONE %s AS created_at,  -- 3 local time
+                NULL::text AS provider_error_code,             -- 4
+                NULL::text AS provider_error_message           -- 5
+            FROM sms_log sl
+            WHERE sl.client_id = %s
+              AND sl.spa_id = %s
+            ORDER BY sl.created_at ASC
+        """, (
+            spa_timezone,
+            client_id,
+            spa_id
+        ))
+
+        messages = cur.fetchall()
+
+        return render_template(
+            "sms_conversation.html",
+            client=client,
+            messages=messages
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
+
+
+
+
+@app.route("/sms/conversation/<int:client_id>", methods=["POST"])
+@login_required
+@spa_required
+@require_workspace_permission("can_view_sms_history")
+@require_workspace_permission("can_send_sms")
+def sms_conversation_send(client_id):
+    spa_id = current_spa_id()
+
+    if not sms_email_terms_accepted(spa_id):
+        flash(
+            "You must accept the SMS and Email Terms and Conditions before using messaging features.",
+            "warning"
+        )
+        return redirect(url_for("sms_email_terms"))
+
+    message_body = request.form.get(
+        "message_body",
+        ""
+    ).strip()
+
+    if not message_body:
+        flash("Message cannot be blank.", "error")
+        return redirect(
+            url_for(
+                "sms_conversation",
+                client_id=client_id
+            )
+        )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                client_id,
+                first_name,
+                last_name,
+                phone
+            FROM clients
+            WHERE client_id = %s
+              AND spa_id = %s
+        """, (client_id, spa_id))
+
+        client = cur.fetchone()
+
+        if not client:
+            flash("Client not found.", "error")
+            return redirect(url_for("sms_history_all"))
+
+        if not client[3]:
+            flash(
+                "Client does not have a phone number.",
+                "error"
+            )
+            return redirect(
+                url_for(
+                    "sms_conversation",
+                    client_id=client_id
+                )
+            )
+
+        result = send_compliant_sms(
+            spa_id=spa_id,
+            client_id=client_id,
+            recipient_phone=client[3],
+            message_body=message_body,
+            message_type="manual"
+        )
+
+        cur.execute("""
+            INSERT INTO sms_log (
+                spa_id,
+                client_id,
+                phone_number,
+                message_body,
+                sms_type,
+                status,
+                created_at,
+                sent_at
+            )
+            VALUES (
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                NOW(),
+                NOW()
+            )
+        """, (
+            spa_id,
+            client_id,
+            client[3],
+            result.get(
+                "final_message_body",
+                message_body
+            ),
+            "outbound",
+            result.get("status") or "sent"
+        ))
+
+        conn.commit()
+        flash("SMS sent.", "success")
+
+    except Exception as error:
+        conn.rollback()
+        flash(
+            f"SMS send failed: {error}",
+            "error"
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    return redirect(
+        url_for(
+            "sms_conversation",
+            client_id=client_id
+        )
+    )
 
 
 
@@ -14210,10 +14549,11 @@ def get_active_messaging_template_types(spa_id, channel):
 ###################################
 
 
-
 @app.route("/sms")
 @login_required
 @spa_required
+@require_workspace_permission("can_send_sms")
+
 def sms_home():
     spa_id = current_spa_id()
     language_code = get_request_language()
@@ -14374,6 +14714,7 @@ def sms_home():
 @app.route("/sms/templates")
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_sms_templates")
 def sms_templates_admin():
     spa_id = current_spa_id()
     if not sms_email_terms_accepted(spa_id):
@@ -14422,6 +14763,8 @@ def sms_templates_admin():
 @app.route("/sms/templates/add", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_sms_templates")
+
 def add_sms_template():
     spa_id = current_spa_id()
 
@@ -14473,6 +14816,8 @@ def add_sms_template():
 @app.route("/sms/templates/edit/<int:template_id>", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_sms_templates")
+
 def edit_sms_template(template_id):
     spa_id = current_spa_id()
 
@@ -14549,6 +14894,8 @@ def edit_sms_template(template_id):
 @app.route("/sms/group-preview", methods=["POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_send_sms")
+
 def sms_group_preview():
     spa_id = current_spa_id()
 
@@ -14677,6 +15024,8 @@ def sms_group_preview():
 @app.route("/sms/group-send", methods=["POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_send_sms")
+
 def sms_group_send():
     print("SMS GROUP SEND ROUTE HIT", flush=True)
 
@@ -15052,6 +15401,8 @@ def sms_group_send():
 @app.route("/sms/history/<int:client_id>")
 @login_required
 @spa_required
+@require_workspace_permission("can_view_sms_history")
+
 def sms_history(client_id):
     spa_id = current_spa_id()
 
@@ -15079,25 +15430,32 @@ def sms_history(client_id):
     # Get SMS logs
     cur.execute("""
         SELECT
-            sl.created_at AT TIME ZONE %s AS created_at,      -- 0
-            sl.sms_type,                 -- 1
-            c.first_name,                -- 2
-            c.last_name,                 -- 3
-            sl.phone_number,             -- 4
-            sl.message_body,             -- 5
-            sl.status,                   -- 6
-            sl.status,                   -- 7
-            sl.provider_error_code,        -- 8
-            sl.provider_error_message,     -- 9
-            sl.sms_log_id                -- 10
+            sl.created_at AT TIME ZONE %s AS created_at,  -- 0
+            sl.sms_type,                                  -- 1
+            c.first_name,                                 -- 2
+            c.last_name,                                  -- 3
+            sl.phone_number,                              -- 4
+            sl.message_body,                              -- 5
+            sl.status,                                    -- 6
+            sl.provider_error_code,                       -- 7
+            sl.provider_error_message,                    -- 8
+            sl.sms_log_id                                 -- 9
+
         FROM sms_log sl
+
         JOIN clients c
-            ON sl.client_id = c.client_id
-           AND sl.spa_id = c.spa_id
+        ON sl.client_id = c.client_id
+        AND sl.spa_id = c.spa_id
+
         WHERE sl.spa_id = %s
-          AND sl.client_id = %s
+        AND sl.client_id = %s
+
         ORDER BY sl.created_at DESC
-    """, (spa_timezone, spa_id, client_id))
+    """, (
+        spa_timezone,
+        spa_id,
+        client_id
+    ))
 
     sms_log = cur.fetchall()
 
@@ -15107,6 +15465,7 @@ def sms_history(client_id):
     return render_template(
         "sms_history.html",
         client=client,
+        client_id=client_id,
         sms_logs=sms_log
     )
 
@@ -15130,6 +15489,8 @@ def sms_history(client_id):
 @app.route("/sms/history")
 @login_required
 @spa_required
+@require_workspace_permission("can_view_sms_history")
+
 def sms_history_all():
     spa_id = current_spa_id()
 
@@ -15140,29 +15501,35 @@ def sms_history_all():
 
     cur.execute("""
         SELECT
-            sm.created_at AT TIME ZONE %s AS created_at,     -- 0
-            sm.message_type,             -- 1
-            c.first_name,                -- 2
-            c.last_name,                 -- 3
-            sm.recipient_phone,          -- 4
-            sm.message_body,             -- 5
-            sm.status,                   -- 6
-            sm.provider_status,            -- 7  
-            sm.provider_error_code,        -- 8
-            sm.provider_error_message,     -- 9
-            sm.sms_message_id            -- 10
-        FROM sms_messages sm
-        LEFT JOIN clients c
-            ON sm.client_id = c.client_id
-           AND sm.spa_id = c.spa_id
-        WHERE sm.spa_id = %s
-        ORDER BY sm.created_at DESC
-    """, (spa_timezone, spa_id,))
+            sl.created_at AT TIME ZONE %s AS created_at,  -- 0
+            sl.sms_type,                                  -- 1
+            c.first_name,                                 -- 2
+            c.last_name,                                  -- 3
+            sl.phone_number,                              -- 4
+            sl.message_body,                              -- 5
+            sl.status,                                    -- 6
+            NULL::text AS provider_error_code,            -- 7
+            NULL::text AS provider_error_message,         -- 8
+            sl.sms_log_id,                                -- 9
+            sl.client_id                                  -- 10
 
+        FROM sms_log sl
+
+        JOIN clients c
+        ON sl.client_id = c.client_id
+        AND sl.spa_id = c.spa_id
+
+        WHERE sl.spa_id = %s
+
+        ORDER BY sl.created_at DESC
+    """, (
+            spa_timezone,
+            spa_id
+    ))
+    
     sms_log = cur.fetchall()
 
     
-
     cur.close()
     conn.close()
 
@@ -15177,14 +15544,15 @@ def sms_history_all():
 
 #   ----------------------------
 #
-#     SMS LOGS
-#
+#     SMS LOGS REFRESH
+#   REFRESH SMS STATUS
 #
 #   ----------------------------
 
 @app.route("/sms_logs/<int:sms_log_id>/refresh", methods=["POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_view_sms_history")
 def refresh_sms_status(sms_log_id):
     flash(
         "SMS status refresh is not available after migrating to Telnyx. Status updates will be handled by Telnyx webhooks.",
@@ -15193,25 +15561,21 @@ def refresh_sms_status(sms_log_id):
     return redirect(url_for("sms_history_all"))
 
 
-
-#   ---------------------------
-#
-#  SMS REFRESH HISTORY ALL
-#
-#
-#
-#   --------------------------
-
+    
 
 @app.route("/sms/refresh-all", methods=["POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_view_sms_history")
 def refresh_all_sms_statuses():
     flash(
-        "SMS status refresh is not available after migrating to Telnyx. Status updates will be handled by Telnyx webhooks.",
+        "SMS status updates are handled automatically by Telnyx webhooks.",
         "info"
     )
     return redirect(url_for("sms_history_all"))
+
+
+
 
 
 
@@ -15231,6 +15595,8 @@ def refresh_all_sms_statuses():
 )
 @login_required
 @spa_required
+@require_workspace_permission("can_send_sms")
+
 def resend_sms(sms_log_id):
     spa_id = current_spa_id()
 
@@ -15478,6 +15844,8 @@ def resend_sms(sms_log_id):
 @app.route("/email-templates")
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_email_templates")
+
 def email_templates_admin():
     return redirect(url_for("template_review", channel="email"))
 
@@ -15495,6 +15863,7 @@ def email_templates_admin():
 @app.route("/email-template-preview/<int:email_template_id>")
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_email_templates")
 def email_template_preview(email_template_id):
     return redirect(url_for(
         "template_review",
@@ -15520,6 +15889,8 @@ def email_template_preview(email_template_id):
 @app.route("/gift-certificates/email/<int:gift_cert_id>", methods=["POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_send_email")
+
 def send_gift_certificate_email(gift_cert_id):
     spa_id = current_spa_id()
     spa_name = get_spa_name(spa_id)
@@ -15649,6 +16020,8 @@ def send_gift_certificate_email(gift_cert_id):
 @app.route("/general-email", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_send_email")
+
 def general_email():
     spa_id = current_spa_id()
 
@@ -15773,6 +16146,8 @@ def general_email():
 @app.route("/general-email/preview", methods=["GET"])
 @login_required
 @spa_required
+@require_workspace_permission("can_send_email")
+
 def general_email_preview():
     spa_id = current_spa_id()
     spa_name = get_spa_name(spa_id)
@@ -15897,6 +16272,8 @@ def general_email_preview():
 @app.route("/general-email/send", methods=["POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_send_email")
+
 def general_email_send():
     spa_id = current_spa_id()
     language_code = get_request_language()
@@ -16118,6 +16495,8 @@ def general_email_send():
 @app.route("/email-history")
 @login_required
 @spa_required
+@require_workspace_permission("can_view_email_history")
+
 def email_history():
     spa_id = current_spa_id()
 
@@ -16166,6 +16545,7 @@ def email_history():
 @app.route("/email-history/clear", methods=["POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_messaging_compliance")
 def clear_email_history():
     spa_id = current_spa_id()
 
@@ -16220,6 +16600,8 @@ def clear_email_history():
 @app.route("/birthday-offers/send-one/<int:client_id>", methods=["POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_send_email")
+
 def send_one_birthday_offer_email(client_id):
     spa_id = current_spa_id()
 
@@ -16270,13 +16652,26 @@ def send_one_birthday_offer_email(client_id):
             }
         )
 
-        if not communication.get("success"):
-            flash(communication.get("error") or "Birthday email template is not available.", "error")
+        if not communication:
+            flash(
+                "Birthday email template is not available.",
+                "error"
+            )
             return redirect(url_for("birthday_offers_home"))
 
-        subject = communication.get("subject") or f"{spa_name}, wishing you a Very Happy Birthday!"
-        body = communication.get("message_body")
+        subject = (
+            communication.get("subject")
+            or f"{spa_name}, wishing you a Very Happy Birthday!"
+        )
 
+        body = communication.get("body")
+
+        if not body:
+            flash(
+                "Birthday email template does not contain a message.",
+                "error"
+            )
+            return redirect(url_for("birthday_offers_home"))
 
         response = send_email(to=email, subject=subject, body=body)
 
@@ -16337,6 +16732,8 @@ def send_one_birthday_offer_email(client_id):
 @app.route("/birthday-offers/send-all", methods=["POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_send_email")
+
 def send_all_birthday_offer_emails():
     spa_id = current_spa_id()
     spa_name = get_spa_name(spa_id)
@@ -16480,6 +16877,8 @@ def send_all_birthday_offer_emails():
 @app.route("/reminder_queue")
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_communication_automation")
+
 def reminder_queue():
     spa_id = current_spa_id()
     status_filter = request.args.get("status", "").strip()
@@ -16560,6 +16959,8 @@ def reminder_queue():
 @app.route("/reminder_queue/generate-appointments", methods=["POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_communication_automation")
+
 def generate_appointment_reminders():
     spa_id = current_spa_id()
 
@@ -16692,6 +17093,8 @@ def generate_appointment_reminders():
 @app.route("/reminder_queue/send-pending", methods=["POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_send_sms")
+
 def send_pending_reminders():
     spa_id = current_spa_id()
 
@@ -16846,6 +17249,8 @@ def send_pending_reminders():
 @app.route("/reminder_queue/retry-failed", methods=["POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_send_sms")
+
 def retry_failed_reminders():
     spa_id = current_spa_id()
 
@@ -16890,6 +17295,8 @@ def retry_failed_reminders():
 @app.route("/reminder_queue/send-one/<int:reminder_id>", methods=["POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_send_sms")
+
 def send_one_reminder(reminder_id):
     spa_id = current_spa_id()
 
@@ -16999,6 +17406,8 @@ def send_one_reminder(reminder_id):
 )
 @login_required
 @spa_required
+@require_workspace_permission("can_send_sms")
+
 def prepare_appointment_reminder(appointment_id):
     spa_id = current_spa_id()
 
@@ -17139,6 +17548,8 @@ def prepare_appointment_reminder(appointment_id):
 @app.route("/reminder_queue/generate-after-appointments", methods=["POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_communication_automation")
+
 def generate_after_appointment_followups():
     spa_id = current_spa_id()
 
@@ -17276,6 +17687,10 @@ def generate_after_appointment_followups():
 @app.route("/reminders/cancel/<int:reminder_id>", methods=["POST"])
 @login_required
 @spa_required
+@require_workspace_permission(
+    "can_manage_communication_automation"
+)
+
 def cancel_reminder(reminder_id):
     spa_id = current_spa_id()
 
@@ -17384,11 +17799,22 @@ def generate_birthday_reminders(spa_id):
 
 
 
-
+#######################################
+#
+#   TODO. TODO
+#
+#   UNREACHABLE ROUTE BELOW
+#   DUPLICATE BLOCK - -  CHECK LATER
+#   THIS PLACED 7/27/26
+#
+###################################################
 
 @app.route("/reminders/create-birthday-reminders", methods=["POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_communication_automation")
+
+
 def create_birthday_reminders():
     spa_id = current_spa_id()
 
@@ -17480,6 +17906,8 @@ def create_birthday_reminders():
 @app.route("/reminders/run-daily-birthday-job", methods=["POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_communication_automation")
+
 def run_daily_birthday_job():
     spa_id = current_spa_id()
 
@@ -17517,6 +17945,7 @@ def run_daily_birthday_job():
 @app.route("/email-templates/add", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_email_templates")
 def add_email_template():
     return redirect(url_for("template_review", channel="email"))
 
@@ -17535,9 +17964,13 @@ def add_email_template():
 ############################################################
 
 
-@app.route("/admin/messaging-compliance/templates/archive/<int:template_id>", methods=["POST"])
+@app.route(
+    "/admin/messaging-compliance/templates/archive/<int:template_id>",
+    methods=["POST"]
+)
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_messaging_compliance")
 def archive_messaging_template(template_id):
     spa_id = current_spa_id()
     language_code = get_request_language()
@@ -17620,9 +18053,10 @@ def archive_messaging_template(template_id):
 )
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_messaging_compliance")
 def restore_messaging_template(channel, template_type):
 
-    spa_id = session.get("spa_id")
+    spa_id = current_spa_id()
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -17675,6 +18109,7 @@ def restore_messaging_template(channel, template_type):
 )
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_messaging_compliance")
 def enable_messaging_template(template_id):
     spa_id = current_spa_id()
     language_code = get_request_language()
@@ -17765,9 +18200,10 @@ def enable_messaging_template(template_id):
 )
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_messaging_compliance")
 def disable_messaging_template(template_id):
 
-    spa_id = session.get("spa_id")
+    spa_id = current_spa_id()
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -22196,6 +22632,7 @@ def redeem_gift_certificate(certificate_id):
 @app.route("/gift_certificate_reminders")
 @login_required
 @spa_required
+@require_workspace_permission("can_send_email")
 def gift_certificate_reminders():
     spa_id = current_spa_id()
     active_status_id = get_status_id("Active")
@@ -22302,7 +22739,7 @@ def gift_certificate_reminders():
 @spa_required
 def gift_certificate_reminder_history():
     spa_id = current_spa_id()
-    print("DEBUG current spa_id:", spa_id)
+   
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -22331,7 +22768,7 @@ def gift_certificate_reminder_history():
     """, (spa_id,))
 
     reminders = cur.fetchall()
-    print("DEBUG reminders found:", reminders)
+    
 
     cur.close()
     conn.close()
@@ -22835,6 +23272,7 @@ def edit_client_full(client_id):
 @app.route("/birthday_offers_home")
 @login_required
 @spa_required
+@require_workspace_permission("can_send_email")
 def birthday_offers_home():
     spa_id = current_spa_id()
     spa_now = get_spa_now()
@@ -23057,6 +23495,8 @@ def mark_birthday_offer_sent_disabled():
 @app.route("/birthday-offers/send/<int:client_id>", methods=["POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_send_email")
+
 def send_birthday_offer(client_id):
 
     spa_id = current_spa_id()
@@ -29903,9 +30343,10 @@ def calculate_business_health(
 @app.route("/morning_briefing")
 @login_required
 @spa_required
+@require_workspace_permission("can_view_daily_briefing")
 def morning_briefing():
 
-    spa_id = session["spa_id"]
+    spa_id = current_spa_id()
     user_id = session["user_id"]
 
     spa_now = get_spa_now(spa_id)
@@ -30522,13 +30963,13 @@ def save_coach_acknowledgment(
 #
 ####################
 
+
+
 def get_coach_recommendation_mentions(
     spa_id,
     spa_now
 ):
-    """
-    Return today's mention counts for each Coach category.
-    """
+    # Return today's mention counts for each Coach category.
 
     today_key = spa_now.date().isoformat()
     spa_key = str(spa_id)
@@ -30860,9 +31301,10 @@ def acknowledge_coach_recommendation():
 @app.route("/daily-briefing/today")
 @login_required
 @spa_required
+@require_workspace_permission("can_view_daily_briefing")
 def daily_briefing_today():
 
-    spa_id = session["spa_id"]
+    spa_id = current_spa_id()
     spa_now = get_spa_now(spa_id)
     today = spa_now.date()
 
@@ -31781,9 +32223,6 @@ def view_business_schedule(schedule_id):
 
 
 
-
-
-
 ##################################
 #
 #
@@ -31794,21 +32233,12 @@ def view_business_schedule(schedule_id):
 
 
 
-
-
-
-
-
 ##################################
 #
 #
 #
 #
 ##################################
-
-
-
-
 
 
 
@@ -31828,12 +32258,14 @@ from datetime import date, datetime, timedelta
 @login_required
 @spa_required
 def reports():
-    spa_id = session.get("spa_id")
+    spa_id = current_spa_id()
     spa_now = get_spa_now(spa_id)
+
     dashboard = get_dashboard_data(
     spa_id,
     spa_now=spa_now
 )
+    
     role = session.get("role")
 
     conn = get_db_connection()
@@ -36091,8 +36523,10 @@ def scheduled_send_pending_reminders():
         conn.close()
 
 
+################################
+#
+#
 #################################
-
 
 
 def scheduled_generate_birthdays():
