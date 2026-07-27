@@ -1,57 +1,113 @@
-<div class="user-menu">
+<div class="user-menu app-menu-category">
+
     <button type="button"
-            class="user-menu-button"
+            class="user-menu-button app-menu-category-button"
             onclick="toggleHelpMenu()">
-        ❓ Help ▾
+
+        <span class="app-menu-category-main">
+
+            <span class="app-menu-category-icon"
+                  aria-hidden="true">
+                ❓
+            </span>
+
+            <span class="app-menu-category-label">
+                Help & Support
+            </span>
+
+        </span>
+
+        <span class="app-menu-category-chevron"
+              aria-hidden="true">
+            ›
+        </span>
+
     </button>
 
+
     <div id="helpMenuDropdown"
-         class="user-menu-dropdown"
+         class="user-menu-dropdown app-menu-submenu"
          style="display:none;">
 
-        <div class="user-menu-header">
-            <strong></strong>
-        </div>
-   
+
+        <!-- Search and Help -->
+        <div class="app-menu-submenu-section">
+
+            <div class="app-menu-submenu-heading">
+                🔍 Find Help
+            </div>
+
             <button type="button"
-                        class="user-menu-button"
-                        onclick="openQLaunch()">
-                    🔍 Search
+                    class="app-menu-submenu-action"
+                    onclick="openQLaunch()">
+
+                <span aria-hidden="true">⚡️</span>
+                <span>Search with Q Launch</span>
+
             </button>
-        <div class="user-menu-divider"></div>
 
-        <a
-            href="#"
-            onclick="openPeachHelpModal(); return false;"
-        >
-            Help & Knowledge Base
-        </a>
-<br>
+            <button type="button"
+                    class="app-menu-submenu-action"
+                    onclick="
+                        openPeachHelpModal();
+                        return false;
+                    ">
 
-        <div class="user-menu-divider"></div>
+                <span aria-hidden="true">📚</span>
+                <span>Help & Knowledge Base</span>
 
+            </button>
 
-        <a
-            href="#"
-            onclick="openAboutPeachSuiteModal(); return false;"
-        >
-            About Peach Suite Pro
-        </a>
-<br>
+            <a href="{{ url_for('help_center') }}">
+                <span aria-hidden="true">❓</span>
+                <span>Help Center</span>
+            </a>
 
-        <div class="user-menu-divider"></div>
+        </div>
 
-         <a href="{{ url_for('help_center') }}">❓ Help Center</a>
-<br>
 
         <div class="user-menu-divider"></div>
 
-         <div class="user-menu-muted" style="padding:6px 12px;"></div>
-        
-         <a href="{{ url_for('feedback') }}">Feedback</a>
+
+        <!-- Product Information -->
+        <div class="app-menu-submenu-section">
+
+            <div class="app-menu-submenu-heading">
+                🍑 Peach Suite Pro
+            </div>
+
+            <button type="button"
+                    class="app-menu-submenu-action"
+                    onclick="
+                        openAboutPeachSuiteModal();
+                        return false;
+                    ">
+
+                <span aria-hidden="true">ℹ️</span>
+                <span>About Peach Suite Pro</span>
+
+            </button>
+
+        </div>
 
 
-         
+        <div class="user-menu-divider"></div>
+
+
+        <!-- Feedback -->
+        <div class="app-menu-submenu-section">
+
+            <div class="app-menu-submenu-heading">
+                💬 Feedback
+            </div>
+
+            <a href="{{ url_for('feedback') }}">
+                <span aria-hidden="true">📝</span>
+                <span>Send Feedback</span>
+            </a>
+
+        </div>
 
     </div>
+
 </div>

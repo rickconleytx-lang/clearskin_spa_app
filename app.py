@@ -224,6 +224,56 @@ def inject_global_context():
     return context
 
 
+
+
+
+#####################################
+#
+#   INJECT NAVIGATION ACCESS CONTEXT
+#
+#
+#########################################
+
+
+
+@app.context_processor
+def inject_navigation_access_context():
+
+    role_code = (
+        current_business_unit_membership_role_code()
+    )
+
+    navigation_access = build_navigation_access(
+        role_code
+    )
+
+    return {
+        "current_workspace_role_code": role_code,
+
+        "has_workspace_access": (
+            role_code is not None
+        ),
+
+        "is_organization_admin": (
+            role_code == "organization_admin"
+        ),
+
+        "nav_access": navigation_access
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # =====================================================
 # LOGGING HELPERS
 # =====================================================
@@ -2057,12 +2107,16 @@ def current_spa_id():
     if "user_id" not in session:
         return None
 
-    if session.get("role") == "master_admin":
+    if is_master_admin():
         return None
 
     return getattr(g, "spa_id", None)
 
 #################################
+
+
+
+
 
 
 
@@ -2090,6 +2144,15 @@ def current_business_unit_id():
         return None
 
     selected_business_unit_id = session.get("business_unit_id")
+
+    if selected_business_unit_id is not None:
+        try:
+            selected_business_unit_id = int(
+                selected_business_unit_id
+            )
+        except (TypeError, ValueError):
+            selected_business_unit_id = None
+            session.pop("business_unit_id", None)
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -6193,12 +6256,10 @@ def split_client_name(full_name):
 def current_spa_id():
     from flask import g, session
 
-    # Not logged in yet
     if "user_id" not in session:
         return None
 
-    # Master admin is not tied to one spa
-    if session.get("role") == "master_admin":
+    if is_master_admin():
         return None
 
     return getattr(g, "spa_id", None)
@@ -6448,6 +6509,138 @@ def current_user_role():
 
 
 
+################################
+#
+#   CURRENT BUSINESS UNIT MEMBERSHIP
+#
+#############################
+
+
+def current_business_unit_membership_role_code():
+    from flask import g, session
+
+    if "user_id" not in session:
+        return None
+
+    if is_master_admin():
+        return None
+
+    # Cache the result for the current request, including None.
+    if hasattr(g, "_business_unit_membership_role_code"):
+        return g._business_unit_membership_role_code
+
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if (
+        spa_id is None
+        or business_unit_id is None
+        or user_id is None
+    ):
+        g._business_unit_membership_role_code = None
+        return None
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                bum.membership_role_code
+
+            FROM business_unit_memberships bum
+
+            JOIN business_units bu
+              ON bu.business_unit_id = bum.business_unit_id
+             AND bu.spa_id = bum.spa_id
+
+            WHERE bum.spa_id = %s
+              AND bum.business_unit_id = %s
+              AND bum.user_id = %s
+              AND bum.is_active = TRUE
+              AND bu.is_active = TRUE
+
+            LIMIT 1
+        """, (
+            spa_id,
+            business_unit_id,
+            user_id
+        ))
+
+        row = cur.fetchone()
+
+        role_code = row[0] if row else None
+
+        g._business_unit_membership_role_code = role_code
+
+        return role_code
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
+
+
+##################################
+#
+#   BUILD NAVIGATION ACCESS
+#
+#
+####################################
+
+
+def build_navigation_access(role_code):
+    from flask import session
+
+    access = {
+        "can_view_master_admin": False,
+
+        "can_view_daily_briefing": False,
+        "can_view_business_summary": False,
+
+        "can_view_calendar": False,
+        "can_view_communications": False,
+        "can_view_clients": False,
+        "can_view_financials": False,
+        "can_view_business_management": False,
+
+        "can_view_account": False,
+        "can_view_help": True
+    }
+
+    if "user_id" not in session:
+        return access
+
+    access["can_view_account"] = True
+
+    # Master Admin remains outside tenant/workspace context
+    # until explicit spa and workspace selection is added.
+    if is_master_admin():
+        access["can_view_master_admin"] = True
+        return access
+
+    if role_code == "organization_admin":
+        access.update({
+            "can_view_daily_briefing": True,
+            "can_view_business_summary": True,
+
+            "can_view_calendar": True,
+            "can_view_communications": True,
+            "can_view_clients": True,
+            "can_view_financials": True,
+            "can_view_business_management": True
+        })
+
+    # Unknown role codes remain fail-closed.
+    return access
+
+
+
+
 
 
 
@@ -6589,41 +6782,23 @@ def add_consent_record(
 
 
 
-
-
-
-
-
-#  ---------------
-#  LOAD SPA
-#
-#
-#
-#
-#
-#
-#
-#  --------------
-
-
 @app.before_request
 def load_spa():
 
     if request.endpoint in (
-        "login",  
-        "logout", 
+        "login",
+        "logout",
         "static",
         "mailgun_godaddy_booking",
         "godaddy_booking_intake",
         "telnyx_sms_webhook"
-
-     ):
+    ):
         return
 
     if "user_id" not in session:
         return redirect(url_for("login"))
 
-    if session.get("role") == "master_admin":
+    if is_master_admin():
         g.spa_id = None
         return
 
@@ -6634,8 +6809,6 @@ def load_spa():
         return redirect(url_for("login"))
 
     g.spa_id = spa_id
-
-
 
 
 
@@ -14988,12 +15161,7 @@ def sms_history_all():
 
     sms_log = cur.fetchall()
 
-    print("SMS HISTORY USING sms_messages", flush=True)
-    print("sms_messages count =", len(sms_log), flush=True)
-    print("sms_messages =", sms_log, flush=True)
-
-    print("sms messages count =", len(sms_log))
-    print("sms_log =", sms_log)
+    
 
     cur.close()
     conn.close()

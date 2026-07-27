@@ -1,65 +1,178 @@
-<div class="user-menu">
+<div class="user-menu app-menu-category">
+
     <button type="button"
-            class="user-menu-button"
+            class="user-menu-button app-menu-category-button"
             onclick="togglefinancialsMenu()">
-        📊 Accounting & <br> 🚚 Logistics ▾
+
+        <span class="app-menu-category-main">
+
+            <span class="app-menu-category-icon"
+                  aria-hidden="true">
+                📊
+            </span>
+
+            <span class="app-menu-category-label">
+                Financials & Inventory
+            </span>
+
+        </span>
+
+        <span class="app-menu-category-chevron"
+              aria-hidden="true">
+            ›
+        </span>
+
     </button>
 
+
     <div id="financialsMenuDropdown"
-         class="user-menu-dropdown"
+         class="user-menu-dropdown app-menu-submenu"
          style="display:none;">
 
 
-        <div class="user-menu-muted" style="padding:6px 12px;">📨 Income</div>        
-        <a href="{{ url_for('add_general_income') }}">Add General Income</a>
-        <br>
-        <a href="{{ url_for('income_report') }}">Income Report</a>
-       
-        <a href="{{ url_for('income_home') }}">Income Home</a>
+        <!-- Income -->
+        <div class="app-menu-submenu-section">
+
+            <div class="app-menu-submenu-heading">
+                💵 Income
+            </div>
+
+            <a href="{{ url_for('add_general_income') }}">
+                <span aria-hidden="true">➕</span>
+                <span>Add General Income</span>
+            </a>
+
+            <a href="{{ url_for('income_report') }}">
+                <span aria-hidden="true">📈</span>
+                <span>Income Report</span>
+            </a>
+
+            <a href="{{ url_for('income_home') }}">
+                <span aria-hidden="true">🏠</span>
+                <span>Income Home</span>
+            </a>
+
+        </div>
 
 
         <div class="user-menu-divider"></div>
 
-        <div class="user-menu-muted" style="padding:6px 12px;">Expenses</div>        
-        <a href="{{ url_for('add_expense') }}">Add Expense</a>
-        <br>
-        <a href="{{ url_for('automatic_expenses') }}">Recurring Expenses</a>
-        <a href="{{ url_for('expense_report') }}">Expense Report</a>
-        <a href="{{ url_for('expenses_home') }}">Expenses Home</a>
+
+        <!-- Expenses -->
+        <div class="app-menu-submenu-section">
+
+            <div class="app-menu-submenu-heading">
+                🧾 Expenses
+            </div>
+
+            <a href="{{ url_for('add_expense') }}">
+                <span aria-hidden="true">➕</span>
+                <span>Add Expense</span>
+            </a>
+
+            <a href="{{ url_for('automatic_expenses') }}">
+                <span aria-hidden="true">🔁</span>
+                <span>Recurring Expenses</span>
+            </a>
+
+            <a href="{{ url_for('expense_report') }}">
+                <span aria-hidden="true">📉</span>
+                <span>Expense Report</span>
+            </a>
+
+            <a href="{{ url_for('expenses_home') }}">
+                <span aria-hidden="true">🏠</span>
+                <span>Expenses Home</span>
+            </a>
+
+        </div>
 
 
         <div class="user-menu-divider"></div>
 
-        <div class="user-menu-muted" style="padding:6px 12px;">Inventory</div>
-        <a href="{{ url_for('inventory_home') }}">Add Inventory Item</a>
-        <br>
-        <a href="{{ url_for('inventory_scan') }}">Scan Inventory Item</a>
-         <a href="{{ url_for('inventory_home') }}">Inventory Home</a>  
+
+        <!-- Inventory and Logistics -->
+        <div class="app-menu-submenu-section">
+
+            <div class="app-menu-submenu-heading">
+                📦 Inventory & Logistics
+            </div>
+
+            <a href="{{ url_for('inventory_home') }}">
+                <span aria-hidden="true">➕</span>
+                <span>Add Inventory Item</span>
+            </a>
+
+            <a href="{{ url_for('inventory_scan') }}">
+                <span aria-hidden="true">📷</span>
+                <span>Scan Inventory Item</span>
+            </a>
+
+            <a href="{{ url_for('inventory_home') }}">
+                <span aria-hidden="true">🏠</span>
+                <span>Inventory Home</span>
+            </a>
+
+        </div>
 
 
         <div class="user-menu-divider"></div>
 
-        <div class="user-menu-muted" style="padding:6px 12px;">Financing</div>        
-        <a href="{{ url_for('business_financing_home') }}">BusinessLoans</a>    
-        <a href="{{ url_for('finance_home') }}">Finance Home </a>
-        <a href="{{ url_for('financials_home') }}">Financials Home</a>
+
+        <!-- Business Financing -->
+        <div class="app-menu-submenu-section">
+
+            <div class="app-menu-submenu-heading">
+                🏦 Business Financing
+            </div>
+
+            <a href="{{ url_for('business_financing_home') }}">
+                <span aria-hidden="true">💳</span>
+                <span>Business Loans</span>
+            </a>
+
+            <a href="{{ url_for('finance_home') }}">
+                <span aria-hidden="true">📋</span>
+                <span>Finance Home</span>
+            </a>
+
+            <a href="{{ url_for('financials_home') }}">
+                <span aria-hidden="true">📊</span>
+                <span>Financials Home</span>
+            </a>
+
+        </div>
+
 
         <div class="user-menu-divider"></div>
 
-        <div class="user-menu-muted" style="padding:6px 12px;">Owner Contributions</div>        
-        <a href="{{ url_for('add_owner_contribution') }}">Add Owner Contribution</a>
-        <a href="{{ url_for('add_owner_reimbursement') }}">Add Owner Reimbursement</a>
-        <a href="{{ url_for('funding_home') }}">Owner Financing</a>
 
-         
-        
-        
-        
-        <div class="user-menu-divider"></div>
-        <div class="user-menu-muted" style="padding:6px 12px;">extras</div>      
-         <a href="{{ url_for('gift_certificates_home') }}">Gift Certificates</a>
-        
-        
-         
+        <!-- Owner Funding -->
+        <div class="app-menu-submenu-section">
+
+            <div class="app-menu-submenu-heading">
+                👤 Owner Funding
+            </div>
+
+            <a href="{{ url_for('add_owner_contribution') }}">
+                <span aria-hidden="true">➕</span>
+                <span>Add Owner Contribution</span>
+            </a>
+
+            <a href="{{ url_for('add_owner_reimbursement') }}">
+                <span aria-hidden="true">↩️</span>
+                <span>Add Owner Reimbursement</span>
+            </a>
+
+            <a href="{{ url_for('funding_home') }}">
+                <span aria-hidden="true">💰</span>
+                <span>Owner Financing</span>
+            </a>
+
+        </div>
+
+
+
     </div>
+
 </div>

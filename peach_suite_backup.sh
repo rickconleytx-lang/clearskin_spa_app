@@ -159,14 +159,14 @@ copy_folder() {
         --exclude='*.pyc' \
         --exclude='.git/' \
         --exclude='.DS_Store' \
-        --exclude='._*' \        
+        --exclude='._*' \
         --exclude='.pytest_cache/' \
         --exclude='node_modules/' \
         "$source/" \
         "$ICLOUD_ROOT/$destination_name/"
-
-    echo
-}
+        
+        echo
+    }
 
 # ---------------------------------------------------------
 # COPY ALL PEACH SUITE PRO FILES

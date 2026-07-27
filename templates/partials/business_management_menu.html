@@ -1,53 +1,146 @@
-<div class="user-menu">
+<div class="user-menu app-menu-category">
+
     <button type="button"
-            class="user-menu-button"
+            class="user-menu-button app-menu-category-button"
             onclick="toggleBusinessManagementMenu()">
-        🗂️ Business<br>Management ▾
+
+        <span class="app-menu-category-main">
+
+            <span class="app-menu-category-icon"
+                  aria-hidden="true">
+                🗂️
+            </span>
+
+            <span class="app-menu-category-label">
+                Business Management
+            </span>
+
+        </span>
+
+        <span class="app-menu-category-chevron"
+              aria-hidden="true">
+            ›
+        </span>
+
     </button>
 
+
     <div id="businessManagementMenuDropdown"
-         class="user-menu-dropdown"
+         class="user-menu-dropdown app-menu-submenu"
          style="display:none;">
 
-        <div class="user-menu-muted" style="padding:6px 12px;">Employee Admin</div>
-        <a href="{{ url_for('add_employee') }}">Add New Employee</a>
-        <br>
-        <a href="{{ url_for('employees_home') }}">Employee Home</a>       
-        
 
-              
+        <!-- Employees -->
+        <div class="app-menu-submenu-section">
+
+            <div class="app-menu-submenu-heading">
+                👥 Employees
+            </div>
+
+            <a href="{{ url_for('add_employee') }}">
+                <span aria-hidden="true">➕</span>
+                <span>Add New Employee</span>
+            </a>
+
+            <a href="{{ url_for('employees_home') }}">
+                <span aria-hidden="true">🏠</span>
+                <span>Employee Home</span>
+            </a>
+
+        </div>
+
+
         <div class="user-menu-divider"></div>
 
-        <div class="user-menu-muted" style="padding:6px 12px;">Employee Pay</div>
-        <a href="{{ url_for('add_employee_compensation') }}">Add Employee Compensation</a>
-        <br>
-        <a href="{{ url_for('employee_compensation_report') }}">Compensation Report</a>
-        <a href="{{ url_for('employee_pay_summary') }}">Employee Pay Summary</a>
-        <br>
+
+        <!-- Employee Compensation -->
+        <div class="app-menu-submenu-section">
+
+            <div class="app-menu-submenu-heading">
+                💵 Employee Compensation
+            </div>
+
+            <a href="{{ url_for(
+                'add_employee_compensation'
+            ) }}">
+                <span aria-hidden="true">➕</span>
+                <span>Add Employee Compensation</span>
+            </a>
+
+            <a href="{{ url_for(
+                'employee_compensation_report'
+            ) }}">
+                <span aria-hidden="true">📊</span>
+                <span>Compensation Report</span>
+            </a>
+
+            <a href="{{ url_for(
+                'employee_pay_summary'
+            ) }}">
+                <span aria-hidden="true">🧾</span>
+                <span>Employee Pay Summary</span>
+            </a>
+
+            <a href="{{ url_for(
+                'compensation_types_report'
+            ) }}">
+                <span aria-hidden="true">⚙️</span>
+                <span>Manage Compensation Types</span>
+            </a>
+
+        </div>
+
+
         <div class="user-menu-divider"></div>
 
-        <div class="user-menu-muted" style="padding:6px 12px;">📝 Business</div>
-        <a href="{{ url_for('business_coach_profile') }}">🍑 Business Profile</a>
-        <a href="{{ url_for('business_schedule') }}">🗓️ Business Schedule</a>
-        <br>
-       
+
+        <!-- Business Operations -->
+        <div class="app-menu-submenu-section">
+
+            <div class="app-menu-submenu-heading">
+                🍑 Business Operations
+            </div>
+
+            <a href="{{ url_for(
+                'business_coach_profile'
+            ) }}">
+                <span aria-hidden="true">🏢</span>
+                <span>Business Profile</span>
+            </a>
+
+            <a href="{{ url_for('business_schedule') }}">
+                <span aria-hidden="true">🗓️</span>
+                <span>Business Schedule</span>
+            </a>
+
+        </div>
+
+
         <div class="user-menu-divider"></div>
 
-        <div class="user-menu-muted" style="padding:6px 12px;">📝 Business Settings</div>
-        <a href="{{ url_for('business_goals') }}">My Business Goals</a>
-        <a href="{{ url_for('admin') }}">Admin Settings</a>
 
-         <div class="user-menu-divider"></div>
-         
-        <a href="{{ url_for('compensation_types_report') }}">Manage Compensation Types</a>
-        
-        
-        <div class="user-menu-divider"></div>
+        <!-- Business Settings -->
+        <div class="app-menu-submenu-section">
 
-        <div class="user-menu-muted" style="padding:6px 12px;">📝 Opt-In/Out</div>
-        <a href="{{ url_for('client_contact_preferences') }}">Contact Preferences</a>
+            <div class="app-menu-submenu-heading">
+                ⚙️ Business Settings
+            </div>
 
-       
+            <a href="{{ url_for('business_goals') }}">
+                <span aria-hidden="true">🎯</span>
+                <span>My Business Goals</span>
+            </a>
+
+            <a href="{{ url_for('admin') }}">
+                <span aria-hidden="true">🛠️</span>
+                <span>Admin Settings</span>
+            </a>
+
+        </div>
+
+
+            
 
     </div>
+
 </div>

@@ -1,48 +1,147 @@
-<div class="user-menu">
+<div class="user-menu app-menu-category">
+
     <button type="button"
-            class="user-menu-button"
+            class="user-menu-button app-menu-category-button"
             onclick="toggleCommunicationMenu()">
-        📡 Communications <br> SMS & Email ▾
+
+        <span class="app-menu-category-main">
+
+            <span class="app-menu-category-icon"
+                  aria-hidden="true">
+                📡
+            </span>
+
+            <span class="app-menu-category-label">
+                Communications
+            </span>
+
+        </span>
+
+        <span class="app-menu-category-chevron"
+              aria-hidden="true">
+            ›
+        </span>
+
     </button>
 
+
     <div id="communicationMenuDropdown"
-         class="user-menu-dropdown"
+         class="user-menu-dropdown app-menu-submenu"
          style="display:none;">
 
 
-        <div class="user-menu-muted" style="padding:6px 12px;">📨 Send</div>
-        <a href="{{ url_for('sms_home') }}">⚡️ Send SMS</a>
-        <br>
-        <a href="{{ url_for('general_email') }}">✉️ Send Email</a>
+        <!-- Send -->
+        <div class="app-menu-submenu-section">
+
+            <div class="app-menu-submenu-heading">
+                📨 Send
+            </div>
+
+            <a href="{{ url_for('sms_home') }}">
+                <span aria-hidden="true">⚡️</span>
+                <span>Send SMS</span>
+            </a>
+
+            <a href="{{ url_for('general_email') }}">
+                <span aria-hidden="true">✉️</span>
+                <span>Send Email</span>
+            </a>
+
+        </div>
+
 
         <div class="user-menu-divider"></div>
 
-        <div class="user-menu-muted" style="padding:6px 12px;">📝 Templates</div>
-        <a href="{{ url_for('template_review', channel='sms') }}">SMS Templates</a>
-        <br>
-        <a href="{{ url_for('template_review', channel='email') }}">Email Templates</a>
+
+        <!-- Templates -->
+        <div class="app-menu-submenu-section">
+
+            <div class="app-menu-submenu-heading">
+                📝 Templates
+            </div>
+
+            <a href="{{ url_for(
+                'template_review',
+                channel='sms'
+            ) }}">
+                SMS Templates
+            </a>
+
+            <a href="{{ url_for(
+                'template_review',
+                channel='email'
+            ) }}">
+                Email Templates
+            </a>
+
+        </div>
+
 
         <div class="user-menu-divider"></div>
 
-        <div class="user-menu-muted" style="padding:6px 12px;">🕘 History</div>
-        <a href="{{ url_for('sms_history_all') }}">SMS History</a>
-        <br>
-        <a href="{{ url_for('email_history') }}">Email History</a>
+
+        <!-- History -->
+        <div class="app-menu-submenu-section">
+
+            <div class="app-menu-submenu-heading">
+                🕘 History
+            </div>
+
+            <a href="{{ url_for('sms_history_all') }}">
+                SMS History
+            </a>
+
+            <a href="{{ url_for('email_history') }}">
+                Email History
+            </a>
+
+        </div>
+
 
         <div class="user-menu-divider"></div>
-        <br>
-        <a href="{{ url_for('reminder_queue') }}">🔁 Communication Automation</a>
 
-       
-        <br>
-        <a href="{{ url_for('messaging_compliance_dashboard') }}">🛡️ Messaging Compliance</a>
-        <a href="{{ url_for('communications') }}">📡 Communications Home</a>
+
+        <!-- Automation and Compliance -->
+        <div class="app-menu-submenu-section">
+
+            <a href="{{ url_for('reminder_queue') }}">
+                <span aria-hidden="true">🔁</span>
+                <span>Communication Automation</span>
+            </a>
+
+            <a href="{{ url_for(
+                'messaging_compliance_dashboard'
+            ) }}">
+                <span aria-hidden="true">🛡️</span>
+                <span>Messaging Compliance</span>
+            </a>
+
+            <a href="{{ url_for('communications') }}">
+                <span aria-hidden="true">📡</span>
+                <span>Communications Home</span>
+            </a>
+
+        </div>
+
 
         <div class="user-menu-divider"></div>
 
-        <div class="user-menu-muted" style="padding:6px 12px;">📝 Opt-In/Out</div>
-        <a href="{{ url_for('client_contact_preferences') }}">Contact Preferences</a>
 
+        <!-- Contact Preferences -->
+        <div class="app-menu-submenu-section">
+
+            <div class="app-menu-submenu-heading">
+                📝 Opt-In / Opt-Out
+            </div>
+
+            <a href="{{ url_for(
+                'client_contact_preferences'
+            ) }}">
+                Contact Preferences
+            </a>
+
+        </div>
 
     </div>
+
 </div>

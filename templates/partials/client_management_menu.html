@@ -1,40 +1,122 @@
-<div class="user-menu">
+<div class="user-menu app-menu-category">
+
     <button type="button"
-            class="user-menu-button"
+            class="user-menu-button app-menu-category-button"
             onclick="toggleClientManagementMenu()">
-        🙋‍♀️ Client <br>Management ▾
+
+        <span class="app-menu-category-main">
+
+            <span class="app-menu-category-icon"
+                  aria-hidden="true">
+                🙋‍♀️
+            </span>
+
+            <span class="app-menu-category-label">
+                Client Management
+            </span>
+
+        </span>
+
+        <span class="app-menu-category-chevron"
+              aria-hidden="true">
+            ›
+        </span>
+
     </button>
 
+
     <div id="clientManagementMenuDropdown"
-         class="user-menu-dropdown"
+         class="user-menu-dropdown app-menu-submenu"
          style="display:none;">
 
 
-        <div class="user-menu-muted" style="padding:6px 12px;">Manage/Add</div>
-        <a href="{{ url_for('add_new_client') }}">Add New Client</a>
-        <br>
-        <a href="{{ url_for('client_management') }}">Manage Clients</a>
-        
+        <!-- Clients -->
+        <div class="app-menu-submenu-section">
 
-              
+            <div class="app-menu-submenu-heading">
+                👥 Clients
+            </div>
+
+            <a href="{{ url_for('add_new_client') }}">
+                <span aria-hidden="true">➕</span>
+                <span>Add New Client</span>
+            </a>
+
+            <a href="{{ url_for('client_management') }}">
+                <span aria-hidden="true">📋</span>
+                <span>Manage Clients</span>
+            </a>
+
+        </div>
+
+
         <div class="user-menu-divider"></div>
 
-        <div class="user-menu-muted" style="padding:6px 12px;">Gift Certificates</div>
-        <a href="{{ url_for('gift_certificates_home') }}">Gift Certificates Home<a>
-        <a href="{{ url_for('gift_certificate_reminders') }}">Reminders</a>
-        <a href="{{ url_for('gift_certificate_reminder_history') }}">History</a>
+
+        <!-- Gift Certificates -->
+        <div class="app-menu-submenu-section">
+
+            <div class="app-menu-submenu-heading">
+                🎁 Gift Certificates
+            </div>
+
+            <a href="{{ url_for('gift_certificates_home') }}">
+                <span aria-hidden="true">🎟️</span>
+                <span>Gift Certificates Home</span>
+            </a>
+
+            <a href="{{ url_for('gift_certificate_reminders') }}">
+                <span aria-hidden="true">🔔</span>
+                <span>Reminders</span>
+            </a>
+
+            <a href="{{ url_for(
+                'gift_certificate_reminder_history'
+            ) }}">
+                <span aria-hidden="true">🕘</span>
+                <span>Reminder History</span>
+            </a>
+
+        </div>
+
 
         <div class="user-menu-divider"></div>
 
-        <div class="user-menu-muted" style="padding:6px 12px;">📝 Birthdays</div>
-        <a href="{{ url_for('birthday_offers_home') }}">Birthday Offers</a>
+
+        <!-- Birthdays -->
+        <div class="app-menu-submenu-section">
+
+            <div class="app-menu-submenu-heading">
+                🎂 Birthdays
+            </div>
+
+            <a href="{{ url_for('birthday_offers_home') }}">
+                <span aria-hidden="true">🎉</span>
+                <span>Birthday Offers</span>
+            </a>
+
+        </div>
+
 
         <div class="user-menu-divider"></div>
 
-        <div class="user-menu-muted" style="padding:6px 12px;">📝 Opt-In/Out</div>
-        <a href="{{ url_for('client_contact_preferences') }}">Contact Preferences</a>
 
-       
+        <!-- Contact Preferences -->
+        <div class="app-menu-submenu-section">
+
+            <div class="app-menu-submenu-heading">
+                📝 Contact Preferences
+            </div>
+
+            <a href="{{ url_for(
+                'client_contact_preferences'
+            ) }}">
+                <span aria-hidden="true">✅</span>
+                <span>Opt-In / Opt-Out Preferences</span>
+            </a>
+
+        </div>
 
     </div>
+
 </div>

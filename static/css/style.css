@@ -4610,3 +4610,756 @@ button.tool-pill:hover {
     width: auto !important;
     flex: 0 0 auto;
 }
+
+/* =========================================================
+   APP SIDE PANEL
+========================================================= */
+
+body.app-menu-open {
+    overflow: hidden;
+}
+
+
+/* ---------------------------------------------------------
+   TOP HEADER / MENU BUTTON
+--------------------------------------------------------- */
+
+.app-header {
+    position: sticky;
+    top: 0;
+    z-index: 9000;
+
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+
+    min-height: 58px;
+    padding: 8px 18px;
+
+    background: #fff7f0;
+    border-bottom: 1px solid #f0c9a8;
+}
+
+
+.app-menu-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+
+    border: 1px solid #e5c7af;
+    background: #ffffff;
+    color: #6f3f28;
+
+    border-radius: 999px;
+    padding: 9px 16px;
+
+    font-size: 0.98rem;
+    font-weight: 700;
+
+    cursor: pointer;
+}
+
+
+.app-menu-trigger:hover {
+    background: #ffe9d6;
+}
+
+
+.app-menu-trigger:focus-visible {
+    outline: 3px solid rgba(185, 109, 61, 0.3);
+    outline-offset: 2px;
+}
+
+
+.app-menu-trigger-icon {
+    font-size: 1.15rem;
+    line-height: 1;
+}
+
+
+/* ---------------------------------------------------------
+   PAGE OVERLAY
+--------------------------------------------------------- */
+
+.app-menu-overlay {
+    position: fixed;
+    inset: 0;
+
+    background: rgba(47, 31, 22, 0.38);
+
+    z-index: 9100;
+}
+
+
+.app-menu-overlay[hidden] {
+    display: none;
+}
+
+
+/* ---------------------------------------------------------
+   SIDE PANEL
+--------------------------------------------------------- */
+
+.app-side-panel {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+
+    width: min(350px, 90vw);
+
+    background: #fffdf9;
+    border-right: 1px solid #ead7c8;
+
+    box-shadow: 14px 0 36px rgba(0, 0, 0, 0.18);
+
+    z-index: 9200;
+
+    overflow-x: hidden;
+    overflow-y: auto;
+
+    transform: translateX(-105%);
+    visibility: hidden;
+
+    transition:
+        transform 0.22s ease,
+        visibility 0.22s ease;
+}
+
+
+.app-side-panel.is-open {
+    transform: translateX(0);
+    visibility: visible;
+}
+
+
+/* ---------------------------------------------------------
+   PANEL HEADER
+--------------------------------------------------------- */
+
+.app-side-panel-header {
+    position: sticky;
+    top: 0;
+
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 15px;
+
+    min-height: 72px;
+    padding: 14px 16px;
+
+    background: #fff7f0;
+    border-bottom: 1px solid #ead7c8;
+
+    z-index: 2;
+}
+
+
+.app-side-panel-title {
+    color: #5d3521;
+    font-size: 1.05rem;
+    font-weight: 800;
+}
+
+
+.app-side-panel-business {
+    margin-top: 3px;
+
+    color: #856957;
+    font-size: 0.82rem;
+    font-weight: 600;
+}
+
+
+.app-menu-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    width: 38px;
+    height: 38px;
+
+    flex: 0 0 38px;
+
+    border: 1px solid #e5c7af;
+    border-radius: 50%;
+
+    background: #ffffff;
+    color: #6f3f28;
+
+    font-size: 1rem;
+    font-weight: 700;
+
+    cursor: pointer;
+}
+
+
+.app-menu-close:hover {
+    background: #ffe9d6;
+}
+
+
+.app-menu-close:focus-visible {
+    outline: 3px solid rgba(185, 109, 61, 0.3);
+    outline-offset: 2px;
+}
+
+
+/* ---------------------------------------------------------
+   PANEL NAVIGATION
+--------------------------------------------------------- */
+
+.app-side-panel-navigation {
+    padding: 12px;
+}
+
+
+.app-side-panel-link {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+
+    width: 100%;
+    box-sizing: border-box;
+
+    margin: 2px 0;
+    padding: 11px 12px;
+
+    border-radius: 10px;
+
+    color: #4a3428;
+    text-decoration: none;
+
+    font-size: 0.96rem;
+    font-weight: 700;
+}
+
+
+.app-side-panel-link:hover {
+    background: #fff1e6;
+}
+
+
+.app-side-panel-link-special {
+    background: #fff1e6;
+    color: #713d20;
+}
+
+
+.app-side-panel-divider {
+    height: 1px;
+
+    margin: 10px 4px;
+
+    background: #ead7c8;
+}
+
+
+
+
+/* ---------------------------------------------------------
+   TEMPORARY SUPPORT FOR EXISTING MENU PARTIALS
+
+   This changes the old horizontal dropdown components into
+   full-width rows inside the side panel.
+--------------------------------------------------------- */
+
+.app-side-panel .user-menu {
+    position: relative;
+
+    display: block;
+
+    width: 100%;
+
+    margin: 2px 0;
+}
+
+
+.app-side-panel .user-menu-button {
+    display: block;
+
+    width: 100%;
+    box-sizing: border-box;
+
+    padding: 11px 12px;
+
+    border: none;
+    border-radius: 10px;
+
+    background: transparent;
+    color: #4a3428;
+
+    text-align: left;
+    font-size: 0.96rem;
+    font-weight: 700;
+    line-height: 1.35;
+
+    white-space: normal;
+}
+
+
+.app-side-panel .user-menu-button:hover {
+    background: #fff1e6;
+}
+
+
+.app-side-panel .user-menu-button:focus-visible {
+    outline: 3px solid rgba(185, 109, 61, 0.3);
+    outline-offset: 1px;
+}
+
+
+.app-side-panel .user-menu-button br {
+    display: none;
+}
+
+
+/*
+The old dropdowns now expand downward inside the side panel.
+This prevents them from opening beyond the browser edge.
+*/
+
+.app-side-panel .user-menu-dropdown {
+    position: static;
+
+    right: auto;
+    top: auto;
+
+    width: auto;
+    min-width: 0;
+
+    margin: 3px 0 9px 16px;
+    padding: 7px;
+
+    border: 1px solid #f0dfd1;
+    border-radius: 10px;
+
+    background: #ffffff;
+
+    box-shadow: none;
+
+    text-align: left;
+}
+
+
+.app-side-panel .user-menu-dropdown > br {
+    display: none;
+}
+
+
+.app-side-panel .user-menu-dropdown a {
+    display: block;
+
+    padding: 8px 10px;
+
+    border-radius: 8px;
+
+    color: #4a3428;
+    text-decoration: none;
+
+    font-size: 0.92rem;
+    font-weight: 600;
+}
+
+
+.app-side-panel .user-menu-dropdown a:hover {
+    background: #fff1e6;
+}
+
+
+
+.app-side-panel .user-menu.is-open
+> .user-menu-button {
+    background: #fff1e6;
+    color: #6f3f28;
+}
+
+
+
+
+/* ---------------------------------------------------------
+   RESPONSIVE PANEL WIDTH
+--------------------------------------------------------- */
+
+@media (max-width: 767px) {
+
+    .app-header {
+        padding: 8px 12px;
+    }
+
+    .app-side-panel {
+        width: 100%;
+        max-width: none;
+    }
+
+}
+
+/* =========================================================
+   STANDARD SIDE-PANEL CATEGORY ROW
+========================================================= */
+
+.app-side-panel .app-menu-category-button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+
+    width: 100%;
+}
+
+
+.app-menu-category-main {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+
+    min-width: 0;
+}
+
+
+.app-menu-category-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    width: 24px;
+    flex: 0 0 24px;
+
+    font-size: 1rem;
+}
+
+
+.app-menu-category-label {
+    overflow: hidden;
+
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+
+.app-menu-category-chevron {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    flex: 0 0 20px;
+
+    color: #8b6955;
+    font-size: 1.45rem;
+    line-height: 1;
+
+    transform: rotate(0deg);
+
+    transition: transform 0.18s ease;
+}
+
+
+.app-menu-category.is-open
+.app-menu-category-chevron {
+    transform: rotate(90deg);
+}
+
+/* =========================================================
+   SIDE-PANEL COLOR SEPARATION
+========================================================= */
+
+/* Main menu background */
+.app-side-panel {
+    background: #f8eee6;
+}
+
+
+/* Sticky panel heading */
+.app-side-panel-header {
+    background: #f3e2d5;
+}
+
+
+/* Main navigation area */
+.app-side-panel-navigation {
+    background: #f8eee6;
+}
+
+
+/* Expanded submenu remains lighter */
+.app-side-panel .user-menu-dropdown,
+.app-side-panel .app-menu-submenu {
+    background: #ffffff;
+
+    border: 1px solid #e4c8b4;
+
+    box-shadow:
+        0 3px 10px rgba(91, 57, 37, 0.08);
+}
+
+
+/* Stronger active category highlight */
+.app-side-panel .user-menu.is-open
+> .user-menu-button {
+    background: #ead2c0;
+    color: #5f321d;
+}
+
+
+/* Main-menu hover state */
+.app-side-panel .user-menu-button:hover,
+.app-side-panel-link:hover {
+    background: #f0ddcf;
+}
+
+
+/* Slightly stronger section divider */
+.app-side-panel-divider {
+    background: #ddc1ad;
+}
+
+
+/* =========================================================
+   DESKTOP SECONDARY MENU PANEL
+========================================================= */
+
+:root {
+    --app-primary-menu-width: 350px;
+    --app-secondary-menu-width: 390px;
+}
+
+
+/*
+The JavaScript adds this heading to every submenu.
+Keep it hidden while the submenu uses the inline layout.
+*/
+
+.app-desktop-submenu-header {
+    display: none;
+}
+
+
+/* ---------------------------------------------------------
+   DESKTOP FLYOUT LAYOUT
+--------------------------------------------------------- */
+
+@media (min-width: 1100px) {
+
+    /*
+    On desktop, use left-position animation rather than
+    transform. This allows fixed secondary panels to extend
+    beyond the primary panel without being clipped.
+    */
+
+    .app-side-panel {
+        left: calc(-1 * var(--app-primary-menu-width));
+
+        width: var(--app-primary-menu-width);
+
+        transform: none;
+
+        overflow-x: hidden;
+        overflow-y: auto;
+
+        transition:
+            left 0.22s ease,
+            visibility 0.22s ease;
+    }
+
+
+    .app-side-panel.is-open {
+        left: 0;
+
+        transform: none;
+    }
+
+
+    /*
+    The category wrapper no longer acts as the positioning
+    container. Each submenu becomes a viewport-level panel.
+    */
+
+    .app-side-panel .user-menu {
+        position: static;
+    }
+
+
+    /*
+    Secondary panel positioned directly beside the primary
+    navigation panel.
+    */
+
+    .app-side-panel .app-menu-submenu {
+        position: fixed;
+
+        top: 0;
+        bottom: 0;
+        left: var(--app-primary-menu-width);
+
+        width: min(
+            var(--app-secondary-menu-width),
+            calc(100vw - var(--app-primary-menu-width))
+        );
+
+        min-width: 0;
+        box-sizing: border-box;
+
+        margin: 0;
+        padding: 0 14px 24px;
+
+        overflow-x: hidden;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+
+        background: #ffffff;
+
+        border: none;
+        border-left: 1px solid #dfc5b3;
+        border-radius: 0;
+
+        box-shadow:
+            12px 0 30px rgba(0, 0, 0, 0.14);
+
+        z-index: 9300;
+    }
+
+
+    /*
+    The main category remains highlighted while its
+    secondary panel is open.
+    */
+
+    .app-side-panel .app-menu-category.is-open
+    > .app-menu-category-button {
+        background: #ead2c0;
+        color: #5f321d;
+    }
+
+
+    /*
+    On desktop, the arrow continues pointing right because
+    the submenu opens to the right rather than downward.
+    */
+
+    .app-menu-category.is-open
+    .app-menu-category-chevron {
+        transform: rotate(0deg);
+    }
+
+
+    /* -----------------------------------------------------
+       SECONDARY PANEL HEADER
+    ----------------------------------------------------- */
+
+    .app-desktop-submenu-header {
+        position: sticky;
+        top: 0;
+
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+
+        min-height: 72px;
+        box-sizing: border-box;
+
+        margin: 0 -14px 12px;
+        padding: 14px 16px;
+
+        background: #fff7f0;
+        border-bottom: 1px solid #ead7c8;
+
+        z-index: 2;
+    }
+
+
+    .app-desktop-submenu-title {
+        color: #5d3521;
+
+        font-size: 1.05rem;
+        font-weight: 800;
+    }
+
+
+    .app-desktop-submenu-close {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+
+        width: 38px;
+        height: 38px;
+        flex: 0 0 38px;
+
+        border: 1px solid #e5c7af;
+        border-radius: 50%;
+
+        background: #ffffff;
+        color: #6f3f28;
+
+        font-family: inherit;
+        font-size: 1rem;
+        font-weight: 700;
+
+        cursor: pointer;
+    }
+
+
+    .app-desktop-submenu-close:hover {
+        background: #ffe9d6;
+    }
+
+
+    .app-desktop-submenu-close:focus-visible {
+        outline: 3px solid rgba(185, 109, 61, 0.3);
+        outline-offset: 2px;
+    }
+
+
+    /*
+    Remove the nested-card appearance because the entire
+    white secondary panel is now the submenu container.
+    */
+
+    .app-side-panel .app-menu-submenu-section {
+        padding: 0 3px;
+    }
+
+
+    .app-side-panel .app-menu-submenu
+    > .user-menu-divider {
+        margin: 10px 4px;
+    }
+
+}
+
+
+
+/* =========================================================
+   STANDARD SUBMENU CONTENT
+========================================================= */
+
+.app-side-panel .app-menu-submenu {
+    margin-left: 12px;
+    margin-right: 4px;
+}
+
+
+.app-menu-submenu-section {
+    display: block;
+}
+
+
+.app-menu-submenu-heading {
+    padding: 7px 10px 5px;
+
+    color: #856957;
+
+    font-size: 0.78rem;
+    font-weight: 800;
+
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+}
+
+
+.app-side-panel .app-menu-submenu a {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}

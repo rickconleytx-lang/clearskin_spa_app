@@ -1,32 +1,95 @@
-<div class="user-menu">
+<div class="user-menu app-menu-category">
+
     <button type="button"
-            class="user-menu-button"
+            class="user-menu-button app-menu-category-button"
             onclick="toggleCalendarMenu()">
-        📅 Calendar & <br> Appointments ▾
+
+        <span class="app-menu-category-main">
+
+            <span class="app-menu-category-icon"
+                  aria-hidden="true">
+                📅
+            </span>
+
+            <span class="app-menu-category-label">
+                Calendar & Appointments
+            </span>
+
+        </span>
+
+        <span class="app-menu-category-chevron"
+              aria-hidden="true">
+            ›
+        </span>
+
     </button>
 
+
     <div id="calendarMenuDropdown"
-         class="user-menu-dropdown"
+         class="user-menu-dropdown app-menu-submenu"
          style="display:none;">
 
-        
-        <a href="{{ url_for('calendar_view') }}"> 📆 Calendar</a>
-        <br>
-        <a href="{{ url_for('daily_schedule') }}">Daily Schedule</a>
+
+        <!-- Schedule -->
+        <div class="app-menu-submenu-section">
+
+            <div class="app-menu-submenu-heading">
+                📆 Schedule
+            </div>
+
+            <a href="{{ url_for('calendar_view') }}">
+                <span aria-hidden="true">📅</span>
+                <span>Calendar</span>
+            </a>
+
+            <a href="{{ url_for('daily_schedule') }}">
+                <span aria-hidden="true">🗓️</span>
+                <span>Daily Schedule</span>
+            </a>
+
+        </div>
+
 
         <div class="user-menu-divider"></div>
-        <br>
-        <a href="{{ url_for('add_appointment') }}">🆕 Add Appointment</a>
-        <br>
-        <a href="{{ url_for('appointments') }}">Appointments</a>
+
+
+        <!-- Appointments -->
+        <div class="app-menu-submenu-section">
+
+            <div class="app-menu-submenu-heading">
+                Appointments
+            </div>
+
+            <a href="{{ url_for('add_appointment') }}">
+                <span aria-hidden="true">➕</span>
+                <span>Add Appointment</span>
+            </a>
+
+            <a href="{{ url_for('appointments') }}">
+                <span aria-hidden="true">📋</span>
+                <span>View Appointments</span>
+            </a>
+
+        </div>
 
 
         <div class="user-menu-divider"></div>
-        <br>
-        <a href="{{ url_for('godaddy_imports') }}">GoDaddy Imports</a>
 
 
-         
+        <!-- Imports -->
+        <div class="app-menu-submenu-section">
+
+            <div class="app-menu-submenu-heading">
+                Imports
+            </div>
+
+            <a href="{{ url_for('godaddy_imports') }}">
+                <span aria-hidden="true">📥</span>
+                <span>GoDaddy Imports</span>
+            </a>
+
+        </div>
 
     </div>
+
 </div>
