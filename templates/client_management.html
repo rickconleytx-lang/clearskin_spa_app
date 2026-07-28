@@ -37,8 +37,11 @@
         </p>
 
         <p>
-            <span style="color: red;">Note: SMS/Email Opt In/Out:</span> 
-            Search Client below, then click on the Client's - SMS Settings button (far right).
+            <p>
+                <span style="color: red;">Note:</span>
+                Use Client Contact Preferences to manage phone, SMS,
+                email, and marketing communication permissions.
+            </p>
         </p>  
 
         <div style="margin-bottom: 20px;">    
@@ -108,24 +111,24 @@
             <td>
                 {{ row[3] or '' }}<br>
 
-                {% if row[8] and row[9] and not row[10] %}
+                {% if row[9] and not row[10] %}
                     <span class="badge badge-success">SMS OK</span>
                 {% elif row[10] %}
                     <span class="badge badge-danger">SMS Out</span>
                 {% else %}
-                    <span class="badge badge-warning">SMS ?</span>
+                    <span class="badge badge-warning">SMS Not Set</span>
                 {% endif %}
             </td>
 
             <td>
                 {{ row[4] or '' }}<br>
 
-                {% if row[11] and row[12] and not row[13] %}
+                {% if row[12] and not row[13] %}
                     <span class="badge badge-success">Email OK</span>
                 {% elif row[13] %}
                     <span class="badge badge-danger">Email Out</span>
                 {% else %}
-                    <span class="badge badge-warning">Email ?</span>
+                    <span class="badge badge-warning">Email Not Set</span>
                 {% endif %}
             </td>
 

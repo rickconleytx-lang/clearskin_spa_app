@@ -10,41 +10,125 @@
 {% endif %}
 
 <div class="form-section">
-    <form method="POST" action="{{ url_for('schedule_appointment_start') }}">
-        <input type="hidden" name="selected_date" value="{{ selected_date }}">
 
-        
-        <div style="display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap;">
+    <form
+        method="POST"
+        action="{{ url_for('schedule_appointment_start') }}"
+    >
+        <input
+            type="hidden"
+            name="selected_date"
+            value="{{ selected_date }}"
+        >
 
-        <div class="form-group" style="margin-bottom:0;">
-            <label for="birth_date">Search by Birthday</label>
-            <input type="date"
-                id="birth_date"
-                name="birth_date"
-                value="{{ birth_date }}">
+        <div
+            style="
+                display:flex;
+                align-items:flex-end;
+                gap:12px;
+                flex-wrap:wrap;
+            "
+        >
+
+            <div
+                class="form-group"
+                style="margin-bottom:0;"
+            >
+                <label for="client_name">
+                    Search by Client Name
+                </label>
+
+                <input
+                    type="text"
+                    id="client_name"
+                    name="client_name"
+                    value="{{ client_name or '' }}"
+                    placeholder="First or last name"
+                >
+            </div>
+
+            <div
+                class="form-group"
+                style="margin-bottom:0;"
+            >
+                <label for="birth_date">
+                    Search by Birthday
+                </label>
+
+                <input
+                    type="date"
+                    id="birth_date"
+                    name="birth_date"
+                    value="{{ birth_date or '' }}"
+                >
+            </div>
+
+            <button
+                type="submit"
+                name="action"
+                value="search"
+                class="tool-pill tool-pill-small"
+            >
+                Search
+            </button>
+
+            <button
+                type="submit"
+                name="action"
+                value="show_all"
+                class="tool-pill tool-pill-small"
+            >
+                Show All Clients
+            </button>
+
+            <a
+                href="{{ url_for(
+                    'schedule_appointment_start',
+                    selected_date=selected_date
+                ) }}"
+                class="tool-pill tool-pill-small"
+            >
+                Clear
+            </a>
+
+        </div>
+<br>        
+<hr>
+        <div
+            class="page-tool-pills"
+            style="margin-top:18px;"
+        >
+            <a
+                href="{{ url_for(
+                    'add_new_client',
+                    selected_date=selected_date
+                ) }}"
+                class="tool-pill tool-pill-small"
+            >
+                Add New Client
+            </a>
+
+            <a
+                href="{{ url_for('clients_home') }}"
+                class="tool-pill tool-pill-small"
+            >
+                Cancel
+            </a>
         </div>
 
-        <button type="submit" class="btn btn-primary">
-            Search
-        </button>
-
-        <a href="{{ url_for('add_new_client', selected_date=selected_date) }}"
-        class="btn btn-secondary">
-            Add New Client
-        </a>
-
-        <a href="{{ url_for('clients_home') }}"
-        class="btn btn-secondary">
-            Cancel
-        </a>
-
-    </div>
-
     </form>
+
 </div>
 
 {% if clients %}
-    <h2>Matching Clients</h2>
+    <h2>
+        {% if show_all %}
+            All Active Clients
+        {% else %}
+            Matching Clients
+        {% endif %}
+    </h2>
+
     <table>
         <thead>
             <tr>
@@ -63,8 +147,14 @@
                 <td>{{ client[3] if client[3] else "" }}</td>
                 <td>{{ client[4] if client[4] else "" }}</td>
                 <td>
-                    <a href="{{ url_for('add_appointment', client_id=client[0], selected_date=selected_date) }}"
-                       class="btn btn-primary">
+                    <a
+                        href="{{ url_for(
+                            'add_appointment',
+                            client_id=client[0],
+                            selected_date=selected_date
+                        ) }}"
+                        class="tool-pill tool-pill-small"
+                    >
                         Schedule Appointment
                     </a>
                 </td>

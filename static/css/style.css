@@ -5364,17 +5364,6 @@ Keep it hidden while the submenu uses the inline layout.
     gap: 8px;
 }
 
-#feedbackModal .about-peach-modal-content {
-    padding-left: 32px;
-    padding-right: 32px;
-}
-
-@media (max-width: 600px) {
-    #feedbackModal .about-peach-modal-content {
-        padding-left: 20px;
-        padding-right: 20px;
-    }
-}
 
 .help-support-menu .app-menu-category-label {
     font-size: 1.08rem;
@@ -5389,4 +5378,103 @@ Keep it hidden while the submenu uses the inline layout.
 .help-support-menu .app-menu-submenu a,
 .help-support-menu .app-menu-submenu button {
     font-size: 1rem;
+}
+
+
+/* ---------------------------------------------------------
+   FEEDBACK MODAL
+--------------------------------------------------------- */
+
+#feedbackModal {
+    width: min(760px, calc(100vw - 32px));
+    max-width: 760px;
+    box-sizing: border-box;
+}
+
+#feedbackModal .about-peach-modal-content {
+    padding: 0;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+#feedbackModal #feedbackModalStatus,
+#feedbackModal #feedbackModalForm {
+    width: calc(100% - 64px);
+    max-width: 550px;
+    box-sizing: border-box;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+#feedbackModal #feedbackModalForm {
+    padding-top: 20px;
+    padding-bottom: 30px;
+}
+
+#feedbackModal .form-group {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+#feedbackModal .form-group input,
+#feedbackModal .form-group select,
+#feedbackModal .form-group textarea {
+    display: block;
+    width: 100%;
+    max-width: none;
+    box-sizing: border-box;
+}
+
+#feedbackModal .form-buttons {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+@media (max-width: 650px) {
+    #feedbackModal {
+        width: calc(100vw - 20px);
+    }
+
+    #feedbackModal #feedbackModalStatus,
+    #feedbackModal #feedbackModalForm {
+        width: calc(100% - 40px);
+        max-width: none;
+        margin-left: auto;
+        margin-right: auto;
+    }
+
+    #feedbackModal .about-peach-modal-header {
+        padding-left: 20px;
+        padding-right: 20px;
+    }
+}
+
+/* ---------------------------------------------------------
+   SMS AUTOMATION QUEUE SUMMARY LINKS
+--------------------------------------------------------- */
+
+.summary-card-link {
+    display: block;
+    color: inherit;
+    text-decoration: none;
+    cursor: pointer;
+    box-sizing: border-box;
+    transition:
+        transform 0.15s ease,
+        box-shadow 0.15s ease;
+}
+
+.summary-card-link:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 14px rgba(0, 0, 0, 0.12);
+}
+
+.summary-card-link:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 3px;
+}
+
+.summary-card-active {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
 }

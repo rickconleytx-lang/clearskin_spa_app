@@ -1,116 +1,226 @@
 {% extends "base.html" %}
 
-{% block title %}Reminder Queue{% endblock %}
+{% block title %}SMS Automation Queue{% endblock %}
 
 {% block content %}
 
 
 
-<form method="POST" action="{{ url_for('generate_appointment_reminders') }}">
-    <button type="submit">
-        Generate Appointment Reminders
-    </button>
-</form>
+<h1>SMS Automation Queue</h1>
 
-<br>
+<p>
+    Generate, review, send, retry, and manage automated SMS reminders.
+</p>
 
-<form method="POST"
-      action="{{ url_for('run_daily_birthday_job') }}"
-      style="display:inline;">
-    <button type="submit"
-            onclick="return confirm('Run daily birthday job now?')">
-        Run Daily Birthday Job
-    </button>
-</form>
-<br><br>
+<hr>
 
-<form method="POST" action="{{ url_for('generate_after_appointment_followups') }}">
-    <button type="submit">
-        Generate After Appointment Follow-Ups
-    </button>
-</form>
+<h2>Automation Actions</h2>
 
-<br>
+<!-- Row 1: Generate Queue Items -->
+<div class="page-tool-pills" style="gap:10px; flex-wrap:wrap; margin-bottom:12px;">
 
-<form method="POST"
-      action="{{ url_for('create_birthday_reminders') }}"
-      style="display:inline;">
-    <button type="submit"
-            onclick="return confirm('Create birthday reminders for today?')">
-        Create Birthday Reminders
-    </button>
-</form>
+    <form
+        method="POST"
+        action="{{ url_for('generate_appointment_reminders') }}"
+        style="display:inline;"
+    >
+        <button
+            type="submit"
+            class="tool-pill tool-pill-small"
+        >
+            Generate Appointment Reminders
+        </button>
+    </form>
 
+    <form
+        method="POST"
+        action="{{ url_for('generate_after_appointment_followups') }}"
+        style="display:inline;"
+    >
+        <button
+            type="submit"
+            class="tool-pill tool-pill-small"
+        >
+            Generate Appointment Follow-Ups
+        </button>
+    </form>
 
-<br>
-<br>
-<form method="POST" action="{{ url_for('send_pending_reminders') }}">
-    <button type="submit"
-            onclick="return confirm('Send all pending reminders now?')">
-        Send Pending Reminders
-    </button>
-</form>
+    {% if sms_marketing_10dlc_approved %}
 
-<br>
+        <form
+            method="POST"
+            action="{{ url_for('create_birthday_reminders') }}"
+            style="display:inline;"
+        >
+            <button
+                type="submit"
+                class="tool-pill tool-pill-small"
+                onclick="return confirm(
+                    'Create birthday SMS reminders for upcoming birthdays in the next 45 days?'
+                )"
+            >
+                Generate Birthday Reminders
+            </button>
+        </form>
 
-<form method="POST"
-      action="{{ url_for('retry_failed_reminders') }}"
-      style="display:inline;">
+    {% else %}
 
-    <button type="submit"
-            onclick="return confirm('Retry all failed reminders?')">
+        <button
+            type="button"
+            class="tool-pill tool-pill-small"
+            disabled
+            title="Approved marketing SMS 10DLC is required."
+            style="opacity:0.55; cursor:not-allowed;"
+        >
+            Birthday SMS Unavailable
+        </button>
 
-        Retry Failed
-
-    </button>
-
-</form>
-
-
-
-
-<br>
-
-<br>
-
-
-
-<h1>Communications Automation</h1>
-
-
-<div class="summary-cards">
-
-    <div class="summary-card">
-        <strong>Pending</strong><br>
-        {{ status_counts.get('pending', 0) }}
-    </div>
-
-    <div class="summary-card">
-        <strong>Sent</strong><br>
-        {{ status_counts.get('sent', 0) }}
-    </div>
-
-    <div class="summary-card">
-        <strong>Failed</strong><br>
-        {{ status_counts.get('failed', 0) }}
-    </div>
-
-    <div class="summary-card">
-        <strong>Skipped</strong><br>
-        {{ status_counts.get('skipped', 0) }}
-    </div>
+    {% endif %}
 
 </div>
 
-<br>
 
-<a href="{{ url_for('reminder_queue') }}" class="btn">All</a>
-<a href="{{ url_for('reminder_queue', status='pending') }}" class="btn">Pending</a>
-<a href="{{ url_for('reminder_queue', status='sent') }}" class="btn">Sent</a>
-<a href="{{ url_for('reminder_queue', status='failed') }}" class="btn">Failed</a>
-<a href="{{ url_for('reminder_queue', status='skipped') }}" class="btn">Skipped</a>
+<!-- Row 2: Process Queue -->
+<div class="page-tool-pills" style="gap:10px; flex-wrap:wrap; margin-bottom:12px;">
 
-<br><br>
+    <form
+        method="POST"
+        action="{{ url_for('send_pending_reminders') }}"
+        style="display:inline;"
+    >
+        <button
+            type="submit"
+            class="tool-pill tool-pill-small"
+            onclick="return confirm(
+                'Send all currently due pending SMS reminders?'
+            )"
+        >
+            Send Pending Reminders
+        </button>
+    </form>
+
+    <form
+        method="POST"
+        action="{{ url_for('retry_failed_reminders') }}"
+        style="display:inline;"
+    >
+        <button
+            type="submit"
+            class="tool-pill tool-pill-small"
+            onclick="return confirm(
+                'Reset all failed reminders to pending?'
+            )"
+        >
+            Retry Failed Reminders
+        </button>
+    </form>
+
+</div>
+
+
+{% if not sms_marketing_10dlc_approved %}
+
+    <p style="margin:8px 0 20px; color:#666;">
+        Birthday SMS requires approved marketing SMS 10DLC.
+        Birthday email offers remain available.
+    </p>
+
+{% endif %}
+
+<hr>
+
+
+<h2>Queue Summary</h2>
+
+<div class="summary-cards">
+
+    <a
+        href="{{ url_for('reminder_queue', status='pending') }}"
+        class="summary-card summary-card-link
+               {% if status_filter == 'pending' %}summary-card-active{% endif %}"
+    >
+        <strong>Pending</strong><br>
+        {{ status_counts.get('pending', 0) }}
+    </a>
+
+    <a
+        href="{{ url_for('reminder_queue', status='sent') }}"
+        class="summary-card summary-card-link
+               {% if status_filter == 'sent' %}summary-card-active{% endif %}"
+    >
+        <strong>Sent</strong><br>
+        {{ status_counts.get('sent', 0) }}
+    </a>
+
+    <a
+        href="{{ url_for('reminder_queue', status='failed') }}"
+        class="summary-card summary-card-link
+               {% if status_filter == 'failed' %}summary-card-active{% endif %}"
+    >
+        <strong>Failed</strong><br>
+        {{ status_counts.get('failed', 0) }}
+    </a>
+
+    <a
+        href="{{ url_for('reminder_queue', status='skipped') }}"
+        class="summary-card summary-card-link
+               {% if status_filter == 'skipped' %}summary-card-active{% endif %}"
+    >
+        <strong>Skipped</strong><br>
+        {{ status_counts.get('skipped', 0) }}
+    </a>
+
+</div>
+
+
+<h2 style="margin-top:24px;">
+    Filter Queue —
+    {{ status_filter|replace('_', ' ')|title }}
+</h2>
+
+<div class="page-tool-pills" style="gap:8px; flex-wrap:wrap; margin-bottom:24px;">
+
+    <a
+        href="{{ url_for('reminder_queue', status='all') }}"
+        class="tool-pill tool-pill-small"
+        {% if status_filter == 'all' %}aria-current="page"{% endif %}
+    >
+        All
+    </a>
+
+    <a
+        href="{{ url_for('reminder_queue', status='pending') }}"
+        class="tool-pill tool-pill-small"
+        {% if status_filter == 'pending' %}aria-current="page"{% endif %}
+    >
+        Pending
+    </a>
+
+    <a
+        href="{{ url_for('reminder_queue', status='sent') }}"
+        class="tool-pill tool-pill-small"
+        {% if status_filter == 'sent' %}aria-current="page"{% endif %}
+    >
+        Sent
+    </a>
+
+    <a
+        href="{{ url_for('reminder_queue', status='failed') }}"
+        class="tool-pill tool-pill-small"
+        {% if status_filter == 'failed' %}aria-current="page"{% endif %}
+    >
+        Failed
+    </a>
+
+    <a
+        href="{{ url_for('reminder_queue', status='skipped') }}"
+        class="tool-pill tool-pill-small"
+        {% if status_filter == 'skipped' %}aria-current="page"{% endif %}
+    >
+        Skipped
+    </a>
+
+</div>
 
 
 <table class="styled-table">
@@ -157,16 +267,37 @@
 
                 <td class="table-actions">
 
-                    {% if r[7] == "pending" or r[7] == "failed" %}
-                         <form method="POST"
-                               action="{{ url_for('send_one_reminder', reminder_id=r[0]) }}"
-                               style="display:inline;">
+                    {% if
+                        r[1] == "birthday"
+                        and not sms_marketing_10dlc_approved
+                    %}
+                        <span
+                            class="status-badge skipped"
+                            title="Approved marketing SMS 10DLC is required."
+                        >
+                            SMS Unavailable
+                        </span>
 
-                             <button type="submit"
-                                     onclick="return confirm('Send this reminder now?')">
-                                 Send One
-                              </button>
-                         </form>
+                    {% elif r[7] == "pending" or r[7] == "failed" %}
+
+                        <form
+                            method="POST"
+                            action="{{ url_for(
+                                'send_one_reminder',
+                                reminder_id=r[0]
+                            ) }}"
+                            style="display:inline;"
+                        >
+                            <button
+                                type="submit"
+                                onclick="return confirm(
+                                    'Send this reminder now?'
+                                )"
+                            >
+                                Send One
+                            </button>
+                        </form>
+
                     {% else %}
                         —
                     {% endif %}

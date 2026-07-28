@@ -4177,103 +4177,207 @@ def enrich_appointment_reminder_merge_data(spa_id, merge_data):
 
 ################################
 #       SEND BIRTHDAY
+#
+#
+#
+#
 ##############################
+
+
 
 def send_birthday_reminder_sms(reminder_id, spa_id):
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute("""
-        SELECT
-            rq.reminder_id,
-            rq.client_id,
-            rq.recipient_phone,
-            c.first_name,
-            c.birth_date,
-            s.spa_name
-        FROM reminder_queue rq
-        JOIN clients c
-          ON rq.client_id = c.client_id
-         AND rq.spa_id = c.spa_id
-        JOIN spas s
-          ON rq.spa_id = s.spa_id
-        WHERE rq.reminder_id = %s
-          AND rq.spa_id = %s
-          AND rq.reminder_type = 'birthday'
-          AND rq.send_method = 'sms'
-    """, (reminder_id, spa_id))
-
-    row = cur.fetchone()
-
-    if not row:
-        cur.close()
-        conn.close()
-        return False, "Birthday reminder not found."
-
-    (
-        reminder_id,
-        client_id,
-        recipient_phone,
-        first_name,
-        birth_date,
-        spa_name
-    ) = row
-
-    if not recipient_phone:
+    try:
         cur.execute("""
-            UPDATE reminder_queue
-            SET status = 'skipped',
-                error_message = %s
-            WHERE reminder_id = %s
-              AND spa_id = %s
-        """, ("Missing phone number", reminder_id, spa_id))
+            SELECT
+                rq.reminder_id,
+                rq.client_id,
+                rq.recipient_phone,
+                c.first_name,
+                c.birth_date,
+                s.spa_name
+            FROM reminder_queue rq
+            JOIN clients c
+              ON rq.client_id = c.client_id
+             AND rq.spa_id = c.spa_id
+            JOIN spas s
+              ON rq.spa_id = s.spa_id
+            WHERE rq.reminder_id = %s
+              AND rq.spa_id = %s
+              AND rq.reminder_type = 'birthday'
+              AND rq.send_method = 'sms'
+        """, (
+            reminder_id,
+            spa_id
+        ))
+
+        row = cur.fetchone()
+
+        if not row:
+            return False, {
+                "success": False,
+                "status": "not_found",
+                "error": "Birthday reminder not found."
+            }
+
+        (
+            reminder_id,
+            client_id,
+            recipient_phone,
+            first_name,
+            birth_date,
+            spa_name
+        ) = row
+
+        if not recipient_phone:
+            cur.execute("""
+                UPDATE reminder_queue
+                SET status = 'skipped',
+                    error_message = %s
+                WHERE reminder_id = %s
+                  AND spa_id = %s
+            """, (
+                "Missing phone number",
+                reminder_id,
+                spa_id
+            ))
+
+            conn.commit()
+
+            return False, {
+                "success": False,
+                "status": "skipped",
+                "error": "Missing phone number."
+            }
+
+        merge_data = build_birthday_message_merge_data(
+            client_id=client_id,
+            first_name=first_name,
+            birth_date=birth_date,
+            spa_name=spa_name
+        )
+
+        merge_data["reminder_id"] = reminder_id
+
+        try:
+            result = send_communication(
+                spa_id=spa_id,
+                channel="sms",
+                recipient=recipient_phone,
+                template_type="birthday_message",
+                merge_data=merge_data,
+                client_id=client_id,
+                message_type="marketing"
+            )
+
+        except Exception as error:
+            result = {
+                "success": False,
+                "status": "failed",
+                "provider_message_id": None,
+                "provider_status": None,
+                "provider_error_code": None,
+                "provider_error_message": str(error),
+                "error": str(error),
+                "message_body": ""
+            }
+
+        success = bool(result.get("success"))
+
+        final_message_body = (
+            result.get("message_body")
+            or result.get("final_message_body")
+            or ""
+        )
+
+        result_status = (
+            result.get("status")
+            or ("sent" if success else "failed")
+        )
+
+        error_message = (
+            result.get("provider_error_message")
+            or result.get("error")
+            or "Birthday reminder SMS failed."
+        )
+
+        if success:
+            cur.execute("""
+                UPDATE reminder_queue
+                SET status = 'sent',
+                    sent_at = NOW(),
+                    error_message = NULL
+                WHERE reminder_id = %s
+                  AND spa_id = %s
+            """, (
+                reminder_id,
+                spa_id
+            ))
+
+        else:
+            cur.execute("""
+                UPDATE reminder_queue
+                SET status = 'failed',
+                    error_message = %s
+                WHERE reminder_id = %s
+                  AND spa_id = %s
+            """, (
+                error_message,
+                reminder_id,
+                spa_id
+            ))
+
         conn.commit()
+
+        try:
+            log_sms_message(
+                spa_id=spa_id,
+                client_id=client_id,
+                recipient_phone=recipient_phone,
+                message_body=final_message_body,
+                message_type="birthday",
+                direction="outbound",
+                status=result_status,
+                provider_message_id=result.get(
+                    "provider_message_id"
+                ),
+                provider_status=result.get(
+                    "provider_status"
+                ),
+                provider_error_code=result.get(
+                    "provider_error_code"
+                ),
+                provider_error_message=(
+                    error_message if not success else None
+                )
+            )
+
+        except Exception as log_error:
+            print(
+                "[BIRTHDAY REMINDER SMS LOG ERROR]",
+                log_error,
+                flush=True
+            )
+
+        return success, result
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
         cur.close()
         conn.close()
-        return False, "Missing phone number."
 
-    merge_data = build_birthday_message_merge_data(
-        client_id=client_id,
-        first_name=first_name,
-        birth_date=birth_date,
-        spa_name=spa_name
-    )
 
-    result = send_communication(
-        spa_id=spa_id,
-        channel="sms",
-        recipient=recipient_phone,
-        template_type="birthday_message",
-        merge_data=merge_data,
-        client_id=client_id,
-        message_type="marketing"
-    )
 
-    success = result.get("success", False)
 
-    if success:
-        cur.execute("""
-            UPDATE reminder_queue
-            SET status = 'sent',
-                sent_at = NOW(),
-                error_message = NULL
-            WHERE reminder_id = %s
-              AND spa_id = %s
-        """, (reminder_id, spa_id))
-    else:
-        cur.execute("""
-            UPDATE reminder_queue
-            SET status = 'failed',
-                error_message = %s
-            WHERE reminder_id = %s
-              AND spa_id = %s
-        """, (str(result), reminder_id, spa_id))
 
-    conn.commit()
-    cur.close()
-    conn.close()
 
-    return success, result
+
+
 
 
 ##################################
@@ -4314,156 +4418,268 @@ def send_template_sms(
 #################################
  
 
+
+
 def send_appointment_reminder_sms(reminder_id, spa_id):
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute("""
-        SELECT
-            rq.reminder_id,
-            rq.appointment_id,
-            rq.client_id,
-            rq.recipient_phone,
-            a.appointment_date,
-            a.appointment_time,
-            a.service_type,
-            s.spa_name,
-            s.owner_phone,
-            NULL AS spa_website
-        FROM reminder_queue rq
-        JOIN appointments a
-          ON rq.appointment_id = a.appointment_id
-         AND rq.spa_id = a.spa_id
-        JOIN spas s
-          ON rq.spa_id = s.spa_id
-        WHERE rq.reminder_id = %s
-          AND rq.spa_id = %s
-          AND rq.reminder_type = 'appointment_reminder'
-          AND rq.send_method = 'sms'
-    """, (reminder_id, spa_id))
-
-    row = cur.fetchone()
-
-    if not row:
-        cur.close()
-        conn.close()
-        return False, "Reminder not found."
-
-    (
-       reminder_id,
-        appointment_id,
-        client_id,
-        recipient_phone,
-        appointment_date,
-        appointment_time,
-        service_name,
-        spa_name,
-        spa_phone,
-        spa_website
-    ) = row
-
-    merge_data = build_appointment_reminder_merge_data(
-        spa_id=spa_id,
-        client_id=client_id,
-        appointment_date=appointment_date,
-        appointment_time=appointment_time,
-        service_name=service_name,
-        spa_name=spa_name,
-        spa_phone=spa_phone,
-        spa_website=spa_website
-    )
-
-    merge_data["reminder_id"] = reminder_id
-
-    result = send_communication(
-        spa_id=spa_id,
-        channel="sms",
-        recipient=recipient_phone,
-        template_type="appointment_reminder",
-        merge_data=merge_data,
-        client_id=client_id,
-        message_type="appointment_reminder"
-    )
-
-    success = result.get("success", False)
-
-    if success:
+    try:
         cur.execute("""
-            UPDATE reminder_queue
-            SET status = 'sent',
-                sent_at = NOW(),
-                error_message = NULL
-            WHERE reminder_id = %s
-              AND spa_id = %s
-        """, (reminder_id, spa_id))
-    else:
-        cur.execute("""
-            UPDATE reminder_queue
-            SET status = 'failed',
-                error_message = %s
-            WHERE reminder_id = %s
-              AND spa_id = %s
-        """, (str(result), reminder_id, spa_id))
+            SELECT
+                rq.reminder_id,
+                rq.appointment_id,
+                rq.client_id,
+                rq.recipient_phone,
+                a.appointment_date,
+                a.appointment_time,
+                a.service_type,
+                s.spa_name,
+                s.owner_phone,
+                NULL AS spa_website
+            FROM reminder_queue rq
+            JOIN appointments a
+              ON rq.appointment_id = a.appointment_id
+             AND rq.spa_id = a.spa_id
+            JOIN spas s
+              ON rq.spa_id = s.spa_id
+            WHERE rq.reminder_id = %s
+              AND rq.spa_id = %s
+              AND rq.reminder_type = 'appointment_reminder'
+              AND rq.send_method = 'sms'
+        """, (
+            reminder_id,
+            spa_id
+        ))
 
+        row = cur.fetchone()
 
-        cur.execute("""
-            INSERT INTO appointment_reminders (
+        if not row:
+            return False, {
+                "success": False,
+                "status": "not_found",
+                "error": "Appointment reminder not found."
+            }
+
+        (
+            reminder_id,
+            appointment_id,
+            client_id,
+            recipient_phone,
+            appointment_date,
+            appointment_time,
+            service_name,
+            spa_name,
+            spa_phone,
+            spa_website
+        ) = row
+
+        if not recipient_phone:
+            cur.execute("""
+                UPDATE reminder_queue
+                SET status = 'skipped',
+                    error_message = %s
+                WHERE reminder_id = %s
+                  AND spa_id = %s
+            """, (
+                "Missing phone number",
+                reminder_id,
+                spa_id
+            ))
+
+            conn.commit()
+
+            return False, {
+                "success": False,
+                "status": "skipped",
+                "error": "Missing phone number."
+            }
+
+        merge_data = build_appointment_reminder_merge_data(
+            spa_id=spa_id,
+            client_id=client_id,
+            appointment_date=appointment_date,
+            appointment_time=appointment_time,
+            service_name=service_name,
+            spa_name=spa_name,
+            spa_phone=spa_phone,
+            spa_website=spa_website
+        )
+
+        merge_data["reminder_id"] = reminder_id
+        merge_data["appointment_id"] = appointment_id
+
+        try:
+            result = send_communication(
+                spa_id=spa_id,
+                channel="sms",
+                recipient=recipient_phone,
+                template_type="appointment_reminder",
+                merge_data=merge_data,
+                client_id=client_id,
+                message_type="appointment_reminder"
+            )
+
+        except Exception as error:
+            result = {
+                "success": False,
+                "status": "failed",
+                "provider_message_id": None,
+                "provider_status": None,
+                "provider_error_code": None,
+                "provider_error_message": str(error),
+                "error": str(error),
+                "message_body": ""
+            }
+
+        success = bool(result.get("success"))
+
+        final_message_body = (
+            result.get("message_body")
+            or result.get("final_message_body")
+            or ""
+        )
+
+        result_status = (
+            result.get("status")
+            or ("sent" if success else "failed")
+        )
+
+        error_message = (
+            result.get("provider_error_message")
+            or result.get("error")
+            or "Appointment reminder SMS failed."
+        )
+
+        if success:
+            cur.execute("""
+                UPDATE reminder_queue
+                SET status = 'sent',
+                    sent_at = NOW(),
+                    error_message = NULL
+                WHERE reminder_id = %s
+                  AND spa_id = %s
+            """, (
+                reminder_id,
+                spa_id
+            ))
+
+            cur.execute("""
+                INSERT INTO appointment_reminders (
+                    spa_id,
+                    appointment_id,
+                    client_id,
+                    channel,
+                    reminder_type,
+                    status,
+                    appointment_date_at_send,
+                    appointment_time_at_send,
+                    recipient,
+                    message_body,
+                    sent_at,
+                    sms_log_id
+                )
+                SELECT
+                    %s,
+                    %s,
+                    %s,
+                    'sms',
+                    'appointment_reminder',
+                    'sent',
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    NOW(),
+                    NULL
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM appointment_reminders
+                    WHERE spa_id = %s
+                      AND appointment_id = %s
+                      AND channel = 'sms'
+                      AND status = 'sent'
+                      AND appointment_date_at_send = %s
+                      AND appointment_time_at_send = %s
+                )
+            """, (
                 spa_id,
                 appointment_id,
                 client_id,
-                channel,
-                reminder_type,
-                status,
-                appointment_date_at_send,
-                appointment_time_at_send,
-                recipient,
-                message_body,
-                sent_at,
-                sms_log_id
-            )
-            SELECT
-                %s,
-                %s,
-                %s,
-                'sms',
-                'appointment_reminder',
-                'sent',
-                %s,
-                %s,
-                %s,
-                %s,
-                NOW(),
-                %s
-            WHERE NOT EXISTS (
-                SELECT 1
-                FROM appointment_reminders
-                WHERE spa_id = %s
-                  AND appointment_id = %s
-                  AND channel = 'sms'
-                  AND status = 'sent'
-                  AND appointment_date_at_send = %s
-                  AND appointment_time_at_send = %s
-            )
-        """, (
-            spa_id,
-            appointment_id,
-            client_id,
-            appointment_date,
-            appointment_time,
-            recipient_phone,
-            result.get("final_message_body"),
-            result.get("sms_log_id"),
-            spa_id,
-            appointment_id,
-            appointment_date,
-            appointment_time
-        ))
+                appointment_date,
+                appointment_time,
+                recipient_phone,
+                final_message_body,
+                spa_id,
+                appointment_id,
+                appointment_date,
+                appointment_time
+            ))
 
-    conn.commit()
-    cur.close()
-    conn.close()
+        else:
+            cur.execute("""
+                UPDATE reminder_queue
+                SET status = 'failed',
+                    error_message = %s
+                WHERE reminder_id = %s
+                  AND spa_id = %s
+            """, (
+                error_message,
+                reminder_id,
+                spa_id
+            ))
 
-    return success, result
+        conn.commit()
+
+        try:
+            log_sms_message(
+                spa_id=spa_id,
+                client_id=client_id,
+                recipient_phone=recipient_phone,
+                message_body=final_message_body,
+                message_type="appointment_reminder",
+                direction="outbound",
+                status=result_status,
+                provider_message_id=result.get(
+                    "provider_message_id"
+                ),
+                provider_status=result.get(
+                    "provider_status"
+                ),
+                provider_error_code=result.get(
+                    "provider_error_code"
+                ),
+                provider_error_message=error_message if not success else None
+            )
+
+        except Exception as log_error:
+            print(
+                "[APPOINTMENT REMINDER SMS LOG ERROR]",
+                log_error,
+                flush=True
+            )
+
+        return success, result
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -13965,7 +14181,10 @@ def sms_webhook():
 #
 #   ----------------------
 
-@app.route("/client/<int:client_id>/messaging-settings", methods=["GET", "POST"])
+@app.route(
+    "/client/<int:client_id>/messaging-settings",
+    methods=["GET"]
+)
 @login_required
 @spa_required
 @require_workspace_permission("can_manage_contact_preferences")
@@ -17004,7 +17223,33 @@ def send_all_birthday_offer_emails():
 
 def reminder_queue():
     spa_id = current_spa_id()
-    status_filter = request.args.get("status", "").strip()
+
+    sms_permissions = get_sms_business_permissions(spa_id)
+
+    sms_marketing_10dlc_approved = bool(
+        sms_permissions.get("marketing_sms_enabled")
+    )
+
+
+
+
+    requested_status = request.args.get("status")
+
+    if requested_status is None:
+        status_filter = "pending"
+    else:
+        status_filter = requested_status.strip().lower()
+
+    valid_status_filters = {
+        "all",
+        "pending",
+        "sent",
+        "failed",
+        "skipped"
+    }
+
+    if status_filter not in valid_status_filters:
+        status_filter = "pending"
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -17032,7 +17277,7 @@ def reminder_queue():
 
     params = [spa_id]
 
-    if status_filter:
+    if status_filter != "all":
         query += " AND rq.status = %s"
         params.append(status_filter)
 
@@ -17062,7 +17307,10 @@ def reminder_queue():
         "reminder_queue.html",
         reminders=reminders,
         status_filter=status_filter,
-        status_counts=status_counts
+        status_counts=status_counts,
+        sms_marketing_10dlc_approved=(
+            sms_marketing_10dlc_approved
+        )
     )
 
 
@@ -17100,7 +17348,8 @@ def generate_appointment_reminders():
                 c.first_name,
                 c.last_name,
                 c.phone,
-                c.ok_to_text
+                c.sms_opt_in,
+                c.sms_opt_out
             FROM appointments a
             JOIN clients c
                 ON a.client_id = c.client_id
@@ -17125,10 +17374,15 @@ def generate_appointment_reminders():
                 first_name,
                 last_name,
                 phone,
-                ok_to_text
+                sms_opt_in,
+                sms_opt_out
             ) = appt
 
-            if not phone or not ok_to_text:
+            if (
+                not phone
+                or not sms_opt_in
+                or sms_opt_out
+            ):
                 skipped_count += 1
                 continue
 
@@ -17223,7 +17477,8 @@ def send_pending_reminders():
 
     if not sms_email_terms_accepted(spa_id):
         flash(
-            "You must accept the SMS and Email Terms and Conditions before using messaging features.",
+            "You must accept the SMS and Email Terms and Conditions "
+            "before using messaging features.",
             "warning"
         )
         return redirect(url_for("sms_email_terms"))
@@ -17239,12 +17494,8 @@ def send_pending_reminders():
         cur.execute("""
             SELECT
                 reminder_id,
-                client_id,
                 reminder_type,
-                send_method,
-                recipient_phone,
-                recipient_email,
-                message_body
+                send_method
             FROM reminder_queue
             WHERE spa_id = %s
               AND status = 'pending'
@@ -17255,97 +17506,172 @@ def send_pending_reminders():
         reminders = cur.fetchall()
 
         for reminder in reminders:
-            reminder_id, client_id, reminder_type, send_method, recipient_phone, recipient_email, message_body = reminder
+            (
+                reminder_id,
+                reminder_type,
+                send_method
+            ) = reminder
 
-            if send_method == "sms":
-                if not recipient_phone:
-                    cur.execute("""
-                        UPDATE reminder_queue
-                        SET status = 'skipped',
-                            error_message = %s
-                        WHERE reminder_id = %s
-                          AND spa_id = %s
-                    """, ("Missing phone number", reminder_id, spa_id))
-                    skipped_count += 1
-                    continue
+            reminder_type = (
+                reminder_type or ""
+            ).strip().lower()
 
-                result = send_communication(
-                    spa_id=spa_id,
-                    channel="sms",
-                    client_id=client_id,
-                    recipient=recipient_phone,
-                    message_body=message_body,
-                    message_type=reminder_type
-                )
+            send_method = (
+                send_method or ""
+            ).strip().lower()
 
-                if result.get("success"):
-                    cur.execute("""
-                        UPDATE reminder_queue
-                        SET status = 'sent',
-                            sent_at = NOW(),
-                            error_message = NULL
-                        WHERE reminder_id = %s
-                          AND spa_id = %s
-                    """, (reminder_id, spa_id))
-
-
-                    cur.execute("""
-                        INSERT INTO sms_log (
-                            spa_id,
-                            client_id,
-                            phone_number,
-                            message_body,
-                            sms_type,
-                            status,
-                            provider_message_id,
-                            provider_error_code,
-                            provider_error_message,
-                            created_at,
-                            sent_at
-                    )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                """, (
-                    spa_id,
-                    client_id,
-                    recipient_phone,
-                    result.get("final_message_body"),
-                    reminder_type,
-                    "sent",
-                    result.get("provider_message_id"),
-                    result.get("provider_error_code"),
-                    result.get("provider_error_message")
-                ))
-
-                    sent_count += 1
-                else:
-                    cur.execute("""
-                        UPDATE reminder_queue
-                        SET status = 'failed',
-                            error_message = %s
-                        WHERE reminder_id = %s
-                          AND spa_id = %s
-                    """, (
-                        result.get("provider_error_message") or "SMS send failed",
-                        reminder_id,
-                        spa_id
-                    ))
-                    failed_count += 1
-
-            else:
+            if send_method != "sms":
                 cur.execute("""
                     UPDATE reminder_queue
                     SET status = 'skipped',
                         error_message = %s
                     WHERE reminder_id = %s
                       AND spa_id = %s
-                """, ("Unsupported send method", reminder_id, spa_id))
-                skipped_count += 1
+                """, (
+                    "Only SMS reminders are currently supported.",
+                    reminder_id,
+                    spa_id
+                ))
 
-        conn.commit()
+                conn.commit()
+                skipped_count += 1
+                continue
+
+            try:
+                if reminder_type == "appointment_reminder":
+                    success, result = (
+                        send_appointment_reminder_sms(
+                            reminder_id=reminder_id,
+                            spa_id=spa_id
+                        )
+                    )
+
+                elif reminder_type == "birthday":
+                    success, result = (
+                        send_birthday_reminder_sms(
+                            reminder_id=reminder_id,
+                            spa_id=spa_id
+                        )
+                    )
+
+                else:
+                    cur.execute("""
+                        UPDATE reminder_queue
+                        SET status = 'skipped',
+                            error_message = %s
+                        WHERE reminder_id = %s
+                          AND spa_id = %s
+                    """, (
+                        (
+                            "This reminder type is not connected "
+                            "to the SMS sending pipeline."
+                        ),
+                        reminder_id,
+                        spa_id
+                    ))
+
+                    conn.commit()
+                    skipped_count += 1
+                    continue
+
+                if success:
+                    sent_count += 1
+                    continue
+
+                if isinstance(result, dict):
+                    result_status = (
+                        result.get("status") or "failed"
+                    ).strip().lower()
+
+                    result_error = (
+                        result.get("provider_error_message")
+                        or result.get("error")
+                        or "Reminder SMS failed."
+                    )
+                else:
+                    result_status = "failed"
+                    result_error = str(result)
+
+                if result_status == "skipped":
+                    skipped_count += 1
+
+                else:
+                    # The helper normally updates failed reminders.
+                    # This handles unusual results such as a missing
+                    # appointment or client relationship.
+                    if result_status == "not_found":
+                        cur.execute("""
+                            UPDATE reminder_queue
+                            SET status = 'failed',
+                                error_message = %s
+                            WHERE reminder_id = %s
+                              AND spa_id = %s
+                        """, (
+                            result_error,
+                            reminder_id,
+                            spa_id
+                        ))
+
+                        conn.commit()
+
+                    failed_count += 1
+
+            except Exception as error:
+                print(
+                    "[REMINDER QUEUE SEND ERROR]",
+                    {
+                        "spa_id": spa_id,
+                        "reminder_id": reminder_id,
+                        "reminder_type": reminder_type,
+                        "error": str(error)
+                    },
+                    flush=True
+                )
+
+                cur.execute("""
+                    UPDATE reminder_queue
+                    SET status = 'failed',
+                        error_message = %s
+                    WHERE reminder_id = %s
+                      AND spa_id = %s
+                """, (
+                    str(error),
+                    reminder_id,
+                    spa_id
+                ))
+
+                conn.commit()
+                failed_count += 1
+
+        if failed_count == 0 and skipped_count == 0:
+            flash_category = "success"
+        elif sent_count == 0 and failed_count > 0:
+            flash_category = "error"
+        else:
+            flash_category = "warning"
 
         flash(
-            f"Pending reminders processed. Sent: {sent_count}. Failed: {failed_count}. Skipped: {skipped_count}.",
-            "success"
+            (
+                "Pending reminders processed. "
+                f"Sent: {sent_count}. "
+                f"Failed: {failed_count}. "
+                f"Skipped: {skipped_count}."
+            ),
+            flash_category
+        )
+
+    except Exception as error:
+        conn.rollback()
+
+        print(
+            "[REMINDER QUEUE PROCESSING ERROR]",
+            error,
+            flush=True
+        )
+
+        flash(
+            f"The Reminder Queue could not be processed: {error}",
+            "error"
         )
 
     finally:
@@ -17353,8 +17679,6 @@ def send_pending_reminders():
         conn.close()
 
     return redirect(url_for("reminder_queue"))
-
-
 
                 
                     
@@ -17480,22 +17804,71 @@ def send_one_reminder(reminder_id):
                 if success:
                     flash("Appointment reminder SMS sent.", "success")
                 else:
-                    flash(f"Appointment reminder SMS failed: {result}", "danger")
+                    flash(f"Appointment reminder SMS failed: {result}", "error")
 
                 return redirect(url_for("reminder_queue"))
 
             if reminder_type == "birthday":
+                sms_permissions = get_sms_business_permissions(
+                    spa_id
+                )
+
+                if not sms_permissions.get(
+                    "marketing_sms_enabled"
+                ):
+                    error_message = (
+                        "Birthday SMS is unavailable. "
+                        "Approved marketing SMS 10DLC is required."
+                    )
+
+                    cur.execute("""
+                        UPDATE reminder_queue
+                        SET status = 'skipped',
+                            error_message = %s
+                        WHERE reminder_id = %s
+                        AND spa_id = %s
+                    """, (
+                        error_message,
+                        reminder_id,
+                        spa_id
+                    ))
+
+                    conn.commit()
+
+                    flash(error_message, "error")
+
+                    return redirect(
+                        url_for("reminder_queue")
+                    )
+
                 success, result = send_birthday_reminder_sms(
                     reminder_id=reminder_id,
                     spa_id=spa_id
                 )
 
                 if success:
-                    flash("Birthday SMS sent.", "success")
+                    flash(
+                        "Birthday SMS sent.",
+                        "success"
+                    )
                 else:
-                    flash(f"Birthday SMS failed: {result}", "danger")
+                    if isinstance(result, dict):
+                        error_message = (
+                            result.get("provider_error_message")
+                            or result.get("error")
+                            or "Birthday SMS failed."
+                        )
+                    else:
+                        error_message = str(result)
 
-                return redirect(url_for("reminder_queue"))
+                    flash(
+                        f"Birthday SMS failed: {error_message}",
+                        "error"
+                    )
+
+                return redirect(
+                    url_for("reminder_queue")
+                )
      
 
             flash("This SMS reminder type is not connected to the new messaging pipeline yet.", "warning")
@@ -17847,7 +18220,12 @@ def cancel_reminder(reminder_id):
 #     AND   DEF         
 #   --------------------------------------
 
+
+
 def generate_birthday_reminders(spa_id):
+    today = get_spa_today()
+    end_date = today + timedelta(days=45)
+
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -17855,59 +18233,139 @@ def generate_birthday_reminders(spa_id):
 
     try:
         cur.execute("""
-            SELECT client_id, first_name, last_name, phone, birth_date
+            SELECT
+                client_id,
+                first_name,
+                last_name,
+                phone,
+                birth_date
             FROM clients
             WHERE spa_id = %s
               AND active_client = TRUE
-              AND ok_to_text = TRUE
               AND birth_date IS NOT NULL
-              AND EXTRACT(MONTH FROM birth_date) = EXTRACT(MONTH FROM CURRENT_DATE)
-              AND EXTRACT(DAY FROM birth_date) = EXTRACT(DAY FROM CURRENT_DATE)
+              AND phone IS NOT NULL
+              AND TRIM(phone) <> ''
+              AND COALESCE(sms_opt_in, FALSE) = TRUE
+              AND COALESCE(sms_opt_out, FALSE) = FALSE
+              AND COALESCE(
+                  sms_marketing_status,
+                  'opt_out'
+              ) = 'opt_in'
+              ORDER BY
+                EXTRACT(MONTH FROM birth_date),
+                EXTRACT(DAY FROM birth_date),
+                last_name,
+                first_name
         """, (spa_id,))
 
         clients = cur.fetchall()
 
+        def birthday_for_year(birth_date, year):
+            try:
+                return birth_date.replace(year=year)
+            except ValueError:
+                # Handles February 29 during a non-leap year.
+                return birth_date.replace(
+                    year=year,
+                    month=2,
+                    day=28
+                )
+
         for client in clients:
-            client_id = client[0]
-            first_name = client[1]
-            phone = client[3]
+            (
+                client_id,
+                first_name,
+                last_name,
+                phone,
+                birth_date
+            ) = client
+
+            next_birthday = birthday_for_year(
+                birth_date,
+                today.year
+            )
+
+            if next_birthday < today:
+                next_birthday = birthday_for_year(
+                    birth_date,
+                    today.year + 1
+                )
+
+            if not (
+                today
+                <= next_birthday
+                <= end_date
+            ):
+                continue
 
             cur.execute("""
-                SELECT reminder_id
+                SELECT 1
                 FROM reminder_queue
                 WHERE spa_id = %s
                   AND client_id = %s
                   AND reminder_type = 'birthday'
-                  AND DATE(scheduled_for) = CURRENT_DATE
-                  AND status IN ('pending', 'sent')
-            """, (spa_id, client_id))
+                  AND send_method = 'sms'
+                  AND DATE(scheduled_for) = %s
+                  AND status IN (
+                      'pending',
+                      'sent',
+                      'failed'
+                  )
+                LIMIT 1
+            """, (
+                spa_id,
+                client_id,
+                next_birthday
+            ))
 
             existing = cur.fetchone()
 
             if existing:
                 continue
 
-            message_body = f"Happy Birthday {first_name}! Clear Skin Esthetics hopes you have a wonderful day!"
+            message_body = (
+                f"Birthday SMS for {first_name} will use "
+                "the active Birthday Message template."
+            )
 
             cur.execute("""
-                INSERT INTO reminder_queue
-                    (spa_id, client_id, reminder_type, send_method, recipient_phone, message_body, scheduled_for, status)
-                VALUES
-                    (%s, %s, %s, %s, %s, %s, NOW(), %s)
+                INSERT INTO reminder_queue (
+                    spa_id,
+                    client_id,
+                    reminder_type,
+                    send_method,
+                    recipient_phone,
+                    message_body,
+                    scheduled_for,
+                    status
+                )
+                VALUES (
+                    %s,
+                    %s,
+                    'birthday',
+                    'sms',
+                    %s,
+                    %s,
+                    (%s::date + TIME '09:00'),
+                    'pending'
+                )
             """, (
                 spa_id,
                 client_id,
-                "birthday",
-                "sms",
                 phone,
                 message_body,
-                "pending"
+                next_birthday
             ))
 
             created_count += 1
 
         conn.commit()
+
         return created_count
+
+    except Exception:
+        conn.rollback()
+        raise
 
     finally:
         cur.close()
@@ -17922,95 +18380,73 @@ def generate_birthday_reminders(spa_id):
 
 
 
+
+
+
+
 #######################################
 #
-#   TODO. TODO
-#
-#   UNREACHABLE ROUTE BELOW
-#   DUPLICATE BLOCK - -  CHECK LATER
-#   THIS PLACED 7/27/26
+#   
+#   CREATE BIRTHDAY REMINDERS
+#   
+#   
+#   
 #
 ###################################################
 
-@app.route("/reminders/create-birthday-reminders", methods=["POST"])
+
+
+@app.route(
+    "/reminders/create-birthday-reminders",
+    methods=["POST"]
+)
 @login_required
 @spa_required
-@require_workspace_permission("can_manage_communication_automation")
-
-
+@require_workspace_permission(
+    "can_manage_communication_automation"
+)
 def create_birthday_reminders():
     spa_id = current_spa_id()
 
-    created_count = generate_birthday_reminders(spa_id)
+    sms_permissions = get_sms_business_permissions(
+        spa_id
+    )
 
-    flash(f"{created_count} birthday reminder(s) added to the queue.", "success")
-    return redirect(url_for("reminder_queue"))
+    if not sms_permissions.get(
+        "marketing_sms_enabled"
+    ):
+        flash(
+            (
+                "Birthday SMS reminders are unavailable. "
+                "Approved marketing SMS 10DLC is required."
+            ),
+            "warning"
+        )
 
-    conn = get_db_connection()
-    cur = conn.cursor()
+        return redirect(
+            url_for("reminder_queue")
+        )
 
-    cur.execute("""
-        SELECT client_id, first_name, last_name, phone, birth_date
-        FROM clients
-        WHERE spa_id = %s
-          AND active_client = TRUE
-          AND ok_to_text = TRUE
-          AND birth_date IS NOT NULL
-          AND EXTRACT(MONTH FROM birth_date) = EXTRACT(MONTH FROM CURRENT_DATE)
-          AND EXTRACT(DAY FROM birth_date) = EXTRACT(DAY FROM CURRENT_DATE)
-    """, (spa_id,))
+    created_count = generate_birthday_reminders(
+        spa_id
+    )
 
-    clients = cur.fetchall()
+    flash(
+        (
+            f"{created_count} upcoming birthday SMS "
+            "reminder(s) added to the queue."
+        ),
+        "success"
+    )
 
-    created_count = 0
-
-    for client in clients:
-
-        client_id = client[0]
-        first_name = client[1]
-        phone = client[3]
+    return redirect(
+        url_for("reminder_queue")
+    )
 
 
-        cur.execute("""
-            SELECT reminder_id
-            FROM reminder_queue
-            WHERE spa_id = %s
-              AND client_id = %s
-              AND reminder_type = 'birthday'
-              AND DATE(scheduled_for) = CURRENT_DATE
-              AND status IN ('pending', 'sent')
-        """, (spa_id, client_id))
 
-        existing = cur.fetchone()
 
-        if existing:
-            continue
 
-        message_body = f"Happy Birthday {first_name}! Clear Skin Esthetics hopes you have a wonderful day!"
-
-        cur.execute("""
-            INSERT INTO reminder_queue
-                (spa_id, client_id, reminder_type, send_method, recipient_phone, message_body, scheduled_for, status)
-            VALUES
-                (%s, %s, %s, %s, %s, %s, NOW(), %s)
-        """, (
-            spa_id,
-            client_id,
-            "birthday",
-            "sms",
-            phone,
-            message_body,
-            "pending"
-        ))
-
-        created_count += 1
-
-    conn.commit()
-    cur.close()
-    conn.close()
-
-    flash(f"{created_count} birthday reminder(s) added to the queue.", "success")
-    return redirect(url_for("reminder_queue"))
 
 
 
@@ -21923,7 +22359,10 @@ def client_management():
 
 
 
-@app.route("/schedule_appointment_start", methods=["GET", "POST"])
+@app.route(
+    "/schedule_appointment_start",
+    methods=["GET", "POST"]
+)
 @login_required
 @spa_required
 def schedule_appointment_start():
@@ -21931,61 +22370,109 @@ def schedule_appointment_start():
 
     clients = []
     searched = False
+    show_all = False
 
-    selected_date = request.args.get("selected_date") \
-        or request.form.get("selected_date") \
+    selected_date = (
+        request.args.get("selected_date")
+        or request.form.get("selected_date")
         or ""
+    )
 
-    last_name = ""
+    client_name = ""
     birth_date = ""
 
     if request.method == "POST":
         searched = True
-        last_name = request.form.get("last_name", "").strip()
-        birth_date = request.form.get("birth_date", "").strip()
+
+        client_name = request.form.get(
+            "client_name",
+            ""
+        ).strip()
+
+        birth_date = request.form.get(
+            "birth_date",
+            ""
+        ).strip()
+
+        action = request.form.get(
+            "action",
+            "search"
+        )
+
+        show_all = action == "show_all"
 
         conn = get_db_connection()
         cur = conn.cursor()
 
-        query = """
-            SELECT
-                client_id,
-                first_name,
-                last_name,
-                birth_date,
-                phone
-            FROM clients
-            WHERE spa_id = %s
-              AND active_client = TRUE
-        """
-        params = [spa_id]
+        try:
+            query = """
+                SELECT
+                    client_id,
+                    first_name,
+                    last_name,
+                    birth_date,
+                    phone
+                FROM clients
+                WHERE spa_id = %s
+                  AND active_client = TRUE
+            """
 
-        if last_name:
-            query += " AND last_name ILIKE %s"
-            params.append(f"%{last_name}%")
+            params = [spa_id]
 
-        if birth_date:
-            query += " AND birth_date = %s"
-            params.append(birth_date)
+            if not show_all:
+                if client_name:
+                    query += """
+                        AND (
+                            first_name ILIKE %s
+                            OR last_name ILIKE %s
+                            OR (
+                                first_name || ' ' || last_name
+                            ) ILIKE %s
+                        )
+                    """
 
-        query += " ORDER BY last_name, first_name"
+                    name_search = f"%{client_name}%"
 
-        if last_name or birth_date:
-            cur.execute(query, tuple(params))
-            clients = cur.fetchall()
+                    params.extend([
+                        name_search,
+                        name_search,
+                        name_search
+                    ])
 
-        cur.close()
-        conn.close()
+                if birth_date:
+                    query += """
+                        AND birth_date = %s
+                    """
+
+                    params.append(birth_date)
+
+            query += """
+                ORDER BY
+                    last_name,
+                    first_name
+            """
+
+            if show_all or client_name or birth_date:
+                cur.execute(
+                    query,
+                    tuple(params)
+                )
+
+                clients = cur.fetchall()
+
+        finally:
+            cur.close()
+            conn.close()
 
     return render_template(
         "schedule_appointment_start.html",
         clients=clients,
         searched=searched,
+        show_all=show_all,
         selected_date=selected_date,
-        last_name=last_name,
+        client_name=client_name,
         birth_date=birth_date
     )
-
 
 
 
