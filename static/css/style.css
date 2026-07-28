@@ -5363,3 +5363,30 @@ Keep it hidden while the submenu uses the inline layout.
     align-items: center;
     gap: 8px;
 }
+
+#feedbackModal .about-peach-modal-content {
+    padding-left: 32px;
+    padding-right: 32px;
+}
+
+@media (max-width: 600px) {
+    #feedbackModal .about-peach-modal-content {
+        padding-left: 20px;
+        padding-right: 20px;
+    }
+}
+
+.help-support-menu .app-menu-category-label {
+    font-size: 1.08rem;
+    font-weight: 700;
+}
+
+.help-support-menu .app-menu-submenu-heading {
+    font-size: 1rem;
+    font-weight: 700;
+}
+
+.help-support-menu .app-menu-submenu a,
+.help-support-menu .app-menu-submenu button {
+    font-size: 1rem;
+}

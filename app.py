@@ -11431,22 +11431,79 @@ def log_it_report():
 def feedback():
     spa_id = current_spa_id()
 
+    is_modal_request = (
+        request.headers.get("X-Requested-With")
+        == "XMLHttpRequest"
+    )
+
     if request.method == "POST":
-        user_name = (request.form.get("user_name") or "").strip()
-        user_email = (request.form.get("user_email") or "").strip()       
-        page_name = (request.form.get("page_name") or "").strip()
-        feedback_type = (request.form.get("feedback_type") or "").strip()
-        message = (request.form.get("message") or "").strip()
-        expected_behavior = (request.form.get("expected_behavior") or "").strip()
-        severity = (request.form.get("severity") or "").strip()
+        user_name = (
+            request.form.get("user_name") or ""
+        ).strip()
+
+        user_email = (
+            request.form.get("user_email") or ""
+        ).strip()
+
+        page_name = (
+            request.form.get("page_name") or ""
+        ).strip()
+
+        feedback_type = (
+            request.form.get("feedback_type") or ""
+        ).strip()
+
+        message = (
+            request.form.get("message") or ""
+        ).strip()
+
+        expected_behavior = (
+            request.form.get("expected_behavior") or ""
+        ).strip()
+
+        severity = (
+            request.form.get("severity") or ""
+        ).strip()
 
         if not feedback_type:
-            flash("Please select a feedback type.", "error")
-            return redirect(url_for("feedback", page=page_name))
+            error_message = (
+                "Please select a feedback type."
+            )
+
+            if is_modal_request:
+                return {
+                    "success": False,
+                    "message": error_message
+                }, 400
+
+            flash(error_message, "error")
+
+            return redirect(
+                url_for(
+                    "feedback",
+                    page=page_name
+                )
+            )
 
         if not message:
-            flash("Please enter your feedback.", "error")
-            return redirect(url_for("feedback", page=page_name))
+            error_message = (
+                "Please enter your feedback."
+            )
+
+            if is_modal_request:
+                return {
+                    "success": False,
+                    "message": error_message
+                }, 400
+
+            flash(error_message, "error")
+
+            return redirect(
+                url_for(
+                    "feedback",
+                    page=page_name
+                )
+            )
 
         conn = get_db_connection()
         cur = conn.cursor()
@@ -11463,7 +11520,10 @@ def feedback():
                     expected_behavior,
                     severity
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (
+                    %s, %s, %s, %s,
+                    %s, %s, %s, %s
+                )
             """, (
                 spa_id,
                 user_name if user_name else None,
@@ -11471,56 +11531,119 @@ def feedback():
                 page_name if page_name else None,
                 feedback_type,
                 message,
-                expected_behavior if expected_behavior else None,
+                (
+                    expected_behavior
+                    if expected_behavior
+                    else None
+                ),
                 severity if severity else None
             ))
 
             conn.commit()
 
-          
             if severity == "High":
                 try:
                     response = send_email(
                         to="rickconleytx@gmail.com",
-                        subject=f" SEV {severity} | {feedback_type} | {page_name}",
+                        subject=(
+                            f"SEV {severity} | "
+                            f"{feedback_type} | "
+                            f"{page_name}"
+                        ),
                         body=(
                             f"Spa ID: {spa_id}\n"
-                            f"User Name: {user_name or 'Not provided'}\n"
-                            f"User Email: {user_email or 'Not provided'}\n"
-                            f"Page: {page_name or 'Not provided'}\n"
+                            f"User Name: "
+                            f"{user_name or 'Not provided'}\n"
+                            f"User Email: "
+                            f"{user_email or 'Not provided'}\n"
+                            f"Page: "
+                            f"{page_name or 'Not provided'}\n"
                             f"Type: {feedback_type}\n"
-                            f"Severity: {severity or 'Not provided'}\n"
-                            f"Expected Behavior: {expected_behavior or 'Not provided'}\n\n"
+                            f"Severity: "
+                            f"{severity or 'Not provided'}\n"
+                            f"Expected Behavior: "
+                            f"{expected_behavior or 'Not provided'}"
+                            f"\n\n"
                             f"Message:\n{message}"
                         )
                     )
 
-                    print("MAILGUN STATUS:", response.status_code)
-                    print("MAILGUN BODY:", response.text)
+                    print(
+                        "MAILGUN STATUS:",
+                        response.status_code
+                    )
+
+                    print(
+                        "MAILGUN BODY:",
+                        response.text
+                    )
 
                 except Exception as email_error:
-                    print("MAILGUN ERROR:", str(email_error))
+                    print(
+                        "MAILGUN ERROR:",
+                        str(email_error)
+                    )
 
-            flash("Thank you. Your feedback has been submitted.", "success")
-            return redirect(url_for("feedback", page=page_name))
+            success_message = (
+                "Thank you. Your feedback has been submitted."
+            )
+
+            if is_modal_request:
+                return {
+                    "success": True,
+                    "message": success_message
+                }, 200
+
+            flash(success_message, "success")
+
+            return redirect(
+                url_for(
+                    "feedback",
+                    page=page_name
+                )
+            )
 
         except Exception as db_error:
             conn.rollback()
-            print("FEEDBACK DB ERROR:", str(db_error))
-            flash("There was a problem saving your feedback.", "error")
-            return redirect(url_for("feedback", page=page_name))
+
+            print(
+                "FEEDBACK DB ERROR:",
+                str(db_error)
+            )
+
+            error_message = (
+                "There was a problem saving your feedback."
+            )
+
+            if is_modal_request:
+                return {
+                    "success": False,
+                    "message": error_message
+                }, 500
+
+            flash(error_message, "error")
+
+            return redirect(
+                url_for(
+                    "feedback",
+                    page=page_name
+                )
+            )
 
         finally:
             cur.close()
             conn.close()
 
-    page_name = request.args.get("page") or request.referrer or request.url
-    return render_template("feedback.html", page_name=page_name)
+    page_name = (
+        request.args.get("page")
+        or request.referrer
+        or request.url
+    )
 
-
-
-
-
+    return render_template(
+        "feedback.html",
+        page_name=page_name
+    )
 
 
 
@@ -15561,7 +15684,7 @@ def refresh_sms_status(sms_log_id):
     return redirect(url_for("sms_history_all"))
 
 
-    
+
 
 @app.route("/sms/refresh-all", methods=["POST"])
 @login_required

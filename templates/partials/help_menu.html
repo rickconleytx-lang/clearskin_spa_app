@@ -1,4 +1,4 @@
-<div class="user-menu app-menu-category">
+<div class="user-menu app-menu-category help-support-menu">
 
     <button type="button"
             class="user-menu-button app-menu-category-button"
@@ -33,19 +33,18 @@
         <!-- Search and Help -->
         <div class="app-menu-submenu-section">
 
-            <div class="app-menu-submenu-heading">
-                🔍 Find Help
-            </div>
-
+        
             <button type="button"
                     class="app-menu-submenu-action"
                     onclick="openQLaunch()">
 
                 <span aria-hidden="true">⚡️</span>
-                <span>Search with Q Launch</span>
+                <span>Search</span>
 
             </button>
-
+<br>
+            <div class="user-menu-divider"></div>
+<br>
             <button type="button"
                     class="app-menu-submenu-action"
                     onclick="
@@ -54,9 +53,11 @@
                     ">
 
                 <span aria-hidden="true">📚</span>
-                <span>Help & Knowledge Base</span>
+                <span>Help</span>
 
             </button>
+
+            <div class="user-menu-divider"></div>
 
             <a href="{{ url_for('help_center') }}">
                 <span aria-hidden="true">❓</span>
@@ -101,10 +102,13 @@
                 💬 Feedback
             </div>
 
-            <a href="{{ url_for('feedback') }}">
+            <button
+                type="button"
+                onclick="openFeedbackModal()"
+            >
                 <span aria-hidden="true">📝</span>
                 <span>Send Feedback</span>
-            </a>
+            </button>
 
         </div>
 

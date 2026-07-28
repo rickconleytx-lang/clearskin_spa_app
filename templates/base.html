@@ -1175,6 +1175,450 @@ document.addEventListener(
 </dialog>
 
 
+
+<dialog
+    id="feedbackModal"
+    class="about-peach-modal"
+    aria-labelledby="feedbackModalTitle"
+>
+    <div
+        class="about-peach-modal-content"
+        style="max-height: 88vh; overflow-y: auto;"
+    >
+
+        <div class="about-peach-modal-header">
+
+            <div>
+                <h2 id="feedbackModalTitle">
+                    Send Feedback
+                </h2>
+
+                <div class="about-peach-subtitle">
+                    Help us improve Peach Suite Pro
+                </div>
+            </div>
+
+            <button
+                type="button"
+                class="about-peach-close"
+                title="Close"
+                aria-label="Close Feedback"
+                onclick="closeFeedbackModal()"
+            >
+                &times;
+            </button>
+
+        </div>
+
+
+        <div
+            id="feedbackModalStatus"
+            role="status"
+            hidden
+        ></div>
+
+
+        <form
+            id="feedbackModalForm"
+            method="POST"
+            action="{{ url_for('feedback') }}"
+        >
+
+            <div class="form-group">
+                <label for="feedbackModalUserName">
+                    Your Name
+                </label>
+
+                <input
+                    type="text"
+                    id="feedbackModalUserName"
+                    name="user_name"
+                    value="{{
+                        (
+                            (session.get('first_name') or '')
+                            ~ ' '
+                            ~ (session.get('last_name') or '')
+                        ) | trim
+                    }}"
+                >
+            </div>
+
+
+            <div class="form-group">
+                <label for="feedbackModalUserEmail">
+                    Your Email
+                </label>
+
+                <input
+                    type="email"
+                    id="feedbackModalUserEmail"
+                    name="user_email"
+                    value="{{ session.get('email') or '' }}"
+                >
+            </div>
+
+
+            <div class="form-group">
+                <label for="feedbackModalPageName">
+                    Current Page
+                </label>
+
+                <input
+                    type="text"
+                    id="feedbackModalPageName"
+                    name="page_name"
+                    readonly
+                >
+            </div>
+
+
+            <div class="form-group">
+                <label for="feedbackModalType">
+                    Feedback Type
+                </label>
+
+                <select
+                    id="feedbackModalType"
+                    name="feedback_type"
+                    required
+                >
+                    <option value="">
+                        Select Type
+                    </option>
+
+                    <option value="Bug">
+                        Bug
+                    </option>
+
+                    <option value="UX Issue">
+                        UX Issue
+                    </option>
+
+                    <option value="Feature Request">
+                        Feature Request
+                    </option>
+
+                    <option value="Navigation Issue">
+                        Navigation Issue
+                    </option>
+
+                    <option value="General Feedback">
+                        General Feedback
+                    </option>
+                </select>
+            </div>
+
+
+            <div class="form-group">
+                <label for="feedbackModalSeverity">
+                    Severity
+                </label>
+
+                <select
+                    id="feedbackModalSeverity"
+                    name="severity"
+                >
+                    <option value="">
+                        Select Severity
+                    </option>
+
+                    <option value="Low">
+                        Low
+                    </option>
+
+                    <option value="Medium">
+                        Medium
+                    </option>
+
+                    <option value="High">
+                        High
+                    </option>
+                </select>
+            </div>
+
+
+            <div class="form-group">
+                <label for="feedbackModalExpected">
+                    What did you expect to happen?
+                </label>
+
+                <textarea
+                    id="feedbackModalExpected"
+                    name="expected_behavior"
+                    rows="4"
+                ></textarea>
+            </div>
+
+
+            <div class="form-group">
+                <label for="feedbackModalMessage">
+                    What happened or what should change?
+                </label>
+
+                <textarea
+                    id="feedbackModalMessage"
+                    name="message"
+                    rows="7"
+                    required
+                ></textarea>
+            </div>
+
+
+            <div class="form-buttons">
+
+                <button
+                    type="submit"
+                    class="btn"
+                    id="feedbackModalSubmitButton"
+                >
+                    Submit Feedback
+                </button>
+
+                <button
+                    type="button"
+                    class="btn"
+                    onclick="closeFeedbackModal()"
+                >
+                    Cancel
+                </button>
+
+            </div>
+
+        </form>
+
+    </div>
+</dialog>
+
+
+
+<script>
+function setFeedbackModalStatus(
+    message,
+    statusType
+) {
+    const statusElement = document.getElementById(
+        "feedbackModalStatus"
+    );
+
+    if (!statusElement) {
+        return;
+    }
+
+    statusElement.textContent = message || "";
+
+    statusElement.className = (
+        "flash "
+        + (
+            statusType === "success"
+                ? "success"
+                : "error"
+        )
+    );
+
+    statusElement.hidden = !message;
+}
+
+
+function openFeedbackModal() {
+    const modal = document.getElementById(
+        "feedbackModal"
+    );
+
+    const pageField = document.getElementById(
+        "feedbackModalPageName"
+    );
+
+    const messageField = document.getElementById(
+        "feedbackModalMessage"
+    );
+
+    if (!modal) {
+        return;
+    }
+
+    if (pageField) {
+        pageField.value = (
+            window.location.pathname
+            + window.location.search
+        );
+    }
+
+    setFeedbackModalStatus("", "success");
+
+    const menuCloseButton = document.getElementById(
+        "appMenuCloseButton"
+    );
+
+    if (
+        menuCloseButton
+        && document.body.classList.contains(
+            "app-menu-open"
+        )
+    ) {
+        menuCloseButton.click();
+    }
+
+    window.setTimeout(
+        function () {
+            modal.showModal();
+
+            if (messageField) {
+                messageField.focus();
+            }
+        },
+        50
+    );
+}
+
+
+function closeFeedbackModal() {
+    const modal = document.getElementById(
+        "feedbackModal"
+    );
+
+    if (modal && modal.open) {
+        modal.close();
+    }
+}
+
+
+document.addEventListener(
+    "DOMContentLoaded",
+    function () {
+        const modal = document.getElementById(
+            "feedbackModal"
+        );
+
+        const form = document.getElementById(
+            "feedbackModalForm"
+        );
+
+        const submitButton = document.getElementById(
+            "feedbackModalSubmitButton"
+        );
+
+        if (!modal || !form) {
+            return;
+        }
+
+
+        modal.addEventListener(
+            "click",
+            function (event) {
+                const bounds =
+                    modal.getBoundingClientRect();
+
+                const clickedInside = (
+                    event.clientX >= bounds.left
+                    && event.clientX <= bounds.right
+                    && event.clientY >= bounds.top
+                    && event.clientY <= bounds.bottom
+                );
+
+                if (!clickedInside) {
+                    modal.close();
+                }
+            }
+        );
+
+
+        form.addEventListener(
+            "submit",
+            async function (event) {
+                event.preventDefault();
+
+                const originalButtonText =
+                    submitButton
+                        ? submitButton.textContent
+                        : "";
+
+                if (submitButton) {
+                    submitButton.disabled = true;
+                    submitButton.textContent =
+                        "Submitting...";
+                }
+
+                setFeedbackModalStatus(
+                    "",
+                    "success"
+                );
+
+                try {
+                    const response = await fetch(
+                        form.action,
+                        {
+                            method: "POST",
+                            body: new FormData(form),
+                            credentials: "same-origin",
+                            headers: {
+                                "Accept":
+                                    "application/json",
+
+                                "X-Requested-With":
+                                    "XMLHttpRequest"
+                            }
+                        }
+                    );
+
+                    const data = await response.json();
+
+                    if (
+                        !response.ok
+                        || !data.success
+                    ) {
+                        throw new Error(
+                            data.message
+                            || "Feedback could not be submitted."
+                        );
+                    }
+
+                    setFeedbackModalStatus(
+                        data.message,
+                        "success"
+                    );
+
+                    document.getElementById(
+                        "feedbackModalType"
+                    ).value = "";
+
+                    document.getElementById(
+                        "feedbackModalSeverity"
+                    ).value = "";
+
+                    document.getElementById(
+                        "feedbackModalExpected"
+                    ).value = "";
+
+                    document.getElementById(
+                        "feedbackModalMessage"
+                    ).value = "";
+
+                } catch (error) {
+                    setFeedbackModalStatus(
+                        error.message
+                        || "Feedback could not be submitted.",
+                        "error"
+                    );
+
+                } finally {
+                    if (submitButton) {
+                        submitButton.disabled = false;
+                        submitButton.textContent =
+                            originalButtonText;
+                    }
+                }
+            }
+        );
+    }
+);
+</script>
+
+
+
+
+
+
+
 <dialog
     id="peachHelpModal"
     class="peach-help-modal"
