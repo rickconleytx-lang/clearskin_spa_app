@@ -3,6 +3,46 @@
 
 {% block content %}
 
+{% if show_login_splash %}
+<div
+    id="loginSplash"
+    class="login-splash"
+    role="status"
+    aria-live="polite"
+    aria-label="Preparing your Daily Briefing"
+>
+    <button
+        type="button"
+        class="login-splash-skip"
+        onclick="dismissLoginSplash()"
+    >
+        Skip
+    </button>
+
+    <div class="login-splash-content">
+
+        <img
+            src="{{ url_for(
+                'static',
+                filename='peachsuite-icon.png'
+            ) }}"
+            alt="Peach Suite Pro"
+            class="login-splash-logo"
+        >
+
+        <h1>Peach Suite Pro</h1>
+
+        <p>Preparing your Daily Briefing…</p>
+
+        <div
+            class="login-splash-loader"
+            aria-hidden="true"
+        ></div>
+
+    </div>
+</div>
+{% endif %}
+
 <div class="page-title">
     <h1>🌅 Daily Briefing</h1>
 </div>
@@ -953,6 +993,54 @@ async function dismissCoachRecommendation(
         }
     );
     {% endif %}
+
+    let loginSplashIsClosing = false;
+
+    function dismissLoginSplash() {
+        const splash = document.getElementById("loginSplash");
+
+        if (!splash || loginSplashIsClosing) {
+            return;
+        }
+
+        loginSplashIsClosing = true;
+        splash.classList.add("login-splash-exit");
+
+        const reducedMotion = window.matchMedia(
+            "(prefers-reduced-motion: reduce)"
+        ).matches;
+
+        window.setTimeout(
+            function () {
+                splash.remove();
+            },
+            reducedMotion ? 0 : 350
+        );
+    }
+
+
+    document.addEventListener(
+        "DOMContentLoaded",
+        function () {
+            const splash = document.getElementById(
+                "loginSplash"
+            );
+
+            if (!splash) {
+                return;
+            }
+
+            const reducedMotion = window.matchMedia(
+                "(prefers-reduced-motion: reduce)"
+            ).matches;
+
+            window.setTimeout(
+                dismissLoginSplash,
+                reducedMotion ? 400 : 1700
+            );
+        }
+    );
+
 </script>
 
 

@@ -9357,6 +9357,9 @@ def login():
         session["email"] = user[4]
         session["role"] = role
 
+
+        session["show_login_splash"] = True
+
         flash("Logged in successfully.", "success")
 
 
@@ -31421,6 +31424,10 @@ def morning_briefing():
     cur.close()
     conn.close()
 
+    show_login_splash = bool(
+        session.pop("show_login_splash", False)
+    )
+
     return render_template(
         "morning_briefing.html",
         dashboard=dashboard,
@@ -31434,7 +31441,8 @@ def morning_briefing():
         coach_session=coach_session,
         spa_now=spa_now,
         action_cards=action_cards,
-        show_coach_welcome=show_coach_welcome
+        show_coach_welcome=show_coach_welcome,
+        show_login_splash=show_login_splash
     )
 
 
