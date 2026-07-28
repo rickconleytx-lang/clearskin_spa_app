@@ -10,17 +10,6 @@
 
 {% if client is defined and client %}
     <h3>{{ client[0] }} {{ client[1] }}</h3>
-{% else %}
-
-
-<form method="POST"
-      action="{{ url_for('refresh_all_sms_statuses') }}"
-      style="margin-bottom: 15px;">
-    <button type="submit" class="btn">Refresh All SMS Statuses</button>
-</form>
-
-
-
 {% endif %}
 
 <div class="form-buttons">
@@ -98,12 +87,14 @@
                     <form method="POST"
                         action="{{ url_for(
                             'resend_sms',
-                            sms_log_id=sms[9]
+                            sms_message_id=sms[9]
                         ) }}"
                         style="margin-top: 6px;">
 
-                        <button type="submit"
-                                class="btn btn-small">
+                        <button
+                            type="submit"
+                            class="tool-pill tool-pill-small"
+                        >
                             Resend
                         </button>
 
@@ -128,10 +119,14 @@
                     <span class="badge badge-danger">
                         {{ sms[7] or 'Error' }}
                     </span>
-                    <br>
-                    {{ sms[8] or '' }}
-                        <span style="color: #999;">None</span>
+
+                    {% if sms[8] %}
+                        <br>
+                        {{ sms[8] }}
                     {% endif %}
+                {% else %}
+                    <span style="color: #999;">None</span>
+                {% endif %}
             </td>
         </tr>
         {% endfor %}

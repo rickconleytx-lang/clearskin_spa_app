@@ -14461,152 +14461,204 @@ def send_birthday_sms_month():
 #
 #   SMS PREVIEW
 #
-#   LEGACY. TODO
+#   
 #   -------------------------
 
 
-@app.route("/sms/preview/<int:client_id>", methods=["GET", "POST"])
+@app.route(
+    "/sms/preview/<int:client_id>",
+    methods=["GET", "POST"]
+)
 @login_required
 @spa_required
 @require_workspace_permission("can_send_sms")
-
 def sms_preview(client_id):
     spa_id = current_spa_id()
 
-
     if not sms_email_terms_accepted(spa_id):
         flash(
-            "You must accept the SMS and Email Terms and Conditions before using messaging features.",
+            "You must accept the SMS and Email Terms and Conditions "
+            "before using messaging features.",
             "warning"
         )
         return redirect(url_for("sms_email_terms"))
 
-
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute("""
-        SELECT 
-            client_id,  
-            first_name, 
-            last_name, 
-            phone,
-            ok_to_text,
-            sms_opt_in,
-            sms_opt_out
-        FROM clients
-        WHERE client_id = %s
-          AND spa_id = %s
-          AND active_client = TRUE
-    """, (client_id, spa_id))
+    try:
+        cur.execute("""
+            SELECT
+                client_id,
+                first_name,
+                last_name,
+                phone,
+                email,
+                sms_opt_in,
+                sms_opt_out
+            FROM clients
+            WHERE client_id = %s
+              AND spa_id = %s
+              AND active_client = TRUE
+        """, (
+            client_id,
+            spa_id
+        ))
 
-    client = cur.fetchone()
+        client = cur.fetchone()
 
-    if not client:
+    finally:
         cur.close()
         conn.close()
+
+    if not client:
         flash("Client not found.", "error")
         return redirect(url_for("clients_home"))
 
-    message_body = request.form.get("message_body", "").strip()
+    message_body = request.form.get(
+        "message_body",
+        ""
+    ).strip()
 
-    message_body = apply_sms_placeholders(message_body, {
-        "first_name": first_name,
-        "last_name": last_name,
-        "phone": phone_number,
-        "email": email,
-        "spa_name": spa_name,
-        "appointment_date": appointment_date,
-        "appointment_time": appointment_time,
-        "service_name": service_name
-    })
+    if message_body:
+        message_body = apply_sms_placeholders(
+            message_body,
+            {
+                "first_name": client[1] or "",
+                "last_name": client[2] or "",
+                "phone": client[3] or "",
+                "email": client[4] or "",
+                "spa_name": "",
+                "appointment_date": "",
+                "appointment_time": "",
+                "service_name": ""
+            }
+        )
 
     action = request.form.get("action")
 
-    if request.method == "POST" and action == "send" and message_body:
+    if (
+        request.method == "POST"
+        and action == "send"
+        and message_body
+    ):
+        if not client[3]:
+            flash(
+                "SMS not sent. This client does not have a phone number.",
+                "error"
+            )
+            return redirect(
+                url_for(
+                    "sms_preview",
+                    client_id=client_id
+                )
+            )
 
-        if not client or not client[3]:
-            cur.close()
-            conn.close()
-            flash("Invalid client or missing phone.", "error")
-            return redirect(request.referrer or url_for("clients_home"))
+        if not client[5] or client[6]:
+            flash(
+                "SMS not sent. This client has not opted in "
+                "to service SMS messaging.",
+                "error"
+            )
+            return redirect(
+                url_for(
+                    "edit_client_contact_preferences",
+                    client_id=client_id
+                )
+            )
 
+        try:
+            result = send_compliant_sms(
+                spa_id=spa_id,
+                client_id=client[0],
+                recipient_phone=client[3],
+                message_body=message_body,
+                message_type="manual"
+            )
 
+        except Exception as send_error:
+            result = {
+                "success": False,
+                "status": "failed",
+                "provider_message_id": None,
+                "provider_status": None,
+                "provider_error_code": None,
+                "provider_error_message": str(send_error),
+                "final_message_body": message_body
+            }
 
-        if not client[4] or not client[5] or client[6]:
-            cur.close()
-            conn.close()
-            flash("SMS not sent. This client is opted out of SMS messaging.", "error")
-            return redirect(url_for("client_messaging_settings", client_id=client_id))
+        success = bool(result.get("success"))
 
-            # Optional extra safety if you later pass more fields
-            # if sms_opt_out:
-            #     skip
-
-        result = send_communication(
-            spa_id=spa_id,
-            channel="sms",
-            client_id=client[0],
-            recipient=client[3],
-            message_body=message_body,
-            message_type="manual"
+        status = (
+            result.get("status")
+            or ("sent" if success else "failed")
         )
 
+        final_message_body = result.get(
+            "final_message_body",
+            message_body
+        )
 
-        status = result.get("status") or "failed"
-
-        cur.execute("""
-            INSERT INTO sms_log (
-                spa_id,
-                client_id,
-                phone_number,
-                message_body,
-                sms_type,
-                status,
-                provider_message_id,
-                provider_error_code,
-                provider_error_message,                
-                sent_at
+        try:
+            log_sms_message(
+                spa_id=spa_id,
+                client_id=client[0],
+                recipient_phone=client[3],
+                message_body=final_message_body,
+                message_type="manual",
+                direction="outbound",
+                status=status,
+                provider_message_id=result.get(
+                    "provider_message_id"
+                ),
+                provider_status=result.get(
+                    "provider_status"
+                ),
+                provider_error_code=result.get(
+                    "provider_error_code"
+                ),
+                provider_error_message=(
+                    result.get("provider_error_message")
+                    or result.get("error")
+                )
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s,
-                CASE WHEN %s = 'sent' THEN CURRENT_TIMESTAMP ELSE NULL END
+
+        except Exception as log_error:
+            print(
+                "[MANUAL SMS LOG ERROR]",
+                log_error,
+                flush=True
             )
-        """, (
-            spa_id,
-            client[0],
-            client[3],
-            result.get("final_message_body"),
-            "manual",
-            status,
-            result.get("provider_message_id"),
-            result.get("provider_error_code"),
-            result.get("provider_error_message"),
-            status
-        ))
 
-        conn.commit()
+        if success:
+            flash(
+                "SMS sent successfully.",
+                "success"
+            )
 
-        cur.close()
-        conn.close()
+            return redirect(
+                url_for(
+                    "sms_conversation",
+                    client_id=client_id
+                )
+            )
 
-        if result.get("status") == "sent":
-            flash("SMS sent successfully.", "success")
-        elif result.get("status") == "logged":
-            flash("SMS logged. Sending is currently disabled.", "success")
-        else:
-            flash("SMS failed to send.", "error")
+        error_message = (
+            result.get("provider_error_message")
+            or result.get("error")
+            or "SMS failed to send."
+        )
 
-        return redirect(url_for("sms_history_all"))
-
-    cur.close()
-    conn.close()
+        flash(
+            error_message,
+            "error"
+        )
 
     return render_template(
         "sms_preview.html",
         client=client,
         message_body=message_body
     )
-
 
 #   ------------------------
 #
@@ -14656,16 +14708,16 @@ def sms_conversation(client_id):
 
         cur.execute("""
             SELECT
-                sl.sms_type,                                  -- 0 direction
-                sl.message_body,                              -- 1 message
-                sl.status,                                    -- 2 status
-                sl.created_at AT TIME ZONE %s AS created_at,  -- 3 local time
-                NULL::text AS provider_error_code,             -- 4
-                NULL::text AS provider_error_message           -- 5
-            FROM sms_log sl
-            WHERE sl.client_id = %s
-              AND sl.spa_id = %s
-            ORDER BY sl.created_at ASC
+                sm.direction,                                  -- 0
+                sm.message_body,                               -- 1
+                sm.status,                                     -- 2
+                sm.created_at AT TIME ZONE %s AS created_at,  -- 3
+                sm.provider_error_code,                        -- 4
+                sm.provider_error_message                      -- 5
+            FROM sms_messages sm
+            WHERE sm.client_id = %s
+            AND sm.spa_id = %s
+            ORDER BY sm.created_at ASC
         """, (
             spa_timezone,
             client_id,
@@ -14686,12 +14738,20 @@ def sms_conversation(client_id):
 
 
 
+#############################
+#
+#
+#   SMS CONVERSATION SEND
+#
+#
+############################################
 
 
 
-
-
-@app.route("/sms/conversation/<int:client_id>", methods=["POST"])
+@app.route(
+    "/sms/conversation/<int:client_id>",
+    methods=["POST"]
+)
 @login_required
 @spa_required
 @require_workspace_permission("can_view_sms_history")
@@ -14701,7 +14761,8 @@ def sms_conversation_send(client_id):
 
     if not sms_email_terms_accepted(spa_id):
         flash(
-            "You must accept the SMS and Email Terms and Conditions before using messaging features.",
+            "You must accept the SMS and Email Terms and Conditions "
+            "before using messaging features.",
             "warning"
         )
         return redirect(url_for("sms_email_terms"))
@@ -14712,7 +14773,10 @@ def sms_conversation_send(client_id):
     ).strip()
 
     if not message_body:
-        flash("Message cannot be blank.", "error")
+        flash(
+            "Message cannot be blank.",
+            "error"
+        )
         return redirect(
             url_for(
                 "sms_conversation",
@@ -14729,30 +14793,56 @@ def sms_conversation_send(client_id):
                 client_id,
                 first_name,
                 last_name,
-                phone
+                phone,
+                sms_opt_in,
+                sms_opt_out
             FROM clients
             WHERE client_id = %s
               AND spa_id = %s
-        """, (client_id, spa_id))
+        """, (
+            client_id,
+            spa_id
+        ))
 
         client = cur.fetchone()
 
-        if not client:
-            flash("Client not found.", "error")
-            return redirect(url_for("sms_history_all"))
+    finally:
+        cur.close()
+        conn.close()
 
-        if not client[3]:
-            flash(
-                "Client does not have a phone number.",
-                "error"
-            )
-            return redirect(
-                url_for(
-                    "sms_conversation",
-                    client_id=client_id
-                )
-            )
+    if not client:
+        flash(
+            "Client not found.",
+            "error"
+        )
+        return redirect(url_for("sms_history_all"))
 
+    if not client[3]:
+        flash(
+            "Client does not have a phone number.",
+            "error"
+        )
+        return redirect(
+            url_for(
+                "sms_conversation",
+                client_id=client_id
+            )
+        )
+
+    if not client[4] or client[5]:
+        flash(
+            "SMS not sent. This client has not opted in "
+            "to service SMS messaging.",
+            "error"
+        )
+        return redirect(
+            url_for(
+                "edit_client_contact_preferences",
+                client_id=client_id
+            )
+        )
+
+    try:
         result = send_compliant_sms(
             spa_id=spa_id,
             client_id=client_id,
@@ -14761,52 +14851,77 @@ def sms_conversation_send(client_id):
             message_type="manual"
         )
 
-        cur.execute("""
-            INSERT INTO sms_log (
-                spa_id,
-                client_id,
-                phone_number,
-                message_body,
-                sms_type,
-                status,
-                created_at,
-                sent_at
-            )
-            VALUES (
-                %s,
-                %s,
-                %s,
-                %s,
-                %s,
-                %s,
-                NOW(),
-                NOW()
-            )
-        """, (
-            spa_id,
-            client_id,
-            client[3],
-            result.get(
-                "final_message_body",
-                message_body
+    except Exception as send_error:
+        result = {
+            "success": False,
+            "status": "failed",
+            "provider_message_id": None,
+            "provider_status": None,
+            "provider_error_code": None,
+            "provider_error_message": str(send_error),
+            "final_message_body": message_body
+        }
+
+    success = bool(result.get("success"))
+
+    status = (
+        result.get("status")
+        or ("sent" if success else "failed")
+    )
+
+    final_message_body = result.get(
+        "final_message_body",
+        message_body
+    )
+
+    try:
+        log_sms_message(
+            spa_id=spa_id,
+            client_id=client_id,
+            recipient_phone=client[3],
+            message_body=final_message_body,
+            message_type="manual",
+            direction="outbound",
+            status=status,
+            provider_message_id=result.get(
+                "provider_message_id"
             ),
-            "outbound",
-            result.get("status") or "sent"
-        ))
-
-        conn.commit()
-        flash("SMS sent.", "success")
-
-    except Exception as error:
-        conn.rollback()
-        flash(
-            f"SMS send failed: {error}",
-            "error"
+            provider_status=result.get(
+                "provider_status"
+            ),
+            provider_error_code=result.get(
+                "provider_error_code"
+            ),
+            provider_error_message=(
+                result.get("provider_error_message")
+                or result.get("error")
+            )
         )
 
-    finally:
-        cur.close()
-        conn.close()
+    except Exception as log_error:
+        print(
+            "[SMS CONVERSATION LOG ERROR]",
+            log_error,
+            flush=True
+        )
+
+    if success:
+        flash(
+            "SMS sent.",
+            "success"
+        )
+
+    else:
+        error_message = (
+            result.get("provider_error_message")
+            or result.get("error")
+            or "SMS failed to send."
+        )
+
+        flash(
+            f"SMS send failed: {error_message}",
+            "error"
+        )
 
     return redirect(
         url_for(
@@ -14814,7 +14929,6 @@ def sms_conversation_send(client_id):
             client_id=client_id
         )
     )
-
 
 
 
@@ -15747,71 +15861,75 @@ def sms_group_send():
 @login_required
 @spa_required
 @require_workspace_permission("can_view_sms_history")
-
 def sms_history(client_id):
     spa_id = current_spa_id()
-
     spa_timezone = get_spa_timezone(spa_id)
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Get client
-    cur.execute("""
-        SELECT first_name, last_name
-        FROM clients
-        WHERE client_id = %s
-          AND spa_id = %s
-    """, (client_id, spa_id))
-    
-    client = cur.fetchone()
+    try:
+        cur.execute("""
+            SELECT
+                first_name,
+                last_name
+            FROM clients
+            WHERE client_id = %s
+              AND spa_id = %s
+        """, (
+            client_id,
+            spa_id
+        ))
 
-    if not client:
+        client = cur.fetchone()
+
+        if not client:
+            flash(
+                "Client not found.",
+                "error"
+            )
+            return redirect(url_for("clients_home"))
+
+        cur.execute("""
+            SELECT
+                sm.created_at AT TIME ZONE %s AS created_at,  -- 0
+                sm.direction,                                 -- 1
+                c.first_name,                                 -- 2
+                c.last_name,                                  -- 3
+                sm.recipient_phone,                           -- 4
+                sm.message_body,                              -- 5
+                sm.status,                                    -- 6
+                sm.provider_error_code,                       -- 7
+                sm.provider_error_message,                    -- 8
+                sm.sms_message_id,                            -- 9
+                sm.client_id                                  -- 10
+            FROM sms_messages sm
+
+            JOIN clients c
+              ON c.client_id = sm.client_id
+             AND c.spa_id = sm.spa_id
+
+            WHERE sm.spa_id = %s
+              AND sm.client_id = %s
+
+            ORDER BY sm.created_at DESC
+        """, (
+            spa_timezone,
+            spa_id,
+            client_id
+        ))
+
+        sms_logs = cur.fetchall()
+
+    finally:
         cur.close()
         conn.close()
-        flash("Client not found.", "error")
-        return redirect(url_for("clients_home"))
-
-    # Get SMS logs
-    cur.execute("""
-        SELECT
-            sl.created_at AT TIME ZONE %s AS created_at,  -- 0
-            sl.sms_type,                                  -- 1
-            c.first_name,                                 -- 2
-            c.last_name,                                  -- 3
-            sl.phone_number,                              -- 4
-            sl.message_body,                              -- 5
-            sl.status,                                    -- 6
-            sl.provider_error_code,                       -- 7
-            sl.provider_error_message,                    -- 8
-            sl.sms_log_id                                 -- 9
-
-        FROM sms_log sl
-
-        JOIN clients c
-        ON sl.client_id = c.client_id
-        AND sl.spa_id = c.spa_id
-
-        WHERE sl.spa_id = %s
-        AND sl.client_id = %s
-
-        ORDER BY sl.created_at DESC
-    """, (
-        spa_timezone,
-        spa_id,
-        client_id
-    ))
-
-    sms_log = cur.fetchall()
-
-    cur.close()
-    conn.close()
 
     return render_template(
         "sms_history.html",
         client=client,
         client_id=client_id,
-        sms_logs=sms_log
+        sms_logs=sms_logs
     )
 
 
@@ -15835,89 +15953,55 @@ def sms_history(client_id):
 @login_required
 @spa_required
 @require_workspace_permission("can_view_sms_history")
-
 def sms_history_all():
     spa_id = current_spa_id()
-
     spa_timezone = get_spa_timezone(spa_id)
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute("""
-        SELECT
-            sl.created_at AT TIME ZONE %s AS created_at,  -- 0
-            sl.sms_type,                                  -- 1
-            c.first_name,                                 -- 2
-            c.last_name,                                  -- 3
-            sl.phone_number,                              -- 4
-            sl.message_body,                              -- 5
-            sl.status,                                    -- 6
-            NULL::text AS provider_error_code,            -- 7
-            NULL::text AS provider_error_message,         -- 8
-            sl.sms_log_id,                                -- 9
-            sl.client_id                                  -- 10
+    try:
+        cur.execute("""
+            SELECT
+                sm.created_at AT TIME ZONE %s AS created_at,  -- 0
+                sm.direction,                                 -- 1
+                c.first_name,                                 -- 2
+                c.last_name,                                  -- 3
+                sm.recipient_phone,                           -- 4
+                sm.message_body,                              -- 5
+                sm.status,                                    -- 6
+                sm.provider_error_code,                       -- 7
+                sm.provider_error_message,                    -- 8
+                sm.sms_message_id,                            -- 9
+                sm.client_id                                  -- 10
+            FROM sms_messages sm
 
-        FROM sms_log sl
+            JOIN clients c
+              ON c.client_id = sm.client_id
+             AND c.spa_id = sm.spa_id
 
-        JOIN clients c
-        ON sl.client_id = c.client_id
-        AND sl.spa_id = c.spa_id
+            WHERE sm.spa_id = %s
 
-        WHERE sl.spa_id = %s
-
-        ORDER BY sl.created_at DESC
-    """, (
+            ORDER BY sm.created_at DESC
+        """, (
             spa_timezone,
             spa_id
-    ))
-    
-    sms_log = cur.fetchall()
+        ))
 
-    
-    cur.close()
-    conn.close()
+        sms_logs = cur.fetchall()
+
+    finally:
+        cur.close()
+        conn.close()
 
     return render_template(
         "sms_history.html",
-        sms_logs=sms_log,
+        sms_logs=sms_logs,
         client=None
     )
 
-
  
 
-#   ----------------------------
-#
-#     SMS LOGS REFRESH
-#   REFRESH SMS STATUS
-#
-#   ----------------------------
-
-@app.route("/sms_logs/<int:sms_log_id>/refresh", methods=["POST"])
-@login_required
-@spa_required
-@require_workspace_permission("can_view_sms_history")
-def refresh_sms_status(sms_log_id):
-    flash(
-        "SMS status refresh is not available after migrating to Telnyx. Status updates will be handled by Telnyx webhooks.",
-        "info"
-    )
-    return redirect(url_for("sms_history_all"))
-
-
-
-
-@app.route("/sms/refresh-all", methods=["POST"])
-@login_required
-@spa_required
-@require_workspace_permission("can_view_sms_history")
-def refresh_all_sms_statuses():
-    flash(
-        "SMS status updates are handled automatically by Telnyx webhooks.",
-        "info"
-    )
-    return redirect(url_for("sms_history_all"))
 
 
 
@@ -15934,124 +16018,84 @@ def refresh_all_sms_statuses():
 #       
 #   -----------------------------------------------
 
+
+
+
 @app.route(
-    "/sms/resend/<int:sms_log_id>",
+    "/sms/resend/<int:sms_message_id>",
     methods=["POST"]
 )
 @login_required
 @spa_required
 @require_workspace_permission("can_send_sms")
-
-def resend_sms(sms_log_id):
+def resend_sms(sms_message_id):
     spa_id = current_spa_id()
 
     if not sms_email_terms_accepted(spa_id):
         flash(
-            (
-                "You must accept the SMS and Email Terms "
-                "and Conditions before using messaging features."
-            ),
+            "You must accept the SMS and Email Terms "
+            "and Conditions before using messaging features.",
             "warning"
         )
-
-        return redirect(
-            url_for("sms_email_terms")
-        )
+        return redirect(url_for("sms_email_terms"))
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute(
-        """
-        SELECT
-            sms_log_id,
-            client_id,
-            phone_number,
-            message_body,
-            sms_type
-        FROM sms_log
-        WHERE sms_log_id = %s
-          AND spa_id = %s
-        """,
-        (
-            sms_log_id,
+    try:
+        cur.execute("""
+            SELECT
+                sm.sms_message_id,
+                sm.client_id,
+                c.phone,
+                sm.message_body,
+                sm.message_type,
+                c.sms_opt_in,
+                c.sms_opt_out
+            FROM sms_messages sm
+
+            JOIN clients c
+              ON c.client_id = sm.client_id
+             AND c.spa_id = sm.spa_id
+
+            WHERE sm.sms_message_id = %s
+              AND sm.spa_id = %s
+              AND sm.direction = 'outbound'
+              AND sm.status IN ('failed', 'undelivered')
+              AND c.active_client = TRUE
+        """, (
+            sms_message_id,
             spa_id
-        )
-    )
+        ))
 
-    old_sms = cur.fetchone()
+        old_sms = cur.fetchone()
 
-    if not old_sms:
+    finally:
         cur.close()
         conn.close()
 
+    if not old_sms:
         flash(
-            "SMS log not found.",
+            "Failed SMS record not found.",
             "error"
         )
-
-        return redirect(
-            url_for("sms_history_all")
-        )
+        return redirect(url_for("sms_history_all"))
 
     (
-        old_sms_log_id,
+        _old_sms_message_id,
         client_id,
         phone_number,
         message_body,
-        sms_type
+        message_type,
+        sms_opt_in,
+        sms_opt_out
     ) = old_sms
 
-    # -----------------------------------------
-    # Verify the client still permits SMS
-    # -----------------------------------------
-
-    cur.execute(
-        """
-        SELECT
-            sms_opt_in,
-            sms_opt_out
-        FROM clients
-        WHERE client_id = %s
-          AND spa_id = %s
-          AND active_client = TRUE
-        """,
-        (
-            client_id,
-            spa_id
-        )
-    )
-
-    client = cur.fetchone()
-
-    if not client:
-        cur.close()
-        conn.close()
-
+    if not phone_number:
         flash(
-            "Client not found or inactive.",
+            "SMS not resent. The client does not have a phone number.",
             "error"
         )
-
-        return redirect(
-            url_for("sms_history_all")
-        )
-
-    sms_opt_in, sms_opt_out = client
-
-
-    if not sms_opt_in or sms_opt_out:
-        cur.close()
-        conn.close()
-
-        flash(
-            (
-                "SMS not resent. The client is not "
-                "opted in for SMS."
-            ),
-            "error"
-        )
-
         return redirect(
             url_for(
                 "sms_history",
@@ -16059,18 +16103,24 @@ def resend_sms(sms_log_id):
             )
         )
 
-    # -----------------------------------------
-    # Preserve original compliance classification
-    # -----------------------------------------
+    if not sms_opt_in or sms_opt_out:
+        flash(
+            "SMS not resent. The client is not opted in for SMS.",
+            "error"
+        )
+        return redirect(
+            url_for(
+                "edit_client_contact_preferences",
+                client_id=client_id
+            )
+        )
 
     original_message_type = (
-        sms_type or "manual"
+        message_type or "manual"
     ).strip().lower()
 
     while original_message_type.endswith("_resend"):
-        original_message_type = (
-            original_message_type[:-7]
-        )
+        original_message_type = original_message_type[:-7]
 
     resend_log_type = (
         f"{original_message_type}_resend"
@@ -16085,68 +16135,76 @@ def resend_sms(sms_log_id):
             message_type=original_message_type
         )
 
-        if not result.get("success"):
-            raise RuntimeError(
+    except Exception as send_error:
+        result = {
+            "success": False,
+            "status": "failed",
+            "provider_message_id": None,
+            "provider_status": None,
+            "provider_error_code": None,
+            "provider_error_message": str(send_error),
+            "final_message_body": message_body
+        }
+
+    success = bool(result.get("success"))
+
+    status = (
+        result.get("status")
+        or ("sent" if success else "failed")
+    )
+
+    final_message_body = result.get(
+        "final_message_body",
+        message_body
+    )
+
+    try:
+        log_sms_message(
+            spa_id=spa_id,
+            client_id=client_id,
+            recipient_phone=phone_number,
+            message_body=final_message_body,
+            message_type=resend_log_type,
+            direction="outbound",
+            status=status,
+            provider_message_id=result.get(
+                "provider_message_id"
+            ),
+            provider_status=result.get(
+                "provider_status"
+            ),
+            provider_error_code=result.get(
+                "provider_error_code"
+            ),
+            provider_error_message=(
                 result.get("provider_error_message")
                 or result.get("error")
-                or "The SMS provider did not send the message."
-            )
-
-        cur.execute(
-            """
-            INSERT INTO sms_log (
-                spa_id,
-                client_id,
-                phone_number,
-                message_body,
-                sms_type,
-                status,
-                provider_message_id,
-                created_at
-            )
-            VALUES (
-                %s,
-                %s,
-                %s,
-                %s,
-                %s,
-                %s,
-                %s,
-                NOW()
-            )
-            """,
-            (
-                spa_id,
-                client_id,
-                phone_number,
-                result.get(
-                    "final_message_body",
-                    message_body
-                ),
-                resend_log_type,
-                result.get("status"),
-                result.get("provider_message_id")
             )
         )
 
-        conn.commit()
+    except Exception as log_error:
+        print(
+            "[SMS RESEND LOG ERROR]",
+            log_error,
+            flush=True
+        )
 
+    if success:
         flash(
             "SMS resent successfully.",
             "success"
         )
-
-    except Exception as error:
-        conn.rollback()
-
-        flash(
-            f"SMS resend failed: {error}",
-            "error"
+    else:
+        error_message = (
+            result.get("provider_error_message")
+            or result.get("error")
+            or "SMS resend failed."
         )
 
-    finally:
-        cur.close()
-        conn.close()
+        flash(
+            f"SMS resend failed: {error_message}",
+            "error"
+        )
 
     return redirect(
         url_for(
@@ -16154,7 +16212,6 @@ def resend_sms(sms_log_id):
             client_id=client_id
         )
     )
-
 
 
 

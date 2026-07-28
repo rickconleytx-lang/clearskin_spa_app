@@ -72,8 +72,14 @@
         </div>
 
         <div class="header-actions">
-            <a href="{{ url_for('sms_preview', client_id=client[0]) }}" class="btn">
-                Send SMS
+            <a
+                href="{{ url_for(
+                    'sms_conversation',
+                    client_id=client[0]
+                ) }}"
+                class="tool-pill tool-pill-small"
+            >
+                SMS Conversation
             </a>
             <a class="btn" href="{{ url_for('client_history') }}">Back to Client History</a>
             <button type="submit" form="edit-client-form" class="btn btn-primary">Save Changes</button>

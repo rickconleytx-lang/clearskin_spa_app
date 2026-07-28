@@ -30,8 +30,13 @@
         <button type="submit" class="btn">Preview</button>
 
         {% if message_body %}
-            <button type="submit" name="action" value="send" class="btn btn-primary">
-                Send / Log SMS
+            <button
+                type="submit"
+                name="action"
+                value="send"
+                class="tool-pill tool-pill-small"
+            >
+                Send SMS
             </button>
         {% endif %}
     </div>

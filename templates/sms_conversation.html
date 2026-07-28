@@ -18,8 +18,16 @@
         </div>
 
         <div class="form-buttons">
-            <a href="{{ url_for('sms_history', client_id=client[0]) }}" class="btn">Back to SMS History</a>
-            <a href="{{ url_for('sms_preview', client_id=client[0]) }}" class="btn">Send New SMS</a>
+            <a
+                href="{{ url_for(
+                    'sms_history',
+                    client_id=client[0]
+                ) }}"
+                class="tool-pill tool-pill-small"
+            >
+                Back to SMS History
+            </a>
+
         </div>
     </div>
 
@@ -79,9 +87,14 @@
         placeholder="Type your SMS message..."
         required></textarea>
 
-    <button type="submit" class="btn">
+    <button
+        type="submit"
+        class="tool-pill tool-pill-small"
+    >
         Send SMS
     </button>
+
+
 </form>
 
 
