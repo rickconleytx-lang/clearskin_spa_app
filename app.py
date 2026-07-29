@@ -9679,7 +9679,14 @@ def login():
         flash("Logged in successfully.", "success")
 
 
-        return redirect(url_for("morning_briefing"))
+        if role == "master_admin":
+            return redirect(
+                url_for("master_admin_home")
+            )
+
+        return redirect(
+            url_for("morning_briefing")
+        )
 
     return render_template("login.html")
 
