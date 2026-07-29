@@ -6523,16 +6523,49 @@ responda UNSUBSCRIBE o comuníquese directamente con nuestra oficina.
 
 
 def add_email_footer(body, language="English"):
+    """
+    Add the configured email opt-out footer.
+
+    English emails use the active footer maintained under
+    Master Messaging Footers. The hard-coded footer remains
+    as a safe fallback when no active database value exists.
+    """
 
     body = (body or "").strip()
 
-    if "unsubscribe" in body.lower():
+    if language == "Spanish":
+        footer = EMAIL_UNSUBSCRIBE_FOOTER_ES
+    else:
+        try:
+            footer = get_messaging_footer(
+                "email_unsubscribe"
+            )
+        except Exception:
+            app.logger.exception(
+                "Unable to load the configured "
+                "email unsubscribe footer."
+            )
+            footer = ""
+
+        footer = (
+            footer
+            or EMAIL_UNSUBSCRIBE_FOOTER_EN
+        )
+
+    footer = (footer or "").strip()
+
+    if not footer:
         return body
 
-    if language == "Spanish":
-        return f"{body}{EMAIL_UNSUBSCRIBE_FOOTER_ES}"
+    # Exact-footer comparison prevents duplicate footers
+    # when a queued message already contains the footer.
+    if footer in body:
+        return body
 
-    return f"{body}{EMAIL_UNSUBSCRIBE_FOOTER_EN}"
+    if not body:
+        return footer
+
+    return f"{body}\n\n{footer}"
 
 
 
@@ -6830,6 +6863,7 @@ def build_navigation_access(role_code):
 
         # Booking and appointment operations
         "can_manage_booking_imports": False,
+        "can_manage_online_booking": False,
 
         # Communications permissions
         "can_send_sms": False,
@@ -6875,6 +6909,7 @@ def build_navigation_access(role_code):
             "can_view_business_management": True,
 
             "can_manage_booking_imports": True,
+            "can_manage_online_booking": True,
 
             # Communications
             "can_send_sms": True,
@@ -7144,7 +7179,9 @@ def load_spa():
         "static",
         "mailgun_godaddy_booking",
         "godaddy_booking_intake",
-        "telnyx_sms_webhook"
+        "telnyx_sms_webhook",
+        "public_booking",
+        "public_booking_confirm"
     ):
         return
 
@@ -8431,13 +8468,25 @@ def update_dropdown_labels():
 @app.route("/service-types")
 @login_required
 @spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
 def service_types():
     spa_id = current_spa_id()
 
-    conn = get_db_connection()
-    cur = conn.cursor()
+    status_filter = (
+        request.args.get("status")
+        or "active"
+    ).strip().lower()
 
-    cur.execute("""
+    if status_filter not in {
+        "active",
+        "archived",
+        "all"
+    }:
+        status_filter = "active"
+
+    query = """
         SELECT
             service_type_id,
             service_name,
@@ -8446,17 +8495,66 @@ def service_types():
             is_active
         FROM service_name_types
         WHERE spa_id = %s
-        ORDER BY service_name
-    """, (spa_id,))
+    """
 
-    services = cur.fetchall()
+    params = [spa_id]
 
-    cur.close()
-    conn.close()
+    if status_filter == "active":
+        query += """
+            AND is_active = TRUE
+        """
+
+    elif status_filter == "archived":
+        query += """
+            AND is_active = FALSE
+        """
+
+    query += """
+        ORDER BY
+            is_active DESC,
+            service_name,
+            service_type_id
+    """
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            query,
+            tuple(params)
+        )
+
+        services = cur.fetchall()
+
+        cur.execute("""
+            SELECT
+                COUNT(*) FILTER (
+                    WHERE is_active = TRUE
+                ) AS active_count,
+
+                COUNT(*) FILTER (
+                    WHERE is_active = FALSE
+                ) AS archived_count
+            FROM service_name_types
+            WHERE spa_id = %s
+        """, (spa_id,))
+
+        count_row = cur.fetchone()
+
+        active_count = count_row[0] or 0
+        archived_count = count_row[1] or 0
+
+    finally:
+        cur.close()
+        conn.close()
 
     return render_template(
         "service_types.html",
-        services=services
+        services=services,
+        status_filter=status_filter,
+        active_count=active_count,
+        archived_count=archived_count
     )
 
 
@@ -8474,6 +8572,9 @@ def service_types():
 @app.route("/service-types/add", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
 def add_service_type():
     spa_id = current_spa_id()
 
@@ -8489,8 +8590,6 @@ def add_service_type():
         price_raw = (
             request.form.get("default_price") or ""
         ).strip()
-
-        is_active = request.form.get("is_active") == "1"
 
         if not service_name:
             flash("Service name is required.", "error")
@@ -8527,20 +8626,25 @@ def add_service_type():
                 default_price,
                 is_active
             )
-            VALUES (%s, %s, %s, %s, %s)
+            VALUES (
+                %s,
+                %s,
+                %s,
+                %s,
+                TRUE
+            )
         """, (
             spa_id,
             service_name,
             default_duration_minutes,
-            default_price,
-            is_active
+            default_price
         ))
 
         conn.commit()
         cur.close()
         conn.close()
 
-        flash("Service type added.", "success")
+        flash("Service added successfully.", "success")
         return redirect(url_for("service_types"))
 
     return render_template(
@@ -8571,6 +8675,9 @@ def add_service_type():
 )
 @login_required
 @spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
 def edit_service_type(service_type_id):
     spa_id = current_spa_id()
 
@@ -8589,8 +8696,6 @@ def edit_service_type(service_type_id):
         price_raw = (
             request.form.get("default_price") or ""
         ).strip()
-
-        is_active = request.form.get("is_active") == "1"
 
         if not service_name:
             flash("Service name is required.", "error")
@@ -8627,15 +8732,13 @@ def edit_service_type(service_type_id):
             SET
                 service_name = %s,
                 default_duration_minutes = %s,
-                default_price = %s,
-                is_active = %s
+                default_price = %s
             WHERE service_type_id = %s
               AND spa_id = %s
         """, (
             service_name,
             default_duration_minutes,
             default_price,
-            is_active,
             service_type_id,
             spa_id
         ))
@@ -8644,7 +8747,7 @@ def edit_service_type(service_type_id):
         cur.close()
         conn.close()
 
-        flash("Service type updated.", "success")
+        flash("Service updated successfully.", "success")
         return redirect(url_for("service_types"))
 
     cur.execute("""
@@ -8697,6 +8800,219 @@ def edit_service_type(service_type_id):
 #               
 #  ----------------------
 
+
+
+############################################
+#
+#   SERVICE CATALOG - ARCHIVE
+#
+############################################
+
+
+@app.route(
+    "/service-types/<int:service_type_id>/archive",
+    methods=["POST"]
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def archive_service_type(service_type_id):
+    spa_id = current_spa_id()
+    user_id = session.get("user_id")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                service_name,
+                is_active
+            FROM service_name_types
+            WHERE service_type_id = %s
+              AND spa_id = %s
+            FOR UPDATE
+        """, (
+            service_type_id,
+            spa_id
+        ))
+
+        service = cur.fetchone()
+
+        if not service:
+            conn.rollback()
+
+            flash(
+                "Service could not be found.",
+                "error"
+            )
+
+        elif not service[1]:
+            conn.rollback()
+
+            flash(
+                "This service is already archived.",
+                "warning"
+            )
+
+        else:
+            cur.execute("""
+                UPDATE service_name_types
+                SET is_active = FALSE
+                WHERE service_type_id = %s
+                  AND spa_id = %s
+            """, (
+                service_type_id,
+                spa_id
+            ))
+
+            cur.execute("""
+                UPDATE provider_service_types
+                SET
+                    is_active = FALSE,
+                    is_publicly_bookable = FALSE,
+                    updated_at = CURRENT_TIMESTAMP,
+                    updated_by = %s
+                WHERE spa_id = %s
+                  AND service_type_id = %s
+                  AND is_active = TRUE
+            """, (
+                user_id,
+                spa_id,
+                service_type_id
+            ))
+
+            conn.commit()
+
+            flash(
+                f"{service[0]} was archived successfully.",
+                "success"
+            )
+
+    except Exception as error:
+        conn.rollback()
+
+        print(
+            "ARCHIVE SERVICE ERROR:",
+            error
+        )
+
+        flash(
+            "The service could not be archived.",
+            "error"
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    return redirect(
+        url_for(
+            "service_types",
+            status="active"
+        )
+    )
+
+
+############################################
+#
+#   SERVICE CATALOG - RESTORE
+#
+############################################
+
+
+@app.route(
+    "/service-types/<int:service_type_id>/restore",
+    methods=["POST"]
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def restore_service_type(service_type_id):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                service_name,
+                is_active
+            FROM service_name_types
+            WHERE service_type_id = %s
+              AND spa_id = %s
+            FOR UPDATE
+        """, (
+            service_type_id,
+            spa_id
+        ))
+
+        service = cur.fetchone()
+
+        if not service:
+            conn.rollback()
+
+            flash(
+                "Service could not be found.",
+                "error"
+            )
+
+        elif service[1]:
+            conn.rollback()
+
+            flash(
+                "This service is already active.",
+                "warning"
+            )
+
+        else:
+            cur.execute("""
+                UPDATE service_name_types
+                SET is_active = TRUE
+                WHERE service_type_id = %s
+                  AND spa_id = %s
+            """, (
+                service_type_id,
+                spa_id
+            ))
+
+            conn.commit()
+
+            flash(
+                f"{service[0]} was restored. "
+                f"Review Provider Services before making "
+                f"it available for online booking.",
+                "success"
+            )
+
+    except Exception as error:
+        conn.rollback()
+
+        print(
+            "RESTORE SERVICE ERROR:",
+            error
+        )
+
+        flash(
+            "The service could not be restored.",
+            "error"
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    return redirect(
+        url_for(
+            "service_types",
+            status="archived"
+        )
+    )
 
 
 @app.route("/spa_management")
@@ -13419,10 +13735,42 @@ def import_godaddy_booking(body, spa_id, subject=""):
 
     
 
+    # Resolve the spa's default active workspace.
+    # Scheduled imports do not have a logged-in session,
+    # so current_business_unit_id() cannot be used here.
+    cur.execute("""
+        SELECT business_unit_id
+        FROM business_units
+        WHERE spa_id = %s
+          AND is_active = TRUE
+        ORDER BY
+            CASE
+                WHEN is_default = TRUE THEN 0
+                ELSE 1
+            END,
+            business_unit_id
+        LIMIT 1
+    """, (spa_id,))
+
+    business_unit_row = cur.fetchone()
+
+    if not business_unit_row:
+        cur.close()
+        conn.close()
+
+        raise RuntimeError(
+            "No active business unit was found "
+            "for the GoDaddy booking import."
+        )
+
+    business_unit_id = business_unit_row[0]
+
+
     # 4. Insert appointment
     cur.execute("""
         INSERT INTO appointments (
             spa_id,
+            business_unit_id,
             client_id,
             appointment_for,
             appointment_date,
@@ -13446,14 +13794,15 @@ def import_godaddy_booking(body, spa_id, subject=""):
             import_status
         )
         VALUES (%s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, 
-                %s, %s, %s, %s, %s, 
                 %s, %s, %s, %s, %s,
-                %s, %s
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s,
+                %s, %s, %s
         )
         RETURNING appointment_id
     """, (
         spa_id,
+        business_unit_id,
         client_id,
         booking.get("customer_name"),
         booking["appointment_datetime"].date(),
@@ -17275,6 +17624,504 @@ def send_all_birthday_offer_emails():
 #
 #
 #   --------------------------------------
+
+#   --------------------------------------
+#
+#
+#   EMAIL AUTOMATION QUEUE
+#
+#
+#   --------------------------------------
+
+@app.route("/email-automation-queue")
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_communication_automation"
+)
+def email_automation_queue():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    status_filter = (
+        request.args.get("status", "")
+        or ""
+    ).strip().lower()
+
+    allowed_statuses = {
+        "pending",
+        "processing",
+        "sent",
+        "failed",
+        "cancelled"
+    }
+
+    if status_filter not in allowed_statuses:
+        status_filter = ""
+
+    conn = get_db_connection()
+    cur = conn.cursor(
+        cursor_factory=RealDictCursor
+    )
+
+    try:
+        query = """
+            SELECT
+                eq.email_queue_id,
+                eq.business_unit_id,
+                eq.client_id,
+                eq.appointment_id,
+                eq.email_type,
+                eq.recipient_email,
+                eq.recipient_name,
+                eq.subject_line,
+                eq.text_body,
+                eq.status,
+                eq.scheduled_for,
+                eq.next_attempt_at,
+                eq.attempt_count,
+                eq.maximum_attempts,
+                eq.provider_message_id,
+                eq.error_message AS last_error,
+                eq.last_attempt_at AS processing_started_at,
+                eq.sent_at,
+                eq.created_at,
+                eq.updated_at,
+
+                a.appointment_for,
+                a.appointment_date,
+                a.appointment_time,
+
+                c.first_name AS client_first_name,
+                c.last_name AS client_last_name
+
+            FROM email_queue eq
+
+            LEFT JOIN appointments a
+                ON eq.appointment_id =
+                    a.appointment_id
+               AND eq.spa_id = a.spa_id
+
+            LEFT JOIN clients c
+                ON eq.client_id = c.client_id
+               AND eq.spa_id = c.spa_id
+
+            WHERE eq.spa_id = %s
+              AND eq.business_unit_id = %s
+        """
+
+        params = [
+            spa_id,
+            business_unit_id
+        ]
+
+        if status_filter:
+            query += """
+                AND eq.status = %s
+            """
+            params.append(status_filter)
+
+        query += """
+            ORDER BY
+                CASE eq.status
+                    WHEN 'pending' THEN 1
+                    WHEN 'processing' THEN 2
+                    WHEN 'failed' THEN 3
+                    WHEN 'sent' THEN 4
+                    WHEN 'cancelled' THEN 5
+                    ELSE 6
+                END,
+
+                CASE
+                    WHEN eq.status = 'pending'
+                    THEN eq.scheduled_for
+                END ASC,
+
+                eq.created_at DESC,
+                eq.email_queue_id DESC
+        """
+
+        cur.execute(
+            query,
+            tuple(params)
+        )
+
+        queue_rows = cur.fetchall()
+
+        cur.execute("""
+            SELECT
+                status,
+                COUNT(*) AS status_count
+            FROM email_queue
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+            GROUP BY status
+        """, (
+            spa_id,
+            business_unit_id
+        ))
+
+        status_counts = {
+            row["status"]: row["status_count"]
+            for row in cur.fetchall()
+        }
+
+        total_count = sum(
+            status_counts.values()
+        )
+
+        return render_template(
+            "email_automation_queue.html",
+            queue_rows=queue_rows,
+            status_filter=status_filter,
+            status_counts=status_counts,
+            total_count=total_count
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+#   --------------------------------------
+#
+#   EMAIL AUTOMATION QUEUE ACTIONS
+#
+#   --------------------------------------
+
+def _email_queue_action_redirect():
+    return_status = (
+        request.form.get("return_status", "")
+        or ""
+    ).strip().lower()
+
+    allowed_statuses = {
+        "pending",
+        "processing",
+        "sent",
+        "failed",
+        "cancelled"
+    }
+
+    if return_status in allowed_statuses:
+        return redirect(
+            url_for(
+                "email_automation_queue",
+                status=return_status
+            )
+        )
+
+    return redirect(
+        url_for("email_automation_queue")
+    )
+
+
+@app.route(
+    "/email-automation-queue/"
+    "<int:email_queue_id>/send-now",
+    methods=["POST"]
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_communication_automation"
+)
+def send_email_queue_now(email_queue_id):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                status,
+                attempt_count,
+                maximum_attempts
+            FROM email_queue
+            WHERE email_queue_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+        """, (
+            email_queue_id,
+            spa_id,
+            business_unit_id
+        ))
+
+        email_record = cur.fetchone()
+
+        if not email_record:
+            flash(
+                "Email queue record not found.",
+                "warning"
+            )
+            return _email_queue_action_redirect()
+
+        (
+            status,
+            attempt_count,
+            maximum_attempts
+        ) = email_record
+
+        if status == "sent":
+            flash(
+                "This email has already been sent.",
+                "warning"
+            )
+            return _email_queue_action_redirect()
+
+        if status == "processing":
+            flash(
+                "This email is already being processed.",
+                "warning"
+            )
+            return _email_queue_action_redirect()
+
+        if status == "cancelled":
+            flash(
+                "A cancelled email cannot be sent.",
+                "warning"
+            )
+            return _email_queue_action_redirect()
+
+        if status == "failed":
+            flash(
+                "Use Retry for a failed email.",
+                "warning"
+            )
+            return _email_queue_action_redirect()
+
+        if status != "pending":
+            flash(
+                "This email is not available to send.",
+                "warning"
+            )
+            return _email_queue_action_redirect()
+
+        if (
+            attempt_count is not None
+            and maximum_attempts is not None
+            and attempt_count >= maximum_attempts
+        ):
+            flash(
+                "This email has reached its maximum "
+                "attempts. Reset it with Retry.",
+                "warning"
+            )
+            return _email_queue_action_redirect()
+
+        cur.execute("""
+            UPDATE email_queue
+            SET
+                scheduled_for = CURRENT_TIMESTAMP,
+                next_attempt_at = CURRENT_TIMESTAMP,
+                error_message = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE email_queue_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND status = 'pending'
+        """, (
+            email_queue_id,
+            spa_id,
+            business_unit_id
+        ))
+
+        conn.commit()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    summary = process_email_automation_queue(
+        batch_size=1,
+        email_queue_id=email_queue_id
+    )
+
+    if summary["sent_count"] == 1:
+        flash(
+            "Email sent successfully.",
+            "success"
+        )
+
+    elif summary["retry_count"] == 1:
+        flash(
+            "The send attempt failed. The email "
+            "was scheduled for another attempt.",
+            "warning"
+        )
+
+    elif summary["failed_count"] == 1:
+        flash(
+            "The email could not be sent and is "
+            "now marked failed.",
+            "error"
+        )
+
+    else:
+        flash(
+            "The email was not sent. Review its "
+            "current queue status.",
+            "warning"
+        )
+
+    return _email_queue_action_redirect()
+
+
+@app.route(
+    "/email-automation-queue/"
+    "<int:email_queue_id>/retry",
+    methods=["POST"]
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_communication_automation"
+)
+def retry_email_queue_item(email_queue_id):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            UPDATE email_queue
+            SET
+                status = 'pending',
+                scheduled_for = CURRENT_TIMESTAMP,
+                next_attempt_at = CURRENT_TIMESTAMP,
+                attempt_count = 0,
+                last_attempt_at = NULL,
+                provider_message_id = NULL,
+                provider_status = NULL,
+                error_message = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE email_queue_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND status = 'failed'
+            RETURNING email_queue_id
+        """, (
+            email_queue_id,
+            spa_id,
+            business_unit_id
+        ))
+
+        reset_record = cur.fetchone()
+
+        if not reset_record:
+            conn.rollback()
+
+            flash(
+                "Only failed emails can be retried.",
+                "warning"
+            )
+
+            return _email_queue_action_redirect()
+
+        conn.commit()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    summary = process_email_automation_queue(
+        batch_size=1,
+        email_queue_id=email_queue_id
+    )
+
+    if summary["sent_count"] == 1:
+        flash(
+            "Email retry completed successfully.",
+            "success"
+        )
+
+    elif summary["retry_count"] == 1:
+        flash(
+            "The retry was unsuccessful. Another "
+            "attempt has been scheduled.",
+            "warning"
+        )
+
+    elif summary["failed_count"] == 1:
+        flash(
+            "The email retry failed.",
+            "error"
+        )
+
+    else:
+        flash(
+            "The email was reset, but it was not "
+            "processed. Review its queue status.",
+            "warning"
+        )
+
+    return _email_queue_action_redirect()
+
+
+@app.route(
+    "/email-automation-queue/"
+    "<int:email_queue_id>/cancel",
+    methods=["POST"]
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_communication_automation"
+)
+def cancel_email_queue_item(email_queue_id):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            UPDATE email_queue
+            SET
+                status = 'cancelled',
+                provider_status = 'cancelled_by_user',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE email_queue_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND status = 'pending'
+            RETURNING email_queue_id
+        """, (
+            email_queue_id,
+            spa_id,
+            business_unit_id
+        ))
+
+        cancelled_record = cur.fetchone()
+
+        if not cancelled_record:
+            conn.rollback()
+
+            flash(
+                "Only pending emails can be cancelled.",
+                "warning"
+            )
+
+            return _email_queue_action_redirect()
+
+        conn.commit()
+
+        flash(
+            "Pending email cancelled.",
+            "success"
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    return _email_queue_action_redirect()
+
 
 @app.route("/reminder_queue")
 @login_required
@@ -30344,7 +31191,12 @@ def appointment_details(appointment_id):
             a.duration_minutes,               -- 11
             a.price_at_booking,               -- 12
             a.appointment_for,                -- 13
-            a.provider_name_at_booking        -- 14
+            a.provider_name_at_booking,       -- 14
+            COALESCE(
+                a.booking_for_other,
+                FALSE
+            ) AS booking_for_other,            -- 15
+            a.service_recipient_client_id      -- 16
         FROM appointments a
         JOIN clients c
             ON a.client_id = c.client_id
@@ -30405,9 +31257,22 @@ def appointment_details(appointment_id):
         "raw_time": appt[2].strftime("%H:%M") if appt[2] else "",
         "status": appt[3] or "",
 
-        "client_name": f"{appt[4]} {appt[5]}",
-        "appointment_for": appt[13] or f"{appt[4] or ''} {appt[5] or ''}".strip(),
-        
+        "client_name":
+            f"{appt[4] or ''} {appt[5] or ''}".strip(),
+
+        "booked_by_name":
+            f"{appt[4] or ''} {appt[5] or ''}".strip(),
+
+        "appointment_for":
+            appt[13]
+            or f"{appt[4] or ''} {appt[5] or ''}".strip(),
+
+        "booking_for_other":
+            bool(appt[15]),
+
+        "service_recipient_client_id":
+            appt[16],
+
         "phone": appt[6] or "",
         "email": appt[7] or "",
         "service_name": appt[8] or "",        
@@ -34103,6 +34968,18 @@ def appointments():
 def add_appointment():
     user_id = session.get("user_id")
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to add an appointment.",
+            "error"
+        )
+
+        return redirect(
+            url_for("calendar_view")
+        )
 
     client_id = request.args.get("client_id") or request.form.get("client_id") or ""
     selected_date = request.args.get("selected_date") or request.form.get("selected_date") or ""
@@ -34293,6 +35170,7 @@ def add_appointment():
         cur.execute("""
             INSERT INTO appointments (
                 spa_id,
+                business_unit_id,
                 client_id,
                 service_type_id,
                 service_type,
@@ -34310,13 +35188,14 @@ def add_appointment():
             VALUES (
                 %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s,
-                %s, %s,
+                %s, %s, %s,
                 TRUE,
                 CURRENT_TIMESTAMP
             )
             RETURNING appointment_id
         """, (
             spa_id,
+            business_unit_id,
             client_id,
             service_type_id,
             service_type,
@@ -36734,6 +37613,2603 @@ def get_utc_now():
 
 
 
+############################################
+#
+#   ONLINE BOOKING - BUSINESS HOURS
+#
+############################################
+
+
+@app.route(
+    "/booking/business-hours",
+    methods=["GET", "POST"]
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def booking_business_hours():
+    from datetime import datetime
+
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to manage business hours.",
+            "error"
+        )
+        return redirect(url_for("admin"))
+
+    day_names = [
+        "Sunday",
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday"
+    ]
+
+    if request.method == "POST":
+        periods_to_save = []
+        validation_errors = []
+
+        # Preserve everything entered so the form can be
+        # restored after a validation or database error.
+        submitted_form_data = request.form.to_dict(
+            flat=False
+        )
+
+        for day_of_week, day_name in enumerate(day_names):
+            start_values = request.form.getlist(
+                f"start_time_{day_of_week}"
+            )
+
+            end_values = request.form.getlist(
+                f"end_time_{day_of_week}"
+            )
+
+            day_periods = []
+
+            max_rows = max(
+                len(start_values),
+                len(end_values)
+            )
+
+            for row_index in range(max_rows):
+                start_value = (
+                    start_values[row_index].strip()
+                    if row_index < len(start_values)
+                    else ""
+                )
+
+                end_value = (
+                    end_values[row_index].strip()
+                    if row_index < len(end_values)
+                    else ""
+                )
+
+                if not start_value and not end_value:
+                    continue
+
+                if not start_value or not end_value:
+                    validation_errors.append(
+                        f"{day_name}: both a start time "
+                        f"and end time are required."
+                    )
+                    continue
+
+                try:
+                    start_time = datetime.strptime(
+                        start_value,
+                        "%H:%M"
+                    ).time()
+
+                    end_time = datetime.strptime(
+                        end_value,
+                        "%H:%M"
+                    ).time()
+
+                except ValueError:
+                    validation_errors.append(
+                        f"{day_name}: one or more times "
+                        f"are invalid."
+                    )
+                    continue
+
+                if end_time <= start_time:
+                    validation_errors.append(
+                        f"{day_name}: the end time must "
+                        f"be later than the start time."
+                    )
+                    continue
+
+                day_periods.append((
+                    start_time,
+                    end_time
+                ))
+
+            day_periods.sort(
+                key=lambda period: period[0]
+            )
+
+            for period_index in range(
+                1,
+                len(day_periods)
+            ):
+                previous_period = day_periods[
+                    period_index - 1
+                ]
+
+                current_period = day_periods[
+                    period_index
+                ]
+
+                if (
+                    current_period[0]
+                    < previous_period[1]
+                ):
+                    validation_errors.append(
+                        f"{day_name}: business-hour "
+                        f"periods cannot overlap."
+                    )
+                    break
+
+            for start_time, end_time in day_periods:
+                periods_to_save.append((
+                    spa_id,
+                    business_unit_id,
+                    day_of_week,
+                    start_time,
+                    end_time,
+                    user_id,
+                    user_id
+                ))
+
+        if validation_errors:
+            session[
+                "booking_business_hours_form"
+            ] = submitted_form_data
+
+            for error_message in validation_errors:
+                flash(error_message, "error")
+
+            return redirect(
+                url_for("booking_business_hours")
+            )
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        try:
+            cur.execute("""
+                DELETE FROM booking_business_hours
+                WHERE spa_id = %s
+                  AND business_unit_id = %s
+            """, (
+                spa_id,
+                business_unit_id
+            ))
+
+            if periods_to_save:
+                cur.executemany("""
+                    INSERT INTO booking_business_hours (
+                        spa_id,
+                        business_unit_id,
+                        day_of_week,
+                        start_time,
+                        end_time,
+                        is_active,
+                        created_by,
+                        updated_by
+                    )
+                    VALUES (
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        TRUE,
+                        %s,
+                        %s
+                    )
+                """, periods_to_save)
+
+            conn.commit()
+
+            flash(
+                "Business hours saved successfully.",
+                "success"
+            )
+
+        except Exception as error:
+            conn.rollback()
+
+            print(
+                "SAVE BOOKING BUSINESS HOURS ERROR:",
+                error
+            )
+
+            session[
+                "booking_business_hours_form"
+            ] = submitted_form_data
+
+            flash(
+                "Business hours could not be saved.",
+                "error"
+            )
+
+        finally:
+            cur.close()
+            conn.close()
+
+        return redirect(
+            url_for("booking_business_hours")
+        )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT unit_name
+            FROM business_units
+            WHERE business_unit_id = %s
+              AND spa_id = %s
+              AND is_active = TRUE
+            LIMIT 1
+        """, (
+            business_unit_id,
+            spa_id
+        ))
+
+        workspace_row = cur.fetchone()
+
+        workspace_name = (
+            workspace_row[0]
+            if workspace_row
+            else "Current Workspace"
+        )
+
+        cur.execute("""
+            SELECT
+                day_of_week,
+                start_time,
+                end_time
+            FROM booking_business_hours
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND is_active = TRUE
+            ORDER BY
+                day_of_week,
+                start_time,
+                end_time
+        """, (
+            spa_id,
+            business_unit_id
+        ))
+
+        hour_rows = cur.fetchall()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    hours_by_day = {
+        day_index: []
+        for day_index in range(7)
+    }
+
+    submitted_form_data = session.pop(
+        "booking_business_hours_form",
+        None
+    )
+
+    if submitted_form_data:
+        for day_index in range(7):
+            start_values = submitted_form_data.get(
+                f"start_time_{day_index}",
+                []
+            )
+
+            end_values = submitted_form_data.get(
+                f"end_time_{day_index}",
+                []
+            )
+
+            max_rows = max(
+                len(start_values),
+                len(end_values)
+            )
+
+            for row_index in range(max_rows):
+                start_value = (
+                    start_values[row_index]
+                    if row_index < len(start_values)
+                    else ""
+                )
+
+                end_value = (
+                    end_values[row_index]
+                    if row_index < len(end_values)
+                    else ""
+                )
+
+                if not start_value and not end_value:
+                    continue
+
+                hours_by_day[day_index].append({
+                    "start_time": start_value,
+                    "end_time": end_value
+                })
+
+    else:
+        for day_of_week, start_time, end_time in hour_rows:
+            hours_by_day[day_of_week].append({
+                "start_time": start_time.strftime("%H:%M"),
+                "end_time": end_time.strftime("%H:%M")
+            })
+
+    return render_template(
+        "booking/business_hours.html",
+        day_names=day_names,
+        hours_by_day=hours_by_day,
+        workspace_name=workspace_name
+    )
+
+
+############################################
+#
+#   ONLINE BOOKING - PROVIDER HOURS
+#
+############################################
+
+
+@app.route(
+    "/booking/provider-hours",
+    methods=["GET", "POST"]
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def booking_provider_hours():
+    from datetime import datetime
+
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to manage provider hours.",
+            "error"
+        )
+        return redirect(url_for("admin"))
+
+    day_names = [
+        "Sunday",
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday"
+    ]
+
+    def format_booking_time(time_value):
+        return datetime.strptime(
+            time_value.strftime("%H:%M"),
+            "%H:%M"
+        ).strftime("%I:%M %p").lstrip("0")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                e.employee_id,
+                e.first_name,
+                e.last_name,
+                e.employee_nickname,
+                er.role_name
+            FROM employees e
+            LEFT JOIN employee_roles er
+              ON er.employee_role_id = e.employee_role_id
+             AND er.spa_id = e.spa_id
+            WHERE e.spa_id = %s
+              AND e.is_active = TRUE
+            ORDER BY
+                e.last_name,
+                e.first_name,
+                e.employee_id
+        """, (spa_id,))
+
+        provider_rows = cur.fetchall()
+
+        cur.execute("""
+            SELECT
+                day_of_week,
+                start_time,
+                end_time
+            FROM booking_business_hours
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND is_active = TRUE
+            ORDER BY
+                day_of_week,
+                start_time,
+                end_time
+        """, (
+            spa_id,
+            business_unit_id
+        ))
+
+        business_hour_rows = cur.fetchall()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    providers = []
+
+    for row in provider_rows:
+        employee_id = row[0]
+        first_name = (row[1] or "").strip()
+        last_name = (row[2] or "").strip()
+        nickname = (row[3] or "").strip()
+        role_name = (row[4] or "").strip()
+
+        full_name = (
+            f"{first_name} {last_name}".strip()
+        )
+
+        display_name = (
+            nickname
+            or full_name
+            or f"Employee {employee_id}"
+        )
+
+        if role_name:
+            display_name = (
+                f"{display_name} — {role_name}"
+            )
+
+        providers.append({
+            "employee_id": employee_id,
+            "display_name": display_name
+        })
+
+    provider_ids = {
+        provider["employee_id"]
+        for provider in providers
+    }
+
+    if request.method == "POST":
+        selected_provider_id = request.form.get(
+            "provider_employee_id",
+            type=int
+        )
+    else:
+        selected_provider_id = request.args.get(
+            "provider_employee_id",
+            type=int
+        )
+
+    if selected_provider_id is None and providers:
+        selected_provider_id = providers[0][
+            "employee_id"
+        ]
+
+    if (
+        selected_provider_id is not None
+        and selected_provider_id not in provider_ids
+    ):
+        if request.method == "POST":
+            flash(
+                "The selected provider is not available.",
+                "error"
+            )
+            return redirect(
+                url_for("booking_provider_hours")
+            )
+
+        selected_provider_id = (
+            providers[0]["employee_id"]
+            if providers
+            else None
+        )
+
+    business_hours_by_day = {
+        day_index: []
+        for day_index in range(7)
+    }
+
+    for day_of_week, start_time, end_time in (
+        business_hour_rows
+    ):
+        business_hours_by_day[day_of_week].append({
+            "start_raw": start_time,
+            "end_raw": end_time,
+            "start_time": start_time.strftime("%H:%M"),
+            "end_time": end_time.strftime("%H:%M"),
+            "start_display": format_booking_time(
+                start_time
+            ),
+            "end_display": format_booking_time(
+                end_time
+            )
+        })
+
+    if request.method == "POST":
+        submitted_form_data = request.form.to_dict(
+            flat=False
+        )
+
+        periods_to_save = []
+        validation_errors = []
+
+        for day_of_week, day_name in enumerate(
+            day_names
+        ):
+            start_values = request.form.getlist(
+                f"start_time_{day_of_week}"
+            )
+
+            end_values = request.form.getlist(
+                f"end_time_{day_of_week}"
+            )
+
+            day_periods = []
+
+            max_rows = max(
+                len(start_values),
+                len(end_values)
+            )
+
+            for row_index in range(max_rows):
+                start_value = (
+                    start_values[row_index].strip()
+                    if row_index < len(start_values)
+                    else ""
+                )
+
+                end_value = (
+                    end_values[row_index].strip()
+                    if row_index < len(end_values)
+                    else ""
+                )
+
+                if not start_value and not end_value:
+                    continue
+
+                if not start_value or not end_value:
+                    validation_errors.append(
+                        f"{day_name}: both a start time "
+                        f"and end time are required."
+                    )
+                    continue
+
+                try:
+                    start_time = datetime.strptime(
+                        start_value,
+                        "%H:%M"
+                    ).time()
+
+                    end_time = datetime.strptime(
+                        end_value,
+                        "%H:%M"
+                    ).time()
+
+                except ValueError:
+                    validation_errors.append(
+                        f"{day_name}: one or more times "
+                        f"are invalid."
+                    )
+                    continue
+
+                if end_time <= start_time:
+                    validation_errors.append(
+                        f"{day_name}: the end time must "
+                        f"be later than the start time."
+                    )
+                    continue
+
+                business_periods = (
+                    business_hours_by_day.get(
+                        day_of_week,
+                        []
+                    )
+                )
+
+                inside_business_hours = any(
+                    start_time >= period["start_raw"]
+                    and end_time <= period["end_raw"]
+                    for period in business_periods
+                )
+
+                if not inside_business_hours:
+                    validation_errors.append(
+                        f"{day_name}: provider hours "
+                        f"must fall within one business-hours "
+                        f"period."
+                    )
+                    continue
+
+                day_periods.append((
+                    start_time,
+                    end_time
+                ))
+
+            day_periods.sort(
+                key=lambda period: period[0]
+            )
+
+            for period_index in range(
+                1,
+                len(day_periods)
+            ):
+                previous_period = day_periods[
+                    period_index - 1
+                ]
+
+                current_period = day_periods[
+                    period_index
+                ]
+
+                if (
+                    current_period[0]
+                    < previous_period[1]
+                ):
+                    validation_errors.append(
+                        f"{day_name}: provider-hour "
+                        f"periods cannot overlap."
+                    )
+                    break
+
+            for start_time, end_time in day_periods:
+                periods_to_save.append((
+                    spa_id,
+                    business_unit_id,
+                    selected_provider_id,
+                    day_of_week,
+                    start_time,
+                    end_time,
+                    user_id,
+                    user_id
+                ))
+
+        if validation_errors:
+            session[
+                "booking_provider_hours_form"
+            ] = {
+                "spa_id": spa_id,
+                "business_unit_id": business_unit_id,
+                "provider_employee_id": (
+                    selected_provider_id
+                ),
+                "form_data": submitted_form_data
+            }
+
+            for error_message in validation_errors:
+                flash(error_message, "error")
+
+            return redirect(
+                url_for(
+                    "booking_provider_hours",
+                    provider_employee_id=(
+                        selected_provider_id
+                    )
+                )
+            )
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        try:
+            cur.execute("""
+                DELETE FROM provider_booking_hours
+                WHERE spa_id = %s
+                  AND business_unit_id = %s
+                  AND provider_employee_id = %s
+            """, (
+                spa_id,
+                business_unit_id,
+                selected_provider_id
+            ))
+
+            if periods_to_save:
+                cur.executemany("""
+                    INSERT INTO provider_booking_hours (
+                        spa_id,
+                        business_unit_id,
+                        provider_employee_id,
+                        day_of_week,
+                        start_time,
+                        end_time,
+                        is_active,
+                        created_by,
+                        updated_by
+                    )
+                    VALUES (
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        TRUE,
+                        %s,
+                        %s
+                    )
+                """, periods_to_save)
+
+            conn.commit()
+
+            session.pop(
+                "booking_provider_hours_form",
+                None
+            )
+
+            flash(
+                "Provider hours saved successfully.",
+                "success"
+            )
+
+        except Exception as error:
+            conn.rollback()
+
+            session[
+                "booking_provider_hours_form"
+            ] = {
+                "spa_id": spa_id,
+                "business_unit_id": business_unit_id,
+                "provider_employee_id": (
+                    selected_provider_id
+                ),
+                "form_data": submitted_form_data
+            }
+
+            print(
+                "SAVE PROVIDER BOOKING HOURS ERROR:",
+                error
+            )
+
+            flash(
+                "Provider hours could not be saved.",
+                "error"
+            )
+
+        finally:
+            cur.close()
+            conn.close()
+
+        return redirect(
+            url_for(
+                "booking_provider_hours",
+                provider_employee_id=(
+                    selected_provider_id
+                )
+            )
+        )
+
+    provider_hour_rows = []
+
+    if selected_provider_id is not None:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        try:
+            cur.execute("""
+                SELECT
+                    day_of_week,
+                    start_time,
+                    end_time
+                FROM provider_booking_hours
+                WHERE spa_id = %s
+                  AND business_unit_id = %s
+                  AND provider_employee_id = %s
+                  AND is_active = TRUE
+                ORDER BY
+                    day_of_week,
+                    start_time,
+                    end_time
+            """, (
+                spa_id,
+                business_unit_id,
+                selected_provider_id
+            ))
+
+            provider_hour_rows = cur.fetchall()
+
+        finally:
+            cur.close()
+            conn.close()
+
+    provider_hours_by_day = {
+        day_index: []
+        for day_index in range(7)
+    }
+
+    preserved_form = session.get(
+        "booking_provider_hours_form"
+    )
+
+    use_preserved_form = (
+        preserved_form
+        and preserved_form.get("spa_id") == spa_id
+        and preserved_form.get(
+            "business_unit_id"
+        ) == business_unit_id
+        and preserved_form.get(
+            "provider_employee_id"
+        ) == selected_provider_id
+    )
+
+    if use_preserved_form:
+        submitted_form_data = preserved_form.get(
+            "form_data",
+            {}
+        )
+
+        session.pop(
+            "booking_provider_hours_form",
+            None
+        )
+
+        for day_index in range(7):
+            start_values = submitted_form_data.get(
+                f"start_time_{day_index}",
+                []
+            )
+
+            end_values = submitted_form_data.get(
+                f"end_time_{day_index}",
+                []
+            )
+
+            max_rows = max(
+                len(start_values),
+                len(end_values)
+            )
+
+            for row_index in range(max_rows):
+                start_value = (
+                    start_values[row_index]
+                    if row_index < len(start_values)
+                    else ""
+                )
+
+                end_value = (
+                    end_values[row_index]
+                    if row_index < len(end_values)
+                    else ""
+                )
+
+                if not start_value and not end_value:
+                    continue
+
+                provider_hours_by_day[
+                    day_index
+                ].append({
+                    "start_time": start_value,
+                    "end_time": end_value
+                })
+
+    else:
+        for day_of_week, start_time, end_time in (
+            provider_hour_rows
+        ):
+            provider_hours_by_day[
+                day_of_week
+            ].append({
+                "start_time": start_time.strftime(
+                    "%H:%M"
+                ),
+                "end_time": end_time.strftime(
+                    "%H:%M"
+                )
+            })
+
+    return render_template(
+        "booking/provider_hours.html",
+        providers=providers,
+        selected_provider_id=selected_provider_id,
+        day_names=day_names,
+        provider_hours_by_day=(
+            provider_hours_by_day
+        ),
+        business_hours_by_day=(
+            business_hours_by_day
+        )
+    )
+
+
+############################################
+#
+#   ONLINE BOOKING - PROVIDER SERVICES
+#
+############################################
+
+
+@app.route(
+    "/booking/provider-services",
+    methods=["GET", "POST"]
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def booking_provider_services():
+    from decimal import Decimal, InvalidOperation
+
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to manage provider services.",
+            "error"
+        )
+        return redirect(url_for("admin"))
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                e.employee_id,
+                e.first_name,
+                e.last_name,
+                e.employee_nickname,
+                er.role_name
+            FROM employees e
+            LEFT JOIN employee_roles er
+              ON er.employee_role_id = e.employee_role_id
+             AND er.spa_id = e.spa_id
+            WHERE e.spa_id = %s
+              AND e.is_active = TRUE
+            ORDER BY
+                e.last_name,
+                e.first_name,
+                e.employee_id
+        """, (spa_id,))
+
+        provider_rows = cur.fetchall()
+
+        cur.execute("""
+            SELECT
+                service_type_id,
+                service_name,
+                default_duration_minutes,
+                default_price
+            FROM service_name_types
+            WHERE spa_id = %s
+              AND is_active = TRUE
+            ORDER BY
+                service_name,
+                service_type_id
+        """, (spa_id,))
+
+        service_rows = cur.fetchall()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    providers = []
+
+    for row in provider_rows:
+        employee_id = row[0]
+        first_name = (row[1] or "").strip()
+        last_name = (row[2] or "").strip()
+        nickname = (row[3] or "").strip()
+        role_name = (row[4] or "").strip()
+
+        full_name = (
+            f"{first_name} {last_name}".strip()
+        )
+
+        display_name = (
+            nickname
+            or full_name
+            or f"Employee {employee_id}"
+        )
+
+        if role_name:
+            display_name = (
+                f"{display_name} — {role_name}"
+            )
+
+        providers.append({
+            "employee_id": employee_id,
+            "display_name": display_name
+        })
+
+    provider_ids = {
+        provider["employee_id"]
+        for provider in providers
+    }
+
+    service_ids = {
+        row[0]
+        for row in service_rows
+    }
+
+    if request.method == "POST":
+        selected_provider_id = request.form.get(
+            "provider_employee_id",
+            type=int
+        )
+    else:
+        selected_provider_id = request.args.get(
+            "provider_employee_id",
+            type=int
+        )
+
+    if selected_provider_id is None and providers:
+        selected_provider_id = providers[0][
+            "employee_id"
+        ]
+
+    if (
+        selected_provider_id is not None
+        and selected_provider_id not in provider_ids
+    ):
+        if request.method == "POST":
+            flash(
+                "The selected provider is not available.",
+                "error"
+            )
+
+            return redirect(
+                url_for("booking_provider_services")
+            )
+
+        selected_provider_id = (
+            providers[0]["employee_id"]
+            if providers
+            else None
+        )
+
+    if request.method == "POST":
+        submitted_form_data = request.form.to_dict(
+            flat=False
+        )
+
+        validation_errors = []
+        assignments_to_save = []
+
+        assigned_service_ids = set()
+
+        for raw_service_id in request.form.getlist(
+            "assigned_service_ids"
+        ):
+            try:
+                service_type_id = int(raw_service_id)
+            except (TypeError, ValueError):
+                validation_errors.append(
+                    "One selected service was invalid."
+                )
+                continue
+
+            if service_type_id not in service_ids:
+                validation_errors.append(
+                    "One selected service is not available."
+                )
+                continue
+
+            assigned_service_ids.add(
+                service_type_id
+            )
+
+        service_lookup = {
+            row[0]: {
+                "service_name": row[1] or "Service",
+                "default_duration_minutes": row[2],
+                "default_price": row[3]
+            }
+            for row in service_rows
+        }
+
+        for service_type_id in sorted(
+            assigned_service_ids
+        ):
+            service = service_lookup[
+                service_type_id
+            ]
+
+            service_name = service[
+                "service_name"
+            ]
+
+            duration_raw = (
+                request.form.get(
+                    f"duration_override_{service_type_id}"
+                )
+                or ""
+            ).strip()
+
+            price_raw = (
+                request.form.get(
+                    f"price_override_{service_type_id}"
+                )
+                or ""
+            ).strip()
+
+            buffer_before_raw = (
+                request.form.get(
+                    f"buffer_before_{service_type_id}"
+                )
+                or ""
+            ).strip()
+
+            buffer_after_raw = (
+                request.form.get(
+                    f"buffer_after_{service_type_id}"
+                )
+                or ""
+            ).strip()
+
+            duration_override = None
+            price_override = None
+            buffer_before = None
+            buffer_after = None
+
+            if duration_raw:
+                try:
+                    duration_override = int(
+                        duration_raw
+                    )
+                except (TypeError, ValueError):
+                    validation_errors.append(
+                        f"{service_name}: duration override "
+                        f"must be entered in minutes."
+                    )
+                else:
+                    if (
+                        duration_override < 1
+                        or duration_override > 1440
+                    ):
+                        validation_errors.append(
+                            f"{service_name}: duration override "
+                            f"must be between 1 and 1,440 "
+                            f"minutes."
+                        )
+
+            if price_raw:
+                try:
+                    price_override = Decimal(
+                        price_raw
+                    )
+                except (
+                    InvalidOperation,
+                    TypeError,
+                    ValueError
+                ):
+                    validation_errors.append(
+                        f"{service_name}: price override "
+                        f"must be a valid dollar amount."
+                    )
+                else:
+                    if price_override < 0:
+                        validation_errors.append(
+                            f"{service_name}: price override "
+                            f"cannot be negative."
+                        )
+
+            if buffer_before_raw:
+                try:
+                    buffer_before = int(
+                        buffer_before_raw
+                    )
+                except (TypeError, ValueError):
+                    validation_errors.append(
+                        f"{service_name}: buffer before "
+                        f"must be entered in minutes."
+                    )
+                else:
+                    if (
+                        buffer_before < 0
+                        or buffer_before > 1440
+                    ):
+                        validation_errors.append(
+                            f"{service_name}: buffer before "
+                            f"must be between 0 and 1,440 "
+                            f"minutes."
+                        )
+
+            if buffer_after_raw:
+                try:
+                    buffer_after = int(
+                        buffer_after_raw
+                    )
+                except (TypeError, ValueError):
+                    validation_errors.append(
+                        f"{service_name}: buffer after "
+                        f"must be entered in minutes."
+                    )
+                else:
+                    if (
+                        buffer_after < 0
+                        or buffer_after > 1440
+                    ):
+                        validation_errors.append(
+                            f"{service_name}: buffer after "
+                            f"must be between 0 and 1,440 "
+                            f"minutes."
+                        )
+
+            is_publicly_bookable = (
+                request.form.get(
+                    f"publicly_bookable_{service_type_id}"
+                )
+                == "1"
+            )
+
+            assignments_to_save.append((
+                spa_id,
+                business_unit_id,
+                selected_provider_id,
+                service_type_id,
+                duration_override,
+                price_override,
+                buffer_before,
+                buffer_after,
+                is_publicly_bookable,
+                user_id,
+                user_id
+            ))
+
+        if validation_errors:
+            session[
+                "booking_provider_services_form"
+            ] = {
+                "spa_id": spa_id,
+                "business_unit_id": business_unit_id,
+                "provider_employee_id": (
+                    selected_provider_id
+                ),
+                "form_data": submitted_form_data
+            }
+
+            for error_message in validation_errors:
+                flash(error_message, "error")
+
+            return redirect(
+                url_for(
+                    "booking_provider_services",
+                    provider_employee_id=(
+                        selected_provider_id
+                    )
+                )
+            )
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        try:
+            cur.execute("""
+                DELETE FROM provider_service_types
+                WHERE spa_id = %s
+                  AND business_unit_id = %s
+                  AND provider_employee_id = %s
+            """, (
+                spa_id,
+                business_unit_id,
+                selected_provider_id
+            ))
+
+            if assignments_to_save:
+                cur.executemany("""
+                    INSERT INTO provider_service_types (
+                        spa_id,
+                        business_unit_id,
+                        provider_employee_id,
+                        service_type_id,
+                        duration_override_minutes,
+                        price_override,
+                        buffer_before_minutes,
+                        buffer_after_minutes,
+                        is_publicly_bookable,
+                        is_active,
+                        created_by,
+                        updated_by
+                    )
+                    VALUES (
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        TRUE,
+                        %s,
+                        %s
+                    )
+                """, assignments_to_save)
+
+            conn.commit()
+
+            session.pop(
+                "booking_provider_services_form",
+                None
+            )
+
+            flash(
+                "Provider services saved successfully.",
+                "success"
+            )
+
+        except Exception as error:
+            conn.rollback()
+
+            session[
+                "booking_provider_services_form"
+            ] = {
+                "spa_id": spa_id,
+                "business_unit_id": business_unit_id,
+                "provider_employee_id": (
+                    selected_provider_id
+                ),
+                "form_data": submitted_form_data
+            }
+
+            print(
+                "SAVE PROVIDER SERVICES ERROR:",
+                error
+            )
+
+            flash(
+                "Provider services could not be saved.",
+                "error"
+            )
+
+        finally:
+            cur.close()
+            conn.close()
+
+        return redirect(
+            url_for(
+                "booking_provider_services",
+                provider_employee_id=(
+                    selected_provider_id
+                )
+            )
+        )
+
+    assignment_rows = []
+
+    if selected_provider_id is not None:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        try:
+            cur.execute("""
+                SELECT
+                    service_type_id,
+                    duration_override_minutes,
+                    price_override,
+                    buffer_before_minutes,
+                    buffer_after_minutes,
+                    is_publicly_bookable
+                FROM provider_service_types
+                WHERE spa_id = %s
+                  AND business_unit_id = %s
+                  AND provider_employee_id = %s
+                  AND is_active = TRUE
+                ORDER BY service_type_id
+            """, (
+                spa_id,
+                business_unit_id,
+                selected_provider_id
+            ))
+
+            assignment_rows = cur.fetchall()
+
+        finally:
+            cur.close()
+            conn.close()
+
+    assignments_by_service = {
+        row[0]: {
+            "duration_override_minutes": row[1],
+            "price_override": row[2],
+            "buffer_before_minutes": row[3],
+            "buffer_after_minutes": row[4],
+            "is_publicly_bookable": bool(row[5])
+        }
+        for row in assignment_rows
+    }
+
+    preserved_form = session.get(
+        "booking_provider_services_form"
+    )
+
+    use_preserved_form = (
+        preserved_form
+        and preserved_form.get("spa_id") == spa_id
+        and preserved_form.get(
+            "business_unit_id"
+        ) == business_unit_id
+        and preserved_form.get(
+            "provider_employee_id"
+        ) == selected_provider_id
+    )
+
+    preserved_form_data = {}
+
+    if use_preserved_form:
+        preserved_form_data = preserved_form.get(
+            "form_data",
+            {}
+        )
+
+        session.pop(
+            "booking_provider_services_form",
+            None
+        )
+
+    def preserved_value(field_name):
+        values = preserved_form_data.get(
+            field_name,
+            []
+        )
+
+        if not values:
+            return ""
+
+        return values[0]
+
+    preserved_assigned_ids = set()
+
+    if use_preserved_form:
+        for raw_service_id in preserved_form_data.get(
+            "assigned_service_ids",
+            []
+        ):
+            try:
+                preserved_assigned_ids.add(
+                    int(raw_service_id)
+                )
+            except (TypeError, ValueError):
+                pass
+
+    services = []
+
+    for row in service_rows:
+        service_type_id = row[0]
+        service_name = row[1] or "Unnamed Service"
+        default_duration = row[2]
+        default_price = row[3]
+
+        assignment = assignments_by_service.get(
+            service_type_id
+        )
+
+        if use_preserved_form:
+            assigned = (
+                service_type_id
+                in preserved_assigned_ids
+            )
+
+            duration_override = preserved_value(
+                f"duration_override_{service_type_id}"
+            )
+
+            price_override = preserved_value(
+                f"price_override_{service_type_id}"
+            )
+
+            buffer_before = preserved_value(
+                f"buffer_before_{service_type_id}"
+            )
+
+            buffer_after = preserved_value(
+                f"buffer_after_{service_type_id}"
+            )
+
+            is_publicly_bookable = (
+                preserved_value(
+                    f"publicly_bookable_{service_type_id}"
+                )
+                == "1"
+            )
+
+        else:
+            assigned = assignment is not None
+
+            duration_override = (
+                ""
+                if not assignment
+                or assignment[
+                    "duration_override_minutes"
+                ] is None
+                else str(
+                    assignment[
+                        "duration_override_minutes"
+                    ]
+                )
+            )
+
+            price_override = (
+                ""
+                if not assignment
+                or assignment["price_override"] is None
+                else format(
+                    assignment["price_override"],
+                    ".2f"
+                )
+            )
+
+            buffer_before = (
+                ""
+                if not assignment
+                or assignment[
+                    "buffer_before_minutes"
+                ] is None
+                else str(
+                    assignment[
+                        "buffer_before_minutes"
+                    ]
+                )
+            )
+
+            buffer_after = (
+                ""
+                if not assignment
+                or assignment[
+                    "buffer_after_minutes"
+                ] is None
+                else str(
+                    assignment[
+                        "buffer_after_minutes"
+                    ]
+                )
+            )
+
+            is_publicly_bookable = (
+                assignment[
+                    "is_publicly_bookable"
+                ]
+                if assignment
+                else False
+            )
+
+        if default_price is None:
+            default_price_value = ""
+            default_price_display = (
+                "Standard price not set"
+            )
+        else:
+            default_price_value = format(
+                default_price,
+                ".2f"
+            )
+
+            default_price_display = (
+                f"${default_price:,.2f}"
+            )
+
+        services.append({
+            "service_type_id": service_type_id,
+            "service_name": service_name,
+            "default_duration_minutes": (
+                default_duration
+                if default_duration is not None
+                else "Not set"
+            ),
+            "default_price": default_price_value,
+            "default_price_display": (
+                default_price_display
+            ),
+            "assigned": assigned,
+            "duration_override_minutes": (
+                duration_override
+            ),
+            "price_override": price_override,
+            "buffer_before_minutes": (
+                buffer_before
+            ),
+            "buffer_after_minutes": buffer_after,
+            "is_publicly_bookable": (
+                is_publicly_bookable
+            )
+        })
+
+    return render_template(
+        "booking/provider_services.html",
+        providers=providers,
+        selected_provider_id=selected_provider_id,
+        services=services
+    )
+
+
+############################################
+#
+#   ONLINE BOOKING - PROVIDER TIME OFF
+#
+############################################
+
+
+@app.route(
+    "/booking/provider-time-off",
+    methods=["GET", "POST"]
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def booking_provider_time_off():
+    from datetime import datetime
+
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to manage provider time off.",
+            "error"
+        )
+        return redirect(url_for("admin"))
+
+    spa_now = get_spa_now(spa_id)
+
+    # Provider time-off values are stored as local
+    # business wall-clock times without a timezone.
+    if spa_now.tzinfo is not None:
+        spa_now_local = spa_now.replace(tzinfo=None)
+    else:
+        spa_now_local = spa_now
+
+    block_types = [
+        (
+            "time_off",
+            "Vacation / Personal Time"
+        ),
+        (
+            "blocked_time",
+            "Meeting / Temporary Block"
+        )
+    ]
+
+    block_type_labels = dict(block_types)
+
+    view_filter = (
+        request.args.get("view")
+        or "upcoming"
+    ).strip().lower()
+
+    if view_filter not in {
+        "upcoming",
+        "history",
+        "all"
+    }:
+        view_filter = "upcoming"
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                e.employee_id,
+                e.first_name,
+                e.last_name,
+                e.employee_nickname,
+                er.role_name
+            FROM employees e
+            LEFT JOIN employee_roles er
+              ON er.employee_role_id = e.employee_role_id
+             AND er.spa_id = e.spa_id
+            WHERE e.spa_id = %s
+              AND e.is_active = TRUE
+            ORDER BY
+                e.last_name,
+                e.first_name,
+                e.employee_id
+        """, (spa_id,))
+
+        provider_rows = cur.fetchall()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    providers = []
+
+    for row in provider_rows:
+        employee_id = row[0]
+        first_name = (row[1] or "").strip()
+        last_name = (row[2] or "").strip()
+        nickname = (row[3] or "").strip()
+        role_name = (row[4] or "").strip()
+
+        full_name = (
+            f"{first_name} {last_name}".strip()
+        )
+
+        display_name = (
+            nickname
+            or full_name
+            or f"Employee {employee_id}"
+        )
+
+        if role_name:
+            display_name = (
+                f"{display_name} — {role_name}"
+            )
+
+        providers.append({
+            "employee_id": employee_id,
+            "display_name": display_name
+        })
+
+    provider_ids = {
+        provider["employee_id"]
+        for provider in providers
+    }
+
+    preserved_session_key = (
+        "booking_provider_time_off_form"
+    )
+
+    if request.method == "POST":
+        provider_time_off_id = request.form.get(
+            "provider_time_off_id",
+            type=int
+        )
+
+        selected_provider_id = request.form.get(
+            "provider_employee_id",
+            type=int
+        )
+
+        block_type = (
+            request.form.get("block_type")
+            or ""
+        ).strip()
+
+        starts_at_raw = (
+            request.form.get("starts_at")
+            or ""
+        ).strip()
+
+        ends_at_raw = (
+            request.form.get("ends_at")
+            or ""
+        ).strip()
+
+        reason = (
+            request.form.get("reason")
+            or ""
+        ).strip()
+
+        submitted_form_data = {
+            "provider_employee_id": (
+                selected_provider_id
+            ),
+            "block_type": block_type,
+            "starts_at": starts_at_raw,
+            "ends_at": ends_at_raw,
+            "reason": reason
+        }
+
+        validation_errors = []
+
+        if selected_provider_id not in provider_ids:
+            validation_errors.append(
+                "Select a valid active provider."
+            )
+
+        if block_type not in block_type_labels:
+            validation_errors.append(
+                "Select a valid block type."
+            )
+
+        starts_at = None
+        ends_at = None
+
+        if not starts_at_raw:
+            validation_errors.append(
+                "A start date and time are required."
+            )
+        else:
+            try:
+                starts_at = datetime.fromisoformat(
+                    starts_at_raw
+                )
+            except ValueError:
+                validation_errors.append(
+                    "The start date or time is invalid."
+                )
+
+        if not ends_at_raw:
+            validation_errors.append(
+                "An end date and time are required."
+            )
+        else:
+            try:
+                ends_at = datetime.fromisoformat(
+                    ends_at_raw
+                )
+            except ValueError:
+                validation_errors.append(
+                    "The end date or time is invalid."
+                )
+
+        if (
+            starts_at is not None
+            and ends_at is not None
+            and ends_at <= starts_at
+        ):
+            validation_errors.append(
+                "The ending date and time must be "
+                "later than the starting date and time."
+            )
+
+        if len(reason) > 255:
+            validation_errors.append(
+                "The reason or note cannot exceed "
+                "255 characters."
+            )
+
+        existing_record = None
+
+        if (
+            provider_time_off_id is not None
+            and not validation_errors
+        ):
+            conn = get_db_connection()
+            cur = conn.cursor()
+
+            try:
+                cur.execute("""
+                    SELECT
+                        provider_time_off_id,
+                        provider_employee_id,
+                        starts_at,
+                        ends_at,
+                        is_active
+                    FROM provider_time_off
+                    WHERE provider_time_off_id = %s
+                      AND spa_id = %s
+                      AND business_unit_id = %s
+                    LIMIT 1
+                """, (
+                    provider_time_off_id,
+                    spa_id,
+                    business_unit_id
+                ))
+
+                existing_record = cur.fetchone()
+
+            finally:
+                cur.close()
+                conn.close()
+
+            if not existing_record:
+                validation_errors.append(
+                    "The time-off record could not "
+                    "be found."
+                )
+
+            elif not existing_record[4]:
+                validation_errors.append(
+                    "A cancelled time-off record cannot "
+                    "be edited."
+                )
+
+            elif existing_record[3] <= spa_now_local:
+                validation_errors.append(
+                    "A past time-off record cannot "
+                    "be edited."
+                )
+
+        if (
+            not validation_errors
+            and starts_at is not None
+            and ends_at is not None
+        ):
+            conn = get_db_connection()
+            cur = conn.cursor()
+
+            try:
+                overlap_query = """
+                    SELECT
+                        provider_time_off_id
+                    FROM provider_time_off
+                    WHERE spa_id = %s
+                      AND business_unit_id = %s
+                      AND provider_employee_id = %s
+                      AND is_active = TRUE
+                      AND starts_at < %s
+                      AND ends_at > %s
+                """
+
+                overlap_params = [
+                    spa_id,
+                    business_unit_id,
+                    selected_provider_id,
+                    ends_at,
+                    starts_at
+                ]
+
+                if provider_time_off_id is not None:
+                    overlap_query += """
+                        AND provider_time_off_id <> %s
+                    """
+
+                    overlap_params.append(
+                        provider_time_off_id
+                    )
+
+                overlap_query += """
+                    LIMIT 1
+                """
+
+                cur.execute(
+                    overlap_query,
+                    tuple(overlap_params)
+                )
+
+                overlapping_record = cur.fetchone()
+
+            finally:
+                cur.close()
+                conn.close()
+
+            if overlapping_record:
+                validation_errors.append(
+                    "This provider already has an "
+                    "overlapping time-off block."
+                )
+
+        if validation_errors:
+            session[preserved_session_key] = {
+                "spa_id": spa_id,
+                "business_unit_id": business_unit_id,
+                "provider_time_off_id": (
+                    provider_time_off_id
+                ),
+                "form_data": submitted_form_data
+            }
+
+            for error_message in validation_errors:
+                flash(error_message, "error")
+
+            redirect_values = {
+                "provider_employee_id": (
+                    selected_provider_id
+                ),
+                "view": view_filter
+            }
+
+            if provider_time_off_id is not None:
+                redirect_values["edit_id"] = (
+                    provider_time_off_id
+                )
+
+            return redirect(
+                url_for(
+                    "booking_provider_time_off",
+                    **redirect_values
+                )
+            )
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        try:
+            if provider_time_off_id is not None:
+                cur.execute("""
+                    UPDATE provider_time_off
+                    SET
+                        provider_employee_id = %s,
+                        starts_at = %s,
+                        ends_at = %s,
+                        block_type = %s,
+                        reason = %s,
+                        updated_at = CURRENT_TIMESTAMP,
+                        updated_by = %s
+                    WHERE provider_time_off_id = %s
+                      AND spa_id = %s
+                      AND business_unit_id = %s
+                      AND is_active = TRUE
+                """, (
+                    selected_provider_id,
+                    starts_at,
+                    ends_at,
+                    block_type,
+                    reason or None,
+                    user_id,
+                    provider_time_off_id,
+                    spa_id,
+                    business_unit_id
+                ))
+
+                if cur.rowcount == 0:
+                    raise ValueError(
+                        "Time-off record was not updated."
+                    )
+
+                success_message = (
+                    "Provider time off updated "
+                    "successfully."
+                )
+
+            else:
+                cur.execute("""
+                    INSERT INTO provider_time_off (
+                        spa_id,
+                        business_unit_id,
+                        provider_employee_id,
+                        starts_at,
+                        ends_at,
+                        block_type,
+                        reason,
+                        is_active,
+                        created_by,
+                        updated_by
+                    )
+                    VALUES (
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        TRUE,
+                        %s,
+                        %s
+                    )
+                """, (
+                    spa_id,
+                    business_unit_id,
+                    selected_provider_id,
+                    starts_at,
+                    ends_at,
+                    block_type,
+                    reason or None,
+                    user_id,
+                    user_id
+                ))
+
+                success_message = (
+                    "Provider time off added "
+                    "successfully."
+                )
+
+            conn.commit()
+
+            session.pop(
+                preserved_session_key,
+                None
+            )
+
+            flash(
+                success_message,
+                "success"
+            )
+
+        except Exception as error:
+            conn.rollback()
+
+            session[preserved_session_key] = {
+                "spa_id": spa_id,
+                "business_unit_id": business_unit_id,
+                "provider_time_off_id": (
+                    provider_time_off_id
+                ),
+                "form_data": submitted_form_data
+            }
+
+            print(
+                "SAVE PROVIDER TIME OFF ERROR:",
+                error
+            )
+
+            flash(
+                "Provider time off could not be saved.",
+                "error"
+            )
+
+        finally:
+            cur.close()
+            conn.close()
+
+        redirect_values = {
+            "provider_employee_id": (
+                selected_provider_id
+            ),
+            "view": "upcoming"
+        }
+
+        if (
+            provider_time_off_id is not None
+            and session.get(preserved_session_key)
+        ):
+            redirect_values["edit_id"] = (
+                provider_time_off_id
+            )
+
+        return redirect(
+            url_for(
+                "booking_provider_time_off",
+                **redirect_values
+            )
+        )
+
+    edit_id = request.args.get(
+        "edit_id",
+        type=int
+    )
+
+    editing_time_off = None
+    editing_row = None
+
+    if edit_id is not None:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        try:
+            cur.execute("""
+                SELECT
+                    provider_time_off_id,
+                    provider_employee_id,
+                    starts_at,
+                    ends_at,
+                    block_type,
+                    reason,
+                    is_active
+                FROM provider_time_off
+                WHERE provider_time_off_id = %s
+                  AND spa_id = %s
+                  AND business_unit_id = %s
+                LIMIT 1
+            """, (
+                edit_id,
+                spa_id,
+                business_unit_id
+            ))
+
+            editing_row = cur.fetchone()
+
+        finally:
+            cur.close()
+            conn.close()
+
+        if not editing_row:
+            flash(
+                "The time-off record could not be found.",
+                "error"
+            )
+
+            return redirect(
+                url_for(
+                    "booking_provider_time_off",
+                    view=view_filter
+                )
+            )
+
+        if not editing_row[6]:
+            flash(
+                "A cancelled time-off record cannot "
+                "be edited.",
+                "warning"
+            )
+
+            return redirect(
+                url_for(
+                    "booking_provider_time_off",
+                    view="history"
+                )
+            )
+
+        if editing_row[3] <= spa_now_local:
+            flash(
+                "A past time-off record cannot be edited.",
+                "warning"
+            )
+
+            return redirect(
+                url_for(
+                    "booking_provider_time_off",
+                    view="history"
+                )
+            )
+
+        editing_time_off = {
+            "provider_time_off_id": editing_row[0]
+        }
+
+    preserved_form = session.get(
+        preserved_session_key
+    )
+
+    use_preserved_form = (
+        preserved_form
+        and preserved_form.get("spa_id") == spa_id
+        and preserved_form.get(
+            "business_unit_id"
+        ) == business_unit_id
+        and preserved_form.get(
+            "provider_time_off_id"
+        ) == edit_id
+    )
+
+    if use_preserved_form:
+        form_data = preserved_form.get(
+            "form_data",
+            {}
+        )
+
+        session.pop(
+            preserved_session_key,
+            None
+        )
+
+    elif editing_row:
+        form_data = {
+            "provider_employee_id": editing_row[1],
+            "starts_at": editing_row[2].strftime(
+                "%Y-%m-%dT%H:%M"
+            ),
+            "ends_at": editing_row[3].strftime(
+                "%Y-%m-%dT%H:%M"
+            ),
+            "block_type": editing_row[4],
+            "reason": editing_row[5] or ""
+        }
+
+    else:
+        selected_provider_id = request.args.get(
+            "provider_employee_id",
+            type=int
+        )
+
+        if selected_provider_id not in provider_ids:
+            selected_provider_id = (
+                providers[0]["employee_id"]
+                if providers
+                else None
+            )
+
+        form_data = {
+            "provider_employee_id": (
+                selected_provider_id
+            ),
+            "starts_at": "",
+            "ends_at": "",
+            "block_type": "time_off",
+            "reason": ""
+        }
+
+    selected_provider_id = form_data.get(
+        "provider_employee_id"
+    )
+
+    records_query = """
+        SELECT
+            pto.provider_time_off_id,
+            pto.provider_employee_id,
+            pto.starts_at,
+            pto.ends_at,
+            pto.block_type,
+            pto.reason,
+            pto.is_active,
+            e.first_name,
+            e.last_name,
+            e.employee_nickname
+        FROM provider_time_off pto
+        JOIN employees e
+          ON e.employee_id = pto.provider_employee_id
+         AND e.spa_id = pto.spa_id
+        WHERE pto.spa_id = %s
+          AND pto.business_unit_id = %s
+    """
+
+    records_params = [
+        spa_id,
+        business_unit_id
+    ]
+
+    if view_filter == "upcoming":
+        records_query += """
+            AND pto.is_active = TRUE
+            AND pto.ends_at >= %s
+        """
+
+        records_params.append(
+            spa_now_local
+        )
+
+        records_query += """
+            ORDER BY
+                pto.starts_at,
+                pto.ends_at
+        """
+
+    elif view_filter == "history":
+        records_query += """
+            AND (
+                pto.is_active = FALSE
+                OR pto.ends_at < %s
+            )
+        """
+
+        records_params.append(
+            spa_now_local
+        )
+
+        records_query += """
+            ORDER BY
+                pto.starts_at DESC,
+                pto.ends_at DESC
+        """
+
+    else:
+        records_query += """
+            ORDER BY
+                pto.is_active DESC,
+                pto.starts_at DESC,
+                pto.ends_at DESC
+        """
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            records_query,
+            tuple(records_params)
+        )
+
+        record_rows = cur.fetchall()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    def format_local_time_off(value):
+        date_part = value.strftime(
+            "%m/%d/%Y"
+        )
+
+        time_part = value.strftime(
+            "%I:%M %p"
+        ).lstrip("0")
+
+        return f"{date_part} {time_part}"
+
+    time_off_records = []
+
+    for row in record_rows:
+        provider_time_off_id = row[0]
+        provider_employee_id = row[1]
+        starts_at = row[2]
+        ends_at = row[3]
+        block_type = row[4]
+        reason = row[5]
+        is_active = bool(row[6])
+
+        first_name = (row[7] or "").strip()
+        last_name = (row[8] or "").strip()
+        nickname = (row[9] or "").strip()
+
+        provider_name = (
+            nickname
+            or f"{first_name} {last_name}".strip()
+            or f"Employee {provider_employee_id}"
+        )
+
+        if not is_active:
+            status = "Cancelled"
+            status_class = "cancelled"
+
+        elif ends_at < spa_now_local:
+            status = "Past"
+            status_class = "past"
+
+        elif (
+            starts_at <= spa_now_local
+            and ends_at > spa_now_local
+        ):
+            status = "Current"
+            status_class = "current"
+
+        else:
+            status = "Upcoming"
+            status_class = "upcoming"
+
+        time_off_records.append({
+            "provider_time_off_id": (
+                provider_time_off_id
+            ),
+            "provider_employee_id": (
+                provider_employee_id
+            ),
+            "provider_name": provider_name,
+            "starts_at_display": (
+                format_local_time_off(starts_at)
+            ),
+            "ends_at_display": (
+                format_local_time_off(ends_at)
+            ),
+            "block_type_display": (
+                block_type_labels.get(
+                    block_type,
+                    block_type.replace(
+                        "_",
+                        " "
+                    ).title()
+                )
+            ),
+            "reason": reason,
+            "is_active": is_active,
+            "status": status,
+            "status_class": status_class
+        })
+
+    return render_template(
+        "booking/provider_time_off.html",
+        providers=providers,
+        block_types=block_types,
+        form_data=form_data,
+        editing_time_off=editing_time_off,
+        selected_provider_id=selected_provider_id,
+        time_off_records=time_off_records,
+        view_filter=view_filter
+    )
+
+
+############################################
+#
+#   ONLINE BOOKING - CANCEL TIME OFF
+#
+############################################
+
+
+@app.route(
+    "/booking/provider-time-off/"
+    "<int:provider_time_off_id>/deactivate",
+    methods=["POST"]
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def deactivate_provider_time_off(
+    provider_time_off_id
+):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required.",
+            "error"
+        )
+        return redirect(url_for("admin"))
+
+    selected_provider_id = None
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                provider_employee_id,
+                is_active
+            FROM provider_time_off
+            WHERE provider_time_off_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            FOR UPDATE
+        """, (
+            provider_time_off_id,
+            spa_id,
+            business_unit_id
+        ))
+
+        record = cur.fetchone()
+
+        if not record:
+            conn.rollback()
+
+            flash(
+                "The time-off record could not be found.",
+                "error"
+            )
+
+        else:
+            selected_provider_id = record[0]
+
+            if not record[1]:
+                conn.rollback()
+
+                flash(
+                    "This time-off block is already "
+                    "cancelled.",
+                    "warning"
+                )
+
+            else:
+                cur.execute("""
+                    UPDATE provider_time_off
+                    SET
+                        is_active = FALSE,
+                        updated_at = CURRENT_TIMESTAMP,
+                        updated_by = %s
+                    WHERE provider_time_off_id = %s
+                      AND spa_id = %s
+                      AND business_unit_id = %s
+                      AND is_active = TRUE
+                """, (
+                    user_id,
+                    provider_time_off_id,
+                    spa_id,
+                    business_unit_id
+                ))
+
+                conn.commit()
+
+                flash(
+                    "Time-off block cancelled "
+                    "successfully.",
+                    "success"
+                )
+
+    except Exception as error:
+        conn.rollback()
+
+        print(
+            "CANCEL PROVIDER TIME OFF ERROR:",
+            error
+        )
+
+        flash(
+            "The time-off block could not be "
+            "cancelled.",
+            "error"
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    return redirect(
+        url_for(
+            "booking_provider_time_off",
+            provider_employee_id=(
+                selected_provider_id
+            ),
+            view="upcoming"
+        )
+    )
+
+
 @app.route("/admin")
 @login_required
 @spa_required
@@ -37169,6 +40645,6317 @@ def clear_new_client():
 #  --------------------------------
 
 
+
+
+############################################
+#
+#       BOOKING AVAILABILITY ENGINE
+#
+############################################
+
+
+def _booking_normalize_name(value):
+    return " ".join(
+        str(value or "").strip().lower().split()
+    )
+
+
+def _booking_intervals_overlap(
+    first_start,
+    first_end,
+    second_start,
+    second_end
+):
+    return (
+        first_start < second_end
+        and first_end > second_start
+    )
+
+
+def _booking_round_up_to_interval(
+    value,
+    interval_minutes
+):
+    from datetime import timedelta
+
+    interval_minutes = max(
+        int(interval_minutes or 1),
+        1
+    )
+
+    day_start = value.replace(
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0
+    )
+
+    total_minutes = (
+        value.hour * 60
+        + value.minute
+    )
+
+    if value.second or value.microsecond:
+        total_minutes += 1
+
+    rounded_minutes = (
+        (
+            total_minutes
+            + interval_minutes
+            - 1
+        )
+        // interval_minutes
+    ) * interval_minutes
+
+    return (
+        day_start
+        + timedelta(minutes=rounded_minutes)
+    )
+
+
+def _booking_merge_windows(windows):
+    if not windows:
+        return []
+
+    sorted_windows = sorted(
+        windows,
+        key=lambda item: item[0]
+    )
+
+    merged = [
+        [
+            sorted_windows[0][0],
+            sorted_windows[0][1]
+        ]
+    ]
+
+    for window_start, window_end in sorted_windows[1:]:
+        previous_start, previous_end = merged[-1]
+
+        if window_start <= previous_end:
+            merged[-1][1] = max(
+                previous_end,
+                window_end
+            )
+        else:
+            merged.append(
+                [window_start, window_end]
+            )
+
+    return [
+        (window_start, window_end)
+        for window_start, window_end in merged
+    ]
+
+
+
+
+
+def _booking_normalize_email(value):
+    return str(
+        value or ""
+    ).strip().lower()
+
+
+def _booking_normalize_phone(value):
+    digits = "".join(
+        character
+        for character in str(value or "")
+        if character.isdigit()
+    )
+
+    # Normalize a standard US country-code prefix.
+    if (
+        len(digits) == 11
+        and digits.startswith("1")
+    ):
+        digits = digits[1:]
+
+    return digits
+
+
+def _booking_validate_selected_slot(
+    cur,
+    spa_id,
+    business_unit_id,
+    provider_employee_id,
+    service_type_id,
+    appointment_start,
+    require_public=False
+):
+    """
+    Revalidate one selected appointment time using the
+    same rules as the booking availability engine.
+
+    This function does not commit or acquire a database
+    lock. The confirmation route must lock the selected
+    provider/date before calling it.
+    """
+    from datetime import datetime, timedelta
+
+    def invalid(reason):
+        return {
+            "valid": False,
+            "reason": reason
+        }
+
+    try:
+        spa_id = int(spa_id)
+        business_unit_id = int(
+            business_unit_id
+        )
+        provider_employee_id = int(
+            provider_employee_id
+        )
+        service_type_id = int(
+            service_type_id
+        )
+    except (TypeError, ValueError):
+        return invalid(
+            "Invalid booking selection."
+        )
+
+    if isinstance(appointment_start, str):
+        try:
+            appointment_start = (
+                datetime.fromisoformat(
+                    appointment_start
+                )
+            )
+        except ValueError:
+            return invalid(
+                "Invalid appointment date or time."
+            )
+
+    if not isinstance(
+        appointment_start,
+        datetime
+    ):
+        return invalid(
+            "Invalid appointment date or time."
+        )
+
+    # Booking times are stored as local business
+    # wall-clock values without timezone information.
+    appointment_start = (
+        appointment_start.replace(
+            tzinfo=None
+        )
+    )
+
+    if (
+        appointment_start.second != 0
+        or appointment_start.microsecond != 0
+    ):
+        return invalid(
+            "The selected time is not aligned "
+            "to a valid booking interval."
+        )
+
+    # =====================================================
+    # Booking settings
+    # =====================================================
+
+    cur.execute("""
+        SELECT
+            slot_interval_minutes,
+            minimum_booking_notice_hours,
+            maximum_booking_days_ahead,
+            default_buffer_before_minutes,
+            default_buffer_after_minutes,
+            public_booking_enabled
+        FROM booking_settings
+        WHERE spa_id = %s
+          AND business_unit_id = %s
+    """, (
+        spa_id,
+        business_unit_id
+    ))
+
+    settings_row = cur.fetchone()
+
+    if not settings_row:
+        return invalid(
+            "Booking settings were not found."
+        )
+
+    slot_interval_minutes = max(
+        int(settings_row[0] or 15),
+        1
+    )
+
+    minimum_notice_hours = max(
+        int(settings_row[1] or 0),
+        0
+    )
+
+    maximum_days_ahead = max(
+        int(settings_row[2] or 90),
+        0
+    )
+
+    default_buffer_before = max(
+        int(settings_row[3] or 0),
+        0
+    )
+
+    default_buffer_after = max(
+        int(settings_row[4] or 0),
+        0
+    )
+
+    public_booking_enabled = bool(
+        settings_row[5]
+    )
+
+    if (
+        require_public
+        and not public_booking_enabled
+    ):
+        return invalid(
+            "Online booking is not currently enabled."
+        )
+
+    local_now = get_spa_now(
+        spa_id
+    ).replace(tzinfo=None)
+
+    earliest_allowed_start = (
+        local_now
+        + timedelta(
+            hours=minimum_notice_hours
+        )
+    )
+
+    latest_allowed_date = (
+        local_now.date()
+        + timedelta(
+            days=maximum_days_ahead
+        )
+    )
+
+    if (
+        appointment_start.date()
+        < local_now.date()
+        or appointment_start.date()
+        > latest_allowed_date
+    ):
+        return invalid(
+            "The selected date is outside "
+            "the allowed booking range."
+        )
+
+    if (
+        appointment_start
+        < earliest_allowed_start
+    ):
+        return invalid(
+            "The minimum booking notice "
+            "has not been met."
+        )
+
+    minutes_from_midnight = (
+        appointment_start.hour * 60
+        + appointment_start.minute
+    )
+
+    if (
+        minutes_from_midnight
+        % slot_interval_minutes
+        != 0
+    ):
+        return invalid(
+            "The selected time is not aligned "
+            "to a valid booking interval."
+        )
+
+    # =====================================================
+    # Provider-service assignment
+    # =====================================================
+
+    assignment_sql = """
+        SELECT
+            COALESCE(
+                NULLIF(
+                    TRIM(e.employee_nickname),
+                    ''
+                ),
+                NULLIF(
+                    TRIM(
+                        CONCAT_WS(
+                            ' ',
+                            e.first_name,
+                            e.last_name
+                        )
+                    ),
+                    ''
+                ),
+                'Provider ' ||
+                    e.employee_id::TEXT
+            ) AS provider_name,
+
+            snt.service_name,
+
+            COALESCE(
+                pst.duration_override_minutes,
+                snt.default_duration_minutes
+            ) AS duration_minutes,
+
+            COALESCE(
+                pst.price_override,
+                snt.default_price
+            ) AS price_at_booking,
+
+            COALESCE(
+                pst.buffer_before_minutes,
+                %s,
+                0
+            ) AS buffer_before_minutes,
+
+            COALESCE(
+                pst.buffer_after_minutes,
+                %s,
+                0
+            ) AS buffer_after_minutes,
+
+            pst.is_publicly_bookable
+
+        FROM provider_service_types pst
+
+        JOIN employees e
+          ON e.employee_id =
+                pst.provider_employee_id
+         AND e.spa_id = pst.spa_id
+
+        JOIN service_name_types snt
+          ON snt.service_type_id =
+                pst.service_type_id
+         AND snt.spa_id = pst.spa_id
+
+        WHERE pst.spa_id = %s
+          AND pst.business_unit_id = %s
+          AND pst.provider_employee_id = %s
+          AND pst.service_type_id = %s
+          AND pst.is_active = TRUE
+          AND e.is_active = TRUE
+          AND snt.is_active = TRUE
+    """
+
+    assignment_params = [
+        default_buffer_before,
+        default_buffer_after,
+        spa_id,
+        business_unit_id,
+        provider_employee_id,
+        service_type_id
+    ]
+
+    if require_public:
+        assignment_sql += """
+          AND pst.is_publicly_bookable = TRUE
+        """
+
+    assignment_sql += """
+        LIMIT 1
+    """
+
+    cur.execute(
+        assignment_sql,
+        tuple(assignment_params)
+    )
+
+    assignment_row = cur.fetchone()
+
+    if not assignment_row:
+        return invalid(
+            "The selected provider does not "
+            "offer this service."
+        )
+
+    provider_name = assignment_row[0]
+    service_name = assignment_row[1]
+
+    duration_minutes = int(
+        assignment_row[2] or 0
+    )
+
+    price_at_booking = assignment_row[3]
+
+    buffer_before_minutes = max(
+        int(assignment_row[4] or 0),
+        0
+    )
+
+    buffer_after_minutes = max(
+        int(assignment_row[5] or 0),
+        0
+    )
+
+    if duration_minutes <= 0:
+        return invalid(
+            "The selected service does not have "
+            "a valid duration."
+        )
+
+    service_end = (
+        appointment_start
+        + timedelta(
+            minutes=duration_minutes
+        )
+    )
+
+    candidate_block_start = (
+        appointment_start
+        - timedelta(
+            minutes=buffer_before_minutes
+        )
+    )
+
+    candidate_block_end = (
+        service_end
+        + timedelta(
+            minutes=buffer_after_minutes
+        )
+    )
+
+    selected_date = (
+        appointment_start.date()
+    )
+
+    if (
+        candidate_block_start.date()
+        != selected_date
+        or candidate_block_end.date()
+        != selected_date
+    ):
+        return invalid(
+            "The selected appointment does not fit "
+            "within one business day."
+        )
+
+    day_of_week = (
+        selected_date.isoweekday()
+    )
+
+    # =====================================================
+    # Business and provider working hours
+    # =====================================================
+
+    cur.execute("""
+        SELECT
+            start_time,
+            end_time
+        FROM booking_business_hours
+        WHERE spa_id = %s
+          AND business_unit_id = %s
+          AND day_of_week = %s
+          AND is_active = TRUE
+        ORDER BY start_time
+    """, (
+        spa_id,
+        business_unit_id,
+        day_of_week
+    ))
+
+    business_windows = [
+        (
+            datetime.combine(
+                selected_date,
+                row[0]
+            ),
+            datetime.combine(
+                selected_date,
+                row[1]
+            )
+        )
+        for row in cur.fetchall()
+    ]
+
+    if not business_windows:
+        return invalid(
+            "The business is closed on "
+            "the selected date."
+        )
+
+    cur.execute("""
+        SELECT
+            start_time,
+            end_time
+        FROM provider_booking_hours
+        WHERE spa_id = %s
+          AND business_unit_id = %s
+          AND provider_employee_id = %s
+          AND day_of_week = %s
+          AND is_active = TRUE
+        ORDER BY start_time
+    """, (
+        spa_id,
+        business_unit_id,
+        provider_employee_id,
+        day_of_week
+    ))
+
+    provider_windows = [
+        (
+            datetime.combine(
+                selected_date,
+                row[0]
+            ),
+            datetime.combine(
+                selected_date,
+                row[1]
+            )
+        )
+        for row in cur.fetchall()
+    ]
+
+    if not provider_windows:
+        return invalid(
+            "The selected provider is not working "
+            "on that date."
+        )
+
+    fits_working_window = False
+
+    for (
+        business_start,
+        business_end
+    ) in business_windows:
+
+        for (
+            provider_start,
+            provider_end
+        ) in provider_windows:
+
+            working_start = max(
+                business_start,
+                provider_start
+            )
+
+            working_end = min(
+                business_end,
+                provider_end
+            )
+
+            if (
+                working_start < working_end
+                and candidate_block_start
+                    >= working_start
+                and candidate_block_end
+                    <= working_end
+            ):
+                fits_working_window = True
+                break
+
+        if fits_working_window:
+            break
+
+    if not fits_working_window:
+        return invalid(
+            "The selected appointment does not fit "
+            "within the provider's working hours."
+        )
+
+    # =====================================================
+    # Provider time off and blocked time
+    # =====================================================
+
+    cur.execute("""
+        SELECT 1
+        FROM provider_time_off
+        WHERE spa_id = %s
+          AND business_unit_id = %s
+          AND provider_employee_id = %s
+          AND is_active = TRUE
+          AND starts_at < %s
+          AND ends_at > %s
+        LIMIT 1
+    """, (
+        spa_id,
+        business_unit_id,
+        provider_employee_id,
+        candidate_block_end,
+        candidate_block_start
+    ))
+
+    if cur.fetchone():
+        return invalid(
+            "The selected provider is unavailable "
+            "at that time."
+        )
+
+    # =====================================================
+    # Provider aliases for appointments that were created
+    # before provider_employee_id was consistently stored
+    # =====================================================
+
+    cur.execute("""
+        SELECT DISTINCT
+            e.employee_id,
+            e.employee_nickname,
+            e.first_name,
+            e.last_name
+        FROM provider_service_types pst
+        JOIN employees e
+          ON e.employee_id =
+                pst.provider_employee_id
+         AND e.spa_id = pst.spa_id
+        WHERE pst.spa_id = %s
+          AND pst.business_unit_id = %s
+          AND pst.is_active = TRUE
+          AND e.is_active = TRUE
+    """, (
+        spa_id,
+        business_unit_id
+    ))
+
+    alias_to_provider_ids = {}
+
+    for row in cur.fetchall():
+        employee_id = row[0]
+        nickname = row[1]
+        first_name = row[2]
+        last_name = row[3]
+
+        aliases = {
+            _booking_normalize_name(
+                nickname
+            ),
+            _booking_normalize_name(
+                first_name
+            ),
+            _booking_normalize_name(
+                " ".join(
+                    value
+                    for value in (
+                        first_name,
+                        last_name
+                    )
+                    if value
+                )
+            )
+        }
+
+        for alias in aliases:
+            if not alias:
+                continue
+
+            alias_to_provider_ids.setdefault(
+                alias,
+                set()
+            ).add(employee_id)
+
+    # =====================================================
+    # Existing appointment conflicts
+    # =====================================================
+
+    cur.execute("""
+        SELECT
+            a.appointment_id,
+            a.appointment_time,
+
+            COALESCE(
+                NULLIF(
+                    a.duration_minutes,
+                    0
+                ),
+                snt.default_duration_minutes,
+                60
+            ) AS duration_minutes,
+
+            a.provider_employee_id,
+            a.provider_name_at_booking,
+
+            COALESCE(
+                pst.buffer_before_minutes,
+                %s,
+                0
+            ) AS buffer_before_minutes,
+
+            COALESCE(
+                pst.buffer_after_minutes,
+                %s,
+                0
+            ) AS buffer_after_minutes
+
+        FROM appointments a
+
+        LEFT JOIN service_name_types snt
+          ON snt.service_type_id =
+                a.service_type_id
+         AND snt.spa_id = a.spa_id
+
+        LEFT JOIN provider_service_types pst
+          ON pst.spa_id = a.spa_id
+         AND pst.business_unit_id =
+                a.business_unit_id
+         AND pst.provider_employee_id =
+                a.provider_employee_id
+         AND pst.service_type_id =
+                a.service_type_id
+         AND pst.is_active = TRUE
+
+        WHERE a.spa_id = %s
+          AND a.business_unit_id = %s
+          AND a.appointment_date = %s
+
+          AND LOWER(
+                TRIM(
+                    COALESCE(
+                        a.status,
+                        ''
+                    )
+                )
+              ) NOT IN (
+                'cancelled',
+                'canceled',
+                'completed',
+                'no show',
+                'no-show',
+                're-scheduled',
+                'rescheduled'
+              )
+
+        ORDER BY
+            a.appointment_time,
+            a.appointment_id
+    """, (
+        default_buffer_before,
+        default_buffer_after,
+        spa_id,
+        business_unit_id,
+        selected_date
+    ))
+
+    generic_provider_names = {
+        "",
+        "any",
+        "any available",
+        "any provider",
+        "no preference",
+        "unassigned"
+    }
+
+    for row in cur.fetchall():
+        existing_time = row[1]
+
+        if existing_time is None:
+            continue
+
+        existing_provider_id = row[3]
+        applies_to_selected_provider = False
+
+        if (
+            existing_provider_id
+            == provider_employee_id
+        ):
+            applies_to_selected_provider = True
+
+        elif existing_provider_id is None:
+            normalized_provider_name = (
+                _booking_normalize_name(
+                    row[4]
+                )
+            )
+
+            matched_ids = (
+                alias_to_provider_ids.get(
+                    normalized_provider_name,
+                    set()
+                )
+            )
+
+            if (
+                normalized_provider_name
+                in generic_provider_names
+            ):
+                applies_to_selected_provider = True
+
+            elif len(matched_ids) == 1:
+                applies_to_selected_provider = (
+                    provider_employee_id
+                    in matched_ids
+                )
+
+            else:
+                # An unrecognized or ambiguous legacy
+                # provider blocks all providers safely.
+                applies_to_selected_provider = True
+
+        if not applies_to_selected_provider:
+            continue
+
+        existing_start = datetime.combine(
+            selected_date,
+            existing_time
+        )
+
+        existing_end = (
+            existing_start
+            + timedelta(
+                minutes=int(row[2] or 60)
+            )
+        )
+
+        existing_block_start = (
+            existing_start
+            - timedelta(
+                minutes=int(row[5] or 0)
+            )
+        )
+
+        existing_block_end = (
+            existing_end
+            + timedelta(
+                minutes=int(row[6] or 0)
+            )
+        )
+
+        if _booking_intervals_overlap(
+            candidate_block_start,
+            candidate_block_end,
+            existing_block_start,
+            existing_block_end
+        ):
+            return invalid(
+                "That appointment time is no longer "
+                "available."
+            )
+
+    return {
+        "valid": True,
+        "reason": "",
+
+        "spa_id": spa_id,
+        "business_unit_id":
+            business_unit_id,
+
+        "provider_employee_id":
+            provider_employee_id,
+
+        "provider_name":
+            provider_name,
+
+        "service_type_id":
+            service_type_id,
+
+        "service_name":
+            service_name,
+
+        "duration_minutes":
+            duration_minutes,
+
+        "price_at_booking":
+            price_at_booking,
+
+        "buffer_before_minutes":
+            buffer_before_minutes,
+
+        "buffer_after_minutes":
+            buffer_after_minutes,
+
+        "appointment_start":
+            appointment_start,
+
+        "appointment_date":
+            appointment_start.date(),
+
+        "appointment_time":
+            appointment_start.time(),
+
+        "service_end":
+            service_end
+    }
+
+
+
+
+@app.route(
+    "/booking/public-preview/confirm",
+    methods=["POST"]
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def booking_public_preview_confirm():
+    """
+    Internal-only booking confirmation test.
+
+    This route creates a real local appointment, but it
+    does not enable the public booking URL and does not
+    send email or SMS.
+    """
+    import re
+    from datetime import datetime
+
+    spa_id = current_spa_id()
+    business_unit_id = (
+        current_business_unit_id()
+    )
+
+    service_type_id_raw = (
+        request.form.get(
+            "service_type_id"
+        )
+        or ""
+    ).strip()
+
+    provider_employee_id_raw = (
+        request.form.get(
+            "provider_employee_id"
+        )
+        or ""
+    ).strip()
+
+    appointment_start_raw = (
+        request.form.get(
+            "appointment_start"
+        )
+        or ""
+    ).strip()
+
+    first_name = (
+        request.form.get("first_name")
+        or ""
+    ).strip()
+
+    last_name = (
+        request.form.get("last_name")
+        or ""
+    ).strip()
+
+    phone = (
+        request.form.get("phone")
+        or ""
+    ).strip()
+
+    email = (
+        request.form.get("email")
+        or ""
+    ).strip()
+
+    notes = (
+        request.form.get("notes")
+        or ""
+    ).strip()
+
+    booking_for_other_raw = (
+        request.form.get(
+            "booking_for_other"
+        )
+        or "false"
+    ).strip().lower()
+
+    guest_first_name = (
+        request.form.get(
+            "guest_first_name"
+        )
+        or ""
+    ).strip()
+
+    guest_last_name = (
+        request.form.get(
+            "guest_last_name"
+        )
+        or ""
+    ).strip()
+
+
+    def failure_response(
+        message,
+        status_code=400,
+        service_type_id=None
+    ):
+        back_arguments = {}
+
+        if service_type_id:
+            back_arguments[
+                "service_type_id"
+            ] = service_type_id
+
+        return (
+            render_template(
+                "booking/"
+                "public_booking_confirmation.html",
+                success=False,
+                preview_mode=True,
+                message=message,
+                back_url=url_for(
+                    "booking_public_preview",
+                    **back_arguments
+                )
+            ),
+            status_code
+        )
+
+
+    if business_unit_id is None:
+        return failure_response(
+            "A valid Provider Workspace "
+            "is required."
+        )
+
+
+    try:
+        service_type_id = int(
+            service_type_id_raw
+        )
+
+        provider_employee_id = int(
+            provider_employee_id_raw
+        )
+    except (TypeError, ValueError):
+        return failure_response(
+            "The selected service or provider "
+            "is invalid."
+        )
+
+
+    try:
+        appointment_start = (
+            datetime.fromisoformat(
+                appointment_start_raw
+            )
+        )
+    except (TypeError, ValueError):
+        return failure_response(
+            "The selected appointment time "
+            "is invalid.",
+            service_type_id=service_type_id
+        )
+
+
+    if appointment_start.tzinfo is not None:
+        return failure_response(
+            "The selected appointment time "
+            "contains an unexpected timezone.",
+            service_type_id=service_type_id
+        )
+
+
+    if (
+        not first_name
+        or not last_name
+    ):
+        return failure_response(
+            "First and last name are required.",
+            service_type_id=service_type_id
+        )
+
+
+    if (
+        len(first_name) > 80
+        or len(last_name) > 80
+    ):
+        return failure_response(
+            "The client name is too long.",
+            service_type_id=service_type_id
+        )
+
+
+    if booking_for_other_raw not in (
+        "true",
+        "false"
+    ):
+        return failure_response(
+            "The appointment recipient selection "
+            "is invalid.",
+            service_type_id=service_type_id
+        )
+
+    booking_for_other = (
+        booking_for_other_raw == "true"
+    )
+
+    if (
+        booking_for_other
+        and (
+            not guest_first_name
+            or not guest_last_name
+        )
+    ):
+        return failure_response(
+            "The guest's first and last name "
+            "are required.",
+            service_type_id=service_type_id
+        )
+
+    if (
+        len(guest_first_name) > 80
+        or len(guest_last_name) > 80
+    ):
+        return failure_response(
+            "The guest name is too long.",
+            service_type_id=service_type_id
+        )
+
+    if not booking_for_other:
+        guest_first_name = ""
+        guest_last_name = ""
+
+
+    if len(phone) > 30:
+        return failure_response(
+            "The phone number is too long.",
+            service_type_id=service_type_id
+        )
+
+
+    if len(email) > 150:
+        return failure_response(
+            "The email address is too long.",
+            service_type_id=service_type_id
+        )
+
+
+    if len(notes) > 500:
+        return failure_response(
+            "Appointment notes cannot exceed "
+            "500 characters.",
+            service_type_id=service_type_id
+        )
+
+
+    normalized_email = (
+        _booking_normalize_email(
+            email
+        )
+    )
+
+    normalized_phone = (
+        _booking_normalize_phone(
+            phone
+        )
+    )
+
+
+    if not re.fullmatch(
+        r"[^@\s]+@[^@\s]+\.[^@\s]+",
+        normalized_email
+    ):
+        return failure_response(
+            "Please enter a valid email address.",
+            service_type_id=service_type_id
+        )
+
+
+    if len(normalized_phone) != 10:
+        return failure_response(
+            "Please enter a valid 10-digit "
+            "phone number.",
+            service_type_id=service_type_id
+        )
+
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    client_was_created = False
+
+    try:
+        # -------------------------------------------------
+        # Serialize online confirmations for this workspace.
+        #
+        # A short row lock prevents two simultaneous
+        # confirmations from both passing availability
+        # validation before either appointment is inserted.
+        # It also prevents duplicate client creation between
+        # simultaneous online bookings in this workspace.
+        # -------------------------------------------------
+
+        cur.execute("""
+            SELECT spa_id
+            FROM booking_settings
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+            FOR UPDATE
+        """, (
+            spa_id,
+            business_unit_id
+        ))
+
+        if not cur.fetchone():
+            conn.rollback()
+
+            return failure_response(
+                "Booking settings were not found "
+                "for this workspace.",
+                service_type_id=service_type_id
+            )
+
+
+        # -------------------------------------------------
+        # Revalidate after obtaining the transaction lock.
+        # Never trust duration, price, provider name, or
+        # service name posted by the browser.
+        # -------------------------------------------------
+
+        validation = (
+            _booking_validate_selected_slot(
+                cur=cur,
+                spa_id=spa_id,
+                business_unit_id=
+                    business_unit_id,
+                provider_employee_id=
+                    provider_employee_id,
+                service_type_id=
+                    service_type_id,
+                appointment_start=
+                    appointment_start,
+                require_public=False
+            )
+        )
+
+        if not validation.get("valid"):
+            conn.rollback()
+
+            return failure_response(
+                validation.get("reason")
+                or (
+                    "That appointment time "
+                    "is no longer available."
+                ),
+                status_code=409,
+                service_type_id=service_type_id
+            )
+
+
+        # -------------------------------------------------
+        # Match an existing client by normalized email
+        # or normalized phone.
+        # -------------------------------------------------
+
+        cur.execute("""
+            SELECT
+                client_id,
+                first_name,
+                last_name,
+                phone,
+                email
+            FROM clients
+            WHERE spa_id = %s
+              AND (
+                    LOWER(
+                        TRIM(
+                            COALESCE(email, '')
+                        )
+                    ) = %s
+
+                    OR regexp_replace(
+                        COALESCE(phone, ''),
+                        '[^0-9]',
+                        '',
+                        'g'
+                    ) IN (%s, %s)
+                  )
+            ORDER BY client_id
+            FOR UPDATE
+        """, (
+            spa_id,
+            normalized_email,
+            normalized_phone,
+            "1" + normalized_phone
+        ))
+
+        candidate_clients = cur.fetchall()
+        matching_client_ids = set()
+
+        for candidate in candidate_clients:
+            candidate_client_id = candidate[0]
+
+            email_matches = (
+                _booking_normalize_email(
+                    candidate[4]
+                )
+                == normalized_email
+            )
+
+            phone_matches = (
+                _booking_normalize_phone(
+                    candidate[3]
+                )
+                == normalized_phone
+            )
+
+            if email_matches or phone_matches:
+                matching_client_ids.add(
+                    candidate_client_id
+                )
+
+
+        if len(matching_client_ids) > 1:
+            conn.rollback()
+
+            return failure_response(
+                "The email and phone match more than "
+                "one client record. Please contact the "
+                "business so the records can be reviewed.",
+                status_code=409,
+                service_type_id=service_type_id
+            )
+
+
+        if matching_client_ids:
+            client_id = next(
+                iter(matching_client_ids)
+            )
+
+        else:
+            # ---------------------------------------------
+            # Conservative online-booking contact defaults:
+            #
+            # Service phone calls: allowed
+            # Service email: allowed
+            # Service SMS: opted out
+            # SMS marketing: opted out
+            # Email marketing: not set
+            # ---------------------------------------------
+
+            cur.execute("""
+                INSERT INTO clients (
+                    spa_id,
+                    first_name,
+                    last_name,
+                    phone,
+                    email,
+                    active_client,
+                    client_status,
+                    ok_to_call,
+                    ok_to_text,
+                    ok_to_email,
+                    sms_opt_in,
+                    sms_opt_out,
+                    email_opt_in,
+                    email_opt_out,
+                    sms_marketing_status,
+                    email_marketing_status
+                )
+                VALUES (
+                    %s, %s, %s, %s, %s,
+                    TRUE,
+                    'Current',
+                    TRUE,
+                    FALSE,
+                    TRUE,
+                    FALSE,
+                    TRUE,
+                    TRUE,
+                    FALSE,
+                    'opt_out',
+                    'not_set'
+                )
+                RETURNING client_id
+            """, (
+                spa_id,
+                first_name,
+                last_name,
+                phone,
+                normalized_email
+            ))
+
+            client_id = cur.fetchone()[0]
+            client_was_created = True
+
+
+        booked_by_name = (
+            f"{first_name} {last_name}"
+        ).strip()
+
+        appointment_for = (
+            (
+                f"{guest_first_name} "
+                f"{guest_last_name}"
+            ).strip()
+            if booking_for_other
+            else booked_by_name
+        )
+
+        service_recipient_client_id = (
+            None
+            if booking_for_other
+            else client_id
+        )
+
+
+        # -------------------------------------------------
+        # Insert using only authoritative values returned
+        # by the server-side validator.
+        # -------------------------------------------------
+
+        cur.execute("""
+            INSERT INTO appointments (
+                spa_id,
+                business_unit_id,
+                client_id,
+                service_type_id,
+                service_type,
+                appointment_for,
+                appointment_date,
+                appointment_time,
+                duration_minutes,
+                price_at_booking,
+                status,
+                notes,
+                provider_employee_id,
+                provider_name_at_booking,
+                booking_channel,
+                booking_for_other,
+                service_recipient_client_id,
+                owner_reviewed,
+                owner_reviewed_at
+            )
+            VALUES (
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s,
+                'booked',
+                %s, %s, %s,
+                'public_preview',
+                %s,
+                %s,
+                TRUE,
+                CURRENT_TIMESTAMP
+            )
+            RETURNING appointment_id
+        """, (
+            spa_id,
+            business_unit_id,
+            client_id,
+            validation["service_type_id"],
+            validation["service_name"],
+            appointment_for,
+            validation["appointment_date"],
+            validation["appointment_time"],
+            validation["duration_minutes"],
+            validation["price_at_booking"],
+            notes or None,
+            validation[
+                "provider_employee_id"
+            ],
+            validation["provider_name"],
+            booking_for_other,
+            service_recipient_client_id
+        ))
+
+        appointment_id = cur.fetchone()[0]
+
+        conn.commit()
+
+
+        date_display = (
+            validation["appointment_date"]
+            .strftime(
+                "%A, %B %d, %Y"
+            )
+            .replace(" 0", " ")
+        )
+
+        time_display = (
+            validation["appointment_time"]
+            .strftime("%I:%M %p")
+            .lstrip("0")
+        )
+
+        price_display = (
+            f"${validation['price_at_booking']:,.2f}"
+        )
+
+
+        return render_template(
+            "booking/"
+            "public_booking_confirmation.html",
+            success=True,
+            preview_mode=True,
+            appointment_id=appointment_id,
+            client_id=client_id,
+            client_was_created=
+                client_was_created,
+            client_name=booked_by_name,
+            booked_by_name=booked_by_name,
+            appointment_for_name=
+                appointment_for,
+            booking_for_other=
+                booking_for_other,
+            service_name=
+                validation["service_name"],
+            provider_name=
+                validation["provider_name"],
+            date_display=date_display,
+            time_display=time_display,
+            duration_minutes=
+                validation["duration_minutes"],
+            price_display=price_display,
+            back_url=url_for(
+                "booking_public_preview",
+                service_type_id=
+                    service_type_id
+            ),
+            calendar_url=url_for(
+                "calendar_view"
+            )
+        )
+
+    except Exception:
+        conn.rollback()
+
+        app.logger.exception(
+            "Internal public-booking preview "
+            "confirmation failed."
+        )
+
+        return failure_response(
+            "The appointment could not be saved. "
+            "No changes were committed.",
+            status_code=500,
+            service_type_id=service_type_id
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
+
+
+def _booking_get_public_csrf_token(
+    public_booking_slug
+):
+    """
+    Return a session-bound token for one public
+    booking workspace.
+    """
+    import secrets
+
+    public_booking_slug = str(
+        public_booking_slug or ""
+    ).strip().lower()
+
+    token_record = session.get(
+        "_public_booking_csrf",
+        {}
+    )
+
+    if (
+        not isinstance(token_record, dict)
+        or token_record.get("slug")
+            != public_booking_slug
+        or not token_record.get("token")
+    ):
+        token_record = {
+            "slug": public_booking_slug,
+            "token": secrets.token_urlsafe(32)
+        }
+
+        session[
+            "_public_booking_csrf"
+        ] = token_record
+
+    return token_record["token"]
+
+
+def _booking_commit_appointment(
+    *,
+    cur,
+    spa_id,
+    business_unit_id,
+    provider_employee_id,
+    service_type_id,
+    appointment_start,
+    first_name,
+    last_name,
+    phone,
+    normalized_phone,
+    normalized_email,
+    booking_for_other,
+    guest_first_name,
+    guest_last_name,
+    notes,
+    require_public,
+    booking_channel
+):
+    """
+    Lock, revalidate, match/create the client, and
+    insert the appointment.
+
+    The caller is responsible for commit or rollback.
+    """
+
+    def failure(
+        message,
+        status_code=400
+    ):
+        return {
+            "success": False,
+            "message": message,
+            "status_code": status_code
+        }
+
+
+    # -----------------------------------------------------
+    # Serialize confirmations for this booking workspace.
+    # -----------------------------------------------------
+
+    cur.execute("""
+        SELECT spa_id
+        FROM booking_settings
+        WHERE spa_id = %s
+          AND business_unit_id = %s
+        FOR UPDATE
+    """, (
+        spa_id,
+        business_unit_id
+    ))
+
+    if not cur.fetchone():
+        return failure(
+            "Booking settings were not found "
+            "for this workspace."
+        )
+
+
+    # -----------------------------------------------------
+    # Revalidate after acquiring the transaction lock.
+    # -----------------------------------------------------
+
+    validation = (
+        _booking_validate_selected_slot(
+            cur=cur,
+            spa_id=spa_id,
+            business_unit_id=
+                business_unit_id,
+            provider_employee_id=
+                provider_employee_id,
+            service_type_id=
+                service_type_id,
+            appointment_start=
+                appointment_start,
+            require_public=
+                require_public
+        )
+    )
+
+    if not validation.get("valid"):
+        return failure(
+            validation.get("reason")
+            or (
+                "That appointment time "
+                "is no longer available."
+            ),
+            status_code=409
+        )
+
+
+    # -----------------------------------------------------
+    # Match an existing client by normalized email or phone.
+    # -----------------------------------------------------
+
+    cur.execute("""
+        SELECT
+            client_id,
+            phone,
+            email
+        FROM clients
+        WHERE spa_id = %s
+          AND (
+                LOWER(
+                    TRIM(
+                        COALESCE(email, '')
+                    )
+                ) = %s
+
+                OR regexp_replace(
+                    COALESCE(phone, ''),
+                    '[^0-9]',
+                    '',
+                    'g'
+                ) IN (%s, %s)
+              )
+        ORDER BY client_id
+        FOR UPDATE
+    """, (
+        spa_id,
+        normalized_email,
+        normalized_phone,
+        "1" + normalized_phone
+    ))
+
+    matching_client_ids = set()
+
+    for candidate in cur.fetchall():
+        email_matches = (
+            _booking_normalize_email(
+                candidate[2]
+            )
+            == normalized_email
+        )
+
+        phone_matches = (
+            _booking_normalize_phone(
+                candidate[1]
+            )
+            == normalized_phone
+        )
+
+        if email_matches or phone_matches:
+            matching_client_ids.add(
+                candidate[0]
+            )
+
+
+    if len(matching_client_ids) > 1:
+        return failure(
+            "The email and phone match more than "
+            "one client record. Please contact the "
+            "business so the records can be reviewed.",
+            status_code=409
+        )
+
+
+    client_was_created = False
+
+    if matching_client_ids:
+        client_id = next(
+            iter(matching_client_ids)
+        )
+
+    else:
+        # Conservative service-contact defaults.
+        # No SMS or marketing consent is assumed.
+
+        cur.execute("""
+            INSERT INTO clients (
+                spa_id,
+                first_name,
+                last_name,
+                phone,
+                email,
+                active_client,
+                client_status,
+                ok_to_call,
+                ok_to_text,
+                ok_to_email,
+                sms_opt_in,
+                sms_opt_out,
+                email_opt_in,
+                email_opt_out,
+                sms_marketing_status,
+                email_marketing_status
+            )
+            VALUES (
+                %s, %s, %s, %s, %s,
+                TRUE,
+                'Current',
+                TRUE,
+                FALSE,
+                TRUE,
+                FALSE,
+                TRUE,
+                TRUE,
+                FALSE,
+                'opt_out',
+                'not_set'
+            )
+            RETURNING client_id
+        """, (
+            spa_id,
+            first_name,
+            last_name,
+            phone,
+            normalized_email
+        ))
+
+        client_id = cur.fetchone()[0]
+        client_was_created = True
+
+
+    booked_by_name = (
+        f"{first_name} {last_name}"
+    ).strip()
+
+    appointment_for = (
+        (
+            f"{guest_first_name} "
+            f"{guest_last_name}"
+        ).strip()
+        if booking_for_other
+        else booked_by_name
+    )
+
+    service_recipient_client_id = (
+        None
+        if booking_for_other
+        else client_id
+    )
+
+
+    # -----------------------------------------------------
+    # Insert only server-authoritative appointment values.
+    # -----------------------------------------------------
+
+    cur.execute("""
+        INSERT INTO appointments (
+            spa_id,
+            business_unit_id,
+            client_id,
+            service_type_id,
+            service_type,
+            appointment_for,
+            appointment_date,
+            appointment_time,
+            duration_minutes,
+            price_at_booking,
+            status,
+            notes,
+            provider_employee_id,
+            provider_name_at_booking,
+            booking_channel,
+            booking_for_other,
+            service_recipient_client_id,
+            owner_reviewed,
+            owner_reviewed_at
+        )
+        VALUES (
+            %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s,
+            'booked',
+            %s, %s, %s, %s,
+            %s, %s,
+            TRUE,
+            CURRENT_TIMESTAMP
+        )
+        RETURNING appointment_id
+    """, (
+        spa_id,
+        business_unit_id,
+        client_id,
+        validation["service_type_id"],
+        validation["service_name"],
+        appointment_for,
+        validation["appointment_date"],
+        validation["appointment_time"],
+        validation["duration_minutes"],
+        validation["price_at_booking"],
+        notes or None,
+        validation["provider_employee_id"],
+        validation["provider_name"],
+        booking_channel,
+        booking_for_other,
+        service_recipient_client_id
+    ))
+
+    appointment_id = cur.fetchone()[0]
+
+    return {
+        "success": True,
+        "appointment_id": appointment_id,
+        "client_id": client_id,
+        "client_was_created":
+            client_was_created,
+        "client_name": booked_by_name,
+        "booked_by_name": booked_by_name,
+        "appointment_for_name":
+            appointment_for,
+        "booking_for_other":
+            booking_for_other,
+        "service_recipient_client_id":
+            service_recipient_client_id,
+        "validation": validation
+    }
+
+
+def _booking_build_public_availability(
+    cur,
+    spa_id,
+    business_unit_id,
+    service_type_id,
+    selected_provider_id,
+    selected_date
+):
+    """
+    Build public-booking availability using the same
+    operating-hour, provider-hour, buffer, time-off,
+    appointment, notice, and booking-window rules used
+    by the internal availability engine.
+    """
+    from datetime import datetime, timedelta
+
+    def result(
+        *,
+        results=None,
+        message="",
+        provider_id="any",
+        date_display=""
+    ):
+        results = list(results or [])
+
+        return {
+            "availability_searched": True,
+            "availability_results": results,
+            "total_slot_count": sum(
+                len(item.get("slots", []))
+                for item in results
+            ),
+            "availability_message": message,
+            "selected_provider_id": provider_id,
+            "date_display": date_display
+        }
+
+
+    try:
+        spa_id = int(spa_id)
+        business_unit_id = int(
+            business_unit_id
+        )
+        service_type_id = int(
+            service_type_id
+        )
+    except (TypeError, ValueError):
+        return result(
+            message="The selected service is invalid."
+        )
+
+
+    if isinstance(selected_date, str):
+        try:
+            selected_date = (
+                datetime.strptime(
+                    selected_date,
+                    "%Y-%m-%d"
+                ).date()
+            )
+        except ValueError:
+            return result(
+                message="Please select a valid date."
+            )
+
+
+    if selected_date is None:
+        return result(
+            message="Please select a date."
+        )
+
+
+    selected_provider_value = str(
+        selected_provider_id or "any"
+    ).strip().lower()
+
+
+    # =====================================================
+    # Booking settings
+    # =====================================================
+
+    cur.execute("""
+        SELECT
+            slot_interval_minutes,
+            minimum_booking_notice_hours,
+            maximum_booking_days_ahead,
+            default_buffer_before_minutes,
+            default_buffer_after_minutes,
+            allow_any_provider,
+            public_booking_enabled
+        FROM booking_settings
+        WHERE spa_id = %s
+          AND business_unit_id = %s
+    """, (
+        spa_id,
+        business_unit_id
+    ))
+
+    settings_row = cur.fetchone()
+
+    if not settings_row:
+        return result(
+            message="Booking settings were not found."
+        )
+
+
+    slot_interval_minutes = max(
+        int(settings_row[0] or 15),
+        1
+    )
+
+    minimum_notice_hours = max(
+        int(settings_row[1] or 0),
+        0
+    )
+
+    maximum_days_ahead = max(
+        int(settings_row[2] or 90),
+        0
+    )
+
+    default_buffer_before = max(
+        int(settings_row[3] or 0),
+        0
+    )
+
+    default_buffer_after = max(
+        int(settings_row[4] or 0),
+        0
+    )
+
+    allow_any_provider = bool(
+        settings_row[5]
+    )
+
+    public_booking_enabled = bool(
+        settings_row[6]
+    )
+
+
+    if not public_booking_enabled:
+        return result(
+            message=(
+                "Online booking is not currently enabled."
+            )
+        )
+
+
+    local_now = get_spa_now(
+        spa_id
+    ).replace(tzinfo=None)
+
+    earliest_allowed_start = (
+        local_now
+        + timedelta(
+            hours=minimum_notice_hours
+        )
+    )
+
+    latest_allowed_date = (
+        local_now.date()
+        + timedelta(
+            days=maximum_days_ahead
+        )
+    )
+
+
+    if (
+        selected_date < local_now.date()
+        or selected_date > latest_allowed_date
+    ):
+        return result(
+            message=(
+                "The selected date is outside "
+                "the available booking range."
+            )
+        )
+
+
+    date_display = (
+        selected_date
+        .strftime("%A, %B %d, %Y")
+        .replace(" 0", " ")
+    )
+
+
+    if (
+        selected_provider_value == "any"
+        and not allow_any_provider
+    ):
+        return result(
+            message="Please select a provider.",
+            date_display=date_display
+        )
+
+
+    normalized_provider_id = "any"
+
+    if selected_provider_value != "any":
+        try:
+            normalized_provider_id = int(
+                selected_provider_value
+            )
+        except (TypeError, ValueError):
+            return result(
+                message=(
+                    "The selected provider is invalid."
+                ),
+                date_display=date_display
+            )
+
+
+    # =====================================================
+    # Public provider-service assignments
+    # =====================================================
+
+    assignment_sql = """
+        SELECT
+            e.employee_id,
+
+            COALESCE(
+                NULLIF(
+                    TRIM(e.employee_nickname),
+                    ''
+                ),
+                NULLIF(
+                    TRIM(
+                        CONCAT_WS(
+                            ' ',
+                            e.first_name,
+                            e.last_name
+                        )
+                    ),
+                    ''
+                ),
+                'Provider ' ||
+                    e.employee_id::TEXT
+            ) AS provider_name,
+
+            COALESCE(
+                pst.duration_override_minutes,
+                snt.default_duration_minutes
+            ) AS duration_minutes,
+
+            COALESCE(
+                pst.price_override,
+                snt.default_price
+            ) AS price_at_booking,
+
+            COALESCE(
+                pst.buffer_before_minutes,
+                %s,
+                0
+            ) AS buffer_before_minutes,
+
+            COALESCE(
+                pst.buffer_after_minutes,
+                %s,
+                0
+            ) AS buffer_after_minutes
+
+        FROM provider_service_types pst
+
+        JOIN employees e
+          ON e.employee_id =
+                pst.provider_employee_id
+         AND e.spa_id = pst.spa_id
+
+        JOIN service_name_types snt
+          ON snt.service_type_id =
+                pst.service_type_id
+         AND snt.spa_id = pst.spa_id
+
+        WHERE pst.spa_id = %s
+          AND pst.business_unit_id = %s
+          AND pst.service_type_id = %s
+          AND pst.is_active = TRUE
+          AND pst.is_publicly_bookable = TRUE
+          AND e.is_active = TRUE
+          AND snt.is_active = TRUE
+    """
+
+    assignment_params = [
+        default_buffer_before,
+        default_buffer_after,
+        spa_id,
+        business_unit_id,
+        service_type_id
+    ]
+
+
+    if normalized_provider_id != "any":
+        assignment_sql += """
+          AND e.employee_id = %s
+        """
+
+        assignment_params.append(
+            normalized_provider_id
+        )
+
+
+    assignment_sql += """
+        ORDER BY provider_name
+    """
+
+
+    cur.execute(
+        assignment_sql,
+        tuple(assignment_params)
+    )
+
+    assignments = []
+
+    for row in cur.fetchall():
+        duration_minutes = int(
+            row[2] or 0
+        )
+
+        if duration_minutes <= 0:
+            continue
+
+        assignments.append({
+            "provider_employee_id": row[0],
+            "provider_name": row[1],
+            "duration_minutes":
+                duration_minutes,
+            "price_at_booking": row[3],
+            "buffer_before_minutes": max(
+                int(row[4] or 0),
+                0
+            ),
+            "buffer_after_minutes": max(
+                int(row[5] or 0),
+                0
+            )
+        })
+
+
+    if not assignments:
+        return result(
+            message=(
+                "No eligible provider is currently "
+                "available for this service."
+            ),
+            provider_id=normalized_provider_id,
+            date_display=date_display
+        )
+
+
+    provider_ids = [
+        assignment["provider_employee_id"]
+        for assignment in assignments
+    ]
+
+    day_of_week = selected_date.isoweekday()
+
+    day_start = datetime.combine(
+        selected_date,
+        datetime.min.time()
+    )
+
+    day_end = (
+        day_start
+        + timedelta(days=1)
+    )
+
+
+    # =====================================================
+    # Business hours
+    # =====================================================
+
+    cur.execute("""
+        SELECT
+            start_time,
+            end_time
+        FROM booking_business_hours
+        WHERE spa_id = %s
+          AND business_unit_id = %s
+          AND day_of_week = %s
+          AND is_active = TRUE
+        ORDER BY start_time
+    """, (
+        spa_id,
+        business_unit_id,
+        day_of_week
+    ))
+
+    business_windows = []
+
+    for row in cur.fetchall():
+        window_start = datetime.combine(
+            selected_date,
+            row[0]
+        )
+
+        window_end = datetime.combine(
+            selected_date,
+            row[1]
+        )
+
+        if window_end > window_start:
+            business_windows.append(
+                (
+                    window_start,
+                    window_end
+                )
+            )
+
+
+    if not business_windows:
+        return result(
+            results=[
+                {
+                    "provider_employee_id":
+                        assignment[
+                            "provider_employee_id"
+                        ],
+                    "provider_name":
+                        assignment["provider_name"],
+                    "slots": [],
+                    "availability_summary_reason":
+                        (
+                            "The business is closed "
+                            "on this date."
+                        )
+                }
+                for assignment in assignments
+            ],
+            provider_id=normalized_provider_id,
+            date_display=date_display
+        )
+
+
+    # =====================================================
+    # Provider working hours
+    # =====================================================
+
+    cur.execute("""
+        SELECT
+            provider_employee_id,
+            start_time,
+            end_time
+        FROM provider_booking_hours
+        WHERE spa_id = %s
+          AND business_unit_id = %s
+          AND day_of_week = %s
+          AND is_active = TRUE
+          AND provider_employee_id =
+                ANY(%s)
+        ORDER BY
+            provider_employee_id,
+            start_time
+    """, (
+        spa_id,
+        business_unit_id,
+        day_of_week,
+        provider_ids
+    ))
+
+    provider_windows = {
+        provider_id: []
+        for provider_id in provider_ids
+    }
+
+    for row in cur.fetchall():
+        window_start = datetime.combine(
+            selected_date,
+            row[1]
+        )
+
+        window_end = datetime.combine(
+            selected_date,
+            row[2]
+        )
+
+        if window_end > window_start:
+            provider_windows.setdefault(
+                row[0],
+                []
+            ).append(
+                (
+                    window_start,
+                    window_end
+                )
+            )
+
+
+    # =====================================================
+    # Provider time off
+    # =====================================================
+
+    cur.execute("""
+        SELECT
+            provider_employee_id,
+            starts_at,
+            ends_at
+        FROM provider_time_off
+        WHERE spa_id = %s
+          AND business_unit_id = %s
+          AND provider_employee_id =
+                ANY(%s)
+          AND is_active = TRUE
+          AND starts_at < %s
+          AND ends_at > %s
+        ORDER BY starts_at
+    """, (
+        spa_id,
+        business_unit_id,
+        provider_ids,
+        day_end,
+        day_start
+    ))
+
+    provider_time_off = {
+        provider_id: []
+        for provider_id in provider_ids
+    }
+
+    for row in cur.fetchall():
+        provider_time_off.setdefault(
+            row[0],
+            []
+        ).append(
+            (
+                row[1],
+                row[2]
+            )
+        )
+
+
+    # =====================================================
+    # Provider aliases used by legacy appointments
+    # =====================================================
+
+    cur.execute("""
+        SELECT DISTINCT
+            e.employee_id,
+            e.employee_nickname,
+            e.first_name,
+            e.last_name
+        FROM provider_service_types pst
+
+        JOIN employees e
+          ON e.employee_id =
+                pst.provider_employee_id
+         AND e.spa_id = pst.spa_id
+
+        WHERE pst.spa_id = %s
+          AND pst.business_unit_id = %s
+          AND pst.is_active = TRUE
+          AND e.is_active = TRUE
+    """, (
+        spa_id,
+        business_unit_id
+    ))
+
+    alias_to_provider_ids = {}
+
+    for row in cur.fetchall():
+        employee_id = row[0]
+
+        aliases = {
+            _booking_normalize_name(row[1]),
+            _booking_normalize_name(row[2]),
+            _booking_normalize_name(
+                " ".join(
+                    value
+                    for value in (
+                        row[2],
+                        row[3]
+                    )
+                    if value
+                )
+            )
+        }
+
+        for alias in aliases:
+            if not alias:
+                continue
+
+            alias_to_provider_ids.setdefault(
+                alias,
+                set()
+            ).add(employee_id)
+
+
+    # =====================================================
+    # Existing appointment blocks
+    # =====================================================
+
+    cur.execute("""
+        SELECT
+            a.appointment_time,
+
+            COALESCE(
+                NULLIF(
+                    a.duration_minutes,
+                    0
+                ),
+                snt.default_duration_minutes,
+                60
+            ) AS duration_minutes,
+
+            a.provider_employee_id,
+            a.provider_name_at_booking,
+
+            COALESCE(
+                pst.buffer_before_minutes,
+                %s,
+                0
+            ) AS buffer_before_minutes,
+
+            COALESCE(
+                pst.buffer_after_minutes,
+                %s,
+                0
+            ) AS buffer_after_minutes
+
+        FROM appointments a
+
+        LEFT JOIN service_name_types snt
+          ON snt.service_type_id =
+                a.service_type_id
+         AND snt.spa_id = a.spa_id
+
+        LEFT JOIN provider_service_types pst
+          ON pst.spa_id = a.spa_id
+         AND pst.business_unit_id =
+                a.business_unit_id
+         AND pst.provider_employee_id =
+                a.provider_employee_id
+         AND pst.service_type_id =
+                a.service_type_id
+         AND pst.is_active = TRUE
+
+        WHERE a.spa_id = %s
+          AND a.business_unit_id = %s
+          AND a.appointment_date = %s
+
+          AND LOWER(
+                TRIM(
+                    COALESCE(
+                        a.status,
+                        ''
+                    )
+                )
+              ) NOT IN (
+                'cancelled',
+                'canceled',
+                'completed',
+                'no show',
+                'no-show',
+                're-scheduled',
+                'rescheduled'
+              )
+
+        ORDER BY a.appointment_time
+    """, (
+        default_buffer_before,
+        default_buffer_after,
+        spa_id,
+        business_unit_id,
+        selected_date
+    ))
+
+    appointment_blocks = {
+        provider_id: []
+        for provider_id in provider_ids
+    }
+
+    selected_provider_ids = set(
+        provider_ids
+    )
+
+    generic_provider_names = {
+        "",
+        "any",
+        "any available",
+        "any provider",
+        "no preference",
+        "unassigned"
+    }
+
+
+    for row in cur.fetchall():
+        if row[0] is None:
+            continue
+
+        existing_start = datetime.combine(
+            selected_date,
+            row[0]
+        )
+
+        existing_end = (
+            existing_start
+            + timedelta(
+                minutes=int(row[1] or 60)
+            )
+        )
+
+        existing_block_start = (
+            existing_start
+            - timedelta(
+                minutes=int(row[4] or 0)
+            )
+        )
+
+        existing_block_end = (
+            existing_end
+            + timedelta(
+                minutes=int(row[5] or 0)
+            )
+        )
+
+
+        target_provider_ids = set()
+
+        if row[2] is not None:
+            if row[2] in selected_provider_ids:
+                target_provider_ids.add(
+                    row[2]
+                )
+
+        else:
+            normalized_name = (
+                _booking_normalize_name(
+                    row[3]
+                )
+            )
+
+            matched_ids = (
+                alias_to_provider_ids.get(
+                    normalized_name,
+                    set()
+                )
+            )
+
+            if (
+                normalized_name
+                in generic_provider_names
+            ):
+                target_provider_ids = set(
+                    selected_provider_ids
+                )
+
+            elif len(matched_ids) == 1:
+                target_provider_ids = (
+                    matched_ids
+                    & selected_provider_ids
+                )
+
+            else:
+                target_provider_ids = set(
+                    selected_provider_ids
+                )
+
+
+        for provider_id in target_provider_ids:
+            appointment_blocks.setdefault(
+                provider_id,
+                []
+            ).append(
+                (
+                    existing_block_start,
+                    existing_block_end
+                )
+            )
+
+
+    # =====================================================
+    # Build available slots
+    # =====================================================
+
+    def round_up_to_interval(value):
+        midnight = datetime.combine(
+            value.date(),
+            datetime.min.time()
+        )
+
+        elapsed_minutes = int(
+            (value - midnight)
+            .total_seconds()
+            // 60
+        )
+
+        if value.second or value.microsecond:
+            elapsed_minutes += 1
+
+        rounded_minutes = (
+            (
+                elapsed_minutes
+                + slot_interval_minutes
+                - 1
+            )
+            // slot_interval_minutes
+            * slot_interval_minutes
+        )
+
+        return (
+            midnight
+            + timedelta(
+                minutes=rounded_minutes
+            )
+        )
+
+
+    availability_results = []
+
+
+    for assignment in assignments:
+        provider_id = assignment[
+            "provider_employee_id"
+        ]
+
+        duration_minutes = assignment[
+            "duration_minutes"
+        ]
+
+        buffer_before = assignment[
+            "buffer_before_minutes"
+        ]
+
+        buffer_after = assignment[
+            "buffer_after_minutes"
+        ]
+
+        working_windows = []
+
+        for (
+            business_start,
+            business_end
+        ) in business_windows:
+
+            for (
+                provider_start,
+                provider_end
+            ) in provider_windows.get(
+                provider_id,
+                []
+            ):
+                working_start = max(
+                    business_start,
+                    provider_start
+                )
+
+                working_end = min(
+                    business_end,
+                    provider_end
+                )
+
+                if working_start < working_end:
+                    working_windows.append(
+                        (
+                            working_start,
+                            working_end
+                        )
+                    )
+
+
+        slots_by_value = {}
+
+
+        for (
+            working_start,
+            working_end
+        ) in working_windows:
+
+            earliest_service_start = (
+                working_start
+                + timedelta(
+                    minutes=buffer_before
+                )
+            )
+
+            earliest_service_start = max(
+                earliest_service_start,
+                earliest_allowed_start
+            )
+
+            latest_service_start = (
+                working_end
+                - timedelta(
+                    minutes=(
+                        duration_minutes
+                        + buffer_after
+                    )
+                )
+            )
+
+            candidate_start = (
+                round_up_to_interval(
+                    earliest_service_start
+                )
+            )
+
+
+            while (
+                candidate_start
+                <= latest_service_start
+            ):
+                service_end = (
+                    candidate_start
+                    + timedelta(
+                        minutes=duration_minutes
+                    )
+                )
+
+                candidate_block_start = (
+                    candidate_start
+                    - timedelta(
+                        minutes=buffer_before
+                    )
+                )
+
+                candidate_block_end = (
+                    service_end
+                    + timedelta(
+                        minutes=buffer_after
+                    )
+                )
+
+
+                blocked = any(
+                    _booking_intervals_overlap(
+                        candidate_block_start,
+                        candidate_block_end,
+                        blocked_start,
+                        blocked_end
+                    )
+                    for (
+                        blocked_start,
+                        blocked_end
+                    ) in provider_time_off.get(
+                        provider_id,
+                        []
+                    )
+                )
+
+
+                if not blocked:
+                    blocked = any(
+                        _booking_intervals_overlap(
+                            candidate_block_start,
+                            candidate_block_end,
+                            blocked_start,
+                            blocked_end
+                        )
+                        for (
+                            blocked_start,
+                            blocked_end
+                        ) in appointment_blocks.get(
+                            provider_id,
+                            []
+                        )
+                    )
+
+
+                if not blocked:
+                    slot_value = (
+                        candidate_start.isoformat(
+                            timespec="minutes"
+                        )
+                    )
+
+                    slots_by_value[
+                        slot_value
+                    ] = {
+                        "value": slot_value,
+                        "display": (
+                            candidate_start
+                            .strftime("%I:%M %p")
+                            .lstrip("0")
+                        )
+                    }
+
+
+                candidate_start += timedelta(
+                    minutes=slot_interval_minutes
+                )
+
+
+        slots = [
+            slots_by_value[key]
+            for key in sorted(
+                slots_by_value
+            )
+        ]
+
+
+        if not provider_windows.get(
+            provider_id
+        ):
+            summary_reason = (
+                "This provider is not working "
+                "on the selected date."
+            )
+
+        elif not working_windows:
+            summary_reason = (
+                "This provider has no working hours "
+                "within business hours on this date."
+            )
+
+        elif not slots:
+            summary_reason = (
+                "No available times remain for "
+                "this provider on the selected date."
+            )
+
+        else:
+            summary_reason = ""
+
+
+        availability_results.append({
+            "provider_employee_id":
+                provider_id,
+            "provider_name":
+                assignment["provider_name"],
+            "slots": slots,
+            "availability_summary_reason":
+                summary_reason
+        })
+
+
+    return result(
+        results=availability_results,
+        provider_id=normalized_provider_id,
+        date_display=date_display
+    )
+
+
+def _render_public_booking_page(
+    public_booking_slug,
+    preview_mode=False,
+    availability_context=None
+):
+    from datetime import timedelta
+
+    availability_context = dict(
+        availability_context or {}
+    )
+
+    public_booking_slug = str(
+        public_booking_slug or ""
+    ).strip().lower()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                bs.spa_id,
+                bs.business_unit_id,
+                bs.public_booking_enabled,
+
+                s.spa_name,
+                bu.unit_name,
+
+                s.business_address_line1,
+                s.business_address_line2,
+                s.city,
+                s.state,
+                s.zip_code,
+
+                bs.minimum_booking_notice_hours,
+                bs.maximum_booking_days_ahead,
+                bs.allow_any_provider
+
+            FROM booking_settings bs
+
+            JOIN business_units bu
+              ON bu.business_unit_id =
+                    bs.business_unit_id
+             AND bu.spa_id = bs.spa_id
+
+            JOIN spas s
+              ON s.spa_id = bs.spa_id
+
+            WHERE bs.public_booking_slug = %s
+              AND bu.is_active = TRUE
+              AND s.active = TRUE
+
+            LIMIT 1
+        """, (public_booking_slug,))
+
+        booking_row = cur.fetchone()
+
+        if not booking_row:
+            return render_template(
+                "booking/public_booking.html",
+                booking_not_found=True,
+                booking_disabled=False,
+                preview_mode=False,
+                business_name="Online Booking",
+                organization_name="",
+                business_address="",
+                services=[]
+            ), 404
+
+        spa_id = booking_row[0]
+        business_unit_id = booking_row[1]
+        public_booking_enabled = bool(
+            booking_row[2]
+        )
+
+        spa_name = str(
+            booking_row[3] or ""
+        ).strip()
+
+        unit_name = str(
+            booking_row[4] or ""
+        ).strip()
+
+        business_name = (
+            unit_name
+            or spa_name
+            or "Online Booking"
+        )
+
+        organization_name = ""
+
+        if (
+            spa_name
+            and unit_name
+            and spa_name != unit_name
+        ):
+            organization_name = spa_name
+
+        address_lines = []
+
+        for address_value in (
+            booking_row[5],
+            booking_row[6]
+        ):
+            address_value = str(
+                address_value or ""
+            ).strip()
+
+            if address_value:
+                address_lines.append(
+                    address_value
+                )
+
+        city_state_zip = ", ".join(
+            value
+            for value in (
+                str(booking_row[7] or "").strip(),
+                str(booking_row[8] or "").strip()
+            )
+            if value
+        )
+
+        zip_code = str(
+            booking_row[9] or ""
+        ).strip()
+
+        if city_state_zip and zip_code:
+            city_state_zip += f" {zip_code}"
+
+        elif zip_code:
+            city_state_zip = zip_code
+
+        if city_state_zip:
+            address_lines.append(
+                city_state_zip
+            )
+
+        business_address = " • ".join(
+            address_lines
+        )
+
+        booking_disabled = (
+            not public_booking_enabled
+        )
+
+        minimum_booking_notice_hours = int(
+            booking_row[10] or 0
+        )
+
+        maximum_booking_days_ahead = int(
+            booking_row[11] or 90
+        )
+
+        allow_any_provider = bool(
+            booking_row[12]
+        )
+
+        local_now = get_spa_now(
+            spa_id
+        ).replace(tzinfo=None)
+
+        minimum_date = (
+            local_now.date().isoformat()
+        )
+
+        maximum_date = (
+            local_now.date()
+            + timedelta(
+                days=maximum_booking_days_ahead
+            )
+        ).isoformat()
+
+        services = []
+
+        if public_booking_enabled or preview_mode:
+            service_sql = """
+                SELECT
+                    snt.service_type_id,
+                    snt.service_name,
+
+                    MIN(
+                        COALESCE(
+                            pst.duration_override_minutes,
+                            snt.default_duration_minutes
+                        )
+                    ) AS duration_minutes,
+
+                    MIN(
+                        COALESCE(
+                            pst.price_override,
+                            snt.default_price
+                        )
+                    ) AS service_price,
+
+                    COUNT(
+                        DISTINCT
+                        pst.provider_employee_id
+                    ) AS provider_count,
+
+                    BOOL_OR(
+                        COALESCE(
+                            pst.is_publicly_bookable,
+                            FALSE
+                        )
+                    ) AS publicly_bookable
+
+                FROM provider_service_types pst
+
+                JOIN service_name_types snt
+                  ON snt.service_type_id =
+                        pst.service_type_id
+                 AND snt.spa_id = pst.spa_id
+
+                JOIN employees e
+                  ON e.employee_id =
+                        pst.provider_employee_id
+                 AND e.spa_id = pst.spa_id
+
+                WHERE pst.spa_id = %s
+                  AND pst.business_unit_id = %s
+                  AND pst.is_active = TRUE
+                  AND snt.is_active = TRUE
+                  AND e.is_active = TRUE
+            """
+
+            service_params = [
+                spa_id,
+                business_unit_id
+            ]
+
+            if not preview_mode:
+                service_sql += """
+                  AND pst.is_publicly_bookable = TRUE
+                """
+
+            service_sql += """
+                GROUP BY
+                    snt.service_type_id,
+                    snt.service_name
+
+                ORDER BY
+                    snt.service_name
+            """
+
+            cur.execute(
+                service_sql,
+                tuple(service_params)
+            )
+
+            for row in cur.fetchall():
+                service_price = row[3]
+
+                price_display = ""
+
+                if service_price is not None:
+                    price_display = (
+                        f"${service_price:,.2f}"
+                    )
+
+                services.append({
+                    "service_type_id": row[0],
+                    "service_name": row[1],
+
+                    "duration_minutes":
+                        int(row[2] or 0),
+
+                    "price_display":
+                        price_display,
+
+                    "provider_count":
+                        int(row[4] or 0),
+
+                    "publicly_bookable":
+                        bool(row[5])
+                })
+
+        selected_service_id = (
+            availability_context.get(
+                "selected_service_id"
+            )
+        )
+
+        if selected_service_id in (
+            None,
+            ""
+        ):
+            selected_service_raw = (
+                request.args.get(
+                    "service_type_id",
+                    ""
+                ).strip()
+            )
+
+            if selected_service_raw:
+                try:
+                    selected_service_id = int(
+                        selected_service_raw
+                    )
+                except (TypeError, ValueError):
+                    selected_service_id = None
+
+        selected_service = next(
+            (
+                service
+                for service in services
+                if service[
+                    "service_type_id"
+                ] == selected_service_id
+            ),
+            None
+        )
+
+        eligible_providers = []
+
+        if selected_service:
+            provider_sql = """
+                SELECT DISTINCT
+                    e.employee_id,
+
+                    COALESCE(
+                        NULLIF(
+                            TRIM(
+                                e.employee_nickname
+                            ),
+                            ''
+                        ),
+                        NULLIF(
+                            TRIM(
+                                CONCAT_WS(
+                                    ' ',
+                                    e.first_name,
+                                    e.last_name
+                                )
+                            ),
+                            ''
+                        ),
+                        'Provider ' ||
+                            e.employee_id::TEXT
+                    ) AS provider_name
+
+                FROM provider_service_types pst
+
+                JOIN employees e
+                  ON e.employee_id =
+                        pst.provider_employee_id
+                 AND e.spa_id = pst.spa_id
+
+                WHERE pst.spa_id = %s
+                  AND pst.business_unit_id = %s
+                  AND pst.service_type_id = %s
+                  AND pst.is_active = TRUE
+                  AND e.is_active = TRUE
+            """
+
+            provider_params = [
+                spa_id,
+                business_unit_id,
+                selected_service_id
+            ]
+
+            if not preview_mode:
+                provider_sql += """
+                  AND pst.is_publicly_bookable = TRUE
+                """
+
+            provider_sql += """
+                ORDER BY
+                    provider_name
+            """
+
+            cur.execute(
+                provider_sql,
+                tuple(provider_params)
+            )
+
+            eligible_providers = [
+                {
+                    "employee_id": row[0],
+                    "provider_name": row[1]
+                }
+                for row in cur.fetchall()
+            ]
+
+        selected_provider_id = (
+            availability_context.get(
+                "selected_provider_id",
+                request.args.get(
+                    "provider_employee_id",
+                    "any"
+                )
+            )
+        )
+
+        selected_date = (
+            availability_context.get(
+                "selected_date",
+                request.args.get(
+                    "booking_date",
+                    ""
+                )
+            )
+        )
+
+        availability_searched = bool(
+            availability_context.get(
+                "availability_searched",
+                False
+            )
+        )
+
+        availability_results = list(
+            availability_context.get(
+                "availability_results",
+                []
+            )
+        )
+
+        total_slot_count = int(
+            availability_context.get(
+                "total_slot_count",
+                0
+            )
+        )
+
+        selected_service_name = str(
+            availability_context.get(
+                "selected_service_name",
+                (
+                    selected_service[
+                        "service_name"
+                    ]
+                    if selected_service
+                    else ""
+                )
+            )
+            or ""
+        )
+
+        date_display = str(
+            availability_context.get(
+                "date_display",
+                ""
+            )
+            or ""
+        )
+
+
+        availability_message = str(
+            availability_context.get(
+                "availability_message",
+                ""
+            )
+            or ""
+        )
+
+
+        # Real public GET availability search.
+        #
+        # Preview mode continues using the existing
+        # authenticated availability-test route.
+        if (
+            not preview_mode
+            and public_booking_enabled
+            and selected_service
+            and selected_date
+        ):
+            public_availability = (
+                _booking_build_public_availability(
+                    cur=cur,
+                    spa_id=spa_id,
+                    business_unit_id=
+                        business_unit_id,
+                    service_type_id=
+                        selected_service_id,
+                    selected_provider_id=
+                        selected_provider_id,
+                    selected_date=
+                        selected_date
+                )
+            )
+
+            availability_searched = bool(
+                public_availability[
+                    "availability_searched"
+                ]
+            )
+
+            availability_results = list(
+                public_availability[
+                    "availability_results"
+                ]
+            )
+
+            total_slot_count = int(
+                public_availability[
+                    "total_slot_count"
+                ]
+            )
+
+            availability_message = str(
+                public_availability[
+                    "availability_message"
+                ]
+                or ""
+            )
+
+            selected_provider_id = (
+                public_availability[
+                    "selected_provider_id"
+                ]
+            )
+
+            date_display = str(
+                public_availability[
+                    "date_display"
+                ]
+                or ""
+            )
+
+        minimum_date = (
+            availability_context.get(
+                "minimum_date",
+                minimum_date
+            )
+        )
+
+        maximum_date = (
+            availability_context.get(
+                "maximum_date",
+                maximum_date
+            )
+        )
+
+        booking_csrf_token = ""
+
+        if (
+            not preview_mode
+            and public_booking_enabled
+        ):
+            booking_csrf_token = (
+                _booking_get_public_csrf_token(
+                    public_booking_slug
+                )
+            )
+
+
+        return render_template(
+            "booking/public_booking.html",
+            booking_not_found=False,
+            booking_disabled=booking_disabled,
+            preview_mode=preview_mode,
+
+            public_booking_slug=
+                public_booking_slug,
+
+            business_name=business_name,
+            organization_name=organization_name,
+            business_address=business_address,
+
+            services=services,
+            selected_service_id=
+                selected_service_id,
+            selected_service=
+                selected_service,
+
+            eligible_providers=
+                eligible_providers,
+
+            allow_any_provider=
+                allow_any_provider,
+
+            minimum_booking_notice_hours=
+                minimum_booking_notice_hours,
+
+            minimum_date=minimum_date,
+            maximum_date=maximum_date,
+
+            selected_provider_id=
+                selected_provider_id,
+            selected_date=selected_date,
+
+            availability_searched=
+                availability_searched,
+            availability_results=
+                availability_results,
+            total_slot_count=
+                total_slot_count,
+
+            selected_service_name=
+                selected_service_name,
+            date_display=date_display,
+            availability_message=
+                availability_message,
+
+            booking_csrf_token=
+                booking_csrf_token
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _queue_public_booking_confirmation_email(
+    cur,
+    spa_id,
+    business_unit_id,
+    appointment_id,
+    client_id,
+    recipient_email,
+    booked_by_name,
+    appointment_for_name,
+    booking_for_other,
+    service_name,
+    provider_name,
+    appointment_date,
+    appointment_time,
+    duration_minutes,
+    price_at_booking
+):
+    """
+    Add one public-booking confirmation email to the
+    Email Automation Queue.
+
+    The appointment must already be committed before
+    this helper is called.
+    """
+
+    cur.execute("""
+        SELECT
+            COALESCE(
+                NULLIF(TRIM(bu.unit_name), ''),
+                NULLIF(TRIM(s.spa_name), ''),
+                'Your Appointment Provider'
+            )
+        FROM business_units bu
+
+        JOIN spas s
+          ON s.spa_id = bu.spa_id
+
+        WHERE bu.spa_id = %s
+          AND bu.business_unit_id = %s
+        LIMIT 1
+    """, (
+        spa_id,
+        business_unit_id
+    ))
+
+    workspace_row = cur.fetchone()
+
+    workspace_name = (
+        workspace_row[0]
+        if workspace_row and workspace_row[0]
+        else "Your Appointment Provider"
+    )
+
+    date_display = (
+        appointment_date
+        .strftime("%A, %B %d, %Y")
+        .replace(" 0", " ")
+    )
+
+    time_display = (
+        appointment_time
+        .strftime("%I:%M %p")
+        .lstrip("0")
+    )
+
+    price_display = (
+        f"${price_at_booking:,.2f}"
+    )
+
+    subject_line = (
+        f"Appointment Confirmed — {workspace_name}"
+    )
+
+    if booking_for_other:
+        appointment_intro = (
+            f"Your appointment for "
+            f"{appointment_for_name} with "
+            f"{workspace_name} is confirmed."
+        )
+
+        recipient_details = (
+            f"Booked By: {booked_by_name}\n"
+            f"Appointment For: "
+            f"{appointment_for_name}\n"
+        )
+
+    else:
+        appointment_intro = (
+            f"Your appointment with "
+            f"{workspace_name} is confirmed."
+        )
+
+        recipient_details = (
+            f"Appointment For: "
+            f"{appointment_for_name}\n"
+        )
+
+    text_body = (
+        f"Hello {booked_by_name},\n\n"
+        f"{appointment_intro}\n\n"
+        f"Confirmation Number: {appointment_id}\n"
+        f"{recipient_details}"
+        f"Service: {service_name}\n"
+        f"Provider: {provider_name}\n"
+        f"Date: {date_display}\n"
+        f"Time: {time_display}\n"
+        f"Duration: {duration_minutes} minutes\n"
+        f"Price: {price_display}\n\n"
+        f"Please contact {workspace_name} directly "
+        f"if you need to make changes to the "
+        f"appointment.\n\n"
+        f"We look forward to seeing you!"
+    )
+
+    cur.execute("""
+        INSERT INTO email_queue (
+            spa_id,
+            business_unit_id,
+            client_id,
+            appointment_id,
+            email_type,
+            recipient_email,
+            recipient_name,
+            subject_line,
+            text_body,
+            html_body,
+            status,
+            scheduled_for,
+            next_attempt_at
+        )
+        VALUES (
+            %s,
+            %s,
+            %s,
+            %s,
+            'booking_confirmation',
+            %s,
+            %s,
+            %s,
+            %s,
+            NULL,
+            'pending',
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP
+        )
+        ON CONFLICT DO NOTHING
+        RETURNING email_queue_id
+    """, (
+        spa_id,
+        business_unit_id,
+        client_id,
+        appointment_id,
+        recipient_email,
+        booked_by_name,
+        subject_line,
+        text_body
+    ))
+
+    queued_row = cur.fetchone()
+
+    if not queued_row:
+        return None
+
+    return queued_row[0]
+
+
+@app.route("/book/<public_booking_slug>")
+def public_booking(public_booking_slug):
+    return _render_public_booking_page(
+        public_booking_slug,
+        preview_mode=False
+    )
+
+
+@app.route(
+    "/book/<public_booking_slug>/confirm",
+    methods=["POST"]
+)
+def public_booking_confirm(
+    public_booking_slug
+):
+    import hmac
+    import re
+    from datetime import datetime
+
+    public_booking_slug = str(
+        public_booking_slug or ""
+    ).strip().lower()
+
+
+    def failure_response(
+        message,
+        status_code=400,
+        service_type_id=None
+    ):
+        back_arguments = {
+            "public_booking_slug":
+                public_booking_slug
+        }
+
+        if service_type_id:
+            back_arguments[
+                "service_type_id"
+            ] = service_type_id
+
+        return (
+            render_template(
+                "booking/"
+                "public_booking_confirmation.html",
+                success=False,
+                preview_mode=False,
+                message=message,
+                back_url=url_for(
+                    "public_booking",
+                    **back_arguments
+                )
+            ),
+            status_code
+        )
+
+
+    # -----------------------------------------------------
+    # Booking-specific CSRF protection.
+    # -----------------------------------------------------
+
+    submitted_token = (
+        request.form.get("csrf_token")
+        or ""
+    ).strip()
+
+    token_record = session.get(
+        "_public_booking_csrf",
+        {}
+    )
+
+    expected_token = ""
+
+    if (
+        isinstance(token_record, dict)
+        and token_record.get("slug")
+            == public_booking_slug
+    ):
+        expected_token = str(
+            token_record.get("token")
+            or ""
+        )
+
+
+    if (
+        not submitted_token
+        or not expected_token
+        or not hmac.compare_digest(
+            submitted_token,
+            expected_token
+        )
+    ):
+        return failure_response(
+            "Your booking page expired or could not "
+            "be verified. Please return to the booking "
+            "page and try again.",
+            status_code=400
+        )
+
+
+    # Simple honeypot for automated form submissions.
+    if (
+        request.form.get("website")
+        or ""
+    ).strip():
+        return failure_response(
+            "The appointment could not be confirmed.",
+            status_code=400
+        )
+
+
+    service_type_id_raw = (
+        request.form.get(
+            "service_type_id"
+        )
+        or ""
+    ).strip()
+
+    provider_employee_id_raw = (
+        request.form.get(
+            "provider_employee_id"
+        )
+        or ""
+    ).strip()
+
+    appointment_start_raw = (
+        request.form.get(
+            "appointment_start"
+        )
+        or ""
+    ).strip()
+
+    first_name = (
+        request.form.get("first_name")
+        or ""
+    ).strip()
+
+    last_name = (
+        request.form.get("last_name")
+        or ""
+    ).strip()
+
+    phone = (
+        request.form.get("phone")
+        or ""
+    ).strip()
+
+    email = (
+        request.form.get("email")
+        or ""
+    ).strip()
+
+    notes = (
+        request.form.get("notes")
+        or ""
+    ).strip()
+
+    booking_for_other_raw = (
+        request.form.get(
+            "booking_for_other"
+        )
+        or "false"
+    ).strip().lower()
+
+    guest_first_name = (
+        request.form.get(
+            "guest_first_name"
+        )
+        or ""
+    ).strip()
+
+    guest_last_name = (
+        request.form.get(
+            "guest_last_name"
+        )
+        or ""
+    ).strip()
+
+
+    try:
+        service_type_id = int(
+            service_type_id_raw
+        )
+
+        provider_employee_id = int(
+            provider_employee_id_raw
+        )
+    except (TypeError, ValueError):
+        return failure_response(
+            "The selected service or provider "
+            "is invalid."
+        )
+
+
+    try:
+        appointment_start = (
+            datetime.fromisoformat(
+                appointment_start_raw
+            )
+        )
+    except (TypeError, ValueError):
+        return failure_response(
+            "The selected appointment time "
+            "is invalid.",
+            service_type_id=service_type_id
+        )
+
+
+    if appointment_start.tzinfo is not None:
+        return failure_response(
+            "The selected appointment time "
+            "contains an unexpected timezone.",
+            service_type_id=service_type_id
+        )
+
+
+    if not first_name or not last_name:
+        return failure_response(
+            "First and last name are required.",
+            service_type_id=service_type_id
+        )
+
+
+    if (
+        len(first_name) > 80
+        or len(last_name) > 80
+    ):
+        return failure_response(
+            "The client name is too long.",
+            service_type_id=service_type_id
+        )
+
+
+    if booking_for_other_raw not in (
+        "true",
+        "false"
+    ):
+        return failure_response(
+            "The appointment recipient selection "
+            "is invalid.",
+            service_type_id=service_type_id
+        )
+
+    booking_for_other = (
+        booking_for_other_raw == "true"
+    )
+
+    if (
+        booking_for_other
+        and (
+            not guest_first_name
+            or not guest_last_name
+        )
+    ):
+        return failure_response(
+            "The guest's first and last name "
+            "are required.",
+            service_type_id=service_type_id
+        )
+
+    if (
+        len(guest_first_name) > 80
+        or len(guest_last_name) > 80
+    ):
+        return failure_response(
+            "The guest name is too long.",
+            service_type_id=service_type_id
+        )
+
+    if not booking_for_other:
+        guest_first_name = ""
+        guest_last_name = ""
+
+
+    if len(phone) > 30:
+        return failure_response(
+            "The phone number is too long.",
+            service_type_id=service_type_id
+        )
+
+
+    if len(email) > 150:
+        return failure_response(
+            "The email address is too long.",
+            service_type_id=service_type_id
+        )
+
+
+    if len(notes) > 500:
+        return failure_response(
+            "Appointment notes cannot exceed "
+            "500 characters.",
+            service_type_id=service_type_id
+        )
+
+
+    normalized_email = (
+        _booking_normalize_email(
+            email
+        )
+    )
+
+    normalized_phone = (
+        _booking_normalize_phone(
+            phone
+        )
+    )
+
+
+    if not re.fullmatch(
+        r"[^@\s]+@[^@\s]+\.[^@\s]+",
+        normalized_email
+    ):
+        return failure_response(
+            "Please enter a valid email address.",
+            service_type_id=service_type_id
+        )
+
+
+    if len(normalized_phone) != 10:
+        return failure_response(
+            "Please enter a valid 10-digit "
+            "phone number.",
+            service_type_id=service_type_id
+        )
+
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        # Resolve the workspace from the public slug.
+        cur.execute("""
+            SELECT
+                bs.spa_id,
+                bs.business_unit_id
+            FROM booking_settings bs
+
+            JOIN business_units bu
+              ON bu.business_unit_id =
+                    bs.business_unit_id
+             AND bu.spa_id = bs.spa_id
+
+            JOIN spas s
+              ON s.spa_id = bs.spa_id
+
+            WHERE bs.public_booking_slug = %s
+              AND bs.public_booking_enabled = TRUE
+              AND bu.is_active = TRUE
+              AND s.active = TRUE
+            LIMIT 1
+        """, (public_booking_slug,))
+
+        booking_row = cur.fetchone()
+
+        if not booking_row:
+            conn.rollback()
+
+            return failure_response(
+                "Online booking is not currently "
+                "available for this business.",
+                status_code=404,
+                service_type_id=service_type_id
+            )
+
+
+        spa_id = booking_row[0]
+        business_unit_id = booking_row[1]
+
+
+        confirmation = (
+            _booking_commit_appointment(
+                cur=cur,
+                spa_id=spa_id,
+                business_unit_id=
+                    business_unit_id,
+                provider_employee_id=
+                    provider_employee_id,
+                service_type_id=
+                    service_type_id,
+                appointment_start=
+                    appointment_start,
+                first_name=first_name,
+                last_name=last_name,
+                phone=phone,
+                normalized_phone=
+                    normalized_phone,
+                normalized_email=
+                    normalized_email,
+                booking_for_other=
+                    booking_for_other,
+                guest_first_name=
+                    guest_first_name,
+                guest_last_name=
+                    guest_last_name,
+                notes=notes,
+                require_public=True,
+                booking_channel=
+                    "public_online"
+            )
+        )
+
+
+        if not confirmation.get("success"):
+            conn.rollback()
+
+            return failure_response(
+                confirmation.get("message")
+                or (
+                    "The appointment could not "
+                    "be confirmed."
+                ),
+                status_code=confirmation.get(
+                    "status_code",
+                    400
+                ),
+                service_type_id=service_type_id
+            )
+
+
+        conn.commit()
+
+
+        # -------------------------------------------------
+        # Queue the confirmation email only after the
+        # appointment transaction has committed.
+        #
+        # This is a separate transaction so an email queue
+        # problem can never undo a confirmed appointment.
+        # -------------------------------------------------
+
+        email_queued = False
+
+        try:
+            validation = confirmation[
+                "validation"
+            ]
+
+            queued_email_id = (
+                _queue_public_booking_confirmation_email(
+                    cur=cur,
+                    spa_id=spa_id,
+                    business_unit_id=
+                        business_unit_id,
+                    appointment_id=
+                        confirmation[
+                            "appointment_id"
+                        ],
+                    client_id=
+                        confirmation[
+                            "client_id"
+                        ],
+                    recipient_email=
+                        normalized_email,
+                    booked_by_name=
+                        confirmation[
+                            "booked_by_name"
+                        ],
+                    appointment_for_name=
+                        confirmation[
+                            "appointment_for_name"
+                        ],
+                    booking_for_other=
+                        confirmation[
+                            "booking_for_other"
+                        ],
+                    service_name=
+                        validation[
+                            "service_name"
+                        ],
+                    provider_name=
+                        validation[
+                            "provider_name"
+                        ],
+                    appointment_date=
+                        validation[
+                            "appointment_date"
+                        ],
+                    appointment_time=
+                        validation[
+                            "appointment_time"
+                        ],
+                    duration_minutes=
+                        validation[
+                            "duration_minutes"
+                        ],
+                    price_at_booking=
+                        validation[
+                            "price_at_booking"
+                        ]
+                )
+            )
+
+            conn.commit()
+
+            if queued_email_id:
+                email_queued = True
+
+                app.logger.info(
+                    "Public booking confirmation "
+                    "email queued. "
+                    "appointment_id=%s "
+                    "email_queue_id=%s",
+                    confirmation[
+                        "appointment_id"
+                    ],
+                    queued_email_id
+                )
+
+        except Exception:
+            conn.rollback()
+
+            app.logger.exception(
+                "Appointment was confirmed, but "
+                "the confirmation email could not "
+                "be queued. appointment_id=%s",
+                confirmation[
+                    "appointment_id"
+                ]
+            )
+
+
+        # Successful tokens are single-use.
+        current_token_record = session.get(
+            "_public_booking_csrf",
+            {}
+        )
+
+        if (
+            isinstance(
+                current_token_record,
+                dict
+            )
+            and current_token_record.get(
+                "slug"
+            ) == public_booking_slug
+        ):
+            session.pop(
+                "_public_booking_csrf",
+                None
+            )
+
+
+        validation = confirmation[
+            "validation"
+        ]
+
+        date_display = (
+            validation["appointment_date"]
+            .strftime("%A, %B %d, %Y")
+            .replace(" 0", " ")
+        )
+
+        time_display = (
+            validation["appointment_time"]
+            .strftime("%I:%M %p")
+            .lstrip("0")
+        )
+
+        price_display = (
+            f"${validation['price_at_booking']:,.2f}"
+        )
+
+
+        return render_template(
+            "booking/"
+            "public_booking_confirmation.html",
+            success=True,
+            preview_mode=False,
+
+            appointment_id=
+                confirmation["appointment_id"],
+
+            client_id=
+                confirmation["client_id"],
+
+            client_was_created=
+                confirmation[
+                    "client_was_created"
+                ],
+
+            client_name=
+                confirmation["booked_by_name"],
+
+            booked_by_name=
+                confirmation["booked_by_name"],
+
+            appointment_for_name=
+                confirmation[
+                    "appointment_for_name"
+                ],
+
+            booking_for_other=
+                confirmation[
+                    "booking_for_other"
+                ],
+
+            email_queued=email_queued,
+
+            service_name=
+                validation["service_name"],
+
+            provider_name=
+                validation["provider_name"],
+
+            date_display=date_display,
+            time_display=time_display,
+
+            duration_minutes=
+                validation["duration_minutes"],
+
+            price_display=price_display,
+
+            back_url=url_for(
+                "public_booking",
+                public_booking_slug=
+                    public_booking_slug
+            )
+        )
+
+    except Exception:
+        conn.rollback()
+
+        app.logger.exception(
+            "Public online booking confirmation failed."
+        )
+
+        return failure_response(
+            "The appointment could not be saved. "
+            "No changes were committed.",
+            status_code=500,
+            service_type_id=service_type_id
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
+@app.route(
+    "/booking/control-center",
+    methods=["GET", "POST"]
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def booking_control_center():
+    spa_id = current_spa_id()
+    business_unit_id = (
+        current_business_unit_id()
+    )
+    user_id = session.get("user_id")
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to manage online booking.",
+            "error"
+        )
+
+        return redirect(
+            url_for("calendar_view")
+        )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    def get_booking_readiness():
+        cur.execute("""
+            SELECT
+                COUNT(
+                    DISTINCT pst.service_type_id
+                ) AS service_count,
+
+                COUNT(
+                    DISTINCT pst.provider_employee_id
+                ) AS provider_count,
+
+                COUNT(*) AS assignment_count
+
+            FROM provider_service_types pst
+
+            JOIN service_name_types snt
+              ON snt.service_type_id =
+                    pst.service_type_id
+             AND snt.spa_id = pst.spa_id
+
+            JOIN employees e
+              ON e.employee_id =
+                    pst.provider_employee_id
+             AND e.spa_id = pst.spa_id
+
+            WHERE pst.spa_id = %s
+              AND pst.business_unit_id = %s
+              AND pst.is_active = TRUE
+              AND pst.is_publicly_bookable = TRUE
+              AND snt.is_active = TRUE
+              AND e.is_active = TRUE
+        """, (
+            spa_id,
+            business_unit_id
+        ))
+
+        public_row = cur.fetchone()
+
+        public_service_count = int(
+            public_row[0] or 0
+        )
+
+        public_provider_count = int(
+            public_row[1] or 0
+        )
+
+        public_assignment_count = int(
+            public_row[2] or 0
+        )
+
+
+        cur.execute("""
+            SELECT COUNT(*)
+            FROM booking_business_hours
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND is_active = TRUE
+        """, (
+            spa_id,
+            business_unit_id
+        ))
+
+        business_hours_count = int(
+            cur.fetchone()[0] or 0
+        )
+
+
+        cur.execute("""
+            SELECT COUNT(
+                DISTINCT pbh.provider_employee_id
+            )
+            FROM provider_booking_hours pbh
+            WHERE pbh.spa_id = %s
+              AND pbh.business_unit_id = %s
+              AND pbh.is_active = TRUE
+
+              AND EXISTS (
+                    SELECT 1
+                    FROM provider_service_types pst
+                    WHERE pst.spa_id =
+                            pbh.spa_id
+                      AND pst.business_unit_id =
+                            pbh.business_unit_id
+                      AND pst.provider_employee_id =
+                            pbh.provider_employee_id
+                      AND pst.is_active = TRUE
+                      AND pst.is_publicly_bookable = TRUE
+              )
+        """, (
+            spa_id,
+            business_unit_id
+        ))
+
+        providers_with_hours = int(
+            cur.fetchone()[0] or 0
+        )
+
+
+        cur.execute("""
+            SELECT COUNT(*)
+            FROM provider_time_off
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND is_active = TRUE
+              AND ends_at >= CURRENT_TIMESTAMP
+        """, (
+            spa_id,
+            business_unit_id
+        ))
+
+        upcoming_time_off_count = int(
+            cur.fetchone()[0] or 0
+        )
+
+
+        cur.execute("""
+            SELECT COUNT(*)
+            FROM appointments
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND booking_channel =
+                    'public_online'
+              AND appointment_date >= CURRENT_DATE
+              AND LOWER(
+                    TRIM(
+                        COALESCE(status, '')
+                    )
+                  ) NOT IN (
+                    'cancelled',
+                    'canceled'
+                  )
+        """, (
+            spa_id,
+            business_unit_id
+        ))
+
+        upcoming_online_appointments = int(
+            cur.fetchone()[0] or 0
+        )
+
+
+        services_ready = (
+            public_service_count > 0
+        )
+
+        business_hours_ready = (
+            business_hours_count > 0
+        )
+
+        provider_hours_ready = (
+            public_provider_count > 0
+            and providers_with_hours
+                == public_provider_count
+        )
+
+        ready_to_enable = all((
+            services_ready,
+            business_hours_ready,
+            provider_hours_ready
+        ))
+
+        return {
+            "public_service_count":
+                public_service_count,
+
+            "public_provider_count":
+                public_provider_count,
+
+            "public_assignment_count":
+                public_assignment_count,
+
+            "business_hours_count":
+                business_hours_count,
+
+            "providers_with_hours":
+                providers_with_hours,
+
+            "upcoming_time_off_count":
+                upcoming_time_off_count,
+
+            "upcoming_online_appointments":
+                upcoming_online_appointments,
+
+            "services_ready":
+                services_ready,
+
+            "business_hours_ready":
+                business_hours_ready,
+
+            "provider_hours_ready":
+                provider_hours_ready,
+
+            "ready_to_enable":
+                ready_to_enable
+        }
+
+
+    try:
+        cur.execute("""
+            SELECT
+                bs.booking_settings_id,
+                bs.slot_interval_minutes,
+                bs.minimum_booking_notice_hours,
+                bs.maximum_booking_days_ahead,
+                bs.default_buffer_before_minutes,
+                bs.default_buffer_after_minutes,
+                bs.allow_any_provider,
+                bs.public_booking_enabled,
+                bs.public_booking_slug,
+                bs.updated_at,
+
+                COALESCE(
+                    NULLIF(
+                        TRIM(bu.unit_name),
+                        ''
+                    ),
+                    NULLIF(
+                        TRIM(s.spa_name),
+                        ''
+                    ),
+                    'Booking Workspace'
+                ) AS workspace_name,
+
+                s.spa_name
+
+            FROM booking_settings bs
+
+            JOIN business_units bu
+              ON bu.business_unit_id =
+                    bs.business_unit_id
+             AND bu.spa_id = bs.spa_id
+
+            JOIN spas s
+              ON s.spa_id = bs.spa_id
+
+            WHERE bs.spa_id = %s
+              AND bs.business_unit_id = %s
+            LIMIT 1
+        """, (
+            spa_id,
+            business_unit_id
+        ))
+
+        settings_row = cur.fetchone()
+
+        if not settings_row:
+            flash(
+                "Booking settings were not found "
+                "for this workspace.",
+                "error"
+            )
+
+            return redirect(
+                url_for(
+                    "booking_availability_test"
+                )
+            )
+
+
+        if request.method == "POST":
+            errors = []
+
+            def parse_integer(
+                field_name,
+                field_label,
+                minimum_value,
+                maximum_value
+            ):
+                raw_value = (
+                    request.form.get(
+                        field_name
+                    )
+                    or ""
+                ).strip()
+
+                try:
+                    value = int(raw_value)
+                except (TypeError, ValueError):
+                    errors.append(
+                        f"{field_label} must be "
+                        f"a whole number."
+                    )
+
+                    return None
+
+                if (
+                    value < minimum_value
+                    or value > maximum_value
+                ):
+                    errors.append(
+                        f"{field_label} must be between "
+                        f"{minimum_value} and "
+                        f"{maximum_value}."
+                    )
+
+                return value
+
+
+            slot_interval_minutes = parse_integer(
+                "slot_interval_minutes",
+                "Slot interval",
+                5,
+                60
+            )
+
+            minimum_booking_notice_hours = (
+                parse_integer(
+                    "minimum_booking_notice_hours",
+                    "Minimum booking notice",
+                    0,
+                    720
+                )
+            )
+
+            maximum_booking_days_ahead = (
+                parse_integer(
+                    "maximum_booking_days_ahead",
+                    "Maximum booking window",
+                    1,
+                    365
+                )
+            )
+
+            default_buffer_before_minutes = (
+                parse_integer(
+                    "default_buffer_before_minutes",
+                    "Default buffer before",
+                    0,
+                    240
+                )
+            )
+
+            default_buffer_after_minutes = (
+                parse_integer(
+                    "default_buffer_after_minutes",
+                    "Default buffer after",
+                    0,
+                    240
+                )
+            )
+
+
+            allowed_slot_intervals = {
+                5,
+                10,
+                15,
+                20,
+                30,
+                60
+            }
+
+            if (
+                slot_interval_minutes is not None
+                and slot_interval_minutes
+                    not in allowed_slot_intervals
+            ):
+                errors.append(
+                    "Slot interval must be 5, 10, "
+                    "15, 20, 30, or 60 minutes."
+                )
+
+
+            allow_any_provider = (
+                "allow_any_provider"
+                in request.form
+            )
+
+            public_booking_enabled = (
+                "public_booking_enabled"
+                in request.form
+            )
+
+
+            readiness = get_booking_readiness()
+
+            if (
+                public_booking_enabled
+                and not readiness[
+                    "ready_to_enable"
+                ]
+            ):
+                errors.append(
+                    "Public booking cannot be enabled "
+                    "until public services, business "
+                    "hours, and provider hours are ready."
+                )
+
+
+            if errors:
+                for error in errors:
+                    flash(error, "error")
+
+            else:
+                cur.execute("""
+                    UPDATE booking_settings
+                    SET
+                        slot_interval_minutes = %s,
+                        minimum_booking_notice_hours = %s,
+                        maximum_booking_days_ahead = %s,
+                        default_buffer_before_minutes = %s,
+                        default_buffer_after_minutes = %s,
+                        allow_any_provider = %s,
+                        public_booking_enabled = %s,
+                        updated_at = CURRENT_TIMESTAMP,
+                        updated_by = %s
+                    WHERE spa_id = %s
+                      AND business_unit_id = %s
+                """, (
+                    slot_interval_minutes,
+                    minimum_booking_notice_hours,
+                    maximum_booking_days_ahead,
+                    default_buffer_before_minutes,
+                    default_buffer_after_minutes,
+                    allow_any_provider,
+                    public_booking_enabled,
+                    user_id,
+                    spa_id,
+                    business_unit_id
+                ))
+
+                conn.commit()
+
+                flash(
+                    "Online booking settings saved.",
+                    "success"
+                )
+
+                return redirect(
+                    url_for(
+                        "booking_control_center"
+                    )
+                )
+
+
+        # Reload after validation or GET.
+        cur.execute("""
+            SELECT
+                bs.booking_settings_id,
+                bs.slot_interval_minutes,
+                bs.minimum_booking_notice_hours,
+                bs.maximum_booking_days_ahead,
+                bs.default_buffer_before_minutes,
+                bs.default_buffer_after_minutes,
+                bs.allow_any_provider,
+                bs.public_booking_enabled,
+                bs.public_booking_slug,
+                bs.updated_at,
+
+                COALESCE(
+                    NULLIF(
+                        TRIM(bu.unit_name),
+                        ''
+                    ),
+                    NULLIF(
+                        TRIM(s.spa_name),
+                        ''
+                    ),
+                    'Booking Workspace'
+                ) AS workspace_name,
+
+                s.spa_name
+
+            FROM booking_settings bs
+
+            JOIN business_units bu
+              ON bu.business_unit_id =
+                    bs.business_unit_id
+             AND bu.spa_id = bs.spa_id
+
+            JOIN spas s
+              ON s.spa_id = bs.spa_id
+
+            WHERE bs.spa_id = %s
+              AND bs.business_unit_id = %s
+            LIMIT 1
+        """, (
+            spa_id,
+            business_unit_id
+        ))
+
+        settings_row = cur.fetchone()
+
+        settings = {
+            "booking_settings_id":
+                settings_row[0],
+
+            "slot_interval_minutes":
+                settings_row[1],
+
+            "minimum_booking_notice_hours":
+                settings_row[2],
+
+            "maximum_booking_days_ahead":
+                settings_row[3],
+
+            "default_buffer_before_minutes":
+                settings_row[4],
+
+            "default_buffer_after_minutes":
+                settings_row[5],
+
+            "allow_any_provider":
+                bool(settings_row[6]),
+
+            "public_booking_enabled":
+                bool(settings_row[7]),
+
+            "public_booking_slug":
+                settings_row[8],
+
+            "updated_at":
+                settings_row[9],
+
+            "workspace_name":
+                settings_row[10],
+
+            "spa_name":
+                settings_row[11]
+        }
+
+        readiness = get_booking_readiness()
+
+        public_booking_url = url_for(
+            "public_booking",
+            public_booking_slug=
+                settings[
+                    "public_booking_slug"
+                ],
+            _external=True
+        )
+
+        return render_template(
+            "Booking/"
+            "booking_control_center.html",
+            settings=settings,
+            readiness=readiness,
+            public_booking_url=
+                public_booking_url
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route("/booking/public-preview")
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def booking_public_preview():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to preview public booking.",
+            "error"
+        )
+
+        return redirect(
+            url_for("booking_availability_test")
+        )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT public_booking_slug
+            FROM booking_settings
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+        """, (
+            spa_id,
+            business_unit_id
+        ))
+
+        row = cur.fetchone()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if not row:
+        flash(
+            "Booking settings were not found "
+            "for this workspace.",
+            "error"
+        )
+
+        return redirect(
+            url_for("booking_availability_test")
+        )
+
+    return _render_public_booking_page(
+        row[0],
+        preview_mode=True
+    )
+
+
+@app.route("/booking/availability-test")
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def booking_availability_test():
+    from datetime import datetime, timedelta
+
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to test booking availability.",
+            "error"
+        )
+
+        return redirect(
+            url_for("calendar_view")
+        )
+
+    spa_now = get_spa_now(spa_id)
+
+    # Availability records use local business wall-clock
+    # values stored without timezone information.
+    local_now = spa_now.replace(tzinfo=None)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        # =================================================
+        # Booking settings
+        # =================================================
+
+        cur.execute("""
+            SELECT
+                slot_interval_minutes,
+                minimum_booking_notice_hours,
+                maximum_booking_days_ahead,
+                default_buffer_before_minutes,
+                default_buffer_after_minutes,
+                allow_any_provider,
+                public_booking_enabled
+            FROM booking_settings
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+        """, (
+            spa_id,
+            business_unit_id
+        ))
+
+        settings_row = cur.fetchone()
+
+        if settings_row:
+            settings = {
+                "slot_interval_minutes":
+                    settings_row[0] or 15,
+
+                "minimum_booking_notice_hours":
+                    settings_row[1] or 0,
+
+                "maximum_booking_days_ahead":
+                    settings_row[2] or 90,
+
+                "default_buffer_before_minutes":
+                    settings_row[3] or 0,
+
+                "default_buffer_after_minutes":
+                    settings_row[4] or 0,
+
+                "allow_any_provider":
+                    bool(settings_row[5]),
+
+                "public_booking_enabled":
+                    bool(settings_row[6])
+            }
+        else:
+            settings = {
+                "slot_interval_minutes": 15,
+                "minimum_booking_notice_hours": 24,
+                "maximum_booking_days_ahead": 90,
+                "default_buffer_before_minutes": 0,
+                "default_buffer_after_minutes": 0,
+                "allow_any_provider": True,
+                "public_booking_enabled": False
+            }
+
+        minimum_date_value = local_now.date()
+
+        maximum_date_value = (
+            minimum_date_value
+            + timedelta(
+                days=settings[
+                    "maximum_booking_days_ahead"
+                ]
+            )
+        )
+
+        # =================================================
+        # Services with active provider assignments
+        #
+        # This is an internal test page, so active
+        # assignments are included even when their public
+        # booking checkbox is currently disabled.
+        # =================================================
+
+        cur.execute("""
+            SELECT DISTINCT
+                snt.service_type_id,
+                snt.service_name
+            FROM provider_service_types pst
+            JOIN service_name_types snt
+              ON snt.service_type_id =
+                    pst.service_type_id
+             AND snt.spa_id = pst.spa_id
+            WHERE pst.spa_id = %s
+              AND pst.business_unit_id = %s
+              AND pst.is_active = TRUE
+              AND snt.is_active = TRUE
+            ORDER BY
+                snt.service_name
+        """, (
+            spa_id,
+            business_unit_id
+        ))
+
+        services = [
+            {
+                "service_type_id": row[0],
+                "service_name": row[1]
+            }
+            for row in cur.fetchall()
+        ]
+
+        # =================================================
+        # Providers with active service assignments
+        # =================================================
+
+        cur.execute("""
+            SELECT DISTINCT
+                e.employee_id,
+
+                COALESCE(
+                    NULLIF(
+                        TRIM(e.employee_nickname),
+                        ''
+                    ),
+                    NULLIF(
+                        TRIM(
+                            CONCAT_WS(
+                                ' ',
+                                e.first_name,
+                                e.last_name
+                            )
+                        ),
+                        ''
+                    ),
+                    'Provider ' ||
+                        e.employee_id::TEXT
+                ) AS provider_name,
+
+                e.employee_nickname,
+                e.first_name,
+                e.last_name
+            FROM provider_service_types pst
+            JOIN employees e
+              ON e.employee_id =
+                    pst.provider_employee_id
+             AND e.spa_id = pst.spa_id
+            WHERE pst.spa_id = %s
+              AND pst.business_unit_id = %s
+              AND pst.is_active = TRUE
+              AND e.is_active = TRUE
+            ORDER BY
+                provider_name
+        """, (
+            spa_id,
+            business_unit_id
+        ))
+
+        providers = []
+
+        for row in cur.fetchall():
+            providers.append({
+                "employee_id": row[0],
+                "provider_name": row[1],
+                "employee_nickname": row[2],
+                "first_name": row[3],
+                "last_name": row[4]
+            })
+
+        # =================================================
+        # Request selections
+        # =================================================
+
+        selected_service_raw = (
+            request.args.get(
+                "service_type_id",
+                ""
+            ).strip()
+        )
+
+        selected_provider_raw = (
+            request.args.get(
+                "provider_employee_id",
+                "any"
+            ).strip()
+            or "any"
+        )
+
+        selected_date_raw = (
+            request.args.get(
+                "booking_date",
+                ""
+            ).strip()
+        )
+
+        show_diagnostics = (
+            request.args.get(
+                "show_diagnostics",
+                ""
+            ) == "1"
+        )
+
+        public_preview_mode = (
+            request.args.get(
+                "public_preview",
+                ""
+            ) == "1"
+        )
+
+        searched = bool(
+            selected_service_raw
+            and selected_date_raw
+        )
+
+        selected_service_id = None
+        selected_provider_id = (
+            "any"
+            if selected_provider_raw == "any"
+            else None
+        )
+
+        selected_date_value = minimum_date_value
+        selected_date = minimum_date_value.isoformat()
+
+        selected_service_name = ""
+        date_display = ""
+        availability_results = []
+        total_slot_count = 0
+        unassigned_conflict_count = 0
+
+        if selected_service_raw:
+            try:
+                selected_service_id = int(
+                    selected_service_raw
+                )
+            except (TypeError, ValueError):
+                flash(
+                    "Invalid service selected.",
+                    "error"
+                )
+
+                return redirect(
+                    url_for(
+                        "booking_availability_test"
+                    )
+                )
+
+        if selected_provider_raw != "any":
+            try:
+                selected_provider_id = int(
+                    selected_provider_raw
+                )
+            except (TypeError, ValueError):
+                flash(
+                    "Invalid provider selected.",
+                    "error"
+                )
+
+                return redirect(
+                    url_for(
+                        "booking_availability_test"
+                    )
+                )
+
+        if selected_date_raw:
+            try:
+                selected_date_value = (
+                    datetime.strptime(
+                        selected_date_raw,
+                        "%Y-%m-%d"
+                    ).date()
+                )
+
+                selected_date = (
+                    selected_date_value.isoformat()
+                )
+
+            except ValueError:
+                flash(
+                    "Invalid booking date selected.",
+                    "error"
+                )
+
+                return redirect(
+                    url_for(
+                        "booking_availability_test"
+                    )
+                )
+
+        if searched:
+            if (
+                selected_date_value
+                < minimum_date_value
+                or selected_date_value
+                > maximum_date_value
+            ):
+                flash(
+                    "The selected date is outside "
+                    "the allowed booking range.",
+                    "error"
+                )
+
+                return redirect(
+                    url_for(
+                        "booking_availability_test"
+                    )
+                )
+
+            service_match = next(
+                (
+                    service
+                    for service in services
+                    if service[
+                        "service_type_id"
+                    ] == selected_service_id
+                ),
+                None
+            )
+
+            if not service_match:
+                flash(
+                    "The selected service is not "
+                    "available for booking.",
+                    "error"
+                )
+
+                return redirect(
+                    url_for(
+                        "booking_availability_test"
+                    )
+                )
+
+            selected_service_name = (
+                service_match["service_name"]
+            )
+
+            date_display = (
+                f"{selected_date_value.strftime('%A, %B')} "
+                f"{selected_date_value.day}, "
+                f"{selected_date_value.year}"
+            )
+
+            day_of_week = (
+                selected_date_value.isoweekday()
+            )
+
+            day_start = datetime.combine(
+                selected_date_value,
+                datetime.min.time()
+            )
+
+            day_end = (
+                day_start
+                + timedelta(days=1)
+            )
+
+            earliest_allowed_start = (
+                local_now
+                + timedelta(
+                    hours=settings[
+                        "minimum_booking_notice_hours"
+                    ]
+                )
+            )
+
+            # =============================================
+            # Business operating windows
+            # =============================================
+
+            cur.execute("""
+                SELECT
+                    start_time,
+                    end_time
+                FROM booking_business_hours
+                WHERE spa_id = %s
+                  AND business_unit_id = %s
+                  AND day_of_week = %s
+                  AND is_active = TRUE
+                ORDER BY
+                    start_time
+            """, (
+                spa_id,
+                business_unit_id,
+                day_of_week
+            ))
+
+            business_windows = [
+                (
+                    datetime.combine(
+                        selected_date_value,
+                        row[0]
+                    ),
+                    datetime.combine(
+                        selected_date_value,
+                        row[1]
+                    )
+                )
+                for row in cur.fetchall()
+            ]
+
+            # =============================================
+            # Provider-service assignments
+            # =============================================
+
+            assignment_sql = """
+                SELECT
+                    pst.provider_employee_id,
+
+                    COALESCE(
+                        NULLIF(
+                            TRIM(
+                                e.employee_nickname
+                            ),
+                            ''
+                        ),
+                        NULLIF(
+                            TRIM(
+                                CONCAT_WS(
+                                    ' ',
+                                    e.first_name,
+                                    e.last_name
+                                )
+                            ),
+                            ''
+                        ),
+                        'Provider ' ||
+                            e.employee_id::TEXT
+                    ) AS provider_name,
+
+                    COALESCE(
+                        pst.duration_override_minutes,
+                        snt.default_duration_minutes
+                    ) AS duration_minutes,
+
+                    COALESCE(
+                        pst.buffer_before_minutes,
+                        %s,
+                        0
+                    ) AS buffer_before_minutes,
+
+                    COALESCE(
+                        pst.buffer_after_minutes,
+                        %s,
+                        0
+                    ) AS buffer_after_minutes
+
+                FROM provider_service_types pst
+
+                JOIN employees e
+                  ON e.employee_id =
+                        pst.provider_employee_id
+                 AND e.spa_id = pst.spa_id
+
+                JOIN service_name_types snt
+                  ON snt.service_type_id =
+                        pst.service_type_id
+                 AND snt.spa_id = pst.spa_id
+
+                WHERE pst.spa_id = %s
+                  AND pst.business_unit_id = %s
+                  AND pst.service_type_id = %s
+                  AND pst.is_active = TRUE
+                  AND snt.is_active = TRUE
+                  AND e.is_active = TRUE
+            """
+
+            assignment_params = [
+                settings[
+                    "default_buffer_before_minutes"
+                ],
+                settings[
+                    "default_buffer_after_minutes"
+                ],
+                spa_id,
+                business_unit_id,
+                selected_service_id
+            ]
+
+            if selected_provider_id != "any":
+                assignment_sql += """
+                  AND pst.provider_employee_id = %s
+                """
+
+                assignment_params.append(
+                    selected_provider_id
+                )
+
+            assignment_sql += """
+                ORDER BY
+                    provider_name
+            """
+
+            cur.execute(
+                assignment_sql,
+                tuple(assignment_params)
+            )
+
+            assignments = [
+                {
+                    "provider_employee_id": row[0],
+                    "provider_name": row[1],
+                    "duration_minutes":
+                        int(row[2] or 0),
+
+                    "buffer_before_minutes":
+                        int(row[3] or 0),
+
+                    "buffer_after_minutes":
+                        int(row[4] or 0)
+                }
+                for row in cur.fetchall()
+                if int(row[2] or 0) > 0
+            ]
+
+            # =============================================
+            # Provider alias map for legacy/imported
+            # appointments that do not yet have an
+            # employee ID.
+            # =============================================
+
+            alias_to_provider_ids = {}
+
+            for provider in providers:
+                provider_aliases = {
+                    _booking_normalize_name(
+                        provider["provider_name"]
+                    ),
+                    _booking_normalize_name(
+                        provider[
+                            "employee_nickname"
+                        ]
+                    ),
+                    _booking_normalize_name(
+                        provider["first_name"]
+                    ),
+                    _booking_normalize_name(
+                        " ".join(
+                            part
+                            for part in [
+                                provider["first_name"],
+                                provider["last_name"]
+                            ]
+                            if part
+                        )
+                    )
+                }
+
+                for alias in provider_aliases:
+                    if not alias:
+                        continue
+
+                    alias_to_provider_ids.setdefault(
+                        alias,
+                        set()
+                    ).add(
+                        provider["employee_id"]
+                    )
+
+            # =============================================
+            # Existing blocking appointments
+            # =============================================
+
+            cur.execute("""
+                SELECT
+                    a.appointment_id,
+                    a.appointment_time,
+
+                    COALESCE(
+                        NULLIF(
+                            a.duration_minutes,
+                            0
+                        ),
+                        snt.default_duration_minutes,
+                        60
+                    ) AS duration_minutes,
+
+                    a.provider_employee_id,
+                    a.provider_name_at_booking,
+
+                    COALESCE(
+                        pst.buffer_before_minutes,
+                        %s,
+                        0
+                    ) AS buffer_before_minutes,
+
+                    COALESCE(
+                        pst.buffer_after_minutes,
+                        %s,
+                        0
+                    ) AS buffer_after_minutes
+
+                FROM appointments a
+
+                LEFT JOIN service_name_types snt
+                  ON snt.service_type_id =
+                        a.service_type_id
+                 AND snt.spa_id = a.spa_id
+
+                LEFT JOIN provider_service_types pst
+                  ON pst.spa_id = a.spa_id
+                 AND pst.business_unit_id =
+                        a.business_unit_id
+                 AND pst.provider_employee_id =
+                        a.provider_employee_id
+                 AND pst.service_type_id =
+                        a.service_type_id
+                 AND pst.is_active = TRUE
+
+                WHERE a.spa_id = %s
+                  AND a.business_unit_id = %s
+                  AND a.appointment_date = %s
+
+                  AND LOWER(
+                        TRIM(
+                            COALESCE(
+                                a.status,
+                                ''
+                            )
+                        )
+                      ) NOT IN (
+                        'cancelled',
+                        'canceled',
+                        'completed',
+                        'no show',
+                        'no-show',
+                        're-scheduled',
+                        'rescheduled'
+                      )
+
+                ORDER BY
+                    a.appointment_time,
+                    a.appointment_id
+            """, (
+                settings[
+                    "default_buffer_before_minutes"
+                ],
+                settings[
+                    "default_buffer_after_minutes"
+                ],
+                spa_id,
+                business_unit_id,
+                selected_date_value
+            ))
+
+            appointment_blocks = []
+            generic_provider_names = {
+                "",
+                "any",
+                "any available",
+                "any provider",
+                "no preference",
+                "unassigned"
+            }
+
+            for row in cur.fetchall():
+                appointment_time = row[1]
+
+                if appointment_time is None:
+                    continue
+
+                appointment_start = (
+                    datetime.combine(
+                        selected_date_value,
+                        appointment_time
+                    )
+                )
+
+                appointment_end = (
+                    appointment_start
+                    + timedelta(
+                        minutes=int(row[2] or 60)
+                    )
+                )
+
+                blocked_start = (
+                    appointment_start
+                    - timedelta(
+                        minutes=int(row[5] or 0)
+                    )
+                )
+
+                blocked_end = (
+                    appointment_end
+                    + timedelta(
+                        minutes=int(row[6] or 0)
+                    )
+                )
+
+                provider_employee_id = row[3]
+                ambiguous_provider = False
+
+                if provider_employee_id is None:
+                    normalized_provider_name = (
+                        _booking_normalize_name(
+                            row[4]
+                        )
+                    )
+
+                    matched_ids = (
+                        alias_to_provider_ids.get(
+                            normalized_provider_name,
+                            set()
+                        )
+                    )
+
+                    if (
+                        normalized_provider_name
+                        in generic_provider_names
+                    ):
+                        ambiguous_provider = True
+
+                    elif len(matched_ids) == 1:
+                        provider_employee_id = next(
+                            iter(matched_ids)
+                        )
+
+                    else:
+                        ambiguous_provider = True
+
+                if ambiguous_provider:
+                    unassigned_conflict_count += 1
+
+                appointment_blocks.append({
+                    "appointment_id": row[0],
+                    "provider_employee_id":
+                        provider_employee_id,
+
+                    "ambiguous_provider":
+                        ambiguous_provider,
+
+                    "starts_at": blocked_start,
+                    "ends_at": blocked_end,
+
+                    "appointment_start":
+                        appointment_start,
+
+                    "appointment_end":
+                        appointment_end,
+
+                    "buffer_before_minutes":
+                        int(row[5] or 0),
+
+                    "buffer_after_minutes":
+                        int(row[6] or 0)
+                })
+
+            # =============================================
+            # Calculate each provider's available slots
+            # =============================================
+
+            slot_interval_minutes = max(
+                int(
+                    settings[
+                        "slot_interval_minutes"
+                    ]
+                    or 15
+                ),
+                1
+            )
+
+            for assignment in assignments:
+                provider_employee_id = (
+                    assignment[
+                        "provider_employee_id"
+                    ]
+                )
+
+                duration_minutes = (
+                    assignment[
+                        "duration_minutes"
+                    ]
+                )
+
+                buffer_before_minutes = (
+                    assignment[
+                        "buffer_before_minutes"
+                    ]
+                )
+
+                buffer_after_minutes = (
+                    assignment[
+                        "buffer_after_minutes"
+                    ]
+                )
+
+                # -----------------------------------------
+                # Provider working windows
+                # -----------------------------------------
+
+                cur.execute("""
+                    SELECT
+                        start_time,
+                        end_time
+                    FROM provider_booking_hours
+                    WHERE spa_id = %s
+                      AND business_unit_id = %s
+                      AND provider_employee_id = %s
+                      AND day_of_week = %s
+                      AND is_active = TRUE
+                    ORDER BY
+                        start_time
+                """, (
+                    spa_id,
+                    business_unit_id,
+                    provider_employee_id,
+                    day_of_week
+                ))
+
+                provider_windows = [
+                    (
+                        datetime.combine(
+                            selected_date_value,
+                            row[0]
+                        ),
+                        datetime.combine(
+                            selected_date_value,
+                            row[1]
+                        )
+                    )
+                    for row in cur.fetchall()
+                ]
+
+                # Provider hours must also fall inside
+                # business operating hours.
+                working_windows = []
+
+                for (
+                    provider_start,
+                    provider_end
+                ) in provider_windows:
+
+                    for (
+                        business_start,
+                        business_end
+                    ) in business_windows:
+
+                        overlap_start = max(
+                            provider_start,
+                            business_start
+                        )
+
+                        overlap_end = min(
+                            provider_end,
+                            business_end
+                        )
+
+                        if overlap_start < overlap_end:
+                            working_windows.append(
+                                (
+                                    overlap_start,
+                                    overlap_end
+                                )
+                            )
+
+                working_windows = (
+                    _booking_merge_windows(
+                        working_windows
+                    )
+                )
+
+                availability_summary_reason = ""
+
+                if not business_windows:
+                    availability_summary_reason = (
+                        "The business is closed on "
+                        "the selected date."
+                    )
+
+                elif not provider_windows:
+                    availability_summary_reason = (
+                        "This provider has no working "
+                        "hours on the selected date."
+                    )
+
+                elif not working_windows:
+                    availability_summary_reason = (
+                        "The provider's working hours "
+                        "do not overlap the business's "
+                        "operating hours."
+                    )
+
+                # -----------------------------------------
+                # Provider time off and blocked time
+                # -----------------------------------------
+
+                cur.execute("""
+                    SELECT
+                        starts_at,
+                        ends_at,
+                        block_type,
+                        reason
+                    FROM provider_time_off
+                    WHERE spa_id = %s
+                      AND business_unit_id = %s
+                      AND provider_employee_id = %s
+                      AND is_active = TRUE
+                      AND starts_at < %s
+                      AND ends_at > %s
+                    ORDER BY
+                        starts_at
+                """, (
+                    spa_id,
+                    business_unit_id,
+                    provider_employee_id,
+                    day_end,
+                    day_start
+                ))
+
+                provider_time_off = [
+                    {
+                        "starts_at": row[0],
+                        "ends_at": row[1],
+                        "block_type": row[2],
+                        "reason": row[3]
+                    }
+                    for row in cur.fetchall()
+                ]
+
+                provider_appointments = [
+                    block
+                    for block in appointment_blocks
+                    if (
+                        block[
+                            "ambiguous_provider"
+                        ]
+                        or block[
+                            "provider_employee_id"
+                        ] == provider_employee_id
+                    )
+                ]
+
+                slots = []
+                blocked_slots = []
+                seen_slot_values = set()
+
+                for (
+                    working_start,
+                    working_end
+                ) in working_windows:
+
+                    earliest_window_start = (
+                        working_start
+                        + timedelta(
+                            minutes=
+                                buffer_before_minutes
+                        )
+                    )
+
+                    candidate_start = (
+                        _booking_round_up_to_interval(
+                            earliest_window_start,
+                            slot_interval_minutes
+                        )
+                    )
+
+                    while True:
+                        service_end = (
+                            candidate_start
+                            + timedelta(
+                                minutes=duration_minutes
+                            )
+                        )
+
+                        candidate_block_start = (
+                            candidate_start
+                            - timedelta(
+                                minutes=
+                                    buffer_before_minutes
+                            )
+                        )
+
+                        candidate_block_end = (
+                            service_end
+                            + timedelta(
+                                minutes=
+                                    buffer_after_minutes
+                            )
+                        )
+
+                        if (
+                            candidate_block_end
+                            > working_end
+                        ):
+                            break
+
+                        blocked_reasons = []
+
+                        if (
+                            candidate_start
+                            < earliest_allowed_start
+                        ):
+                            blocked_reasons.append(
+                                "Minimum booking notice "
+                                "has not been met."
+                            )
+
+                        for block in provider_time_off:
+                            if not (
+                                _booking_intervals_overlap(
+                                    candidate_block_start,
+                                    candidate_block_end,
+                                    block["starts_at"],
+                                    block["ends_at"]
+                                )
+                            ):
+                                continue
+
+                            if (
+                                block["block_type"]
+                                == "blocked_time"
+                            ):
+                                time_off_label = (
+                                    "Meeting or temporary "
+                                    "blocked time"
+                                )
+                            else:
+                                time_off_label = (
+                                    "Vacation or personal "
+                                    "time"
+                                )
+
+                            reason_text = str(
+                                block["reason"] or ""
+                            ).strip()
+
+                            if reason_text:
+                                time_off_label += (
+                                    f" — {reason_text}"
+                                )
+
+                            if (
+                                time_off_label
+                                not in blocked_reasons
+                            ):
+                                blocked_reasons.append(
+                                    time_off_label
+                                )
+
+                        for block in provider_appointments:
+                            if not (
+                                _booking_intervals_overlap(
+                                    candidate_block_start,
+                                    candidate_block_end,
+                                    block["starts_at"],
+                                    block["ends_at"]
+                                )
+                            ):
+                                continue
+
+                            appointment_start_display = (
+                                block[
+                                    "appointment_start"
+                                ]
+                                .strftime("%I:%M %p")
+                                .lstrip("0")
+                            )
+
+                            appointment_end_display = (
+                                block[
+                                    "appointment_end"
+                                ]
+                                .strftime("%I:%M %p")
+                                .lstrip("0")
+                            )
+
+                            if block["ambiguous_provider"]:
+                                appointment_label = (
+                                    "Unassigned appointment "
+                                    f"#{block['appointment_id']} "
+                                    "is being treated as "
+                                    "blocking all providers"
+                                )
+                            else:
+                                appointment_label = (
+                                    "Existing appointment "
+                                    f"#{block['appointment_id']}"
+                                )
+
+                            appointment_label += (
+                                " — "
+                                f"{appointment_start_display}"
+                                " to "
+                                f"{appointment_end_display}"
+                            )
+
+                            if (
+                                block[
+                                    "buffer_before_minutes"
+                                ]
+                                or block[
+                                    "buffer_after_minutes"
+                                ]
+                            ):
+                                appointment_label += (
+                                    " including configured "
+                                    "buffer time"
+                                )
+
+                            if (
+                                appointment_label
+                                not in blocked_reasons
+                            ):
+                                blocked_reasons.append(
+                                    appointment_label
+                                )
+
+                        slot_value = (
+                            candidate_start.strftime(
+                                "%Y-%m-%dT%H:%M"
+                            )
+                        )
+
+                        slot_display = (
+                            candidate_start
+                            .strftime("%I:%M %p")
+                            .lstrip("0")
+                        )
+
+                        if not blocked_reasons:
+                            if (
+                                slot_value
+                                not in seen_slot_values
+                            ):
+                                slots.append({
+                                    "value": slot_value,
+                                    "display": slot_display
+                                })
+
+                                seen_slot_values.add(
+                                    slot_value
+                                )
+
+                        elif show_diagnostics:
+                            blocked_slots.append({
+                                "value": slot_value,
+                                "display": slot_display,
+                                "reasons": blocked_reasons
+                            })
+
+                        candidate_start += timedelta(
+                            minutes=
+                                slot_interval_minutes
+                        )
+
+                if (
+                    not slots
+                    and not availability_summary_reason
+                ):
+                    availability_summary_reason = (
+                        "Every eligible start time is "
+                        "blocked by booking notice, "
+                        "time off, or an existing "
+                        "appointment."
+                    )
+
+                availability_results.append({
+                    "provider_employee_id":
+                        provider_employee_id,
+
+                    "provider_name":
+                        assignment[
+                            "provider_name"
+                        ],
+
+                    "duration_minutes":
+                        duration_minutes,
+
+                    "buffer_before_minutes":
+                        buffer_before_minutes,
+
+                    "buffer_after_minutes":
+                        buffer_after_minutes,
+
+                    "slots": slots,
+                    "blocked_slots": blocked_slots,
+
+                    "availability_summary_reason":
+                        availability_summary_reason
+                })
+
+            total_slot_count = sum(
+                len(result["slots"])
+                for result in availability_results
+            )
+
+        if public_preview_mode:
+            cur.execute("""
+                SELECT public_booking_slug
+                FROM booking_settings
+                WHERE spa_id = %s
+                  AND business_unit_id = %s
+            """, (
+                spa_id,
+                business_unit_id
+            ))
+
+            slug_row = cur.fetchone()
+
+            if not slug_row:
+                flash(
+                    "Public booking settings were "
+                    "not found for this workspace.",
+                    "error"
+                )
+
+                return redirect(
+                    url_for(
+                        "booking_public_preview"
+                    )
+                )
+
+            return _render_public_booking_page(
+                slug_row[0],
+                preview_mode=True,
+                availability_context={
+                    "selected_service_id":
+                        selected_service_id,
+
+                    "selected_provider_id":
+                        selected_provider_id,
+
+                    "selected_date":
+                        selected_date,
+
+                    "minimum_date":
+                        minimum_date_value
+                        .isoformat(),
+
+                    "maximum_date":
+                        maximum_date_value
+                        .isoformat(),
+
+                    "availability_searched":
+                        searched,
+
+                    "availability_results":
+                        availability_results,
+
+                    "total_slot_count":
+                        total_slot_count,
+
+                    "selected_service_name":
+                        selected_service_name,
+
+                    "date_display":
+                        date_display
+                }
+            )
+
+        return render_template(
+            "booking/availability_test.html",
+
+            services=services,
+            providers=providers,
+            settings=settings,
+
+            searched=searched,
+            show_diagnostics=show_diagnostics,
+
+            selected_service_id=
+                selected_service_id,
+
+            selected_provider_id=
+                selected_provider_id,
+
+            selected_date=selected_date,
+
+            selected_service_name=
+                selected_service_name,
+
+            date_display=date_display,
+
+            minimum_date=
+                minimum_date_value.isoformat(),
+
+            maximum_date=
+                maximum_date_value.isoformat(),
+
+            availability_results=
+                availability_results,
+
+            total_slot_count=
+                total_slot_count,
+
+            unassigned_conflict_count=
+                unassigned_conflict_count
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
 ############################################
 #
 #       SCHEDULED
@@ -37202,6 +46989,393 @@ def scheduled_send_pending_reminders():
 #
 #
 #################################
+
+
+def process_email_automation_queue(
+    batch_size=20,
+    email_queue_id=None
+):
+    """
+    Process ready messages from the Email Automation Queue.
+
+    email_queue_id may be supplied for a controlled
+    one-record test.
+    """
+
+    try:
+        batch_size = int(batch_size)
+    except (TypeError, ValueError):
+        batch_size = 20
+
+    batch_size = max(
+        1,
+        min(batch_size, 100)
+    )
+
+    summary = {
+        "processed_count": 0,
+        "sent_count": 0,
+        "retry_count": 0,
+        "failed_count": 0
+    }
+
+
+    while (
+        summary["processed_count"]
+        < batch_size
+    ):
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        try:
+            if email_queue_id is not None:
+                cur.execute("""
+                    SELECT
+                        email_queue_id,
+                        spa_id,
+                        client_id,
+                        appointment_id,
+                        email_type,
+                        recipient_email,
+                        subject_line,
+                        text_body,
+                        attempt_count,
+                        maximum_attempts
+                    FROM email_queue
+                    WHERE email_queue_id = %s
+                      AND status = 'pending'
+                      AND scheduled_for
+                            <= CURRENT_TIMESTAMP
+                      AND next_attempt_at
+                            <= CURRENT_TIMESTAMP
+                      AND attempt_count
+                            < maximum_attempts
+                    FOR UPDATE SKIP LOCKED
+                """, (
+                    email_queue_id,
+                ))
+
+            else:
+                cur.execute("""
+                    SELECT
+                        email_queue_id,
+                        spa_id,
+                        client_id,
+                        appointment_id,
+                        email_type,
+                        recipient_email,
+                        subject_line,
+                        text_body,
+                        attempt_count,
+                        maximum_attempts
+                    FROM email_queue
+                    WHERE status = 'pending'
+                      AND scheduled_for
+                            <= CURRENT_TIMESTAMP
+                      AND next_attempt_at
+                            <= CURRENT_TIMESTAMP
+                      AND attempt_count
+                            < maximum_attempts
+                    ORDER BY
+                        scheduled_for,
+                        email_queue_id
+                    FOR UPDATE SKIP LOCKED
+                    LIMIT 1
+                """)
+
+            row = cur.fetchone()
+
+            if not row:
+                conn.rollback()
+                break
+
+            (
+                selected_queue_id,
+                spa_id,
+                client_id,
+                appointment_id,
+                email_type,
+                recipient_email,
+                subject_line,
+                text_body,
+                previous_attempt_count,
+                maximum_attempts
+            ) = row
+
+            attempt_count = int(
+                previous_attempt_count or 0
+            ) + 1
+
+            maximum_attempts = int(
+                maximum_attempts or 1
+            )
+
+            cur.execute("""
+                UPDATE email_queue
+                SET
+                    status = 'processing',
+                    attempt_count = %s,
+                    last_attempt_at =
+                        CURRENT_TIMESTAMP,
+                    error_message = NULL,
+                    updated_at =
+                        CURRENT_TIMESTAMP
+                WHERE email_queue_id = %s
+            """, (
+                attempt_count,
+                selected_queue_id
+            ))
+
+            conn.commit()
+
+        except Exception:
+            conn.rollback()
+            raise
+
+        finally:
+            cur.close()
+            conn.close()
+
+
+        sent_successfully = False
+        provider_status = None
+        provider_message_id = None
+        error_message = None
+
+        final_text_body = add_email_footer(
+            text_body
+        )
+
+        try:
+            response = send_email(
+                to=recipient_email,
+                subject=subject_line,
+                body=final_text_body
+            )
+
+            provider_status = str(
+                response.status_code
+            )
+
+            if (
+                200
+                <= response.status_code
+                < 300
+            ):
+                sent_successfully = True
+
+                try:
+                    response_data = response.json()
+
+                    provider_message_id = (
+                        str(
+                            response_data.get("id")
+                            or ""
+                        ).strip()
+                        or None
+                    )
+
+                except Exception:
+                    provider_message_id = None
+
+            else:
+                response_text = str(
+                    response.text or ""
+                ).strip()
+
+                error_message = (
+                    f"Mailgun returned HTTP "
+                    f"{response.status_code}"
+                )
+
+                if response_text:
+                    error_message += (
+                        f": {response_text[:2000]}"
+                    )
+
+        except Exception as exc:
+            error_message = (
+                f"{type(exc).__name__}: {exc}"
+            )[:4000]
+
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        try:
+            notes = (
+                f"Email Automation Queue "
+                f"#{selected_queue_id}; "
+                f"appointment_id="
+                f"{appointment_id or 'none'}; "
+                f"attempt={attempt_count}"
+            )
+
+            if sent_successfully:
+                cur.execute("""
+                    UPDATE email_queue
+                    SET
+                        status = 'sent',
+                        sent_at =
+                            CURRENT_TIMESTAMP,
+                        provider_message_id = %s,
+                        provider_status = %s,
+                        text_body = %s,
+                        error_message = NULL,
+                        updated_at =
+                            CURRENT_TIMESTAMP
+                    WHERE email_queue_id = %s
+                """, (
+                    provider_message_id,
+                    provider_status,
+                    final_text_body,
+                    selected_queue_id
+                ))
+
+                cur.execute("""
+                    INSERT INTO email_send_log (
+                        spa_id,
+                        client_id,
+                        email_type,
+                        recipient_email,
+                        subject_line,
+                        sent_status,
+                        sent_date,
+                        error_message,
+                        notes,
+                        sent_at
+                    )
+                    VALUES (
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        'Sent',
+                        CURRENT_TIMESTAMP,
+                        NULL,
+                        %s,
+                        CURRENT_TIMESTAMP
+                    )
+                """, (
+                    spa_id,
+                    client_id,
+                    email_type,
+                    recipient_email,
+                    subject_line,
+                    notes
+                ))
+
+                summary["sent_count"] += 1
+
+            else:
+                error_message = (
+                    error_message
+                    or "Email delivery failed."
+                )[:4000]
+
+                retry_available = (
+                    attempt_count
+                    < maximum_attempts
+                )
+
+                if retry_available:
+                    cur.execute("""
+                        UPDATE email_queue
+                        SET
+                            status = 'pending',
+                            next_attempt_at =
+                                CURRENT_TIMESTAMP
+                                + (
+                                    %s
+                                    * INTERVAL '5 minutes'
+                                  ),
+                            provider_status = %s,
+                            error_message = %s,
+                            updated_at =
+                                CURRENT_TIMESTAMP
+                        WHERE email_queue_id = %s
+                    """, (
+                        attempt_count,
+                        provider_status,
+                        error_message,
+                        selected_queue_id
+                    ))
+
+                    summary["retry_count"] += 1
+
+                else:
+                    cur.execute("""
+                        UPDATE email_queue
+                        SET
+                            status = 'failed',
+                            provider_status = %s,
+                            error_message = %s,
+                            updated_at =
+                                CURRENT_TIMESTAMP
+                        WHERE email_queue_id = %s
+                    """, (
+                        provider_status,
+                        error_message,
+                        selected_queue_id
+                    ))
+
+                    summary["failed_count"] += 1
+
+                cur.execute("""
+                    INSERT INTO email_send_log (
+                        spa_id,
+                        client_id,
+                        email_type,
+                        recipient_email,
+                        subject_line,
+                        sent_status,
+                        sent_date,
+                        error_message,
+                        notes,
+                        sent_at
+                    )
+                    VALUES (
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        'Failed',
+                        NULL,
+                        %s,
+                        %s,
+                        CURRENT_TIMESTAMP
+                    )
+                """, (
+                    spa_id,
+                    client_id,
+                    email_type,
+                    recipient_email,
+                    subject_line,
+                    error_message,
+                    notes
+                ))
+
+            conn.commit()
+
+        except Exception:
+            conn.rollback()
+            raise
+
+        finally:
+            cur.close()
+            conn.close()
+
+
+        summary["processed_count"] += 1
+
+        if email_queue_id is not None:
+            break
+
+
+    return summary
+
 
 
 def scheduled_generate_birthdays():
@@ -37288,6 +47462,42 @@ def scheduled_process_due_automatic_expenses():
 
 
 
+def scheduled_process_email_automation_queue():
+    """
+    Scheduled wrapper for the Email Automation Queue.
+
+    Exceptions are contained so one failed scheduler run
+    cannot stop the remaining background jobs.
+    """
+
+    try:
+        summary = process_email_automation_queue(
+            batch_size=20
+        )
+
+        if summary["processed_count"] > 0:
+            print(
+                "[EMAIL AUTOMATION] "
+                f"Processed: {summary['processed_count']} | "
+                f"Sent: {summary['sent_count']} | "
+                f"Retry: {summary['retry_count']} | "
+                f"Failed: {summary['failed_count']}",
+                flush=True
+            )
+
+    except Exception:
+        app.logger.exception(
+            "Scheduled email automation queue "
+            "processing failed."
+        )
+
+        print(
+            "[EMAIL AUTOMATION] "
+            "Scheduled processing failed.",
+            flush=True
+        )
+
+
 def start_scheduler():
     scheduler = BackgroundScheduler()
 
@@ -37297,6 +47507,17 @@ def start_scheduler():
         minutes=1,
         id="send_pending_reminders_job",
         replace_existing=True
+    )
+
+    scheduler.add_job(
+        scheduled_process_email_automation_queue,
+        "interval",
+        minutes=1,
+        id="process_email_automation_queue_job",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=60
     )
 
     scheduler.add_job(

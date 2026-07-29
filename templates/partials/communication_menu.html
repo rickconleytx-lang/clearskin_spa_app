@@ -183,6 +183,10 @@
                         <span aria-hidden="true">🔁</span>
                         <span>SMS Automation Queue</span>
                     </a>
+<a href="{{ url_for('email_automation_queue') }}">
+                        <span aria-hidden="true">🔁</span>
+                        <span>Email Automation Queue</span>
+                    </a>
                 {% endif %}
 
                 {% if nav_access.can_manage_messaging_compliance %}

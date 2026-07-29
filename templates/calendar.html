@@ -341,10 +341,37 @@
         <h1>Appointment Command Center</h1>
         <hr>
         <br>
+        <div
+            id="modalGuestBookingBadge"
+            class="guest-booking-badge"
+            style="display:none;"
+        >
+            Booked for Someone Else
+        </div>
+
         <h2 id="modalClientName"></h2>
 
-        <p><strong>Phone:</strong> 📞 <a id="modalPhoneLink"></a></p>
-        <p><strong>Email:</strong> ✉️ <a id="modalEmailLink"></a></p>
+        <p
+            id="modalBookedByRow"
+            style="display:none;"
+        >
+            <strong>Booked By:</strong>
+            <span id="modalBookedBy"></span>
+        </p>
+
+        <p>
+            <strong id="modalPhoneLabel">
+                Phone:
+            </strong>
+            📞 <a id="modalPhoneLink"></a>
+        </p>
+
+        <p>
+            <strong id="modalEmailLabel">
+                Email:
+            </strong>
+            ✉️ <a id="modalEmailLink"></a>
+        </p>
 
         <hr>
         <p><strong>Service:</strong> <span id="modalService"></span></p>
@@ -446,6 +473,17 @@
     text-decoration: underline;
 }
 
+.guest-booking-badge {
+    display: inline-block;
+    margin-bottom: 8px;
+    padding: 4px 9px;
+    border-radius: 999px;
+    background: #fff1e8;
+    color: #9a553c;
+    font-size: 12px;
+    font-weight: 700;
+}
+
 .status-badge {
     padding: 4px 8px;
     border-radius: 6px;
@@ -522,7 +560,91 @@ function openAppointmentModal(appointmentId, clickedElement) {
                 }
             }
 
-            setText("modalClientName", data.client_name);
+            const appointmentForName = (
+                data.appointment_for
+                || data.client_name
+                || ""
+            ).trim();
+
+            const bookedByName = (
+                data.booked_by_name
+                || data.client_name
+                || ""
+            ).trim();
+
+            const namesAreDifferent = (
+                appointmentForName.toLowerCase()
+                !== bookedByName.toLowerCase()
+            );
+
+            /*
+             * Native guest bookings use booking_for_other.
+             * GoDaddy appointments are also treated as guest
+             * bookings when appointment_for differs from the
+             * matched client name.
+             */
+            const isGuestBooking = Boolean(
+                data.booking_for_other
+            ) || namesAreDifferent;
+
+            setText(
+                "modalClientName",
+                appointmentForName
+            );
+
+            setText(
+                "modalBookedBy",
+                bookedByName
+            );
+
+            const bookedByRow =
+                document.getElementById(
+                    "modalBookedByRow"
+                );
+
+            if (bookedByRow) {
+                bookedByRow.style.display =
+                    isGuestBooking
+                        ? "block"
+                        : "none";
+            }
+
+            const guestBookingBadge =
+                document.getElementById(
+                    "modalGuestBookingBadge"
+                );
+
+            if (guestBookingBadge) {
+                guestBookingBadge.style.display =
+                    isGuestBooking
+                        ? "inline-block"
+                        : "none";
+            }
+
+            const phoneLabel =
+                document.getElementById(
+                    "modalPhoneLabel"
+                );
+
+            if (phoneLabel) {
+                phoneLabel.innerText =
+                    isGuestBooking
+                        ? "Booking Contact Phone:"
+                        : "Phone:";
+            }
+
+            const emailLabel =
+                document.getElementById(
+                    "modalEmailLabel"
+                );
+
+            if (emailLabel) {
+                emailLabel.innerText =
+                    isGuestBooking
+                        ? "Booking Contact Email:"
+                        : "Email:";
+            }
+
             setText("modalDate", data.appointment_date);
             setText("modalTime", data.start_time);
             setText("modalService", data.service_name);

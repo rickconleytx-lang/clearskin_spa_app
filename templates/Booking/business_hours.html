@@ -1,0 +1,337 @@
+cat > templates/booking/business_hours.html <<'HTML'
+{% extends "base.html" %}
+
+{% block title %}Business Hours{% endblock %}
+
+{% block content %}
+
+<style>
+    .booking-hours-page {
+        max-width: 900px;
+    }
+
+    .booking-hours-intro {
+        margin-bottom: 20px;
+    }
+
+    .booking-hours-grid {
+        display: grid;
+        gap: 15px;
+    }
+
+    .booking-day-card {
+        padding: 16px;
+        background: #ffffff;
+        border: 1px solid #dddddd;
+        border-radius: 10px;
+    }
+
+    .booking-day-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+    }
+
+    .booking-day-header h2 {
+        margin: 0;
+        font-size: 1.15rem;
+    }
+
+    .booking-period-list {
+        display: grid;
+        gap: 10px;
+    }
+
+    .booking-period-row {
+        display: grid;
+        grid-template-columns:
+            minmax(140px, 1fr)
+            minmax(140px, 1fr)
+            auto;
+        gap: 12px;
+        align-items: end;
+    }
+
+    .booking-period-row label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: 600;
+    }
+
+    .booking-period-row input[type="time"] {
+        width: 100%;
+    }
+
+    .booking-closed-message {
+        margin: 4px 0 0;
+        color: #666666;
+        font-style: italic;
+    }
+
+    .booking-save-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 22px;
+    }
+
+    @media (max-width: 650px) {
+        .booking-period-row {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+
+
+<div class="booking-hours-page">
+
+    <div class="page-tool-pills">
+        <a
+            href="{{ url_for('admin') }}"
+            class="tool-pill tool-pill-small"
+        >
+            Admin / Setup
+        </a>
+    </div>
+
+    <div class="page-title">
+        <h1>Business Hours</h1>
+    </div>
+
+    <div class="booking-hours-intro">
+
+        <p>
+            Set the normal operating hours for
+            <strong>{{ workspace_name }}</strong>.
+        </p>
+
+        <p>
+            Leave a day without any periods to mark the
+            business closed. Add multiple periods when the
+            business closes for lunch or uses a split schedule.
+        </p>
+
+    </div>
+
+
+    <form method="POST">
+
+        <div class="booking-hours-grid">
+
+            {% for day_index in range(7) %}
+
+                {% set periods = hours_by_day.get(day_index, []) %}
+
+                <section
+                    class="booking-day-card"
+                    data-day="{{ day_index }}"
+                >
+
+                    <div class="booking-day-header">
+
+                        <h2>
+                            {{ day_names[day_index] }}
+                        </h2>
+
+                        <button
+                            type="button"
+                            class="tool-pill tool-pill-small"
+                            onclick="addBusinessPeriod({{ day_index }})"
+                        >
+                            Add Period
+                        </button>
+
+                    </div>
+
+
+                    <div
+                        class="booking-period-list"
+                        id="period-list-{{ day_index }}"
+                    >
+
+                        {% for period in periods %}
+
+                            <div class="booking-period-row">
+
+                                <div>
+                                    <label>
+                                        Opens
+                                    </label>
+
+                                    <input
+                                        type="time"
+                                        name="start_time_{{ day_index }}"
+                                        value="{{ period.start_time }}"
+                                        required
+                                    >
+                                </div>
+
+                                <div>
+                                    <label>
+                                        Closes
+                                    </label>
+
+                                    <input
+                                        type="time"
+                                        name="end_time_{{ day_index }}"
+                                        value="{{ period.end_time }}"
+                                        required
+                                    >
+                                </div>
+
+                                <button
+                                    type="button"
+                                    class="btn"
+                                    onclick="removeBusinessPeriod(
+                                        this,
+                                        {{ day_index }}
+                                    )"
+                                >
+                                    Remove
+                                </button>
+
+                            </div>
+
+                        {% endfor %}
+
+                    </div>
+
+
+                    <p
+                        class="booking-closed-message"
+                        id="closed-message-{{ day_index }}"
+                        {% if periods %}
+                            style="display: none;"
+                        {% endif %}
+                    >
+                        Closed
+                    </p>
+
+                </section>
+
+            {% endfor %}
+
+        </div>
+
+
+        <div class="booking-save-row">
+
+            <button
+                type="submit"
+                class="btn btn-primary"
+            >
+                Save Business Hours
+            </button>
+
+            <a
+                href="{{ url_for('admin') }}"
+                class="btn"
+            >
+                Cancel
+            </a>
+
+        </div>
+
+    </form>
+
+</div>
+
+
+<script>
+    function updateClosedMessage(dayIndex) {
+        const periodList = document.getElementById(
+            `period-list-${dayIndex}`
+        );
+
+        const closedMessage = document.getElementById(
+            `closed-message-${dayIndex}`
+        );
+
+        const periodCount = periodList.querySelectorAll(
+            ".booking-period-row"
+        ).length;
+
+        closedMessage.style.display = (
+            periodCount > 0
+                ? "none"
+                : "block"
+        );
+    }
+
+
+    function addBusinessPeriod(dayIndex) {
+        const periodList = document.getElementById(
+            `period-list-${dayIndex}`
+        );
+
+        const row = document.createElement("div");
+
+        row.className = "booking-period-row";
+
+        row.innerHTML = `
+            <div>
+                <label>Opens</label>
+
+                <input
+                    type="time"
+                    name="start_time_${dayIndex}"
+                    required
+                >
+            </div>
+
+            <div>
+                <label>Closes</label>
+
+                <input
+                    type="time"
+                    name="end_time_${dayIndex}"
+                    required
+                >
+            </div>
+
+            <button
+                type="button"
+                class="btn"
+                onclick="removeBusinessPeriod(
+                    this,
+                    ${dayIndex}
+                )"
+            >
+                Remove
+            </button>
+        `;
+
+        periodList.appendChild(row);
+
+        updateClosedMessage(dayIndex);
+
+        const startInput = row.querySelector(
+            'input[type="time"]'
+        );
+
+        if (startInput) {
+            startInput.focus();
+        }
+    }
+
+
+    function removeBusinessPeriod(
+        button,
+        dayIndex
+    ) {
+        const row = button.closest(
+            ".booking-period-row"
+        );
+
+        if (row) {
+            row.remove();
+        }
+
+        updateClosedMessage(dayIndex);
+    }
+</script>
+
+{% endblock %}
+HTML

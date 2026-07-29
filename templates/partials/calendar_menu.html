@@ -73,6 +73,39 @@
         </div>
 
 
+        {% if
+            nav_access
+            and (
+                nav_access
+                .can_manage_online_booking
+                | default(false)
+            )
+        %}
+
+            <div class="user-menu-divider"></div>
+
+
+            <!-- Online Booking -->
+            <div class="app-menu-submenu-section">
+
+                <div class="app-menu-submenu-heading">
+                    Online Booking
+                </div>
+
+                <a href="{{
+                    url_for(
+                        'booking_control_center'
+                    )
+                }}">
+                    <span aria-hidden="true">🍑</span>
+                    <span>Booking Control Center</span>
+                </a>
+
+            </div>
+
+        {% endif %}
+
+
         <div class="user-menu-divider"></div>
 
 

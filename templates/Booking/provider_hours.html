@@ -1,0 +1,526 @@
+{% extends "base.html" %}
+
+{% block title %}Provider Hours{% endblock %}
+
+{% block content %}
+
+<style>
+    .provider-hours-page {
+        max-width: 950px;
+    }
+
+    .provider-hours-intro {
+        margin-bottom: 20px;
+    }
+
+    .provider-selector-card {
+        padding: 16px;
+        margin-bottom: 20px;
+        background: #ffffff;
+        border: 1px solid #dddddd;
+        border-radius: 10px;
+    }
+
+    .provider-selector-card label {
+        display: block;
+        margin-bottom: 6px;
+        font-weight: 600;
+    }
+
+    .provider-selector-card select {
+        width: 100%;
+        max-width: 420px;
+    }
+
+    .provider-hours-grid {
+        display: grid;
+        gap: 15px;
+    }
+
+    .provider-day-card {
+        padding: 16px;
+        background: #ffffff;
+        border: 1px solid #dddddd;
+        border-radius: 10px;
+    }
+
+    .provider-day-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 15px;
+        margin-bottom: 12px;
+    }
+
+    .provider-day-header h2 {
+        margin: 0 0 4px;
+        font-size: 1.15rem;
+    }
+
+    .business-hours-reference {
+        margin: 0;
+        color: #666666;
+        font-size: 0.92rem;
+    }
+
+    .provider-period-list {
+        display: grid;
+        gap: 10px;
+    }
+
+    .provider-period-row {
+        display: grid;
+        grid-template-columns:
+            minmax(140px, 1fr)
+            minmax(140px, 1fr)
+            auto;
+        gap: 12px;
+        align-items: end;
+    }
+
+    .provider-period-row label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: 600;
+    }
+
+    .provider-period-row input[type="time"] {
+        width: 100%;
+    }
+
+    .provider-closed-message {
+        margin: 4px 0 0;
+        color: #666666;
+        font-style: italic;
+    }
+
+    .provider-save-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 22px;
+    }
+
+    .provider-empty-state {
+        padding: 20px;
+        background: #ffffff;
+        border: 1px solid #dddddd;
+        border-radius: 10px;
+    }
+
+    @media (max-width: 650px) {
+        .provider-day-header {
+            flex-direction: column;
+        }
+
+        .provider-period-row {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+
+
+<div class="provider-hours-page">
+
+    <div class="page-tool-pills">
+
+        <a
+            href="{{ url_for('admin') }}"
+            class="tool-pill tool-pill-small"
+        >
+            Admin / Setup
+        </a>
+
+        <a
+            href="{{ url_for('booking_business_hours') }}"
+            class="tool-pill tool-pill-small"
+        >
+            Business Hours
+        </a>
+
+    </div>
+
+
+    <div class="page-title">
+        <h1>Provider Hours</h1>
+    </div>
+
+
+    <div class="provider-hours-intro">
+
+        <p>
+            Set the regular working hours for each provider.
+        </p>
+
+        <p>
+            Provider hours must fall within the business hours
+            already established for the current workspace.
+        </p>
+
+    </div>
+
+
+    {% if providers %}
+
+        <div class="provider-selector-card">
+
+            <form
+                method="GET"
+                action="{{ url_for('booking_provider_hours') }}"
+            >
+
+                <label for="provider_employee_id">
+                    Select Provider
+                </label>
+
+                <select
+                    name="provider_employee_id"
+                    id="provider_employee_id"
+                    onchange="this.form.submit()"
+                >
+
+                    {% for provider in providers %}
+
+                        <option
+                            value="{{ provider.employee_id }}"
+                            {% if provider.employee_id == selected_provider_id %}
+                                selected
+                            {% endif %}
+                        >
+                            {{ provider.display_name }}
+                        </option>
+
+                    {% endfor %}
+
+                </select>
+
+                <noscript>
+                    <button
+                        type="submit"
+                        class="btn"
+                    >
+                        View Provider
+                    </button>
+                </noscript>
+
+            </form>
+
+        </div>
+
+
+        {% if selected_provider_id %}
+
+            <form method="POST">
+
+                <input
+                    type="hidden"
+                    name="provider_employee_id"
+                    value="{{ selected_provider_id }}"
+                >
+
+
+                <div class="provider-hours-grid">
+
+                    {% for day_index in range(7) %}
+
+                        {% set provider_periods =
+                            provider_hours_by_day.get(
+                                day_index,
+                                []
+                            )
+                        %}
+
+                        {% set business_periods =
+                            business_hours_by_day.get(
+                                day_index,
+                                []
+                            )
+                        %}
+
+
+                        <section
+                            class="provider-day-card"
+                            data-day="{{ day_index }}"
+                        >
+
+                            <div class="provider-day-header">
+
+                                <div>
+
+                                    <h2>
+                                        {{ day_names[day_index] }}
+                                    </h2>
+
+                                    <p class="business-hours-reference">
+
+                                        Business Hours:
+
+                                        {% if business_periods %}
+
+                                            {% for period in business_periods %}
+
+                                                {{ period.start_display }}
+                                                –
+                                                {{ period.end_display }}
+
+                                                {% if not loop.last %}
+                                                    &nbsp; | &nbsp;
+                                                {% endif %}
+
+                                            {% endfor %}
+
+                                        {% else %}
+
+                                            Closed
+
+                                        {% endif %}
+
+                                    </p>
+
+                                </div>
+
+
+                                <button
+                                    type="button"
+                                    class="tool-pill tool-pill-small"
+                                    onclick="addProviderPeriod(
+                                        {{ day_index }}
+                                    )"
+                                    {% if not business_periods %}
+                                        disabled
+                                        title="The business is closed this day."
+                                    {% endif %}
+                                >
+                                    Add Period
+                                </button>
+
+                            </div>
+
+
+                            <div
+                                class="provider-period-list"
+                                id="provider-period-list-{{ day_index }}"
+                            >
+
+                                {% for period in provider_periods %}
+
+                                    <div class="provider-period-row">
+
+                                        <div>
+
+                                            <label>
+                                                Starts
+                                            </label>
+
+                                            <input
+                                                type="time"
+                                                name="start_time_{{ day_index }}"
+                                                value="{{ period.start_time }}"
+                                                required
+                                            >
+
+                                        </div>
+
+
+                                        <div>
+
+                                            <label>
+                                                Ends
+                                            </label>
+
+                                            <input
+                                                type="time"
+                                                name="end_time_{{ day_index }}"
+                                                value="{{ period.end_time }}"
+                                                required
+                                            >
+
+                                        </div>
+
+
+                                        <button
+                                            type="button"
+                                            class="btn"
+                                            onclick="removeProviderPeriod(
+                                                this,
+                                                {{ day_index }}
+                                            )"
+                                        >
+                                            Remove
+                                        </button>
+
+                                    </div>
+
+                                {% endfor %}
+
+                            </div>
+
+
+                            <p
+                                class="provider-closed-message"
+                                id="provider-closed-message-{{ day_index }}"
+                                {% if provider_periods %}
+                                    style="display: none;"
+                                {% endif %}
+                            >
+                                Not working
+                            </p>
+
+                        </section>
+
+                    {% endfor %}
+
+                </div>
+
+
+                <div class="provider-save-row">
+
+                    <button
+                        type="submit"
+                        class="btn btn-primary"
+                    >
+                        Save Provider Hours
+                    </button>
+
+                    <a
+                        href="{{ url_for('admin') }}"
+                        class="btn"
+                    >
+                        Cancel
+                    </a>
+
+                </div>
+
+            </form>
+
+        {% endif %}
+
+
+    {% else %}
+
+        <div class="provider-empty-state">
+
+            <h2>No Active Providers</h2>
+
+            <p>
+                Add an active employee before setting provider
+                booking hours.
+            </p>
+
+            <a
+                href="{{ url_for('employees') }}"
+                class="btn"
+            >
+                View Employees
+            </a>
+
+        </div>
+
+    {% endif %}
+
+</div>
+
+
+<script>
+    function updateProviderClosedMessage(dayIndex) {
+        const periodList = document.getElementById(
+            `provider-period-list-${dayIndex}`
+        );
+
+        const closedMessage = document.getElementById(
+            `provider-closed-message-${dayIndex}`
+        );
+
+        if (!periodList || !closedMessage) {
+            return;
+        }
+
+        const periodCount = periodList.querySelectorAll(
+            ".provider-period-row"
+        ).length;
+
+        closedMessage.style.display = (
+            periodCount > 0
+                ? "none"
+                : "block"
+        );
+    }
+
+
+    function addProviderPeriod(dayIndex) {
+        const periodList = document.getElementById(
+            `provider-period-list-${dayIndex}`
+        );
+
+        if (!periodList) {
+            return;
+        }
+
+        const row = document.createElement("div");
+
+        row.className = "provider-period-row";
+
+        row.innerHTML = `
+            <div>
+                <label>Starts</label>
+
+                <input
+                    type="time"
+                    name="start_time_${dayIndex}"
+                    required
+                >
+            </div>
+
+            <div>
+                <label>Ends</label>
+
+                <input
+                    type="time"
+                    name="end_time_${dayIndex}"
+                    required
+                >
+            </div>
+
+            <button
+                type="button"
+                class="btn"
+                onclick="removeProviderPeriod(
+                    this,
+                    ${dayIndex}
+                )"
+            >
+                Remove
+            </button>
+        `;
+
+        periodList.appendChild(row);
+
+        updateProviderClosedMessage(dayIndex);
+
+        const startInput = row.querySelector(
+            'input[type="time"]'
+        );
+
+        if (startInput) {
+            startInput.focus();
+        }
+    }
+
+
+    function removeProviderPeriod(
+        button,
+        dayIndex
+    ) {
+        const row = button.closest(
+            ".provider-period-row"
+        );
+
+        if (row) {
+            row.remove();
+        }
+
+        updateProviderClosedMessage(dayIndex);
+    }
+</script>
+
+{% endblock %}

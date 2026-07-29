@@ -1,0 +1,588 @@
+{% extends "base.html" %}
+
+{% block title %}Provider Services{% endblock %}
+
+{% block content %}
+
+<style>
+    .provider-services-page {
+        max-width: 1050px;
+    }
+
+    .provider-services-intro {
+        margin-bottom: 20px;
+    }
+
+    .provider-selector-card {
+        padding: 16px;
+        margin-bottom: 20px;
+        background: #ffffff;
+        border: 1px solid #dddddd;
+        border-radius: 10px;
+    }
+
+    .provider-selector-card label {
+        display: block;
+        margin-bottom: 6px;
+        font-weight: 600;
+    }
+
+    .provider-selector-card select {
+        width: 100%;
+        max-width: 420px;
+    }
+
+    .provider-service-grid {
+        display: grid;
+        gap: 16px;
+    }
+
+    .provider-service-card {
+        padding: 18px;
+        background: #ffffff;
+        border: 1px solid #dddddd;
+        border-radius: 10px;
+    }
+
+    .provider-service-card.is-assigned {
+        border-color: #b7b7b7;
+    }
+
+    .provider-service-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 15px;
+        margin-bottom: 15px;
+    }
+
+    .provider-service-header h2 {
+        margin: 0 0 5px;
+        font-size: 1.15rem;
+    }
+
+    .provider-service-defaults {
+        margin: 0;
+        color: #666666;
+        font-size: 0.92rem;
+    }
+
+    .provider-service-assignment {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        font-weight: 600;
+        white-space: nowrap;
+    }
+
+    .provider-service-fields {
+        display: grid;
+        grid-template-columns:
+            repeat(4, minmax(140px, 1fr));
+        gap: 14px;
+    }
+
+    .provider-service-fields label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: 600;
+    }
+
+    .provider-service-fields input[type="number"] {
+        width: 100%;
+    }
+
+    .provider-service-public {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 15px;
+    }
+
+    .provider-service-public label {
+        margin: 0;
+        font-weight: 600;
+    }
+
+    .provider-service-help {
+        margin: 5px 0 0;
+        color: #666666;
+        font-size: 0.88rem;
+    }
+
+    .provider-service-save-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 22px;
+    }
+
+    .provider-service-empty-state {
+        padding: 20px;
+        background: #ffffff;
+        border: 1px solid #dddddd;
+        border-radius: 10px;
+    }
+
+    @media (max-width: 850px) {
+        .provider-service-fields {
+            grid-template-columns:
+                repeat(2, minmax(140px, 1fr));
+        }
+    }
+
+    @media (max-width: 600px) {
+        .provider-service-header {
+            flex-direction: column;
+        }
+
+        .provider-service-assignment {
+            white-space: normal;
+        }
+
+        .provider-service-fields {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+
+
+<div class="provider-services-page">
+
+    <div class="page-tool-pills">
+
+        <a
+            href="{{ url_for('admin') }}"
+            class="tool-pill tool-pill-small"
+        >
+            Admin / Setup
+        </a>
+
+        <a
+            href="{{ url_for('booking_business_hours') }}"
+            class="tool-pill tool-pill-small"
+        >
+            Business Hours
+        </a>
+
+        <a
+            href="{{ url_for('booking_provider_hours') }}"
+            class="tool-pill tool-pill-small"
+        >
+            Provider Hours
+        </a>
+
+    </div>
+
+
+    <div class="page-title">
+        <h1>Provider Services</h1>
+    </div>
+
+
+    <div class="provider-services-intro">
+
+        <p>
+            Select the services each provider performs.
+        </p>
+
+        <p>
+            Leave an override blank to use the service's
+            standard duration or price.
+        </p>
+
+    </div>
+
+
+    {% if providers %}
+
+        <div class="provider-selector-card">
+
+            <form
+                method="GET"
+                action="{{ url_for('booking_provider_services') }}"
+            >
+
+                <label for="provider_employee_id">
+                    Select Provider
+                </label>
+
+                <select
+                    name="provider_employee_id"
+                    id="provider_employee_id"
+                    onchange="this.form.submit()"
+                >
+
+                    {% for provider in providers %}
+
+                        <option
+                            value="{{ provider.employee_id }}"
+                            {% if provider.employee_id == selected_provider_id %}
+                                selected
+                            {% endif %}
+                        >
+                            {{ provider.display_name }}
+                        </option>
+
+                    {% endfor %}
+
+                </select>
+
+                <noscript>
+                    <button
+                        type="submit"
+                        class="btn"
+                    >
+                        View Provider
+                    </button>
+                </noscript>
+
+            </form>
+
+        </div>
+
+
+        {% if services and selected_provider_id %}
+
+            <form method="POST">
+
+                <input
+                    type="hidden"
+                    name="provider_employee_id"
+                    value="{{ selected_provider_id }}"
+                >
+
+
+                <div class="provider-service-grid">
+
+                    {% for service in services %}
+
+                        <section
+                            class="provider-service-card
+                                {% if service.assigned %}
+                                    is-assigned
+                                {% endif %}
+                            "
+                            id="service-card-{{ service.service_type_id }}"
+                        >
+
+                            <div class="provider-service-header">
+
+                                <div>
+
+                                    <h2>
+                                        {{ service.service_name }}
+                                    </h2>
+
+                                    <p class="provider-service-defaults">
+                                        Standard:
+                                        {{ service.default_duration_minutes }}
+                                        minutes
+                                        &nbsp;•&nbsp;
+                                        {{ service.default_price_display }}
+                                    </p>
+
+                                </div>
+
+
+                                <label class="provider-service-assignment">
+
+                                    <input
+                                        type="checkbox"
+                                        name="assigned_service_ids"
+                                        value="{{ service.service_type_id }}"
+                                        class="service-assignment-checkbox"
+                                        data-service-id="{{ service.service_type_id }}"
+                                        onchange="toggleProviderService(
+                                            {{ service.service_type_id }}
+                                        )"
+                                        {% if service.assigned %}
+                                            checked
+                                        {% endif %}
+                                    >
+
+                                    Provider Offers Service
+
+                                </label>
+
+                            </div>
+
+
+                            <div class="provider-service-fields">
+
+                                <div>
+
+                                    <label
+                                        for="duration_override_{{ service.service_type_id }}"
+                                    >
+                                        Duration Override
+                                    </label>
+
+                                    <input
+                                        type="number"
+                                        id="duration_override_{{ service.service_type_id }}"
+                                        name="duration_override_{{ service.service_type_id }}"
+                                        min="1"
+                                        max="1440"
+                                        step="1"
+                                        placeholder="{{ service.default_duration_minutes }}"
+                                        value="{{ service.duration_override_minutes }}"
+                                        data-service-field="{{ service.service_type_id }}"
+                                        {% if not service.assigned %}
+                                            disabled
+                                        {% endif %}
+                                    >
+
+                                    <p class="provider-service-help">
+                                        Minutes
+                                    </p>
+
+                                </div>
+
+
+                                <div>
+
+                                    <label
+                                        for="price_override_{{ service.service_type_id }}"
+                                    >
+                                        Price Override
+                                    </label>
+
+                                    <input
+                                        type="number"
+                                        id="price_override_{{ service.service_type_id }}"
+                                        name="price_override_{{ service.service_type_id }}"
+                                        min="0"
+                                        step="0.01"
+                                        placeholder="{{ service.default_price }}"
+                                        value="{{ service.price_override }}"
+                                        data-service-field="{{ service.service_type_id }}"
+                                        {% if not service.assigned %}
+                                            disabled
+                                        {% endif %}
+                                    >
+
+                                    <p class="provider-service-help">
+                                        Dollars
+                                    </p>
+
+                                </div>
+
+
+                                <div>
+
+                                    <label
+                                        for="buffer_before_{{ service.service_type_id }}"
+                                    >
+                                        Buffer Before
+                                    </label>
+
+                                    <input
+                                        type="number"
+                                        id="buffer_before_{{ service.service_type_id }}"
+                                        name="buffer_before_{{ service.service_type_id }}"
+                                        min="0"
+                                        max="1440"
+                                        step="1"
+                                        placeholder="0"
+                                        value="{{ service.buffer_before_minutes }}"
+                                        data-service-field="{{ service.service_type_id }}"
+                                        {% if not service.assigned %}
+                                            disabled
+                                        {% endif %}
+                                    >
+
+                                    <p class="provider-service-help">
+                                        Minutes
+                                    </p>
+
+                                </div>
+
+
+                                <div>
+
+                                    <label
+                                        for="buffer_after_{{ service.service_type_id }}"
+                                    >
+                                        Buffer After
+                                    </label>
+
+                                    <input
+                                        type="number"
+                                        id="buffer_after_{{ service.service_type_id }}"
+                                        name="buffer_after_{{ service.service_type_id }}"
+                                        min="0"
+                                        max="1440"
+                                        step="1"
+                                        placeholder="0"
+                                        value="{{ service.buffer_after_minutes }}"
+                                        data-service-field="{{ service.service_type_id }}"
+                                        {% if not service.assigned %}
+                                            disabled
+                                        {% endif %}
+                                    >
+
+                                    <p class="provider-service-help">
+                                        Minutes
+                                    </p>
+
+                                </div>
+
+                            </div>
+
+
+                            <div class="provider-service-public">
+
+                                <input
+                                    type="checkbox"
+                                    id="publicly_bookable_{{ service.service_type_id }}"
+                                    name="publicly_bookable_{{ service.service_type_id }}"
+                                    value="1"
+                                    data-service-field="{{ service.service_type_id }}"
+                                    {% if service.is_publicly_bookable %}
+                                        checked
+                                    {% endif %}
+                                    {% if not service.assigned %}
+                                        disabled
+                                    {% endif %}
+                                >
+
+                                <label
+                                    for="publicly_bookable_{{ service.service_type_id }}"
+                                >
+                                    Available for Public Online Booking
+                                </label>
+
+                            </div>
+
+                        </section>
+
+                    {% endfor %}
+
+                </div>
+
+
+                <div class="provider-service-save-row">
+
+                    <button
+                        type="submit"
+                        class="btn btn-primary"
+                    >
+                        Save Provider Services
+                    </button>
+
+                    <a
+                        href="{{ url_for('admin') }}"
+                        class="btn"
+                    >
+                        Cancel
+                    </a>
+
+                </div>
+
+            </form>
+
+
+        {% elif not services %}
+
+            <div class="provider-service-empty-state">
+
+                <h2>No Active Services</h2>
+
+                <p>
+                    Add an active service before assigning
+                    services to providers.
+                </p>
+
+                <a
+                    href="{{ url_for('service_types') }}"
+                    class="btn"
+                >
+                    View Service Types
+                </a>
+
+            </div>
+
+        {% endif %}
+
+
+    {% else %}
+
+        <div class="provider-service-empty-state">
+
+            <h2>No Active Employees</h2>
+
+            <p>
+                Add an active employee before assigning
+                provider services.
+            </p>
+
+            <a
+                href="{{ url_for('employees') }}"
+                class="btn"
+            >
+                View Employees
+            </a>
+
+        </div>
+
+    {% endif %}
+
+</div>
+
+
+<script>
+    function toggleProviderService(serviceId) {
+        const assignmentCheckbox = document.querySelector(
+            `.service-assignment-checkbox[
+                data-service-id="${serviceId}"
+            ]`
+        );
+
+        const serviceCard = document.getElementById(
+            `service-card-${serviceId}`
+        );
+
+        const serviceFields = document.querySelectorAll(
+            `[data-service-field="${serviceId}"]`
+        );
+
+        if (!assignmentCheckbox) {
+            return;
+        }
+
+        const isAssigned = assignmentCheckbox.checked;
+
+        serviceFields.forEach(function(field) {
+            field.disabled = !isAssigned;
+        });
+
+        if (serviceCard) {
+            serviceCard.classList.toggle(
+                "is-assigned",
+                isAssigned
+            );
+        }
+    }
+
+
+    document.addEventListener(
+        "DOMContentLoaded",
+        function() {
+            const assignmentCheckboxes =
+                document.querySelectorAll(
+                    ".service-assignment-checkbox"
+                );
+
+            assignmentCheckboxes.forEach(
+                function(checkbox) {
+                    toggleProviderService(
+                        checkbox.dataset.serviceId
+                    );
+                }
+            );
+        }
+    );
+</script>
+
+{% endblock %}

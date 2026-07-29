@@ -1,0 +1,2136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1"
+    >
+
+    <meta
+        name="robots"
+        content="noindex, nofollow"
+    >
+
+    <title>
+        {% if booking_not_found %}
+            Booking Page Not Found
+        {% elif booking_disabled and not preview_mode %}
+            Online Booking Unavailable
+        {% else %}
+            Book with {{ business_name }}
+        {% endif %}
+    </title>
+
+    <style>
+        :root {
+            --peach: #e6a27e;
+            --peach-dark: #b86845;
+            --cream: #fffaf7;
+            --ink: #332b27;
+            --muted: #746a64;
+            --border: #eaded7;
+            --card: #ffffff;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        .booking-for-radio {
+            width: auto !important;
+            min-width: 16px !important;
+            height: 16px !important;
+            min-height: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            flex: 0 0 auto;
+            accent-color: var(--peach-dark);
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family:
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                sans-serif;
+            color: var(--ink);
+            background:
+                linear-gradient(
+                    150deg,
+                    #fffaf7 0%,
+                    #f8eee8 100%
+                );
+        }
+
+        .booking-wrap {
+            width: min(980px, calc(100% - 30px));
+            margin: 0 auto;
+            padding: 30px 0 45px;
+        }
+
+        .preview-banner {
+            margin-bottom: 16px;
+            padding: 11px 15px;
+            border: 1px solid #d8b45e;
+            border-radius: 10px;
+            background: #fff7d9;
+            font-weight: 700;
+            text-align: center;
+        }
+
+        .booking-shell {
+            overflow: hidden;
+            border: 1px solid var(--border);
+            border-radius: 22px;
+            background: var(--card);
+            box-shadow:
+                0 18px 50px rgba(76, 53, 42, 0.10);
+        }
+
+        .booking-header {
+            padding: 34px 30px;
+            text-align: center;
+            background:
+                linear-gradient(
+                    135deg,
+                    #fff7f2,
+                    #f7dfd2
+                );
+        }
+
+        .peach-mark {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 66px;
+            height: 66px;
+            margin: 0 auto 14px;
+            border-radius: 50%;
+            background: #fff;
+            box-shadow:
+                0 7px 18px rgba(84, 53, 38, 0.12);
+            font-size: 34px;
+        }
+
+        .booking-header h1 {
+            margin: 0 0 8px;
+            font-size: clamp(1.8rem, 5vw, 2.5rem);
+        }
+
+        .organization-name {
+            margin-bottom: 8px;
+            color: var(--muted);
+            font-weight: 600;
+        }
+
+        .business-address {
+            color: var(--muted);
+            line-height: 1.5;
+        }
+
+        .booking-content {
+            padding: 30px;
+        }
+
+        .booking-intro {
+            max-width: 680px;
+            margin: 0 auto 26px;
+            text-align: center;
+        }
+
+        .booking-intro h2 {
+            margin: 0 0 8px;
+        }
+
+        .booking-intro p {
+            margin: 0;
+            color: var(--muted);
+            line-height: 1.6;
+        }
+
+        .service-grid {
+            display: grid;
+            grid-template-columns:
+                repeat(auto-fit, minmax(250px, 1fr));
+            gap: 16px;
+        }
+
+        .service-card {
+            position: relative;
+            padding: 20px;
+            border: 1px solid var(--border);
+            border-radius: 15px;
+            background: #fff;
+        }
+
+        .service-card h3 {
+            margin: 0 0 12px;
+            padding-right: 70px;
+        }
+
+        .service-details {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 13px;
+        }
+
+        .service-detail {
+            padding: 6px 9px;
+            border-radius: 999px;
+            background: var(--cream);
+            color: var(--muted);
+            font-size: 0.88rem;
+            font-weight: 700;
+        }
+
+        .service-provider-count {
+            color: var(--muted);
+            font-size: 0.92rem;
+        }
+
+        .service-badge {
+            position: absolute;
+            top: 17px;
+            right: 17px;
+            padding: 5px 8px;
+            border-radius: 999px;
+            font-size: 0.74rem;
+            font-weight: 800;
+        }
+
+        .service-badge-public {
+            background: #e8f5eb;
+            color: #317443;
+        }
+
+        .service-badge-internal {
+            background: #f2eeee;
+            color: #766965;
+        }
+
+        .service-card-selected {
+            border-color: var(--peach);
+            box-shadow:
+                0 0 0 2px rgba(230, 162, 126, 0.18);
+        }
+
+        .service-select-button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 40px;
+            margin-top: 16px;
+            padding: 9px 15px;
+            border-radius: 9px;
+            color: #fff;
+            background: var(--peach-dark);
+            font-weight: 800;
+            text-decoration: none;
+        }
+
+        .service-select-button:hover {
+            opacity: 0.92;
+        }
+
+        .booking-step-card {
+            margin-top: 24px;
+            padding: 22px;
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            background: var(--cream);
+        }
+
+        .booking-step-card h2 {
+            margin: 0 0 7px;
+        }
+
+        .booking-step-card > p {
+            margin: 0 0 19px;
+            color: var(--muted);
+            line-height: 1.5;
+        }
+
+        .selected-service-summary {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 15px;
+            margin-bottom: 19px;
+            padding: 14px 16px;
+            border: 1px solid var(--border);
+            border-radius: 11px;
+            background: #fff;
+        }
+
+        .selected-service-summary strong {
+            display: block;
+            margin-bottom: 4px;
+        }
+
+        .selected-service-meta {
+            color: var(--muted);
+            font-size: 0.9rem;
+        }
+
+        .change-service-link {
+            color: var(--peach-dark);
+            font-weight: 800;
+            text-decoration: none;
+            white-space: nowrap;
+        }
+
+        .booking-form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr auto;
+            gap: 13px;
+            align-items: end;
+        }
+
+        .booking-field label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: 800;
+        }
+
+        .booking-field select,
+        .booking-field input {
+            width: 100%;
+            min-height: 44px;
+            padding: 9px 11px;
+            border: 1px solid #d8cdc7;
+            border-radius: 9px;
+            background: #fff;
+            color: var(--ink);
+            font: inherit;
+        }
+
+        .show-times-button {
+            min-height: 44px;
+            padding: 10px 18px;
+            border: 0;
+            border-radius: 9px;
+            color: #fff;
+            background: var(--peach-dark);
+            font: inherit;
+            font-weight: 800;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .availability-section {
+            margin-top: 24px;
+        }
+
+        .availability-heading {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 14px;
+            margin-bottom: 17px;
+        }
+
+        .availability-heading h2 {
+            margin: 0 0 5px;
+        }
+
+        .availability-heading p {
+            margin: 0;
+            color: var(--muted);
+        }
+
+        .availability-total {
+            padding: 7px 11px;
+            border-radius: 999px;
+            background: #fff;
+            border: 1px solid var(--border);
+            font-weight: 800;
+            white-space: nowrap;
+        }
+
+        .provider-availability {
+            margin-bottom: 15px;
+            padding: 17px;
+            border: 1px solid var(--border);
+            border-radius: 13px;
+            background: #fff;
+        }
+
+        .provider-availability:last-child {
+            margin-bottom: 0;
+        }
+
+        .provider-availability h3 {
+            margin: 0 0 12px;
+        }
+
+        .time-grid {
+            display: grid;
+            grid-template-columns:
+                repeat(auto-fill, minmax(105px, 1fr));
+            gap: 9px;
+        }
+
+        .time-choice {
+            min-height: 42px;
+            padding: 9px 8px;
+            border: 1px solid #dbcac0;
+            border-radius: 9px;
+            background: #fffaf7;
+            color: var(--ink);
+            font: inherit;
+            font-weight: 800;
+            cursor: pointer;
+            transition:
+                transform 0.12s ease,
+                background 0.12s ease,
+                color 0.12s ease;
+        }
+
+        .time-choice:hover {
+            transform: translateY(-1px);
+            border-color: var(--peach);
+        }
+
+        .time-choice-selected {
+            border-color: var(--peach-dark);
+            background: var(--peach-dark);
+            color: #fff;
+        }
+
+        .client-step-card,
+        .review-step-card {
+            display: none;
+            margin-top: 24px;
+            padding: 22px;
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            background: var(--cream);
+        }
+
+        .client-step-card.is-visible,
+        .review-step-card.is-visible {
+            display: block;
+        }
+
+        .client-step-card h2,
+        .review-step-card h2 {
+            margin: 0 0 7px;
+        }
+
+        .client-step-card > p,
+        .review-step-card > p {
+            margin: 0 0 19px;
+            color: var(--muted);
+            line-height: 1.5;
+        }
+
+        .selected-time-summary {
+            margin-bottom: 19px;
+            padding: 14px 16px;
+            border: 1px solid var(--border);
+            border-radius: 11px;
+            background: #fff;
+        }
+
+        .selected-time-summary strong {
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        .selected-time-details {
+            color: var(--muted);
+            line-height: 1.5;
+        }
+
+        .client-form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+        }
+
+        .client-field-full {
+            grid-column: 1 / -1;
+        }
+
+        .client-field label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: 800;
+        }
+
+        .client-field input,
+        .client-field textarea {
+            width: 100%;
+            padding: 10px 11px;
+            border: 1px solid #d8cdc7;
+            border-radius: 9px;
+            background: #fff;
+            color: var(--ink);
+            font: inherit;
+        }
+
+        .client-field input {
+            min-height: 44px;
+        }
+
+        .client-field textarea {
+            min-height: 96px;
+            resize: vertical;
+        }
+
+        .booking-action-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 18px;
+        }
+
+        .booking-primary-button,
+        .booking-secondary-button {
+            min-height: 44px;
+            padding: 10px 18px;
+            border-radius: 9px;
+            font: inherit;
+            font-weight: 800;
+            cursor: pointer;
+        }
+
+        .booking-primary-button {
+            border: 0;
+            background: var(--peach-dark);
+            color: #fff;
+        }
+
+        .booking-secondary-button {
+            border: 1px solid #d8c8bf;
+            background: #fff;
+            color: var(--ink);
+        }
+
+        .booking-primary-button:disabled {
+            cursor: not-allowed;
+            opacity: 0.55;
+        }
+
+        .review-grid {
+            display: grid;
+            grid-template-columns:
+                repeat(auto-fit, minmax(210px, 1fr));
+            gap: 12px;
+        }
+
+        .review-item {
+            padding: 13px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: #fff;
+        }
+
+        .review-label {
+            display: block;
+            margin-bottom: 4px;
+            color: var(--muted);
+            font-size: 0.8rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .review-value {
+            font-weight: 700;
+            line-height: 1.45;
+            overflow-wrap: anywhere;
+        }
+
+        .preview-save-warning {
+            margin-top: 17px;
+            padding: 13px 15px;
+            border: 1px solid #e0c46e;
+            border-radius: 10px;
+            background: #fff7d9;
+            color: #665119;
+            font-weight: 700;
+        }
+
+        .availability-empty {
+            padding: 14px;
+            border: 1px dashed #d8c8bf;
+            border-radius: 10px;
+            color: var(--muted);
+            background: #fffaf7;
+        }
+
+        .status-card {
+            max-width: 650px;
+            margin: 10px auto;
+            padding: 28px;
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            background: var(--cream);
+            text-align: center;
+        }
+
+        .status-card h2 {
+            margin: 0 0 10px;
+        }
+
+        .status-card p {
+            margin: 0;
+            color: var(--muted);
+            line-height: 1.6;
+        }
+
+        .preview-note {
+            margin-top: 24px;
+            padding: 14px;
+            border: 1px dashed #d5c4ba;
+            border-radius: 11px;
+            color: var(--muted);
+            text-align: center;
+        }
+
+        .booking-footer {
+            padding: 18px;
+            border-top: 1px solid var(--border);
+            color: var(--muted);
+            text-align: center;
+            font-size: 0.88rem;
+        }
+
+        @media (max-width: 600px) {
+            .booking-wrap {
+                width: min(100% - 18px, 980px);
+                padding-top: 12px;
+            }
+
+            .booking-header,
+            .booking-content {
+                padding: 24px 18px;
+            }
+
+            .booking-form-grid,
+            .client-form-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .client-field-full {
+                grid-column: auto;
+            }
+
+            .selected-service-summary,
+            .availability-heading {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            .booking-shell {
+                border-radius: 16px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <main class="booking-wrap">
+
+        {% if preview_mode %}
+            <div class="preview-banner">
+                Internal Preview — public booking is not enabled.
+            </div>
+        {% endif %}
+
+
+        <section class="booking-shell">
+
+            <header class="booking-header">
+                <div class="peach-mark">
+                    🍑
+                </div>
+
+                <h1>
+                    {{ business_name or "Online Booking" }}
+                </h1>
+
+                {% if organization_name %}
+                    <div class="organization-name">
+                        {{ organization_name }}
+                    </div>
+                {% endif %}
+
+                {% if business_address %}
+                    <div class="business-address">
+                        {{ business_address }}
+                    </div>
+                {% endif %}
+            </header>
+
+
+            <div class="booking-content">
+
+                {% if booking_not_found %}
+
+                    <div class="status-card">
+                        <h2>
+                            Booking Page Not Found
+                        </h2>
+
+                        <p>
+                            This booking address is not available.
+                            Please check the link provided by the
+                            business.
+                        </p>
+                    </div>
+
+
+                {% elif booking_disabled and not preview_mode %}
+
+                    <div class="status-card">
+                        <h2>
+                            Online Booking Is Not Available
+                        </h2>
+
+                        <p>
+                            This business has not enabled online
+                            appointment booking yet. Please contact
+                            the business directly to schedule.
+                        </p>
+                    </div>
+
+
+                {% else %}
+
+                    <div class="booking-intro">
+                        <h2>
+                            Choose a Service
+                        </h2>
+
+                        <p>
+                            Review the services currently configured
+                            for this booking workspace.
+                        </p>
+                    </div>
+
+
+                    {% if services %}
+
+                        <div class="service-grid">
+
+                            {% for service in services %}
+
+                                <article
+                                    class="
+                                        service-card
+                                        {% if
+                                            selected_service_id
+                                            == service.service_type_id
+                                        %}
+                                            service-card-selected
+                                        {% endif %}
+                                    "
+                                >
+
+                                    {% if preview_mode %}
+                                        {% if service.publicly_bookable %}
+                                            <span
+                                                class="
+                                                    service-badge
+                                                    service-badge-public
+                                                "
+                                            >
+                                                Public
+                                            </span>
+                                        {% else %}
+                                            <span
+                                                class="
+                                                    service-badge
+                                                    service-badge-internal
+                                                "
+                                            >
+                                                Internal
+                                            </span>
+                                        {% endif %}
+                                    {% endif %}
+
+                                    <h3>
+                                        {{ service.service_name }}
+                                    </h3>
+
+                                    <div class="service-details">
+
+                                        {% if service.duration_minutes %}
+                                            <span class="service-detail">
+                                                {{
+                                                    service.duration_minutes
+                                                }}
+                                                minutes
+                                            </span>
+                                        {% endif %}
+
+                                        {% if service.price_display %}
+                                            <span class="service-detail">
+                                                {{ service.price_display }}
+                                            </span>
+                                        {% endif %}
+
+                                    </div>
+
+                                    <div class="service-provider-count">
+                                        {{
+                                            service.provider_count
+                                        }}
+                                        eligible
+                                        {% if service.provider_count == 1 %}
+                                            provider
+                                        {% else %}
+                                            providers
+                                        {% endif %}
+                                    </div>
+
+
+                                    {% if preview_mode %}
+                                        <a
+                                            href="{{ url_for(
+                                                'booking_public_preview',
+                                                service_type_id=
+                                                    service.service_type_id
+                                            ) }}"
+                                            class="service-select-button"
+                                        >
+                                            {% if
+                                                selected_service_id
+                                                == service.service_type_id
+                                            %}
+                                                Selected
+                                            {% else %}
+                                                Choose Service
+                                            {% endif %}
+                                        </a>
+                                    {% else %}
+                                        <a
+                                            href="{{ url_for(
+                                                'public_booking',
+                                                public_booking_slug=
+                                                    public_booking_slug,
+                                                service_type_id=
+                                                    service.service_type_id
+                                            ) }}"
+                                            class="service-select-button"
+                                        >
+                                            {% if
+                                                selected_service_id
+                                                == service.service_type_id
+                                            %}
+                                                Selected
+                                            {% else %}
+                                                Choose Service
+                                            {% endif %}
+                                        </a>
+                                    {% endif %}
+
+                                </article>
+
+                            {% endfor %}
+
+                        </div>
+
+                    {% else %}
+
+                        <div class="status-card">
+                            <h2>
+                                No Services Available
+                            </h2>
+
+                            <p>
+                                No services are currently configured
+                                for online booking.
+                            </p>
+                        </div>
+
+                    {% endif %}
+
+
+                    {% if selected_service %}
+
+                        <section class="booking-step-card">
+
+                            <div class="selected-service-summary">
+                                <div>
+                                    <strong>
+                                        {{ selected_service.service_name }}
+                                    </strong>
+
+                                    <div class="selected-service-meta">
+                                        {{
+                                            selected_service.duration_minutes
+                                        }}
+                                        minutes
+
+                                        {% if
+                                            selected_service.price_display
+                                        %}
+                                            •
+                                            {{
+                                                selected_service.price_display
+                                            }}
+                                        {% endif %}
+                                    </div>
+                                </div>
+
+                                <a
+                                    href="{% if preview_mode %}{{
+                                        url_for(
+                                            'booking_public_preview'
+                                        )
+                                    }}{% else %}{{
+                                        url_for(
+                                            'public_booking',
+                                            public_booking_slug=
+                                                public_booking_slug
+                                        )
+                                    }}{% endif %}"
+                                    class="change-service-link"
+                                >
+                                    Change Service
+                                </a>
+                            </div>
+
+
+                            <h2>
+                                Choose Provider and Date
+                            </h2>
+
+                            <p>
+                                Select a provider or let the booking
+                                engine show availability for everyone
+                                who offers this service.
+                            </p>
+
+
+                            <form
+                                method="GET"
+                                action="{% if preview_mode %}{{
+                                    url_for(
+                                        'booking_availability_test'
+                                    )
+                                }}{% else %}{{
+                                    url_for(
+                                        'public_booking',
+                                        public_booking_slug=
+                                            public_booking_slug
+                                    )
+                                }}{% endif %}"
+                            >
+                                {% if preview_mode %}
+                                    <input
+                                        type="hidden"
+                                        name="public_preview"
+                                        value="1"
+                                    >
+                                {% endif %}
+
+                                <input
+                                    type="hidden"
+                                    name="service_type_id"
+                                    value="{{
+                                        selected_service.service_type_id
+                                    }}"
+                                >
+
+
+                                <div class="booking-form-grid">
+
+                                    <div class="booking-field">
+                                        <label
+                                            for="provider_employee_id"
+                                        >
+                                            Provider
+                                        </label>
+
+                                        <select
+                                            id="provider_employee_id"
+                                            name="provider_employee_id"
+                                            required
+                                        >
+                                            {% if allow_any_provider %}
+                                                <option
+                                                    value="any"
+                                                    {% if
+                                                        selected_provider_id
+                                                        == "any"
+                                                    %}
+                                                        selected
+                                                    {% endif %}
+                                                >
+                                                    Any Available
+                                                </option>
+                                            {% endif %}
+
+                                            {% for provider in eligible_providers %}
+                                                <option
+                                                    value="{{
+                                                        provider.employee_id
+                                                    }}"
+                                                    {% if
+                                                        selected_provider_id
+                                                        == provider.employee_id
+                                                    %}
+                                                        selected
+                                                    {% endif %}
+                                                >
+                                                    {{
+                                                        provider.provider_name
+                                                    }}
+                                                </option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+
+
+                                    <div class="booking-field">
+                                        <label for="booking_date">
+                                            Date
+                                        </label>
+
+                                        <input
+                                            type="date"
+                                            id="booking_date"
+                                            name="booking_date"
+                                            value="{{
+                                                selected_date
+                                                or minimum_date
+                                            }}"
+                                            min="{{ minimum_date }}"
+                                            max="{{ maximum_date }}"
+                                            required
+                                        >
+                                    </div>
+
+
+                                    <button
+                                        type="submit"
+                                        class="show-times-button"
+                                    >
+                                        Show Available Times
+                                    </button>
+
+                                </div>
+                            </form>
+
+                        </section>
+
+                    {% endif %}
+
+
+                    {% if availability_searched %}
+
+                        <section
+                            class="
+                                booking-step-card
+                                availability-section
+                            "
+                        >
+
+                            <div class="availability-heading">
+                                <div>
+                                    <h2>
+                                        Available Times
+                                    </h2>
+
+                                    <p>
+                                        {{ selected_service_name }}
+                                        {% if date_display %}
+                                            • {{ date_display }}
+                                        {% endif %}
+                                    </p>
+                                </div>
+
+                                <div class="availability-total">
+                                    {{ total_slot_count }}
+                                    available
+                                </div>
+                            </div>
+
+
+                            {% if availability_results %}
+
+                                {% for result in availability_results %}
+
+                                    <div class="provider-availability">
+                                        <h3>
+                                            {{ result.provider_name }}
+                                        </h3>
+
+                                        {% if result.slots %}
+
+                                            <div class="time-grid">
+
+                                                {% for slot in result.slots %}
+                                                    <button
+                                                        type="button"
+                                                        class="time-choice"
+                                                        title="
+                                                            Select this time
+                                                        "
+                                                        data-slot="{{
+                                                            slot.value
+                                                        }}"
+                                                        data-time-display="{{
+                                                            slot.display
+                                                        }}"
+                                                        data-provider-id="{{
+                                                            result
+                                                            .provider_employee_id
+                                                        }}"
+                                                        data-provider-name="{{
+                                                            result
+                                                            .provider_name
+                                                        }}"
+                                                    >
+                                                        {{ slot.display }}
+                                                    </button>
+                                                {% endfor %}
+
+                                            </div>
+
+                                        {% else %}
+
+                                            <div class="availability-empty">
+                                                {% if
+                                                    result
+                                                    .availability_summary_reason
+                                                %}
+                                                    {{
+                                                        result
+                                                        .availability_summary_reason
+                                                    }}
+                                                {% else %}
+                                                    No available times were
+                                                    found for this provider.
+                                                {% endif %}
+                                            </div>
+
+                                        {% endif %}
+                                    </div>
+
+                                {% endfor %}
+
+                            {% else %}
+
+                                <div class="availability-empty">
+                                    {{
+                                        availability_message
+                                        or (
+                                            "No eligible provider is "
+                                            "assigned to this service."
+                                        )
+                                    }}
+                                </div>
+
+                            {% endif %}
+
+                        </section>
+
+                    {% endif %}
+
+
+                    {% if availability_searched %}
+
+                        <section
+                            id="clientBookingStep"
+                            class="client-step-card"
+                        >
+                            <h2>
+                                Client Information
+                            </h2>
+
+                            <p>
+                                Enter the information that will be
+                                attached to this appointment.
+                            </p>
+
+
+                            <div class="selected-time-summary">
+                                <strong>
+                                    Selected Appointment
+                                </strong>
+
+                                <div
+                                    id="selectedTimeDetails"
+                                    class="selected-time-details"
+                                ></div>
+                            </div>
+
+
+                            <form id="previewClientForm">
+
+                                <input
+                                    type="hidden"
+                                    id="previewServiceTypeId"
+                                    name="service_type_id"
+                                    value="{{
+                                        selected_service_id or ''
+                                    }}"
+                                >
+
+                                <input
+                                    type="hidden"
+                                    id="previewProviderEmployeeId"
+                                    name="provider_employee_id"
+                                >
+
+                                <input
+                                    type="hidden"
+                                    id="previewAppointmentStart"
+                                    name="appointment_start"
+                                >
+
+
+                                <div class="client-form-grid">
+
+                                    <div
+                                        class="
+                                            client-field
+                                            client-field-full
+                                        "
+                                    >
+                                        <label>
+                                            Who is this appointment for?
+                                        </label>
+
+                                        <div
+                                            style="
+                                                display: flex;
+                                                flex-wrap: wrap;
+                                                gap: 12px;
+                                                margin-top: 8px;
+                                            "
+                                        >
+                                            <label
+                                                style="
+                                                    display: flex;
+                                                    align-items: center;
+                                                    gap: 8px;
+                                                    padding: 7px 11px;
+                                                    border: 1px solid
+                                                        var(--border);
+                                                    border-radius: 10px;
+                                                    cursor: pointer;
+                                                "
+                                            >
+                                                <input
+                                                    type="radio"
+                                                    class="booking-for-radio"
+                                                    name="booking_for_choice"
+                                                    value="me"
+                                                    checked
+                                                >
+                                                <span>Me</span>
+                                            </label>
+
+                                            <label
+                                                style="
+                                                    display: flex;
+                                                    align-items: center;
+                                                    gap: 8px;
+                                                    padding: 7px 11px;
+                                                    border: 1px solid
+                                                        var(--border);
+                                                    border-radius: 10px;
+                                                    cursor: pointer;
+                                                "
+                                            >
+                                                <input
+                                                    type="radio"
+                                                    class="booking-for-radio"
+                                                    name="booking_for_choice"
+                                                    value="other"
+                                                >
+                                                <span>Someone else</span>
+                                            </label>
+                                        </div>
+
+                                        <p
+                                            style="
+                                                margin: 8px 0 0;
+                                                color: var(--muted);
+                                                font-size: 0.92rem;
+                                            "
+                                        >
+                                            Select Someone else when booking
+                                            for a friend or family member.
+                                            Your contact information will be
+                                            used for the confirmation.
+                                        </p>
+                                    </div>
+
+
+                                    <div
+                                        id="guestFirstNameField"
+                                        class="client-field"
+                                        hidden
+                                    >
+                                        <label for="previewGuestFirstName">
+                                            Guest First Name
+                                        </label>
+
+                                        <input
+                                            type="text"
+                                            id="previewGuestFirstName"
+                                            name="guest_first_name"
+                                            maxlength="80"
+                                            autocomplete="off"
+                                        >
+                                    </div>
+
+
+                                    <div
+                                        id="guestLastNameField"
+                                        class="client-field"
+                                        hidden
+                                    >
+                                        <label for="previewGuestLastName">
+                                            Guest Last Name
+                                        </label>
+
+                                        <input
+                                            type="text"
+                                            id="previewGuestLastName"
+                                            name="guest_last_name"
+                                            maxlength="80"
+                                            autocomplete="off"
+                                        >
+                                    </div>
+
+
+                                    <div class="client-field">
+                                        <label for="previewFirstName">
+                                            Your First Name
+                                        </label>
+
+                                        <input
+                                            type="text"
+                                            id="previewFirstName"
+                                            name="first_name"
+                                            maxlength="80"
+                                            autocomplete="given-name"
+                                            required
+                                        >
+                                    </div>
+
+
+                                    <div class="client-field">
+                                        <label for="previewLastName">
+                                            Your Last Name
+                                        </label>
+
+                                        <input
+                                            type="text"
+                                            id="previewLastName"
+                                            name="last_name"
+                                            maxlength="80"
+                                            autocomplete="family-name"
+                                            required
+                                        >
+                                    </div>
+
+
+                                    <div class="client-field">
+                                        <label for="previewPhone">
+                                            Your Phone
+                                        </label>
+
+                                        <input
+                                            type="tel"
+                                            id="previewPhone"
+                                            name="phone"
+                                            maxlength="30"
+                                            autocomplete="tel"
+                                            required
+                                        >
+                                    </div>
+
+
+                                    <div class="client-field">
+                                        <label for="previewEmail">
+                                            Your Email
+                                        </label>
+
+                                        <input
+                                            type="email"
+                                            id="previewEmail"
+                                            name="email"
+                                            maxlength="150"
+                                            autocomplete="email"
+                                            required
+                                        >
+                                    </div>
+
+
+                                    <div
+                                        class="
+                                            client-field
+                                            client-field-full
+                                        "
+                                    >
+                                        <label for="previewNotes">
+                                            Appointment Notes
+                                            <span
+                                                style="
+                                                    font-weight: 400;
+                                                    color: var(--muted);
+                                                "
+                                            >
+                                                (optional)
+                                            </span>
+                                        </label>
+
+                                        <textarea
+                                            id="previewNotes"
+                                            name="notes"
+                                            maxlength="500"
+                                            placeholder="
+                                                Add anything the provider
+                                                should know before the visit.
+                                            "
+                                        ></textarea>
+                                    </div>
+
+                                </div>
+
+
+                                <div class="booking-action-row">
+                                    <button
+                                        type="submit"
+                                        class="booking-primary-button"
+                                    >
+                                        Review Appointment
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        id="changeTimeButton"
+                                        class="booking-secondary-button"
+                                    >
+                                        Change Time
+                                    </button>
+                                </div>
+
+                            </form>
+                        </section>
+
+
+                        <section
+                            id="previewReviewStep"
+                            class="review-step-card"
+                        >
+                            <h2>
+                                Review Appointment
+                            </h2>
+
+                            <p>
+                                Confirm that the appointment details
+                                and client information are correct.
+                            </p>
+
+
+                            <div class="review-grid">
+
+                                <div class="review-item">
+                                    <span class="review-label">
+                                        Service
+                                    </span>
+
+                                    <div
+                                        id="reviewService"
+                                        class="review-value"
+                                    ></div>
+                                </div>
+
+
+                                <div class="review-item">
+                                    <span class="review-label">
+                                        Provider
+                                    </span>
+
+                                    <div
+                                        id="reviewProvider"
+                                        class="review-value"
+                                    ></div>
+                                </div>
+
+
+                                <div class="review-item">
+                                    <span class="review-label">
+                                        Date and Time
+                                    </span>
+
+                                    <div
+                                        id="reviewDateTime"
+                                        class="review-value"
+                                    ></div>
+                                </div>
+
+
+                                <div class="review-item">
+                                    <span class="review-label">
+                                        Appointment For
+                                    </span>
+
+                                    <div
+                                        id="reviewAppointmentFor"
+                                        class="review-value"
+                                    ></div>
+                                </div>
+
+
+                                <div class="review-item">
+                                    <span class="review-label">
+                                        Booked By
+                                    </span>
+
+                                    <div
+                                        id="reviewBookedBy"
+                                        class="review-value"
+                                    ></div>
+                                </div>
+
+
+                                <div class="review-item">
+                                    <span class="review-label">
+                                        Phone
+                                    </span>
+
+                                    <div
+                                        id="reviewPhone"
+                                        class="review-value"
+                                    ></div>
+                                </div>
+
+
+                                <div class="review-item">
+                                    <span class="review-label">
+                                        Email
+                                    </span>
+
+                                    <div
+                                        id="reviewEmail"
+                                        class="review-value"
+                                    ></div>
+                                </div>
+
+
+                                <div
+                                    class="
+                                        review-item
+                                        client-field-full
+                                    "
+                                >
+                                    <span class="review-label">
+                                        Notes
+                                    </span>
+
+                                    <div
+                                        id="reviewNotes"
+                                        class="review-value"
+                                    ></div>
+                                </div>
+
+                            </div>
+
+
+                            <div class="preview-save-warning">
+                                {% if preview_mode %}
+                                    Internal testing mode — confirming
+                                    creates a real local appointment.
+                                    No email or SMS will be sent.
+                                {% else %}
+                                    Review the appointment carefully.
+                                    Confirming will create a real
+                                    appointment. Email and SMS
+                                    confirmations are not enabled yet.
+                                {% endif %}
+                            </div>
+
+
+                            <div class="booking-action-row">
+                                <button
+                                    type="button"
+                                    id="editClientButton"
+                                    class="booking-secondary-button"
+                                >
+                                    Back to Edit
+                                </button>
+
+                                <form
+                                    id="confirmPreviewBookingForm"
+                                    method="post"
+                                    action="{% if preview_mode %}{{
+                                        url_for(
+                                            'booking_public_preview_confirm'
+                                        )
+                                    }}{% else %}{{
+                                        url_for(
+                                            'public_booking_confirm',
+                                            public_booking_slug=
+                                                public_booking_slug
+                                        )
+                                    }}{% endif %}"
+                                    style="margin: 0;"
+                                >
+
+                                    {% if not preview_mode %}
+                                        <input
+                                            type="hidden"
+                                            name="csrf_token"
+                                            value="{{
+                                                booking_csrf_token
+                                            }}"
+                                        >
+
+                                        <div
+                                            style="
+                                                position: absolute;
+                                                left: -10000px;
+                                                width: 1px;
+                                                height: 1px;
+                                                overflow: hidden;
+                                            "
+                                            aria-hidden="true"
+                                        >
+                                            <label for="bookingWebsite">
+                                                Website
+                                            </label>
+
+                                            <input
+                                                type="text"
+                                                id="bookingWebsite"
+                                                name="website"
+                                                tabindex="-1"
+                                                autocomplete="off"
+                                            >
+                                        </div>
+                                    {% endif %}
+                                    <input
+                                        type="hidden"
+                                        id="confirmServiceTypeId"
+                                        name="service_type_id"
+                                    >
+
+                                    <input
+                                        type="hidden"
+                                        id="confirmProviderEmployeeId"
+                                        name="provider_employee_id"
+                                    >
+
+                                    <input
+                                        type="hidden"
+                                        id="confirmAppointmentStart"
+                                        name="appointment_start"
+                                    >
+
+                                    <input
+                                        type="hidden"
+                                        id="confirmBookingForOther"
+                                        name="booking_for_other"
+                                        value="false"
+                                    >
+
+                                    <input
+                                        type="hidden"
+                                        id="confirmGuestFirstName"
+                                        name="guest_first_name"
+                                    >
+
+                                    <input
+                                        type="hidden"
+                                        id="confirmGuestLastName"
+                                        name="guest_last_name"
+                                    >
+
+                                    <input
+                                        type="hidden"
+                                        id="confirmFirstName"
+                                        name="first_name"
+                                    >
+
+                                    <input
+                                        type="hidden"
+                                        id="confirmLastName"
+                                        name="last_name"
+                                    >
+
+                                    <input
+                                        type="hidden"
+                                        id="confirmPhone"
+                                        name="phone"
+                                    >
+
+                                    <input
+                                        type="hidden"
+                                        id="confirmEmail"
+                                        name="email"
+                                    >
+
+                                    <input
+                                        type="hidden"
+                                        id="confirmNotes"
+                                        name="notes"
+                                    >
+
+                                    <button
+                                        type="submit"
+                                        class="booking-primary-button"
+                                    >
+                                        {% if preview_mode %}
+                                            Confirm Test Appointment
+                                        {% else %}
+                                            Confirm Appointment
+                                        {% endif %}
+                                    </button>
+                                </form>
+                            </div>
+                        </section>
+
+
+                        <div class="preview-note">
+                            {% if preview_mode %}
+                                Internal testing only. Confirming creates
+                                a real local appointment, but public
+                                online booking remains disabled.
+                            {% else %}
+                                Your appointment will be saved immediately
+                                after confirmation. Email and SMS
+                                confirmations are not enabled yet.
+                            {% endif %}
+                        </div>
+
+                    {% endif %}
+
+                {% endif %}
+
+            </div>
+
+
+            <footer class="booking-footer">
+                Powered by Peach Suite Pro
+            </footer>
+
+        </section>
+
+    </main>
+
+{% if availability_searched %}
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const timeButtons = Array.from(
+        document.querySelectorAll(".time-choice")
+    );
+
+    const clientStep = document.getElementById(
+        "clientBookingStep"
+    );
+
+    const reviewStep = document.getElementById(
+        "previewReviewStep"
+    );
+
+    const clientForm = document.getElementById(
+        "previewClientForm"
+    );
+
+    if (
+        !timeButtons.length
+        || !clientStep
+        || !reviewStep
+        || !clientForm
+    ) {
+        return;
+    }
+
+    const selectedTimeDetails = document.getElementById(
+        "selectedTimeDetails"
+    );
+
+    const providerIdInput = document.getElementById(
+        "previewProviderEmployeeId"
+    );
+
+    const appointmentStartInput = document.getElementById(
+        "previewAppointmentStart"
+    );
+
+    const changeTimeButton = document.getElementById(
+        "changeTimeButton"
+    );
+
+    const editClientButton = document.getElementById(
+        "editClientButton"
+    );
+
+    const bookingForRadios = Array.from(
+        document.querySelectorAll(
+            'input[name="booking_for_choice"]'
+        )
+    );
+
+    const guestFirstNameField =
+        document.getElementById(
+            "guestFirstNameField"
+        );
+
+    const guestLastNameField =
+        document.getElementById(
+            "guestLastNameField"
+        );
+
+    const guestFirstNameInput =
+        document.getElementById(
+            "previewGuestFirstName"
+        );
+
+    const guestLastNameInput =
+        document.getElementById(
+            "previewGuestLastName"
+        );
+
+    let selectedProviderName = "";
+    let selectedTimeDisplay = "";
+
+    const selectedServiceName = {{ (
+        selected_service_name
+        or (
+            selected_service.service_name
+            if selected_service
+            else ""
+        )
+    )|tojson }};
+
+    const selectedDateDisplay = {{ (
+        date_display
+        or selected_date
+        or ""
+    )|tojson }};
+
+
+    function isBookingForOther() {
+        const selectedOption =
+            bookingForRadios.find(
+                function (radio) {
+                    return radio.checked;
+                }
+            );
+
+        return (
+            selectedOption
+            && selectedOption.value === "other"
+        );
+    }
+
+
+    function updateBookingForFields() {
+        const bookingForOther =
+            isBookingForOther();
+
+        guestFirstNameField.hidden =
+            !bookingForOther;
+
+        guestLastNameField.hidden =
+            !bookingForOther;
+
+        guestFirstNameInput.required =
+            bookingForOther;
+
+        guestLastNameInput.required =
+            bookingForOther;
+
+        if (!bookingForOther) {
+            guestFirstNameInput.value = "";
+            guestLastNameInput.value = "";
+        }
+    }
+
+
+    bookingForRadios.forEach(
+        function (radio) {
+            radio.addEventListener(
+                "change",
+                updateBookingForFields
+            );
+        }
+    );
+
+    updateBookingForFields();
+
+
+    function scrollToElement(element) {
+        element.scrollIntoView({
+            behavior: "smooth",
+            block: "start"
+        });
+    }
+
+
+    function clearSelectedTime() {
+        timeButtons.forEach(function (button) {
+            button.classList.remove(
+                "time-choice-selected"
+            );
+
+            button.setAttribute(
+                "aria-pressed",
+                "false"
+            );
+        });
+
+        providerIdInput.value = "";
+        appointmentStartInput.value = "";
+
+        selectedProviderName = "";
+        selectedTimeDisplay = "";
+
+        clientStep.classList.remove("is-visible");
+        reviewStep.classList.remove("is-visible");
+    }
+
+
+    timeButtons.forEach(function (button) {
+        button.setAttribute(
+            "aria-pressed",
+            "false"
+        );
+
+        button.addEventListener("click", function () {
+            clearSelectedTime();
+
+            button.classList.add(
+                "time-choice-selected"
+            );
+
+            button.setAttribute(
+                "aria-pressed",
+                "true"
+            );
+
+            providerIdInput.value =
+                button.dataset.providerId || "";
+
+            appointmentStartInput.value =
+                button.dataset.slot || "";
+
+            selectedProviderName =
+                button.dataset.providerName || "Provider";
+
+            selectedTimeDisplay =
+                button.dataset.timeDisplay || "";
+
+            selectedTimeDetails.textContent = [
+                selectedServiceName,
+                selectedProviderName,
+                selectedDateDisplay,
+                selectedTimeDisplay
+            ].filter(Boolean).join(" • ");
+
+            clientStep.classList.add("is-visible");
+            reviewStep.classList.remove("is-visible");
+
+            scrollToElement(clientStep);
+        });
+    });
+
+
+    changeTimeButton.addEventListener(
+        "click",
+        function () {
+            clearSelectedTime();
+
+            const availabilitySection =
+                document.querySelector(
+                    ".availability-section"
+                );
+
+            if (availabilitySection) {
+                scrollToElement(
+                    availabilitySection
+                );
+            }
+        }
+    );
+
+
+    clientForm.addEventListener(
+        "submit",
+        function (event) {
+            event.preventDefault();
+
+            if (!clientForm.reportValidity()) {
+                return;
+            }
+
+            if (!appointmentStartInput.value) {
+                window.alert(
+                    "Please select an available time."
+                );
+
+                return;
+            }
+
+            const firstName = document
+                .getElementById("previewFirstName")
+                .value
+                .trim();
+
+            const lastName = document
+                .getElementById("previewLastName")
+                .value
+                .trim();
+
+            const phone = document
+                .getElementById("previewPhone")
+                .value
+                .trim();
+
+            const email = document
+                .getElementById("previewEmail")
+                .value
+                .trim();
+
+            const notes = document
+                .getElementById("previewNotes")
+                .value
+                .trim();
+
+            const bookingForOther =
+                isBookingForOther();
+
+            const guestFirstName =
+                guestFirstNameInput.value.trim();
+
+            const guestLastName =
+                guestLastNameInput.value.trim();
+
+            const bookedByName = [
+                firstName,
+                lastName
+            ].filter(Boolean).join(" ");
+
+            const appointmentForName =
+                bookingForOther
+                    ? [
+                        guestFirstName,
+                        guestLastName
+                      ].filter(Boolean).join(" ")
+                    : bookedByName;
+
+            document.getElementById(
+                "reviewService"
+            ).textContent = selectedServiceName;
+
+            document.getElementById(
+                "reviewProvider"
+            ).textContent = selectedProviderName;
+
+            document.getElementById(
+                "reviewDateTime"
+            ).textContent = [
+                selectedDateDisplay,
+                selectedTimeDisplay
+            ].filter(Boolean).join(" • ");
+
+            document.getElementById(
+                "reviewAppointmentFor"
+            ).textContent = appointmentForName;
+
+            document.getElementById(
+                "reviewBookedBy"
+            ).textContent = bookedByName;
+
+            document.getElementById(
+                "reviewPhone"
+            ).textContent = phone;
+
+            document.getElementById(
+                "reviewEmail"
+            ).textContent = email;
+
+            document.getElementById(
+                "reviewNotes"
+            ).textContent = notes || "None";
+
+
+            document.getElementById(
+                "confirmServiceTypeId"
+            ).value = document.getElementById(
+                "previewServiceTypeId"
+            ).value;
+
+            document.getElementById(
+                "confirmProviderEmployeeId"
+            ).value = providerIdInput.value;
+
+            document.getElementById(
+                "confirmAppointmentStart"
+            ).value = appointmentStartInput.value;
+
+            document.getElementById(
+                "confirmBookingForOther"
+            ).value = bookingForOther
+                ? "true"
+                : "false";
+
+            document.getElementById(
+                "confirmGuestFirstName"
+            ).value = guestFirstName;
+
+            document.getElementById(
+                "confirmGuestLastName"
+            ).value = guestLastName;
+
+            document.getElementById(
+                "confirmFirstName"
+            ).value = firstName;
+
+            document.getElementById(
+                "confirmLastName"
+            ).value = lastName;
+
+            document.getElementById(
+                "confirmPhone"
+            ).value = phone;
+
+            document.getElementById(
+                "confirmEmail"
+            ).value = email;
+
+            document.getElementById(
+                "confirmNotes"
+            ).value = notes;
+
+
+            clientStep.classList.remove("is-visible");
+            reviewStep.classList.add("is-visible");
+
+            scrollToElement(reviewStep);
+        }
+    );
+
+
+    editClientButton.addEventListener(
+        "click",
+        function () {
+            reviewStep.classList.remove("is-visible");
+            clientStep.classList.add("is-visible");
+            scrollToElement(clientStep);
+        }
+    );
+});
+</script>
+{% endif %}
+
+</body>
+</html>

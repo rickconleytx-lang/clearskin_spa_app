@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1"
+    >
+
+    <title>
+        {% if success %}
+            Appointment Confirmed
+        {% else %}
+            Appointment Not Confirmed
+        {% endif %}
+    </title>
+
+    <style>
+        :root {
+            --ink: #342a26;
+            --muted: #756761;
+            --cream: #fff9f5;
+            --peach: #efad8e;
+            --peach-dark: #bd7256;
+            --border: #eadbd2;
+            --success: #2f7652;
+            --error: #9c3f3f;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 34px 18px;
+            background:
+                linear-gradient(
+                    145deg,
+                    #fff7f1,
+                    #f7ebe4
+                );
+            color: var(--ink);
+            font-family:
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                sans-serif;
+        }
+
+        .confirmation-shell {
+            width: min(760px, 100%);
+            margin: 0 auto;
+            padding: 30px;
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            background: #fff;
+            box-shadow:
+                0 18px 48px
+                rgba(75, 48, 35, 0.10);
+        }
+
+        .status-icon {
+            width: 62px;
+            height: 62px;
+            display: grid;
+            place-items: center;
+            margin-bottom: 18px;
+            border-radius: 50%;
+            color: #fff;
+            font-size: 1.8rem;
+            font-weight: 900;
+        }
+
+        .status-success {
+            background: var(--success);
+        }
+
+        .status-error {
+            background: var(--error);
+        }
+
+        h1 {
+            margin: 0 0 10px;
+            font-size: clamp(1.8rem, 5vw, 2.5rem);
+        }
+
+        .lead {
+            margin: 0 0 24px;
+            color: var(--muted);
+            line-height: 1.6;
+        }
+
+        .confirmation-number {
+            display: inline-block;
+            margin: 4px 0 22px;
+            padding: 13px 20px;
+            border: 2px solid var(--peach);
+            border-radius: 12px;
+            background: var(--cream);
+            color: var(--peach-dark);
+            font-size: 1.35rem;
+            font-weight: 900;
+            letter-spacing: 0.03em;
+        }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns:
+                repeat(
+                    auto-fit,
+                    minmax(210px, 1fr)
+                );
+            gap: 12px;
+        }
+
+        .detail-card {
+            padding: 15px;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            background: var(--cream);
+        }
+
+        .detail-label {
+            display: block;
+            margin-bottom: 5px;
+            color: var(--muted);
+            font-size: 0.78rem;
+            font-weight: 800;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        .detail-value {
+            font-weight: 750;
+            line-height: 1.45;
+        }
+
+        .test-note {
+            margin-top: 20px;
+            padding: 14px 16px;
+            border: 1px solid #e2c66b;
+            border-radius: 11px;
+            background: #fff7d9;
+            color: #665119;
+            line-height: 1.5;
+            font-weight: 700;
+        }
+
+        .action-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 24px;
+        }
+
+        .button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 44px;
+            padding: 10px 18px;
+            border-radius: 9px;
+            text-decoration: none;
+            font-weight: 800;
+        }
+
+        .button-primary {
+            background: var(--peach-dark);
+            color: #fff;
+        }
+
+        .button-secondary {
+            border: 1px solid #d8c8bf;
+            background: #fff;
+            color: var(--ink);
+        }
+    </style>
+</head>
+
+<body>
+
+    <main class="confirmation-shell">
+
+        {% if success %}
+
+            <div
+                class="
+                    status-icon
+                    status-success
+                "
+            >
+                ✓
+            </div>
+
+            <h1>
+                {% if preview_mode %}
+                    Test Appointment Confirmed
+                {% else %}
+                    Appointment Confirmed
+                {% endif %}
+            </h1>
+
+            <p class="lead">
+                {% if booking_for_other %}
+                    The booking contact was
+                    {% if client_was_created %}
+                        created
+                    {% else %}
+                        matched to an existing record
+                    {% endif %}
+                    and the appointment for
+                    <strong>
+                        {{ appointment_for_name }}
+                    </strong>
+                    was saved successfully.
+                {% else %}
+                    Your client record was
+                    {% if client_was_created %}
+                        created
+                    {% else %}
+                        matched to an existing record
+                    {% endif %}
+                    and the appointment was saved successfully.
+                {% endif %}
+            </p>
+
+
+            <div class="confirmation-number">
+                Confirmation #{{ appointment_id }}
+            </div>
+
+
+            <div class="detail-grid">
+
+                <div class="detail-card">
+                    <span class="detail-label">
+                        Appointment ID
+                    </span>
+
+                    <div class="detail-value">
+                        {{ appointment_id }}
+                    </div>
+                </div>
+
+
+                <div class="detail-card">
+                    <span class="detail-label">
+                        Appointment For
+                    </span>
+
+                    <div class="detail-value">
+                        {{
+                            appointment_for_name
+                            or client_name
+                        }}
+                    </div>
+                </div>
+
+
+                {% if booking_for_other %}
+                    <div class="detail-card">
+                        <span class="detail-label">
+                            Booked By
+                        </span>
+
+                        <div class="detail-value">
+                            {{
+                                booked_by_name
+                                or client_name
+                            }}
+                        </div>
+                    </div>
+                {% endif %}
+
+
+                <div class="detail-card">
+                    <span class="detail-label">
+                        Booking Contact Record
+                    </span>
+
+                    <div class="detail-value">
+                        ID {{ client_id }}
+                        —
+                        {% if client_was_created %}
+                            New client
+                        {% else %}
+                            Existing client
+                        {% endif %}
+                    </div>
+                </div>
+
+
+                <div class="detail-card">
+                    <span class="detail-label">
+                        Service
+                    </span>
+
+                    <div class="detail-value">
+                        {{ service_name }}
+                    </div>
+                </div>
+
+
+                <div class="detail-card">
+                    <span class="detail-label">
+                        Provider
+                    </span>
+
+                    <div class="detail-value">
+                        {{ provider_name }}
+                    </div>
+                </div>
+
+
+                <div class="detail-card">
+                    <span class="detail-label">
+                        Date and Time
+                    </span>
+
+                    <div class="detail-value">
+                        {{ date_display }}
+                        at
+                        {{ time_display }}
+                    </div>
+                </div>
+
+
+                <div class="detail-card">
+                    <span class="detail-label">
+                        Duration
+                    </span>
+
+                    <div class="detail-value">
+                        {{ duration_minutes }} minutes
+                    </div>
+                </div>
+
+
+                <div class="detail-card">
+                    <span class="detail-label">
+                        Price
+                    </span>
+
+                    <div class="detail-value">
+                        {{ price_display }}
+                    </div>
+                </div>
+
+            </div>
+
+
+            <div class="test-note">
+                {% if preview_mode %}
+                    This appointment was created through the
+                    internal online-booking preview. No email
+                    or SMS was sent.
+                {% else %}
+                    Please save your confirmation number.
+                    Your appointment has been added to the
+                    business calendar.
+
+                    {% if email_queued %}
+                        An email confirmation has been queued
+                        for delivery to the booking contact.
+                    {% else %}
+                        The appointment is confirmed, but an
+                        email confirmation could not be queued.
+                    {% endif %}
+
+                    SMS confirmation is not enabled yet.
+                {% endif %}
+            </div>
+
+
+            <div class="action-row">
+
+                {% if preview_mode %}
+                    <a
+                        href="{{ calendar_url }}"
+                        class="
+                            button
+                            button-primary
+                        "
+                    >
+                        View Calendar
+                    </a>
+
+                    <a
+                        href="{{ back_url }}"
+                        class="
+                            button
+                            button-secondary
+                        "
+                    >
+                        Book Another Test
+                    </a>
+
+                {% else %}
+                    <a
+                        href="{{ back_url }}"
+                        class="
+                            button
+                            button-primary
+                        "
+                    >
+                        Return to Booking Page
+                    </a>
+                {% endif %}
+
+            </div>
+
+        {% else %}
+
+            <div
+                class="
+                    status-icon
+                    status-error
+                "
+            >
+                !
+            </div>
+
+            <h1>
+                Appointment Not Confirmed
+            </h1>
+
+            <p class="lead">
+                {{ message }}
+            </p>
+
+
+            <div class="test-note">
+                No appointment or client changes were
+                committed.
+            </div>
+
+
+            <div class="action-row">
+                <a
+                    href="{{ back_url }}"
+                    class="
+                        button
+                        button-primary
+                    "
+                >
+                    Return to Booking Preview
+                </a>
+            </div>
+
+        {% endif %}
+
+    </main>
+
+</body>
+</html>

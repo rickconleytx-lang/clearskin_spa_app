@@ -1,0 +1,707 @@
+{% extends "base.html" %}
+
+{% block title %}
+    Email Automation Queue
+{% endblock %}
+
+
+{% block content %}
+
+<div class="email-queue-page">
+
+    <div class="page-header">
+        <div>
+            <h1>Email Automation Queue</h1>
+
+            <p class="page-subtitle">
+                Review automatically queued, delivered,
+                cancelled, and failed email messages.
+            </p>
+        </div>
+    </div>
+
+
+    <div class="email-queue-summary">
+
+        <a
+            href="{{ url_for('email_automation_queue') }}"
+            class="email-summary-card
+                {% if not status_filter %}active{% endif %}"
+        >
+            <span class="email-summary-label">
+                All
+            </span>
+
+            <strong>{{ total_count }}</strong>
+        </a>
+
+
+        {% for status_name, status_label in [
+            ('pending', 'Pending'),
+            ('processing', 'Processing'),
+            ('sent', 'Sent'),
+            ('failed', 'Failed'),
+            ('cancelled', 'Cancelled')
+        ] %}
+
+            <a
+                href="{{
+                    url_for(
+                        'email_automation_queue',
+                        status=status_name
+                    )
+                }}"
+                class="email-summary-card
+                    {% if status_filter == status_name %}
+                        active
+                    {% endif %}"
+            >
+                <span class="email-summary-label">
+                    {{ status_label }}
+                </span>
+
+                <strong>
+                    {{
+                        status_counts.get(
+                            status_name,
+                            0
+                        )
+                    }}
+                </strong>
+            </a>
+
+        {% endfor %}
+
+    </div>
+
+
+    {% if queue_rows %}
+
+        <div class="email-queue-table-wrap">
+
+            <table class="email-queue-table">
+
+                <thead>
+                    <tr>
+                        <th>Queue</th>
+                        <th>Status</th>
+                        <th>Recipient</th>
+                        <th>Appointment</th>
+                        <th>Email</th>
+                        <th>Schedule</th>
+                        <th>Attempts</th>
+                        <th>Details</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+
+                    {% for email in queue_rows %}
+
+                        <tr>
+
+                            <td data-label="Queue">
+                                <strong>
+                                    #{{ email.email_queue_id }}
+                                </strong>
+
+                                <div class="email-muted">
+                                    {{
+                                        email.email_type
+                                        | replace('_', ' ')
+                                        | title
+                                    }}
+                                </div>
+                            </td>
+
+
+                            <td data-label="Status">
+                                <span class="
+                                    email-status
+                                    email-status-{{
+                                        email.status
+                                        or 'unknown'
+                                    }}
+                                ">
+                                    {{
+                                        email.status
+                                        or 'Unknown'
+                                        | title
+                                    }}
+                                </span>
+                            </td>
+
+
+                            <td data-label="Recipient">
+                                <strong>
+                                    {{
+                                        email.recipient_name
+                                        or 'Name not entered'
+                                    }}
+                                </strong>
+
+                                <div class="email-muted">
+                                    {{
+                                        email.recipient_email
+                                        or 'Email not entered'
+                                    }}
+                                </div>
+
+                                {% if email.client_id %}
+                                    <div class="email-muted">
+                                        Client #{{ email.client_id }}
+                                    </div>
+                                {% endif %}
+                            </td>
+
+
+                            <td data-label="Appointment">
+
+                                {% if email.appointment_id %}
+
+                                    <strong>
+                                        Appointment
+                                        #{{ email.appointment_id }}
+                                    </strong>
+
+                                    {% if email.appointment_for %}
+                                        <div>
+                                            For:
+                                            {{
+                                                email.appointment_for
+                                            }}
+                                        </div>
+                                    {% endif %}
+
+                                    {% if email.appointment_date %}
+                                        <div class="email-muted">
+                                            {{
+                                                email.appointment_date
+                                                .strftime(
+                                                    '%m/%d/%Y'
+                                                )
+                                            }}
+
+                                            {% if email.appointment_time %}
+                                                at
+                                                {{
+                                                    email.appointment_time
+                                                    .strftime(
+                                                        '%I:%M %p'
+                                                    )
+                                                }}
+                                            {% endif %}
+                                        </div>
+                                    {% endif %}
+
+                                {% else %}
+
+                                    <span class="email-muted">
+                                        Not appointment related
+                                    </span>
+
+                                {% endif %}
+
+                            </td>
+
+
+                            <td data-label="Email">
+                                <strong>
+                                    {{
+                                        email.subject_line
+                                        or 'No subject'
+                                    }}
+                                </strong>
+
+                                <details class="email-message-details">
+                                    <summary>
+                                        View Message
+                                    </summary>
+
+                                    <div class="email-message-body">
+                                        {{
+                                            email.text_body
+                                            or 'No message body.'
+                                        }}
+                                    </div>
+                                </details>
+                            </td>
+
+
+                            <td data-label="Schedule">
+
+                                <div>
+                                    <strong>Scheduled:</strong>
+                                </div>
+
+                                <div class="email-muted">
+                                    {% if email.scheduled_for %}
+                                        {{
+                                            email.scheduled_for
+                                            .strftime(
+                                                '%m/%d/%Y %I:%M %p'
+                                            )
+                                        }}
+                                    {% else %}
+                                        Not scheduled
+                                    {% endif %}
+                                </div>
+
+
+                                {% if email.sent_at %}
+                                    <div class="email-detail-space">
+                                        <strong>Sent:</strong>
+                                    </div>
+
+                                    <div class="email-muted">
+                                        {{
+                                            email.sent_at
+                                            .strftime(
+                                                '%m/%d/%Y %I:%M %p'
+                                            )
+                                        }}
+                                    </div>
+                                {% endif %}
+
+
+                                {% if
+                                    email.status == 'pending'
+                                    and email.next_attempt_at
+                                %}
+                                    <div class="email-detail-space">
+                                        <strong>Next Attempt:</strong>
+                                    </div>
+
+                                    <div class="email-muted">
+                                        {{
+                                            email.next_attempt_at
+                                            .strftime(
+                                                '%m/%d/%Y %I:%M %p'
+                                            )
+                                        }}
+                                    </div>
+                                {% endif %}
+
+                            </td>
+
+
+                            <td data-label="Attempts">
+                                <strong>
+                                    {{ email.attempt_count or 0 }}
+                                    /
+                                    {{ email.maximum_attempts or 0 }}
+                                </strong>
+                            </td>
+
+
+                            <td data-label="Details">
+
+                                {% if email.last_error %}
+                                    <details class="email-error-details">
+                                        <summary>
+                                            View Error
+                                        </summary>
+
+                                        <div class="email-error-message">
+                                            {{ email.last_error }}
+                                        </div>
+                                    </details>
+                                {% endif %}
+
+
+                                {% if email.provider_message_id %}
+                                    <details class="email-provider-details">
+                                        <summary>
+                                            Provider ID
+                                        </summary>
+
+                                        <div class="email-provider-id">
+                                            {{
+                                                email.provider_message_id
+                                            }}
+                                        </div>
+                                    </details>
+                                {% endif %}
+
+
+                                {% if
+                                    not email.last_error
+                                    and not email.provider_message_id
+                                %}
+                                    <span class="email-muted">
+                                        No additional details
+                                    </span>
+                                {% endif %}
+
+                            </td>
+
+
+                            <td data-label="Actions">
+
+                                <div class="email-action-stack">
+
+                                    {% if email.status == 'pending' %}
+
+                                        <form
+                                            method="POST"
+                                            action="{{
+                                                url_for(
+                                                    'send_email_queue_now',
+                                                    email_queue_id=
+                                                        email.email_queue_id
+                                                )
+                                            }}"
+                                        >
+                                            <input
+                                                type="hidden"
+                                                name="return_status"
+                                                value="{{ status_filter }}"
+                                            >
+
+                                            <button
+                                                type="submit"
+                                                class="
+                                                    email-action-btn
+                                                    email-send-btn
+                                                "
+                                                onclick="return confirm(
+                                                    'Send this email now?'
+                                                )"
+                                            >
+                                                Send Now
+                                            </button>
+                                        </form>
+
+
+                                        <form
+                                            method="POST"
+                                            action="{{
+                                                url_for(
+                                                    'cancel_email_queue_item',
+                                                    email_queue_id=
+                                                        email.email_queue_id
+                                                )
+                                            }}"
+                                        >
+                                            <input
+                                                type="hidden"
+                                                name="return_status"
+                                                value="{{ status_filter }}"
+                                            >
+
+                                            <button
+                                                type="submit"
+                                                class="
+                                                    email-action-btn
+                                                    email-cancel-btn
+                                                "
+                                                onclick="return confirm(
+                                                    'Cancel this pending email?'
+                                                )"
+                                            >
+                                                Cancel
+                                            </button>
+                                        </form>
+
+
+                                    {% elif email.status == 'failed' %}
+
+                                        <form
+                                            method="POST"
+                                            action="{{
+                                                url_for(
+                                                    'retry_email_queue_item',
+                                                    email_queue_id=
+                                                        email.email_queue_id
+                                                )
+                                            }}"
+                                        >
+                                            <input
+                                                type="hidden"
+                                                name="return_status"
+                                                value="{{ status_filter }}"
+                                            >
+
+                                            <button
+                                                type="submit"
+                                                class="
+                                                    email-action-btn
+                                                    email-retry-btn
+                                                "
+                                                onclick="return confirm(
+                                                    'Retry this failed email now?'
+                                                )"
+                                            >
+                                                Retry
+                                            </button>
+                                        </form>
+
+
+                                    {% else %}
+
+                                        <span class="email-muted">
+                                            No actions available
+                                        </span>
+
+                                    {% endif %}
+
+                                </div>
+
+                            </td>
+
+                        </tr>
+
+                    {% endfor %}
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+    {% else %}
+
+        <div class="empty-state">
+            <h2>No Email Queue Records</h2>
+
+            <p>
+                No email messages match the selected status.
+            </p>
+        </div>
+
+    {% endif %}
+
+</div>
+
+
+<style>
+
+.email-queue-page {
+    max-width: 1500px;
+    margin: 0 auto;
+}
+
+.email-queue-summary {
+    display: grid;
+    grid-template-columns:
+        repeat(auto-fit, minmax(145px, 1fr));
+    gap: 12px;
+    margin: 20px 0;
+}
+
+.email-summary-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    min-height: 68px;
+    padding: 14px 16px;
+    border: 1px solid #dddddd;
+    border-radius: 10px;
+    background: #ffffff;
+    color: inherit;
+    text-decoration: none;
+}
+
+.email-summary-card:hover,
+.email-summary-card.active {
+    border-color: #d98f70;
+    background: #fff6f1;
+}
+
+.email-summary-label {
+    font-weight: 600;
+}
+
+.email-summary-card strong {
+    font-size: 1.35rem;
+}
+
+.email-queue-table-wrap {
+    overflow-x: auto;
+    border: 1px solid #dddddd;
+    border-radius: 10px;
+    background: #ffffff;
+}
+
+.email-queue-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.email-queue-table th,
+.email-queue-table td {
+    padding: 12px;
+    border-bottom: 1px solid #eeeeee;
+    vertical-align: top;
+    text-align: left;
+}
+
+.email-queue-table th {
+    background: #f7f7f7;
+    white-space: nowrap;
+}
+
+.email-muted {
+    margin-top: 3px;
+    color: #666666;
+    font-size: 0.88rem;
+}
+
+.email-status {
+    display: inline-block;
+    padding: 4px 9px;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: capitalize;
+}
+
+.email-status-pending {
+    background: #fff3cd;
+    color: #664d03;
+}
+
+.email-status-processing {
+    background: #cff4fc;
+    color: #055160;
+}
+
+.email-status-sent {
+    background: #d1e7dd;
+    color: #0f5132;
+}
+
+.email-status-failed {
+    background: #f8d7da;
+    color: #842029;
+}
+
+.email-status-cancelled {
+    background: #e2e3e5;
+    color: #41464b;
+}
+
+.email-message-details,
+.email-error-details,
+.email-provider-details {
+    margin-top: 8px;
+}
+
+.email-message-details summary,
+.email-error-details summary,
+.email-provider-details summary {
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.email-message-body,
+.email-error-message,
+.email-provider-id {
+    max-width: 420px;
+    margin-top: 8px;
+    padding: 10px;
+    border-radius: 7px;
+    background: #f7f7f7;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.email-error-message {
+    background: #fff1f1;
+    color: #842029;
+}
+
+.email-detail-space {
+    margin-top: 8px;
+}
+
+.email-action-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 7px;
+    min-width: 100px;
+}
+
+.email-action-stack form {
+    margin: 0;
+}
+
+.email-action-btn {
+    min-width: 92px;
+    padding: 7px 10px;
+    border: none;
+    border-radius: 7px;
+    cursor: pointer;
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
+.email-send-btn {
+    background: #d1e7dd;
+    color: #0f5132;
+}
+
+.email-retry-btn {
+    background: #cff4fc;
+    color: #055160;
+}
+
+.email-cancel-btn {
+    background: #f8d7da;
+    color: #842029;
+}
+
+.email-action-btn:hover {
+    filter: brightness(0.96);
+}
+
+.empty-state {
+    padding: 35px;
+    border: 1px solid #dddddd;
+    border-radius: 10px;
+    background: #ffffff;
+    text-align: center;
+}
+
+
+@media (max-width: 900px) {
+
+    .email-queue-table thead {
+        display: none;
+    }
+
+    .email-queue-table,
+    .email-queue-table tbody,
+    .email-queue-table tr,
+    .email-queue-table td {
+        display: block;
+        width: 100%;
+    }
+
+    .email-queue-table tr {
+        padding: 10px 0;
+        border-bottom: 2px solid #dddddd;
+    }
+
+    .email-queue-table td {
+        border-bottom: 1px solid #eeeeee;
+    }
+
+    .email-queue-table td::before {
+        content: attr(data-label);
+        display: block;
+        margin-bottom: 5px;
+        font-size: 0.75rem;
+        font-weight: 700;
+        color: #777777;
+        text-transform: uppercase;
+    }
+
+}
+
+</style>
+
+{% endblock %}

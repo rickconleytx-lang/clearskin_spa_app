@@ -1,0 +1,890 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<style>
+    .booking-control-wrap {
+        max-width: 1180px;
+        margin: 0 auto;
+    }
+
+    .booking-control-header {
+        margin-bottom: 20px;
+    }
+
+    .booking-control-header h1 {
+        margin-bottom: 5px;
+    }
+
+    .booking-control-subtitle {
+        color: #756761;
+        line-height: 1.5;
+    }
+
+    .booking-tool-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 9px;
+        margin: 18px 0 24px;
+    }
+
+    .booking-tool-row a {
+        display: inline-flex;
+        align-items: center;
+        min-height: 38px;
+        padding: 8px 13px;
+        border: 1px solid #dfd0c7;
+        border-radius: 999px;
+        background: #fffaf7;
+        color: #4f4039;
+        text-decoration: none;
+        font-weight: 750;
+    }
+
+    .booking-tool-row a:hover {
+        border-color: #d49477;
+        background: #fff3ec;
+    }
+
+    .booking-status-panel {
+        display: grid;
+        grid-template-columns:
+            minmax(0, 1.5fr)
+            minmax(260px, 0.8fr);
+        gap: 18px;
+        margin-bottom: 20px;
+    }
+
+    .booking-card {
+        padding: 22px;
+        border: 1px solid #eadbd2;
+        border-radius: 16px;
+        background: #fff;
+        box-shadow:
+            0 8px 24px rgba(75, 48, 35, 0.05);
+    }
+
+    .booking-status-card {
+        background:
+            linear-gradient(
+                135deg,
+                #fff8f3,
+                #fff
+            );
+    }
+
+    .booking-status-heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        margin-bottom: 14px;
+    }
+
+    .booking-status-heading h2 {
+        margin: 0;
+    }
+
+    .booking-status-badge {
+        display: inline-flex;
+        align-items: center;
+        min-height: 32px;
+        padding: 6px 12px;
+        border-radius: 999px;
+        font-size: 0.86rem;
+        font-weight: 850;
+    }
+
+    .booking-status-live {
+        background: #e5f5ea;
+        color: #24643f;
+    }
+
+    .booking-status-disabled {
+        background: #f2eeeb;
+        color: #665a54;
+    }
+
+    .booking-public-url-label {
+        margin-bottom: 6px;
+        color: #756761;
+        font-size: 0.82rem;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+    }
+
+    .booking-url-row {
+        display: flex;
+        gap: 9px;
+    }
+
+    .booking-url-row input {
+        flex: 1;
+        min-width: 0;
+        min-height: 43px;
+        padding: 9px 11px;
+        border: 1px solid #d9ccc4;
+        border-radius: 9px;
+        background: #fff;
+        font: inherit;
+    }
+
+    .booking-copy-button {
+        min-height: 43px;
+        padding: 9px 15px;
+        border: 0;
+        border-radius: 9px;
+        background: #bd7256;
+        color: #fff;
+        font: inherit;
+        font-weight: 800;
+        cursor: pointer;
+    }
+
+    .booking-summary-grid {
+        display: grid;
+        grid-template-columns:
+            repeat(2, minmax(0, 1fr));
+        gap: 12px;
+    }
+
+    .booking-summary-item {
+        padding: 14px;
+        border: 1px solid #eadbd2;
+        border-radius: 11px;
+        background: #fffaf7;
+    }
+
+    .booking-summary-value {
+        display: block;
+        margin-bottom: 3px;
+        font-size: 1.45rem;
+        font-weight: 900;
+        color: #bd7256;
+    }
+
+    .booking-summary-label {
+        color: #756761;
+        font-size: 0.86rem;
+        font-weight: 700;
+    }
+
+    .booking-main-grid {
+        display: grid;
+        grid-template-columns:
+            minmax(0, 1.35fr)
+            minmax(280px, 0.65fr);
+        gap: 20px;
+    }
+
+    .booking-card h2 {
+        margin-top: 0;
+    }
+
+    .booking-settings-grid {
+        display: grid;
+        grid-template-columns:
+            repeat(2, minmax(0, 1fr));
+        gap: 15px;
+    }
+
+    .booking-field label {
+        display: block;
+        margin-bottom: 6px;
+        font-weight: 800;
+    }
+
+    .booking-field input,
+    .booking-field select {
+        width: 100%;
+        min-height: 43px;
+        padding: 9px 10px;
+        border: 1px solid #d9ccc4;
+        border-radius: 9px;
+        background: #fff;
+        font: inherit;
+    }
+
+    .booking-field-help {
+        margin-top: 5px;
+        color: #7b6e68;
+        font-size: 0.82rem;
+        line-height: 1.4;
+    }
+
+    .booking-toggle-list {
+        display: grid;
+        gap: 12px;
+        margin-top: 18px;
+    }
+
+    .booking-toggle {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 14px;
+        border: 1px solid #eadbd2;
+        border-radius: 11px;
+        background: #fffaf7;
+    }
+
+    .booking-toggle input {
+        width: 19px;
+        height: 19px;
+        margin-top: 2px;
+    }
+
+    .booking-toggle strong {
+        display: block;
+        margin-bottom: 3px;
+    }
+
+    .booking-toggle-description {
+        color: #756761;
+        font-size: 0.86rem;
+        line-height: 1.45;
+    }
+
+    .booking-save-row {
+        margin-top: 20px;
+    }
+
+    .booking-save-button {
+        min-height: 44px;
+        padding: 10px 20px;
+        border: 0;
+        border-radius: 9px;
+        background: #bd7256;
+        color: #fff;
+        font: inherit;
+        font-weight: 850;
+        cursor: pointer;
+    }
+
+    .booking-readiness-list {
+        display: grid;
+        gap: 10px;
+    }
+
+    .booking-readiness-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 12px;
+        border: 1px solid #eadbd2;
+        border-radius: 10px;
+    }
+
+    .booking-readiness-icon {
+        width: 25px;
+        height: 25px;
+        display: inline-grid;
+        flex: 0 0 25px;
+        place-items: center;
+        border-radius: 50%;
+        color: #fff;
+        font-weight: 900;
+    }
+
+    .booking-ready {
+        background: #39865b;
+    }
+
+    .booking-not-ready {
+        background: #b75a55;
+    }
+
+    .booking-readiness-item strong {
+        display: block;
+        margin-bottom: 2px;
+    }
+
+    .booking-readiness-detail {
+        color: #756761;
+        font-size: 0.84rem;
+        line-height: 1.4;
+    }
+
+    .booking-readiness-result {
+        margin-top: 16px;
+        padding: 14px;
+        border-radius: 10px;
+        font-weight: 800;
+        line-height: 1.45;
+    }
+
+    .booking-ready-result {
+        border: 1px solid #b9dfc7;
+        background: #edf8f1;
+        color: #286542;
+    }
+
+    .booking-not-ready-result {
+        border: 1px solid #e3b9b4;
+        background: #fff0ee;
+        color: #8b3f3a;
+    }
+
+    @media (max-width: 850px) {
+        .booking-status-panel,
+        .booking-main-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    @media (max-width: 600px) {
+        .booking-settings-grid,
+        .booking-summary-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .booking-url-row {
+            flex-direction: column;
+        }
+    }
+</style>
+
+
+<div class="booking-control-wrap">
+
+    <div class="booking-control-header">
+        <h1>Booking Control Center</h1>
+
+        <div class="booking-control-subtitle">
+            Manage public online booking for
+            <strong>{{ settings.workspace_name }}</strong>.
+        </div>
+    </div>
+
+
+    <div class="booking-tool-row">
+        <a href="{{ url_for('booking_business_hours') }}">
+            Business Hours
+        </a>
+
+        <a href="{{ url_for('booking_provider_hours') }}">
+            Provider Hours
+        </a>
+
+        <a href="{{ url_for('booking_provider_services') }}">
+            Provider Services
+        </a>
+
+        <a href="{{ url_for('booking_provider_time_off') }}">
+            Provider Time Off
+        </a>
+
+        <a href="{{ url_for('booking_availability_test') }}">
+            Availability Test
+        </a>
+
+        <a href="{{ url_for('booking_public_preview') }}">
+            Internal Preview
+        </a>
+
+        <a
+            href="{{ public_booking_url }}"
+            target="_blank"
+            rel="noopener"
+        >
+            Open Public Page
+        </a>
+    </div>
+
+
+    <div class="booking-status-panel">
+
+        <section class="booking-card booking-status-card">
+
+            <div class="booking-status-heading">
+                <h2>Public Booking Status</h2>
+
+                {% if settings.public_booking_enabled %}
+                    <span
+                        class="
+                            booking-status-badge
+                            booking-status-live
+                        "
+                    >
+                        Live
+                    </span>
+                {% else %}
+                    <span
+                        class="
+                            booking-status-badge
+                            booking-status-disabled
+                        "
+                    >
+                        Disabled
+                    </span>
+                {% endif %}
+            </div>
+
+
+            <div class="booking-public-url-label">
+                Public Booking URL
+            </div>
+
+            <div class="booking-url-row">
+                <input
+                    type="text"
+                    id="publicBookingUrl"
+                    value="{{ public_booking_url }}"
+                    readonly
+                >
+
+                <button
+                    type="button"
+                    id="copyBookingUrlButton"
+                    class="booking-copy-button"
+                >
+                    Copy URL
+                </button>
+            </div>
+
+        </section>
+
+
+        <section class="booking-card">
+            <div class="booking-summary-grid">
+
+                <div class="booking-summary-item">
+                    <span class="booking-summary-value">
+                        {{ readiness.public_service_count }}
+                    </span>
+
+                    <span class="booking-summary-label">
+                        Public Services
+                    </span>
+                </div>
+
+
+                <div class="booking-summary-item">
+                    <span class="booking-summary-value">
+                        {{ readiness.public_provider_count }}
+                    </span>
+
+                    <span class="booking-summary-label">
+                        Public Providers
+                    </span>
+                </div>
+
+
+                <div class="booking-summary-item">
+                    <span class="booking-summary-value">
+                        {{
+                            readiness
+                            .upcoming_online_appointments
+                        }}
+                    </span>
+
+                    <span class="booking-summary-label">
+                        Upcoming Online Bookings
+                    </span>
+                </div>
+
+
+                <div class="booking-summary-item">
+                    <span class="booking-summary-value">
+                        {{
+                            readiness
+                            .upcoming_time_off_count
+                        }}
+                    </span>
+
+                    <span class="booking-summary-label">
+                        Upcoming Time-Off Blocks
+                    </span>
+                </div>
+
+            </div>
+        </section>
+
+    </div>
+
+
+    <div class="booking-main-grid">
+
+        <section class="booking-card">
+            <h2>Booking Settings</h2>
+
+            <form
+                method="POST"
+                action="{{ url_for('booking_control_center') }}"
+            >
+
+                <div class="booking-settings-grid">
+
+                    <div class="booking-field">
+                        <label for="slot_interval_minutes">
+                            Slot Interval
+                        </label>
+
+                        <select
+                            id="slot_interval_minutes"
+                            name="slot_interval_minutes"
+                            required
+                        >
+                            {% for interval in [5, 10, 15, 20, 30, 60] %}
+                                <option
+                                    value="{{ interval }}"
+                                    {% if
+                                        settings.slot_interval_minutes
+                                        == interval
+                                    %}
+                                        selected
+                                    {% endif %}
+                                >
+                                    {{ interval }} minutes
+                                </option>
+                            {% endfor %}
+                        </select>
+
+                        <div class="booking-field-help">
+                            Controls how frequently appointment
+                            start times are offered.
+                        </div>
+                    </div>
+
+
+                    <div class="booking-field">
+                        <label for="minimum_booking_notice_hours">
+                            Minimum Notice
+                        </label>
+
+                        <input
+                            type="number"
+                            id="minimum_booking_notice_hours"
+                            name="minimum_booking_notice_hours"
+                            min="0"
+                            max="720"
+                            value="{{
+                                settings
+                                .minimum_booking_notice_hours
+                            }}"
+                            required
+                        >
+
+                        <div class="booking-field-help">
+                            Hours required before a client can book.
+                        </div>
+                    </div>
+
+
+                    <div class="booking-field">
+                        <label for="maximum_booking_days_ahead">
+                            Maximum Days Ahead
+                        </label>
+
+                        <input
+                            type="number"
+                            id="maximum_booking_days_ahead"
+                            name="maximum_booking_days_ahead"
+                            min="1"
+                            max="365"
+                            value="{{
+                                settings
+                                .maximum_booking_days_ahead
+                            }}"
+                            required
+                        >
+
+                        <div class="booking-field-help">
+                            How far into the future clients may book.
+                        </div>
+                    </div>
+
+
+                    <div class="booking-field">
+                        <label for="default_buffer_before_minutes">
+                            Default Buffer Before
+                        </label>
+
+                        <input
+                            type="number"
+                            id="default_buffer_before_minutes"
+                            name="default_buffer_before_minutes"
+                            min="0"
+                            max="240"
+                            value="{{
+                                settings
+                                .default_buffer_before_minutes
+                            }}"
+                            required
+                        >
+
+                        <div class="booking-field-help">
+                            Used when a provider-service assignment
+                            has no custom before buffer.
+                        </div>
+                    </div>
+
+
+                    <div class="booking-field">
+                        <label for="default_buffer_after_minutes">
+                            Default Buffer After
+                        </label>
+
+                        <input
+                            type="number"
+                            id="default_buffer_after_minutes"
+                            name="default_buffer_after_minutes"
+                            min="0"
+                            max="240"
+                            value="{{
+                                settings
+                                .default_buffer_after_minutes
+                            }}"
+                            required
+                        >
+
+                        <div class="booking-field-help">
+                            Used when a provider-service assignment
+                            has no custom after buffer.
+                        </div>
+                    </div>
+
+                </div>
+
+
+                <div class="booking-toggle-list">
+
+                    <label class="booking-toggle">
+                        <input
+                            type="checkbox"
+                            name="allow_any_provider"
+                            {% if settings.allow_any_provider %}
+                                checked
+                            {% endif %}
+                        >
+
+                        <span>
+                            <strong>
+                                Allow “Any Available”
+                            </strong>
+
+                            <span class="booking-toggle-description">
+                                Clients can view times across every
+                                eligible provider for the service.
+                            </span>
+                        </span>
+                    </label>
+
+
+                    <label class="booking-toggle">
+                        <input
+                            type="checkbox"
+                            name="public_booking_enabled"
+                            {% if settings.public_booking_enabled %}
+                                checked
+                            {% endif %}
+                        >
+
+                        <span>
+                            <strong>
+                                Enable Public Online Booking
+                            </strong>
+
+                            <span class="booking-toggle-description">
+                                When enabled, the public URL can create
+                                real client and appointment records.
+                            </span>
+                        </span>
+                    </label>
+
+                </div>
+
+
+                <div class="booking-save-row">
+                    <button
+                        type="submit"
+                        class="booking-save-button"
+                    >
+                        Save Booking Settings
+                    </button>
+                </div>
+
+            </form>
+        </section>
+
+
+        <aside class="booking-card">
+            <h2>Go-Live Readiness</h2>
+
+            <div class="booking-readiness-list">
+
+                <div class="booking-readiness-item">
+                    <span
+                        class="
+                            booking-readiness-icon
+                            {% if readiness.services_ready %}
+                                booking-ready
+                            {% else %}
+                                booking-not-ready
+                            {% endif %}
+                        "
+                    >
+                        {% if readiness.services_ready %}
+                            ✓
+                        {% else %}
+                            !
+                        {% endif %}
+                    </span>
+
+                    <div>
+                        <strong>Public Services</strong>
+
+                        <div class="booking-readiness-detail">
+                            {{
+                                readiness
+                                .public_service_count
+                            }}
+                            service(s) across
+                            {{
+                                readiness
+                                .public_assignment_count
+                            }}
+                            provider assignment(s).
+                        </div>
+                    </div>
+                </div>
+
+
+                <div class="booking-readiness-item">
+                    <span
+                        class="
+                            booking-readiness-icon
+                            {% if readiness.business_hours_ready %}
+                                booking-ready
+                            {% else %}
+                                booking-not-ready
+                            {% endif %}
+                        "
+                    >
+                        {% if readiness.business_hours_ready %}
+                            ✓
+                        {% else %}
+                            !
+                        {% endif %}
+                    </span>
+
+                    <div>
+                        <strong>Business Hours</strong>
+
+                        <div class="booking-readiness-detail">
+                            {{
+                                readiness
+                                .business_hours_count
+                            }}
+                            active operating-hour record(s).
+                        </div>
+                    </div>
+                </div>
+
+
+                <div class="booking-readiness-item">
+                    <span
+                        class="
+                            booking-readiness-icon
+                            {% if readiness.provider_hours_ready %}
+                                booking-ready
+                            {% else %}
+                                booking-not-ready
+                            {% endif %}
+                        "
+                    >
+                        {% if readiness.provider_hours_ready %}
+                            ✓
+                        {% else %}
+                            !
+                        {% endif %}
+                    </span>
+
+                    <div>
+                        <strong>Provider Hours</strong>
+
+                        <div class="booking-readiness-detail">
+                            {{
+                                readiness
+                                .providers_with_hours
+                            }}
+                            of
+                            {{
+                                readiness
+                                .public_provider_count
+                            }}
+                            public provider(s) have active hours.
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+
+            <div
+                class="
+                    booking-readiness-result
+                    {% if readiness.ready_to_enable %}
+                        booking-ready-result
+                    {% else %}
+                        booking-not-ready-result
+                    {% endif %}
+                "
+            >
+                {% if readiness.ready_to_enable %}
+                    This workspace is ready for public booking.
+                {% else %}
+                    Complete the missing setup items before
+                    enabling public booking.
+                {% endif %}
+            </div>
+
+        </aside>
+
+    </div>
+
+</div>
+
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const copyButton = document.getElementById(
+        "copyBookingUrlButton"
+    );
+
+    const urlInput = document.getElementById(
+        "publicBookingUrl"
+    );
+
+    if (!copyButton || !urlInput) {
+        return;
+    }
+
+    copyButton.addEventListener("click", async function () {
+        try {
+            await navigator.clipboard.writeText(
+                urlInput.value
+            );
+
+            const originalText = copyButton.textContent;
+
+            copyButton.textContent = "Copied";
+
+            window.setTimeout(function () {
+                copyButton.textContent = originalText;
+            }, 1600);
+
+        } catch (error) {
+            urlInput.focus();
+            urlInput.select();
+
+            document.execCommand("copy");
+
+            copyButton.textContent = "Copied";
+        }
+    });
+});
+</script>
+
+{% endblock %}
