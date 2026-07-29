@@ -45574,7 +45574,7 @@ def booking_control_center():
         )
 
         return render_template(
-            "Booking/"
+            "booking/"
             "booking_control_center.html",
             settings=settings,
             readiness=readiness,
