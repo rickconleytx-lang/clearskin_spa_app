@@ -2369,7 +2369,15 @@ async function loadPeachHelpTopics(searchText) {
             + "?q="
             + encodeURIComponent(
                 searchText || ""
-            )
+            ),
+            {
+                method: "GET",
+                credentials: "same-origin",
+                cache: "no-store",
+                headers: {
+                    "Accept": "application/json"
+                }
+            }
         );
 
         const data = await response.json();

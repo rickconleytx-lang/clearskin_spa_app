@@ -552,6 +552,65 @@ def inject_about_modal_data():
 
 
 
+BOOKING_HELP_TOPICS = [
+    {
+        "page_key": "booking_control_center",
+        "title": "Booking Control Center"
+    },
+    {
+        "page_key": "booking_business_hours",
+        "title": "Business Hours"
+    },
+    {
+        "page_key": "booking_provider_hours",
+        "title": "Provider Hours"
+    },
+    {
+        "page_key": "booking_provider_services",
+        "title": "Provider Services"
+    },
+    {
+        "page_key": "booking_provider_time_off",
+        "title": "Provider Time Off"
+    },
+    {
+        "page_key": "booking_availability_test",
+        "title": "Availability Test"
+    },
+    {
+        "page_key": "booking_internal_preview",
+        "title": "Internal Booking Preview"
+    },
+    {
+        "page_key": "booking_public_page",
+        "title": "Public Booking Page"
+    }
+]
+
+
+def build_booking_help_context(
+    title,
+    description,
+    primary_page_key
+):
+    topics = [
+        dict(topic)
+        for topic in BOOKING_HELP_TOPICS
+    ]
+
+    topics.sort(
+        key=lambda topic: (
+            topic["page_key"] != primary_page_key
+        )
+    )
+
+    return {
+        "title": title,
+        "description": description,
+        "topics": topics
+    }
+
+
 HELP_CONTEXT_MAP = {
     "client_contact_preferences": {
         "title": "Client Contact Preferences",
@@ -603,7 +662,97 @@ HELP_CONTEXT_MAP = {
                 "title": "SMS Setup & 10DLC Compliance"
             }
         ]
-    }
+    },
+
+    "calendar_view": {
+        "title": "Calendar",
+        "description": (
+            "Review appointments, open appointment details, "
+            "and manage the business schedule."
+        ),
+        "topics": [
+            {
+                "page_key": "calendar",
+                "title": "Calendar"
+            },
+            {
+                "page_key": "appointments",
+                "title": "Appointments"
+            },
+            
+        ]
+    },
+
+    "booking_control_center":
+        build_booking_help_context(
+            "Booking Control Center",
+            (
+                "Set up, review, test, and manage your "
+                "online booking system."
+            ),
+            "booking_control_center"
+        ),
+
+    "booking_business_hours":
+        build_booking_help_context(
+            "Business Hours",
+            (
+                "Set the normal days and times your business "
+                "accepts appointments."
+            ),
+            "booking_business_hours"
+        ),
+
+    "booking_provider_hours":
+        build_booking_help_context(
+            "Provider Hours",
+            (
+                "Manage the normal weekly working schedule "
+                "for each provider."
+            ),
+            "booking_provider_hours"
+        ),
+
+    "booking_provider_services":
+        build_booking_help_context(
+            "Provider Services",
+            (
+                "Choose which services each provider performs "
+                "and may receive through online booking."
+            ),
+            "booking_provider_services"
+        ),
+
+    "booking_provider_time_off":
+        build_booking_help_context(
+            "Provider Time Off",
+            (
+                "Block temporary periods when a provider is "
+                "unavailable for appointments."
+            ),
+            "booking_provider_time_off"
+        ),
+
+    "booking_availability_test":
+        build_booking_help_context(
+            "Availability Test",
+            (
+                "Test services, providers, dates, and appointment "
+                "times using the current booking rules."
+            ),
+            "booking_availability_test"
+        ),
+
+    "booking_public_preview":
+        build_booking_help_context(
+            "Internal Booking Preview",
+            (
+                "Review and test the client booking experience "
+                "before sharing the public booking page."
+            ),
+            "booking_internal_preview"
+        )
+
 }
 
 #################################################
@@ -735,7 +884,7 @@ def help_topics_api():
                 ),
                 page_key
 
-            LIMIT 40
+            LIMIT 200
         """
 
         cur.execute(

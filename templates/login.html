@@ -3,15 +3,148 @@
 {% block title %}Login{% endblock %}
 
 {% block content %}
+
+<style>
+    .login-loading-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 99999;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: rgba(255, 255, 255, 0.96);
+    }
+
+    .login-loading-overlay.is-visible {
+        display: flex;
+    }
+
+    .login-loading-card {
+        width: min(420px, calc(100% - 40px));
+        padding: 36px 28px;
+        text-align: center;
+        background: #ffffff;
+        border-radius: 16px;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.14);
+    }
+
+    .login-loading-card img {
+        max-width: 250px;
+        width: 100%;
+        height: auto;
+        margin-bottom: 22px;
+    }
+
+    .login-loading-spinner {
+        width: 42px;
+        height: 42px;
+        margin: 0 auto 18px;
+        border: 4px solid #e5e5e5;
+        border-top-color: #333333;
+        border-radius: 50%;
+        animation: loginSpinner 0.8s linear infinite;
+    }
+
+    .login-loading-message {
+        margin: 0;
+        font-size: 17px;
+        font-weight: 600;
+    }
+
+    @keyframes loginSpinner {
+        to {
+            transform: rotate(360deg);
+        }
+    }
+</style>
+
+
 <h2>Login</h2>
 
-<form method="POST">
+<form method="POST" id="loginForm">
     <label>Email</label><br>
-    <input type="email" name="email" required><br><br>
+    <input
+        type="email"
+        name="email"
+        required
+    ><br><br>
 
     <label>Password</label><br>
-    <input type="password" name="password" required><br><br>
+    <input
+        type="password"
+        name="password"
+        required
+    ><br><br>
 
-    <button type="submit" class="btn">Login</button>
+    <button
+        type="submit"
+        class="btn"
+        id="loginButton"
+    >
+        Login
+    </button>
 </form>
+
+
+<div
+    id="loginLoadingOverlay"
+    class="login-loading-overlay"
+    role="status"
+    aria-live="polite"
+    aria-hidden="true"
+>
+    <div class="login-loading-card">
+
+        <img
+            src="{{ url_for('static', filename='images/smallbanner.png') }}"
+            alt="Peach Suite Pro"
+        >
+
+        <div class="login-loading-spinner"></div>
+
+        <p class="login-loading-message">
+            Signing you in...
+        </p>
+
+    </div>
+</div>
+
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const loginForm = document.getElementById(
+        "loginForm"
+    );
+
+    const loginButton = document.getElementById(
+        "loginButton"
+    );
+
+    const loadingOverlay = document.getElementById(
+        "loginLoadingOverlay"
+    );
+
+    loginForm.addEventListener("submit", function (event) {
+        event.preventDefault();
+
+        loadingOverlay.classList.add("is-visible");
+        loadingOverlay.setAttribute(
+            "aria-hidden",
+            "false"
+        );
+
+        loginButton.disabled = true;
+        loginButton.textContent = "Signing In...";
+
+        /*
+         * Give the browser a moment to display the overlay
+         * before submitting the login request.
+         */
+        window.setTimeout(function () {
+            loginForm.submit();
+        }, 75);
+    });
+});
+</script>
+
 {% endblock %}
