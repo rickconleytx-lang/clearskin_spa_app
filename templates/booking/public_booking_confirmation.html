@@ -227,6 +227,45 @@
             </p>
 
 
+            {% if contact_verification_type %}
+                <div
+                    style="
+                        margin: 18px 0;
+                        padding: 14px 16px;
+                        background: #fff3b0;
+                        border-left: 5px solid #d6a700;
+                        border-radius: 8px;
+                        color: #3d3400;
+                    "
+                >
+                    <strong>Please Verify Your Information</strong>
+
+                    {% if contact_verification_type == "verify_email" %}
+                        <p style="margin: 7px 0 0 0;">
+                            The email used for this booking does not match
+                            the email on file. Please advise your provider
+                            of the updated information upon arrival.
+                        </p>
+
+                    {% elif contact_verification_type == "verify_phone" %}
+                        <p style="margin: 7px 0 0 0;">
+                            The phone number used for this booking does not
+                            match the phone number on file. Please advise
+                            your provider of the updated information upon
+                            arrival.
+                        </p>
+
+                    {% elif contact_verification_type == "verify_client_information" %}
+                        <p style="margin: 7px 0 0 0;">
+                            Some of the information used for this booking
+                            does not match the information on file. Please
+                            verify your information with your provider upon
+                            arrival.
+                        </p>
+                    {% endif %}
+                </div>
+            {% endif %}
+
             <div class="confirmation-number">
                 Confirmation #{{ appointment_id }}
             </div>

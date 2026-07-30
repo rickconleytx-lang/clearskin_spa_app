@@ -31352,7 +31352,16 @@ def appointment_details(appointment_id):
                 a.booking_for_other,
                 FALSE
             ) AS booking_for_other,            -- 15
-            a.service_recipient_client_id      -- 16
+            a.service_recipient_client_id,     -- 16
+            a.booking_channel,                 -- 17
+            a.contact_verification_type,       -- 18
+            a.booking_contact_name_submitted,  -- 19
+            a.booking_contact_email_submitted, -- 20
+            a.booking_contact_phone_submitted, -- 21
+            COALESCE(
+                a.contact_verification_resolved,
+                FALSE
+            ) AS contact_verification_resolved -- 2222
         FROM appointments a
         JOIN clients c
             ON a.client_id = c.client_id
@@ -31377,24 +31386,40 @@ def appointment_details(appointment_id):
         conn.close()
         return {"error": "Appointment not found."}, 404
 
-    # Opening the Appointment Command Center counts as owner review.
+    
+    # Opening the Appointment Command Center counts as owner review
+    # for appointments from every source.
+    cur.execute("""
+        UPDATE appointments
+        SET
+            owner_reviewed = TRUE,
+            owner_reviewed_at = COALESCE(owner_reviewed_at, NOW())
+        WHERE appointment_id = %s
+          AND spa_id = %s
+          AND (
+                COALESCE(owner_reviewed, FALSE) = FALSE
+             OR owner_reviewed_at IS NULL
+          )
+    """, (
+        appointment_id,
+        spa_id
+    ))
+
+    # GoDaddy appointments also require import-review fields.
     cur.execute("""
         UPDATE appointments
         SET
             import_reviewed = TRUE,
             import_reviewed_at = COALESCE(import_reviewed_at, NOW()),
             import_reviewed_by = COALESCE(import_reviewed_by, %s),
-            owner_reviewed = TRUE,
-            owner_reviewed_at = COALESCE(owner_reviewed_at, NOW()),
             import_status = 'Reviewed'
         WHERE appointment_id = %s
-        AND spa_id = %s
-        AND LOWER(COALESCE(external_source, '')) = 'godaddy'
-        AND (
+          AND spa_id = %s
+          AND LOWER(COALESCE(external_source, '')) = 'godaddy'
+          AND (
                 COALESCE(import_reviewed, FALSE) = FALSE
-            OR COALESCE(owner_reviewed, FALSE) = FALSE
-            OR COALESCE(import_status, '') <> 'Reviewed'
-        )
+             OR COALESCE(import_status, '') <> 'Reviewed'
+          )
     """, (
         session.get("user_id"),
         appointment_id,
@@ -31436,7 +31461,18 @@ def appointment_details(appointment_id):
         "notes": appt[9] or "",
         "external_source": appt[10] or "",
         "duration_minutes": appt[11],
-        "price_at_booking": appt[12]
+        "price_at_booking": appt[12],
+        "booking_channel": appt[17] or "",
+        "contact_verification_type":
+            appt[18] or "",
+        "booking_contact_name_submitted":
+            appt[19] or "",
+        "booking_contact_email_submitted":
+            appt[20] or "",
+        "booking_contact_phone_submitted":
+            appt[21] or "",
+        "contact_verification_resolved":
+            bool(appt[22])
     }
 
 
@@ -42116,10 +42152,17 @@ def booking_public_preview_confirm():
         ))
 
         candidate_clients = cur.fetchall()
-        matching_client_ids = set()
+
+        email_match_ids = set()
+        phone_match_ids = set()
+        candidate_by_id = {}
 
         for candidate in candidate_clients:
             candidate_client_id = candidate[0]
+
+            candidate_by_id[
+                candidate_client_id
+            ] = candidate
 
             email_matches = (
                 _booking_normalize_email(
@@ -42135,28 +42178,110 @@ def booking_public_preview_confirm():
                 == normalized_phone
             )
 
-            if email_matches or phone_matches:
-                matching_client_ids.add(
+            if email_matches:
+                email_match_ids.add(
+                    candidate_client_id
+                )
+
+            if phone_matches:
+                phone_match_ids.add(
                     candidate_client_id
                 )
 
 
-        if len(matching_client_ids) > 1:
+        # Multiple records using the same email or phone
+        # cannot be safely matched automatically.
+        if (
+            len(email_match_ids) > 1
+            or len(phone_match_ids) > 1
+        ):
             conn.rollback()
 
             return failure_response(
-                "The email and phone match more than "
-                "one client record. Please contact the "
-                "business so the records can be reviewed.",
+                "The information provided does not match "
+                "our records. Please contact the business "
+                "to schedule your appointment.",
                 status_code=409,
                 service_type_id=service_type_id
             )
 
 
-        if matching_client_ids:
-            client_id = next(
-                iter(matching_client_ids)
+        client_was_created = False
+        contact_verification_type = None
+        matched_client_id = None
+
+        # Email and phone both matched existing records.
+        if email_match_ids and phone_match_ids:
+            if email_match_ids != phone_match_ids:
+                conn.rollback()
+
+                return failure_response(
+                    "The information provided does not match "
+                    "our records. Please contact the business "
+                    "to schedule your appointment.",
+                    status_code=409,
+                    service_type_id=service_type_id
+                )
+
+            matched_client_id = next(
+                iter(email_match_ids)
             )
+
+        # Email matched, but phone is different/new.
+        elif email_match_ids:
+            matched_client_id = next(
+                iter(email_match_ids)
+            )
+
+            contact_verification_type = (
+                "verify_phone"
+            )
+
+        # Phone matched, but email is different/new.
+        elif phone_match_ids:
+            matched_client_id = next(
+                iter(phone_match_ids)
+            )
+
+            contact_verification_type = (
+                "verify_email"
+            )
+
+
+        if matched_client_id is not None:
+            client_id = matched_client_id
+
+            matched_client = candidate_by_id[
+                client_id
+            ]
+
+            existing_first_name = (
+                matched_client[1] or ""
+            ).strip()
+
+            existing_last_name = (
+                matched_client[2] or ""
+            ).strip()
+
+            submitted_name = " ".join(
+                f"{first_name} {last_name}"
+                .strip()
+                .lower()
+                .split()
+            )
+
+            existing_name = " ".join(
+                f"{existing_first_name} "
+                f"{existing_last_name}"
+                .strip()
+                .lower()
+                .split()
+            )
+
+            if submitted_name != existing_name:
+                contact_verification_type = (
+                    "verify_client_information"
+                )
 
         else:
             # ---------------------------------------------
@@ -42259,6 +42384,10 @@ def booking_public_preview_confirm():
                 booking_channel,
                 booking_for_other,
                 service_recipient_client_id,
+                contact_verification_type,
+                booking_contact_name_submitted,
+                booking_contact_email_submitted,
+                booking_contact_phone_submitted,
                 owner_reviewed,
                 owner_reviewed_at
             )
@@ -42270,8 +42399,9 @@ def booking_public_preview_confirm():
                 'public_preview',
                 %s,
                 %s,
-                TRUE,
-                CURRENT_TIMESTAMP
+                %s, %s, %s, %s,
+                FALSE,
+                NULL
             )
             RETURNING appointment_id
         """, (
@@ -42291,7 +42421,19 @@ def booking_public_preview_confirm():
             ],
             validation["provider_name"],
             booking_for_other,
-            service_recipient_client_id
+            service_recipient_client_id,
+            contact_verification_type,
+            (
+                f"{first_name} {last_name}"
+            ).strip()
+            if contact_verification_type
+            else None,
+            normalized_email
+            if contact_verification_type
+            else None,
+            phone
+            if contact_verification_type
+            else None
         ))
 
         appointment_id = cur.fetchone()[0]
@@ -42327,6 +42469,8 @@ def booking_public_preview_confirm():
             client_id=client_id,
             client_was_created=
                 client_was_created,
+            contact_verification_type=
+                contact_verification_type,
             client_name=booked_by_name,
             booked_by_name=booked_by_name,
             appointment_for_name=
@@ -42509,73 +42653,177 @@ def _booking_commit_appointment(
     # -----------------------------------------------------
 
     cur.execute("""
-        SELECT
-            client_id,
-            phone,
-            email
-        FROM clients
-        WHERE spa_id = %s
-          AND (
-                LOWER(
-                    TRIM(
-                        COALESCE(email, '')
-                    )
-                ) = %s
+    SELECT
+        client_id,
+        first_name,
+        last_name,
+        phone,
+        email
+    FROM clients
+    WHERE spa_id = %s
+        AND (
+            LOWER(
+                TRIM(
+                    COALESCE(email, '')
+                )
+            ) = %s
 
-                OR regexp_replace(
-                    COALESCE(phone, ''),
-                    '[^0-9]',
-                    '',
-                    'g'
-                ) IN (%s, %s)
-              )
-        ORDER BY client_id
-        FOR UPDATE
-    """, (
-        spa_id,
-        normalized_email,
-        normalized_phone,
-        "1" + normalized_phone
-    ))
+            OR regexp_replace(
+                COALESCE(phone, ''),
+                '[^0-9]',
+                '',
+                'g'
+            ) IN (%s, %s)
+            )
+    ORDER BY client_id
+    FOR UPDATE
+""", (
+    spa_id,
+    normalized_email,
+    normalized_phone,
+    "1" + normalized_phone
+))
 
-    matching_client_ids = set()
+    candidate_clients = cur.fetchall()
 
-    for candidate in cur.fetchall():
+    email_match_ids = set()
+    phone_match_ids = set()
+    candidate_by_id = {}
+
+    for candidate in candidate_clients:
+        candidate_client_id = candidate[0]
+
+        candidate_by_id[
+            candidate_client_id
+        ] = candidate
+
         email_matches = (
             _booking_normalize_email(
-                candidate[2]
+                candidate[4]
             )
             == normalized_email
         )
 
         phone_matches = (
             _booking_normalize_phone(
-                candidate[1]
+                candidate[3]
             )
             == normalized_phone
         )
 
-        if email_matches or phone_matches:
-            matching_client_ids.add(
-                candidate[0]
+        if email_matches:
+            email_match_ids.add(
+                candidate_client_id
+            )
+
+        if phone_matches:
+            phone_match_ids.add(
+                candidate_client_id
             )
 
 
-    if len(matching_client_ids) > 1:
+    # Multiple records using the same identifier
+    # cannot be safely matched automatically.
+    if (
+        len(email_match_ids) > 1
+        or len(phone_match_ids) > 1
+    ):
         return failure(
-            "The email and phone match more than "
-            "one client record. Please contact the "
-            "business so the records can be reviewed.",
+            "The information provided does not match "
+            "our records. Please contact the business "
+            "to schedule your appointment.",
             status_code=409
         )
 
 
-    client_was_created = False
+    submitted_booking_name = (
+        f"{first_name} {last_name}"
+    ).strip()
 
-    if matching_client_ids:
-        client_id = next(
-            iter(matching_client_ids)
+    client_was_created = False
+    contact_verification_type = None
+    matched_client_id = None
+    booked_by_name = submitted_booking_name
+
+    # Both identifiers matched existing records.
+    if email_match_ids and phone_match_ids:
+        if email_match_ids != phone_match_ids:
+            return failure(
+                "The information provided does not match "
+                "our records. Please contact the business "
+                "to schedule your appointment.",
+                status_code=409
+            )
+
+        matched_client_id = next(
+            iter(email_match_ids)
         )
+
+    # Email matched, but phone is different.
+    elif email_match_ids:
+        matched_client_id = next(
+            iter(email_match_ids)
+        )
+
+        contact_verification_type = (
+            "verify_phone"
+        )
+
+    # Phone matched, but email is different.
+    elif phone_match_ids:
+        matched_client_id = next(
+            iter(phone_match_ids)
+        )
+
+        contact_verification_type = (
+            "verify_email"
+        )
+
+
+    if matched_client_id is not None:
+        client_id = matched_client_id
+
+        matched_client = candidate_by_id[
+            client_id
+        ]
+
+        existing_first_name = (
+            matched_client[1] or ""
+        ).strip()
+
+        existing_last_name = (
+            matched_client[2] or ""
+        ).strip()
+
+        existing_client_name = (
+            f"{existing_first_name} "
+            f"{existing_last_name}"
+        ).strip()
+
+        if existing_client_name:
+            booked_by_name = (
+                existing_client_name
+            )
+
+        submitted_name_normalized = " ".join(
+            submitted_booking_name
+            .lower()
+            .split()
+        )
+
+        existing_name_normalized = " ".join(
+            existing_client_name
+            .lower()
+            .split()
+        )
+
+        if (
+            submitted_name_normalized
+            != existing_name_normalized
+        ):
+            contact_verification_type = (
+                "verify_client_information"
+            )
 
     else:
         # Conservative service-contact defaults.
@@ -42627,17 +42875,24 @@ def _booking_commit_appointment(
         client_was_created = True
 
 
-    booked_by_name = (
-        f"{first_name} {last_name}"
-    ).strip()
 
+
+
+
+    # Keep the existing client name when a client was matched.
+    # Use the submitted name only when the name itself needs review.
     appointment_for = (
         (
             f"{guest_first_name} "
             f"{guest_last_name}"
         ).strip()
         if booking_for_other
-        else booked_by_name
+        else (
+            submitted_booking_name
+            if contact_verification_type
+                == "verify_client_information"
+            else booked_by_name
+        )
     )
 
     service_recipient_client_id = (
@@ -42670,6 +42925,10 @@ def _booking_commit_appointment(
             booking_channel,
             booking_for_other,
             service_recipient_client_id,
+            contact_verification_type,
+            booking_contact_name_submitted,
+            booking_contact_email_submitted,
+            booking_contact_phone_submitted,
             owner_reviewed,
             owner_reviewed_at
         )
@@ -42679,8 +42938,9 @@ def _booking_commit_appointment(
             'booked',
             %s, %s, %s, %s,
             %s, %s,
-            TRUE,
-            CURRENT_TIMESTAMP
+            %s, %s, %s, %s,
+            FALSE,
+            NULL
         )
         RETURNING appointment_id
     """, (
@@ -42699,7 +42959,17 @@ def _booking_commit_appointment(
         validation["provider_name"],
         booking_channel,
         booking_for_other,
-        service_recipient_client_id
+        service_recipient_client_id,
+        contact_verification_type,
+        submitted_booking_name
+        if contact_verification_type
+        else None,
+        normalized_email
+        if contact_verification_type
+        else None,
+        phone
+        if contact_verification_type
+        else None
     ))
 
     appointment_id = cur.fetchone()[0]
@@ -42718,6 +42988,8 @@ def _booking_commit_appointment(
             booking_for_other,
         "service_recipient_client_id":
             service_recipient_client_id,
+        "contact_verification_type":
+            contact_verification_type,
         "validation": validation
     }
 
@@ -45100,6 +45372,11 @@ def public_booking_confirm(
                 confirmation[
                     "client_was_created"
                 ],
+
+            contact_verification_type=
+                confirmation.get(
+                    "contact_verification_type"
+                ),
 
             client_name=
                 confirmation["booked_by_name"],

@@ -349,6 +349,23 @@
             Booked for Someone Else
         </div>
 
+        <div
+            id="modalContactVerificationAlert"
+            class="contact-verification-alert"
+            style="display:none;"
+        >
+            <strong id="modalContactVerificationTitle">
+            </strong>
+
+            <p id="modalContactVerificationMessage"></p>
+
+            <div
+                id="modalContactVerificationDetails"
+                class="contact-verification-details"
+            ></div>
+        </div>
+
+
         <h2 id="modalClientName"></h2>
 
         <p
@@ -374,6 +391,13 @@
         </p>
 
         <hr>
+        <p
+            id="modalConfirmationRow"
+            style="display:none;"
+        >
+            <strong>Booking Confirmation #:</strong>
+            <span id="modalConfirmationNumber"></span>
+        </p>
         <p><strong>Service:</strong> <span id="modalService"></span></p>
         <p><strong>Provider:</strong> <span id="modalProvider"></span></p>
 
@@ -507,6 +531,29 @@
     font-weight: 600;
 }
 
+.contact-verification-alert {
+    margin: 10px 0 15px 0;
+    padding: 12px;
+    border-left: 5px solid #d6a700;
+    border-radius: 8px;
+    background: #fff3b0;
+    color: #3d3400;
+}
+
+.contact-verification-alert p {
+    margin: 6px 0;
+}
+
+.contact-verification-details {
+    margin-top: 6px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.contact-verification-details {
+    white-space: pre-line;
+}
+
 
 </style>
 
@@ -621,6 +668,109 @@ function openAppointmentModal(appointmentId, clickedElement) {
                         : "none";
             }
 
+            const verificationAlert =
+            document.getElementById(
+                "modalContactVerificationAlert"
+            );
+
+            const verificationTitle =
+                document.getElementById(
+                    "modalContactVerificationTitle"
+                );
+
+            const verificationMessage =
+                document.getElementById(
+                    "modalContactVerificationMessage"
+                );
+
+            const verificationDetails =
+                document.getElementById(
+                    "modalContactVerificationDetails"
+                );
+
+            const verificationType = (
+                data.contact_verification_type || ""
+            ).trim().toLowerCase();
+
+            const verificationIsPending = (
+                verificationType
+                && !data.contact_verification_resolved
+            );
+
+            if (verificationAlert) {
+                verificationAlert.style.display =
+                    verificationIsPending
+                        ? "block"
+                        : "none";
+            }
+
+            if (verificationIsPending) {
+                if (verificationType === "verify_email") {
+                    verificationTitle.innerText =
+                        "⚠ Verify Email";
+
+            verificationMessage.innerText =
+                "The email entered during online booking "
+                + "does not match the email currently on file. "
+                + "Please verify the client's email upon arrival.";
+
+            verificationDetails.innerText =
+                `Email on file: ${data.email || "Not entered"}`
+                + `\nEmail submitted: ${
+                    data.booking_contact_email_submitted
+                    || "Not entered"
+                }`;
+            }
+
+            else if (verificationType === "verify_phone") {
+                verificationTitle.innerText =
+                    "⚠ Verify Phone";
+
+                verificationMessage.innerText =
+                    "The phone number entered during online booking "
+                    + "does not match the phone number currently on file. "
+                    + "Please verify the client's phone number upon arrival.";
+
+                verificationDetails.innerText =
+                    `Phone on file: ${data.phone || "Not entered"}`
+                    + `\nPhone submitted: ${
+                        data.booking_contact_phone_submitted
+                        || "Not entered"
+                    }`;
+            }
+
+            else {
+                verificationTitle.innerText =
+                    "⚠ Verify Client Information";
+
+                verificationMessage.innerText =
+                    "The information entered during online booking "
+                    + "does not fully match the existing client record. "
+                    + "Please verify the client's information upon arrival.";
+
+                verificationDetails.innerText =
+                    `Client on file: ${data.client_name || "Not entered"}`
+                    + `\nName submitted: ${
+                        data.booking_contact_name_submitted
+                        || "Not entered"
+                    }`;
+            }
+        }
+        else {
+            if (verificationTitle) {
+                verificationTitle.innerText = "";
+            }
+
+            if (verificationMessage) {
+                verificationMessage.innerText = "";
+            }
+
+            if (verificationDetails) {
+                verificationDetails.innerText = "";
+            }
+        }
+
+
             const phoneLabel =
                 document.getElementById(
                     "modalPhoneLabel"
@@ -649,6 +799,34 @@ function openAppointmentModal(appointmentId, clickedElement) {
             setText("modalTime", data.start_time);
             setText("modalService", data.service_name);
             setText("modalProvider", data.provider_name || "Any Available");
+
+            const bookingChannel = (
+                data.booking_channel || ""
+            ).trim().toLowerCase();
+
+            const hasBookingConfirmation = [
+                "public_preview",
+                "public_online"
+            ].includes(bookingChannel);
+
+            const confirmationRow =
+                document.getElementById(
+                    "modalConfirmationRow"
+                );
+
+            if (confirmationRow) {
+                confirmationRow.style.display =
+                    hasBookingConfirmation
+                        ? "block"
+                        : "none";
+            }
+
+            setText(
+                "modalConfirmationNumber",
+                hasBookingConfirmation
+                    ? data.appointment_id
+                    : ""
+            );
 
 
             setText(
