@@ -35984,6 +35984,35 @@ def cancel_appointment(appointment_id):
     spa_id = current_spa_id()
     user_id = session.get("user_id")
     role = session.get("role")
+    return_week_start = (
+        request.form.get("return_week_start")
+        or ""
+    ).strip()
+
+    try:
+        return_week_start = (
+            datetime.strptime(
+                return_week_start,
+                "%Y-%m-%d"
+            )
+            .date()
+            .isoformat()
+        )
+    except (TypeError, ValueError):
+        return_week_start = None
+
+    def return_to_calendar():
+        if return_week_start:
+            return redirect(url_for(
+                "calendar_view",
+                week_start=return_week_start,
+                _anchor="week-view"
+            ))
+
+        return redirect(url_for(
+            "calendar_view",
+            _anchor="week-view"
+        ))
     
     conn = get_db_connection()
     cur = conn.cursor()
@@ -36011,7 +36040,7 @@ def cancel_appointment(appointment_id):
         cur.close()
         conn.close()   
         flash("Appointment not found or can no longer be cancelled.", "error")
-        return redirect(url_for("calendar_view", offset=0))
+        return return_to_calendar()
 
     client_id = appt[0]
     old_date = appt[1]
@@ -36030,7 +36059,7 @@ def cancel_appointment(appointment_id):
         cur.close()
         conn.close()   
         flash("Appointment not found or can no longer be cancelled.", "error")
-        return redirect(url_for("calendar_view", offset=0))
+        return return_to_calendar()
 
     log_audit(
         cur,
@@ -36065,8 +36094,7 @@ def cancel_appointment(appointment_id):
     conn.close()
         
     flash("Appointment cancelled.", "warning")
-    return redirect(url_for("calendar_view", offset=0))
-
+    return return_to_calendar()
 
 
 

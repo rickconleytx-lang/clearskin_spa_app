@@ -276,11 +276,15 @@
 
                             <div class="
                                 calendar-event
-                                {% if appt[5] == 'completed' %}
+                                {% set appointment_status = (appt[5] or '')|lower %}
+
+                                {% if appointment_status in ['cancelled', 'canceled'] %}
+                                    cancelled
+                                {% elif appointment_status == 'completed' %}
                                     completed
-                                {% elif appt[5] == 'booked' and not appt[9] %}
+                                {% elif appointment_status == 'booked' and not appt[9] %}
                                     unreviewed
-                                {% elif appt[5] == 'booked' and is_past %}
+                                {% elif appointment_status == 'booked' and is_past %}
                                     overdue
                                 {% else %}
                                     booked
@@ -451,6 +455,10 @@
             
 
             <form method="POST" id="modalCancelForm" style="display:inline;">
+                <input
+                    type="hidden"
+                    name="return_week_start"
+                    value="{{ start_of_week.strftime('%Y-%m-%d') }}">
                 <button type="submit" class="btn" style="background: #cc0000; color: white;"
                         onclick="return confirm('Cancel this appointment?')">
                     Cancel Appointment
@@ -478,6 +486,13 @@
     border-radius: 10px;
     width: 500px;
     max-width: 90%;
+
+    max-height: calc(100vh - 40px);
+    overflow-y: auto;
+    box-sizing: border-box;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+
     box-shadow: 0 4px 12px rgba(0,0,0,0.25);
 }
 
@@ -519,6 +534,18 @@
     background: #fff3b0;
     border-left: 4px solid #d6a700;
 }
+
+
+.calendar-event.cancelled {
+    background: #dbeafe;
+    border-left: 4px solid #4f83cc;
+    color: #274060;
+}
+
+.calendar-event.cancelled .calendar-event-link {
+    opacity: 0.85;
+}
+
 
 .appointment-review-badge {
     display: inline-block;
@@ -888,6 +915,9 @@ function openAppointmentModal(appointmentId, clickedElement) {
                 document.getElementById("modalCancelForm");
 
             if (cancelForm) {
+                cancelForm.action =
+                    `/cancel_appointment/${appointmentId}`;
+
                 cancelForm.style.display =
                     status === "booked" ? "inline" : "none";
             }
