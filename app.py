@@ -31219,7 +31219,16 @@ def quick_reschedule_appointment(appointment_id):
         params.append(spa_id)
 
     cur.execute(f"""
-        SELECT spa_id, client_id, appointment_date, appointment_time, status
+        SELECT
+            spa_id,
+            client_id,
+            appointment_date,
+            appointment_time,
+            status,
+            business_unit_id,
+            duration_minutes,
+            provider_employee_id,
+            service_type_id
         FROM appointments
         {filter_sql}
     """, params)
@@ -31237,6 +31246,48 @@ def quick_reschedule_appointment(appointment_id):
     old_date = old_appt[2]
     old_time = old_appt[3]
     old_status = old_appt[4]
+    appointment_business_unit_id = old_appt[5]
+    duration_minutes = old_appt[6]
+    provider_employee_id = old_appt[7]
+    service_type_id = old_appt[8]
+
+
+    availability = (
+        _appointment_reschedule_is_available(
+            cur=cur,
+            spa_id=appointment_spa_id,
+            business_unit_id=
+                appointment_business_unit_id,
+            appointment_date=appointment_date,
+            appointment_time=appointment_time,
+            duration_minutes=duration_minutes,
+            provider_employee_id=
+                provider_employee_id,
+            service_type_id=service_type_id,
+            exclude_appointment_id=
+                appointment_id
+        )
+    )
+
+    if not availability.get("valid"):
+        conn.rollback()
+        cur.close()
+        conn.close()
+
+        flash(
+            availability.get("message")
+            or (
+                "That appointment time is no "
+                "longer available."
+            ),
+            "error"
+        )
+
+        return redirect(
+            url_for("calendar_view")
+        )
+
+
         
     cur.execute(f"""
         UPDATE appointments
@@ -35358,7 +35409,42 @@ def add_appointment():
             cur.close()
             conn.close()
             return redirect(url_for("add_appointment", selected_date=selected_date))
-    
+
+
+        availability = (
+            _appointment_reschedule_is_available(
+                cur=cur,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                appointment_date=appointment_date,
+                appointment_time=appointment_time,
+                duration_minutes=duration_minutes,
+                provider_employee_id=
+                    provider_employee_id,
+                service_type_id=service_type_id
+            )
+        )
+
+        if not availability.get("valid"):
+            conn.rollback()
+            cur.close()
+            conn.close()
+
+            flash(
+                availability.get("message")
+                or (
+                    "That appointment time is "
+                    "no longer available."
+                ),
+                "error"
+            )
+
+            return redirect(url_for(
+                "add_appointment",
+                selected_date=appointment_date
+            ))
+
+
         cur.execute("""
             INSERT INTO appointments (
                 spa_id,
@@ -35603,7 +35689,11 @@ def edit_appointment(appointment_id):
                 status,
                 service_type,
                 price_at_booking,
-                duration_minutes
+                duration_minutes,
+                spa_id,
+                business_unit_id,
+                provider_employee_id,
+                service_type_id
             FROM appointments
             {filter_sql}
         """, params)
@@ -35623,6 +35713,61 @@ def edit_appointment(appointment_id):
         old_service_type = old_appt[4]
         old_price = old_appt[5]
         old_duration = old_appt[6]
+
+        appointment_spa_id = old_appt[7]
+        appointment_business_unit_id = old_appt[8]
+        provider_employee_id = old_appt[9]
+        service_type_id = old_appt[10]
+
+        schedule_changed = (
+            str(old_date) != appointment_date
+            or old_time.strftime("%H:%M")
+                != appointment_time
+            or int(old_duration or 0)
+                != int(duration_value or 0)
+        )
+
+        if schedule_changed:
+            availability = (
+                _appointment_reschedule_is_available(
+                    cur=cur,
+                    spa_id=appointment_spa_id,
+                    business_unit_id=
+                        appointment_business_unit_id,
+                    appointment_date=appointment_date,
+                    appointment_time=appointment_time,
+                    duration_minutes=(
+                        duration_value
+                        or old_duration
+                        or 60
+                    ),
+                    provider_employee_id=
+                        provider_employee_id,
+                    service_type_id=service_type_id,
+                    exclude_appointment_id=
+                        appointment_id
+                )
+            )
+
+            if not availability.get("valid"):
+                conn.rollback()
+                cur.close()
+                conn.close()
+
+                flash(
+                    availability.get("message")
+                    or (
+                        "That appointment time is "
+                        "no longer available."
+                    ),
+                    "error"
+                )
+
+                return redirect(url_for(
+                    "edit_appointment",
+                    appointment_id=appointment_id
+                ))
+
 
         cur.execute(f"""
             UPDATE appointments
@@ -35989,7 +36134,15 @@ def reschedule_appointment(appointment_id):
     
 
         cur.execute(f"""
-            SELECT client_id, appointment_date, appointment_time, status
+            SELECT
+                client_id,
+                appointment_date,
+                appointment_time,
+                status,
+                business_unit_id,
+                duration_minutes,
+                provider_employee_id,
+                service_type_id
             FROM appointments
             {appt_filter}
         """, appt_params)
@@ -36006,6 +36159,10 @@ def reschedule_appointment(appointment_id):
         old_date = old_appt[1]
         old_time = old_appt[2]
         old_status = old_appt[3]
+        appointment_business_unit_id = old_appt[4]
+        duration_minutes = old_appt[5]
+        provider_employee_id = old_appt[6]
+        old_service_type_id = old_appt[7]
 
         cur.execute("""
             SELECT 1
@@ -36019,6 +36176,94 @@ def reschedule_appointment(appointment_id):
             cur.close()
             conn.close()
             return redirect(url_for("reschedule_appointment", appointment_id=appointment_id))
+
+
+        inactive_statuses = {
+            "cancelled",
+            "canceled",
+            "completed",
+            "no show",
+            "no-show",
+            "re-scheduled",
+            "rescheduled"
+        }
+
+        old_status_normalized = (
+            str(old_status or "")
+            .strip()
+            .lower()
+        )
+
+        target_status_normalized = (
+            str(status or "")
+            .strip()
+            .lower()
+        )
+
+        schedule_changed = (
+            str(old_date) != appointment_date
+            or str(old_time)[:5]
+                != appointment_time[:5]
+            or str(old_service_type_id or "")
+                != str(service_type_id)
+        )
+
+        reactivating_appointment = (
+            old_status_normalized
+                in inactive_statuses
+            and target_status_normalized
+                not in inactive_statuses
+        )
+
+        if (
+            target_status_normalized
+                not in inactive_statuses
+            and (
+                schedule_changed
+                or reactivating_appointment
+            )
+        ):
+            availability = (
+                _appointment_reschedule_is_available(
+                    cur=cur,
+                    spa_id=service_spa_id,
+                    business_unit_id=
+                        appointment_business_unit_id,
+                    appointment_date=
+                        appointment_date,
+                    appointment_time=
+                        appointment_time,
+                    duration_minutes=
+                        duration_minutes,
+                    provider_employee_id=
+                        provider_employee_id,
+                    service_type_id=
+                        service_type_id,
+                    exclude_appointment_id=
+                        appointment_id
+                )
+            )
+
+            if not availability.get("valid"):
+                conn.rollback()
+                cur.close()
+                conn.close()
+
+                flash(
+                    availability.get("message")
+                    or (
+                        "That appointment time is "
+                        "no longer available."
+                    ),
+                    "error"
+                )
+
+                return redirect(url_for(
+                    "reschedule_appointment",
+                    appointment_id=
+                        appointment_id
+                ))
+
 
         cur.execute(f"""
             UPDATE appointments
@@ -40862,6 +41107,332 @@ def _booking_intervals_overlap(
         first_start < second_end
         and first_end > second_start
     )
+
+
+def _appointment_reschedule_is_available(
+    *,
+    cur,
+    spa_id,
+    business_unit_id,
+    appointment_date,
+    appointment_time,
+    duration_minutes,
+    provider_employee_id,
+    service_type_id,
+    exclude_appointment_id=None
+):
+    """
+    Serialize appointment changes with public booking and
+    reject overlapping active appointments.
+    """
+    from datetime import datetime, timedelta
+
+    def invalid(message):
+        return {
+            "valid": False,
+            "message": message
+        }
+
+    try:
+        spa_id = int(spa_id)
+        business_unit_id = int(
+            business_unit_id
+        )
+
+        if provider_employee_id is not None:
+            provider_employee_id = int(
+                provider_employee_id
+            )
+
+        if service_type_id is not None:
+            service_type_id = int(
+                service_type_id
+            )
+
+        if exclude_appointment_id is not None:
+            exclude_appointment_id = int(
+                exclude_appointment_id
+            )
+
+        duration_minutes = max(
+            int(duration_minutes or 60),
+            1
+        )
+
+        candidate_start = (
+            datetime.fromisoformat(
+                f"{appointment_date}T"
+                f"{appointment_time}"
+            )
+        )
+
+    except (TypeError, ValueError):
+        return invalid(
+            "Please enter a valid appointment "
+            "date and time."
+        )
+
+    # -----------------------------------------------------
+    # Use the same workspace transaction lock as public
+    # booking confirmation.
+    # -----------------------------------------------------
+
+    cur.execute("""
+        SELECT
+            default_buffer_before_minutes,
+            default_buffer_after_minutes
+        FROM booking_settings
+        WHERE spa_id = %s
+          AND business_unit_id = %s
+        FOR UPDATE
+    """, (
+        spa_id,
+        business_unit_id
+    ))
+
+    booking_settings_row = cur.fetchone()
+
+    if booking_settings_row:
+        default_buffer_before = max(
+            int(
+                booking_settings_row[0]
+                or 0
+            ),
+            0
+        )
+
+        default_buffer_after = max(
+            int(
+                booking_settings_row[1]
+                or 0
+            ),
+            0
+        )
+
+    else:
+        default_buffer_before = 0
+        default_buffer_after = 0
+
+        cur.execute("""
+            SELECT pg_advisory_xact_lock(
+                %s,
+                %s
+            )
+        """, (
+            spa_id,
+            business_unit_id
+        ))
+
+    candidate_buffer_before = (
+        default_buffer_before
+    )
+
+    candidate_buffer_after = (
+        default_buffer_after
+    )
+
+    if (
+        provider_employee_id is not None
+        and service_type_id is not None
+    ):
+        cur.execute("""
+            SELECT
+                COALESCE(
+                    buffer_before_minutes,
+                    %s,
+                    0
+                ),
+                COALESCE(
+                    buffer_after_minutes,
+                    %s,
+                    0
+                )
+            FROM provider_service_types
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND provider_employee_id = %s
+              AND service_type_id = %s
+              AND is_active = TRUE
+            LIMIT 1
+        """, (
+            default_buffer_before,
+            default_buffer_after,
+            spa_id,
+            business_unit_id,
+            provider_employee_id,
+            service_type_id
+        ))
+
+        provider_service_row = (
+            cur.fetchone()
+        )
+
+        if provider_service_row:
+            candidate_buffer_before = max(
+                int(
+                    provider_service_row[0]
+                    or 0
+                ),
+                0
+            )
+
+            candidate_buffer_after = max(
+                int(
+                    provider_service_row[1]
+                    or 0
+                ),
+                0
+            )
+
+    candidate_end = (
+        candidate_start
+        + timedelta(
+            minutes=duration_minutes
+        )
+    )
+
+    candidate_block_start = (
+        candidate_start
+        - timedelta(
+            minutes=candidate_buffer_before
+        )
+    )
+
+    candidate_block_end = (
+        candidate_end
+        + timedelta(
+            minutes=candidate_buffer_after
+        )
+    )
+
+    cur.execute("""
+        SELECT 1
+        FROM appointments a
+
+        LEFT JOIN service_name_types snt
+          ON snt.service_type_id =
+                a.service_type_id
+         AND snt.spa_id = a.spa_id
+
+        LEFT JOIN provider_service_types pst
+          ON pst.spa_id = a.spa_id
+         AND pst.business_unit_id =
+                a.business_unit_id
+         AND pst.provider_employee_id =
+                a.provider_employee_id
+         AND pst.service_type_id =
+                a.service_type_id
+         AND pst.is_active = TRUE
+
+        WHERE a.spa_id = %s
+          AND a.business_unit_id = %s
+          AND a.appointment_date = %s
+
+          AND (
+                %s::INTEGER IS NULL
+                OR a.appointment_id <> %s
+              )
+
+          AND LOWER(
+                TRIM(
+                    COALESCE(
+                        a.status,
+                        ''
+                    )
+                )
+              ) NOT IN (
+                'cancelled',
+                'canceled',
+                'completed',
+                'no show',
+                'no-show',
+                're-scheduled',
+                'rescheduled'
+              )
+
+          AND (
+                %s::INTEGER IS NULL
+                OR a.provider_employee_id = %s
+                OR a.provider_employee_id IS NULL
+              )
+
+          AND (
+                (
+                    (
+                        a.appointment_date
+                        + a.appointment_time
+                    )
+                    - make_interval(
+                        mins => COALESCE(
+                            pst.buffer_before_minutes,
+                            %s,
+                            0
+                        )
+                    )
+                ) < %s
+
+                AND
+
+                (
+                    (
+                        a.appointment_date
+                        + a.appointment_time
+                    )
+                    + make_interval(
+                        mins => (
+                            COALESCE(
+                                NULLIF(
+                                    a.duration_minutes,
+                                    0
+                                ),
+                                snt.default_duration_minutes,
+                                60
+                            )
+                            + COALESCE(
+                                pst.buffer_after_minutes,
+                                %s,
+                                0
+                            )
+                        )
+                    )
+                ) > %s
+              )
+
+        LIMIT 1
+    """, (
+        spa_id,
+        business_unit_id,
+        candidate_start.date(),
+        exclude_appointment_id,
+        exclude_appointment_id,
+        provider_employee_id,
+        provider_employee_id,
+        default_buffer_before,
+        candidate_block_end,
+        default_buffer_after,
+        candidate_block_start
+    ))
+
+    if cur.fetchone():
+        if provider_employee_id is None:
+            message = (
+                "An existing appointment overlaps "
+                "the selected time. Please choose "
+                "another time."
+            )
+        else:
+            message = (
+                "That provider already has an "
+                "overlapping appointment. Please "
+                "choose another time."
+            )
+
+        return invalid(message)
+
+    return {
+        "valid": True,
+        "message": ""
+    }
 
 
 def _booking_round_up_to_interval(
