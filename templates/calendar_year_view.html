@@ -1,48 +1,624 @@
 {% extends "base.html" %}
-{% block title %}Year View | Peach Suite Pro{% endblock %}
+
+{% block title %}
+    Year View | Peach Suite Pro
+{% endblock %}
 
 {% block content %}
 
-<h1>Year View</h1>
+<style>
+    .year-view-page {
+        width: 100%;
+    }
 
-<div class="page-tool-pills" style="margin:10px 0 18px;">
-    <a
-        href="{{ url_for(
-            'calendar_day_view',
-            date=display_date.strftime('%Y-%m-%d')
-        ) }}"
-        class="tool-pill tool-pill-small"
-    >
-        Day
-    </a>
+    .year-view-title h1 {
+        margin-bottom: 5px;
+    }
 
-    <a
-        href="{{ url_for(
-            'calendar_view',
-            week_start=display_date.strftime('%Y-%m-%d')
-        ) }}"
-        class="tool-pill tool-pill-small"
-    >
-        Week
-    </a>
+    .year-view-title h2 {
+        margin: 0;
+        color: #625852;
+        font-size: 1.25rem;
+    }
 
-    <a
-        href="{{ url_for(
-            'calendar_month_view',
-            date=display_date.strftime('%Y-%m-%d')
-        ) }}"
-        class="tool-pill tool-pill-small"
+    .year-view-tools {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin: 14px 0 20px;
+    }
+
+    .year-date-form {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+
+    .year-date-form input[type="date"] {
+        min-height: 36px;
+        padding: 6px 9px;
+        border: 1px solid #cfc5bf;
+        border-radius: 7px;
+        background: white;
+        font: inherit;
+    }
+
+    .year-summary {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin: 0 0 20px;
+    }
+
+    .year-summary-card {
+        min-width: 160px;
+        padding: 13px 16px;
+        border: 1px solid #ded4ce;
+        border-radius: 10px;
+        background: white;
+    }
+
+    .year-summary-value {
+        display: block;
+        color: #8e4937;
+        font-size: 1.3rem;
+        font-weight: 900;
+    }
+
+    .year-summary-label {
+        display: block;
+        margin-top: 2px;
+        color: #625852;
+        font-size: 0.76rem;
+        font-weight: 700;
+    }
+
+    .year-month-grid {
+        display: grid;
+        grid-template-columns:
+            repeat(3, minmax(0, 1fr));
+        gap: 18px;
+    }
+
+    .year-month-card {
+        overflow: hidden;
+        border: 1px solid #d8cec8;
+        border-radius: 12px;
+        background: white;
+        box-shadow:
+            0 4px 14px rgba(0, 0, 0, 0.05);
+    }
+
+    .year-month-heading {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        padding: 11px 12px;
+        border-bottom: 1px solid #ddd5d0;
+        background: #f5f0ed;
+    }
+
+    .year-month-heading a {
+        color: #423a36;
+        font-size: 1rem;
+        font-weight: 900;
+        text-decoration: none;
+    }
+
+    .year-month-heading a:hover {
+        color: #a65c48;
+        text-decoration: underline;
+    }
+
+    .year-month-total {
+        color: #756b65;
+        font-size: 0.68rem;
+        font-weight: 800;
+        white-space: nowrap;
+    }
+
+    .year-weekday-row,
+    .year-week-row {
+        display: grid;
+        grid-template-columns:
+            repeat(7, minmax(0, 1fr));
+    }
+
+    .year-weekday {
+        padding: 6px 2px;
+        border-right: 1px solid #e4ddd9;
+        border-bottom: 1px solid #ddd5d0;
+        background: #faf7f5;
+        color: #6b625d;
+        font-size: 0.61rem;
+        font-weight: 900;
+        text-align: center;
+        text-transform: uppercase;
+    }
+
+    .year-weekday:last-child {
+        border-right: none;
+    }
+
+    .year-day {
+        position: relative;
+        min-height: 43px;
+        border-right: 1px solid #e8e1dd;
+        border-bottom: 1px solid #e8e1dd;
+        background: white;
+    }
+
+    .year-day:nth-child(7) {
+        border-right: none;
+    }
+
+    .year-week-row:last-child .year-day {
+        border-bottom: none;
+    }
+
+    .year-day.outside-month {
+        background: #f6f6f6;
+    }
+
+    .year-day.density-1 {
+        background: #fff8f4;
+    }
+
+    .year-day.density-2 {
+        background: #ffe9dc;
+    }
+
+    .year-day.density-3 {
+        background: #ffd1bd;
+    }
+
+    .year-day.density-4 {
+        background: #f4ad92;
+    }
+
+    .year-day.today {
+        box-shadow:
+            inset 0 0 0 2px #a65c48;
+    }
+
+    .year-day-link {
+        display0 0 0 2px #a65c48;
+    }
+
+: flex;
+        flex-direction: column;
+        width: 100%;
+        min-height: 43px;
+        padding: 4px;
+        color: inherit;
+        text-decoration: none;
+    }
+
+    .year-day-link:hover {
+        position: relative;
+        z-index: 2;
+        box-shadow:
+            inset 0 0 0 2px #b97862;
+    }
+
+    .year-day-number {
+        font-size: 0.68rem;
+        font-weight: 800;
+    }
+
+    .year-day.today .year-day-number {
+        color: #8e4937;
+        font-weight: 900;
+    }
+
+    .year-day-activity {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 3px;
+        margin-top: auto;
+    }
+
+    .year-appointment-count {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 16px;
+        height: 16px;
+        padding: 0 4px;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.88);
+        color: #4f4641;
+        font-size: 0.58rem;
+        font-weight: 900;
+    }
+
+    .year-provider-dots {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+    }
+
+    .year-provider-dot {
+        display: inline-block;
+        width: 7px;
+        height: 7px;
+        border: 1px solid rgba(0, 0, 0, 0.14);
+        border-radius: 50%;
+        background: var(--provider-color);
+    }
+
+    .year-legend {
+        display: flex;
+        align-items: center;
+        gap: 8px 14px;
+        flex-wrap: wrap;
+        margin-top: 15px;
+        color: #615954;
+        font-size: 0.74rem;
+    }
+
+    .year-legend-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+    }
+
+    .year-legend-swatch {
+        width: 18px;
+        height: 12px;
+        border: 1px solid rgba(0, 0, 0, 0.12);
+        border-radius: 3px;
+    }
+
+    @media (max-width: 1100px) {
+        .year-month-grid {
+            grid-template-columns:
+                repeat(2, minmax(0, 1fr));
+        }
+    }
+
+    @media (max-width: 700px) {
+        .year-month-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .year-month-card {
+            max-width: 520px;
+        }
+
+        .year-day,
+        .year-day-link {
+            min-height: 48px;
+        }
+    }
+</style>
+
+
+<div class="year-view-page">
+
+    <div class="year-view-title">
+        <h1>Year View</h1>
+
+        <h2>
+            {{ display_date.strftime('%Y') }}
+        </h2>
+    </div>
+
+
+    <div
+        class="page-tool-pills"
+        style="margin:10px 0 18px;"
     >
-        Month
-    </a>
+        <a
+            href="{{ url_for(
+                'calendar_day_view',
+                date=today.strftime('%Y-%m-%d')
+            ) }}"
+            class="tool-pill tool-pill-small"
+        >
+            Day
+        </a>
+
+        <a
+            href="{{ url_for(
+                'calendar_view',
+                week_start=today.strftime('%Y-%m-%d')
+            ) }}"
+            class="tool-pill tool-pill-small"
+        >
+            Week
+        </a>
+
+        <a
+            href="{{ url_for(
+                'calendar_month_view',
+                date=display_date.strftime('%Y-%m-%d')
+            ) }}"
+            class="tool-pill tool-pill-small"
+        >
+            Month
+        </a>
+    </div>
+
+
+    <div class="year-view-tools">
+
+        <a
+            href="{{ url_for(
+                'calendar_year_view',
+                date=previous_year_date.strftime('%Y-%m-%d')
+            ) }}"
+            class="tool-pill tool-pill-small"
+        >
+            Previous Year
+        </a>
+
+        <a
+            href="{{ url_for(
+                'calendar_year_view',
+                date=today.strftime('%Y-%m-%d')
+            ) }}"
+            class="tool-pill tool-pill-small"
+        >
+            Current Year
+        </a>
+
+        <a
+            href="{{ url_for(
+                'calendar_year_view',
+                date=next_year_date.strftime('%Y-%m-%d')
+            ) }}"
+            class="tool-pill tool-pill-small"
+        >
+            Next Year
+        </a>
+
+        <form
+            method="GET"
+            action="{{ url_for('calendar_year_view') }}"
+            class="year-date-form"
+        >
+            <input
+                type="date"
+                name="date"
+                value="{{ display_date.strftime('%Y-%m-%d') }}"
+                aria-label="Select calendar year"
+            >
+
+            <button
+                type="submit"
+                class="tool-pill tool-pill-small"
+            >
+                Go To Date
+            </button>
+        </form>
+
+    </div>
+
+
+    <div class="year-summary">
+
+        <div class="year-summary-card">
+            <span class="year-summary-value">
+                {{ year_appointment_count }}
+            </span>
+
+            <span class="year-summary-label">
+                Scheduled Appointments
+            </span>
+        </div>
+
+        <div class="year-summary-card">
+            <span class="year-summary-value">
+                {{ (year_scheduled_minutes / 60) | round(1) }}
+            </span>
+
+            <span class="year-summary-label">
+                Scheduled Hours
+            </span>
+        </div>
+
+    </div>
+
+
+    <div class="year-month-grid">
+
+        {% for month in year_months %}
+
+            <section class="year-month-card">
+
+                <div class="year-month-heading">
+
+                    <a
+                        href="{{ url_for(
+                            'calendar_month_view',
+                            date=month.month_start.strftime(
+                                '%Y-%m-%d'
+                            )
+                        ) }}"
+                    >
+                        {{ month.month_name }}
+                    </a>
+
+                    <span class="year-month-total">
+                        {{ month.appointment_count }}
+                        {% if month.appointment_count == 1 %}
+                            appt
+                        {% else %}
+                            appts
+                        {% endif %}
+                    </span>
+
+                </div>
+
+
+                <div class="year-weekday-row">
+                    <div class="year-weekday">S</div>
+                    <div class="year-weekday">M</div>
+                    <div class="year-weekday">T</div>
+                    <div class="year-weekday">W</div>
+                    <div class="year-weekday">T</div>
+                    <div class="year-weekday">F</div>
+                    <div class="year-weekday">S</div>
+                </div>
+
+
+                {% for week in month.weeks %}
+
+                    <div class="year-week-row">
+
+                        {% for day in week %}
+
+                            <div
+                                class="
+                                    year-day
+                                    density-{{ day.density_level }}
+                                    {% if not day.is_current_month %}
+                                        outside-month
+                                    {% endif %}
+                                    {% if day.is_today %}
+                                        today
+                                    {% endif %}
+                                "
+                            >
+
+                                {% if day.is_current_month %}
+
+                                    <a
+                                        href="{{ url_for(
+                                            'calendar_day_view',
+                                            date=day.date.strftime(
+                                                '%Y-%m-%d'
+                                            )
+                                        ) }}"
+                                        class="year-day-link"
+                                        title="
+                                            {{ day.date.strftime(
+                                                '%B %d, %Y'
+                                            ) }}
+                                            —
+                                            {{ day.appointment_count }}
+                                            appointment{% if
+                                                day.appointment_count != 1
+                                            %}s{% endif %}
+                                        "
+                                        aria-label="
+                                            Open Day View for
+                                            {{ day.date.strftime(
+                                                '%B %d, %Y'
+                                            ) }}
+                                        "
+                                    >
+                                        <span class="year-day-number">
+                                            {{ day.date.day }}
+                                        </span>
+
+                                        {% if day.appointment_count > 0 %}
+
+                                            <span
+                                                class="year-day-activity"
+                                            >
+                                                <span
+                                                    class="
+                                                        year-appointment-count
+                                                    "
+                                                >
+                                                    {{
+                                                        day.appointment_count
+                                                    }}
+                                                </span>
+
+                                                <span
+                                                    class="
+                                                        year-provider-dots
+                                                    "
+                                                >
+                                                    {% for provider in
+                                                        day.provider_indicators[
+                                                            :3
+                                                        ]
+                                                    %}
+                                                        <span
+                                                            class="
+                                                                year-provider-dot
+                                                            "
+                                                            style="
+                                                                --provider-color:
+                                                                {{
+                                                                    provider
+                                                                    .provider_color
+                                                                }};
+                                                            "
+                                                            title="{{
+                                                                provider
+                                                                .provider_name
+                                                            }}"
+                                                        ></span>
+                                                    {% endfor %}
+                                                </span>
+                                            </span>
+
+                                        {% endif %}
+
+                                    </a>
+
+                                {% endif %}
+
+                            </div>
+
+                        {% endfor %}
+
+                    </div>
+
+                {% endfor %}
+
+            </section>
+
+        {% endfor %}
+
+    </div>
+
+
+    <div class="year-legend">
+        <span>Workload:</span>
+
+        <span class="year-legend-item">
+            <span
+                class="year-legend-swatch"
+                style="background:#fff8f4;"
+            ></span>
+            Light
+        </span>
+
+        <span class="year-legend-item">
+            <span
+                class="year-legend-swatch"
+                style="background:#ffe9dc;"
+            ></span>
+            Moderate
+        </span>
+
+        <span class="year-legend-item">
+            <span
+                class="year-legend-swatch"
+                style="background:#ffd1bd;"
+            ></span>
+            Busy
+        </span>
+
+        <span class="year-legend-item">
+            <span
+                class="year-legend-swatch"
+                style="background:#f4ad92;"
+            ></span>
+            Heavily Booked
+        </span>
+    </div>
+
 </div>
-
-<h3>
-    {{ display_date.strftime('%Y') }}
-</h3>
-
-<p>
-    The Peach Suite Pro Year View will be built here.
-</p>
 
 {% endblock %}
