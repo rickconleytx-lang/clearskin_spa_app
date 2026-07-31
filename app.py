@@ -755,6 +755,18 @@ HELP_CONTEXT_MAP = {
 
 }
 
+
+# All Calendar views use the same page-aware Help context.
+for calendar_help_endpoint in (
+    "calendar_day_view",
+    "calendar_month_view",
+    "calendar_year_view",
+):
+    HELP_CONTEXT_MAP[
+        calendar_help_endpoint
+    ] = HELP_CONTEXT_MAP["calendar_view"]
+
+
 #################################################
 ############################################################
 
