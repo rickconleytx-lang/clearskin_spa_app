@@ -423,11 +423,6 @@ document.addEventListener("keydown", function (event) {
         // Close Search
         closeQLaunch();
 
-        // Close ALL header dropdowns
-        document.querySelectorAll(".user-menu-dropdown").forEach(function(menu) {
-            menu.style.display = "none";
-        });
-
     }
 
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
@@ -567,6 +562,19 @@ document.addEventListener("DOMContentLoaded", function () {
             application menu.
             */
 
+            /*
+            Close a third-level pane first while keeping its
+            parent category submenu open.
+            */
+
+            if (
+                typeof window.closeOpenNestedAppMenu
+                    === "function"
+                && window.closeOpenNestedAppMenu()
+            ) {
+                return;
+            }
+
             if (
                 typeof window.closeOpenAppSubmenu === "function"
                 && window.closeOpenAppSubmenu()
@@ -660,6 +668,13 @@ function closeAppSubmenu(menu) {
 
     if (!menu) {
         return;
+    }
+
+    if (
+        typeof window.closeNestedAppMenusWithin
+            === "function"
+    ) {
+        window.closeNestedAppMenusWithin(menu);
     }
 
     menu.style.display = "none";
@@ -791,6 +806,229 @@ function toggleAppSubmenu(menuId) {
     if (menuWrapper) {
         menuWrapper.classList.add("is-open");
     }
+}
+
+
+/* =========================================================
+   NESTED APP MENU CONTROLLER
+
+   Used for reusable third-level panes such as:
+
+   Calendar
+       Day View
+       Week View
+       Month View
+       Year View
+========================================================= */
+
+
+function getNestedAppMenuButton(menu) {
+
+    if (!menu || !menu.id) {
+        return null;
+    }
+
+    return document.querySelector(
+        '[data-nested-menu-target="'
+        + menu.id
+        + '"]'
+    );
+}
+
+
+function nestedAppMenuIsOpen(menu) {
+
+    if (!menu) {
+        return false;
+    }
+
+    return (
+        window.getComputedStyle(menu).display
+        !== "none"
+    );
+}
+
+
+function closeNestedAppMenu(
+    menu,
+    options = {}
+) {
+
+    if (!menu) {
+        return;
+    }
+
+    const returnFocus = (
+        options.returnFocus === true
+    );
+
+    const button = getNestedAppMenuButton(
+        menu
+    );
+
+    menu.style.display = "none";
+
+    if (button) {
+        button.setAttribute(
+            "aria-expanded",
+            "false"
+        );
+    }
+
+    const wrapper = menu.closest(
+        ".app-nested-menu"
+    );
+
+    if (wrapper) {
+        wrapper.classList.remove(
+            "is-open"
+        );
+    }
+
+    if (returnFocus && button) {
+        button.focus();
+    }
+}
+
+
+window.closeNestedAppMenusWithin = function (
+    container
+) {
+
+    if (!container) {
+        return;
+    }
+
+    const menus = container.querySelectorAll(
+        ".app-nested-menu-pane"
+    );
+
+    menus.forEach(function (menu) {
+        closeNestedAppMenu(menu);
+    });
+};
+
+
+window.closeAllNestedAppMenus = function (
+    exceptMenu = null
+) {
+
+    const menus = document.querySelectorAll(
+        ".app-nested-menu-pane"
+    );
+
+    menus.forEach(function (menu) {
+
+        if (menu === exceptMenu) {
+            return;
+        }
+
+        closeNestedAppMenu(menu);
+    });
+};
+
+
+window.closeOpenNestedAppMenu = function (
+    options = {}
+) {
+
+    const returnFocus = (
+        options.returnFocus !== false
+    );
+
+    const menus = document.querySelectorAll(
+        ".app-nested-menu-pane"
+    );
+
+    let openMenu = null;
+
+    menus.forEach(function (menu) {
+
+        if (
+            !openMenu
+            && nestedAppMenuIsOpen(menu)
+        ) {
+            openMenu = menu;
+        }
+    });
+
+    if (!openMenu) {
+        return false;
+    }
+
+    closeNestedAppMenu(
+        openMenu,
+        {
+            returnFocus: returnFocus
+        }
+    );
+
+    return true;
+};
+
+function toggleNestedAppMenu(
+    menuId,
+    button = null
+) {
+
+    const menu = document.getElementById(
+        menuId
+    );
+
+    if (!menu) {
+        return;
+    }
+
+    const wasOpen = nestedAppMenuIsOpen(
+        menu
+    );
+
+    window.closeAllNestedAppMenus();
+
+    if (wasOpen) {
+        return;
+    }
+
+    menu.style.display = "block";
+
+    const controllingButton = (
+        button
+        || getNestedAppMenuButton(menu)
+    );
+
+    if (controllingButton) {
+        controllingButton.setAttribute(
+            "aria-expanded",
+            "true"
+        );
+    }
+
+    const wrapper = menu.closest(
+        ".app-nested-menu"
+    );
+
+    if (wrapper) {
+        wrapper.classList.add(
+            "is-open"
+        );
+    }
+}
+
+
+function closeNestedAppMenuById(
+    menuId
+) {
+
+    const menu = document.getElementById(
+        menuId
+    );
+
+    closeNestedAppMenu(
+        menu,
+        {
+            returnFocus: true
+        }
+    );
 }
 
 

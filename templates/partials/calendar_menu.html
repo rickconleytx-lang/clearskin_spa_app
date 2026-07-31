@@ -37,10 +37,102 @@
                 📆 Schedule
             </div>
 
-            <a href="{{ url_for('calendar_view') }}">
-                <span aria-hidden="true">📅</span>
-                <span>Calendar</span>
-            </a>
+
+            <div class="app-nested-menu">
+
+                <button type="button"
+                        class="app-nested-menu-button"
+                        data-nested-menu-target="calendarViewsNestedMenu"
+                        aria-controls="calendarViewsNestedMenu"
+                        aria-expanded="false"
+                        aria-haspopup="true"
+                        onclick="toggleNestedAppMenu(
+                            'calendarViewsNestedMenu',
+                            this
+                        )">
+
+                    <span class="app-nested-menu-button-main">
+
+                        <span aria-hidden="true">
+                            📅
+                        </span>
+
+                        <span>
+                            Calendar
+                        </span>
+
+                    </span>
+
+                    <span class="app-nested-menu-chevron"
+                          aria-hidden="true">
+                        ›
+                    </span>
+
+                </button>
+
+
+                <div id="calendarViewsNestedMenu"
+                     class="app-nested-menu-pane"
+                     style="display:none;">
+
+                    <div class="app-nested-menu-header">
+
+                        <div class="app-nested-menu-title">
+                            Calendar Views
+                        </div>
+
+                        <button type="button"
+                                class="app-nested-menu-close"
+                                aria-label="Close Calendar Views"
+                                onclick="closeNestedAppMenuById(
+                                    'calendarViewsNestedMenu'
+                                )">
+                            ✕
+                        </button>
+
+                    </div>
+
+
+                    <a href="{{
+                        url_for(
+                            'calendar_day_view'
+                        )
+                    }}">
+                        <span aria-hidden="true">🗓️</span>
+                        <span>Day View</span>
+                    </a>
+
+                    <a href="{{
+                        url_for(
+                            'calendar_view'
+                        )
+                    }}">
+                        <span aria-hidden="true">📅</span>
+                        <span>Week View</span>
+                    </a>
+
+                    <a href="{{
+                        url_for(
+                            'calendar_month_view'
+                        )
+                    }}">
+                        <span aria-hidden="true">🗓️</span>
+                        <span>Month View</span>
+                    </a>
+
+                    <a href="{{
+                        url_for(
+                            'calendar_year_view'
+                        )
+                    }}">
+                        <span aria-hidden="true">📆</span>
+                        <span>Year View</span>
+                    </a>
+
+                </div>
+
+            </div>
+
 
             <a href="{{ url_for('daily_schedule') }}">
                 <span aria-hidden="true">🗓️</span>

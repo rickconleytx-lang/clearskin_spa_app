@@ -5648,3 +5648,241 @@ Keep it hidden while the submenu uses the inline layout.
         transition: none;
     }
 }
+
+
+/* =========================================================
+   NESTED APP MENU
+========================================================= */
+
+:root {
+    --app-tertiary-menu-width: 340px;
+}
+
+
+.app-nested-menu {
+    display: block;
+}
+
+
+.app-nested-menu-button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+
+    width: 100%;
+    box-sizing: border-box;
+
+    padding: 8px 10px;
+
+    border: none;
+    border-radius: 8px;
+
+    background: transparent;
+    color: #4a3428;
+
+    font-family: inherit;
+    font-size: 0.92rem;
+    font-weight: 600;
+    text-align: left;
+
+    cursor: pointer;
+}
+
+
+.app-nested-menu-button:hover {
+    background: #fff1e6;
+}
+
+
+.app-nested-menu-button:focus-visible {
+    outline: 3px solid rgba(185, 109, 61, 0.3);
+    outline-offset: 1px;
+}
+
+
+.app-nested-menu-button-main {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    min-width: 0;
+}
+
+
+.app-nested-menu-chevron {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    flex: 0 0 20px;
+
+    color: #8b6955;
+    font-size: 1.35rem;
+    line-height: 1;
+
+    transition: transform 0.18s ease;
+}
+
+
+.app-nested-menu.is-open
+> .app-nested-menu-button {
+    background: #fff1e6;
+    color: #6f3f28;
+}
+
+
+.app-nested-menu.is-open
+> .app-nested-menu-button
+.app-nested-menu-chevron {
+    transform: rotate(90deg);
+}
+
+
+/*
+On phone and tablet, the nested menu expands downward
+inside the existing category panel.
+*/
+
+.app-nested-menu-pane {
+    position: static;
+
+    min-width: 0;
+
+    margin: 4px 0 7px 14px;
+    padding: 6px;
+
+    background: #fffaf6;
+
+    border: 1px solid #ead7c8;
+    border-radius: 9px;
+
+    box-shadow: none;
+}
+
+
+.app-nested-menu-header {
+    display: none;
+}
+
+
+/* ---------------------------------------------------------
+   DESKTOP THIRD MENU PANE
+--------------------------------------------------------- */
+
+@media (min-width: 1100px) {
+
+    .app-side-panel .app-nested-menu-pane {
+        position: fixed;
+
+        top: 0;
+        bottom: 0;
+
+        left: calc(
+            var(--app-primary-menu-width)
+            + var(--app-secondary-menu-width)
+        );
+
+        width: min(
+            var(--app-tertiary-menu-width),
+            calc(
+                100vw
+                - var(--app-primary-menu-width)
+                - var(--app-secondary-menu-width)
+            )
+        );
+
+        min-width: 0;
+        box-sizing: border-box;
+
+        margin: 0;
+        padding: 0 14px 24px;
+
+        overflow-x: hidden;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+
+        background: #ffffff;
+
+        border: none;
+        border-left: 1px solid #dfc5b3;
+        border-radius: 0;
+
+        box-shadow:
+            12px 0 30px rgba(0, 0, 0, 0.14);
+
+        z-index: 9400;
+    }
+
+
+    .app-nested-menu.is-open
+    > .app-nested-menu-button
+    .app-nested-menu-chevron {
+        transform: rotate(0deg);
+    }
+
+
+    .app-nested-menu-header {
+        position: sticky;
+        top: 0;
+
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+
+        min-height: 72px;
+        box-sizing: border-box;
+
+        margin: 0 -14px 12px;
+        padding: 14px 16px;
+
+        background: #fff7f0;
+        border-bottom: 1px solid #ead7c8;
+
+        z-index: 2;
+    }
+
+
+    .app-nested-menu-title {
+        color: #5d3521;
+
+        font-size: 1.05rem;
+        font-weight: 800;
+    }
+
+
+    .app-nested-menu-close {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+
+        width: 38px;
+        height: 38px;
+        flex: 0 0 38px;
+
+        border: 1px solid #e5c7af;
+        border-radius: 50%;
+
+        background: #ffffff;
+        color: #6f3f28;
+
+        font-family: inherit;
+        font-size: 1rem;
+        font-weight: 700;
+
+        cursor: pointer;
+    }
+
+
+    .app-nested-menu-close:hover {
+        background: #ffe9d6;
+    }
+
+
+    .app-nested-menu-close:focus-visible {
+        outline: 3px solid rgba(185, 109, 61, 0.3);
+        outline-offset: 2px;
+    }
+
+}
