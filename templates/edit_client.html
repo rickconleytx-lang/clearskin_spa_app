@@ -142,18 +142,166 @@
 
     {% if client and client[24] %}
         <div class="danger-zone">
-            <h3>Deactivate Client</h3>
+            <h3>Archive Client</h3>
             <p>This will hide the client from active client lists but will not delete their history.</p>
 
             <form method="POST"
                   action="{{ url_for('deactivate_client', client_id=client[0]) }}"
                   onsubmit="return confirm('Deactivate this client? They will be hidden from active client lists but not deleted.');">
-                <button type="submit" class="btn btn-danger">Deactivate Client</button>
+                <button type="submit" class="btn btn-danger">Archive Client</button>
             </form>
         </div>
     {% endif %}
 
     <form method="POST" id="edit-client-form">
+
+        {% if duplicate_matches %}
+            <div style="
+                margin: 0 0 20px;
+                padding: 18px;
+                border: 2px solid #b7791f;
+                border-radius: 10px;
+                background: #fffaf0;
+            ">
+                <h2 style="margin-top: 0;">
+                    Possible Duplicate Client
+                </h2>
+
+                <p>
+                    Peach Suite Pro found other client
+                    records that may match these changes.
+                </p>
+
+                <p>
+                    Review the matching records before
+                    saving this client.
+                </p>
+
+                {% for match in duplicate_matches %}
+                    <div style="
+                        margin: 14px 0;
+                        padding: 14px;
+                        border: 1px solid #d6bc8c;
+                        border-radius: 8px;
+                        background: white;
+                    ">
+                        {% if match.strong_match %}
+                            <div style="
+                                margin-bottom: 6px;
+                                color: #b91c1c;
+                                font-size: 1.05rem;
+                                font-weight: 900;
+                                text-transform: uppercase;
+                            ">
+                                Strong Duplicate Match
+                            </div>
+                        {% endif %}
+
+                        <div style="
+                            margin-bottom: 8px;
+                            color: #b91c1c;
+                            font-weight: 800;
+                        ">
+                            Matched:
+                            {{ match.match_reason_display }}
+                        </div>
+
+                        <div style="line-height: 1.8;">
+                            <div>
+                                {% if "Name" in match.match_reasons %}
+                                    <span aria-hidden="true">🔴</span>
+                                {% endif %}
+
+                                <strong>
+                                    {{ match.client_name }}
+                                </strong>
+
+                                —
+                                <strong>
+                                    {{ match.status_label }}
+                                </strong>
+                            </div>
+
+                            {% if match.phone %}
+                                <div>
+                                    {% if "Phone" in match.match_reasons %}
+                                        <span aria-hidden="true">🔴</span>
+                                    {% endif %}
+
+                                    {{ match.phone }}
+                                </div>
+                            {% endif %}
+
+                            {% if match.email %}
+                                <div>
+                                    {% if "Email" in match.match_reasons %}
+                                        <span aria-hidden="true">🔴</span>
+                                    {% endif %}
+
+                                    {{ match.email }}
+                                </div>
+                            {% endif %}
+                        </div>
+
+                        <div
+                            class="page-tool-pills"
+                            style="margin-top: 10px;"
+                        >
+                            <a
+                                href="{{ url_for(
+                                    'client_history_detail',
+                                    client_id=match.client_id
+                                ) }}"
+                                class="tool-pill tool-pill-small"
+                                target="_blank"
+                                rel="noopener"
+                            >
+                                View Existing Client
+                            </a>
+
+                            <a
+                                href="{{ url_for(
+                                    'edit_client',
+                                    client_id=match.client_id
+                                ) }}"
+                                class="tool-pill tool-pill-small"
+                                target="_blank"
+                                rel="noopener"
+                            >
+                                Edit Existing Client
+                            </a>
+
+                            {% if not match.active_client %}
+                                <a
+                                    href="{{ url_for(
+                                        'inactive_clients'
+                                    ) }}"
+                                    class="tool-pill tool-pill-small"
+                                    target="_blank"
+                                    rel="noopener"
+                                >
+                                    Open Archived Clients
+                                </a>
+                            {% endif %}
+                        </div>
+                    </div>
+                {% endfor %}
+
+                <button
+                    type="submit"
+                    name="duplicate_override"
+                    value="1"
+                    class="tool-pill tool-pill-small"
+                    onclick="
+                        return confirm(
+                            'Save these changes even though matching client records were found?'
+                        );
+                    "
+                >
+                    Save Changes Anyway
+                </button>
+            </div>
+        {% endif %}
 
         <div class="form-card">
             <div class="card-header">
@@ -194,7 +342,7 @@
 
                     <div class="form-group">
                         <label>Client Status</label>
-                        <select name="client_status">
+                        <select name="client_status" required>
                             <option value="Current" {% if client and client[12] == 'Current' %}selected{% endif %}>Current</option>
                             <option value="Previous" {% if client and client[12] == 'Previous' %}selected{% endif %}>Previous</option>
                             <option value="Prior Spa Client" {% if client and client[12] == 'Prior Spa Client' %}selected{% endif %}>Prior Spa Client</option>

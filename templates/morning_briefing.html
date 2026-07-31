@@ -184,7 +184,16 @@
 
             <br>
 
-            <span class="briefing-local-time">
+            <span
+                id="briefing-local-time"
+                class="briefing-local-time"
+                data-spa-year="{{ spa_now.year }}"
+                data-spa-month="{{ spa_now.month }}"
+                data-spa-day="{{ spa_now.day }}"
+                data-spa-hour="{{ spa_now.hour }}"
+                data-spa-minute="{{ spa_now.minute }}"
+                data-spa-second="{{ spa_now.second }}"
+            >
                 Local Business Time:
                 {{ spa_now.strftime('%-I:%M %p') }}
             </span>
@@ -1044,5 +1053,59 @@ async function dismissCoachRecommendation(
 </script>
 
 
+
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const clock = document.getElementById(
+        "briefing-local-time"
+    );
+
+    if (!clock) {
+        return;
+    }
+
+    const initialSpaTime = Date.UTC(
+        Number(clock.dataset.spaYear),
+        Number(clock.dataset.spaMonth) - 1,
+        Number(clock.dataset.spaDay),
+        Number(clock.dataset.spaHour),
+        Number(clock.dataset.spaMinute),
+        Number(clock.dataset.spaSecond)
+    );
+
+    const browserStartTime = Date.now();
+
+    function updateBusinessClock() {
+        const elapsedMilliseconds =
+            Date.now() - browserStartTime;
+
+        const currentSpaTime = new Date(
+            initialSpaTime + elapsedMilliseconds
+        );
+
+        const formattedTime =
+            new Intl.DateTimeFormat(
+                "en-US",
+                {
+                    hour: "numeric",
+                    minute: "2-digit",
+                    hour12: true,
+                    timeZone: "UTC"
+                }
+            ).format(currentSpaTime);
+
+        clock.textContent =
+            "Local Business Time: " + formattedTime;
+    }
+
+    updateBusinessClock();
+
+    window.setInterval(
+        updateBusinessClock,
+        1000
+    );
+});
+</script>
 
 {% endblock %}

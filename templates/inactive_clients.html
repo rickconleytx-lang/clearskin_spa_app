@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block title %}Archived Clients{% endblock %}
+
+{% block content %}
+
+<br><br>
+
+<h1>Archived Clients</h1>
+
+<p>
+    Archived clients are hidden from normal client lists but their
+    appointment and business history remains available.
+</p>
+
+<div class="page-tool-pills" style="margin: 15px 0;">
+    <a href="{{ url_for('clients_home') }}"
+       class="tool-pill tool-pill-small">
+        Clients Home
+    </a>
+
+    <a href="{{ url_for('client_management') }}"
+       class="tool-pill tool-pill-small">
+        Client Management
+    </a>
+
+    <a href="{{ url_for('add_new_client') }}"
+       class="tool-pill tool-pill-small">
+        Add New Client
+    </a>
+</div>
+
+{% if rows %}
+
+<div style="overflow-x: auto;">
+    <table>
+        <thead>
+            <tr>
+                <th>Client</th>
+                <th>Phone</th>
+                <th>Email</th>
+                <th>Birth Date</th>
+                <th>Client Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+
+        <tbody>
+            {% for row in rows %}
+                <tr>
+                    <td>
+                        <strong>
+                            {{ row[1] or '' }} {{ row[2] or '' }}
+                        </strong>
+                        <br>
+                        <span style="font-size: 0.85rem;">
+                            Client ID: {{ row[0] }}
+                        </span>
+                    </td>
+
+                    <td>{{ row[3] or '' }}</td>
+
+                    <td>{{ row[4] or '' }}</td>
+
+                    <td>
+                        {% if row[5] %}
+                            {{ row[5].strftime('%m/%d/%Y') }}
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        {{ row[6] or 'Archived' }}
+                    </td>
+
+                    <td>
+                        <div class="page-tool-pills">
+                            <a href="{{ url_for(
+                                    'client_history_detail',
+                                    client_id=row[0]
+                                ) }}"
+                               class="tool-pill tool-pill-small">
+                                View Client
+                            </a>
+
+                            <a href="{{ url_for(
+                                    'edit_client',
+                                    client_id=row[0]
+                                ) }}"
+                               class="tool-pill tool-pill-small">
+                                Edit Client
+                            </a>
+
+                            <form method="POST"
+                                  action="{{ url_for(
+                                      'reactivate_client',
+                                      client_id=row[0]
+                                  ) }}"
+                                  style="display: inline;"
+                                  onsubmit="return confirm(
+                                      'Reactivate this client?'
+                                  );">
+                                <button type="submit"
+                                        class="tool-pill tool-pill-small">
+                                    Reactivate Client
+                                </button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% else %}
+
+<div class="info-box" style="margin-top: 20px;">
+    <strong>No archived clients were found.</strong>
+</div>
+
+{% endif %}
+
+{% endblock %}

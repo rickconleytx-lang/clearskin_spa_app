@@ -6629,6 +6629,57 @@ def current_spa_id():
 
 
 
+def get_utc_now():
+    """
+    Return the current timezone-aware UTC datetime.
+    """
+    return datetime.now(timezone.utc)
+
+
+def get_current_spa_timezone(spa_id=None):
+    """
+    Return the configured timezone name for a spa.
+
+    Supports both:
+        get_current_spa_timezone()
+        get_current_spa_timezone(spa_id)
+    """
+    resolved_spa_id = (
+        spa_id
+        if spa_id is not None
+        else current_spa_id()
+    )
+
+    if not resolved_spa_id:
+        return "UTC"
+
+    timezone_name = (
+        get_spa_timezone(resolved_spa_id)
+        or "UTC"
+    )
+
+    try:
+        ZoneInfo(timezone_name)
+    except Exception:
+        return "UTC"
+
+    return timezone_name
+
+
+def get_spa_now(spa_id=None):
+    """
+    Return the current timezone-aware datetime
+    for the selected spa.
+    """
+    timezone_name = get_current_spa_timezone(
+        spa_id
+    )
+
+    return get_utc_now().astimezone(
+        ZoneInfo(timezone_name)
+    )
+
+
 def get_spa_today():
     return get_spa_now().date()
 
@@ -24614,7 +24665,90 @@ def edit_client_full(client_id):
 
         if not client:
             flash("Client not found.", "error")
-            return redirect(url_for("clients_home"))
+            return redirect(url_for("client_management"))
+
+        cur.execute("""
+            SELECT
+                health_profile_id,
+                client_id,
+                sex,
+                skin_type_id,
+                fitzpatrick_id,
+                skin_concerns,
+                skin_conditions,
+                allergies,
+                medications,
+                current_medical_conditions,
+                past_medical_treatments,
+                recent_injections,
+                recent_laser,
+                pregnant,
+                nursing,
+                using_retinol,
+                using_accutane,
+                sun_exposure_level,
+                last_facial_date,
+                notes1,
+                notes2,
+                notes3,
+                last_updated,
+                created_at
+            FROM client_health_profile
+            WHERE client_id = %s
+              AND spa_id = %s
+        """, (client_id, spa_id))
+
+        health = cur.fetchone()
+        duplicate_matches = []
+
+        def load_full_client_options():
+            cur.execute("""
+                SELECT
+                    sex_type_id,
+                    sex_type
+                FROM sex
+                ORDER BY sex_type
+            """)
+
+            sex_options = cur.fetchall()
+
+            cur.execute("""
+                SELECT
+                    skin_type_id,
+                    skin_type_name
+                FROM skin_types
+                ORDER BY skin_type_name
+            """)
+
+            skin_types = cur.fetchall()
+
+            cur.execute("""
+                SELECT
+                    fitzpatrick_id,
+                    fitzpatrick_level
+                FROM fitzpatrick_types
+                ORDER BY fitzpatrick_id
+            """)
+
+            fitzpatrick_types = cur.fetchall()
+
+            cur.execute("""
+                SELECT
+                    referral_source_id,
+                    referral_source_name
+                FROM referral_sources
+                WHERE spa_id = %s
+                ORDER BY referral_source_name
+            """, (spa_id,))
+
+            referral_sources = cur.fetchall()
+
+            return (
+                sex_options,
+                skin_types,
+                fitzpatrick_types,
+                referral_sources
+            )
 
         if request.method == "POST":
             # ----- clients table fields -----
@@ -24658,6 +24792,160 @@ def edit_client_full(client_id):
             health_notes1 = request.form.get("health_notes1", "").strip()
             health_notes2 = request.form.get("health_notes2", "").strip()
             health_notes3 = request.form.get("health_notes3", "").strip()
+
+            # Preserve all submitted client information
+            # when validation or duplicate checking stops
+            # the database update.
+            submitted_birth_date = (
+                datetime.strptime(
+                    birth_date,
+                    "%Y-%m-%d"
+                ).date()
+                if birth_date
+                else None
+            )
+
+            submitted_last_facial_date = (
+                datetime.strptime(
+                    last_facial_date,
+                    "%Y-%m-%d"
+                ).date()
+                if last_facial_date
+                else None
+            )
+
+            client_values = list(client)
+
+            client_values[1] = first_name
+            client_values[2] = last_name
+            client_values[3] = phone
+            client_values[4] = email
+            client_values[5] = submitted_birth_date
+            client_values[6] = address
+            client_values[7] = city
+            client_values[8] = state
+            client_values[9] = zip_code
+            client_values[10] = emergency_contact_name
+            client_values[11] = emergency_contact_phone
+            client_values[12] = referred_by
+            client_values[13] = notes_one
+            client_values[14] = notes_two
+            client_values[15] = notes_three
+            client_values[16] = active_client
+
+            client = tuple(client_values)
+
+            health_values = (
+                list(health)
+                if health
+                else [None] * 24
+            )
+
+            health_values[1] = client_id
+            health_values[2] = sex
+            health_values[3] = skin_type_id
+            health_values[4] = fitzpatrick_id
+            health_values[5] = skin_concerns
+            health_values[6] = skin_conditions
+            health_values[7] = allergies
+            health_values[8] = medications
+            health_values[9] = current_medical_conditions
+            health_values[10] = past_medical_treatments
+            health_values[11] = recent_injections
+            health_values[12] = recent_laser
+            health_values[13] = pregnant
+            health_values[14] = nursing
+            health_values[15] = using_retinol
+            health_values[16] = using_accutane
+            health_values[17] = sun_exposure_level
+            health_values[18] = submitted_last_facial_date
+            health_values[19] = health_notes1
+            health_values[20] = health_notes2
+            health_values[21] = health_notes3
+
+            health = tuple(health_values)
+
+            missing_required_fields = []
+
+            if not first_name:
+                missing_required_fields.append(
+                    "First Name"
+                )
+
+            if not last_name:
+                missing_required_fields.append(
+                    "Last Name"
+                )
+
+            duplicate_override = (
+                request.form.get(
+                    "duplicate_override"
+                ) == "1"
+            )
+
+            if not missing_required_fields:
+                duplicate_matches = (
+                    find_possible_client_duplicates(
+                        cur=cur,
+                        spa_id=spa_id,
+                        first_name=first_name,
+                        last_name=last_name,
+                        phone=phone,
+                        email=email,
+                        exclude_client_id=client_id
+                    )
+                )
+
+            save_blocked = bool(
+                missing_required_fields
+                or (
+                    duplicate_matches
+                    and not duplicate_override
+                )
+            )
+
+            if save_blocked:
+                if missing_required_fields:
+                    flash(
+                        "Please complete the required "
+                        "information: "
+                        + ", ".join(
+                            missing_required_fields
+                        )
+                        + ".",
+                        "error"
+                    )
+                else:
+                    flash(
+                        "Possible duplicate client found. "
+                        "Please review the matching records "
+                        "before saving.",
+                        "warning"
+                    )
+
+                (
+                    sex_options,
+                    skin_types,
+                    fitzpatrick_types,
+                    referral_sources
+                ) = load_full_client_options()
+
+                return render_template(
+                    "edit_client_full.html",
+                    client=client,
+                    health=health,
+                    sex_options=sex_options,
+                    skin_types=skin_types,
+                    fitzpatrick_types=(
+                        fitzpatrick_types
+                    ),
+                    referral_sources=(
+                        referral_sources
+                    ),
+                    duplicate_matches=(
+                        duplicate_matches
+                    )
+                )
 
             # ----- update clients -----
             cur.execute("""
@@ -24706,7 +24994,7 @@ def edit_client_full(client_id):
             if cur.rowcount == 0:
                 conn.rollback()
                 flash("Client not found.", "error")
-                return redirect(url_for("clients_home"))
+                return redirect(url_for("client_management"))
 
             # ----- check whether health profile exists -----
             cur.execute("""
@@ -24830,72 +25118,16 @@ def edit_client_full(client_id):
 
             conn.commit()
             flash("Client full record updated successfully.", "success")
-            return redirect(url_for("clients_home"))
+            return redirect(url_for("client_management"))
 
         # ---------------- GET request ----------------
 
-        cur.execute("""
-            SELECT
-                health_profile_id,
-                client_id,
-                sex,
-                skin_type_id,
-                fitzpatrick_id,
-                skin_concerns,
-                skin_conditions,
-                allergies,
-                medications,
-                current_medical_conditions,
-                past_medical_treatments,
-                recent_injections,
-                recent_laser,
-                pregnant,
-                nursing,
-                using_retinol,
-                using_accutane,
-                sun_exposure_level,
-                last_facial_date,
-                notes1,
-                notes2,
-                notes3,
-                last_updated,
-                created_at
-            FROM client_health_profile
-            WHERE client_id = %s
-              AND spa_id = %s
-        """, (client_id, spa_id))
-        health = cur.fetchone()
-
-        # global lookup tables
-        cur.execute("""
-            SELECT sex_type_id, sex_type
-            FROM sex
-            ORDER BY sex_type
-        """, (spa_id,))
-        sex_options = cur.fetchall()
-
-        cur.execute("""
-            SELECT skin_type_id, skin_type_name
-            FROM skin_types
-            ORDER BY skin_type_name
-        """, (spa_id,))
-        skin_types = cur.fetchall()
-
-        cur.execute("""
-            SELECT fitzpatrick_id, fitzpatrick_level
-            FROM fitzpatrick_types
-            ORDER BY fitzpatrick_id
-        """, (spa_id,))
-        fitzpatrick_types = cur.fetchall()
-
-        # spa-owned lookup table
-        cur.execute("""
-            SELECT referral_source_id, referral_source_name
-            FROM referral_sources
-            WHERE spa_id = %s
-            ORDER BY referral_source_name
-        """, (spa_id,))
-        referral_sources = cur.fetchall()
+        (
+            sex_options,
+            skin_types,
+            fitzpatrick_types,
+            referral_sources
+        ) = load_full_client_options()
 
         return render_template(
             "edit_client_full.html",
@@ -24904,13 +25136,14 @@ def edit_client_full(client_id):
             sex_options=sex_options,
             skin_types=skin_types,
             fitzpatrick_types=fitzpatrick_types,
-            referral_sources=referral_sources
+            referral_sources=referral_sources,
+            duplicate_matches=duplicate_matches
         )
 
     except Exception as e:
         conn.rollback()
         flash(f"Error updating client record: {e}", "error")
-        return redirect(url_for("clients_home"))
+        return redirect(url_for("client_management"))
 
     finally:
         cur.close()
@@ -37134,6 +37367,287 @@ def client_history_detail_two(client_id):
 
 
 
+
+# =========================================================
+# CLIENT DUPLICATE DETECTION
+# =========================================================
+
+
+def find_possible_client_duplicates(
+    cur,
+    spa_id,
+    first_name,
+    last_name,
+    phone,
+    email,
+    exclude_client_id=None
+):
+    """
+    Return possible duplicate clients for the current spa.
+
+    Strong matches:
+    - Exact normalized email
+    - Exact normalized phone
+
+    Warning match:
+    - Exact normalized first and last name
+
+    Active and archived clients are both included.
+    """
+    import re
+
+    def normalize_name(value):
+        return " ".join(
+            str(value or "")
+            .strip()
+            .lower()
+            .split()
+        )
+
+    def normalize_email(value):
+        return str(value or "").strip().lower()
+
+    def normalize_phone(value):
+        digits = re.sub(
+            r"[^0-9]",
+            "",
+            str(value or "")
+        )
+
+        if (
+            len(digits) == 11
+            and digits.startswith("1")
+        ):
+            digits = digits[1:]
+
+        return digits
+
+    submitted_first_name = normalize_name(
+        first_name
+    )
+
+    submitted_last_name = normalize_name(
+        last_name
+    )
+
+    submitted_email = normalize_email(
+        email
+    )
+
+    submitted_phone = normalize_phone(
+        phone
+    )
+
+    match_conditions = []
+    params = [spa_id]
+
+    if (
+        submitted_first_name
+        and submitted_last_name
+    ):
+        match_conditions.append("""
+            (
+                LOWER(
+                    REGEXP_REPLACE(
+                        TRIM(
+                            COALESCE(first_name, '')
+                        ),
+                        '\\s+',
+                        ' ',
+                        'g'
+                    )
+                ) = %s
+
+                AND LOWER(
+                    REGEXP_REPLACE(
+                        TRIM(
+                            COALESCE(last_name, '')
+                        ),
+                        '\\s+',
+                        ' ',
+                        'g'
+                    )
+                ) = %s
+            )
+        """)
+
+        params.extend([
+            submitted_first_name,
+            submitted_last_name
+        ])
+
+    if submitted_email:
+        match_conditions.append("""
+            LOWER(
+                TRIM(
+                    COALESCE(email, '')
+                )
+            ) = %s
+        """)
+
+        params.append(
+            submitted_email
+        )
+
+    if submitted_phone:
+        match_conditions.append("""
+            REGEXP_REPLACE(
+                COALESCE(phone, ''),
+                '[^0-9]',
+                '',
+                'g'
+            ) IN (%s, %s)
+        """)
+
+        params.extend([
+            submitted_phone,
+            "1" + submitted_phone
+        ])
+
+    if not match_conditions:
+        return []
+
+    query = """
+        SELECT
+            client_id,
+            first_name,
+            last_name,
+            phone,
+            email,
+            active_client
+        FROM clients
+        WHERE spa_id = %s
+          AND (
+    """
+
+    query += "\n OR ".join(
+        match_conditions
+    )
+
+    query += """
+          )
+    """
+
+    if exclude_client_id is not None:
+        query += """
+          AND client_id <> %s
+        """
+
+        params.append(
+            exclude_client_id
+        )
+
+    query += """
+        ORDER BY
+            active_client DESC,
+            last_name,
+            first_name,
+            client_id
+    """
+
+    cur.execute(
+        query,
+        tuple(params)
+    )
+
+    duplicates = []
+
+    for row in cur.fetchall():
+        (
+            client_id,
+            existing_first_name,
+            existing_last_name,
+            existing_phone,
+            existing_email,
+            active_client
+        ) = row
+
+        reasons = []
+
+        existing_first_normalized = (
+            normalize_name(existing_first_name)
+        )
+
+        existing_last_normalized = (
+            normalize_name(existing_last_name)
+        )
+
+        existing_email_normalized = (
+            normalize_email(existing_email)
+        )
+
+        existing_phone_normalized = (
+            normalize_phone(existing_phone)
+        )
+
+        if (
+            submitted_first_name
+            and submitted_last_name
+            and submitted_first_name
+                == existing_first_normalized
+            and submitted_last_name
+                == existing_last_normalized
+        ):
+            reasons.append(
+                "Name"
+            )
+
+        if (
+            submitted_email
+            and submitted_email
+                == existing_email_normalized
+        ):
+            reasons.append(
+                "Email"
+            )
+
+        if (
+            submitted_phone
+            and submitted_phone
+                == existing_phone_normalized
+        ):
+            reasons.append(
+                "Phone"
+            )
+
+        strong_match = (
+            "Email" in reasons
+            or "Phone" in reasons
+        )
+
+        duplicates.append({
+            "client_id": client_id,
+
+            "client_name": (
+                f"{existing_first_name or ''} "
+                f"{existing_last_name or ''}"
+            ).strip()
+            or f"Client {client_id}",
+
+            "phone": existing_phone or "",
+            "email": existing_email or "",
+
+            "active_client":
+                bool(active_client),
+
+            "status_label": (
+                "Active"
+                if active_client
+                else "Archived"
+            ),
+
+            "match_reasons": reasons,
+
+            "match_reason_display":
+                ", ".join(reasons),
+
+            "strong_match":
+                strong_match
+        })
+
+    return duplicates
+
+
 #  ---------------------------------
 #   ADD NEW CLIENT STEP 1  
 #         PAGE 1
@@ -37169,7 +37683,20 @@ def add_new_client():
             
 
     if request.method == "POST":
-        action = request.form.get("action", "next")
+        submitted_action = request.form.get(
+            "action",
+            "next"
+        )
+
+        duplicate_override = (
+            submitted_action.endswith("_override")
+        )
+
+        action = (
+            submitted_action[:-9]
+            if duplicate_override
+            else submitted_action
+        )
 
         step1_data = {
             "first_name": request.form.get("first_name", "").strip(),
@@ -37185,18 +37712,169 @@ def add_new_client():
             "preferred_location_id": request.form.get("preferred_location_id") or "",
             "client_status": request.form.get("client_status", "Current").strip(),
             "preferred_language": request.form.get("preferred_language", "").strip(),
-            "ok_to_call": "ok_to_call" in request.form,
+            "ok_to_call": True,
             "ok_to_text": "ok_to_text" in request.form,
             "ok_to_email": "ok_to_email" in request.form,
             "preferred_contact_method": request.form.get("preferred_contact_method", "").strip()
         }
 
+        missing_required_fields = []
+
+        required_fields = [
+            (
+                "First Name",
+                step1_data.get("first_name", "")
+            ),
+            (
+                "Last Name",
+                step1_data.get("last_name", "")
+            ),
+            (
+                "Phone",
+                step1_data.get("phone", "")
+            ),
+            (
+                "Client Status",
+                step1_data.get("client_status", "")
+            )
+        ]
+
+        for field_label, field_value in required_fields:
+            if not str(field_value or "").strip():
+                missing_required_fields.append(
+                    field_label
+                )
+
+        if (
+            action in {"next", "save"}
+            and missing_required_fields
+        ):
+            session["new_client_step1"] = step1_data
+
+            flash(
+                "Please complete the required information: "
+                + ", ".join(missing_required_fields)
+                + ".",
+                "error"
+            )
+
+            cur.close()
+            conn.close()
+
+            return redirect(
+                url_for(
+                    "add_new_client",
+                    selected_date=selected_date
+                )
+            )
+
+
+        duplicate_matches = []
+
+        if action in {"next", "save"}:
+            duplicate_matches = (
+                find_possible_client_duplicates(
+                    cur=cur,
+                    spa_id=spa_id,
+                    first_name=step1_data.get(
+                        "first_name",
+                        ""
+                    ),
+                    last_name=step1_data.get(
+                        "last_name",
+                        ""
+                    ),
+                    phone=step1_data.get(
+                        "phone",
+                        ""
+                    ),
+                    email=step1_data.get(
+                        "email",
+                        ""
+                    )
+                )
+            )
+
+        if (
+            duplicate_matches
+            and not duplicate_override
+        ):
+            session["new_client_step1"] = (
+                step1_data
+            )
+
+            session.pop(
+                "new_client_duplicate_override",
+                None
+            )
+
+            locations = get_dropdown_options(
+                "spa_locations",
+                spa_id
+            )
+
+            client_statuses = (
+                get_dropdown_options(
+                    "client_statuses",
+                    spa_id
+                )
+            )
+
+            preferred_languages = (
+                get_dropdown_options(
+                    "preferred_languages",
+                    spa_id
+                )
+            )
+
+            preferred_contact_methods = (
+                get_dropdown_options(
+                    "preferred_contact_methods",
+                    spa_id
+                )
+            )
+
+            cur.close()
+            conn.close()
+
+            return render_template(
+                "add_new_client.html",
+                selected_date=selected_date,
+                step1_data=step1_data,
+                locations=locations,
+                preferred_languages=(
+                    preferred_languages
+                ),
+                preferred_contact_methods=(
+                    preferred_contact_methods
+                ),
+                client_statuses=client_statuses,
+                duplicate_matches=(
+                    duplicate_matches
+                ),
+                duplicate_action=action
+            )
+
+        if duplicate_override:
+            session[
+                "new_client_duplicate_override"
+            ] = True
+        else:
+            session.pop(
+                "new_client_duplicate_override",
+                None
+            )
+
         if action == "next":
             session["new_client_step1"] = step1_data
-            return redirect(url_for("add_new_client_step2", selected_date=selected_date))    
 
+            return redirect(
+                url_for(
+                    "add_new_client_step2",
+                    selected_date=selected_date
+                )
+            )
 
- 
 
         if action == "save":
             try:
@@ -37275,6 +37953,10 @@ def add_new_client():
 
             session.pop("new_client_step1", None)
             session.pop("new_client_step2", None)
+            session.pop(
+                "new_client_duplicate_override",
+                None
+            )
 
             if selected_date:
                 return redirect(url_for(
@@ -37326,7 +38008,9 @@ def add_new_client():
         locations=locations,
         preferred_languages=preferred_languages,
         preferred_contact_methods=preferred_contact_methods,
-        client_statuses=client_statuses
+        client_statuses=client_statuses,
+        duplicate_matches=[],
+        duplicate_action=""
     )
 
 
@@ -37370,7 +38054,16 @@ def add_new_client_step2():
             "active_client": request.form.get("active_client", "true")
         }
 
-        action = request.form.get("action")
+        submitted_action = request.form.get(
+            "action",
+            ""
+        )
+
+        action = (
+            "save"
+            if submitted_action == "save_override"
+            else submitted_action
+        )
 
         if action == "back":
             return redirect(url_for("add_new_client", selected_date=selected_date))
@@ -37382,6 +38075,83 @@ def add_new_client_step2():
 
             conn = get_db_connection()
             cur = conn.cursor()
+
+            duplicate_matches = (
+                find_possible_client_duplicates(
+                    cur=cur,
+                    spa_id=spa_id,
+                    first_name=step1.get(
+                        "first_name",
+                        ""
+                    ),
+                    last_name=step1.get(
+                        "last_name",
+                        ""
+                    ),
+                    phone=step1.get(
+                        "phone",
+                        ""
+                    ),
+                    email=step1.get(
+                        "email",
+                        ""
+                    )
+                )
+            )
+
+            duplicate_override_confirmed = (
+                bool(
+                    session.get(
+                        "new_client_duplicate_override"
+                    )
+                )
+                or submitted_action
+                    == "save_override"
+            )
+
+            if (
+                duplicate_matches
+                and not duplicate_override_confirmed
+            ):
+                cur.execute("""
+                    SELECT
+                        client_id,
+                        first_name,
+                        last_name
+                    FROM clients
+                    WHERE spa_id = %s
+                      AND active_client = TRUE
+                    ORDER BY
+                        last_name,
+                        first_name
+                """, (spa_id,))
+
+                clients_for_referral = (
+                    cur.fetchall()
+                )
+
+                cur.close()
+                conn.close()
+
+                return render_template(
+                    "add_new_client_step2.html",
+                    step2_data=step2,
+                    selected_date=selected_date,
+                    clients_for_referral=(
+                        clients_for_referral
+                    ),
+                    duplicate_matches=(
+                        duplicate_matches
+                    )
+                )
+
+            if (
+                submitted_action
+                == "save_override"
+            ):
+                session[
+                    "new_client_duplicate_override"
+                ] = True
 
             try:
                 referred_by_value = None
@@ -37519,6 +38289,10 @@ def add_new_client_step2():
 
             session.pop("new_client_step1", None)
             session.pop("new_client_step2", None)
+            session.pop(
+                "new_client_duplicate_override",
+                None
+            )
 
             if incoming_booking_data:
                 session.pop("incoming_booking_data", None)
@@ -37564,7 +38338,8 @@ def add_new_client_step2():
         "add_new_client_step2.html",
         step2_data=step2_data,
         selected_date=selected_date,
-        clients_for_referral=clients_for_referral
+        clients_for_referral=clients_for_referral,
+        duplicate_matches=[]
     )
 
 
@@ -37648,6 +38423,8 @@ def edit_client(client_id):
 
     locations = cur.fetchall()
 
+    duplicate_matches = []
+
     if request.method == "POST":
         first_name = request.form.get("first_name", "").strip()
         last_name = request.form.get("last_name", "").strip()
@@ -37677,70 +38454,161 @@ def edit_client(client_id):
 
         active_client = True if request.form.get("active_client") == "true" else False
 
-        cur.execute("""
-            UPDATE clients
-            SET first_name = %s,
-                last_name = %s,
-                phone = %s,
-                email = %s,
-                birth_date = %s,
-                address = %s,
-                city = %s,
-                state = %s,
-                zip = %s,
-                spa_location_id = %s,
-                preferred_location_id = %s,
-                client_status = %s,
-                preferred_language = %s,
-                ok_to_call = %s,
-                ok_to_text = %s,
-                ok_to_email = %s,
-                preferred_contact_method = %s,
-                emergency_contact_name = %s,
-                emergency_contact_phone = %s,
-                referred_by = %s,
-                notes_one = %s,
-                notes_two = %s,
-                notes_three = %s,
-                active_client = %s,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE client_id = %s
-              AND spa_id = %s
-        """, (
-            first_name,
-            last_name,
-            phone,
-            email,
-            birth_date,
-            address,
-            city,
-            state,
-            zip_code,
-            spa_location_id,
-            preferred_location_id,
-            client_status,
-            preferred_language,
-            ok_to_call,
-            ok_to_text,
-            ok_to_email,
-            preferred_contact_method,
-            emergency_contact_name,
-            emergency_contact_phone,
-            referred_by,
-            notes_one,
-            notes_two,
-            notes_three,
-            active_client,
-            client_id,
-            client_spa_id
-        ))
+        # Preserve submitted values if the update is blocked.
+        submitted_client = list(client)
 
-        conn.commit()
-        cur.close()
-        conn.close()
+        submitted_client[1] = first_name
+        submitted_client[2] = last_name
+        submitted_client[3] = phone
+        submitted_client[4] = email
+        submitted_client[5] = birth_date
+        submitted_client[6] = address
+        submitted_client[7] = city
+        submitted_client[8] = state
+        submitted_client[9] = zip_code
+        submitted_client[10] = spa_location_id
+        submitted_client[11] = preferred_location_id
+        submitted_client[12] = client_status
+        submitted_client[13] = preferred_language
+        submitted_client[14] = ok_to_call
+        submitted_client[15] = ok_to_text
+        submitted_client[16] = ok_to_email
+        submitted_client[17] = preferred_contact_method
+        submitted_client[18] = emergency_contact_name
+        submitted_client[19] = emergency_contact_phone
+        submitted_client[20] = referred_by
+        submitted_client[21] = notes_one
+        submitted_client[22] = notes_two
+        submitted_client[23] = notes_three
+        submitted_client[24] = active_client
 
-        flash("Client updated successfully!", "success")
-        return redirect(url_for("client_history"))
+        client = tuple(submitted_client)
+
+        missing_required_fields = []
+
+        required_fields = [
+            ("First Name", first_name),
+            ("Last Name", last_name),
+            ("Client Status", client_status)
+        ]
+
+        for field_label, field_value in required_fields:
+            if not str(field_value or "").strip():
+                missing_required_fields.append(
+                    field_label
+                )
+
+        duplicate_override = (
+            request.form.get(
+                "duplicate_override"
+            ) == "1"
+        )
+
+        if not missing_required_fields:
+            duplicate_matches = (
+                find_possible_client_duplicates(
+                    cur=cur,
+                    spa_id=client_spa_id,
+                    first_name=first_name,
+                    last_name=last_name,
+                    phone=phone,
+                    email=email,
+                    exclude_client_id=client_id
+                )
+            )
+
+        save_blocked = bool(
+            missing_required_fields
+            or (
+                duplicate_matches
+                and not duplicate_override
+            )
+        )
+
+        if missing_required_fields:
+            flash(
+                "Please complete the required information: "
+                + ", ".join(missing_required_fields)
+                + ".",
+                "error"
+            )
+
+        elif (
+            duplicate_matches
+            and not duplicate_override
+        ):
+            flash(
+                "Possible duplicate client found. "
+                "Please review the matching records "
+                "before saving.",
+                "warning"
+            )
+
+        if not save_blocked:
+            cur.execute("""
+                UPDATE clients
+                SET first_name = %s,
+                    last_name = %s,
+                    phone = %s,
+                    email = %s,
+                    birth_date = %s,
+                    address = %s,
+                    city = %s,
+                    state = %s,
+                    zip = %s,
+                    spa_location_id = %s,
+                    preferred_location_id = %s,
+                    client_status = %s,
+                    preferred_language = %s,
+                    ok_to_call = %s,
+                    ok_to_text = %s,
+                    ok_to_email = %s,
+                    preferred_contact_method = %s,
+                    emergency_contact_name = %s,
+                    emergency_contact_phone = %s,
+                    referred_by = %s,
+                    notes_one = %s,
+                    notes_two = %s,
+                    notes_three = %s,
+                    active_client = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE client_id = %s
+                  AND spa_id = %s
+            """, (
+                first_name,
+                last_name,
+                phone,
+                email,
+                birth_date,
+                address,
+                city,
+                state,
+                zip_code,
+                spa_location_id,
+                preferred_location_id,
+                client_status,
+                preferred_language,
+                ok_to_call,
+                ok_to_text,
+                ok_to_email,
+                preferred_contact_method,
+                emergency_contact_name,
+                emergency_contact_phone,
+                referred_by,
+                notes_one,
+                notes_two,
+                notes_three,
+                active_client,
+                client_id,
+                client_spa_id
+            ))
+
+            conn.commit()
+            cur.close()
+            conn.close()
+
+            flash("Client updated successfully!", "success")
+            return redirect(url_for("client_history"))
 
     # --- CLIENT SUMMARY DATA ---
 
@@ -37844,7 +38712,8 @@ def edit_client(client_id):
         recent_appointments=recent_appointments,
         lifetime_value=lifetime_value,
         average_ticket=average_ticket,
-        credit_balance=credit_balance
+        credit_balance=credit_balance,
+        duplicate_matches=duplicate_matches
     )
 
 
@@ -37978,111 +38847,16 @@ def reactivate_client(client_id):
 @login_required
 @spa_required
 def delete_client(client_id):
-    spa_id = current_spa_id()
-    role = session.get("role")
+    flash(
+        "Permanent client deletion is temporarily disabled "
+        "while protected deletion checks are being added.",
+        "warning"
+    )
 
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    filter_sql = "WHERE client_id = %s"
-    params = [client_id]
-
-    if role != "master_admin":
-        filter_sql += " AND spa_id = %s"
-        params.append(spa_id)
-
-    cur.execute(f"""
-        DELETE FROM clients
-        {filter_sql}
-    """, params)
-
-    if cur.rowcount == 0:
-        conn.rollback()
-        cur.close()
-        conn.close()
-        flash("Client not found or not authorized.", "error")
-        return redirect(url_for("client_history"))
-
-    conn.commit()
-    cur.close()
-    conn.close()
-
-    flash("Client deleted successfully!", "success")
-    return redirect(url_for("client_history"))
-
-
-
-
-
-
-
-#  -----------------
-#   TIME ZONES
-#       
-#  ----------------
-
-
-
-
-
-#  -----------------
-#    TIME ZONES
-# 4/28 good
-#  ----------------
-
-
-
-from datetime import datetime
-from zoneinfo import ZoneInfo
-
-def get_current_spa_timezone(spa_id=None):
-    if not spa_id:
-        spa_id = current_spa_id()
-
-    conn = get_db_connection()
-    cur = conn.cursor()   
-    
-    cur.execute("""
-        SELECT timezone_name
-        FROM spas
-        WHERE spa_id = %s
-    """, (spa_id,))
-    row = cur.fetchone()
-    
-    cur.close()
-    conn.close()
-    
-    if row and row[0]:
-        return row[0]
-    
-    return "America/Chicago"
-
-
-
-
-
-def get_spa_now(spa_id=None):
-    timezone_name = get_current_spa_timezone(spa_id)
-    return datetime.now(ZoneInfo(timezone_name))
-
-
-def get_utc_now():
-    return datetime.now(ZoneInfo("UTC"))
-
-
-#   ---------------------------------
-#
-#    ADMIN PAGE
-#   4/28 good
-#   --------------------------------
-
-
-
-############################################
-#
-#   ONLINE BOOKING - BUSINESS HOURS
-#
-############################################
+    return redirect(
+        request.referrer
+        or url_for("client_history")
+    )
 
 
 @app.route(
@@ -41259,7 +42033,12 @@ def delete_referral_source(referral_source_id):
 def cancel_new_client():
     session.pop("new_client_step1", None)
     session.pop("new_client_step2", None)
-    return redirect(url_for("home"))
+    session.pop("new_client_duplicate_override", None)
+    session.pop("incoming_booking_data", None)
+
+    return redirect(
+        url_for("client_management")
+    )
     
 
 @app.route("/clear_new_client")

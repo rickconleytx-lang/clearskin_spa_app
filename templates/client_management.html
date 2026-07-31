@@ -14,6 +14,23 @@
 
 <h1>Client Management</h1>
 
+<div class="page-tool-pills" style="margin: 12px 0 20px;">
+    <a href="{{ url_for('add_new_client') }}"
+       class="tool-pill tool-pill-small">
+        Add New Client
+    </a>
+
+    <a href="{{ url_for('inactive_clients') }}"
+       class="tool-pill tool-pill-small">
+        Archived Clients
+    </a>
+
+    <a href="{{ url_for('client_history') }}"
+       class="tool-pill tool-pill-small">
+        Client History
+    </a>
+</div>
+
 <div style="display:flex; flex-direction:row; justify-content:space-between; align-items:flex-start; gap:25px; width:100%;">
 
     <!-- LEFT SIDE -->
@@ -44,11 +61,6 @@
             </p>
         </p>  
 
-        <div style="margin-bottom: 20px;">    
-            <a class="btn" href="{{ url_for('add_new_client') }}">
-                Add New Client
-            </a>
-        </div>
 
         <p style="margin-bottom: 15px;">
             Search by first name, last name, or phone number to quickly access client records.
