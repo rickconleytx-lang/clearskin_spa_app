@@ -44800,6 +44800,20 @@ def booking_public_preview_confirm():
         if matched_client_id is not None:
             client_id = matched_client_id
 
+            # Public booking searches active and archived
+            # clients. When an archived client is matched,
+            # restore the existing client instead of creating
+            # a duplicate record.
+            cur.execute("""
+                UPDATE clients
+                SET active_client = TRUE
+                WHERE client_id = %s
+                  AND spa_id = %s
+            """, (
+                client_id,
+                spa_id
+            ))
+
             matched_client = candidate_by_id[
                 client_id
             ]
@@ -45331,6 +45345,19 @@ def _booking_commit_appointment(
 
     if matched_client_id is not None:
         client_id = matched_client_id
+
+        # Public online booking searches active and archived
+        # clients. Reactivate a matched archived record rather
+        # than creating a duplicate client.
+        cur.execute("""
+            UPDATE clients
+            SET active_client = TRUE
+            WHERE client_id = %s
+              AND spa_id = %s
+        """, (
+            client_id,
+            spa_id
+        ))
 
         matched_client = candidate_by_id[
             client_id
