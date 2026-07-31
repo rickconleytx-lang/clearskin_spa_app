@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Year View | Peach Suite Pro{% endblock %}
+
+{% block content %}
+
+<h1>Year View</h1>
+
+<div class="page-tool-pills" style="margin:10px 0 18px;">
+    <a
+        href="{{ url_for(
+            'calendar_day_view',
+            date=display_date.strftime('%Y-%m-%d')
+        ) }}"
+        class="tool-pill tool-pill-small"
+    >
+        Day
+    </a>
+
+    <a
+        href="{{ url_for(
+            'calendar_view',
+            week_start=display_date.strftime('%Y-%m-%d')
+        ) }}"
+        class="tool-pill tool-pill-small"
+    >
+        Week
+    </a>
+
+    <a
+        href="{{ url_for(
+            'calendar_month_view',
+            date=display_date.strftime('%Y-%m-%d')
+        ) }}"
+        class="tool-pill tool-pill-small"
+    >
+        Month
+    </a>
+</div>
+
+<h3>
+    {{ display_date.strftime('%Y') }}
+</h3>
+
+<p>
+    The Peach Suite Pro Year View will be built here.
+</p>
+
+{% endblock %}

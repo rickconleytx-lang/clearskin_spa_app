@@ -1,0 +1,1934 @@
+{% extends "base.html" %}
+{% block title %}Day View | Peach Suite Pro
+
+
+
+{% endblock %}
+
+{% block content %}
+
+<style>
+    .day-view-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 24px;
+        flex-wrap: wrap;
+        margin-bottom: 22px;
+    }
+
+    .day-view-date-tools {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin: 14px 0;
+    }
+
+    .day-view-summary {
+        display: grid;
+        grid-template-columns: minmax(180px, 300px);
+        gap: 14px;
+        margin: 20px 0 24px;
+        max-width: 300px;
+    }
+
+    .day-summary-card {
+        background: #fff;
+        border: 1px solid #e6d8cf;
+        border-radius: 12px;
+        padding: 16px;
+        box-shadow:
+            0 3px 12px rgba(0, 0, 0, 0.05);
+    }
+
+    .day-summary-label {
+        display: block;
+        color: #6b5d57;
+        font-size: 0.9rem;
+        margin-bottom: 5px;
+    }
+
+    .day-summary-value {
+        font-size: 1.4rem;
+        font-weight: 800;
+    }
+
+    .day-business-hours {
+        display: flex;
+        align-items: center;
+        gap: 8px 16px;
+        flex-wrap: wrap;
+        margin: 0 0 18px;
+        padding: 12px 15px;
+        border: 1px solid #e2d8d1;
+        border-radius: 10px;
+        background: #fffaf7;
+    }
+
+    .day-business-period {
+        font-weight: 700;
+        white-space: nowrap;
+    }
+
+    .day-timeline-shell {
+        width: 100%;
+        overflow-x: auto;
+        border: 1px solid #d9d2cd;
+        border-radius: 12px;
+        background: white;
+        box-shadow:
+            0 4px 16px rgba(0, 0, 0, 0.06);
+    }
+
+    .day-timeline-grid {
+        --time-column-width: 82px;
+        --provider-min-width: 112px;
+
+        min-width: max(
+            100%,
+            calc(
+                var(--time-column-width)
+                + (
+                    var(--provider-count)
+                    * var(--provider-min-width)
+                )
+            )
+        );
+    }
+
+    .day-timeline-header {
+        display: grid;
+        grid-template-columns:
+            var(--time-column-width)
+            repeat(
+                var(--provider-count),
+                minmax(
+                    var(--provider-min-width),
+                    1fr
+                )
+            );
+
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        min-height: 82px;
+        border-bottom: 2px solid #cfc7c1;
+        background: white;
+    }
+
+    .day-time-heading {
+        position: sticky;
+        left: 0;
+        z-index: 24;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 10px 6px;
+        border-right: 1px solid #d5cec8;
+        background: #f7f3f0;
+        font-size: 0.85rem;
+        font-weight: 800;
+        text-align: center;
+    }
+
+    .day-provider-heading {
+        min-width: 0;
+        padding: 11px 7px;
+        border-left: 1px solid #e4ded9;
+        border-top: 7px solid var(--provider-color);
+        background:
+            color-mix(
+                in srgb,
+                var(--provider-color) 7%,
+                white
+            );
+        text-align: center;
+    }
+
+    .day-provider-name {
+        display: block;
+        overflow: hidden;
+        font-weight: 900;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .day-provider-hours {
+        display: block;
+        margin-top: 5px;
+        color: #625a55;
+        font-size: 0.72rem;
+        line-height: 1.25;
+    }
+
+    .day-timeline-body {
+        display: grid;
+        grid-template-columns:
+            var(--time-column-width)
+            repeat(
+                var(--provider-count),
+                minmax(
+                    var(--provider-min-width),
+                    1fr
+                )
+            );
+
+        position: relative;
+    }
+
+    .day-time-axis {
+        position: sticky;
+        left: 0;
+        z-index: 15;
+        border-right: 1px solid #cfc7c1;
+        background: #f8f5f2;
+    }
+
+    .day-time-label {
+        position: absolute;
+        right: 8px;
+        transform: translateY(-50%);
+        color: #5f5752;
+        font-size: 0.72rem;
+        font-weight: 700;
+        white-space: nowrap;
+    }
+
+    .day-provider-lane {
+        position: relative;
+        overflow: hidden;
+        border-left: 1px solid #e4ded9;
+        background:
+            repeating-linear-gradient(
+                to bottom,
+                #f3f3f3 0,
+                #f3f3f3 39px,
+                #eeeeee 40px
+            );
+    }
+
+    .day-provider-work-period {
+        position: absolute;
+        left: 0;
+        right: 0;
+        z-index: 1;
+        border-top:
+            1px dashed
+            color-mix(
+                in srgb,
+                var(--provider-color) 50%,
+                #999
+            );
+        border-bottom:
+            1px dashed
+            color-mix(
+                in srgb,
+                var(--provider-color) 50%,
+                #999
+            );
+        background:
+            color-mix(
+                in srgb,
+                var(--provider-color) 7%,
+                white
+            );
+    }
+
+    .day-grid-line {
+        position: absolute;
+        left: 0;
+        right: 0;
+        z-index: 2;
+        border-top: 1px solid rgba(0, 0, 0, 0.08);
+        pointer-events: none;
+    }
+
+    .day-grid-line.hour {
+        border-top-color: rgba(0, 0, 0, 0.16);
+    }
+
+    .day-current-time-line {
+        position: absolute;
+        left: 0;
+        right: 0;
+        z-index: 8;
+        border-top: 2px solid #c62828;
+        pointer-events: none;
+    }
+
+    .day-current-time-line::before {
+        content: "";
+        position: absolute;
+        top: -5px;
+        left: -1px;
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: #c62828;
+    }
+
+    .day-timeline-appointment {
+        position: absolute;
+        width: auto;
+        font: inherit;
+        text-align: left;
+        cursor: pointer;
+        left: 4px;
+        right: 4px;
+        z-index: 10;
+        display: block;
+        overflow: hidden;
+        padding: 6px 7px;
+        border: 1px solid rgba(0, 0, 0, 0.18);
+        border-left: 6px solid var(--provider-color);
+        border-radius: 7px;
+        background: #f0f0f0;
+        color: #1f1f1f;
+        text-decoration: none;
+        box-shadow:
+            0 2px 7px rgba(0, 0, 0, 0.11);
+    }
+
+    .day-timeline-appointment:hover {
+        z-index: 12;
+        box-shadow:
+            0 5px 14px rgba(0, 0, 0, 0.17);
+    }
+
+    .day-timeline-appointment.booked {
+        background: #efefef;
+    }
+
+    .day-timeline-appointment.unreviewed {
+        border-color: #d1a000;
+        border-left-color: var(--provider-color);
+        background: #fff2a8;
+    }
+
+    .day-timeline-appointment.overdue {
+        border-color: #b91c1c;
+        border-left-color: var(--provider-color);
+        background: #ffd8d8;
+    }
+
+    .day-timeline-appointment.completed {
+        border-color: #2f855a;
+        border-left-color: var(--provider-color);
+        background: #d8f3df;
+    }
+
+    .day-timeline-appointment.cancelled {
+        border-color: #9ca3af;
+        border-left-color: var(--provider-color);
+        background: #ededed;
+        opacity: 0.5;
+        text-decoration: line-through;
+    }
+
+    .day-appt-time {
+        display: block;
+        font-size: 0.76rem;
+        font-weight: 900;
+        line-height: 1.1;
+    }
+
+    .day-appt-client {
+        display: block;
+        margin-top: 2px;
+        overflow: hidden;
+        font-size: 0.78rem;
+        font-weight: 800;
+        line-height: 1.15;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .day-appt-service {
+        display: block;
+        margin-top: 2px;
+        overflow: hidden;
+        font-size: 0.69rem;
+        line-height: 1.15;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .day-appt-room {
+        display: block;
+        margin-top: 2px;
+        overflow: hidden;
+        color: #514b47;
+        font-size: 0.65rem;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .day-empty-state {
+        max-width: 760px;
+        padding: 28px;
+        border: 1px dashed #cdbfb7;
+        border-radius: 12px;
+        background: #fffaf7;
+        text-align: center;
+    }
+
+    .day-timeline-legend {
+        display: flex;
+        gap: 10px 18px;
+        flex-wrap: wrap;
+        margin-top: 14px;
+        color: #5f5752;
+        font-size: 0.78rem;
+    }
+
+    .day-legend-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .day-legend-swatch {
+        width: 18px;
+        height: 12px;
+        border: 1px solid rgba(0, 0, 0, 0.18);
+        border-radius: 3px;
+    }
+
+    @media (max-width: 700px) {
+        .day-view-summary {
+            grid-template-columns: 1fr;
+            max-width: none;
+        }
+
+        .day-timeline-grid {
+            --provider-min-width: 150px;
+        }
+    }
+</style>
+
+<div class="day-view-header">
+    <div>
+        <h1>Day View</h1>
+
+        <div class="page-tool-pills" style="margin:10px 0 18px;">
+            <a
+                href="{{ url_for(
+                    'calendar_view',
+                    goto_date=display_date.strftime('%Y-%m-%d')
+                ) }}"
+                class="tool-pill tool-pill-small"
+            >
+                Week
+            </a>
+
+            <a
+                href="{{ url_for(
+                    'calendar_month_view',
+                    date=display_date.strftime('%Y-%m-%d')
+                ) }}"
+                class="tool-pill tool-pill-small"
+            >
+                Month
+            </a>
+
+            <a
+                href="{{ url_for(
+                    'calendar_year_view',
+                    date=display_date.strftime('%Y-%m-%d')
+                ) }}"
+                class="tool-pill tool-pill-small"
+            >
+                Year
+            </a>
+        </div>
+
+        <h2>
+            {{ display_date.strftime('%A, %B %d, %Y') }}
+        </h2>
+
+        <div class="day-view-date-tools">
+            <a
+                href="{{ url_for(
+                    'calendar_day_view',
+                    date=previous_date.strftime('%Y-%m-%d')
+                ) }}"
+                class="tool-pill tool-pill-small"
+            >
+                Previous Day
+            </a>
+
+            <a
+                href="{{ url_for(
+                    'calendar_day_view',
+                    date=today.strftime('%Y-%m-%d')
+                ) }}"
+                class="tool-pill tool-pill-small"
+            >
+                Today
+            </a>
+
+            <a
+                href="{{ url_for(
+                    'calendar_day_view',
+                    date=next_date.strftime('%Y-%m-%d')
+                ) }}"
+                class="tool-pill tool-pill-small"
+            >
+                Next Day
+            </a>
+
+            <form
+                method="GET"
+                action="{{ url_for('calendar_day_view') }}"
+                style="display:flex; gap:8px; align-items:center;"
+            >
+                <input
+                    type="date"
+                    name="date"
+                    value="{{ display_date.strftime('%Y-%m-%d') }}"
+                    required
+                >
+
+                <button
+                    type="submit"
+                    class="tool-pill tool-pill-small"
+                >
+                    Go To Date
+                </button>
+            </form>
+        </div>
+
+        <div class="page-tool-pills">
+            <a
+                href="{{ url_for(
+                    'schedule_appointment_start',
+                    selected_date=display_date.strftime('%Y-%m-%d')
+                ) }}"
+                class="tool-pill tool-pill-small"
+            >
+                Schedule Appointment
+            </a>
+
+            <a
+                href="{{ url_for(
+                    'daily_schedule',
+                    date=display_date.strftime('%Y-%m-%d')
+                ) }}"
+                class="tool-pill tool-pill-small"
+            >
+                Daily Schedule
+            </a>
+        </div>
+    </div>
+</div>
+
+<div class="day-view-summary">
+    <div class="day-summary-card">
+        <span class="day-summary-label">
+            Active Appointments
+        </span>
+
+        <span class="day-summary-value">
+            {{ appointment_count }}
+        </span>
+    </div>
+
+</div>
+
+{% if business_periods %}
+    <div class="day-business-hours">
+        <strong>Business Hours:</strong>
+
+        {% for period in business_periods %}
+            <span class="day-business-period">
+                {{ period.start_display }}
+                –
+                {{ period.end_display }}
+            </span>
+        {% endfor %}
+    </div>
+{% else %}
+    <div class="day-business-hours">
+        <strong>Business Hours:</strong>
+        <span>Closed or not entered</span>
+    </div>
+{% endif %}
+
+{% if provider_columns %}
+    <div class="day-timeline-shell">
+        <div
+            class="day-timeline-grid"
+            style="
+                --provider-count:
+                    {{ provider_columns|length }};
+            "
+        >
+            <div class="day-timeline-header">
+                <div class="day-time-heading">
+                    Time
+                </div>
+
+                {% for provider in provider_columns %}
+                    <div
+                        class="day-provider-heading"
+                        style="
+                            --provider-color:
+                                {{ provider.color }};
+                        "
+                        title="{{ provider.display_name }}"
+                    >
+                        <span class="day-provider-name">
+                            {{ provider.display_name }}
+                        </span>
+
+                        <span class="day-provider-hours">
+                            {% if provider.periods %}
+                                {% for period in provider.periods %}
+                                    {{ period.start_display }}
+                                    –
+                                    {{ period.end_display }}
+
+                                    {% if not loop.last %}
+                                        <br>
+                                    {% endif %}
+                                {% endfor %}
+                            {% else %}
+                                No provider hours entered
+                            {% endif %}
+                        </span>
+                    </div>
+                {% endfor %}
+            </div>
+
+            <div
+                class="day-timeline-body"
+                style="
+                    --provider-count:
+                        {{ provider_columns|length }};
+
+                    height:
+                        {{ timeline_total_minutes * 1.35 }}px;
+                "
+            >
+                <div class="day-time-axis">
+                    {% for marker in time_markers %}
+                        {% set marker_top =
+                            (
+                                (
+                                    marker.minutes
+                                    - timeline_start_minutes
+                                )
+                                / timeline_total_minutes
+                                * 100
+                            )
+                        %}
+
+                        <div
+                            class="day-time-label"
+                            style="top: {{ marker_top }}%;"
+                        >
+                            {{ marker.label }}
+                        </div>
+                    {% endfor %}
+                </div>
+
+                {% for provider in provider_columns %}
+                    <div
+                        class="day-provider-lane"
+                        style="
+                            --provider-color:
+                                {{ provider.color }};
+                        "
+                    >
+                        {% for period in provider.periods %}
+                            {% set period_top =
+                                (
+                                    (
+                                        period.start_minutes
+                                        - timeline_start_minutes
+                                    )
+                                    / timeline_total_minutes
+                                    * 100
+                                )
+                            %}
+
+                            {% set period_height =
+                                (
+                                    (
+                                        period.end_minutes
+                                        - period.start_minutes
+                                    )
+                                    / timeline_total_minutes
+                                    * 100
+                                )
+                            %}
+
+                            <div
+                                class="day-provider-work-period"
+                                style="
+                                    top: {{ period_top }}%;
+                                    height: {{ period_height }}%;
+                                "
+                                title="
+                                    Working:
+                                    {{ period.start_display }}
+                                    –
+                                    {{ period.end_display }}
+                                "
+                            ></div>
+                        {% endfor %}
+
+                        {% for marker in time_markers %}
+                            {% set marker_top =
+                                (
+                                    (
+                                        marker.minutes
+                                        - timeline_start_minutes
+                                    )
+                                    / timeline_total_minutes
+                                    * 100
+                                )
+                            %}
+
+                            <div
+                                class="
+                                    day-grid-line
+                                    {% if marker.minutes % 60 == 0 %}
+                                        hour
+                                    {% endif %}
+                                "
+                                style="top: {{ marker_top }}%;"
+                            ></div>
+                        {% endfor %}
+
+                        {% if
+                            display_date == today
+                            and current_minutes
+                                >= timeline_start_minutes
+                            and current_minutes
+                                <= timeline_end_minutes
+                        %}
+                            {% set current_top =
+                                (
+                                    (
+                                        current_minutes
+                                        - timeline_start_minutes
+                                    )
+                                    / timeline_total_minutes
+                                    * 100
+                                )
+                            %}
+
+                            <div
+                                class="day-current-time-line"
+                                style="top: {{ current_top }}%;"
+                                title="Current business time"
+                            ></div>
+                        {% endif %}
+
+                        {% for appt in timeline_appointments %}
+                            {% if
+                                appt.provider_key
+                                == provider.provider_key
+                            %}
+                                {% set appointment_status =
+                                    appt.status
+                                %}
+
+                                {% set is_past =
+                                    (
+                                        display_date < today
+                                    )
+                                    or (
+                                        display_date == today
+                                        and appt.start_minutes
+                                            < current_minutes
+                                    )
+                                %}
+
+                                {% if appointment_status
+                                    in ['cancelled', 'canceled']
+                                %}
+                                    {% set block_status =
+                                        'cancelled'
+                                    %}
+                                {% elif appointment_status
+                                    == 'completed'
+                                %}
+                                    {% set block_status =
+                                        'completed'
+                                    %}
+                                {% elif
+                                    appointment_status == 'booked'
+                                    and not appt.owner_reviewed
+                                %}
+                                    {% set block_status =
+                                        'unreviewed'
+                                    %}
+                                {% elif
+                                    appointment_status == 'booked'
+                                    and is_past
+                                %}
+                                    {% set block_status =
+                                        'overdue'
+                                    %}
+                                {% else %}
+                                    {% set block_status =
+                                        'booked'
+                                    %}
+                                {% endif %}
+
+                                {% set appointment_top =
+                                    (
+                                        (
+                                            appt.start_minutes
+                                            - timeline_start_minutes
+                                        )
+                                        / timeline_total_minutes
+                                        * 100
+                                    )
+                                %}
+
+                                {% set appointment_height =
+                                    (
+                                        (
+                                            appt.end_minutes
+                                            - appt.start_minutes
+                                        )
+                                        / timeline_total_minutes
+                                        * 100
+                                    )
+                                %}
+
+                                <button
+                                    type="button"
+                                    onclick="openAppointmentModal(
+                                        {{ appt.appointment_id }},
+                                        this
+                                    )"
+                                    class="
+                                        day-timeline-appointment
+                                        {{ block_status }}
+                                    "
+                                    style="
+                                        top:
+                                            {{ appointment_top }}%;
+
+                                        height:
+                                            max(
+                                                28px,
+                                                calc(
+                                                    {{ appointment_height }}%
+                                                    - 4px
+                                                )
+                                            );
+                                    "
+                                    title="
+                                        {{ appt.start_display }}
+                                        ·
+                                        {{ appt.recipient_name }}
+                                        ·
+                                        {{ appt.service_name }}
+                                    "
+                                >
+                                    <span class="day-appt-time">
+                                        {{ appt.start_display }}
+                                    </span>
+
+                                    <span class="day-appt-client">
+                                        {{ appt.recipient_name }}
+                                    </span>
+
+                                    <span class="day-appt-service">
+                                        {{ appt.service_name }}
+                                    </span>
+
+                                    {% if appt.room_number %}
+                                        <span class="day-appt-room">
+                                            Room:
+                                            {{ appt.room_number }}
+                                        </span>
+                                    {% endif %}
+                                </button>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <div class="day-timeline-legend">
+        <span class="day-legend-item">
+            <span
+                class="day-legend-swatch"
+                style="background:#efefef;"
+            ></span>
+            Booked
+        </span>
+
+        <span class="day-legend-item">
+            <span
+                class="day-legend-swatch"
+                style="background:#fff2a8;"
+            ></span>
+            Needs Review
+        </span>
+
+        <span class="day-legend-item">
+            <span
+                class="day-legend-swatch"
+                style="background:#ffd8d8;"
+            ></span>
+            Overdue
+        </span>
+
+        <span class="day-legend-item">
+            <span
+                class="day-legend-swatch"
+                style="background:#d8f3df;"
+            ></span>
+            Completed
+        </span>
+
+        <span class="day-legend-item">
+            <span
+                class="day-legend-swatch"
+                style="
+                    background:#ededed;
+                    opacity:0.55;
+                "
+            ></span>
+            Cancelled
+        </span>
+    </div>
+{% else %}
+    <div class="day-empty-state">
+        <h2>No providers scheduled</h2>
+
+        <p>
+            No provider working hours or appointments
+            were found for
+            {{ display_date.strftime(
+                '%A, %B %d, %Y'
+            ) }}.
+        </p>
+
+        <a
+            href="{{ url_for(
+                'schedule_appointment_start',
+                selected_date=(
+                    display_date.strftime(
+                        '%Y-%m-%d'
+                    )
+                )
+            ) }}"
+            class="tool-pill tool-pill-small"
+        >
+            Schedule Appointment
+        </a>
+    </div>
+{% endif %}
+
+
+
+<div id="appointmentModal" class="modal-overlay" style="display:none;">
+    <div class="modal-box">
+        <h1>Appointment Command Center</h1>
+        <hr>
+        <br>
+        <div
+            id="modalGuestBookingBadge"
+            class="guest-booking-badge"
+            style="display:none;"
+        >
+            Booked for Someone Else
+        </div>
+
+        <div
+            id="modalContactVerificationAlert"
+            class="contact-verification-alert"
+            style="display:none;"
+        >
+            <strong id="modalContactVerificationTitle">
+            </strong>
+
+            <p id="modalContactVerificationMessage"></p>
+
+            <div
+                id="modalContactVerificationDetails"
+                class="contact-verification-details"
+            ></div>
+        </div>
+
+
+        <h2 id="modalClientName"></h2>
+
+        <p
+            id="modalBookedByRow"
+            style="display:none;"
+        >
+            <strong>Booked By:</strong>
+            <span id="modalBookedBy"></span>
+        </p>
+
+        <p>
+            <strong id="modalPhoneLabel">
+                Phone:
+            </strong>
+            📞 <a id="modalPhoneLink"></a>
+        </p>
+
+        <p>
+            <strong id="modalEmailLabel">
+                Email:
+            </strong>
+            ✉️ <a id="modalEmailLink"></a>
+        </p>
+
+        <hr>
+        <p
+            id="modalConfirmationRow"
+            style="display:none;"
+        >
+            <strong>Booking Confirmation #:</strong>
+            <span id="modalConfirmationNumber"></span>
+        </p>
+        <p><strong>Service:</strong> <span id="modalService"></span></p>
+        <p><strong>Provider:</strong> <span id="modalProvider"></span></p>
+
+        <p><strong>Date:</strong> <span id="modalDate"></span></p>
+        <p><strong>Time:</strong> <span id="modalTime"></span></p>
+
+        <p><strong>Duration:</strong> <span id="modalDuration"></span></p>
+        <p><strong>Price at Booking:</strong> <span id="modalPrice"></span></p>
+        <p><strong>Status:</strong> <span id="modalStatus" class="status-badge"></span></p>
+
+        <p><strong>Appointment Notes:</strong></p>
+        <div id="modalNotes"
+            style="background:#f7f7f7; padding:10px; border-radius:8px; white-space:pre-wrap;">
+        </div>
+
+        <div class="todays-contact-card">
+            <h3>Today’s Contact</h3>
+
+            <p class="todays-contact-help">
+                Defaults to the client’s contact information.
+                Changes apply only to this appointment.
+            </p>
+
+            <form
+                id="modalTodaysContactForm"
+                onsubmit="return saveTodaysContact(event);"
+            >
+                <label for="modalTodaysContactName">
+                    Contact Name
+                </label>
+
+                <input
+                    type="text"
+                    id="modalTodaysContactName"
+                    name="todays_contact_name"
+                    maxlength="150"
+                    autocomplete="name"
+                >
+
+                <label for="modalTodaysContactPhone">
+                    Contact Phone
+                </label>
+
+                <input
+                    type="tel"
+                    id="modalTodaysContactPhone"
+                    name="todays_contact_phone"
+                    maxlength="50"
+                    autocomplete="tel"
+                >
+
+                <label for="modalTodaysContactNote">
+                    Contact Note
+                </label>
+
+                <textarea
+                    id="modalTodaysContactNote"
+                    name="todays_contact_note"
+                    rows="3"
+                    maxlength="2000"
+                    placeholder="Example: Call mother when the appointment is finished."
+                ></textarea>
+
+                <div class="todays-contact-actions">
+                    <button
+                        type="submit"
+                        id="modalTodaysContactSaveBtn"
+                        class="btn"
+                        style="
+                            background:#4a7c59;
+                            color:white;
+                        "
+                    >
+                        Save Today’s Contact
+                    </button>
+
+                    <span
+                        id="modalTodaysContactStatus"
+                        class="todays-contact-status"
+                        aria-live="polite"
+                    ></span>
+                </div>
+
+                <p class="todays-contact-reset-note">
+                    Clear the name or phone and save to return
+                    that field to the client default.
+                </p>
+            </form>
+        </div>
+
+
+
+    <hr>
+
+
+    <div class="form-buttons">
+            <a
+                id="godaddyImportBtn"
+                class="btn"
+                style="display:none;"
+            >
+                View GoDaddy Import
+            </a>
+
+
+            <a id="modalEditBtn" class="btn">Edit Appointment</a>
+            <a id="modalPaymentBtn" class="btn">Finish Session</a>
+
+
+            <form method="POST" id="modalCancelForm" style="display:inline;">
+                <input
+                    type="hidden"
+                    name="return_week_start"
+                    value="{{ display_date.strftime('%Y-%m-%d') }}">
+                <button type="submit" class="btn" style="background: #cc0000; color: white;"
+                        onclick="return confirm('Cancel this appointment?')">
+                    Cancel Appointment
+                </button>
+            </form>
+
+            <button type="button" class="btn" onclick="closeAppointmentModal()">Close</button>
+        </div>
+    </div>
+</div>
+
+<style>
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.45);
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+}
+
+.modal-box {
+    background: white;
+    padding: 25px;
+    border-radius: 10px;
+    width: 500px;
+    max-width: 90%;
+
+    max-height: calc(100vh - 40px);
+    overflow-y: auto;
+    box-sizing: border-box;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+
+    box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+}
+
+.calendar-event-link {
+    display: block;
+    width: 100%;
+    border: none;
+    background: transparent;
+    text-align: left;
+    color: inherit;
+    cursor: pointer;
+    padding: 0;
+    font: inherit;
+}
+
+.calendar-event-link:hover {
+    text-decoration: underline;
+}
+
+.guest-booking-badge {
+    display: inline-block;
+    margin-bottom: 8px;
+    padding: 4px 9px;
+    border-radius: 999px;
+    background: #fff1e8;
+    color: #9a553c;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.status-badge {
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+}
+
+
+.calendar-event.unreviewed {
+    background: #fff3b0;
+    border-left: 4px solid #d6a700;
+}
+
+
+.calendar-event.cancelled {
+    background: #dbeafe;
+    border-left: 4px solid #4f83cc;
+    color: #274060;
+}
+
+.calendar-event.cancelled .calendar-event-link {
+    opacity: 0.85;
+}
+
+
+.appointment-review-badge {
+    display: inline-block;
+    margin-top: 3px;
+    padding: 2px 6px;
+    border-radius: 8px;
+    background: #d6a700;
+    color: #2f2a00;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.contact-verification-alert {
+    margin: 10px 0 15px 0;
+    padding: 12px;
+    border-left: 5px solid #d6a700;
+    border-radius: 8px;
+    background: #fff3b0;
+    color: #3d3400;
+}
+
+.contact-verification-alert p {
+    margin: 6px 0;
+}
+
+.contact-verification-details {
+    margin-top: 6px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.contact-verification-details {
+    white-space: pre-line;
+}
+
+
+
+.todays-contact-card {
+    margin: 20px 0;
+    padding: 16px;
+    border: 1px solid #e2d5cd;
+    border-radius: 10px;
+    background: #fffaf7;
+}
+
+.todays-contact-card h3 {
+    margin: 0 0 6px;
+}
+
+.todays-contact-help {
+    margin: 0 0 14px;
+    color: #625852;
+    font-size: 0.9rem;
+}
+
+.todays-contact-card label {
+    display: block;
+    margin: 12px 0 5px;
+    font-weight: 700;
+}
+
+.todays-contact-card input,
+.todays-contact-card textarea {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 9px 10px;
+    border: 1px solid #cfc5bf;
+    border-radius: 7px;
+    background: white;
+    font: inherit;
+}
+
+.todays-contact-card textarea {
+    resize: vertical;
+}
+
+.todays-contact-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 14px;
+}
+
+.todays-contact-status {
+    min-height: 1.2em;
+    font-size: 0.9rem;
+    font-weight: 700;
+}
+
+.todays-contact-reset-note {
+    margin: 10px 0 0;
+    color: #726761;
+    font-size: 0.78rem;
+}
+
+</style>
+
+<script>
+function setText(id, value) {
+    const el = document.getElementById(id);
+    if (el) {
+        el.innerText = value || "";
+    }
+}
+
+
+function openAppointmentModal(appointmentId, clickedElement) {
+    fetch(`/appointment-details/${appointmentId}`)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error("Unable to load appointment details.");
+            }
+
+            return response.json();
+        })
+        .then(data => {
+            console.log("appointment data:", data);
+
+            if (data.error) {
+                alert(data.error);
+                return;
+            }
+
+            /*
+             * Opening the modal marks the appointment reviewed in the database.
+             * Now immediately update the calendar card visually.
+             */
+            if (clickedElement) {
+                const calendarCard = clickedElement.closest(
+                    ".calendar-event, .day-timeline-appointment"
+                );
+
+                if (
+                    calendarCard &&
+                    calendarCard.classList.contains("unreviewed")
+                ) {
+                    calendarCard.classList.remove("unreviewed");
+                    calendarCard.classList.add("booked");
+
+                    const importIndicator = calendarCard.querySelector(
+                        ".appointment-review-badge"
+                    );
+
+                    if (importIndicator) {
+                        importIndicator.remove();
+                    }
+                }
+            }
+
+            const appointmentForName = (
+                data.appointment_for
+                || data.client_name
+                || ""
+            ).trim();
+
+            const bookedByName = (
+                data.booked_by_name
+                || data.client_name
+                || ""
+            ).trim();
+
+            const namesAreDifferent = (
+                appointmentForName.toLowerCase()
+                !== bookedByName.toLowerCase()
+            );
+
+            /*
+             * Native guest bookings use booking_for_other.
+             * GoDaddy appointments are also treated as guest
+             * bookings when appointment_for differs from the
+             * matched client name.
+             */
+            const isGuestBooking = Boolean(
+                data.booking_for_other
+            ) || namesAreDifferent;
+
+            setText(
+                "modalClientName",
+                appointmentForName
+            );
+
+            setText(
+                "modalBookedBy",
+                bookedByName
+            );
+
+            const bookedByRow =
+                document.getElementById(
+                    "modalBookedByRow"
+                );
+
+            if (bookedByRow) {
+                bookedByRow.style.display =
+                    isGuestBooking
+                        ? "block"
+                        : "none";
+            }
+
+            const guestBookingBadge =
+                document.getElementById(
+                    "modalGuestBookingBadge"
+                );
+
+            if (guestBookingBadge) {
+                guestBookingBadge.style.display =
+                    isGuestBooking
+                        ? "inline-block"
+                        : "none";
+            }
+
+            const verificationAlert =
+            document.getElementById(
+                "modalContactVerificationAlert"
+            );
+
+            const verificationTitle =
+                document.getElementById(
+                    "modalContactVerificationTitle"
+                );
+
+            const verificationMessage =
+                document.getElementById(
+                    "modalContactVerificationMessage"
+                );
+
+            const verificationDetails =
+                document.getElementById(
+                    "modalContactVerificationDetails"
+                );
+
+            const verificationType = (
+                data.contact_verification_type || ""
+            ).trim().toLowerCase();
+
+            const verificationIsPending = (
+                verificationType
+                && !data.contact_verification_resolved
+            );
+
+            if (verificationAlert) {
+                verificationAlert.style.display =
+                    verificationIsPending
+                        ? "block"
+                        : "none";
+            }
+
+            if (verificationIsPending) {
+                if (verificationType === "verify_email") {
+                    verificationTitle.innerText =
+                        "⚠ Verify Email";
+
+            verificationMessage.innerText =
+                "The email entered during online booking "
+                + "does not match the email currently on file. "
+                + "Please verify the client's email upon arrival.";
+
+            verificationDetails.innerText =
+                `Email on file: ${data.email || "Not entered"}`
+                + `\nEmail submitted: ${
+                    data.booking_contact_email_submitted
+                    || "Not entered"
+                }`;
+            }
+
+            else if (verificationType === "verify_phone") {
+                verificationTitle.innerText =
+                    "⚠ Verify Phone";
+
+                verificationMessage.innerText =
+                    "The phone number entered during online booking "
+                    + "does not match the phone number currently on file. "
+                    + "Please verify the client's phone number upon arrival.";
+
+                verificationDetails.innerText =
+                    `Phone on file: ${data.phone || "Not entered"}`
+                    + `\nPhone submitted: ${
+                        data.booking_contact_phone_submitted
+                        || "Not entered"
+                    }`;
+            }
+
+            else {
+                verificationTitle.innerText =
+                    "⚠ Verify Client Information";
+
+                verificationMessage.innerText =
+                    "The information entered during online booking "
+                    + "does not fully match the existing client record. "
+                    + "Please verify the client's information upon arrival.";
+
+                verificationDetails.innerText =
+                    `Client on file: ${data.client_name || "Not entered"}`
+                    + `\nName submitted: ${
+                        data.booking_contact_name_submitted
+                        || "Not entered"
+                    }`;
+            }
+        }
+        else {
+            if (verificationTitle) {
+                verificationTitle.innerText = "";
+            }
+
+            if (verificationMessage) {
+                verificationMessage.innerText = "";
+            }
+
+            if (verificationDetails) {
+                verificationDetails.innerText = "";
+            }
+        }
+
+
+            const phoneLabel =
+                document.getElementById(
+                    "modalPhoneLabel"
+                );
+
+            if (phoneLabel) {
+                phoneLabel.innerText =
+                    isGuestBooking
+                        ? "Booking Contact Phone:"
+                        : "Phone:";
+            }
+
+            const emailLabel =
+                document.getElementById(
+                    "modalEmailLabel"
+                );
+
+            if (emailLabel) {
+                emailLabel.innerText =
+                    isGuestBooking
+                        ? "Booking Contact Email:"
+                        : "Email:";
+            }
+
+            setText("modalDate", data.appointment_date);
+            setText("modalTime", data.start_time);
+            setText("modalService", data.service_name);
+            setText("modalProvider", data.provider_name || "Any Available");
+
+            const bookingChannel = (
+                data.booking_channel || ""
+            ).trim().toLowerCase();
+
+            const hasBookingConfirmation = [
+                "public_preview",
+                "public_online"
+            ].includes(bookingChannel);
+
+            const confirmationRow =
+                document.getElementById(
+                    "modalConfirmationRow"
+                );
+
+            if (confirmationRow) {
+                confirmationRow.style.display =
+                    hasBookingConfirmation
+                        ? "block"
+                        : "none";
+            }
+
+            setText(
+                "modalConfirmationNumber",
+                hasBookingConfirmation
+                    ? data.appointment_id
+                    : ""
+            );
+
+
+            setText(
+                "modalDuration",
+                data.duration_minutes
+                    ? `${data.duration_minutes} minutes`
+                    : "Not entered"
+            );
+
+            setText(
+                "modalPrice",
+                data.price_at_booking !== null &&
+                data.price_at_booking !== undefined &&
+                data.price_at_booking !== ""
+                    ? `$${Number(data.price_at_booking).toFixed(2)}`
+                    : "Not entered"
+            );
+
+            setText(
+                "modalNotes",
+                data.notes || "No appointment notes entered."
+            );
+
+
+            const todaysContactForm =
+                document.getElementById(
+                    "modalTodaysContactForm"
+                );
+
+            if (todaysContactForm) {
+                todaysContactForm.dataset.appointmentId =
+                    appointmentId;
+            }
+
+            const todaysContactName =
+                document.getElementById(
+                    "modalTodaysContactName"
+                );
+
+            if (todaysContactName) {
+                todaysContactName.value =
+                    data.todays_contact_name || "";
+            }
+
+            const todaysContactPhone =
+                document.getElementById(
+                    "modalTodaysContactPhone"
+                );
+
+            if (todaysContactPhone) {
+                todaysContactPhone.value =
+                    data.todays_contact_phone || "";
+            }
+
+            const todaysContactNote =
+                document.getElementById(
+                    "modalTodaysContactNote"
+                );
+
+            if (todaysContactNote) {
+                todaysContactNote.value =
+                    data.todays_contact_note || "";
+            }
+
+            const todaysContactStatus =
+                document.getElementById(
+                    "modalTodaysContactStatus"
+                );
+
+            if (todaysContactStatus) {
+                todaysContactStatus.innerText = "";
+                todaysContactStatus.style.color = "";
+            }
+
+            const phoneLink = document.getElementById("modalPhoneLink");
+
+            if (phoneLink) {
+                phoneLink.innerText = data.phone || "";
+                phoneLink.href = data.phone ? `tel:${data.phone}` : "#";
+            }
+
+            const emailLink = document.getElementById("modalEmailLink");
+
+            if (emailLink) {
+                emailLink.innerText = data.email || "";
+                emailLink.href = data.email
+                    ? `mailto:${data.email}`
+                    : "#";
+            }
+
+            const statusEl = document.getElementById("modalStatus");
+
+            if (statusEl) {
+                statusEl.innerText = data.status || "";
+                statusEl.className =
+                    "status-badge " + (data.status || "");
+            }
+
+            const status = (data.status || "").toLowerCase();
+
+            const completeForm =
+                document.getElementById("modalCompleteForm");
+
+            if (completeForm) {
+                completeForm.style.display =
+                    status === "booked" ? "inline" : "none";
+            }
+
+            const cancelForm =
+                document.getElementById("modalCancelForm");
+
+            if (cancelForm) {
+                cancelForm.action =
+                    `/cancel_appointment/${appointmentId}`;
+
+                cancelForm.style.display =
+                    status === "booked" ? "inline" : "none";
+            }
+
+            const rescheduleForm =
+                document.getElementById("modalRescheduleForm");
+
+            if (rescheduleForm) {
+                rescheduleForm.action =
+                    `/quick_reschedule_appointment/${appointmentId}`;
+            }
+
+            const rescheduleDate =
+                document.getElementById("modalRescheduleDate");
+
+            if (rescheduleDate) {
+                rescheduleDate.value =
+                    data.appointment_date || "";
+            }
+
+            const rescheduleTime =
+                document.getElementById("modalRescheduleTime");
+
+            if (rescheduleTime && data.raw_time) {
+                rescheduleTime.value = data.raw_time;
+            }
+
+            document.getElementById("modalEditBtn").href =
+                `/edit_appointment/${appointmentId}`;
+
+            document.getElementById("modalPaymentBtn").href =
+                `/add_income/${appointmentId}`;
+
+            const godaddyBtn =
+                document.getElementById("godaddyImportBtn");
+
+            if (godaddyBtn) {
+                if (
+                    (data.external_source || "").toLowerCase() ===
+                    "godaddy"
+                ) {
+                    godaddyBtn.style.display = "inline-block";
+                    godaddyBtn.href =
+                        `/godaddy-imports/${appointmentId}/raw`;
+                } else {
+                    godaddyBtn.style.display = "none";
+                    godaddyBtn.removeAttribute("href");
+                }
+            }
+
+            document.getElementById(
+                "appointmentModal"
+            ).style.display = "flex";
+        })
+        .catch(error => {
+            console.error(error);
+            alert("Modal error");
+        });
+}
+
+
+
+
+function saveTodaysContact(event) {
+    event.preventDefault();
+
+    const form = document.getElementById(
+        "modalTodaysContactForm"
+    );
+
+    const saveButton = document.getElementById(
+        "modalTodaysContactSaveBtn"
+    );
+
+    const statusElement = document.getElementById(
+        "modalTodaysContactStatus"
+    );
+
+    if (!form) {
+        return false;
+    }
+
+    const appointmentId =
+        form.dataset.appointmentId;
+
+    if (!appointmentId) {
+        if (statusElement) {
+            statusElement.innerText =
+                "Appointment was not identified.";
+
+            statusElement.style.color =
+                "#b91c1c";
+        }
+
+        return false;
+    }
+
+    const payload = {
+        todays_contact_name:
+            document.getElementById(
+                "modalTodaysContactName"
+            ).value.trim(),
+
+        todays_contact_phone:
+            document.getElementById(
+                "modalTodaysContactPhone"
+            ).value.trim(),
+
+        todays_contact_note:
+            document.getElementById(
+                "modalTodaysContactNote"
+            ).value.trim()
+    };
+
+    if (saveButton) {
+        saveButton.disabled = true;
+        saveButton.innerText = "Saving...";
+    }
+
+    if (statusElement) {
+        statusElement.innerText = "";
+        statusElement.style.color = "";
+    }
+
+    fetch(
+        `/appointment/${appointmentId}/todays-contact`,
+        {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(payload)
+        }
+    )
+        .then(async response => {
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(
+                    data.error
+                    || "Today's Contact could not be saved."
+                );
+            }
+
+            return data;
+        })
+        .then(data => {
+            document.getElementById(
+                "modalTodaysContactName"
+            ).value =
+                data.todays_contact_name || "";
+
+            document.getElementById(
+                "modalTodaysContactPhone"
+            ).value =
+                data.todays_contact_phone || "";
+
+            document.getElementById(
+                "modalTodaysContactNote"
+            ).value =
+                data.todays_contact_note || "";
+
+            if (statusElement) {
+                statusElement.innerText =
+                    "Saved.";
+
+                statusElement.style.color =
+                    "#2f855a";
+            }
+        })
+        .catch(error => {
+            console.error(error);
+
+            if (statusElement) {
+                statusElement.innerText =
+                    error.message;
+
+                statusElement.style.color =
+                    "#b91c1c";
+            }
+        })
+        .finally(() => {
+            if (saveButton) {
+                saveButton.disabled = false;
+                saveButton.innerText =
+                    "Save Today’s Contact";
+            }
+        });
+
+    return false;
+}
+
+
+function closeAppointmentModal() {
+    document.getElementById("appointmentModal").style.display = "none";
+}
+
+window.onclick = function(event) {
+    const modal = document.getElementById("appointmentModal");
+    if (event.target === modal) {
+        modal.style.display = "none";
+    }
+};
+
+
+document.addEventListener("keydown", function(e) {
+    if (e.key === "Escape") {
+        closeAppointmentModal();
+    }
+});
+
+function setupModalFormSafety() {
+    const completeForm = document.getElementById("modalCompleteForm");
+    const cancelForm = document.getElementById("modalCancelForm");
+
+    if (completeForm) {
+        completeForm.addEventListener("submit", function(e) {
+            const btn = completeForm.querySelector("button");
+            if (btn) {
+                btn.disabled = true;
+                btn.innerText = "Working...";
+            }
+            closeAppointmentModal();
+        });
+    }
+
+
+    if (cancelForm) {
+        cancelForm.addEventListener("submit", function(e) {
+            const btn = cancelForm.querySelector("button");
+            if (btn) {
+                btn.disabled = true;
+                btn.innerText = "Working...";
+            }
+            closeAppointmentModal();
+        });
+    }
+}
+
+setupModalFormSafety();
+
+
+    function toggleHelp(id) {
+    const box = document.getElementById(id);
+    box.style.display = box.style.display === "none" ? "block" : "none";
+    }
+
+
+</script>
+
+{% endblock %}

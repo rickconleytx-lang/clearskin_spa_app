@@ -31645,7 +31645,10 @@ def appointment_details(appointment_id):
             COALESCE(
                 a.contact_verification_resolved,
                 FALSE
-            ) AS contact_verification_resolved -- 2222
+            ) AS contact_verification_resolved, -- 22
+            a.todays_contact_name,             -- 23
+            a.todays_contact_phone,            -- 24
+            a.todays_contact_note              -- 25
         FROM appointments a
         JOIN clients c
             ON a.client_id = c.client_id
@@ -31756,12 +31759,169 @@ def appointment_details(appointment_id):
         "booking_contact_phone_submitted":
             appt[21] or "",
         "contact_verification_resolved":
-            bool(appt[22])
+            bool(appt[22]),
+
+        "todays_contact_name":
+            appt[23]
+            or f"{appt[4] or ''} {appt[5] or ''}".strip(),
+
+        "todays_contact_phone":
+            appt[24]
+            or appt[6]
+            or "",
+
+        "todays_contact_note":
+            appt[25]
+            or ""
     }
 
 
 
 
+
+
+@app.route(
+    "/appointment/<int:appointment_id>/todays-contact",
+    methods=["POST"]
+)
+@login_required
+@spa_required
+def save_appointment_todays_contact(appointment_id):
+    spa_id = current_spa_id()
+
+    submitted = request.get_json(
+        silent=True
+    ) or request.form
+
+    contact_name = (
+        submitted.get("todays_contact_name", "")
+        or ""
+    ).strip()
+
+    contact_phone = (
+        submitted.get("todays_contact_phone", "")
+        or ""
+    ).strip()
+
+    contact_note = (
+        submitted.get("todays_contact_note", "")
+        or ""
+    ).strip()
+
+    if len(contact_name) > 150:
+        return {
+            "error":
+                "Today's Contact name cannot exceed "
+                "150 characters."
+        }, 400
+
+    if len(contact_phone) > 50:
+        return {
+            "error":
+                "Today's Contact phone cannot exceed "
+                "50 characters."
+        }, 400
+
+    if len(contact_note) > 2000:
+        return {
+            "error":
+                "Today's Contact note cannot exceed "
+                "2,000 characters."
+        }, 400
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            UPDATE appointments
+            SET
+                todays_contact_name = %s,
+                todays_contact_phone = %s,
+                todays_contact_note = %s
+            WHERE appointment_id = %s
+              AND spa_id = %s
+            RETURNING client_id
+        """, (
+            contact_name or None,
+            contact_phone or None,
+            contact_note or None,
+            appointment_id,
+            spa_id
+        ))
+
+        updated_row = cur.fetchone()
+
+        if not updated_row:
+            conn.rollback()
+
+            return {
+                "error": "Appointment not found."
+            }, 404
+
+        client_id = updated_row[0]
+
+        cur.execute("""
+            SELECT
+                first_name,
+                last_name,
+                phone
+            FROM clients
+            WHERE client_id = %s
+              AND spa_id = %s
+        """, (
+            client_id,
+            spa_id
+        ))
+
+        client_row = cur.fetchone()
+
+        conn.commit()
+
+    except Exception as error:
+        conn.rollback()
+
+        print(
+            "SAVE TODAY'S CONTACT ERROR:",
+            error
+        )
+
+        return {
+            "error":
+                "Today's Contact could not be saved."
+        }, 500
+
+    finally:
+        cur.close()
+        conn.close()
+
+    default_name = ""
+
+    default_phone = ""
+
+    if client_row:
+        default_name = (
+            f"{client_row[0] or ''} "
+            f"{client_row[1] or ''}"
+        ).strip()
+
+        default_phone = (
+            client_row[2]
+            or ""
+        )
+
+    return {
+        "success": True,
+        "message": "Today's Contact saved.",
+        "todays_contact_name":
+            contact_name
+            or default_name,
+        "todays_contact_phone":
+            contact_phone
+            or default_phone,
+        "todays_contact_note":
+            contact_note
+    }
 
 
 #  -----------------------------
@@ -31774,6 +31934,542 @@ def appointment_details(appointment_id):
 
 
 from datetime import datetime, date
+
+
+# =========================================================
+# CALENDAR VIEW DATE HELPER
+# =========================================================
+
+def resolve_calendar_view_date():
+    selected_date = request.args.get(
+        "date",
+        ""
+    ).strip()
+
+    if not selected_date:
+        return get_spa_today()
+
+    try:
+        return datetime.strptime(
+            selected_date,
+            "%Y-%m-%d"
+        ).date()
+
+    except ValueError:
+        flash(
+            "Invalid calendar date. Showing today.",
+            "warning"
+        )
+        return get_spa_today()
+
+
+# =========================================================
+# DAY VIEW
+# =========================================================
+
+@app.route("/calendar/day")
+@login_required
+@spa_required
+def calendar_day_view():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    display_date = resolve_calendar_view_date()
+
+    spa_now = get_spa_now(spa_id)
+    today = spa_now.date()
+    now_time = spa_now.time()
+    current_minutes = (
+        now_time.hour * 60
+        + now_time.minute
+    )
+
+    previous_date = display_date - timedelta(days=1)
+    next_date = display_date + timedelta(days=1)
+
+    # booking_business_hours uses:
+    # 0 = Sunday through 6 = Saturday.
+    day_of_week = (
+        display_date.weekday() + 1
+    ) % 7
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                a.appointment_date,                         -- 0
+                a.appointment_time,                         -- 1
+                c.first_name,                               -- 2
+                c.last_name,                                -- 3
+                COALESCE(
+                    NULLIF(snt.service_name, ''),
+                    NULLIF(a.service_type, ''),
+                    NULLIF(a.external_service_name, ''),
+                    s.service_name,
+                    'Service not entered'
+                ) AS service_name,                          -- 4
+                a.status,                                   -- 5
+                a.appointment_id,                           -- 6
+                a.duration_minutes,                         -- 7
+                a.price_at_booking,                         -- 8
+                COALESCE(a.owner_reviewed, FALSE),          -- 9
+                a.appointment_for,                          -- 10
+                a.provider_name_at_booking,                 -- 11
+                a.room_number,                              -- 12
+                a.notes,                                    -- 13
+                a.client_id,                                -- 14
+                a.external_source,                          -- 15
+                a.provider_employee_id,                     -- 16
+                pe.first_name,                              -- 17
+                pe.last_name,                               -- 18
+                pe.employee_nickname,                       -- 19
+                pe.provider_color_code                      -- 20
+            FROM appointments a
+
+            JOIN clients c
+                ON a.client_id = c.client_id
+               AND a.spa_id = c.spa_id
+
+            LEFT JOIN service_name_types snt
+                ON a.service_type_id = snt.service_type_id
+               AND a.spa_id = snt.spa_id
+
+            LEFT JOIN services s
+                ON a.service_id = s.service_id
+               AND a.spa_id = s.spa_id
+
+            LEFT JOIN employees pe
+                ON pe.employee_id = a.provider_employee_id
+               AND pe.spa_id = a.spa_id
+
+            WHERE a.appointment_date = %s
+              AND a.spa_id = %s
+
+            ORDER BY
+                a.appointment_time,
+                a.appointment_id
+        """, (
+            display_date,
+            spa_id
+        ))
+
+        appointments = cur.fetchall()
+
+        business_hour_rows = []
+        provider_hour_rows = []
+
+        if business_unit_id is not None:
+            cur.execute("""
+                SELECT
+                    start_time,
+                    end_time
+                FROM booking_business_hours
+                WHERE spa_id = %s
+                  AND business_unit_id = %s
+                  AND day_of_week = %s
+                  AND is_active = TRUE
+                ORDER BY
+                    start_time,
+                    end_time
+            """, (
+                spa_id,
+                business_unit_id,
+                day_of_week
+            ))
+
+            business_hour_rows = cur.fetchall()
+
+            cur.execute("""
+                SELECT
+                    pbh.provider_employee_id,
+                    e.first_name,
+                    e.last_name,
+                    e.employee_nickname,
+                    e.provider_color_code,
+                    pbh.start_time,
+                    pbh.end_time
+                FROM provider_booking_hours pbh
+
+                JOIN employees e
+                  ON e.employee_id =
+                     pbh.provider_employee_id
+                 AND e.spa_id = pbh.spa_id
+
+                WHERE pbh.spa_id = %s
+                  AND pbh.business_unit_id = %s
+                  AND pbh.day_of_week = %s
+                  AND pbh.is_active = TRUE
+                  AND e.is_active = TRUE
+
+                ORDER BY
+                    COALESCE(
+                        NULLIF(
+                            TRIM(e.employee_nickname),
+                            ''
+                        ),
+                        NULLIF(
+                            TRIM(e.first_name),
+                            ''
+                        ),
+                        e.employee_id::TEXT
+                    ),
+                    e.last_name,
+                    pbh.start_time,
+                    pbh.end_time
+            """, (
+                spa_id,
+                business_unit_id,
+                day_of_week
+            ))
+
+            provider_hour_rows = cur.fetchall()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    def time_to_minutes(time_value):
+        return (
+            time_value.hour * 60
+            + time_value.minute
+        )
+
+    def format_minutes(total_minutes):
+        total_minutes = total_minutes % (24 * 60)
+        hour = total_minutes // 60
+        minute = total_minutes % 60
+
+        return datetime.strptime(
+            f"{hour:02d}:{minute:02d}",
+            "%H:%M"
+        ).strftime("%-I:%M %p")
+
+    def provider_display_name(
+        employee_id,
+        first_name,
+        last_name,
+        nickname
+    ):
+        nickname = (nickname or "").strip()
+        first_name = (first_name or "").strip()
+        last_name = (last_name or "").strip()
+
+        full_name = (
+            f"{first_name} {last_name}".strip()
+        )
+
+        return (
+            nickname
+            or full_name
+            or f"Employee {employee_id}"
+        )
+
+    business_periods = []
+
+    for start_time, end_time in business_hour_rows:
+        business_periods.append({
+            "start_minutes":
+                time_to_minutes(start_time),
+            "end_minutes":
+                time_to_minutes(end_time),
+            "start_display":
+                format_minutes(
+                    time_to_minutes(start_time)
+                ),
+            "end_display":
+                format_minutes(
+                    time_to_minutes(end_time)
+                )
+        })
+
+    providers_by_id = {}
+
+    for row in provider_hour_rows:
+        employee_id = row[0]
+
+        if employee_id not in providers_by_id:
+            providers_by_id[employee_id] = {
+                "provider_employee_id":
+                    employee_id,
+                "provider_key":
+                    str(employee_id),
+                "display_name":
+                    provider_display_name(
+                        employee_id,
+                        row[1],
+                        row[2],
+                        row[3]
+                    ),
+                "color":
+                    row[4] or "#8B5CF6",
+                "periods": []
+            }
+
+        providers_by_id[
+            employee_id
+        ]["periods"].append({
+            "start_minutes":
+                time_to_minutes(row[5]),
+            "end_minutes":
+                time_to_minutes(row[6]),
+            "start_display":
+                format_minutes(
+                    time_to_minutes(row[5])
+                ),
+            "end_display":
+                format_minutes(
+                    time_to_minutes(row[6])
+                )
+        })
+
+    # Include assigned providers who have an appointment
+    # even if no provider-hours row exists for the date.
+    for appt in appointments:
+        employee_id = appt[16]
+
+        if (
+            employee_id is not None
+            and employee_id not in providers_by_id
+        ):
+            providers_by_id[employee_id] = {
+                "provider_employee_id":
+                    employee_id,
+                "provider_key":
+                    str(employee_id),
+                "display_name":
+                    provider_display_name(
+                        employee_id,
+                        appt[17],
+                        appt[18],
+                        appt[19]
+                    ),
+                "color":
+                    appt[20] or "#8B5CF6",
+                "periods": []
+            }
+
+    has_unassigned = any(
+        appt[16] is None
+        for appt in appointments
+    )
+
+    provider_columns = list(
+        providers_by_id.values()
+    )
+
+    if has_unassigned:
+        provider_columns.append({
+            "provider_employee_id": None,
+            "provider_key": "unassigned",
+            "display_name":
+                "Any Available / Unassigned",
+            "color": "#7A7A7A",
+            "periods": []
+        })
+
+    timeline_appointments = []
+
+    for appt in appointments:
+        start_minutes = (
+            time_to_minutes(appt[1])
+            if appt[1]
+            else 0
+        )
+
+        duration_minutes = int(
+            appt[7] or 30
+        )
+
+        end_minutes = min(
+            start_minutes + duration_minutes,
+            24 * 60
+        )
+
+        recipient_name = (
+            appt[10]
+            or (
+                f"{appt[2] or ''} "
+                f"{appt[3] or ''}"
+            ).strip()
+            or "Client"
+        )
+
+        timeline_appointments.append({
+            "appointment_id": appt[6],
+            "provider_employee_id":
+                appt[16],
+            "provider_key":
+                str(appt[16])
+                if appt[16] is not None
+                else "unassigned",
+            "start_minutes": start_minutes,
+            "end_minutes": end_minutes,
+            "duration_minutes":
+                duration_minutes,
+            "start_display":
+                format_minutes(start_minutes),
+            "recipient_name":
+                recipient_name,
+            "service_name":
+                appt[4] or "Service not entered",
+            "provider_name":
+                appt[11] or "Any Available",
+            "room_number":
+                appt[12] or "",
+            "status":
+                (appt[5] or "").strip().lower(),
+            "owner_reviewed":
+                bool(appt[9]),
+            "external_source":
+                appt[15] or ""
+        })
+
+    range_starts = []
+    range_ends = []
+
+    for period in business_periods:
+        range_starts.append(
+            period["start_minutes"]
+        )
+        range_ends.append(
+            period["end_minutes"]
+        )
+
+    for provider in provider_columns:
+        for period in provider["periods"]:
+            range_starts.append(
+                period["start_minutes"]
+            )
+            range_ends.append(
+                period["end_minutes"]
+            )
+
+    for appt in timeline_appointments:
+        range_starts.append(
+            appt["start_minutes"]
+        )
+        range_ends.append(
+            appt["end_minutes"]
+        )
+
+    if range_starts and range_ends:
+        timeline_start_minutes = (
+            min(range_starts) // 30
+        ) * 30
+
+        timeline_end_minutes = (
+            (
+                max(range_ends) + 29
+            ) // 30
+        ) * 30
+    else:
+        timeline_start_minutes = 8 * 60
+        timeline_end_minutes = 6 * 60 + 12 * 60
+
+    timeline_start_minutes = max(
+        0,
+        timeline_start_minutes
+    )
+
+    timeline_end_minutes = min(
+        24 * 60,
+        timeline_end_minutes
+    )
+
+    if (
+        timeline_end_minutes
+        <= timeline_start_minutes
+    ):
+        timeline_end_minutes = min(
+            24 * 60,
+            timeline_start_minutes + 60
+        )
+
+    time_markers = []
+
+    for marker_minutes in range(
+        timeline_start_minutes,
+        timeline_end_minutes + 1,
+        30
+    ):
+        time_markers.append({
+            "minutes": marker_minutes,
+            "label":
+                format_minutes(marker_minutes)
+        })
+
+    active_appointments = [
+        appt
+        for appt in appointments
+        if (appt[5] or "").strip().lower()
+        not in {"cancelled", "canceled"}
+    ]
+
+    appointment_count = len(
+        active_appointments
+    )
+
+    return render_template(
+        "calendar_day_view.html",
+        display_date=display_date,
+        previous_date=previous_date,
+        next_date=next_date,
+        today=today,
+        now_time=now_time,
+        current_minutes=current_minutes,
+        appointments=appointments,
+        appointment_count=appointment_count,
+        business_periods=business_periods,
+        provider_columns=provider_columns,
+        timeline_appointments=(
+            timeline_appointments
+        ),
+        timeline_start_minutes=(
+            timeline_start_minutes
+        ),
+        timeline_end_minutes=(
+            timeline_end_minutes
+        ),
+        timeline_total_minutes=(
+            timeline_end_minutes
+            - timeline_start_minutes
+        ),
+        time_markers=time_markers
+    )
+
+
+# =========================================================
+# MONTH VIEW
+# =========================================================
+
+@app.route("/calendar/month")
+@login_required
+@spa_required
+def calendar_month_view():
+    display_date = resolve_calendar_view_date()
+
+    return render_template(
+        "calendar_month_view.html",
+        display_date=display_date
+    )
+
+
+# =========================================================
+# YEAR VIEW
+# =========================================================
+
+@app.route("/calendar/year")
+@login_required
+@spa_required
+def calendar_year_view():
+    display_date = resolve_calendar_view_date()
+
+    return render_template(
+        "calendar_year_view.html",
+        display_date=display_date
+    )
+
 
 @app.route("/daily_schedule")
 @login_required

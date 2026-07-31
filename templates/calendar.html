@@ -25,13 +25,46 @@
         <div style="margin-bottom:15px;">
 
         <div class="page-tool-pills" style="margin-top:10px;">
-            <a href="{{ url_for('appointments') }}" class="tool-pill tool-pill-small">
+            <a
+                href="{{ url_for('appointments') }}"
+                class="tool-pill tool-pill-small"
+            >
                 Appointments
+            </a>
+
+            <a
+                href="{{ url_for(
+                    'calendar_day_view',
+                    date=today.strftime('%Y-%m-%d')
+                ) }}"
+                class="tool-pill tool-pill-small"
+            >
+                Day
+            </a>
+
+            <a
+                href="{{ url_for(
+                    'calendar_month_view',
+                    date=week_days[0].strftime('%Y-%m-%d')
+                ) }}"
+                class="tool-pill tool-pill-small"
+            >
+                Month
+            </a>
+
+            <a
+                href="{{ url_for(
+                    'calendar_year_view',
+                    date=week_days[0].strftime('%Y-%m-%d')
+                ) }}"
+                class="tool-pill tool-pill-small"
+            >
+                Year
             </a>
         </div>
         <br>
         <div class="page-title">
-            <h1>Calendar</h1>
+            <h1>Week View</h1>
 
             <span class="help-icon"
                 onclick="toggleHelp('calendarHelp')">
