@@ -219,6 +219,36 @@
                 >
 
 
+                <div
+                    style="
+                        display:flex;
+                        align-items:center;
+                        gap:12px;
+                        flex-wrap:wrap;
+                        margin:0 0 18px;
+                    "
+                >
+                    <button
+                        type="button"
+                        id="worksBusinessHoursBtn"
+                        class="tool-pill tool-pill-small"
+                        onclick="copyBusinessHoursToProvider()"
+                    >
+                        Works Business Hours
+                    </button>
+
+                    <span
+                        id="worksBusinessHoursStatus"
+                        style="
+                            font-size:0.9rem;
+                            font-weight:700;
+                            color:#4a7c59;
+                        "
+                        aria-live="polite"
+                    ></span>
+                </div>
+
+
                 <div class="provider-hours-grid">
 
                     {% for day_index in range(7) %}
@@ -276,6 +306,17 @@
                                         {% endif %}
 
                                     </p>
+
+                                    {% for period in business_periods %}
+                                        <span
+                                            class="provider-business-period-source"
+                                            data-business-day="{{ day_index }}"
+                                            data-start-time="{{ period.start_time }}"
+                                            data-end-time="{{ period.end_time }}"
+                                            hidden
+                                        ></span>
+                                    {% endfor %}
+
 
                                 </div>
 
@@ -447,7 +488,12 @@
     }
 
 
-    function addProviderPeriod(dayIndex) {
+    function addProviderPeriod(
+        dayIndex,
+        startValue = "",
+        endValue = "",
+        focusInput = true
+    ) {
         const periodList = document.getElementById(
             `provider-period-list-${dayIndex}`
         );
@@ -467,6 +513,7 @@
                 <input
                     type="time"
                     name="start_time_${dayIndex}"
+                    value="${startValue}"
                     required
                 >
             </div>
@@ -477,6 +524,7 @@
                 <input
                     type="time"
                     name="end_time_${dayIndex}"
+                    value="${endValue}"
                     required
                 >
             </div>
@@ -501,8 +549,76 @@
             'input[type="time"]'
         );
 
-        if (startInput) {
+        if (startInput && focusInput) {
             startInput.focus();
+        }
+    }
+
+
+    function copyBusinessHoursToProvider() {
+        const confirmed = window.confirm(
+            "Replace the displayed provider hours "
+            + "with the current business hours? "
+            + "You will still need to click "
+            + "Save Provider Hours."
+        );
+
+        if (!confirmed) {
+            return;
+        }
+
+        for (
+            let dayIndex = 0;
+            dayIndex < 7;
+            dayIndex += 1
+        ) {
+            const periodList = document.getElementById(
+                `provider-period-list-${dayIndex}`
+            );
+
+            if (!periodList) {
+                continue;
+            }
+
+            periodList.innerHTML = "";
+
+            const businessPeriods =
+                document.querySelectorAll(
+                    `.provider-business-period-source`
+                    + `[data-business-day="${dayIndex}"]`
+                );
+
+            businessPeriods.forEach(period => {
+                addProviderPeriod(
+                    dayIndex,
+                    period.dataset.startTime || "",
+                    period.dataset.endTime || "",
+                    false
+                );
+            });
+
+            updateProviderClosedMessage(dayIndex);
+        }
+
+        const statusElement = document.getElementById(
+            "worksBusinessHoursStatus"
+        );
+
+        if (statusElement) {
+            statusElement.innerText =
+                "Business hours copied. "
+                + "Review and click Save Provider Hours.";
+        }
+
+        const saveButton = document.querySelector(
+            '.provider-save-row button[type="submit"]'
+        );
+
+        if (saveButton) {
+            saveButton.scrollIntoView({
+                behavior: "smooth",
+                block: "center"
+            });
         }
     }
 
