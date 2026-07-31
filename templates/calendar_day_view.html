@@ -411,6 +411,14 @@
     <div>
         <h1>Day View</h1>
 
+
+
+        <h2>
+            {{ display_date.strftime('%A, %B %d, %Y') }}
+        </h2>
+
+
+
         <div class="page-tool-pills" style="margin:10px 0 18px;">
             <a
                 href="{{ url_for(
@@ -443,9 +451,6 @@
             </a>
         </div>
 
-        <h2>
-            {{ display_date.strftime('%A, %B %d, %Y') }}
-        </h2>
 
         <div class="day-view-date-tools">
             <a

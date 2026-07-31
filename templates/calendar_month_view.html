@@ -291,39 +291,40 @@
             </h2>
         </div>
 
-        <div class="page-tool-pills">
-            <a
-                href="{{ url_for(
-                    'calendar_day_view',
-                    date=today.strftime('%Y-%m-%d')
-                ) }}"
-                class="tool-pill tool-pill-small"
-            >
-                Day
-            </a>
-
-            <a
-                href="{{ url_for(
-                    'calendar_view',
-                    week_start=today.strftime('%Y-%m-%d')
-                ) }}"
-                class="tool-pill tool-pill-small"
-            >
-                Week
-            </a>
-
-            <a
-                href="{{ url_for(
-                    'calendar_year_view',
-                    date=display_date.strftime('%Y-%m-%d')
-                ) }}"
-                class="tool-pill tool-pill-small"
-            >
-                Year
-            </a>
-        </div>
-
     </div>
+    <div class="page-tool-pills">
+        <a
+            href="{{ url_for(
+                'calendar_day_view',
+                date=today.strftime('%Y-%m-%d')
+            ) }}"
+            class="tool-pill tool-pill-small"
+        >
+            Day
+        </a>
+
+        <a
+            href="{{ url_for(
+                'calendar_view',
+                week_start=today.strftime('%Y-%m-%d')
+            ) }}"
+            class="tool-pill tool-pill-small"
+        >
+            Week
+        </a>
+
+        <a
+            href="{{ url_for(
+                'calendar_year_view',
+                date=display_date.strftime('%Y-%m-%d')
+            ) }}"
+            class="tool-pill tool-pill-small"
+        >
+            Year
+        </a>
+    </div>
+
+
 
 
     <div class="month-view-tools">

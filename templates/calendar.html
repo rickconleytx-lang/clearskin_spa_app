@@ -66,18 +66,9 @@
         <div class="page-title">
             <h1>Week View</h1>
 
-            <span class="help-icon"
-                onclick="toggleHelp('calendarHelp')">
-                ❔
-            </span>
+
         </div>
 
-            <div id="calendarHelp"
-                class="help-popover"
-                style="display:none;">
-                This is a test<br>
-                where is my text?
-            </div>
 
         <br>
         <h3>
@@ -103,7 +94,7 @@
                     name="goto_date"
                     value="{{ goto_date if goto_date else '' }}">
 
-                <button type="submit" 
+                <button type="submit"
                         class="tool-pill tool-pill-small">
                     Go To Date
                 </button>
@@ -126,12 +117,12 @@
                href="{{ url_for('calendar_view', week_start=next_week_start.strftime('%Y-%m-%d')) }}#week-view">
                 Next Week
             </a>
-            
+
         <div style="margin-top: 2rem;"></div>
 
         {% if overdue_count > 0 %}
         <div class="alert alert-danger">
-            
+
             <p><strong style="color: red;">{{ overdue_count }} overdue appointments.</strong></p>
 
             <a href="{{ url_for('appointments',
@@ -168,11 +159,11 @@
 
 <!-- =========================================================
      CALENDAR CONTENT CONTINUES BELOW
-========================================================= -->     
-       
+========================================================= -->
+
 
     </div>
-   
+
 
 </div>
 
@@ -440,7 +431,7 @@
 
         <p><strong>Date:</strong> <span id="modalDate"></span></p>
         <p><strong>Time:</strong> <span id="modalTime"></span></p>
-        
+
         <p><strong>Duration:</strong> <span id="modalDuration"></span></p>
         <p><strong>Price at Booking:</strong> <span id="modalPrice"></span></p>
         <p><strong>Status:</strong> <span id="modalStatus" class="status-badge"></span></p>
@@ -450,7 +441,7 @@
             style="background:#f7f7f7; padding:10px; border-radius:8px; white-space:pre-wrap;">
         </div>
 
- 
+
     <hr>
 
     <h3>Quick Reschedule</h3>
@@ -471,8 +462,8 @@
     <hr>
     <br>
 
-</form>    
-            
+</form>
+
     <div class="form-buttons">
             <a
                 id="godaddyImportBtn"
@@ -485,7 +476,7 @@
 
             <a id="modalEditBtn" class="btn">Edit Appointment</a>
             <a id="modalPaymentBtn" class="btn">Finish Session</a>
-            
+
 
             <form method="POST" id="modalCancelForm" style="display:inline;">
                 <input
@@ -1047,7 +1038,7 @@ function setupModalFormSafety() {
         });
     }
 
-    
+
     if (cancelForm) {
         cancelForm.addEventListener("submit", function(e) {
             const btn = cancelForm.querySelector("button");
