@@ -38278,6 +38278,8 @@ def booking_business_hours():
                         %s,
                         %s,
                         %s,
+                        %s,
+                        %s,
                         TRUE,
                         %s,
                         %s
@@ -39721,7 +39723,7 @@ def booking_provider_services():
     "can_manage_online_booking"
 )
 def booking_provider_time_off():
-    from datetime import datetime
+    from datetime import datetime, timedelta
 
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -39817,6 +39819,8 @@ def booking_provider_time_off():
             or f"Employee {employee_id}"
         )
 
+        filter_name = display_name
+
         if role_name:
             display_name = (
                 f"{display_name} — {role_name}"
@@ -39824,13 +39828,22 @@ def booking_provider_time_off():
 
         providers.append({
             "employee_id": employee_id,
-            "display_name": display_name
+            "display_name": display_name,
+            "filter_name": filter_name
         })
 
     provider_ids = {
         provider["employee_id"]
         for provider in providers
     }
+
+    filter_provider_id = request.args.get(
+        "filter_provider_id",
+        type=int
+    )
+
+    if filter_provider_id not in provider_ids:
+        filter_provider_id = None
 
     preserved_session_key = (
         "booking_provider_time_off_form"
@@ -39862,6 +39875,25 @@ def booking_provider_time_off():
             or ""
         ).strip()
 
+        is_all_day = (
+            request.form.get("is_all_day")
+            == "1"
+        )
+
+        all_day_start_date_raw = (
+            request.form.get(
+                "all_day_start_date"
+            )
+            or ""
+        ).strip()
+
+        all_day_end_date_raw = (
+            request.form.get(
+                "all_day_end_date"
+            )
+            or ""
+        ).strip()
+
         reason = (
             request.form.get("reason")
             or ""
@@ -39874,6 +39906,14 @@ def booking_provider_time_off():
             "block_type": block_type,
             "starts_at": starts_at_raw,
             "ends_at": ends_at_raw,
+            "is_all_day": is_all_day,
+
+            "all_day_start_date":
+                all_day_start_date_raw,
+
+            "all_day_end_date":
+                all_day_end_date_raw,
+
             "reason": reason
         }
 
@@ -39892,33 +39932,94 @@ def booking_provider_time_off():
         starts_at = None
         ends_at = None
 
-        if not starts_at_raw:
-            validation_errors.append(
-                "A start date and time are required."
-            )
-        else:
-            try:
-                starts_at = datetime.fromisoformat(
-                    starts_at_raw
-                )
-            except ValueError:
+        if is_all_day:
+            if not all_day_start_date_raw:
                 validation_errors.append(
-                    "The start date or time is invalid."
+                    "A start date is required for "
+                    "all-day time off."
                 )
 
-        if not ends_at_raw:
-            validation_errors.append(
-                "An end date and time are required."
-            )
-        else:
-            try:
-                ends_at = datetime.fromisoformat(
-                    ends_at_raw
-                )
-            except ValueError:
+            if not all_day_end_date_raw:
                 validation_errors.append(
-                    "The end date or time is invalid."
+                    "An end date is required for "
+                    "all-day time off."
                 )
+
+            if (
+                all_day_start_date_raw
+                and all_day_end_date_raw
+            ):
+                try:
+                    all_day_start_date = (
+                        datetime.strptime(
+                            all_day_start_date_raw,
+                            "%Y-%m-%d"
+                        ).date()
+                    )
+
+                    all_day_end_date = (
+                        datetime.strptime(
+                            all_day_end_date_raw,
+                            "%Y-%m-%d"
+                        ).date()
+                    )
+
+                    if (
+                        all_day_end_date
+                        < all_day_start_date
+                    ):
+                        validation_errors.append(
+                            "The all-day end date cannot "
+                            "be earlier than the start date."
+                        )
+
+                    else:
+                        starts_at = datetime.combine(
+                            all_day_start_date,
+                            datetime.min.time()
+                        )
+
+                        ends_at = datetime.combine(
+                            (
+                                all_day_end_date
+                                + timedelta(days=1)
+                            ),
+                            datetime.min.time()
+                        )
+
+                except ValueError:
+                    validation_errors.append(
+                        "The all-day date range is invalid."
+                    )
+
+        else:
+            if not starts_at_raw:
+                validation_errors.append(
+                    "A start date and time are required."
+                )
+            else:
+                try:
+                    starts_at = datetime.fromisoformat(
+                        starts_at_raw
+                    )
+                except ValueError:
+                    validation_errors.append(
+                        "The start date or time is invalid."
+                    )
+
+            if not ends_at_raw:
+                validation_errors.append(
+                    "An end date and time are required."
+                )
+            else:
+                try:
+                    ends_at = datetime.fromisoformat(
+                        ends_at_raw
+                    )
+                except ValueError:
+                    validation_errors.append(
+                        "The end date or time is invalid."
+                    )
 
         if (
             starts_at is not None
@@ -40092,6 +40193,7 @@ def booking_provider_time_off():
                         ends_at = %s,
                         block_type = %s,
                         reason = %s,
+                        is_all_day = %s,
                         updated_at = CURRENT_TIMESTAMP,
                         updated_by = %s
                     WHERE provider_time_off_id = %s
@@ -40104,6 +40206,7 @@ def booking_provider_time_off():
                     ends_at,
                     block_type,
                     reason or None,
+                    is_all_day,
                     user_id,
                     provider_time_off_id,
                     spa_id,
@@ -40130,11 +40233,13 @@ def booking_provider_time_off():
                         ends_at,
                         block_type,
                         reason,
+                        is_all_day,
                         is_active,
                         created_by,
                         updated_by
                     )
                     VALUES (
+                        %s,
                         %s,
                         %s,
                         %s,
@@ -40154,6 +40259,7 @@ def booking_provider_time_off():
                     ends_at,
                     block_type,
                     reason or None,
+                    is_all_day,
                     user_id,
                     user_id
                 ))
@@ -40208,6 +40314,11 @@ def booking_provider_time_off():
             "view": "upcoming"
         }
 
+        if filter_provider_id is not None:
+            redirect_values["filter_provider_id"] = (
+                filter_provider_id
+            )
+
         if (
             provider_time_off_id is not None
             and session.get(preserved_session_key)
@@ -40244,7 +40355,8 @@ def booking_provider_time_off():
                     ends_at,
                     block_type,
                     reason,
-                    is_active
+                    is_active,
+                    is_all_day
                 FROM provider_time_off
                 WHERE provider_time_off_id = %s
                   AND spa_id = %s
@@ -40342,7 +40454,23 @@ def booking_provider_time_off():
                 "%Y-%m-%dT%H:%M"
             ),
             "block_type": editing_row[4],
-            "reason": editing_row[5] or ""
+            "reason": editing_row[5] or "",
+            "is_all_day": bool(editing_row[7]),
+
+            "all_day_start_date": (
+                editing_row[2].date().isoformat()
+                if editing_row[7]
+                else ""
+            ),
+
+            "all_day_end_date": (
+                (
+                    editing_row[3]
+                    - timedelta(days=1)
+                ).date().isoformat()
+                if editing_row[7]
+                else ""
+            )
         }
 
     else:
@@ -40365,6 +40493,9 @@ def booking_provider_time_off():
             "starts_at": "",
             "ends_at": "",
             "block_type": "time_off",
+            "is_all_day": False,
+            "all_day_start_date": "",
+            "all_day_end_date": "",
             "reason": ""
         }
 
@@ -40381,6 +40512,7 @@ def booking_provider_time_off():
             pto.block_type,
             pto.reason,
             pto.is_active,
+            pto.is_all_day,
             e.first_name,
             e.last_name,
             e.employee_nickname
@@ -40396,6 +40528,15 @@ def booking_provider_time_off():
         spa_id,
         business_unit_id
     ]
+
+    if filter_provider_id is not None:
+        records_query += """
+            AND pto.provider_employee_id = %s
+        """
+
+        records_params.append(
+            filter_provider_id
+        )
 
     if view_filter == "upcoming":
         records_query += """
@@ -40475,10 +40616,11 @@ def booking_provider_time_off():
         block_type = row[4]
         reason = row[5]
         is_active = bool(row[6])
+        is_all_day = bool(row[7])
 
-        first_name = (row[7] or "").strip()
-        last_name = (row[8] or "").strip()
-        nickname = (row[9] or "").strip()
+        first_name = (row[8] or "").strip()
+        last_name = (row[9] or "").strip()
+        nickname = (row[10] or "").strip()
 
         provider_name = (
             nickname
@@ -40505,6 +40647,33 @@ def booking_provider_time_off():
             status = "Upcoming"
             status_class = "upcoming"
 
+        if is_all_day:
+            inclusive_end_date = (
+                ends_at
+                - timedelta(days=1)
+            )
+
+            starts_at_display = (
+                starts_at.strftime("%m/%d/%Y")
+                + " — All Day"
+            )
+
+            ends_at_display = (
+                inclusive_end_date.strftime(
+                    "%m/%d/%Y"
+                )
+                + " — All Day"
+            )
+
+        else:
+            starts_at_display = (
+                format_local_time_off(starts_at)
+            )
+
+            ends_at_display = (
+                format_local_time_off(ends_at)
+            )
+
         time_off_records.append({
             "provider_time_off_id": (
                 provider_time_off_id
@@ -40513,12 +40682,13 @@ def booking_provider_time_off():
                 provider_employee_id
             ),
             "provider_name": provider_name,
-            "starts_at_display": (
-                format_local_time_off(starts_at)
-            ),
-            "ends_at_display": (
-                format_local_time_off(ends_at)
-            ),
+            "starts_at_display":
+                starts_at_display,
+
+            "ends_at_display":
+                ends_at_display,
+
+            "is_all_day": is_all_day,
             "block_type_display": (
                 block_type_labels.get(
                     block_type,
@@ -40541,6 +40711,7 @@ def booking_provider_time_off():
         form_data=form_data,
         editing_time_off=editing_time_off,
         selected_provider_id=selected_provider_id,
+        filter_provider_id=filter_provider_id,
         time_off_records=time_off_records,
         view_filter=view_filter
     )
@@ -43609,12 +43780,35 @@ def _booking_build_public_availability(
     """
     from datetime import datetime, timedelta
 
+    def format_windows(windows):
+        displays = []
+
+        for window_start, window_end in windows:
+            start_display = (
+                window_start
+                .strftime("%I:%M %p")
+                .lstrip("0")
+            )
+
+            end_display = (
+                window_end
+                .strftime("%I:%M %p")
+                .lstrip("0")
+            )
+
+            displays.append(
+                f"{start_display}–{end_display}"
+            )
+
+        return ", ".join(displays)
+
     def result(
         *,
         results=None,
         message="",
         provider_id="any",
-        date_display=""
+        date_display="",
+        business_hours_display=""
     ):
         results = list(results or [])
 
@@ -43627,7 +43821,9 @@ def _booking_build_public_availability(
             ),
             "availability_message": message,
             "selected_provider_id": provider_id,
-            "date_display": date_display
+            "date_display": date_display,
+            "business_hours_display":
+                business_hours_display
         }
 
 
@@ -43938,7 +44134,8 @@ def _booking_build_public_availability(
                 "available for this service."
             ),
             provider_id=normalized_provider_id,
-            date_display=date_display
+            date_display=date_display,
+            business_hours_display="Closed"
         )
 
 
@@ -44597,10 +44794,16 @@ def _booking_build_public_availability(
             )
 
         elif not slots:
-            summary_reason = (
-                "No available times remain for "
-                "this provider on the selected date."
-            )
+            if provider_time_off.get(provider_id):
+                summary_reason = (
+                    "This provider is unavailable "
+                    "on the selected date."
+                )
+            else:
+                summary_reason = (
+                    "No available times remain for "
+                    "this provider on the selected date."
+                )
 
         else:
             summary_reason = ""
@@ -44612,6 +44815,21 @@ def _booking_build_public_availability(
             "provider_name":
                 assignment["provider_name"],
             "slots": slots,
+
+            "has_provider_time_off": bool(
+                provider_time_off.get(provider_id)
+            ),
+
+            "provider_hours_display": (
+                format_windows(
+                    provider_windows.get(
+                        provider_id,
+                        []
+                    )
+                )
+                or "Not scheduled"
+            ),
+
             "availability_summary_reason":
                 summary_reason
         })
@@ -44620,7 +44838,9 @@ def _booking_build_public_availability(
     return result(
         results=availability_results,
         provider_id=normalized_provider_id,
-        date_display=date_display
+        date_display=date_display,
+        business_hours_display=
+            format_windows(business_windows)
     )
 
 
@@ -44629,7 +44849,7 @@ def _render_public_booking_page(
     preview_mode=False,
     availability_context=None
 ):
-    from datetime import timedelta
+    from datetime import datetime, timedelta
 
     availability_context = dict(
         availability_context or {}
@@ -45070,6 +45290,14 @@ def _render_public_booking_page(
             or ""
         )
 
+        business_hours_display = str(
+            availability_context.get(
+                "business_hours_display",
+                ""
+            )
+            or ""
+        )
+
 
         availability_message = str(
             availability_context.get(
@@ -45078,6 +45306,8 @@ def _render_public_booking_page(
             )
             or ""
         )
+
+        coach_booking_advice = None
 
 
         # Real public GET availability search.
@@ -45142,6 +45372,311 @@ def _render_public_booking_page(
                 ]
                 or ""
             )
+
+            business_hours_display = str(
+                public_availability.get(
+                    "business_hours_display",
+                    ""
+                )
+                or ""
+            )
+
+            def first_coach_option(
+                availability_data
+            ):
+                earliest_option = None
+
+                for provider_result in (
+                    availability_data.get(
+                        "availability_results",
+                        []
+                    )
+                ):
+                    provider_slots = list(
+                        provider_result.get(
+                            "slots",
+                            []
+                        )
+                    )
+
+                    if not provider_slots:
+                        continue
+
+                    first_slot = provider_slots[0]
+
+                    coach_option = {
+                        "slot_value":
+                            first_slot.get("value", ""),
+
+                        "slot_display":
+                            first_slot.get("display", ""),
+
+                        "provider_id":
+                            provider_result.get(
+                                "provider_employee_id"
+                            ),
+
+                        "provider_name":
+                            str(
+                                provider_result.get(
+                                    "provider_name",
+                                    "Provider"
+                                )
+                                or "Provider"
+                            ),
+
+                        "date_display":
+                            str(
+                                availability_data.get(
+                                    "date_display",
+                                    ""
+                                )
+                                or ""
+                            )
+                    }
+
+                    if (
+                        earliest_option is None
+                        or coach_option["slot_value"]
+                        < earliest_option["slot_value"]
+                    ):
+                        earliest_option = coach_option
+
+                return earliest_option
+
+
+            earliest_coach_option = (
+                first_coach_option(
+                    public_availability
+                )
+            )
+
+
+            if earliest_coach_option:
+                coach_booking_advice = {
+                    "title": "Next Available Time",
+
+                    "message": (
+                        f"{earliest_coach_option['provider_name']}'s "
+                        f"next available time for "
+                        f"{selected_service_name} on "
+                        f"{date_display} is "
+                        f"{earliest_coach_option['slot_display']}."
+                    ),
+
+                    "options": [
+                        earliest_coach_option
+                    ]
+                }
+
+            else:
+                try:
+                    selected_date_value = (
+                        selected_date
+                        if not isinstance(
+                            selected_date,
+                            str
+                        )
+                        else datetime.strptime(
+                            selected_date,
+                            "%Y-%m-%d"
+                        ).date()
+                    )
+                except (TypeError, ValueError):
+                    selected_date_value = None
+
+                nearby_options = []
+
+                if selected_date_value is not None:
+                    earliest_search_date = (
+                        local_now.date()
+                    )
+
+                    latest_search_date = (
+                        local_now.date()
+                        + timedelta(
+                            days=(
+                                maximum_booking_days_ahead
+                            )
+                        )
+                    )
+
+                    earlier_date = (
+                        selected_date_value
+                        - timedelta(days=1)
+                    )
+
+                    while (
+                        earlier_date
+                        >= earliest_search_date
+                    ):
+                        earlier_availability = (
+                            _booking_build_public_availability(
+                                cur=cur,
+                                spa_id=spa_id,
+                                business_unit_id=
+                                    business_unit_id,
+                                service_type_id=
+                                    selected_service_id,
+                                selected_provider_id=
+                                    selected_provider_id,
+                                selected_date=
+                                    earlier_date
+                            )
+                        )
+
+                        earlier_option = (
+                            first_coach_option(
+                                earlier_availability
+                            )
+                        )
+
+                        if earlier_option:
+                            nearby_options.append(
+                                earlier_option
+                            )
+                            break
+
+                        earlier_date -= timedelta(
+                            days=1
+                        )
+
+                    later_date = (
+                        selected_date_value
+                        + timedelta(days=1)
+                    )
+
+                    while (
+                        later_date
+                        <= latest_search_date
+                    ):
+                        later_availability = (
+                            _booking_build_public_availability(
+                                cur=cur,
+                                spa_id=spa_id,
+                                business_unit_id=
+                                    business_unit_id,
+                                service_type_id=
+                                    selected_service_id,
+                                selected_provider_id=
+                                    selected_provider_id,
+                                selected_date=
+                                    later_date
+                            )
+                        )
+
+                        later_option = (
+                            first_coach_option(
+                                later_availability
+                            )
+                        )
+
+                        if later_option:
+                            nearby_options.append(
+                                later_option
+                            )
+                            break
+
+                        later_date += timedelta(
+                            days=1
+                        )
+
+                nearby_options.sort(
+                    key=lambda option: (
+                        option.get(
+                            "slot_value",
+                            ""
+                        )
+                    )
+                )
+
+                if nearby_options:
+                    current_reasons = [
+                        str(
+                            provider_result.get(
+                                "availability_summary_reason",
+                                ""
+                            )
+                            or ""
+                        )
+                        for provider_result
+                        in availability_results
+                    ]
+
+                    business_closed = any(
+                        "business is closed"
+                        in reason.lower()
+                        for reason in current_reasons
+                    )
+
+                    provider_time_off_results = [
+                        provider_result
+                        for provider_result
+                        in availability_results
+                        if provider_result.get(
+                            "has_provider_time_off"
+                        )
+                    ]
+
+                    provider_unavailable = (
+                        len(availability_results) == 1
+                        and len(
+                            provider_time_off_results
+                        ) == 1
+                    )
+
+                    if business_closed:
+                        coach_title = (
+                            "Business Closed"
+                        )
+
+                        coach_message = (
+                            f"The business is closed on "
+                            f"{date_display}. Here are the "
+                            f"closest available times for "
+                            f"{selected_service_name}."
+                        )
+
+                    elif provider_unavailable:
+                        unavailable_provider_name = str(
+                            provider_time_off_results[0]
+                            .get(
+                                "provider_name",
+                                "Provider"
+                            )
+                            or "Provider"
+                        )
+
+                        coach_title = (
+                            "Provider Unavailable"
+                        )
+
+                        coach_message = (
+                            f"{unavailable_provider_name} "
+                            f"is unavailable on "
+                            f"{date_display}. Here are "
+                            f"{unavailable_provider_name}'s "
+                            f"closest available times for "
+                            f"{selected_service_name}."
+                        )
+
+                    else:
+                        coach_title = (
+                            "Nearby Availability"
+                        )
+
+                        coach_message = (
+                            f"No times are available on "
+                            f"{date_display}. Here are the "
+                            f"closest available times for "
+                            f"{selected_service_name}."
+                        )
+
+                    coach_booking_advice = {
+                        "title": coach_title,
+                        "message": coach_message,
+                        "options": nearby_options
+                    }
 
         minimum_date = (
             availability_context.get(
@@ -45215,8 +45750,15 @@ def _render_public_booking_page(
             selected_service_name=
                 selected_service_name,
             date_display=date_display,
+
+            business_hours_display=
+                business_hours_display,
+
             availability_message=
                 availability_message,
+
+            coach_booking_advice=
+                coach_booking_advice,
 
             booking_csrf_token=
                 booking_csrf_token
@@ -47843,12 +48385,17 @@ def booking_availability_test():
                     not slots
                     and not availability_summary_reason
                 ):
-                    availability_summary_reason = (
-                        "Every eligible start time is "
-                        "blocked by booking notice, "
-                        "time off, or an existing "
-                        "appointment."
-                    )
+                    if provider_time_off:
+                        availability_summary_reason = (
+                            "The provider is unavailable "
+                            "on the selected date."
+                        )
+                    else:
+                        availability_summary_reason = (
+                            "Every eligible start time is "
+                            "blocked by booking notice or "
+                            "an existing appointment."
+                        )
 
                 availability_results.append({
                     "provider_employee_id":
@@ -47870,6 +48417,9 @@ def booking_availability_test():
 
                     "slots": slots,
                     "blocked_slots": blocked_slots,
+
+                    "has_provider_time_off":
+                        bool(provider_time_off),
 
                     "availability_summary_reason":
                         availability_summary_reason

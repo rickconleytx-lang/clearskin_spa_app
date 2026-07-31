@@ -256,7 +256,112 @@
                     </div>
 
 
-                    <div class="time-off-form-field">
+                    <div
+                        class="
+                            time-off-form-field
+                            time-off-form-field-wide
+                        "
+                    >
+                        <label
+                            for="is_all_day"
+                            style="
+                                display: flex;
+                                align-items: center;
+                                gap: 9px;
+                                cursor: pointer;
+                            "
+                        >
+                            <input
+                                type="checkbox"
+                                name="is_all_day"
+                                id="is_all_day"
+                                value="1"
+                                {% if form_data.is_all_day %}
+                                    checked
+                                {% endif %}
+                                style="
+                                    width: auto;
+                                    min-height: auto;
+                                    margin: 0;
+                                "
+                            >
+
+                            <span>
+                                All Day
+                            </span>
+                        </label>
+
+                        <p class="time-off-help">
+                            Block the provider for one or more
+                            complete consecutive days.
+                        </p>
+                    </div>
+
+
+                    <div
+                        class="time-off-form-field"
+                        id="allDayStartDateField"
+                        {% if not form_data.is_all_day %}
+                            hidden
+                        {% endif %}
+                    >
+                        <label for="all_day_start_date">
+                            Start Date
+                        </label>
+
+                        <input
+                            type="date"
+                            name="all_day_start_date"
+                            id="all_day_start_date"
+                            value="{{
+                                form_data
+                                .all_day_start_date
+                            }}"
+                            {% if form_data.is_all_day %}
+                                required
+                            {% endif %}
+                        >
+                    </div>
+
+
+                    <div
+                        class="time-off-form-field"
+                        id="allDayEndDateField"
+                        {% if not form_data.is_all_day %}
+                            hidden
+                        {% endif %}
+                    >
+                        <label for="all_day_end_date">
+                            End Date
+                        </label>
+
+                        <input
+                            type="date"
+                            name="all_day_end_date"
+                            id="all_day_end_date"
+                            value="{{
+                                form_data
+                                .all_day_end_date
+                            }}"
+                            {% if form_data.is_all_day %}
+                                required
+                            {% endif %}
+                        >
+
+                        <p class="time-off-help">
+                            Use the same date for a single
+                            full day.
+                        </p>
+                    </div>
+
+
+                    <div
+                        class="time-off-form-field"
+                        id="partialStartField"
+                        {% if form_data.is_all_day %}
+                            hidden
+                        {% endif %}
+                    >
 
                         <label for="starts_at">
                             Starts
@@ -267,13 +372,23 @@
                             name="starts_at"
                             id="starts_at"
                             value="{{ form_data.starts_at }}"
-                            required
+                            {% if form_data.is_all_day %}
+                                disabled
+                            {% else %}
+                                required
+                            {% endif %}
                         >
 
                     </div>
 
 
-                    <div class="time-off-form-field">
+                    <div
+                        class="time-off-form-field"
+                        id="partialEndField"
+                        {% if form_data.is_all_day %}
+                            hidden
+                        {% endif %}
+                    >
 
                         <label for="ends_at">
                             Ends
@@ -284,7 +399,11 @@
                             name="ends_at"
                             id="ends_at"
                             value="{{ form_data.ends_at }}"
-                            required
+                            {% if form_data.is_all_day %}
+                                disabled
+                            {% else %}
+                                required
+                            {% endif %}
                         >
 
                     </div>
@@ -338,7 +457,9 @@
                         <a
                             href="{{ url_for(
                                 'booking_provider_time_off',
-                                provider_employee_id=form_data.provider_employee_id
+                                provider_employee_id=form_data.provider_employee_id,
+                                filter_provider_id=filter_provider_id,
+                                view=view_filter
                             ) }}"
                             class="btn"
                         >
@@ -369,6 +490,7 @@
                 href="{{ url_for(
                     'booking_provider_time_off',
                     provider_employee_id=selected_provider_id,
+                    filter_provider_id=filter_provider_id,
                     view='upcoming'
                 ) }}"
                 class="tool-pill tool-pill-small"
@@ -384,6 +506,7 @@
                 href="{{ url_for(
                     'booking_provider_time_off',
                     provider_employee_id=selected_provider_id,
+                    filter_provider_id=filter_provider_id,
                     view='history'
                 ) }}"
                 class="tool-pill tool-pill-small"
@@ -399,6 +522,7 @@
                 href="{{ url_for(
                     'booking_provider_time_off',
                     provider_employee_id=selected_provider_id,
+                    filter_provider_id=filter_provider_id,
                     view='all'
                 ) }}"
                 class="tool-pill tool-pill-small"
@@ -411,6 +535,74 @@
             </a>
 
         </div>
+
+
+        <form
+            method="GET"
+            action="{{ url_for(
+                'booking_provider_time_off'
+            ) }}"
+            class="service-filter-row"
+        >
+
+            <input
+                type="hidden"
+                name="provider_employee_id"
+                value="{{ selected_provider_id or '' }}"
+            >
+
+            <input
+                type="hidden"
+                name="view"
+                value="{{ view_filter }}"
+            >
+
+            <label
+                for="filter_provider_id"
+                style="font-weight: 700;"
+            >
+                Provider:
+            </label>
+
+            <select
+                name="filter_provider_id"
+                id="filter_provider_id"
+                onchange="this.form.submit();"
+                style="
+                    width: auto;
+                    min-width: 190px;
+                "
+            >
+
+                <option value="">
+                    All Providers
+                </option>
+
+                {% for provider in providers %}
+
+                    <option
+                        value="{{ provider.employee_id }}"
+                        {% if filter_provider_id == provider.employee_id %}
+                            selected
+                        {% endif %}
+                    >
+                        {{ provider.filter_name }}
+                    </option>
+
+                {% endfor %}
+
+            </select>
+
+            <noscript>
+                <button
+                    type="submit"
+                    class="tool-pill tool-pill-small"
+                >
+                    Apply
+                </button>
+            </noscript>
+
+        </form>
 
 
         {% if time_off_records %}
@@ -486,7 +678,8 @@
                                                     'booking_provider_time_off',
                                                     provider_employee_id=record.provider_employee_id,
                                                     edit_id=record.provider_time_off_id,
-                                                    view=view_filter
+                                                    view=view_filter,
+                                                    filter_provider_id=filter_provider_id
                                                 ) }}"
                                                 class="tool-pill tool-pill-small"
                                             >
@@ -575,5 +768,154 @@
     {% endif %}
 
 </div>
+
+<script>
+document.addEventListener(
+    "DOMContentLoaded",
+    function () {
+        const allDayCheckbox =
+            document.getElementById(
+                "is_all_day"
+            );
+
+        const allDayStartDateField =
+            document.getElementById(
+                "allDayStartDateField"
+            );
+
+        const allDayEndDateField =
+            document.getElementById(
+                "allDayEndDateField"
+            );
+
+        const allDayStartDateInput =
+            document.getElementById(
+                "all_day_start_date"
+            );
+
+        const allDayEndDateInput =
+            document.getElementById(
+                "all_day_end_date"
+            );
+
+        const partialStartField =
+            document.getElementById(
+                "partialStartField"
+            );
+
+        const partialEndField =
+            document.getElementById(
+                "partialEndField"
+            );
+
+        const startsAtInput =
+            document.getElementById(
+                "starts_at"
+            );
+
+        const endsAtInput =
+            document.getElementById(
+                "ends_at"
+            );
+
+        if (
+            !allDayCheckbox
+            || !allDayStartDateField
+            || !allDayEndDateField
+            || !allDayStartDateInput
+            || !allDayEndDateInput
+            || !partialStartField
+            || !partialEndField
+            || !startsAtInput
+            || !endsAtInput
+        ) {
+            return;
+        }
+
+
+        function updateAllDayFields() {
+            const isAllDay =
+                allDayCheckbox.checked;
+
+            if (
+                isAllDay
+                && !allDayStartDateInput.value
+                && startsAtInput.value
+            ) {
+                allDayStartDateInput.value =
+                    startsAtInput.value.slice(
+                        0,
+                        10
+                    );
+            }
+
+            if (
+                isAllDay
+                && !allDayEndDateInput.value
+                && endsAtInput.value
+            ) {
+                allDayEndDateInput.value =
+                    endsAtInput.value.slice(
+                        0,
+                        10
+                    );
+            }
+
+            if (
+                isAllDay
+                && allDayStartDateInput.value
+                && !allDayEndDateInput.value
+            ) {
+                allDayEndDateInput.value =
+                    allDayStartDateInput.value;
+            }
+
+            allDayStartDateField.hidden =
+                !isAllDay;
+
+            allDayEndDateField.hidden =
+                !isAllDay;
+
+            allDayStartDateInput.disabled =
+                !isAllDay;
+
+            allDayEndDateInput.disabled =
+                !isAllDay;
+
+            allDayStartDateInput.required =
+                isAllDay;
+
+            allDayEndDateInput.required =
+                isAllDay;
+
+            partialStartField.hidden =
+                isAllDay;
+
+            partialEndField.hidden =
+                isAllDay;
+
+            startsAtInput.disabled =
+                isAllDay;
+
+            endsAtInput.disabled =
+                isAllDay;
+
+            startsAtInput.required =
+                !isAllDay;
+
+            endsAtInput.required =
+                !isAllDay;
+        }
+
+
+        allDayCheckbox.addEventListener(
+            "change",
+            updateAllDayFields
+        );
+
+        updateAllDayFields();
+    }
+);
+</script>
 
 {% endblock %}

@@ -343,6 +343,26 @@
             color: var(--muted);
         }
 
+        .availability-hours {
+            margin-top: 7px;
+            color: var(--ink);
+            font-size: 0.94rem;
+        }
+
+        .availability-hours strong {
+            color: var(--peach-dark);
+        }
+
+        .provider-hours {
+            margin: -5px 0 13px;
+            color: var(--muted);
+            font-size: 0.92rem;
+        }
+
+        .provider-hours strong {
+            color: var(--ink);
+        }
+
         .availability-total {
             padding: 7px 11px;
             border-radius: 999px;
@@ -350,6 +370,49 @@
             border: 1px solid var(--border);
             font-weight: 800;
             white-space: nowrap;
+        }
+
+        .coach-booking-card {
+            margin: 0 0 18px;
+            padding: 17px 18px;
+            border: 1px solid #efc4ad;
+            border-radius: 14px;
+            background: #fff7f1;
+            box-shadow: 0 8px 20px rgba(91, 55, 39, 0.07);
+        }
+
+        .coach-booking-header {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            margin-bottom: 8px;
+        }
+
+        .coach-booking-header h3 {
+            margin: 0;
+            color: var(--peach-dark);
+            font-size: 1.05rem;
+        }
+
+        .coach-booking-title {
+            margin: 0 0 6px;
+            font-weight: 800;
+            color: var(--ink);
+        }
+
+        .coach-booking-message {
+            margin: 0;
+            color: var(--ink);
+            line-height: 1.5;
+        }
+
+        .coach-booking-action {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-top: 13px;
+            min-height: 42px;
+            padding: 9px 15px;
         }
 
         .provider-availability {
@@ -1048,6 +1111,13 @@
                                             • {{ date_display }}
                                         {% endif %}
                                     </p>
+
+                                    {% if business_hours_display %}
+                                        <div class="availability-hours">
+                                            <strong>Business Hours:</strong>
+                                            {{ business_hours_display }}
+                                        </div>
+                                    {% endif %}
                                 </div>
 
                                 <div class="availability-total">
@@ -1055,6 +1125,71 @@
                                     available
                                 </div>
                             </div>
+
+
+                            {% if coach_booking_advice %}
+                                <section class="coach-booking-card">
+                                    <div class="coach-booking-header">
+                                        <h3>🍑 Coach Peach</h3>
+                                    </div>
+
+                                    <p class="coach-booking-title">
+                                        {{
+                                            coach_booking_advice.title
+                                        }}
+                                    </p>
+
+                                    <p class="coach-booking-message">
+                                        {{
+                                            coach_booking_advice.message
+                                        }}
+                                    </p>
+
+                                    {% for option in
+                                        coach_booking_advice.options
+                                    %}
+                                        <button
+                                            type="button"
+                                            class="
+                                                time-choice
+                                                coach-booking-action
+                                            "
+                                            title="
+                                                Choose Coach Peach's
+                                                recommended time
+                                            "
+                                            data-slot="{{
+                                                option.slot_value
+                                            }}"
+                                            data-time-display="{{
+                                                option.slot_display
+                                            }}"
+                                            data-date-display="{{
+                                                option.date_display
+                                            }}"
+                                            data-provider-id="{{
+                                                option.provider_id
+                                            }}"
+                                            data-provider-name="{{
+                                                option.provider_name
+                                            }}"
+                                        >
+                                            {% if
+                                                coach_booking_advice.title
+                                                == "Next Available Time"
+                                            %}
+                                                Choose
+                                                {{ option.slot_display }}
+                                            {% else %}
+                                                Choose
+                                                {{ option.date_display }}
+                                                at
+                                                {{ option.slot_display }}
+                                            {% endif %}
+                                        </button>
+                                    {% endfor %}
+                                </section>
+                            {% endif %}
 
 
                             {% if availability_results %}
@@ -1065,6 +1200,16 @@
                                         <h3>
                                             {{ result.provider_name }}
                                         </h3>
+
+                                        {% if result.provider_hours_display %}
+                                            <div class="provider-hours">
+                                                <strong>Provider Hours:</strong>
+                                                {{
+                                                    result
+                                                    .provider_hours_display
+                                                }}
+                                            </div>
+                                        {% endif %}
 
                                         {% if result.slots %}
 
@@ -1082,6 +1227,9 @@
                                                         }}"
                                                         data-time-display="{{
                                                             slot.display
+                                                        }}"
+                                                        data-date-display="{{
+                                                            date_display
                                                         }}"
                                                         data-provider-id="{{
                                                             result
@@ -1811,11 +1959,14 @@ document.addEventListener("DOMContentLoaded", function () {
         )
     )|tojson }};
 
-    const selectedDateDisplay = {{ (
+    const searchedDateDisplay = {{ (
         date_display
         or selected_date
         or ""
     )|tojson }};
+
+    let selectedDateDisplay =
+        searchedDateDisplay;
 
 
     function isBookingForOther() {
@@ -1893,6 +2044,8 @@ document.addEventListener("DOMContentLoaded", function () {
 
         selectedProviderName = "";
         selectedTimeDisplay = "";
+        selectedDateDisplay =
+            searchedDateDisplay;
 
         clientStep.classList.remove("is-visible");
         reviewStep.classList.remove("is-visible");
@@ -1928,6 +2081,10 @@ document.addEventListener("DOMContentLoaded", function () {
 
             selectedTimeDisplay =
                 button.dataset.timeDisplay || "";
+
+            selectedDateDisplay =
+                button.dataset.dateDisplay
+                || searchedDateDisplay;
 
             selectedTimeDetails.textContent = [
                 selectedServiceName,
