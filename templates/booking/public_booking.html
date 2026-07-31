@@ -102,6 +102,25 @@
                 );
         }
 
+        .booking-header.booking-header-banner {
+            padding: 0;
+            background: #ffffff;
+        }
+
+        .booking-banner-image {
+            display: block;
+            width: 100%;
+            height: auto;
+        }
+
+        .booking-banner-address {
+            padding: 14px 20px 16px;
+            border-top: 1px solid var(--border);
+            color: var(--muted);
+            line-height: 1.5;
+            text-align: center;
+        }
+
         .peach-mark {
             display: flex;
             align-items: center;
@@ -711,26 +730,63 @@
 
         <section class="booking-shell">
 
-            <header class="booking-header">
-                <div class="peach-mark">
-                    🍑
-                </div>
+            <header class="
+                booking-header
+                {% if public_booking_slug
+                    == 'clear-skin-esthetics'
+                %}
+                    booking-header-banner
+                {% endif %}
+            ">
 
-                <h1>
-                    {{ business_name or "Online Booking" }}
-                </h1>
+                {% if public_booking_slug
+                    == 'clear-skin-esthetics'
+                %}
 
-                {% if organization_name %}
-                    <div class="organization-name">
-                        {{ organization_name }}
+                    <img
+                        src="{{
+                            url_for(
+                                'static',
+                                filename=
+                                    'images/booking/'
+                                    'clear_skin_esthetics_'
+                                    'booking_banner.png'
+                            )
+                        }}"
+                        alt="Clear Skin Esthetics"
+                        class="booking-banner-image"
+                    >
+
+                    {% if business_address %}
+                        <div class="booking-banner-address">
+                            {{ business_address }}
+                        </div>
+                    {% endif %}
+
+                {% else %}
+
+                    <div class="peach-mark">
+                        🍑
                     </div>
+
+                    <h1>
+                        {{ business_name or "Online Booking" }}
+                    </h1>
+
+                    {% if organization_name %}
+                        <div class="organization-name">
+                            {{ organization_name }}
+                        </div>
+                    {% endif %}
+
+                    {% if business_address %}
+                        <div class="business-address">
+                            {{ business_address }}
+                        </div>
+                    {% endif %}
+
                 {% endif %}
 
-                {% if business_address %}
-                    <div class="business-address">
-                        {{ business_address }}
-                    </div>
-                {% endif %}
             </header>
 
 
