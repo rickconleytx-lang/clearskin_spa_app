@@ -1,48 +1,561 @@
 {% extends "base.html" %}
-{% block title %}Month View | Peach Suite Pro{% endblock %}
+
+{% block title %}
+    Month View | Peach Suite Pro
+{% endblock %}
 
 {% block content %}
 
-<h1>Month View</h1>
+<style>
+    .month-view-page {
+        width: 100%;
+    }
 
-<div class="page-tool-pills" style="margin:10px 0 18px;">
-    <a
-        href="{{ url_for(
-            'calendar_day_view',
-            date=display_date.strftime('%Y-%m-%d')
-        ) }}"
-        class="tool-pill tool-pill-small"
-    >
-        Day
-    </a>
+    .month-view-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 20px;
+        flex-wrap: wrap;
+        margin-bottom: 18px;
+    }
 
-    <a
-        href="{{ url_for(
-            'calendar_view',
-            week_start=display_date.strftime('%Y-%m-%d')
-        ) }}"
-        class="tool-pill tool-pill-small"
-    >
-        Week
-    </a>
+    .month-view-title h1 {
+        margin-bottom: 5px;
+    }
 
-    <a
-        href="{{ url_for(
-            'calendar_year_view',
-            date=display_date.strftime('%Y-%m-%d')
-        ) }}"
-        class="tool-pill tool-pill-small"
-    >
-        Year
-    </a>
+    .month-view-title h2 {
+        margin: 0;
+        color: #625852;
+        font-size: 1.25rem;
+    }
+
+    .month-view-tools {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin: 12px 0 18px;
+    }
+
+    .month-date-form {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+
+    .month-date-form input[type="date"] {
+        min-height: 36px;
+        padding: 6px 9px;
+        border: 1px solid #cfc5bf;
+        border-radius: 7px;
+        background: white;
+        font: inherit;
+    }
+
+    .month-calendar-shell {
+        width: 100%;
+        overflow-x: auto;
+        border: 1px solid #d8cec8;
+        border-radius: 12px;
+        background: white;
+        box-shadow:
+            0 4px 16px rgba(0, 0, 0, 0.06);
+    }
+
+    .month-calendar {
+        min-width: 770px;
+    }
+
+    .month-weekday-row,
+    .month-week-row {
+        display: grid;
+        grid-template-columns: repeat(7, minmax(110px, 1fr));
+    }
+
+    .month-weekday {
+        padding: 11px 8px;
+        border-right: 1px solid #ddd5d0;
+        border-bottom: 2px solid #cfc5bf;
+        background: #f5f0ed;
+        color: #514944;
+        font-size: 0.78rem;
+        font-weight: 900;
+        text-align: center;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+
+    .month-weekday:last-child {
+        border-right: none;
+    }
+
+    .month-day {
+        position: relative;
+        min-height: 128px;
+        border-right: 1px solid #e2dbd6;
+        border-bottom: 1px solid #e2dbd6;
+        background: white;
+    }
+
+    .month-day:nth-child(7) {
+        border-right: none;
+    }
+
+    .month-week-row:last-child .month-day {
+        border-bottom: none;
+    }
+
+    .month-day-link {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        height: 100%;
+        min-height: 128px;
+        box-sizing: border-box;
+        padding: 9px;
+        color: inherit;
+        text-decoration: none;
+    }
+
+    .month-day-link:hover {
+        position: relative;
+        z-index: 2;
+        box-shadow:
+            inset 0 0 0 2px #b97862;
+    }
+
+    .month-day.outside-month {
+        background: #f5f5f5;
+        color: #9a918b;
+    }
+
+    .month-day.density-1 {
+        background: #fff8f4;
+    }
+
+    .month-day.density-2 {
+        background: #ffe9dc;
+    }
+
+    .month-day.density-3 {
+        background: #ffd1bd;
+    }
+
+    .month-day.density-4 {
+        background: #f4ad92;
+    }
+
+    .month-day.outside-month.density-1,
+    .month-day.outside-month.density-2,
+    .month-day.outside-month.density-3,
+    .month-day.outside-month.density-4 {
+        filter: saturate(0.45);
+        opacity: 0.76;
+    }
+
+    .month-day.today {
+        box-shadow:
+            inset 0 0 0 3px #a65c48;
+    }
+
+    .month-day-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .month-day-number {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 27px;
+        height: 27px;
+        border-radius: 50%;
+        font-size: 0.9rem;
+        font-weight: 900;
+    }
+
+    .month-day.today .month-day-number {
+        background: #a65c48;
+        color: white;
+    }
+
+    .month-today-label {
+        color: #8e4937;
+        font-size: 0.68rem;
+        font-weight: 900;
+        text-transform: uppercase;
+    }
+
+    .month-day-content {
+        display: flex;
+        flex: 1;
+        flex-direction: column;
+        justify-content: flex-end;
+        margin-top: 10px;
+    }
+
+    .month-appointment-count {
+        font-size: 0.84rem;
+        font-weight: 900;
+    }
+
+    .month-scheduled-time {
+        margin-top: 3px;
+        color: #5f5752;
+        font-size: 0.7rem;
+    }
+
+    .month-provider-indicators {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-wrap: wrap;
+        margin-top: 8px;
+    }
+
+    .month-provider-dot {
+        display: inline-block;
+        width: 11px;
+        height: 11px;
+        border: 1px solid rgba(0, 0, 0, 0.16);
+        border-radius: 50%;
+        background: var(--provider-color);
+    }
+
+    .month-provider-more {
+        color: #514944;
+        font-size: 0.68rem;
+        font-weight: 800;
+    }
+
+    .month-no-appointments {
+        color: #8a817c;
+        font-size: 0.72rem;
+    }
+
+    .month-legend {
+        display: flex;
+        align-items: center;
+        gap: 9px 15px;
+        flex-wrap: wrap;
+        margin-top: 14px;
+        color: #615954;
+        font-size: 0.77rem;
+    }
+
+    .month-legend-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .month-legend-swatch {
+        width: 20px;
+        height: 13px;
+        border: 1px solid rgba(0, 0, 0, 0.13);
+        border-radius: 3px;
+    }
+
+    @media (max-width: 700px) {
+        .month-calendar {
+            min-width: 910px;
+        }
+
+        .month-weekday-row,
+        .month-week-row {
+            grid-template-columns:
+                repeat(7, minmax(130px, 1fr));
+        }
+
+        .month-day,
+        .month-day-link {
+            min-height: 118px;
+        }
+    }
+</style>
+
+
+<div class="month-view-page">
+
+    <div class="month-view-header">
+
+        <div class="month-view-title">
+            <h1>Month View</h1>
+
+            <h2>
+                {{ display_date.strftime('%B %Y') }}
+            </h2>
+        </div>
+
+        <div class="page-tool-pills">
+            <a
+                href="{{ url_for(
+                    'calendar_day_view',
+                    date=today.strftime('%Y-%m-%d')
+                ) }}"
+                class="tool-pill tool-pill-small"
+            >
+                Day
+            </a>
+
+            <a
+                href="{{ url_for(
+                    'calendar_view',
+                    week_start=today.strftime('%Y-%m-%d')
+                ) }}"
+                class="tool-pill tool-pill-small"
+            >
+                Week
+            </a>
+
+            <a
+                href="{{ url_for(
+                    'calendar_year_view',
+                    date=display_date.strftime('%Y-%m-%d')
+                ) }}"
+                class="tool-pill tool-pill-small"
+            >
+                Year
+            </a>
+        </div>
+
+    </div>
+
+
+    <div class="month-view-tools">
+
+        <a
+            href="{{ url_for(
+                'calendar_month_view',
+                date=previous_month_date.strftime('%Y-%m-%d')
+            ) }}"
+            class="tool-pill tool-pill-small"
+        >
+            Previous Month
+        </a>
+
+        <a
+            href="{{ url_for(
+                'calendar_month_view',
+                date=today.strftime('%Y-%m-%d')
+            ) }}"
+            class="tool-pill tool-pill-small"
+        >
+            Current Month
+        </a>
+
+        <a
+            href="{{ url_for(
+                'calendar_month_view',
+                date=next_month_date.strftime('%Y-%m-%d')
+            ) }}"
+            class="tool-pill tool-pill-small"
+        >
+            Next Month
+        </a>
+
+        <form
+            method="GET"
+            action="{{ url_for('calendar_month_view') }}"
+            class="month-date-form"
+        >
+            <input
+                type="date"
+                name="date"
+                value="{{ display_date.strftime('%Y-%m-%d') }}"
+                aria-label="Select calendar month"
+            >
+
+            <button
+                type="submit"
+                class="tool-pill tool-pill-small"
+            >
+                Go To Date
+            </button>
+        </form>
+
+    </div>
+
+
+    <div class="month-calendar-shell">
+
+        <div class="month-calendar">
+
+            <div class="month-weekday-row">
+                <div class="month-weekday">Sunday</div>
+                <div class="month-weekday">Monday</div>
+                <div class="month-weekday">Tuesday</div>
+                <div class="month-weekday">Wednesday</div>
+                <div class="month-weekday">Thursday</div>
+                <div class="month-weekday">Friday</div>
+                <div class="month-weekday">Saturday</div>
+            </div>
+
+
+            {% for week in month_weeks %}
+
+                <div class="month-week-row">
+
+                    {% for day in week %}
+
+                        <div
+                            class="
+                                month-day
+                                density-{{ day.density_level }}
+                                {% if not day.is_current_month %}
+                                    outside-month
+                                {% endif %}
+                                {% if day.is_today %}
+                                    today
+                                {% endif %}
+                            "
+                        >
+                            <a
+                                href="{{ url_for(
+                                    'calendar_day_view',
+                                    date=day.date.strftime('%Y-%m-%d')
+                                ) }}"
+                                class="month-day-link"
+                                aria-label="
+                                    Open Day View for
+                                    {{ day.date.strftime('%B %d, %Y') }}
+                                "
+                            >
+                                <div class="month-day-top">
+
+                                    <span class="month-day-number">
+                                        {{ day.date.day }}
+                                    </span>
+
+                                    {% if day.is_today %}
+                                        <span class="month-today-label">
+                                            Today
+                                        </span>
+                                    {% endif %}
+
+                                </div>
+
+
+                                <div class="month-day-content">
+
+                                    {% if day.appointment_count %}
+
+                                        <span class="month-appointment-count">
+                                            {{ day.appointment_count }}
+                                            appointment{% if day.appointment_count != 1 %}s{% endif %}
+                                        </span>
+
+                                        <span class="month-scheduled-time">
+                                            {{ day.scheduled_minutes }}
+                                            scheduled minutes
+                                            {% if day.utilization_percent %}
+                                                ·
+                                                {{ day.utilization_percent }}%
+                                                booked
+                                            {% endif %}
+                                        </span>
+
+
+                                        {% if day.provider_indicators %}
+
+                                            <div
+                                                class="month-provider-indicators"
+                                                aria-label="Scheduled providers"
+                                            >
+                                                {% for provider in day.provider_indicators %}
+
+                                                    {% if loop.index <= 6 %}
+                                                        <span
+                                                            class="month-provider-dot"
+                                                            style="
+                                                                --provider-color:
+                                                                    {{ provider.provider_color }};
+                                                            "
+                                                            title="{{ provider.provider_name }}"
+                                                        ></span>
+                                                    {% endif %}
+
+                                                {% endfor %}
+
+
+                                                {% if day.provider_indicators|length > 6 %}
+                                                    <span class="month-provider-more">
+                                                        +{{ day.provider_indicators|length - 6 }}
+                                                    </span>
+                                                {% endif %}
+                                            </div>
+
+                                        {% endif %}
+
+                                    {% else %}
+
+                                        <span class="month-no-appointments">
+                                            No appointments
+                                        </span>
+
+                                    {% endif %}
+
+                                </div>
+                            </a>
+                        </div>
+
+                    {% endfor %}
+
+                </div>
+
+            {% endfor %}
+
+        </div>
+
+    </div>
+
+
+    <div class="month-legend">
+
+        <strong>Workload:</strong>
+
+        <span class="month-legend-item">
+            <span
+                class="month-legend-swatch"
+                style="background:#fff8f4;"
+            ></span>
+            Light
+        </span>
+
+        <span class="month-legend-item">
+            <span
+                class="month-legend-swatch"
+                style="background:#ffe9dc;"
+            ></span>
+            Moderate
+        </span>
+
+        <span class="month-legend-item">
+            <span
+                class="month-legend-swatch"
+                style="background:#ffd1bd;"
+            ></span>
+            Busy
+        </span>
+
+        <span class="month-legend-item">
+            <span
+                class="month-legend-swatch"
+                style="background:#f4ad92;"
+            ></span>
+            Very Busy
+        </span>
+
+        <span>
+            Provider dots use each employee’s calendar color.
+        </span>
+
+    </div>
+
 </div>
-
-<h3>
-    {{ display_date.strftime('%B %Y') }}
-</h3>
-
-<p>
-    The Peach Suite Pro Month View will be built here.
-</p>
 
 {% endblock %}

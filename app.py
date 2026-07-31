@@ -32447,11 +32447,315 @@ def calendar_day_view():
 @login_required
 @spa_required
 def calendar_month_view():
-    display_date = resolve_calendar_view_date()
+    import calendar as pycalendar
+    from datetime import date, timedelta
+
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    selected_date = resolve_calendar_view_date()
+
+    month_start = selected_date.replace(day=1)
+
+    previous_month_date = (
+        month_start - timedelta(days=1)
+    ).replace(day=1)
+
+    next_month_date = (
+        month_start.replace(day=28)
+        + timedelta(days=4)
+    ).replace(day=1)
+
+    today = get_spa_now(spa_id).date()
+
+    month_calendar = pycalendar.Calendar(
+        firstweekday=6
+    )
+
+    calendar_weeks = (
+        month_calendar.monthdatescalendar(
+            month_start.year,
+            month_start.month
+        )
+    )
+
+    while len(calendar_weeks) < 6:
+        next_week_start = (
+            calendar_weeks[-1][-1]
+            + timedelta(days=1)
+        )
+
+        calendar_weeks.append([
+            next_week_start
+            + timedelta(days=day_offset)
+            for day_offset in range(7)
+        ])
+
+    grid_start = calendar_weeks[0][0]
+    grid_end = calendar_weeks[-1][-1]
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                a.appointment_date,
+                a.appointment_id,
+                COALESCE(
+                    a.duration_minutes,
+                    30
+                ) AS duration_minutes,
+                LOWER(
+                    COALESCE(a.status, '')
+                ) AS appointment_status,
+                a.provider_employee_id,
+                COALESCE(
+                    NULLIF(
+                        TRIM(e.employee_nickname),
+                        ''
+                    ),
+                    NULLIF(
+                        TRIM(
+                            CONCAT_WS(
+                                ' ',
+                                e.first_name,
+                                e.last_name
+                            )
+                        ),
+                        ''
+                    ),
+                    NULLIF(
+                        TRIM(
+                            a.provider_name_at_booking
+                        ),
+                        ''
+                    ),
+                    'Any Available'
+                ) AS provider_name,
+                COALESCE(
+                    NULLIF(
+                        TRIM(e.provider_color_code),
+                        ''
+                    ),
+                    '#8B5CF6'
+                ) AS provider_color
+            FROM appointments a
+
+            LEFT JOIN employees e
+              ON e.employee_id =
+                 a.provider_employee_id
+             AND e.spa_id = a.spa_id
+
+            WHERE a.spa_id = %s
+              AND a.appointment_date
+                  BETWEEN %s AND %s
+
+            ORDER BY
+                a.appointment_date,
+                a.appointment_time,
+                a.appointment_id
+        """, (
+            spa_id,
+            grid_start,
+            grid_end
+        ))
+
+        appointment_rows = cur.fetchall()
+
+        provider_minutes_by_weekday = {
+            day_index: 0
+            for day_index in range(7)
+        }
+
+        if business_unit_id is not None:
+            cur.execute("""
+                SELECT
+                    day_of_week,
+                    start_time,
+                    end_time
+                FROM provider_booking_hours
+                WHERE spa_id = %s
+                  AND business_unit_id = %s
+                  AND is_active = TRUE
+                ORDER BY
+                    day_of_week,
+                    start_time,
+                    end_time
+            """, (
+                spa_id,
+                business_unit_id
+            ))
+
+            provider_hour_rows = cur.fetchall()
+
+            for (
+                day_of_week,
+                start_time,
+                end_time
+            ) in provider_hour_rows:
+                start_minutes = (
+                    start_time.hour * 60
+                    + start_time.minute
+                )
+
+                end_minutes = (
+                    end_time.hour * 60
+                    + end_time.minute
+                )
+
+                provider_minutes_by_weekday[
+                    day_of_week
+                ] += max(
+                    0,
+                    end_minutes - start_minutes
+                )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    day_data_by_date = {}
+
+    for week in calendar_weeks:
+        for calendar_date in week:
+            day_data_by_date[calendar_date] = {
+                "date": calendar_date,
+                "is_current_month": (
+                    calendar_date.month
+                    == month_start.month
+                ),
+                "is_today": (
+                    calendar_date == today
+                ),
+                "appointment_count": 0,
+                "scheduled_minutes": 0,
+                "provider_indicators": [],
+                "density_level": 0,
+                "utilization_percent": 0
+            }
+
+    provider_keys_by_date = {
+        calendar_date: set()
+        for calendar_date in day_data_by_date
+    }
+
+    for row in appointment_rows:
+        appointment_date = row[0]
+        appointment_status = row[3]
+
+        if appointment_date not in day_data_by_date:
+            continue
+
+        if appointment_status in {
+            "cancelled",
+            "canceled"
+        }:
+            continue
+
+        day_entry = day_data_by_date[
+            appointment_date
+        ]
+
+        day_entry["appointment_count"] += 1
+        day_entry["scheduled_minutes"] += int(
+            row[2] or 30
+        )
+
+        provider_key = (
+            row[4]
+            if row[4] is not None
+            else f"name:{row[5]}"
+        )
+
+        if (
+            provider_key
+            not in provider_keys_by_date[
+                appointment_date
+            ]
+        ):
+            provider_keys_by_date[
+                appointment_date
+            ].add(provider_key)
+
+            day_entry[
+                "provider_indicators"
+            ].append({
+                "provider_name":
+                    row[5] or "Any Available",
+                "provider_color":
+                    row[6] or "#8B5CF6"
+            })
+
+    maximum_scheduled_minutes = max(
+        (
+            entry["scheduled_minutes"]
+            for entry in day_data_by_date.values()
+        ),
+        default=0
+    )
+
+    for calendar_date, day_entry in (
+        day_data_by_date.items()
+    ):
+        if day_entry["appointment_count"] == 0:
+            continue
+
+        # booking tables use:
+        # 0 = Sunday through 6 = Saturday.
+        day_of_week = (
+            calendar_date.weekday() + 1
+        ) % 7
+
+        available_minutes = (
+            provider_minutes_by_weekday.get(
+                day_of_week,
+                0
+            )
+        )
+
+        if available_minutes > 0:
+            utilization_ratio = min(
+                day_entry["scheduled_minutes"]
+                / available_minutes,
+                1.0
+            )
+        elif maximum_scheduled_minutes > 0:
+            utilization_ratio = min(
+                day_entry["scheduled_minutes"]
+                / maximum_scheduled_minutes,
+                1.0
+            )
+        else:
+            utilization_ratio = 0
+
+        day_entry["utilization_percent"] = round(
+            utilization_ratio * 100
+        )
+
+        if utilization_ratio <= 0.25:
+            day_entry["density_level"] = 1
+        elif utilization_ratio <= 0.50:
+            day_entry["density_level"] = 2
+        elif utilization_ratio <= 0.75:
+            day_entry["density_level"] = 3
+        else:
+            day_entry["density_level"] = 4
+
+    month_weeks = []
+
+    for week in calendar_weeks:
+        month_weeks.append([
+            day_data_by_date[calendar_date]
+            for calendar_date in week
+        ])
 
     return render_template(
         "calendar_month_view.html",
-        display_date=display_date
+        display_date=month_start,
+        previous_month_date=previous_month_date,
+        next_month_date=next_month_date,
+        today=today,
+        month_weeks=month_weeks
     )
 
 
