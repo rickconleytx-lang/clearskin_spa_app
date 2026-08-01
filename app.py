@@ -5657,9 +5657,20 @@ def validate_sms_length(message_body):
 # Add new dashboard metrics here.
 # =======================================================
         
-def get_dashboard_data(spa_id, spa_now):
+def get_dashboard_data(
+    spa_id,
+    business_unit_id,
+    spa_now
+):
     if spa_now is None:
-        raise ValueError("get_dashboard_data requires spa_now")
+        raise ValueError(
+            "get_dashboard_data requires spa_now"
+        )
+
+    if business_unit_id is None:
+        raise ValueError(
+            "get_dashboard_data requires business_unit_id"
+        )
     
     conn = get_db_connection()
     cur = conn.cursor()
@@ -5694,11 +5705,15 @@ def get_dashboard_data(spa_id, spa_now):
             COUNT(*) AS count
         FROM appointments
         WHERE spa_id = %s
+        AND business_unit_id = %s
         AND appointment_date >= date_trunc('month', CURRENT_DATE)
         AND appointment_date < date_trunc('month', CURRENT_DATE) + INTERVAL '1 month'
         GROUP BY status
         ORDER BY status
-    """, (spa_id,))
+    """, (
+        spa_id,
+        business_unit_id
+    ))
 
     appointment_status_chart = [
         {
@@ -5712,7 +5727,11 @@ def get_dashboard_data(spa_id, spa_now):
         SELECT COUNT(*)
         FROM clients
         WHERE spa_id = %s
-    """, (spa_id,))
+          AND business_unit_id = %s
+    """, (
+        spa_id,
+        business_unit_id
+    ))
 
     dashboard["total_clients"]  = cur.fetchone()[0] or 0
     dashboard["appointment_status_chart"] = appointment_status_chart
@@ -5741,8 +5760,13 @@ def get_dashboard_data(spa_id, spa_now):
         FROM appointments
         WHERE appointment_date = %s
           AND spa_id = %s
+          AND business_unit_id = %s
           AND LOWER(status) IN ('booked', 'completed')
-    """, (today, spa_id))
+    """, (
+        today,
+        spa_id,
+        business_unit_id
+    ))
 
     dashboard["appointments_today"] = cur.fetchone()[0] or 0
 
@@ -5754,8 +5778,14 @@ def get_dashboard_data(spa_id, spa_now):
         WHERE appointment_date = %s
           AND appointment_time >= %s
           AND spa_id = %s
+          AND business_unit_id = %s
           AND LOWER(status) = 'booked'
-    """, (today, current_time, spa_id))
+    """, (
+        today,
+        current_time,
+        spa_id,
+        business_unit_id
+    ))
 
     dashboard["appointments_remaining_today"] = (
         cur.fetchone()[0] or 0
@@ -5768,8 +5798,13 @@ def get_dashboard_data(spa_id, spa_now):
         FROM appointments
         WHERE appointment_date = %s
           AND spa_id = %s
+          AND business_unit_id = %s
           AND LOWER(status) NOT IN ('cancelled', 'no show')
-    """, (today, spa_id))
+    """, (
+        today,
+        spa_id,
+        business_unit_id
+    ))
 
     expected_income_today = cur.fetchone()[0] or 0
 
@@ -5784,8 +5819,14 @@ def get_dashboard_data(spa_id, spa_now):
         WHERE appointment_date = %s
           AND appointment_time >= %s
           AND spa_id = %s
+          AND business_unit_id = %s
           AND LOWER(status) = 'booked'
-    """, (today, current_time, spa_id))
+    """, (
+        today,
+        current_time,
+        spa_id,
+        business_unit_id
+    ))
 
     dashboard["expected_income_remaining_today"] = (
         cur.fetchone()[0] or 0
@@ -5798,8 +5839,13 @@ def get_dashboard_data(spa_id, spa_now):
         FROM appointments
         WHERE appointment_date = %s
           AND spa_id = %s
+          AND business_unit_id = %s
           AND LOWER(status) IN ('booked', 'completed')
-    """, (tomorrow, spa_id))
+    """, (
+        tomorrow,
+        spa_id,
+        business_unit_id
+    ))
 
     dashboard["appointments_tomorrow"] = (
         cur.fetchone()[0] or 0
@@ -5812,8 +5858,13 @@ def get_dashboard_data(spa_id, spa_now):
         FROM appointments
         WHERE appointment_date = %s
           AND spa_id = %s
+          AND business_unit_id = %s
           AND LOWER(status) NOT IN ('cancelled', 'no show')
-    """, (tomorrow, spa_id))
+    """, (
+        tomorrow,
+        spa_id,
+        business_unit_id
+    ))
 
     dashboard["expected_income_tomorrow"] = (
         cur.fetchone()[0] or 0
@@ -5841,16 +5892,19 @@ def get_dashboard_data(spa_id, spa_now):
         JOIN clients c
         ON a.client_id = c.client_id
         AND a.spa_id = c.spa_id
+        AND a.business_unit_id = c.business_unit_id
         WHERE a.appointment_date = %s
         AND a.appointment_time >= %s
         AND a.spa_id = %s
+        AND a.business_unit_id = %s
         AND LOWER(a.status) = 'booked'
         ORDER BY a.appointment_time
         LIMIT 1
     """, (
         today,
         current_time,
-        spa_id
+        spa_id,
+        business_unit_id
     ))
 
     next_appointment_row = cur.fetchone()
@@ -5954,11 +6008,13 @@ def get_dashboard_data(spa_id, spa_now):
         SELECT COUNT(*)
         FROM clients
         WHERE spa_id = %s
+        AND business_unit_id = %s
         AND birth_date IS NOT NULL
         AND EXTRACT(MONTH FROM birth_date) = %s
         AND EXTRACT(DAY FROM birth_date) = %s
     """, (
         spa_id,
+        business_unit_id,
         today.month,
         today.day
     ))
@@ -5973,8 +6029,13 @@ def get_dashboard_data(spa_id, spa_now):
         FROM appointments
         WHERE appointment_date=%s
           AND spa_id=%s
+          AND business_unit_id=%s
           AND status='completed'
-    """,(today,spa_id))
+    """, (
+        today,
+        spa_id,
+        business_unit_id
+    ))
 
     dashboard["completed_today"] = cur.fetchone()[0] or 0
 
@@ -5989,8 +6050,13 @@ def get_dashboard_data(spa_id, spa_now):
         FROM appointments
         WHERE appointment_date=%s
           AND spa_id=%s
+          AND business_unit_id=%s
           AND status='cancelled'
-    """,(today,spa_id))
+    """, (
+        today,
+        spa_id,
+        business_unit_id
+    ))
 
     dashboard["cancelled_today"] = cur.fetchone()[0] or 0
 
@@ -6001,8 +6067,13 @@ def get_dashboard_data(spa_id, spa_now):
         FROM appointments
         WHERE appointment_date=%s
           AND spa_id=%s
+          AND business_unit_id=%s
           AND status='no show'
-    """,(today,spa_id))
+    """, (
+        today,
+        spa_id,
+        business_unit_id
+    ))
 
     dashboard["no_shows_today"] = cur.fetchone()[0] or 0
 
@@ -6016,7 +6087,12 @@ def get_dashboard_data(spa_id, spa_now):
         WHERE appointment_date = %s
         AND status = 'completed'
         AND spa_id = %s
-    """, (today, spa_id))
+        AND business_unit_id = %s
+    """, (
+        today,
+        spa_id,
+        business_unit_id
+    ))
 
     dashboard["daily_revenue"] = cur.fetchone()[0] or 0   
 
@@ -6047,6 +6123,7 @@ def get_dashboard_data(spa_id, spa_now):
         FROM appointments
         WHERE appointment_date BETWEEN %s AND %s
         AND spa_id = %s
+        AND business_unit_id = %s
         AND LOWER(status) = 'booked'
         AND (
                 appointment_date > %s
@@ -6062,6 +6139,7 @@ def get_dashboard_data(spa_id, spa_now):
             seven_day_start,
             seven_day_end,
             spa_id,
+            business_unit_id,
             today,
             today,
             current_time
@@ -6323,7 +6401,13 @@ def get_dashboard_data(spa_id, spa_now):
         FROM appointments
         WHERE appointment_date BETWEEN %s AND %s
             AND spa_id = %s
-    """, (week_start, week_end, spa_id))
+            AND business_unit_id = %s
+    """, (
+        week_start,
+        week_end,
+        spa_id,
+        business_unit_id
+    ))
 
     weekly_totals = cur.fetchone() or (0, 0, 0, 0)
 
@@ -6342,7 +6426,13 @@ def get_dashboard_data(spa_id, spa_now):
         WHERE a.appointment_date BETWEEN %s AND %s
           AND a.status = 'completed'
           AND a.spa_id = %s
-    """, [week_start, week_end, spa_id])
+          AND a.business_unit_id = %s
+    """, [
+        week_start,
+        week_end,
+        spa_id,
+        business_unit_id
+    ])
     weekly_revenue = cur.fetchone()[0] or 0
 
     dashboard["weekly_revenue"] = weekly_revenue
@@ -6362,10 +6452,12 @@ def get_dashboard_data(spa_id, spa_now):
           AND appointment_date < %s
           AND status = 'no show'
           AND spa_id = %s
+          AND business_unit_id = %s
         """, (
         month_start,
         next_month_start,
-        spa_id
+        spa_id,
+        business_unit_id
     ))
 
     dashboard["no_shows_month"] = cur.fetchone()[0] or 0    
@@ -6377,9 +6469,15 @@ def get_dashboard_data(spa_id, spa_now):
         SELECT COUNT(*)
         FROM clients
         WHERE spa_id = %s
+        AND business_unit_id = %s
         AND created_at >= %s
         AND created_at < %s
-    """, (spa_id, month_start, next_month_start))
+    """, (
+        spa_id,
+        business_unit_id,
+        month_start,
+        next_month_start
+    ))
 
     dashboard["new_clients_month"] = cur.fetchone()[0] or 0
 
@@ -6392,7 +6490,13 @@ def get_dashboard_data(spa_id, spa_now):
         AND a.appointment_date < %s
         AND a.status = 'completed'
         AND a.spa_id = %s
-    """, (month_start, next_month_start, spa_id))
+        AND a.business_unit_id = %s
+    """, (
+        month_start,
+        next_month_start,
+        spa_id,
+        business_unit_id
+    ))
 
     monthly_revenue = cur.fetchone()[0] or 0
 
@@ -6409,7 +6513,13 @@ def get_dashboard_data(spa_id, spa_now):
         AND a.status = 'completed'
         AND a.price_at_booking IS NOT NULL
         AND a.spa_id = %s
-    """, (month_start, next_month_start, spa_id))
+        AND a.business_unit_id = %s
+    """, (
+        month_start,
+        next_month_start,
+        spa_id,
+        business_unit_id
+    ))
 
     average_ticket = cur.fetchone()[0] or 0
 
@@ -6434,7 +6544,11 @@ def get_dashboard_data(spa_id, spa_now):
     FROM appointments
     WHERE status = 'cancelled'
       AND spa_id = %s
-    """, (spa_id,))
+      AND business_unit_id = %s
+    """, (
+        spa_id,
+        business_unit_id
+    ))
 
     dashboard["cancelled_count"] = cur.fetchone()[0] or 0
 
@@ -33715,6 +33829,7 @@ def calculate_business_health(
 def morning_briefing():
 
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
     user_id = session["user_id"]
 
     spa_now = get_spa_now(spa_id)
@@ -33723,9 +33838,10 @@ def morning_briefing():
     now_time = spa_now.time()
 
     dashboard = get_dashboard_data(
-    spa_id,
-    spa_now=spa_now
-)
+        spa_id=spa_id,
+        business_unit_id=business_unit_id,
+        spa_now=spa_now
+    )
 
     business_health = {
         "score": None,
@@ -35630,14 +35746,19 @@ from datetime import date, datetime, timedelta
 @app.route("/reports")
 @login_required
 @spa_required
+@require_workspace_permission(
+    "can_view_business_summary"
+)
 def reports():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
     spa_now = get_spa_now(spa_id)
 
     dashboard = get_dashboard_data(
-    spa_id,
-    spa_now=spa_now
-)
+        spa_id=spa_id,
+        business_unit_id=business_unit_id,
+        spa_now=spa_now
+    )
     
     role = session.get("role")
 
