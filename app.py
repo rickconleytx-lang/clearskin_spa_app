@@ -3623,6 +3623,7 @@ def send_communication(
 
 def log_sms_message(
     spa_id,
+    business_unit_id,
     client_id,
     recipient_phone,
     message_body,
@@ -3640,6 +3641,7 @@ def log_sms_message(
     cur.execute("""
         INSERT INTO sms_messages (
             spa_id,
+            business_unit_id,
             client_id,
             recipient_phone,
             message_body,
@@ -3653,10 +3655,11 @@ def log_sms_message(
             created_at
         )
         VALUES (
-            %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW()
+            %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW()
         )
     """, (
         spa_id,
+        business_unit_id,
         client_id,
         recipient_phone,
         message_body,
@@ -4370,6 +4373,7 @@ def send_birthday_reminder_sms(reminder_id, spa_id):
                 rq.reminder_id,
                 rq.client_id,
                 rq.recipient_phone,
+                c.business_unit_id,
                 c.first_name,
                 c.birth_date,
                 s.spa_name
@@ -4401,6 +4405,7 @@ def send_birthday_reminder_sms(reminder_id, spa_id):
             reminder_id,
             client_id,
             recipient_phone,
+            business_unit_id,
             first_name,
             birth_date,
             spa_name
@@ -4509,6 +4514,7 @@ def send_birthday_reminder_sms(reminder_id, spa_id):
         try:
             log_sms_message(
                 spa_id=spa_id,
+                business_unit_id=business_unit_id,
                 client_id=client_id,
                 recipient_phone=recipient_phone,
                 message_body=final_message_body,
@@ -4812,6 +4818,7 @@ def send_appointment_reminder_sms(reminder_id, spa_id):
         try:
             log_sms_message(
                 spa_id=spa_id,
+                business_unit_id=business_unit_id,
                 client_id=client_id,
                 recipient_phone=recipient_phone,
                 message_body=final_message_body,
@@ -15148,6 +15155,7 @@ def send_birthday_sms_month():
 @require_workspace_permission("can_send_sms")
 def sms_preview(client_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
 
     if not sms_email_terms_accepted(spa_id):
         flash(
@@ -15173,10 +15181,12 @@ def sms_preview(client_id):
             FROM clients
             WHERE client_id = %s
               AND spa_id = %s
+              AND business_unit_id = %s
               AND active_client = TRUE
         """, (
             client_id,
-            spa_id
+            spa_id,
+            business_unit_id
         ))
 
         client = cur.fetchone()
@@ -15276,6 +15286,7 @@ def sms_preview(client_id):
         try:
             log_sms_message(
                 spa_id=spa_id,
+                business_unit_id=business_unit_id,
                 client_id=client[0],
                 recipient_phone=client[3],
                 message_body=final_message_body,
@@ -15349,6 +15360,7 @@ def sms_preview(client_id):
 @require_workspace_permission("can_view_sms_history")
 def sms_conversation(client_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
 
     if not sms_email_terms_accepted(spa_id):
         flash(
@@ -15370,7 +15382,12 @@ def sms_conversation(client_id):
             FROM clients
             WHERE client_id = %s
               AND spa_id = %s
-        """, (client_id, spa_id))
+              AND business_unit_id = %s
+        """, (
+            client_id,
+            spa_id,
+            business_unit_id
+        ))
 
         client = cur.fetchone()
 
@@ -15390,12 +15407,14 @@ def sms_conversation(client_id):
                 sm.provider_error_message                      -- 5
             FROM sms_messages sm
             WHERE sm.client_id = %s
-            AND sm.spa_id = %s
+              AND sm.spa_id = %s
+              AND sm.business_unit_id = %s
             ORDER BY sm.created_at ASC
         """, (
             spa_timezone,
             client_id,
-            spa_id
+            spa_id,
+            business_unit_id
         ))
 
         messages = cur.fetchall()
@@ -15432,6 +15451,7 @@ def sms_conversation(client_id):
 @require_workspace_permission("can_send_sms")
 def sms_conversation_send(client_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
 
     if not sms_email_terms_accepted(spa_id):
         flash(
@@ -15473,9 +15493,11 @@ def sms_conversation_send(client_id):
             FROM clients
             WHERE client_id = %s
               AND spa_id = %s
+              AND business_unit_id = %s
         """, (
             client_id,
-            spa_id
+            spa_id,
+            business_unit_id
         ))
 
         client = cur.fetchone()
@@ -15551,6 +15573,7 @@ def sms_conversation_send(client_id):
     try:
         log_sms_message(
             spa_id=spa_id,
+            business_unit_id=business_unit_id,
             client_id=client_id,
             recipient_phone=client[3],
             message_body=final_message_body,
@@ -16358,6 +16381,7 @@ def sms_group_send():
 
             log_sms_message(
                 spa_id=spa_id,
+                business_unit_id=business_unit_id,
                 client_id=client_id,
                 recipient_phone=phone,
                 message_body=result.get("message_body",""),
@@ -16549,6 +16573,7 @@ def sms_group_send():
 @require_workspace_permission("can_view_sms_history")
 def sms_history(client_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
     spa_timezone = get_spa_timezone(spa_id)
 
     conn = get_db_connection()
@@ -16562,9 +16587,11 @@ def sms_history(client_id):
             FROM clients
             WHERE client_id = %s
               AND spa_id = %s
+              AND business_unit_id = %s
         """, (
             client_id,
-            spa_id
+            spa_id,
+            business_unit_id
         ))
 
         client = cur.fetchone()
@@ -16594,14 +16621,17 @@ def sms_history(client_id):
             JOIN clients c
               ON c.client_id = sm.client_id
              AND c.spa_id = sm.spa_id
+             AND c.business_unit_id = sm.business_unit_id
 
             WHERE sm.spa_id = %s
+              AND sm.business_unit_id = %s
               AND sm.client_id = %s
 
             ORDER BY sm.created_at DESC
         """, (
             spa_timezone,
             spa_id,
+            business_unit_id,
             client_id
         ))
 
@@ -16641,6 +16671,7 @@ def sms_history(client_id):
 @require_workspace_permission("can_view_sms_history")
 def sms_history_all():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
     spa_timezone = get_spa_timezone(spa_id)
 
     conn = get_db_connection()
@@ -16665,13 +16696,16 @@ def sms_history_all():
             JOIN clients c
               ON c.client_id = sm.client_id
              AND c.spa_id = sm.spa_id
+             AND c.business_unit_id = sm.business_unit_id
 
             WHERE sm.spa_id = %s
+              AND sm.business_unit_id = %s
 
             ORDER BY sm.created_at DESC
         """, (
             spa_timezone,
-            spa_id
+            spa_id,
+            business_unit_id
         ))
 
         sms_logs = cur.fetchall()
@@ -16716,6 +16750,7 @@ def sms_history_all():
 @require_workspace_permission("can_send_sms")
 def resend_sms(sms_message_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
 
     if not sms_email_terms_accepted(spa_id):
         flash(
@@ -16743,15 +16778,18 @@ def resend_sms(sms_message_id):
             JOIN clients c
               ON c.client_id = sm.client_id
              AND c.spa_id = sm.spa_id
+             AND c.business_unit_id = sm.business_unit_id
 
             WHERE sm.sms_message_id = %s
               AND sm.spa_id = %s
+              AND sm.business_unit_id = %s
               AND sm.direction = 'outbound'
               AND sm.status IN ('failed', 'undelivered')
               AND c.active_client = TRUE
         """, (
             sms_message_id,
-            spa_id
+            spa_id,
+            business_unit_id
         ))
 
         old_sms = cur.fetchone()
@@ -16847,6 +16885,7 @@ def resend_sms(sms_message_id):
     try:
         log_sms_message(
             spa_id=spa_id,
+            business_unit_id=business_unit_id,
             client_id=client_id,
             recipient_phone=phone_number,
             message_body=final_message_body,
