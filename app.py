@@ -4025,7 +4025,11 @@ def get_active_messaging_templates(spa_id, channel):
 ##################################
 
 
-def get_sms_clients_by_ids(spa_id, client_ids):
+def get_sms_clients_by_ids(
+    spa_id,
+    business_unit_id,
+    client_ids
+):
     if not client_ids:
         return []
 
@@ -4042,6 +4046,7 @@ def get_sms_clients_by_ids(spa_id, client_ids):
             sms_opt_out
         FROM clients
         WHERE spa_id = %s
+          AND business_unit_id = %s
           AND sms_opt_in = TRUE
           AND COALESCE(sms_opt_out, FALSE) = FALSE
           AND active_client = TRUE
@@ -4049,7 +4054,11 @@ def get_sms_clients_by_ids(spa_id, client_ids):
           AND TRIM(phone) <> ''
           AND client_id = ANY(%s)
         ORDER BY last_name, first_name
-    """, (spa_id, client_ids))
+    """, (
+        spa_id,
+        business_unit_id,
+        client_ids
+    ))
 
     clients = cur.fetchall()
 
@@ -15949,6 +15958,7 @@ def edit_sms_template(template_id):
 
 def sms_group_preview():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
 
     selected_template_type = request.form.get("template_type", "").strip()
     selected_template_id = request.form.get("template_id", "").strip()
@@ -16000,6 +16010,7 @@ def sms_group_preview():
 
     clients = get_sms_clients_by_ids(
         spa_id=spa_id,
+        business_unit_id=business_unit_id,
         client_ids=client_ids
     )
 
@@ -16081,6 +16092,7 @@ def sms_group_send():
     print("SMS GROUP SEND ROUTE HIT", flush=True)
 
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
     language_code = get_request_language()
 
     if not sms_email_terms_accepted(spa_id):
@@ -16152,9 +16164,11 @@ def sms_group_send():
                 AND a.spa_id = s.spa_id
                 WHERE a.appointment_id = %s
                 AND a.spa_id = %s
+                AND a.business_unit_id = %s
             """, (
                 appointment_id,
-                spa_id
+                spa_id,
+                business_unit_id
             ))
 
             appointment_row = cur.fetchone()
@@ -16179,6 +16193,7 @@ def sms_group_send():
     try:
         clients = get_sms_clients_by_ids(
             spa_id=spa_id,
+            business_unit_id=business_unit_id,
             client_ids=client_ids
         )
 
