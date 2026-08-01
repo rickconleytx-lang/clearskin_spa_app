@@ -4252,11 +4252,6 @@ def enrich_sms_merge_data(spa_id, template_type, merge_data):
 
 
 
-def enrich_appointment_reminder_merge_data(spa_id, merge_data):
-    # We will fill this in next.
-    return merge_data
-
-
 
 
 
@@ -14795,7 +14790,7 @@ def client_messaging_settings(client_id):
         cur.close()
         conn.close()
         flash("Client not found.", "error")
-        return redirect(url_for("clients"))
+        return redirect(url_for("clients_home"))
 
     if request.method == "POST":
         ok_to_call = request.form.get("ok_to_call") == "on"
@@ -24535,98 +24530,6 @@ def gift_certificate_reminder_history():
 
 
 from datetime import date
-
-@app.route("/clients")
-@login_required
-@spa_required
-def clients():
-    spa_id = current_spa_id()
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    today = date.today()
-    current_month = today.month
-    current_day = today.day
-    current_year = today.year
-
-    months_to_show = [current_month]
-
-    if current_day >= 15:
-        next_month = 1 if current_month == 12 else current_month + 1
-        months_to_show.append(next_month)
-
-    cur.execute("""
-        SELECT
-            c.client_id,
-            c.first_name,
-            c.last_name,
-            c.birth_date,
-            EXTRACT(MONTH FROM c.birth_date) AS birth_month,
-            cbo.birthday_offer_id,
-            cbo.birthday_year,
-            COALESCE(cbo.offer_sent, FALSE) AS offer_sent,
-            cbo.offer_sent_date,
-            cbo.acknowledged_by,
-            cbo.notes
-        FROM clients c
-        LEFT JOIN client_birthday_offers cbo
-            ON c.client_id = cbo.client_id
-           AND c.spa_id = cbo.spa_id
-           AND cbo.birthday_year = %s
-        WHERE c.spa_id = %s
-          AND c.birth_date IS NOT NULL
-          AND EXTRACT(MONTH FROM c.birth_date) = ANY(%s)
-          AND COALESCE(cbo.offer_sent, FALSE) = FALSE
-        ORDER BY
-            EXTRACT(MONTH FROM c.birth_date),
-            EXTRACT(DAY FROM c.birth_date),
-            c.last_name,
-            c.first_name
-    """, (current_year, spa_id, months_to_show))
-
-    birthday_clients = cur.fetchall()
-
-    print("birthday_clients =", birthday_clients)
-
-    cur.execute("""
-        SELECT 
-            client_id, 
-            first_name, 
-            last_name, 
-            phone, 
-            email, 
-            birth_date,
-            ok_to_text,
-            sms_opt_in,
-            sms_opt_out,
-            ok_to_email,
-            email_opt_in,
-            email_opt_out
-        FROM clients
-        WHERE spa_id = %s
-        ORDER BY last_name, first_name
-    """, (spa_id,))
-    clients = cur.fetchall()
-
-    cur.close()
-    conn.close()
-
-    return render_template(
-        "clients_home.html",
-        clients=clients,
-        birthday_clients=birthday_clients
-    )
-
-
-
-
-
-
-
-
-
-
 
 #  ------------------------------------------
 #          
