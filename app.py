@@ -3722,6 +3722,7 @@ def send_email_message(
 
 def get_sms_eligible_clients(
     spa_id,
+    business_unit_id,
     search="",
     client_status="",
     show_all=False
@@ -3745,6 +3746,7 @@ def get_sms_eligible_clients(
         LEFT JOIN client_statuses cs
             ON c.client_status = cs.status_name
         WHERE c.spa_id = %s
+          AND c.business_unit_id = %s
           AND c.sms_opt_in = TRUE
           AND COALESCE(c.sms_opt_out, FALSE) = FALSE
           AND c.active_client = TRUE
@@ -3752,7 +3754,10 @@ def get_sms_eligible_clients(
           AND TRIM(c.phone) <> ''
     """
 
-    params = [spa_id]
+    params = [
+        spa_id,
+        business_unit_id
+    ]
 
     if search:
         query += """
@@ -3825,6 +3830,7 @@ def get_client_statuses(spa_id):
 
 def get_email_eligible_clients(
     spa_id,
+    business_unit_id,
     search="",
     client_status="",
     show_all=False
@@ -3851,13 +3857,17 @@ def get_email_eligible_clients(
             ON TRIM(c.client_status) = TRIM(cs.status_name)
            AND cs.spa_id = c.spa_id
         WHERE c.spa_id = %s
+          AND c.business_unit_id = %s
           AND c.email_opt_in = TRUE
           AND COALESCE(c.email_opt_out, FALSE) = FALSE
           AND c.email IS NOT NULL
           AND TRIM(c.email) <> ''
     """
 
-    params = [spa_id]
+    params = [
+        spa_id,
+        business_unit_id
+    ]
 
     if search:
         query += """
@@ -15592,6 +15602,7 @@ def get_active_messaging_template_types(spa_id, channel):
 
 def sms_home():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
     language_code = get_request_language()
 
     appointment_id = request.args.get(
@@ -15655,14 +15666,17 @@ def sms_home():
             JOIN clients c
             ON a.client_id = c.client_id
             AND a.spa_id = c.spa_id
+            AND a.business_unit_id = c.business_unit_id
             LEFT JOIN service_name_types s
             ON a.service_type_id = s.service_type_id
             AND a.spa_id = s.spa_id
             WHERE a.appointment_id = %s
             AND a.spa_id = %s
+            AND a.business_unit_id = %s
         """, (
             appointment_id,
-            spa_id
+            spa_id,
+            business_unit_id
         ))
 
         appointment_row = cur.fetchone()
@@ -15684,6 +15698,7 @@ def sms_home():
 
     clients = get_sms_eligible_clients(
         spa_id=spa_id,
+        business_unit_id=business_unit_id,
         search=search,
         client_status=client_status,
         show_all=True if appointment_context else show_all
@@ -17003,6 +17018,7 @@ def send_gift_certificate_email(gift_cert_id):
 
 def general_email():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
 
     search = request.args.get(
         "search",
@@ -17085,6 +17101,7 @@ def general_email():
 
     clients = get_email_eligible_clients(
         spa_id=spa_id,
+        business_unit_id=business_unit_id,
         search=search if not show_all else "",
         client_status=(
             client_status_id
