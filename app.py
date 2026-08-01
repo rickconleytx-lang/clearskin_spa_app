@@ -4606,6 +4606,7 @@ def send_appointment_reminder_sms(reminder_id, spa_id):
                 rq.appointment_id,
                 rq.client_id,
                 rq.recipient_phone,
+                a.business_unit_id,
                 a.appointment_date,
                 a.appointment_time,
                 a.service_type,
@@ -4641,6 +4642,7 @@ def send_appointment_reminder_sms(reminder_id, spa_id):
             appointment_id,
             client_id,
             recipient_phone,
+            business_unit_id,
             appointment_date,
             appointment_time,
             service_name,
@@ -4672,6 +4674,7 @@ def send_appointment_reminder_sms(reminder_id, spa_id):
 
         merge_data = build_appointment_reminder_merge_data(
             spa_id=spa_id,
+            business_unit_id=business_unit_id,
             client_id=client_id,
             appointment_date=appointment_date,
             appointment_time=appointment_time,
@@ -4868,6 +4871,7 @@ def send_appointment_reminder_sms(reminder_id, spa_id):
 
 def build_appointment_reminder_merge_data(
     spa_id,
+    business_unit_id,
     client_id,
     appointment_date,
     appointment_time,
@@ -4886,7 +4890,12 @@ def build_appointment_reminder_merge_data(
         FROM clients
         WHERE client_id = %s
           AND spa_id = %s
-    """, (client_id, spa_id))
+          AND business_unit_id = %s
+    """, (
+        client_id,
+        spa_id,
+        business_unit_id
+    ))
 
     client = cur.fetchone()
 
@@ -16231,6 +16240,7 @@ def sms_group_send():
                 appointment_merge_data = (
                     build_appointment_reminder_merge_data(
                         spa_id=spa_id,
+                        business_unit_id=business_unit_id,
                         client_id=client_id,
                         appointment_date=appointment_context[
                             "appointment_date"
