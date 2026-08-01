@@ -14838,13 +14838,14 @@ def test_gmail_import():
 
 @app.route(
     "/client/<int:client_id>/messaging-settings",
-    methods=["GET"]
+    methods=["GET", "POST"]
 )
 @login_required
 @spa_required
 @require_workspace_permission("can_manage_contact_preferences")
 def client_messaging_settings(client_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
 
     if not sms_email_terms_accepted(spa_id):
         flash(
@@ -14871,7 +14872,12 @@ def client_messaging_settings(client_id):
         FROM clients
         WHERE client_id = %s
           AND spa_id = %s
-    """, (client_id, spa_id))
+          AND business_unit_id = %s
+    """, (
+        client_id,
+        spa_id,
+        business_unit_id
+    ))
 
     client = cur.fetchone()
 
@@ -14903,6 +14909,7 @@ def client_messaging_settings(client_id):
                 email_opt_out = %s
             WHERE client_id = %s
               AND spa_id = %s
+              AND business_unit_id = %s
         """, (
             ok_to_call,
             sms_opt_in,
@@ -14910,22 +14917,25 @@ def client_messaging_settings(client_id):
             email_opt_in,
             email_opt_out,
             client_id,
-            spa_id
+            spa_id,
+            business_unit_id
         ))
 
         if phone:
             cur.execute("""
                 INSERT INTO sms_consent_log (
                     spa_id,
+                    business_unit_id,
                     client_id,
                     phone_number,
                     consent_given,
                     consent_method,
                     consent_text
                 )
-                VALUES (%s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
             """, (
                 spa_id,
+                business_unit_id,
                 client_id,
                 phone,
                 sms_opt_in,
@@ -14937,14 +14947,16 @@ def client_messaging_settings(client_id):
             cur.execute("""
                 INSERT INTO email_consent_log (
                     spa_id,
+                    business_unit_id,
                     client_id,
                     email,
                     consent_given,
                     consent_method
                 )
-                VALUES (%s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s)
             """, (
                 spa_id,
+                business_unit_id,
                 client_id,
                 email,
                 email_opt_in,
@@ -14967,10 +14979,15 @@ def client_messaging_settings(client_id):
             created_at
         FROM sms_consent_log
         WHERE spa_id = %s
+          AND business_unit_id = %s
           AND client_id = %s
         ORDER BY created_at DESC
         LIMIT 20
-    """, (spa_id, client_id))
+    """, (
+        spa_id,
+        business_unit_id,
+        client_id
+    ))
 
     sms_logs = cur.fetchall()
 
@@ -14982,10 +14999,15 @@ def client_messaging_settings(client_id):
             created_at
         FROM email_consent_log
         WHERE spa_id = %s
+          AND business_unit_id = %s
           AND client_id = %s
         ORDER BY created_at DESC
         LIMIT 20
-    """, (spa_id, client_id))
+    """, (
+        spa_id,
+        business_unit_id,
+        client_id
+    ))
 
     email_logs = cur.fetchall()
 
