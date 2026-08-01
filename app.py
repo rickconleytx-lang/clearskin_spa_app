@@ -13889,66 +13889,6 @@ def import_godaddy_booking(body, spa_id, subject=""):
             "order_number": booking["order_number"]
         }
 
-    # 2. Find existing client by email first
-    client = None
-
-    if booking.get("email"):
-        cur.execute("""
-            SELECT client_id
-            FROM clients
-            WHERE spa_id = %s
-              AND LOWER(email) = LOWER(%s)
-            LIMIT 1
-        """, (spa_id, booking["email"]))
-
-        client = cur.fetchone()
-
-    # If no email match, try phone
-    if not client and booking.get("phone"):
-        cur.execute("""
-            SELECT client_id
-            FROM clients
-            WHERE spa_id = %s
-              AND phone = %s
-            LIMIT 1
-        """, (spa_id, booking["phone"]))
-
-        client = cur.fetchone()
-
-    # 3. Create client if not found
-    if client:
-        client_id = client[0]
-    else:
-        name_parts = booking["customer_name"].split(" ", 1)
-        first_name = name_parts[0]
-        last_name = name_parts[1] if len(name_parts) > 1 else ""
-
-        cur.execute("""
-            INSERT INTO clients (
-                spa_id,
-                first_name,
-                last_name,
-                phone,
-                email
-            )
-            VALUES (%s, %s, %s, %s, %s)
-            RETURNING client_id
-        """, (
-            spa_id,
-            first_name,
-            last_name,
-            booking["phone"],
-            booking["email"]
-        ))
-
-        client_id = cur.fetchone()[0]
-
-
-    # Parser returns True/False
-    paid_at_checkout = bool(booking.get("paid_at_checkout"))
-
-    
-
     # Resolve the spa's default active workspace.
     # Scheduled imports do not have a logged-in session,
     # so current_business_unit_id() cannot be used here.
@@ -13978,6 +13918,80 @@ def import_godaddy_booking(body, spa_id, subject=""):
         )
 
     business_unit_id = business_unit_row[0]
+
+
+    # 2. Find existing client by email first
+    client = None
+
+    if booking.get("email"):
+        cur.execute("""
+            SELECT client_id
+            FROM clients
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND LOWER(email) = LOWER(%s)
+            LIMIT 1
+        """, (
+            spa_id,
+            business_unit_id,
+            booking["email"]
+        ))
+
+        client = cur.fetchone()
+
+    # If no email match, try phone
+    if not client and booking.get("phone"):
+        cur.execute("""
+            SELECT client_id
+            FROM clients
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND phone = %s
+            LIMIT 1
+        """, (
+            spa_id,
+            business_unit_id,
+            booking["phone"]
+        ))
+
+        client = cur.fetchone()
+
+    # 3. Create client if not found
+    if client:
+        client_id = client[0]
+    else:
+        name_parts = booking["customer_name"].split(" ", 1)
+        first_name = name_parts[0]
+        last_name = name_parts[1] if len(name_parts) > 1 else ""
+
+        cur.execute("""
+            INSERT INTO clients (
+                spa_id,
+                business_unit_id,
+                first_name,
+                last_name,
+                phone,
+                email
+            )
+            VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING client_id
+        """, (
+            spa_id,
+            business_unit_id,
+            first_name,
+            last_name,
+            booking["phone"],
+            booking["email"]
+        ))
+
+        client_id = cur.fetchone()[0]
+
+
+    # Parser returns True/False
+    paid_at_checkout = bool(booking.get("paid_at_checkout"))
+
+    
+
 
 
     # 4. Insert appointment
@@ -24571,7 +24585,8 @@ def edit_client_full(client_id):
                 notes_three,
                 active_client,
                 created_at,
-                updated_at
+                updated_at,
+                business_unit_id
             FROM clients
             WHERE client_id = %s
               AND spa_id = %s
@@ -24581,6 +24596,8 @@ def edit_client_full(client_id):
         if not client:
             flash("Client not found.", "error")
             return redirect(url_for("client_management"))
+
+        client_business_unit_id = client[19]
 
         cur.execute("""
             SELECT
@@ -24803,6 +24820,7 @@ def edit_client_full(client_id):
                     find_possible_client_duplicates(
                         cur=cur,
                         spa_id=spa_id,
+                        business_unit_id=client_business_unit_id,
                         first_name=first_name,
                         last_name=last_name,
                         phone=phone,
@@ -38673,6 +38691,7 @@ def client_history_detail_two(client_id):
 def find_possible_client_duplicates(
     cur,
     spa_id,
+    business_unit_id,
     first_name,
     last_name,
     phone,
@@ -38680,7 +38699,7 @@ def find_possible_client_duplicates(
     exclude_client_id=None
 ):
     """
-    Return possible duplicate clients for the current spa.
+    Return possible duplicate clients for the current workspace.
 
     Strong matches:
     - Exact normalized email
@@ -38736,7 +38755,10 @@ def find_possible_client_duplicates(
     )
 
     match_conditions = []
-    params = [spa_id]
+    params = [
+        spa_id,
+        business_unit_id
+    ]
 
     if (
         submitted_first_name
@@ -38814,6 +38836,7 @@ def find_possible_client_duplicates(
             active_client
         FROM clients
         WHERE spa_id = %s
+          AND business_unit_id = %s
           AND (
     """
 
@@ -38962,6 +38985,19 @@ def find_possible_client_duplicates(
 @spa_required
 def add_new_client():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to add a client.",
+            "error"
+        )
+
+        return redirect(
+            url_for("client_history")
+        )
+
     selected_date = request.args.get("selected_date") or request.form.get("selected_date") or ""
     
     conn = get_db_connection()
@@ -39073,6 +39109,7 @@ def add_new_client():
                 find_possible_client_duplicates(
                     cur=cur,
                     spa_id=spa_id,
+                    business_unit_id=business_unit_id,
                     first_name=step1_data.get(
                         "first_name",
                         ""
@@ -39178,6 +39215,7 @@ def add_new_client():
                 cur.execute("""
                     INSERT INTO clients (
                         spa_id,
+                        business_unit_id,
                         first_name,
                         last_name,
                         phone,
@@ -39205,14 +39243,16 @@ def add_new_client():
                     )   
                     VALUES (
                         %s, %s, %s, %s, %s,
-                    	%s, %s, %s, %s, %s,
-                    	%s, %s, %s, %s, %s,
-                    	%s, %s, %s, %s, %s,
-                    	%s, %s, %s, %s, %s
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s,
+                        %s
                     )
                     RETURNING client_id
                 """, (
                     spa_id,
+                    business_unit_id,
                     step1_data.get("first_name", ""),
                     step1_data.get("last_name", ""),
                     step1_data.get("phone", ""),
@@ -39329,6 +39369,19 @@ def add_new_client():
 @spa_required
 def add_new_client_step2():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to add a client.",
+            "error"
+        )
+
+        return redirect(
+            url_for("client_history")
+        )
+
     selected_date = request.args.get("selected_date") or request.form.get("selected_date") or ""
             
     step1 = session.get("new_client_step1")
@@ -39377,6 +39430,7 @@ def add_new_client_step2():
                 find_possible_client_duplicates(
                     cur=cur,
                     spa_id=spa_id,
+                    business_unit_id=business_unit_id,
                     first_name=step1.get(
                         "first_name",
                         ""
@@ -39458,6 +39512,7 @@ def add_new_client_step2():
                 cur.execute("""
                     INSERT INTO clients (
                         spa_id,
+                        business_unit_id,
                         first_name,
                         last_name,
                         phone,
@@ -39488,11 +39543,13 @@ def add_new_client_step2():
                         %s, %s, %s, %s, %s,
                         %s, %s, %s, %s, %s,
                         %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s
+                        %s, %s, %s, %s, %s,
+                        %s
                     )
                     RETURNING client_id
                 """, (
                     spa_id,
+                    business_unit_id,
                     step1.get("first_name", ""),
                     step1.get("last_name", ""),
                     step1.get("phone", ""),
@@ -39694,7 +39751,8 @@ def edit_client(client_id):
             c.notes_two,
             c.notes_three,
             c.active_client,
-            c.spa_id
+            c.spa_id,
+            c.business_unit_id
         FROM clients c
         {client_filter}
     """, tuple(client_params))
@@ -39708,6 +39766,7 @@ def edit_client(client_id):
         return redirect(url_for("client_history"))
 
     client_spa_id = client[25]
+    client_business_unit_id = client[26]
 
     # Load active locations for dropdowns
     cur.execute("""
@@ -39806,6 +39865,7 @@ def edit_client(client_id):
                 find_possible_client_duplicates(
                     cur=cur,
                     spa_id=client_spa_id,
+                    business_unit_id=client_business_unit_id,
                     first_name=first_name,
                     last_name=last_name,
                     phone=phone,
@@ -44974,6 +45034,7 @@ def booking_public_preview_confirm():
                 email
             FROM clients
             WHERE spa_id = %s
+              AND business_unit_id = %s
               AND (
                     LOWER(
                         TRIM(
@@ -44992,6 +45053,7 @@ def booking_public_preview_confirm():
             FOR UPDATE
         """, (
             spa_id,
+            business_unit_id,
             normalized_email,
             normalized_phone,
             "1" + normalized_phone
@@ -45106,9 +45168,11 @@ def booking_public_preview_confirm():
                 SET active_client = TRUE
                 WHERE client_id = %s
                   AND spa_id = %s
+                  AND business_unit_id = %s
             """, (
                 client_id,
-                spa_id
+                spa_id,
+                business_unit_id
             ))
 
             matched_client = candidate_by_id[
@@ -45157,6 +45221,7 @@ def booking_public_preview_confirm():
             cur.execute("""
                 INSERT INTO clients (
                     spa_id,
+                    business_unit_id,
                     first_name,
                     last_name,
                     phone,
@@ -45175,6 +45240,7 @@ def booking_public_preview_confirm():
                 )
                 VALUES (
                     %s, %s, %s, %s, %s,
+                    %s,
                     TRUE,
                     'Current',
                     TRUE,
@@ -45190,6 +45256,7 @@ def booking_public_preview_confirm():
                 RETURNING client_id
             """, (
                 spa_id,
+                business_unit_id,
                 first_name,
                 last_name,
                 phone,
@@ -45521,6 +45588,7 @@ def _booking_commit_appointment(
         email
     FROM clients
     WHERE spa_id = %s
+        AND business_unit_id = %s
         AND (
             LOWER(
                 TRIM(
@@ -45539,6 +45607,7 @@ def _booking_commit_appointment(
     FOR UPDATE
 """, (
     spa_id,
+    business_unit_id,
     normalized_email,
     normalized_phone,
     "1" + normalized_phone
@@ -45651,9 +45720,11 @@ def _booking_commit_appointment(
             SET active_client = TRUE
             WHERE client_id = %s
               AND spa_id = %s
+              AND business_unit_id = %s
         """, (
             client_id,
-            spa_id
+            spa_id,
+            business_unit_id
         ))
 
         matched_client = candidate_by_id[
@@ -45705,6 +45776,7 @@ def _booking_commit_appointment(
         cur.execute("""
             INSERT INTO clients (
                 spa_id,
+                business_unit_id,
                 first_name,
                 last_name,
                 phone,
@@ -45723,6 +45795,7 @@ def _booking_commit_appointment(
             )
             VALUES (
                 %s, %s, %s, %s, %s,
+                %s,
                 TRUE,
                 'Current',
                 TRUE,
@@ -45738,6 +45811,7 @@ def _booking_commit_appointment(
             RETURNING client_id
         """, (
             spa_id,
+            business_unit_id,
             first_name,
             last_name,
             phone,
