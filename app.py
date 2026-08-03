@@ -1042,7 +1042,10 @@ def help_page_api(page_key):
 # CLEAR SKIN ESTHETICS — PUBLIC WEBSITE
 # =========================================================
 
-CLEAR_SKIN_PUBLIC_HOST = "clearskinesthetics.peachsuitepro.com"
+CLEAR_SKIN_PUBLIC_HOSTS = {
+    "clearskinesthetics.peachsuitepro.com",
+    "clearskinesthetics.localhost",
+}
 
 
 @app.before_request
@@ -1057,7 +1060,7 @@ def route_clear_skin_public_home():
     host = request.host.split(":", 1)[0].lower()
 
     if (
-        host == CLEAR_SKIN_PUBLIC_HOST
+        host in CLEAR_SKIN_PUBLIC_HOSTS
         and request.method == "GET"
         and request.path == "/"
     ):
@@ -8376,88 +8379,6 @@ def send_email(to, subject, body):
 
 
 
-
-# =========================================================
-# CLEAR SKIN ESTHETICS — PUBLIC WEBSITE
-# =========================================================
-
-CLEAR_SKIN_PUBLIC_HOST = "clearskinesthetics.peachsuitepro.com"
-
-
-@app.before_request
-def serve_clear_skin_public_home():
-    """
-    Serve Clear Skin's public home page before the protected
-    Peach Suite Pro root route processes the request.
-    """
-
-    host = request.host.split(":", 1)[0].lower()
-
-    if (
-        host == CLEAR_SKIN_PUBLIC_HOST
-        and request.method == "GET"
-        and request.path == "/"
-    ):
-        services = [
-            {
-                "name": "Signature Facial",
-                "description": (
-                    "A customized facial designed around your skin’s "
-                    "current needs and goals."
-                ),
-                "duration": "60 minutes",
-            },
-            {
-                "name": "Express Facial",
-                "description": (
-                    "A refreshing treatment for clients who want visible "
-                    "results in less time."
-                ),
-                "duration": "30 minutes",
-            },
-            {
-                "name": "Deluxe Facial",
-                "description": (
-                    "An extended facial experience with additional time "
-                    "for targeted skincare and relaxation."
-                ),
-                "duration": "90 minutes",
-            },
-            {
-                "name": "Chemical Peel",
-                "description": (
-                    "A professional resurfacing treatment designed to "
-                    "improve tone, texture, and clarity."
-                ),
-                "duration": "Custom treatment",
-            },
-            {
-                "name": "Microdermabrasion",
-                "description": (
-                    "Gentle exfoliation that helps reveal smoother, "
-                    "brighter-looking skin."
-                ),
-                "duration": "Custom treatment",
-            },
-            {
-                "name": "Back Facial",
-                "description": (
-                    "Deep cleansing, exfoliation, and targeted care for "
-                    "the skin on your back."
-                ),
-                "duration": "Custom treatment",
-            },
-        ]
-
-        return render_template(
-            "public_site/clear_skin_home.html",
-            services=services,
-        )
-
-
-
-
-
 # =========================================================
 # CLEAR SKIN ESTHETICS — PUBLIC POLICY PAGES
 # Place near the Clear Skin public-home code.
@@ -8469,7 +8390,8 @@ from flask import abort  # Add abort to the existing Flask import if needed.
 def _is_clear_skin_public_host():
     host = request.host.split(":", 1)[0].lower()
 
-    if host == CLEAR_SKIN_PUBLIC_HOST:
+    if host in CLEAR_SKIN_PUBLIC_HOSTS:
+
         return True
 
     # Allows easy browser testing at 127.0.0.1 while Flask is in debug mode.

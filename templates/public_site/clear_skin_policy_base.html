@@ -84,6 +84,70 @@
             font-weight: 700;
         }
 
+        .nav-more {
+            position: relative;
+        }
+
+        .nav-more summary {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: var(--text);
+            font-weight: 700;
+            list-style: none;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .nav-more summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .nav-more summary::after {
+            content: "▾";
+            font-size: 0.72rem;
+            transition: transform 0.2s ease;
+        }
+
+        .nav-more[open] summary::after {
+            transform: rotate(180deg);
+        }
+
+        .nav-more summary:hover {
+            color: var(--peach-dark);
+        }
+
+        .nav-more summary:focus-visible {
+            outline: 3px solid rgba(185, 111, 89, 0.3);
+            outline-offset: 5px;
+            border-radius: 4px;
+        }
+
+        .nav-more-menu {
+            position: absolute;
+            z-index: 1000;
+            top: calc(100% + 14px);
+            right: 0;
+            min-width: 225px;
+            padding: 10px;
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            background: var(--white);
+            box-shadow: 0 18px 45px rgba(75, 55, 48, 0.16);
+        }
+
+        .nav-more-menu a {
+            display: block;
+            padding: 11px 13px;
+            border-radius: 10px;
+            white-space: nowrap;
+        }
+
+        .nav-more-menu a:hover {
+            color: var(--peach-dark);
+            background: var(--peach-light);
+        }
+
         .button {
             display: inline-flex;
             align-items: center;
@@ -203,6 +267,14 @@
                 padding: 12px 18px;
             }
 
+            .main-nav {
+                gap: 14px;
+            }
+
+            .nav-more-menu {
+                right: -12px;
+            }
+
             .brand-tagline,
             .main-nav > a:not(.button) {
                 display: none;
@@ -225,14 +297,39 @@
             </a>
 
             <nav class="main-nav" aria-label="Main navigation">
-                <a href="/">Home</a>
-                <a
-                    href="{{ url_for('public_booking', public_booking_slug='clear-skin-esthetics') }}"
-                    class="button"
-                >
-                    Book Now
-                </a>
-            </nav>
+    <a href="/">Home</a>
+
+    <details class="nav-more">
+        <summary>
+            More
+        </summary>
+
+        <div class="nav-more-menu">
+            <a href="{{ url_for('clear_skin_booking_policy') }}">
+                Booking Policy
+            </a>
+
+            <a href="{{ url_for('clear_skin_privacy') }}">
+                Privacy Policy
+            </a>
+
+            <a href="{{ url_for('clear_skin_terms') }}">
+                Terms of Use
+            </a>
+
+            <a href="{{ url_for('clear_skin_sms_terms') }}">
+                SMS Terms
+            </a>
+        </div>
+    </details>
+
+    <a
+        href="{{ url_for('public_booking', public_booking_slug='clear-skin-esthetics') }}"
+        class="button"
+    >
+        Book Now
+    </a>
+</nav>
         </div>
     </header>
 
