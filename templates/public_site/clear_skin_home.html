@@ -372,6 +372,102 @@
             font-size: 1.05rem;
         }
 
+        .about-section {
+            background: #fffaf6;
+        }
+
+        .about-layout {
+            display: grid;
+            grid-template-columns:
+                minmax(280px, 0.9fr)
+                minmax(320px, 1.1fr);
+            gap: 46px;
+            align-items: center;
+        }
+
+        .about-visual {
+            width: 100%;
+        }
+
+        .about-image {
+            display: block;
+            width: 100%;
+            min-height: 360px;
+            max-height: 480px;
+            object-fit: cover;
+            border-radius: 24px;
+            box-shadow: 0 18px 45px rgba(83, 55, 43, 0.14);
+        }
+
+        .about-image-placeholder {
+            min-height: 360px;
+            padding: 36px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            background:
+                linear-gradient(
+                    145deg,
+                    #fff7f1,
+                    #f0d8cb
+                );
+            border: 1px solid rgba(126, 82, 63, 0.16);
+            border-radius: 24px;
+            box-shadow: 0 18px 45px rgba(83, 55, 43, 0.14);
+        }
+
+        .about-image-mark {
+            width: 104px;
+            height: 104px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #ffffff;
+            border: 1px solid rgba(126, 82, 63, 0.18);
+            border-radius: 50%;
+            color: #7d5240;
+            font-size: 2rem;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+        }
+
+        .about-image-placeholder strong {
+            margin-bottom: 7px;
+            color: #4f362d;
+            font-size: 1.35rem;
+        }
+
+        .about-image-placeholder span {
+            color: #765c51;
+        }
+
+        .about-copy h2 {
+            margin-top: 0;
+            margin-bottom: 18px;
+        }
+
+        .about-copy > p:last-child {
+            margin-bottom: 0;
+            font-size: 1.05rem;
+            line-height: 1.8;
+        }
+
+        @media (max-width: 760px) {
+            .about-layout {
+                grid-template-columns: 1fr;
+                gap: 30px;
+            }
+
+            .about-image,
+            .about-image-placeholder {
+                min-height: 300px;
+            }
+        }
+
+
         .services-section {
             background: var(--white);
         }
@@ -588,6 +684,11 @@
 
             <nav class="main-nav" aria-label="Main navigation">
                 <a href="/">Home</a>
+
+                {% if website_settings.show_about_section %}
+                    <a href="#about">About</a>
+                {% endif %}
+
                 <a href="#services">Services</a>
 
                 <details class="nav-more">
@@ -685,6 +786,81 @@
 
             </div>
         </section>
+
+        {% if website_settings.show_about_section %}
+
+            <section
+                id="about"
+                class="section about-section"
+            >
+                <div class="section-inner">
+
+                    <div class="about-layout">
+
+                        <div class="about-visual">
+
+                            {% if website_settings.about_image_url %}
+
+                                <img
+                                    src="{{ website_settings.about_image_url }}"
+                                    alt="{{ website_settings.about_image_alt }}"
+                                    class="about-image"
+                                    loading="lazy"
+                                >
+
+                            {% else %}
+
+                                <div
+                                    class="about-image-placeholder"
+                                    role="img"
+                                    aria-label="{{
+                                        website_settings.about_image_alt
+                                        or
+                                        'Clear Skin Esthetics personalized skincare'
+                                    }}"
+                                >
+
+                                    <div class="about-image-mark">
+                                        CS
+                                    </div>
+
+                                    <strong>
+                                        Clear Skin Esthetics
+                                    </strong>
+
+                                    <span>
+                                        Personalized Skincare
+                                    </span>
+
+                                </div>
+
+                            {% endif %}
+
+                        </div>
+
+
+                        <div class="about-copy">
+
+                            <p class="eyebrow">
+                                About Clear Skin Esthetics
+                            </p>
+
+                            <h2>
+                                {{ website_settings.about_heading }}
+                            </h2>
+
+                            <p>
+                                {{ website_settings.about_description }}
+                            </p>
+
+                        </div>
+
+                    </div>
+
+                </div>
+            </section>
+
+        {% endif %}
 
 
         <section

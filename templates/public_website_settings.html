@@ -79,6 +79,24 @@
         gap: 10px;
         margin-top: 22px;
     }
+
+    .website-settings-checkbox {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 12px;
+        background: #f7f7f7;
+        border-radius: 8px;
+    }
+
+    .website-settings-checkbox input {
+        width: auto;
+        margin-top: 3px;
+    }
+
+    .website-settings-checkbox label {
+        margin: 0;
+    }
 </style>
 
 
@@ -205,6 +223,112 @@
 
             </section>
 
+            <section class="website-settings-section">
+
+                <h2>About Section</h2>
+
+                <div
+                    class="
+                        website-settings-field
+                        website-settings-checkbox
+                    "
+                >
+
+                    <input
+                        type="checkbox"
+                        id="show_about_section"
+                        name="show_about_section"
+                        {% if settings.show_about_section %}
+                            checked
+                        {% endif %}
+                    >
+
+                    <label for="show_about_section">
+                        Show About Section on Website
+                    </label>
+
+                </div>
+
+
+                <div class="website-settings-field">
+
+                    <label for="about_heading">
+                        About Heading
+                    </label>
+
+                    <input
+                        type="text"
+                        id="about_heading"
+                        name="about_heading"
+                        maxlength="180"
+                        value="{{ settings.about_heading }}"
+                        required
+                    >
+
+                </div>
+
+
+                <div class="website-settings-field">
+
+                    <label for="about_description">
+                        About Description
+                    </label>
+
+                    <textarea
+                        id="about_description"
+                        name="about_description"
+                        maxlength="1500"
+                        required
+                    >{{ settings.about_description }}</textarea>
+
+                </div>
+
+
+                <div class="website-settings-field">
+
+                    <label for="about_image_url">
+                        About Image URL
+                    </label>
+
+                    <input
+                        type="url"
+                        id="about_image_url"
+                        name="about_image_url"
+                        maxlength="2000"
+                        value="{{ settings.about_image_url }}"
+                        placeholder="https://example.com/image.jpg"
+                    >
+
+                    <span class="website-settings-help">
+                        Leave blank to display the styled business
+                        initials card.
+                    </span>
+
+                </div>
+
+
+                <div class="website-settings-field">
+
+                    <label for="about_image_alt">
+                        About Image Alt Text
+                    </label>
+
+                    <input
+                        type="text"
+                        id="about_image_alt"
+                        name="about_image_alt"
+                        maxlength="250"
+                        value="{{ settings.about_image_alt }}"
+                    >
+
+                    <span class="website-settings-help">
+                        Briefly describe the image for customers using
+                        screen readers. Required when an image URL is used.
+                    </span>
+
+                </div>
+
+            </section>
 
             <section class="website-settings-section">
 

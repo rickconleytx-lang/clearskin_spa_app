@@ -1062,6 +1062,26 @@ CLEAR_SKIN_PUBLIC_WEBSITE_DEFAULTS = {
         "select the service that best supports your "
         "skincare journey."
     ),
+
+    "show_about_section": True,
+
+    "about_heading": (
+            "Personalized skincare with a personal touch"
+    ),
+
+    "about_description": (
+            "Clear Skin Esthetics provides thoughtful, "
+            "customized skincare in a comfortable and welcoming "
+            "environment. Each treatment is selected around your "
+            "skin, your goals, and the results you want to achieve."
+    ),
+
+    "about_image_url": "",
+
+    "about_image_alt": (
+            "Clear Skin Esthetics personalized skincare"
+    ),
+
     "services_heading": (
         "Professional treatments with a personal touch"
     ),
@@ -1076,6 +1096,7 @@ CLEAR_SKIN_PUBLIC_WEBSITE_DEFAULTS = {
         "Choose your service, select an available appointment, "
         "and let Clear Skin Esthetics take care of the rest."
     ),
+
 }
 
 
@@ -1153,6 +1174,11 @@ def route_clear_skin_public_home():
                     hero_headline,
                     intro_heading,
                     intro_description,
+                    show_about_section,
+                    about_heading,
+                    about_description,
+                    about_image_url,
+                    about_image_alt,
                     services_heading,
                     services_description,
                     booking_heading,
@@ -1170,11 +1196,16 @@ def route_clear_skin_public_home():
                     "hero_headline": settings_row[0],
                     "intro_heading": settings_row[1],
                     "intro_description": settings_row[2],
-                    "services_heading": settings_row[3],
-                    "services_description": settings_row[4],
-                    "booking_heading": settings_row[5],
-                    "booking_description": settings_row[6],
-                }
+                    "show_about_section": settings_row[3],
+                    "about_heading": settings_row[4],
+                    "about_description": settings_row[5],
+                    "about_image_url": settings_row[6] or "",
+                    "about_image_alt": settings_row[7] or "",
+                    "services_heading": settings_row[8],
+                    "services_description": settings_row[9],
+                    "booking_heading": settings_row[10],
+                    "booking_description": settings_row[11],
+            }
 
         except Exception:
             app.logger.exception(
@@ -9166,6 +9197,39 @@ def public_website_settings():
                         or ""
                     ).strip(),
 
+                    "show_about_section": (
+                        "show_about_section" in request.form
+                    ),
+
+                    "about_heading": (
+                        request.form.get(
+                            "about_heading"
+                        )
+                        or ""
+                    ).strip(),
+
+                    "about_description": (
+                        request.form.get(
+                            "about_description"
+                        )
+                        or ""
+                    ).strip(),
+
+                    "about_image_url": (
+                        request.form.get(
+                            "about_image_url"
+                        )
+                        or ""
+                    ).strip(),
+
+                    "about_image_alt": (
+                        request.form.get(
+                            "about_image_alt"
+                        )
+                        or ""
+                    ).strip(),
+
+
                     "services_heading": (
                         request.form.get(
                             "services_heading"
@@ -9208,6 +9272,17 @@ def public_website_settings():
                         "Intro Description",
                         1000
                     ),
+
+                    "about_heading": (
+                        "About Heading",
+                        180
+                    ),
+                    "about_description": (
+                        "About Description",
+                        1500
+                    ),
+
+
                     "services_heading": (
                         "Services Heading",
                         180
@@ -9263,9 +9338,84 @@ def public_website_settings():
                             )
                         )
 
+
+
+                if len(settings["about_image_url"]) > 2000:
+                    flash(
+                        (
+                            "About Image URL must be "
+                            "2000 characters or fewer."
+                        ),
+                        "error"
+                    )
+
+                    return render_template(
+                        "public_website_settings.html",
+                        settings=settings,
+                        public_website_url=public_website_url
+                    )
+
+
+                if (
+                    settings["about_image_url"]
+                    and not settings["about_image_url"].startswith(
+                        "https://"
+                    )
+                ):
+                    flash(
+                        (
+                            "About Image URL must begin "
+                            "with https://."
+                        ),
+                        "error"
+                    )
+
+                    return render_template(
+                        "public_website_settings.html",
+                        settings=settings,
+                        public_website_url=public_website_url
+                    )
+
+
+                if len(settings["about_image_alt"]) > 250:
+                    flash(
+                        (
+                            "About Image Alt Text must be "
+                            "250 characters or fewer."
+                        ),
+                        "error"
+                    )
+
+                    return render_template(
+                        "public_website_settings.html",
+                        settings=settings,
+                        public_website_url=public_website_url
+                    )
+
+
+                if (
+                    settings["about_image_url"]
+                    and not settings["about_image_alt"]
+                ):
+                    flash(
+                        (
+                            "About Image Alt Text is required "
+                            "when an image URL is provided."
+                        ),
+                        "error"
+                    )
+
+                    return render_template(
+                        "public_website_settings.html",
+                        settings=settings,
+                        public_website_url=public_website_url
+                    )
+
                 success_message = (
                     "Public website settings updated."
                 )
+
+
 
             cur.execute("""
                 INSERT INTO public_website_settings (
@@ -9273,6 +9423,11 @@ def public_website_settings():
                     hero_headline,
                     intro_heading,
                     intro_description,
+                    show_about_section,
+                    about_heading,
+                    about_description,
+                    about_image_url,
+                    about_image_alt,
                     services_heading,
                     services_description,
                     booking_heading,
@@ -9280,7 +9435,9 @@ def public_website_settings():
                 )
                 VALUES (
                     %s, %s, %s, %s,
-                    %s, %s, %s, %s
+                    %s, %s, %s, %s,
+                    %s, %s, %s, %s,
+                    %s
                 )
                 ON CONFLICT (spa_id)
                 DO UPDATE SET
@@ -9289,6 +9446,15 @@ def public_website_settings():
                     intro_description = (
                         EXCLUDED.intro_description
                     ),
+                    show_about_section = (
+                        EXCLUDED.show_about_section
+                    ),
+                    about_heading = EXCLUDED.about_heading,
+                    about_description = (
+                        EXCLUDED.about_description
+                    ),
+                    about_image_url = EXCLUDED.about_image_url,
+                    about_image_alt = EXCLUDED.about_image_alt,
                     services_heading = (
                         EXCLUDED.services_heading
                     ),
@@ -9307,6 +9473,11 @@ def public_website_settings():
                 settings["hero_headline"],
                 settings["intro_heading"],
                 settings["intro_description"],
+                settings["show_about_section"],
+                settings["about_heading"],
+                settings["about_description"],
+                settings["about_image_url"] or None,
+                settings["about_image_alt"] or None,
                 settings["services_heading"],
                 settings["services_description"],
                 settings["booking_heading"],
@@ -9329,6 +9500,11 @@ def public_website_settings():
                 hero_headline,
                 intro_heading,
                 intro_description,
+                show_about_section,
+                about_heading,
+                about_description,
+                about_image_url,
+                about_image_alt,
                 services_heading,
                 services_description,
                 booking_heading,
@@ -9344,10 +9520,15 @@ def public_website_settings():
                 "hero_headline": row[0],
                 "intro_heading": row[1],
                 "intro_description": row[2],
-                "services_heading": row[3],
-                "services_description": row[4],
-                "booking_heading": row[5],
-                "booking_description": row[6],
+                "show_about_section": row[3],
+                "about_heading": row[4],
+                "about_description": row[5],
+                "about_image_url": row[6] or "",
+                "about_image_alt": row[7] or "",
+                "services_heading": row[8],
+                "services_description": row[9],
+                "booking_heading": row[10],
+                "booking_description": row[11],
             }
 
         else:
