@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="{{ page_description }}">
+    <title>{{ page_title }} | Clear Skin Esthetics</title>
+
+    <style>
+        :root {
+            --peach: #d99078;
+            --peach-dark: #b96f59;
+            --peach-light: #f7e8e2;
+            --cream: #fffaf7;
+            --text: #302b29;
+            --muted: #6f6662;
+            --white: #ffffff;
+            --border: #eadbd5;
+            --shadow: 0 14px 40px rgba(79, 55, 45, 0.10);
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+            color: var(--text);
+            background: var(--cream);
+            line-height: 1.7;
+        }
+
+        a { color: var(--peach-dark); }
+
+        .site-header {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: rgba(255, 250, 247, 0.96);
+            border-bottom: 1px solid var(--border);
+            backdrop-filter: blur(12px);
+        }
+
+        .header-inner {
+            max-width: 1180px;
+            margin: 0 auto;
+            padding: 14px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 24px;
+        }
+
+        .brand {
+            color: var(--text);
+            text-decoration: none;
+            display: flex;
+            flex-direction: column;
+            line-height: 1.15;
+        }
+
+        .brand-name {
+            font-family: Georgia, "Times New Roman", serif;
+            font-size: 1.35rem;
+            font-weight: 700;
+        }
+
+        .brand-tagline {
+            margin-top: 4px;
+            color: var(--muted);
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.14em;
+        }
+
+        .main-nav {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .main-nav a {
+            color: var(--text);
+            text-decoration: none;
+            font-weight: 700;
+        }
+
+        .button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 42px;
+            padding: 10px 20px;
+            border-radius: 999px;
+            background: var(--peach-dark);
+            color: var(--white) !important;
+            text-decoration: none;
+            font-weight: 800;
+        }
+
+        .page-hero {
+            padding: 76px 24px 48px;
+            background:
+                radial-gradient(circle at 82% 20%, rgba(217, 144, 120, 0.22), transparent 35%),
+                linear-gradient(135deg, #fffaf7 0%, #f9eee9 100%);
+            text-align: center;
+        }
+
+        .page-hero h1 {
+            margin: 0;
+            font-family: Georgia, "Times New Roman", serif;
+            font-size: clamp(2.4rem, 5vw, 4.3rem);
+            font-weight: 500;
+            line-height: 1.08;
+        }
+
+        .page-hero p {
+            max-width: 720px;
+            margin: 18px auto 0;
+            color: var(--muted);
+        }
+
+        .policy-shell {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 54px 24px 84px;
+        }
+
+        .policy-card {
+            padding: 42px;
+            background: var(--white);
+            border: 1px solid var(--border);
+            border-radius: 28px;
+            box-shadow: var(--shadow);
+        }
+
+        .effective-date {
+            margin-top: 0;
+            padding-bottom: 18px;
+            border-bottom: 1px solid var(--border);
+            color: var(--muted);
+            font-size: 0.94rem;
+        }
+
+        .policy-card h2 {
+            margin: 34px 0 10px;
+            font-family: Georgia, "Times New Roman", serif;
+            font-size: 1.65rem;
+            font-weight: 500;
+        }
+
+        .policy-card h2:first-of-type {
+            margin-top: 24px;
+        }
+
+        .policy-card p,
+        .policy-card li {
+            color: #4f4743;
+        }
+
+        .policy-card ul {
+            padding-left: 22px;
+        }
+
+        .notice-box {
+            margin: 24px 0;
+            padding: 20px;
+            border-left: 4px solid var(--peach-dark);
+            border-radius: 10px;
+            background: var(--peach-light);
+        }
+
+        .site-footer {
+            padding: 34px 24px;
+            background: #241f1d;
+            color: rgba(255,255,255,0.75);
+        }
+
+        .footer-inner {
+            max-width: 1180px;
+            margin: 0 auto;
+            text-align: center;
+        }
+
+        .footer-links {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 10px 18px;
+            margin-bottom: 14px;
+        }
+
+        .footer-links a {
+            color: rgba(255,255,255,0.88);
+        }
+
+        .footer-inner p {
+            margin: 6px 0 0;
+            font-size: 0.9rem;
+        }
+
+        @media (max-width: 680px) {
+            .header-inner {
+                padding: 12px 18px;
+            }
+
+            .brand-tagline,
+            .main-nav > a:not(.button) {
+                display: none;
+            }
+
+            .policy-card {
+                padding: 28px 22px;
+                border-radius: 22px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <header class="site-header">
+        <div class="header-inner">
+            <a href="/" class="brand">
+                <span class="brand-name">Clear Skin Esthetics</span>
+                <span class="brand-tagline">Personalized Skincare</span>
+            </a>
+
+            <nav class="main-nav" aria-label="Main navigation">
+                <a href="/">Home</a>
+                <a
+                    href="{{ url_for('public_booking', public_booking_slug='clear-skin-esthetics') }}"
+                    class="button"
+                >
+                    Book Now
+                </a>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <section class="page-hero">
+            <h1>{{ page_title }}</h1>
+            <p>{{ page_intro }}</p>
+        </section>
+
+        <section class="policy-shell">
+            <article class="policy-card">
+                <p class="effective-date">
+                    Effective date: August 2, 2026
+                </p>
+
+                {% block policy_content %}{% endblock %}
+            </article>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <div class="footer-inner">
+            <div class="footer-links">
+                <a href="{{ url_for('clear_skin_booking_policy') }}">Booking &amp; Cancellation Policy</a>
+                <a href="{{ url_for('clear_skin_privacy') }}">Privacy Policy</a>
+                <a href="{{ url_for('clear_skin_terms') }}">Terms &amp; Conditions</a>
+                <a href="{{ url_for('clear_skin_sms_terms') }}">SMS Terms</a>
+            </div>
+
+            <p>&copy; 2026 Clear Skin Esthetics. All rights reserved.</p>
+            <p>Online booking powered by Peach Suite Pro.</p>
+        </div>
+    </footer>
+</body>
+</html>

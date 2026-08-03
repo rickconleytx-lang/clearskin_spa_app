@@ -7628,7 +7628,11 @@ def load_spa():
         "godaddy_booking_intake",
         "telnyx_sms_webhook",
         "public_booking",
-        "public_booking_confirm"
+        "public_booking_confirm",
+        "clear_skin_booking_policy",
+        "clear_skin_privacy",
+        "clear_skin_terms",
+        "clear_skin_sms_terms",
     ):
         return
 
@@ -8449,6 +8453,99 @@ def serve_clear_skin_public_home():
             "public_site/clear_skin_home.html",
             services=services,
         )
+
+
+
+
+
+# =========================================================
+# CLEAR SKIN ESTHETICS — PUBLIC POLICY PAGES
+# Place near the Clear Skin public-home code.
+# =========================================================
+
+from flask import abort  # Add abort to the existing Flask import if needed.
+
+
+def _is_clear_skin_public_host():
+    host = request.host.split(":", 1)[0].lower()
+
+    if host == CLEAR_SKIN_PUBLIC_HOST:
+        return True
+
+    # Allows easy browser testing at 127.0.0.1 while Flask is in debug mode.
+    return bool(
+        app.debug
+        and host in {"127.0.0.1", "localhost"}
+    )
+
+
+def _render_clear_skin_policy(
+    template_name,
+    page_title,
+    page_intro,
+    page_description
+):
+    if not _is_clear_skin_public_host():
+        abort(404)
+
+    return render_template(
+        template_name,
+        page_title=page_title,
+        page_intro=page_intro,
+        page_description=page_description
+    )
+
+
+@app.route("/booking-policy")
+def clear_skin_booking_policy():
+    return _render_clear_skin_policy(
+        "public_site/clear_skin_booking_policy.html",
+        "Booking & Cancellation Policy",
+        "Clear expectations for booking, rescheduling, late arrivals, and appointment care.",
+        "Clear Skin Esthetics booking and cancellation policy."
+    )
+
+
+@app.route("/privacy")
+def clear_skin_privacy():
+    return _render_clear_skin_policy(
+        "public_site/clear_skin_privacy.html",
+        "Privacy Policy",
+        "How Clear Skin Esthetics collects, uses, protects, and shares information.",
+        "Clear Skin Esthetics privacy policy."
+    )
+
+
+@app.route("/terms")
+def clear_skin_terms():
+    return _render_clear_skin_policy(
+        "public_site/clear_skin_terms.html",
+        "Terms & Conditions",
+        "Terms governing the Clear Skin Esthetics website, booking system, and services.",
+        "Clear Skin Esthetics website and booking terms."
+    )
+
+
+@app.route("/sms-terms")
+def clear_skin_sms_terms():
+    return _render_clear_skin_policy(
+        "public_site/clear_skin_sms_terms.html",
+        "SMS Terms",
+        "Terms for optional Clear Skin Esthetics appointment-related text messages.",
+        "Clear Skin Esthetics SMS messaging terms."
+    )
+
+
+# IMPORTANT:
+# If Peach Suite Pro has a global public-endpoint allowlist, add:
+#
+# "clear_skin_booking_policy",
+# "clear_skin_privacy",
+# "clear_skin_terms",
+# "clear_skin_sms_terms",
+#
+# alongside the existing "public_booking" and "public_booking_confirm" entries.
+
 
 
 #  ----------------------

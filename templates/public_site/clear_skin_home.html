@@ -684,7 +684,33 @@
 
 
     <footer class="site-footer">
-        <div class="footer-inner">
+        <div class="footer-inner" style="display:block; text-align:center;">
+
+            <div
+                style="
+                    display:flex;
+                    flex-wrap:wrap;
+                    justify-content:center;
+                    gap:10px 18px;
+                    margin-bottom:14px;
+                "
+            >
+                <a href="{{ url_for('clear_skin_booking_policy') }}">
+                    Booking &amp; Cancellation Policy
+                </a>
+
+                <a href="{{ url_for('clear_skin_privacy') }}">
+                    Privacy Policy
+                </a>
+
+                <a href="{{ url_for('clear_skin_terms') }}">
+                    Terms &amp; Conditions
+                </a>
+
+                <a href="{{ url_for('clear_skin_sms_terms') }}">
+                    SMS Terms
+                </a>
+            </div>
 
             <p>
                 &copy; {{ current_year or 2026 }}
@@ -697,6 +723,7 @@
 
         </div>
     </footer>
+
 
 </body>
 </html>
