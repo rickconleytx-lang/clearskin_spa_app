@@ -1027,6 +1027,97 @@ def help_page_api(page_key):
         cur.close()
         conn.close()
 
+############################################
+#
+#
+#   HOST NAME HANDLER
+#
+#
+#
+############################################
+
+
+
+# =========================================================
+# CLEAR SKIN ESTHETICS — PUBLIC WEBSITE
+# =========================================================
+
+CLEAR_SKIN_PUBLIC_HOST = "clearskinesthetics.peachsuitepro.com"
+
+
+@app.before_request
+def route_clear_skin_public_home():
+    """
+    Show the Clear Skin public website when the request comes
+    through the Clear Skin Peach Suite Pro subdomain.
+
+    The normal app.peachsuitepro.com root route remains unchanged.
+    """
+
+    host = request.host.split(":", 1)[0].lower()
+
+    if (
+        host == CLEAR_SKIN_PUBLIC_HOST
+        and request.method == "GET"
+        and request.path == "/"
+    ):
+        services = [
+            {
+                "name": "Signature Facial",
+                "description": (
+                    "A customized facial designed around your skin’s "
+                    "current needs and goals."
+                ),
+                "duration": "60 minutes",
+            },
+            {
+                "name": "Express Facial",
+                "description": (
+                    "A refreshing treatment for clients who want visible "
+                    "results in less time."
+                ),
+                "duration": "30 minutes",
+            },
+            {
+                "name": "Deluxe Facial",
+                "description": (
+                    "An extended facial experience with additional time "
+                    "for targeted skincare and relaxation."
+                ),
+                "duration": "90 minutes",
+            },
+            {
+                "name": "Chemical Peel",
+                "description": (
+                    "A professional resurfacing treatment designed to "
+                    "improve tone, texture, and clarity."
+                ),
+                "duration": "Custom treatment",
+            },
+            {
+                "name": "Microdermabrasion",
+                "description": (
+                    "Gentle exfoliation that helps reveal smoother, "
+                    "brighter-looking skin."
+                ),
+                "duration": "Custom treatment",
+            },
+            {
+                "name": "Back Facial",
+                "description": (
+                    "Deep cleansing, exfoliation, and targeted care for "
+                    "the skin on your back."
+                ),
+                "duration": "Custom treatment",
+            },
+        ]
+
+        return render_template(
+            "public_site/clear_skin_home.html",
+            services=services,
+        )
+
+
 
 
 
@@ -8276,6 +8367,88 @@ def send_email(to, subject, body):
 
     return response
 
+
+
+
+
+
+
+# =========================================================
+# CLEAR SKIN ESTHETICS — PUBLIC WEBSITE
+# =========================================================
+
+CLEAR_SKIN_PUBLIC_HOST = "clearskinesthetics.peachsuitepro.com"
+
+
+@app.before_request
+def serve_clear_skin_public_home():
+    """
+    Serve Clear Skin's public home page before the protected
+    Peach Suite Pro root route processes the request.
+    """
+
+    host = request.host.split(":", 1)[0].lower()
+
+    if (
+        host == CLEAR_SKIN_PUBLIC_HOST
+        and request.method == "GET"
+        and request.path == "/"
+    ):
+        services = [
+            {
+                "name": "Signature Facial",
+                "description": (
+                    "A customized facial designed around your skin’s "
+                    "current needs and goals."
+                ),
+                "duration": "60 minutes",
+            },
+            {
+                "name": "Express Facial",
+                "description": (
+                    "A refreshing treatment for clients who want visible "
+                    "results in less time."
+                ),
+                "duration": "30 minutes",
+            },
+            {
+                "name": "Deluxe Facial",
+                "description": (
+                    "An extended facial experience with additional time "
+                    "for targeted skincare and relaxation."
+                ),
+                "duration": "90 minutes",
+            },
+            {
+                "name": "Chemical Peel",
+                "description": (
+                    "A professional resurfacing treatment designed to "
+                    "improve tone, texture, and clarity."
+                ),
+                "duration": "Custom treatment",
+            },
+            {
+                "name": "Microdermabrasion",
+                "description": (
+                    "Gentle exfoliation that helps reveal smoother, "
+                    "brighter-looking skin."
+                ),
+                "duration": "Custom treatment",
+            },
+            {
+                "name": "Back Facial",
+                "description": (
+                    "Deep cleansing, exfoliation, and targeted care for "
+                    "the skin on your back."
+                ),
+                "duration": "Custom treatment",
+            },
+        ]
+
+        return render_template(
+            "public_site/clear_skin_home.html",
+            services=services,
+        )
 
 
 #  ----------------------
