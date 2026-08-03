@@ -48539,12 +48539,20 @@ def _queue_public_booking_confirmation_email(
     return queued_row[0]
 
 
+
+
+
 @app.route("/book/<public_booking_slug>")
 def public_booking(public_booking_slug):
     return _render_public_booking_page(
         public_booking_slug,
         preview_mode=False
     )
+
+
+
+
+
 
 
 @app.route(
@@ -48693,6 +48701,12 @@ def public_booking_confirm(
         request.form.get("notes")
         or ""
     ).strip()
+
+    service_sms_consent = (
+        request.form.get("service_sms_consent")
+        == "1"
+    )
+
 
     booking_for_other_raw = (
         request.form.get(
@@ -48954,6 +48968,74 @@ def public_booking_confirm(
                     400
                 ),
                 service_type_id=service_type_id
+            )
+
+
+        if service_sms_consent:
+
+            client_id = confirmation["client_id"]
+
+            cur.execute("""
+                UPDATE clients
+                SET
+                    sms_opt_in = TRUE,
+                    sms_opt_out = FALSE
+                WHERE client_id = %s
+                  AND spa_id = %s
+                  AND business_unit_id = %s
+            """, (
+                client_id,
+                spa_id,
+                business_unit_id
+            ))
+
+            cur.execute("""
+                INSERT INTO sms_consent_log (
+                    spa_id,
+                    business_unit_id,
+                    client_id,
+                    phone_number,
+                    consent_given,
+                    consent_method,
+                    consent_text
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (
+                spa_id,
+                business_unit_id,
+                client_id,
+                phone,
+                True,
+                "public_website_booking_checkbox",
+                (
+                    "I agree to receive service-related text "
+                    "messages from Clear Skin Esthetics regarding "
+                    "appointment confirmations, reminders, "
+                    "scheduling updates, and cancellations. "
+                    "Message frequency varies. Message and data "
+                    "rates may apply. Reply STOP to opt out or "
+                    "HELP for help. Consent is not a condition "
+                    "of purchase. Consent text version: "
+                    "clear_skin_service_sms_2026_08_02."
+                )
+            ))
+
+            add_consent_record(
+                cur=cur,
+                spa_id=spa_id,
+                client_id=client_id,
+                consent_type="SMS",
+                consent_status=True,
+                consent_source=(
+                    "Public Website Booking Checkbox"
+                ),
+                consent_note=(
+                    "Client voluntarily selected the "
+                    "optional service SMS consent checkbox. "
+                    "Consent text version: "
+                    "clear_skin_service_sms_2026_08_02."
+                ),
+                updated_by=None
             )
 
 

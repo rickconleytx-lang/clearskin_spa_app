@@ -737,6 +737,38 @@
                 outline-offset: 4px;
                 border-radius: 4px;
             }
+
+            .service-sms-consent {
+                display: grid;
+                grid-template-columns: 22px 1fr;
+                gap: 10px;
+                width: min(100%, 620px);
+                margin: 0 0 18px;
+                padding: 16px;
+                border: 1px solid #eadbd5;
+                border-radius: 14px;
+                background: #fffaf7;
+                text-align: left;
+            }
+
+            .service-sms-consent input {
+                width: 18px;
+                height: 18px;
+                margin: 4px 0 0;
+                cursor: pointer;
+            }
+
+            .service-sms-consent label {
+                color: #4f4743;
+                font-size: 0.88rem;
+                line-height: 1.55;
+                cursor: pointer;
+            }
+
+            .service-sms-consent a {
+                color: #b96f59;
+                font-weight: 700;
+            }
         }
     </style>
 </head>
@@ -1788,9 +1820,9 @@
                                     No email or SMS will be sent.
                                 {% else %}
                                     Review the appointment carefully.
-                                    Confirming will create a real
-                                    appointment. Email and SMS
-                                    confirmations are not enabled yet.
+                                    Confirming will create a real appointment.
+                                    An email confirmation will be sent.
+                                    SMS confirmations and reminders are not enabled yet.
                                 {% endif %}
                             </div>
 
@@ -1920,6 +1952,51 @@
                                         name="notes"
                                     >
 
+                                    {% if not preview_mode %}
+
+                                        <div class="service-sms-consent">
+
+                                            <input
+                                                type="checkbox"
+                                                id="serviceSmsConsent"
+                                                name="service_sms_consent"
+                                                value="1"
+                                            >
+
+                                            <label for="serviceSmsConsent">
+                                                I agree to receive service-related text messages
+                                                from Clear Skin Esthetics at the number I provided 
+                                                about this appointment, regarding appointment
+                                                confirmations, reminders, scheduling updates, and
+                                                cancellations. Message frequency varies. Message
+                                                and data rates may apply. Reply STOP to opt out or
+                                                HELP for help. Consent is not a condition of
+                                                purchase.
+
+                                                <a
+                                                    href="/sms-terms"
+                                                    target="_blank"
+                                                    rel="noopener"
+                                                >
+                                                    SMS Terms
+                                                </a>
+
+                                                and
+
+                                                <a
+                                                    href="/privacy"
+                                                    target="_blank"
+                                                    rel="noopener"
+                                                >
+                                                    Privacy Policy
+                                                </a>.
+                                            </label>
+
+                                        </div>
+
+                                    {% endif %}
+<br>
+
                                     <button
                                         type="submit"
                                         class="booking-primary-button"
@@ -1940,10 +2017,11 @@
                                 Internal testing only. Confirming creates
                                 a real local appointment, but public
                                 online booking remains disabled.
-                            {% else %}
+                           {% else %}
                                 Your appointment will be saved immediately
-                                after confirmation. Email and SMS
-                                confirmations are not enabled yet.
+                                after confirmation. An email confirmation
+                                will be sent. SMS confirmations and reminders
+                                are not enabled yet.
                             {% endif %}
                         </div>
 
