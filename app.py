@@ -9044,10 +9044,13 @@ def service_types():
             service_name,
             default_duration_minutes,
             default_price,
-            is_active
+            is_active,
+            show_on_public_website
         FROM service_name_types
         WHERE spa_id = %s
     """
+
+
 
     params = [spa_id]
 
