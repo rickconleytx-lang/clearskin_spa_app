@@ -1,0 +1,322 @@
+{% extends "base.html" %}
+
+{% block title %}
+    Public Website Settings | Peach Suite Pro
+{% endblock %}
+
+{% block content %}
+
+<style>
+    .website-settings-page {
+        max-width: 900px;
+    }
+
+    .website-settings-intro {
+        margin-bottom: 20px;
+    }
+
+    .website-settings-card {
+        padding: 22px;
+        background: #ffffff;
+        border: 1px solid #dddddd;
+        border-radius: 10px;
+    }
+
+    .website-settings-section {
+        padding-bottom: 22px;
+        margin-bottom: 22px;
+        border-bottom: 1px solid #e5e5e5;
+    }
+
+    .website-settings-section:last-of-type {
+        border-bottom: 0;
+    }
+
+    .website-settings-section h2 {
+        margin-top: 0;
+        margin-bottom: 14px;
+    }
+
+    .website-settings-field {
+        margin-bottom: 18px;
+    }
+
+    .website-settings-field:last-child {
+        margin-bottom: 0;
+    }
+
+    .website-settings-field label {
+        display: block;
+        margin-bottom: 7px;
+        font-weight: 700;
+    }
+
+    .website-settings-field input,
+    .website-settings-field textarea {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 10px 12px;
+        border: 1px solid #cccccc;
+        border-radius: 7px;
+        font: inherit;
+    }
+
+    .website-settings-field textarea {
+        min-height: 110px;
+        resize: vertical;
+    }
+
+    .website-settings-help {
+        display: block;
+        margin-top: 6px;
+        color: #666666;
+        font-size: 0.9rem;
+    }
+
+    .website-settings-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 22px;
+    }
+</style>
+
+
+<div class="website-settings-page">
+
+    <div class="page-tool-pills">
+
+        <a
+            href="{{ url_for('admin') }}"
+            class="tool-pill tool-pill-small"
+        >
+            Admin / Setup
+        </a>
+
+        <a
+            href="{{ url_for('service_types') }}"
+            class="tool-pill tool-pill-small"
+        >
+            Service Catalog
+        </a>
+
+        <a
+            href="{{ public_website_url }}"
+            class="tool-pill tool-pill-small"
+            target="_blank"
+            rel="noopener"
+        >
+            View Website
+        </a>
+
+    </div>
+
+
+    <div class="page-title">
+        <h1>Public Website Settings</h1>
+    </div>
+
+
+    <div class="website-settings-intro">
+
+        <p>
+            Customize the main headings and descriptions shown
+            on the public business website.
+        </p>
+
+        <p>
+            Service names, descriptions, visibility, and display
+            order are managed separately in the Service Catalog.
+        </p>
+
+    </div>
+
+
+    <div class="website-settings-card">
+
+        <form method="POST">
+
+            <section class="website-settings-section">
+
+                <h2>Hero Section</h2>
+
+                <div class="website-settings-field">
+
+                    <label for="hero_headline">
+                        Hero Headline
+                    </label>
+
+                    <input
+                        type="text"
+                        id="hero_headline"
+                        name="hero_headline"
+                        maxlength="180"
+                        value="{{ settings.hero_headline }}"
+                        required
+                        autofocus
+                    >
+
+                    <span class="website-settings-help">
+                        The main headline customers see when
+                        they first open the website.
+                    </span>
+
+                </div>
+
+            </section>
+
+
+            <section class="website-settings-section">
+
+                <h2>Introduction Card</h2>
+
+                <div class="website-settings-field">
+
+                    <label for="intro_heading">
+                        Intro Heading
+                    </label>
+
+                    <input
+                        type="text"
+                        id="intro_heading"
+                        name="intro_heading"
+                        maxlength="180"
+                        value="{{ settings.intro_heading }}"
+                        required
+                    >
+
+                </div>
+
+
+                <div class="website-settings-field">
+
+                    <label for="intro_description">
+                        Intro Description
+                    </label>
+
+                    <textarea
+                        id="intro_description"
+                        name="intro_description"
+                        maxlength="1000"
+                        required
+                    >{{ settings.intro_description }}</textarea>
+
+                </div>
+
+            </section>
+
+
+            <section class="website-settings-section">
+
+                <h2>Services Section</h2>
+
+                <div class="website-settings-field">
+
+                    <label for="services_heading">
+                        Services Heading
+                    </label>
+
+                    <input
+                        type="text"
+                        id="services_heading"
+                        name="services_heading"
+                        maxlength="180"
+                        value="{{ settings.services_heading }}"
+                        required
+                    >
+
+                </div>
+
+
+                <div class="website-settings-field">
+
+                    <label for="services_description">
+                        Services Description
+                    </label>
+
+                    <textarea
+                        id="services_description"
+                        name="services_description"
+                        maxlength="1000"
+                        required
+                    >{{ settings.services_description }}</textarea>
+
+                </div>
+
+            </section>
+
+
+            <section class="website-settings-section">
+
+                <h2>Booking Section</h2>
+
+                <div class="website-settings-field">
+
+                    <label for="booking_heading">
+                        Booking Heading
+                    </label>
+
+                    <input
+                        type="text"
+                        id="booking_heading"
+                        name="booking_heading"
+                        maxlength="180"
+                        value="{{ settings.booking_heading }}"
+                        required
+                    >
+
+                </div>
+
+
+                <div class="website-settings-field">
+
+                    <label for="booking_description">
+                        Booking Description
+                    </label>
+
+                    <textarea
+                        id="booking_description"
+                        name="booking_description"
+                        maxlength="1000"
+                        required
+                    >{{ settings.booking_description }}</textarea>
+
+                </div>
+
+            </section>
+
+
+            <div class="website-settings-actions">
+
+                <button
+                    type="submit"
+                    name="action"
+                    value="save"
+                    class="btn btn-primary"
+                >
+                    Save Changes
+                </button>
+
+                <button
+                    type="submit"
+                    name="action"
+                    value="reset"
+                    class="btn"
+                    onclick="
+                        return confirm(
+                            'Reset all website text to the original defaults?'
+                        );
+                    "
+                >
+                    Reset to Defaults
+                </button>
+
+            </div>
+
+        </form>
+
+    </div>
+
+</div>
+
+{% endblock %}
