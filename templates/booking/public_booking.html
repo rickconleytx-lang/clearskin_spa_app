@@ -713,6 +713,30 @@
             .booking-shell {
                 border-radius: 16px;
             }
+
+            .public-booking-back-link {
+                display: inline-flex;
+                align-items: center;
+                margin-bottom: 20px;
+                color: #6f6662;
+                font-size: 0.95rem;
+                font-weight: 700;
+                text-decoration: none;
+                transition:
+                    color 0.2s ease,
+                    transform 0.2s ease;
+            }
+
+            .public-booking-back-link:hover {
+                color: #b96f59;
+                transform: translateX(-3px);
+            }
+
+            .public-booking-back-link:focus-visible {
+                outline: 3px solid rgba(185, 111, 89, 0.35);
+                outline-offset: 4px;
+                border-radius: 4px;
+            }
         }
     </style>
 </head>
@@ -823,6 +847,15 @@
 
 
                 {% else %}
+
+                    <a
+                        href="/"
+                        class="public-booking-back-link"
+                        aria-label="Return to the business website"
+                    >
+                        ← Back to Website
+                    </a>
+
 
                     <div class="booking-intro">
                         <h2>
