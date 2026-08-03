@@ -1047,6 +1047,8 @@ CLEAR_SKIN_PUBLIC_HOSTS = {
     "clearskinesthetics.localhost",
 }
 
+CLEAR_SKIN_PUBLIC_SPA_ID = 1
+
 
 @app.before_request
 def route_clear_skin_public_home():
@@ -1064,56 +1066,58 @@ def route_clear_skin_public_home():
         and request.method == "GET"
         and request.path == "/"
     ):
-        services = [
-            {
-                "name": "Signature Facial",
-                "description": (
-                    "A customized facial designed around your skin’s "
-                    "current needs and goals."
-                ),
-                "duration": "60 minutes",
-            },
-            {
-                "name": "Express Facial",
-                "description": (
-                    "A refreshing treatment for clients who want visible "
-                    "results in less time."
-                ),
-                "duration": "30 minutes",
-            },
-            {
-                "name": "Deluxe Facial",
-                "description": (
-                    "An extended facial experience with additional time "
-                    "for targeted skincare and relaxation."
-                ),
-                "duration": "90 minutes",
-            },
-            {
-                "name": "Chemical Peel",
-                "description": (
-                    "A professional resurfacing treatment designed to "
-                    "improve tone, texture, and clarity."
-                ),
-                "duration": "Custom treatment",
-            },
-            {
-                "name": "Microdermabrasion",
-                "description": (
-                    "Gentle exfoliation that helps reveal smoother, "
-                    "brighter-looking skin."
-                ),
-                "duration": "Custom treatment",
-            },
-            {
-                "name": "Back Facial",
-                "description": (
-                    "Deep cleansing, exfoliation, and targeted care for "
-                    "the skin on your back."
-                ),
-                "duration": "Custom treatment",
-            },
-        ]
+
+        services = []
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        try:
+            cur.execute("""
+                SELECT
+                    service_name,
+                    public_description,
+                    default_duration_minutes
+                FROM service_name_types
+                WHERE spa_id = %s
+                  AND is_active = TRUE
+                  AND show_on_public_website = TRUE
+                ORDER BY
+                    website_sort_order NULLS LAST,
+                    service_name
+            """, (
+                CLEAR_SKIN_PUBLIC_SPA_ID,
+            ))
+
+            for row in cur.fetchall():
+                service_name = row[0]
+                public_description = row[1]
+                duration_minutes = row[2]
+
+                services.append({
+                    "name": service_name,
+                    "description": (
+                        public_description
+                        or (
+                            "Contact Clear Skin Esthetics "
+                            "to learn more about this service."
+                        )
+                    ),
+                    "duration": (
+                        f"{duration_minutes} minutes"
+                        if duration_minutes is not None
+                        else "Contact for duration"
+                    ),
+                })
+
+        except Exception:
+            app.logger.exception(
+                "Could not load Clear Skin website services."
+            )
+
+        finally:
+            cur.close()
+            conn.close()
 
         return render_template(
             "public_site/clear_skin_home.html",
@@ -9097,12 +9101,44 @@ def service_types():
         cur.close()
         conn.close()
 
+    request_host = (
+        request.host.split(":", 1)[0].lower()
+    )
+
+    request_port = (
+        request.host.split(":", 1)[1]
+        if ":" in request.host
+        else ""
+    )
+
+    if request_host in {
+        "127.0.0.1",
+        "localhost"
+    }:
+        port_suffix = (
+            f":{request_port}"
+            if request_port
+            else ""
+        )
+
+        public_services_url = (
+            "http://clearskinesthetics.localhost"
+            f"{port_suffix}/#services"
+        )
+
+    else:
+        public_services_url = (
+            "https://clearskinesthetics."
+            "peachsuitepro.com/#services"
+        )
+
     return render_template(
         "service_types.html",
         services=services,
         status_filter=status_filter,
         active_count=active_count,
-        archived_count=archived_count
+        archived_count=archived_count,
+        public_services_url=public_services_url
     )
 
 
@@ -9139,6 +9175,23 @@ def add_service_type():
             request.form.get("default_price") or ""
         ).strip()
 
+        public_description = (
+            request.form.get("public_description")
+            or ""
+        ).strip()
+
+        show_on_public_website = (
+            request.form.get(
+                "show_on_public_website"
+            )
+            == "on"
+        )
+
+        website_sort_order_raw = (
+            request.form.get("website_sort_order")
+            or ""
+        ).strip()
+
         if not service_name:
             flash("Service name is required.", "error")
             return redirect(url_for("add_service_type"))
@@ -9163,6 +9216,36 @@ def add_service_type():
             flash("Default service price cannot be negative.", "error")
             return redirect(url_for("add_service_type"))
 
+        if len(public_description) > 500:
+            flash(
+                "Public website description cannot exceed "
+                "500 characters.",
+                "error"
+            )
+            return redirect(url_for("add_service_type"))
+
+        website_sort_order = None
+
+        if website_sort_order_raw:
+            try:
+                website_sort_order = int(
+                    website_sort_order_raw
+                )
+            except (TypeError, ValueError):
+                flash(
+                    "Website display order must be a number.",
+                    "error"
+                )
+                return redirect(url_for("add_service_type"))
+
+            if not 1 <= website_sort_order <= 999:
+                flash(
+                    "Website display order must be between "
+                    "1 and 999.",
+                    "error"
+                )
+                return redirect(url_for("add_service_type"))
+
         conn = get_db_connection()
         cur = conn.cursor()
 
@@ -9172,9 +9255,15 @@ def add_service_type():
                 service_name,
                 default_duration_minutes,
                 default_price,
+                public_description,
+                show_on_public_website,
+                website_sort_order,
                 is_active
             )
             VALUES (
+                %s,
+                %s,
+                %s,
                 %s,
                 %s,
                 %s,
@@ -9185,7 +9274,10 @@ def add_service_type():
             spa_id,
             service_name,
             default_duration_minutes,
-            default_price
+            default_price,
+            public_description or None,
+            show_on_public_website,
+            website_sort_order
         ))
 
         conn.commit()
@@ -9245,6 +9337,24 @@ def edit_service_type(service_type_id):
             request.form.get("default_price") or ""
         ).strip()
 
+        public_description = (
+            request.form.get("public_description")
+            or ""
+        ).strip()
+
+        show_on_public_website = (
+            request.form.get(
+                "show_on_public_website"
+            )
+            == "on"
+        )
+
+        website_sort_order_raw = (
+            request.form.get("website_sort_order")
+            or ""
+        ).strip()
+
+
         if not service_name:
             flash("Service name is required.", "error")
             cur.close()
@@ -9275,18 +9385,73 @@ def edit_service_type(service_type_id):
                 service_type_id=service_type_id
             ))
 
+        if len(public_description) > 500:
+            flash(
+                "Public website description cannot exceed "
+                "500 characters.",
+                "error"
+            )
+            cur.close()
+            conn.close()
+
+            return redirect(url_for(
+                "edit_service_type",
+                service_type_id=service_type_id
+            ))
+
+        website_sort_order = None
+
+        if website_sort_order_raw:
+            try:
+                website_sort_order = int(
+                    website_sort_order_raw
+                )
+            except (TypeError, ValueError):
+                flash(
+                    "Website display order must be a number.",
+                    "error"
+                )
+                cur.close()
+                conn.close()
+
+                return redirect(url_for(
+                    "edit_service_type",
+                    service_type_id=service_type_id
+                ))
+
+            if not 1 <= website_sort_order <= 999:
+                flash(
+                    "Website display order must be between "
+                    "1 and 999.",
+                    "error"
+                )
+                cur.close()
+                conn.close()
+
+                return redirect(url_for(
+                    "edit_service_type",
+                    service_type_id=service_type_id
+                ))
+
+
         cur.execute("""
             UPDATE service_name_types
             SET
                 service_name = %s,
                 default_duration_minutes = %s,
-                default_price = %s
+                default_price = %s,
+                public_description = %s,
+                show_on_public_website = %s,
+                website_sort_order = %s
             WHERE service_type_id = %s
               AND spa_id = %s
         """, (
             service_name,
             default_duration_minutes,
             default_price,
+            public_description or None,
+            show_on_public_website,
+            website_sort_order,
             service_type_id,
             spa_id
         ))
@@ -9304,11 +9469,17 @@ def edit_service_type(service_type_id):
             service_name,
             default_duration_minutes,
             default_price,
-            is_active
+            is_active,
+            public_description,
+            show_on_public_website,
+            website_sort_order
         FROM service_name_types
         WHERE service_type_id = %s
           AND spa_id = %s
-    """, (service_type_id, spa_id))
+    """, (
+        service_type_id,
+        spa_id
+    ))
 
     service = cur.fetchone()
 
