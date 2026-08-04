@@ -287,8 +287,58 @@
                 <div class="website-settings-field">
 
                     <label for="about_image_url">
-                        About Image URL
+                        About Photo
                     </label>
+
+                    {% if settings.about_image_url %}
+
+                        <div
+                            style="
+                                max-width:420px;
+                                margin:0 0 14px 0;
+                            "
+                        >
+
+                            <img
+                                src="{{ settings.about_image_url }}"
+                                alt="{{ settings.about_image_alt }}"
+                                style="
+                                    display:block;
+                                    width:100%;
+                                    max-height:320px;
+                                    object-fit:cover;
+                                    border:1px solid #dddddd;
+                                    border-radius:12px;
+                                "
+                            >
+
+                            <div
+                                style="
+                                    margin-top:8px;
+                                    font-weight:700;
+                                "
+                            >
+                                Currently displayed on website
+                            </div>
+
+                        </div>
+
+                    {% else %}
+
+                        <div
+                            style="
+                                margin-bottom:14px;
+                                padding:14px;
+                                background:#fafafa;
+                                border:1px dashed #bbbbbb;
+                                border-radius:8px;
+                            "
+                        >
+                            No About photo is currently displayed.
+                            The website is using the styled initials card.
+                        </div>
+
+                    {% endif %}
 
                     <input
                         type="url"
@@ -296,13 +346,28 @@
                         name="about_image_url"
                         maxlength="2000"
                         value="{{ settings.about_image_url }}"
-                        placeholder="https://example.com/image.jpg"
+                        readonly
                     >
 
                     <span class="website-settings-help">
-                        Leave blank to display the styled business
-                        initials card.
+                        The photo and Cloudinary URL are managed
+                        through the About Photo page.
                     </span>
+
+                    <div style="margin-top:12px;">
+
+                        <a
+                            href="{{
+                                url_for(
+                                    'public_website_about_photo'
+                                )
+                            }}"
+                            class="tool-pill"
+                        >
+                            Manage About Photo
+                        </a>
+
+                    </div>
 
                 </div>
 

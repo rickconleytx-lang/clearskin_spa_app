@@ -7,6 +7,8 @@ import email
 import calendar
 import click
 import secrets
+import cloudinary
+import cloudinary.uploader
 
 
 
@@ -65,6 +67,173 @@ from services.sms_service import send_sms_telnyx
 load_dotenv()
 
 
+# --------------------------------------------------
+# Cloudinary configuration
+# --------------------------------------------------
+
+CLOUDINARY_CLOUD_NAME = os.getenv(
+    "CLOUDINARY_CLOUD_NAME"
+)
+
+CLOUDINARY_API_KEY = os.getenv(
+    "CLOUDINARY_API_KEY"
+)
+
+CLOUDINARY_API_SECRET = os.getenv(
+    "CLOUDINARY_API_SECRET"
+)
+
+
+CLOUDINARY_CONFIGURED = all((
+    CLOUDINARY_CLOUD_NAME,
+    CLOUDINARY_API_KEY,
+    CLOUDINARY_API_SECRET,
+))
+
+
+if CLOUDINARY_CONFIGURED:
+    cloudinary.config(
+        cloud_name=CLOUDINARY_CLOUD_NAME,
+        api_key=CLOUDINARY_API_KEY,
+        api_secret=CLOUDINARY_API_SECRET,
+        secure=True,
+    )
+
+
+
+
+# --------------------------------------------------
+# Public website About image uploads
+# --------------------------------------------------
+
+ABOUT_IMAGE_MAX_BYTES = 5 * 1024 * 1024
+
+ABOUT_IMAGE_ALLOWED_EXTENSIONS = {
+    "jpg",
+    "jpeg",
+    "png",
+    "webp",
+}
+
+ABOUT_IMAGE_ALLOWED_MIME_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+}
+
+
+def validate_about_image_upload(uploaded_file):
+    if (
+        uploaded_file is None
+        or not uploaded_file.filename
+    ):
+        return "Choose an image to upload."
+
+    filename = uploaded_file.filename.strip()
+
+    if "." not in filename:
+        return (
+            "The image filename must include "
+            "a valid extension."
+        )
+
+    extension = filename.rsplit(
+        ".",
+        1
+    )[1].lower()
+
+    if extension not in ABOUT_IMAGE_ALLOWED_EXTENSIONS:
+        return (
+            "About photos must be JPG, JPEG, "
+            "PNG, or WebP files."
+        )
+
+    mimetype = (
+        uploaded_file.mimetype or ""
+    ).lower()
+
+    if mimetype not in ABOUT_IMAGE_ALLOWED_MIME_TYPES:
+        return (
+            "The selected file is not a supported "
+            "image type."
+        )
+
+    uploaded_file.stream.seek(
+        0,
+        os.SEEK_END
+    )
+
+    file_size = uploaded_file.stream.tell()
+
+    uploaded_file.stream.seek(0)
+
+    if file_size <= 0:
+        return "The selected image file is empty."
+
+    if file_size > ABOUT_IMAGE_MAX_BYTES:
+        return (
+            "About photos must be 5 MB or smaller."
+        )
+
+    return None
+
+
+def upload_about_image_to_cloudinary(
+    uploaded_file,
+    spa_id
+):
+    if not CLOUDINARY_CONFIGURED:
+        raise RuntimeError(
+            "Cloudinary is not configured."
+        )
+
+    public_id = (
+        "peach-suite-pro/"
+        f"spa_{spa_id}/"
+        "website/about/main"
+    )
+
+    result = cloudinary.uploader.upload(
+        uploaded_file,
+        public_id=public_id,
+        overwrite=True,
+        invalidate=True,
+        resource_type="image",
+    )
+
+    secure_url = result.get("secure_url")
+    saved_public_id = result.get("public_id")
+
+    if not secure_url or not saved_public_id:
+        raise RuntimeError(
+            "Cloudinary did not return the "
+            "uploaded image information."
+        )
+
+    return {
+        "secure_url": secure_url,
+        "public_id": saved_public_id,
+    }
+
+
+def remove_cloudinary_image(public_id):
+    public_id = str(
+        public_id or ""
+    ).strip()
+
+    if not public_id:
+        return
+
+    if not CLOUDINARY_CONFIGURED:
+        raise RuntimeError(
+            "Cloudinary is not configured."
+        )
+
+    cloudinary.uploader.destroy(
+        public_id,
+        resource_type="image",
+        invalidate=True,
+    )
 # --------------------------------------------------
 # In-memory file objects
 # --------------------------------------------------
@@ -9113,6 +9282,337 @@ def update_dropdown_labels():
 
 
 @app.route(
+    "/public-website-settings/about-photo",
+    methods=["GET", "POST"]
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def public_website_about_photo():
+    spa_id = current_spa_id()
+
+    request_host = (
+        request.host.split(":", 1)[0].lower()
+    )
+
+    request_port = (
+        request.host.split(":", 1)[1]
+        if ":" in request.host
+        else ""
+    )
+
+    if request_host in {
+        "127.0.0.1",
+        "localhost"
+    }:
+        port_suffix = (
+            f":{request_port}"
+            if request_port
+            else ""
+        )
+
+        public_website_url = (
+            "http://clearskinesthetics.localhost"
+            f"{port_suffix}/"
+        )
+
+    else:
+        public_website_url = (
+            "https://clearskinesthetics."
+            "peachsuitepro.com/"
+        )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                about_image_url,
+                about_image_public_id,
+                about_image_alt
+            FROM public_website_settings
+            WHERE spa_id = %s
+        """, (spa_id,))
+
+        row = cur.fetchone()
+
+        if not row:
+            defaults = (
+                CLEAR_SKIN_PUBLIC_WEBSITE_DEFAULTS.copy()
+            )
+
+            cur.execute("""
+                INSERT INTO public_website_settings (
+                    spa_id,
+                    hero_headline,
+                    intro_heading,
+                    intro_description,
+                    show_about_section,
+                    about_heading,
+                    about_description,
+                    about_image_url,
+                    about_image_public_id,
+                    about_image_alt,
+                    services_heading,
+                    services_description,
+                    booking_heading,
+                    booking_description
+                )
+                VALUES (
+                    %s, %s, %s, %s,
+                    %s, %s, %s, %s,
+                    %s, %s, %s, %s,
+                    %s, %s
+                )
+                ON CONFLICT (spa_id)
+                DO NOTHING
+            """, (
+                spa_id,
+                defaults["hero_headline"],
+                defaults["intro_heading"],
+                defaults["intro_description"],
+                defaults["show_about_section"],
+                defaults["about_heading"],
+                defaults["about_description"],
+                defaults["about_image_url"] or None,
+                None,
+                defaults["about_image_alt"] or None,
+                defaults["services_heading"],
+                defaults["services_description"],
+                defaults["booking_heading"],
+                defaults["booking_description"],
+            ))
+
+            conn.commit()
+
+            cur.execute("""
+                SELECT
+                    about_image_url,
+                    about_image_public_id,
+                    about_image_alt
+                FROM public_website_settings
+                WHERE spa_id = %s
+            """, (spa_id,))
+
+            row = cur.fetchone()
+
+        if not row:
+            raise RuntimeError(
+                "Public website settings could not "
+                "be initialized."
+            )
+
+        settings = {
+            "about_image_url": row[0] or "",
+            "about_image_public_id": row[1] or "",
+            "about_image_alt": row[2] or "",
+        }
+
+        if request.method == "POST":
+            action = (
+                request.form.get("action")
+                or "upload"
+            ).strip().lower()
+
+            if action == "remove":
+                public_id_to_remove = (
+                    settings["about_image_public_id"]
+                )
+
+                cur.execute("""
+                    UPDATE public_website_settings
+                    SET
+                        about_image_url = NULL,
+                        about_image_public_id = NULL,
+                        updated_at = NOW()
+                    WHERE spa_id = %s
+                """, (spa_id,))
+
+                conn.commit()
+
+                if public_id_to_remove:
+                    try:
+                        remove_cloudinary_image(
+                            public_id_to_remove
+                        )
+
+                    except Exception:
+                        app.logger.exception(
+                            "Cloudinary About photo "
+                            "cleanup failed."
+                        )
+
+                        flash(
+                            (
+                                "The photo was removed from "
+                                "the website, but Cloudinary "
+                                "cleanup could not be completed."
+                            ),
+                            "warning"
+                        )
+
+                flash(
+                    "About photo removed.",
+                    "success"
+                )
+
+                return redirect(
+                    url_for(
+                        "public_website_about_photo"
+                    )
+                )
+
+            if action != "upload":
+                flash(
+                    "Invalid About photo action.",
+                    "error"
+                )
+
+                return redirect(
+                    url_for(
+                        "public_website_about_photo"
+                    )
+                )
+
+            uploaded_file = request.files.get(
+                "about_image_file"
+            )
+
+            image_alt = (
+                request.form.get(
+                    "about_image_alt"
+                )
+                or ""
+            ).strip()
+
+            settings["about_image_alt"] = image_alt
+
+            upload_error = (
+                validate_about_image_upload(
+                    uploaded_file
+                )
+            )
+
+            if upload_error:
+                flash(
+                    upload_error,
+                    "error"
+                )
+
+                return render_template(
+                    "public_website_about_photo.html",
+                    settings=settings,
+                    public_website_url=(
+                        public_website_url
+                    )
+                )
+
+            if not image_alt:
+                flash(
+                    (
+                        "About Image Alt Text is "
+                        "required."
+                    ),
+                    "error"
+                )
+
+                return render_template(
+                    "public_website_about_photo.html",
+                    settings=settings,
+                    public_website_url=(
+                        public_website_url
+                    )
+                )
+
+            if len(image_alt) > 250:
+                flash(
+                    (
+                        "About Image Alt Text must be "
+                        "250 characters or fewer."
+                    ),
+                    "error"
+                )
+
+                return render_template(
+                    "public_website_about_photo.html",
+                    settings=settings,
+                    public_website_url=(
+                        public_website_url
+                    )
+                )
+
+            try:
+                upload_result = (
+                    upload_about_image_to_cloudinary(
+                        uploaded_file,
+                        spa_id
+                    )
+                )
+
+            except Exception:
+                app.logger.exception(
+                    "Could not upload About photo."
+                )
+
+                flash(
+                    (
+                        "The About photo could not be "
+                        "uploaded. Please try again."
+                    ),
+                    "error"
+                )
+
+                return render_template(
+                    "public_website_about_photo.html",
+                    settings=settings,
+                    public_website_url=(
+                        public_website_url
+                    )
+                )
+
+            cur.execute("""
+                UPDATE public_website_settings
+                SET
+                    about_image_url = %s,
+                    about_image_public_id = %s,
+                    about_image_alt = %s,
+                    updated_at = NOW()
+                WHERE spa_id = %s
+            """, (
+                upload_result["secure_url"],
+                upload_result["public_id"],
+                image_alt,
+                spa_id,
+            ))
+
+            conn.commit()
+
+            flash(
+                "About photo uploaded successfully.",
+                "success"
+            )
+
+            return redirect(
+                url_for(
+                    "public_website_about_photo"
+                )
+            )
+
+        return render_template(
+            "public_website_about_photo.html",
+            settings=settings,
+            public_website_url=public_website_url
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route(
     "/public-website-settings",
     methods=["GET", "POST"]
 )
@@ -9166,12 +9666,79 @@ def public_website_settings():
             ).strip().lower()
 
             if action == "reset":
-                settings = (
+                defaults = (
                     CLEAR_SKIN_PUBLIC_WEBSITE_DEFAULTS.copy()
                 )
 
-                success_message = (
-                    "Public website text reset to defaults."
+                cur.execute("""
+                    INSERT INTO public_website_settings (
+                        spa_id,
+                        hero_headline,
+                        intro_heading,
+                        intro_description,
+                        show_about_section,
+                        about_heading,
+                        about_description,
+                        services_heading,
+                        services_description,
+                        booking_heading,
+                        booking_description
+                    )
+                    VALUES (
+                        %s, %s, %s, %s,
+                        %s, %s, %s, %s,
+                        %s, %s, %s
+                    )
+                    ON CONFLICT (spa_id)
+                    DO UPDATE SET
+                        hero_headline = EXCLUDED.hero_headline,
+                        intro_heading = EXCLUDED.intro_heading,
+                        intro_description = (
+                            EXCLUDED.intro_description
+                        ),
+                        show_about_section = (
+                            EXCLUDED.show_about_section
+                        ),
+                        about_heading = EXCLUDED.about_heading,
+                        about_description = (
+                            EXCLUDED.about_description
+                        ),
+                        services_heading = (
+                            EXCLUDED.services_heading
+                        ),
+                        services_description = (
+                            EXCLUDED.services_description
+                        ),
+                        booking_heading = (
+                            EXCLUDED.booking_heading
+                        ),
+                        booking_description = (
+                            EXCLUDED.booking_description
+                        ),
+                        updated_at = NOW()
+                """, (
+                    spa_id,
+                    defaults["hero_headline"],
+                    defaults["intro_heading"],
+                    defaults["intro_description"],
+                    defaults["show_about_section"],
+                    defaults["about_heading"],
+                    defaults["about_description"],
+                    defaults["services_heading"],
+                    defaults["services_description"],
+                    defaults["booking_heading"],
+                    defaults["booking_description"],
+                ))
+
+                conn.commit()
+
+                flash(
+                    "Public website text reset to defaults.",
+                    "success"
+                )
+
+                return redirect(
+                    url_for("public_website_settings")
                 )
 
             else:

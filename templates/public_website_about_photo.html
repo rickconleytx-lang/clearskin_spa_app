@@ -1,0 +1,263 @@
+{% extends "base.html" %}
+
+{% block title %}
+    Manage About Photo | Peach Suite Pro
+{% endblock %}
+
+{% block content %}
+
+<style>
+    .about-photo-page {
+        max-width: 900px;
+    }
+
+    .about-photo-intro {
+        margin-bottom: 20px;
+    }
+
+    .about-photo-card {
+        padding: 22px;
+        background: #ffffff;
+        border: 1px solid #dddddd;
+        border-radius: 10px;
+    }
+
+    .about-photo-preview {
+        max-width: 520px;
+        margin-bottom: 22px;
+    }
+
+    .about-photo-preview img {
+        display: block;
+        width: 100%;
+        max-height: 420px;
+        object-fit: cover;
+        border: 1px solid #dddddd;
+        border-radius: 12px;
+    }
+
+    .about-photo-placeholder {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 220px;
+        max-width: 520px;
+        margin-bottom: 22px;
+        padding: 24px;
+        background: #fafafa;
+        border: 1px dashed #bbbbbb;
+        border-radius: 12px;
+        text-align: center;
+    }
+
+    .about-photo-field {
+        margin-bottom: 20px;
+    }
+
+    .about-photo-field label {
+        display: block;
+        margin-bottom: 7px;
+        font-weight: 700;
+    }
+
+    .about-photo-field input[type="text"],
+    .about-photo-field input[type="file"] {
+        width: 100%;
+        max-width: 620px;
+    }
+
+    .about-photo-help {
+        display: block;
+        margin-top: 7px;
+        color: #666666;
+        font-size: 0.92rem;
+    }
+
+    .about-photo-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 22px;
+    }
+
+    .about-photo-button {
+        padding: 10px 16px;
+        border: 1px solid #bbbbbb;
+        border-radius: 8px;
+        background: #ffffff;
+        cursor: pointer;
+        font-weight: 700;
+    }
+
+    .about-photo-button-primary {
+        background: #222222;
+        border-color: #222222;
+        color: #ffffff;
+    }
+</style>
+
+
+<div class="about-photo-page">
+
+    <div class="page-title">
+        <h1>Manage About Photo</h1>
+    </div>
+
+
+    <div class="about-photo-intro">
+
+        <p>
+            Upload, replace, or remove the photo displayed
+            in the public website About section.
+        </p>
+
+        <div class="page-tool-pills">
+
+            <a
+                href="{{ url_for('public_website_settings') }}"
+                class="tool-pill"
+            >
+                Website Settings
+            </a>
+
+            <a
+                href="{{ public_website_url }}"
+                class="tool-pill"
+                target="_blank"
+                rel="noopener"
+            >
+                View Website
+            </a>
+
+        </div>
+
+    </div>
+
+
+    <div class="about-photo-card">
+
+        {% if settings.about_image_url %}
+
+            <div class="about-photo-preview">
+
+                <img
+                    src="{{ settings.about_image_url }}"
+                    alt="{{ settings.about_image_alt }}"
+                >
+
+            </div>
+
+        {% else %}
+
+            <div class="about-photo-placeholder">
+
+                No About photo is currently uploaded.
+                The public website will display the
+                styled business initials card.
+
+            </div>
+
+        {% endif %}
+
+
+        <form
+            method="POST"
+            enctype="multipart/form-data"
+        >
+
+            <div class="about-photo-field">
+
+                <label for="about_image_file">
+                    About Photo
+                </label>
+
+                <input
+                    type="file"
+                    id="about_image_file"
+                    name="about_image_file"
+                    accept="
+                        .jpg,
+                        .jpeg,
+                        .png,
+                        .webp,
+                        image/jpeg,
+                        image/png,
+                        image/webp
+                    "
+                >
+
+                <span class="about-photo-help">
+                    JPG, JPEG, PNG, or WebP.
+                    Maximum size: 5 MB.
+                </span>
+
+            </div>
+
+
+            <div class="about-photo-field">
+
+                <label for="about_image_alt">
+                    About Image Alt Text
+                </label>
+
+                <input
+                    type="text"
+                    id="about_image_alt"
+                    name="about_image_alt"
+                    maxlength="250"
+                    value="{{ settings.about_image_alt }}"
+                >
+
+                <span class="about-photo-help">
+                    Briefly describe the photo for
+                    customers using screen readers.
+                </span>
+
+            </div>
+
+
+            <div class="about-photo-actions">
+
+                <button
+                    type="submit"
+                    name="action"
+                    value="upload"
+                    class="
+                        about-photo-button
+                        about-photo-button-primary
+                    "
+                >
+                    {% if settings.about_image_url %}
+                        Replace About Photo
+                    {% else %}
+                        Upload About Photo
+                    {% endif %}
+                </button>
+
+                {% if settings.about_image_url %}
+
+                    <button
+                        type="submit"
+                        name="action"
+                        value="remove"
+                        class="about-photo-button"
+                        onclick="
+                            return confirm(
+                                'Remove the current About photo?'
+                            );
+                        "
+                    >
+                        Remove Photo
+                    </button>
+
+                {% endif %}
+
+            </div>
+
+        </form>
+
+    </div>
+
+</div>
+
+{% endblock %}
