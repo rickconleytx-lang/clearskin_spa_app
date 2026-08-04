@@ -343,6 +343,57 @@
             color: var(--muted);
         }
 
+        .promotion-section {
+            padding: 34px 24px;
+            background: #ffffff;
+        }
+
+        .promotion-card {
+            max-width: 1180px;
+            margin: 0 auto;
+            padding: 34px 42px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 32px;
+            background:
+                linear-gradient(
+                    135deg,
+                    #f8e7df 0%,
+                    #fff7f2 100%
+                );
+            border: 1px solid rgba(185, 111, 89, 0.2);
+            border-radius: 22px;
+            box-shadow: 0 12px 30px rgba(83, 55, 43, 0.08);
+        }
+
+        .promotion-copy {
+            max-width: 820px;
+        }
+
+        .promotion-copy h2 {
+            margin: 0;
+            font-family: Georgia, "Times New Roman", serif;
+            font-size: clamp(1.8rem, 3vw, 2.7rem);
+            line-height: 1.15;
+            font-weight: 500;
+        }
+
+        .promotion-copy p {
+            margin: 12px 0 0;
+            color: var(--muted);
+            font-size: 1.04rem;
+        }
+
+        .promotion-label {
+            margin: 0 0 9px;
+            color: var(--peach-dark);
+            font-size: 0.78rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.16em;
+        }
+
         .section {
             padding: 90px 24px;
         }
@@ -643,6 +694,20 @@
                 border-radius: 28px;
             }
 
+            .promotion-section {
+                padding: 24px 20px;
+            }
+
+            .promotion-card {
+                padding: 28px 24px;
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .promotion-card .button {
+                width: 100%;
+            }
+
             .section {
                 padding: 70px 20px;
             }
@@ -786,6 +851,52 @@
 
             </div>
         </section>
+
+
+        {% if (
+            website_settings.show_promotional_section
+            and website_settings.promotional_heading
+            and website_settings.promotional_text
+        ) %}
+
+            <section class="promotion-section">
+
+                <div class="promotion-card">
+
+                    <div class="promotion-copy">
+
+                        <p class="promotion-label">
+                            Featured Promotion
+                        </p>
+
+                        <h2>
+                            {{ website_settings.promotional_heading }}
+                        </h2>
+
+                        <p>
+                            {{ website_settings.promotional_text }}
+                        </p>
+
+                    </div>
+
+                    <a
+                        href="{{
+                            url_for(
+                                'public_booking',
+                                public_booking_slug='clear-skin-esthetics'
+                            )
+                        }}"
+                        class="button button-primary"
+                    >
+                        Book Now
+                    </a>
+
+                </div>
+
+            </section>
+
+        {% endif %}
+
 
         {% if website_settings.show_about_section %}
 

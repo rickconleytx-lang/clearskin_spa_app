@@ -186,6 +186,77 @@
 
             <section class="website-settings-section">
 
+                <h2>Promotional Section</h2>
+
+                <div
+                    class="
+                        website-settings-field
+                        website-settings-checkbox
+                    "
+                >
+
+                    <input
+                        type="checkbox"
+                        id="show_promotional_section"
+                        name="show_promotional_section"
+                        {% if settings.show_promotional_section %}
+                            checked
+                        {% endif %}
+                    >
+
+                    <label for="show_promotional_section">
+                        Show Promotional Section on Website
+                    </label>
+
+                </div>
+
+
+                <div class="website-settings-field">
+
+                    <label for="promotional_heading">
+                        Promotional Heading
+                    </label>
+
+                    <input
+                        type="text"
+                        id="promotional_heading"
+                        name="promotional_heading"
+                        maxlength="180"
+                        value="{{ settings.promotional_heading }}"
+                    >
+
+                    <span class="website-settings-help">
+                        The main headline for the current
+                        promotion or announcement.
+                    </span>
+
+                </div>
+
+
+                <div class="website-settings-field">
+
+                    <label for="promotional_text">
+                        Promotional Text
+                    </label>
+
+                    <textarea
+                        id="promotional_text"
+                        name="promotional_text"
+                        maxlength="1000"
+                    >{{ settings.promotional_text }}</textarea>
+
+                    <span class="website-settings-help">
+                        Explain the offer, important details,
+                        expiration date, or booking instructions.
+                    </span>
+
+                </div>
+
+            </section>
+
+
+            <section class="website-settings-section">
+
                 <h2>Introduction Card</h2>
 
                 <div class="website-settings-field">

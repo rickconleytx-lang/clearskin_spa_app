@@ -1232,6 +1232,12 @@ CLEAR_SKIN_PUBLIC_WEBSITE_DEFAULTS = {
         "skincare journey."
     ),
 
+    "show_promotional_section": False,
+
+    "promotional_heading": "",
+
+    "promotional_text": "",
+
     "show_about_section": True,
 
     "about_heading": (
@@ -1343,6 +1349,9 @@ def route_clear_skin_public_home():
                     hero_headline,
                     intro_heading,
                     intro_description,
+                    show_promotional_section,
+                    promotional_heading,
+                    promotional_text,
                     show_about_section,
                     about_heading,
                     about_description,
@@ -1365,15 +1374,18 @@ def route_clear_skin_public_home():
                     "hero_headline": settings_row[0],
                     "intro_heading": settings_row[1],
                     "intro_description": settings_row[2],
-                    "show_about_section": settings_row[3],
-                    "about_heading": settings_row[4],
-                    "about_description": settings_row[5],
-                    "about_image_url": settings_row[6] or "",
-                    "about_image_alt": settings_row[7] or "",
-                    "services_heading": settings_row[8],
-                    "services_description": settings_row[9],
-                    "booking_heading": settings_row[10],
-                    "booking_description": settings_row[11],
+                    "show_promotional_section": settings_row[3],
+                    "promotional_heading": settings_row[4],
+                    "promotional_text": settings_row[5],
+                    "show_about_section": settings_row[6],
+                    "about_heading": settings_row[7],
+                    "about_description": settings_row[8],
+                    "about_image_url": settings_row[9] or "",
+                    "about_image_alt": settings_row[10] or "",
+                    "services_heading": settings_row[11],
+                    "services_description": settings_row[12],
+                    "booking_heading": settings_row[13],
+                    "booking_description": settings_row[14],
             }
 
         except Exception:
@@ -9676,6 +9688,9 @@ def public_website_settings():
                         hero_headline,
                         intro_heading,
                         intro_description,
+                        show_promotional_section,
+                        promotional_heading,
+                        promotional_text,
                         show_about_section,
                         about_heading,
                         about_description,
@@ -9687,7 +9702,8 @@ def public_website_settings():
                     VALUES (
                         %s, %s, %s, %s,
                         %s, %s, %s, %s,
-                        %s, %s, %s
+                        %s, %s, %s, %s,
+                        %s, %s
                     )
                     ON CONFLICT (spa_id)
                     DO UPDATE SET
@@ -9695,6 +9711,15 @@ def public_website_settings():
                         intro_heading = EXCLUDED.intro_heading,
                         intro_description = (
                             EXCLUDED.intro_description
+                        ),
+                        show_promotional_section = (
+                            EXCLUDED.show_promotional_section
+                        ),
+                        promotional_heading = (
+                            EXCLUDED.promotional_heading
+                        ),
+                        promotional_text = (
+                            EXCLUDED.promotional_text
                         ),
                         show_about_section = (
                             EXCLUDED.show_about_section
@@ -9721,6 +9746,9 @@ def public_website_settings():
                     defaults["hero_headline"],
                     defaults["intro_heading"],
                     defaults["intro_description"],
+                    defaults["show_promotional_section"],
+                    defaults["promotional_heading"],
+                    defaults["promotional_text"],
                     defaults["show_about_section"],
                     defaults["about_heading"],
                     defaults["about_description"],
@@ -9760,6 +9788,25 @@ def public_website_settings():
                     "intro_description": (
                         request.form.get(
                             "intro_description"
+                        )
+                        or ""
+                    ).strip(),
+
+                    "show_promotional_section": (
+                        "show_promotional_section"
+                        in request.form
+                    ),
+
+                    "promotional_heading": (
+                        request.form.get(
+                            "promotional_heading"
+                        )
+                        or ""
+                    ).strip(),
+
+                    "promotional_text": (
+                        request.form.get(
+                            "promotional_text"
                         )
                         or ""
                     ).strip(),
@@ -9907,6 +9954,51 @@ def public_website_settings():
 
 
 
+                promotion_error = None
+
+                if len(settings["promotional_heading"]) > 180:
+                    promotion_error = (
+                        "Promotional Heading must be "
+                        "180 characters or fewer."
+                    )
+
+                elif len(settings["promotional_text"]) > 1000:
+                    promotion_error = (
+                        "Promotional Text must be "
+                        "1000 characters or fewer."
+                    )
+
+                elif (
+                    settings["show_promotional_section"]
+                    and not settings["promotional_heading"]
+                ):
+                    promotion_error = (
+                        "Promotional Heading is required "
+                        "when the promotional section is shown."
+                    )
+
+                elif (
+                    settings["show_promotional_section"]
+                    and not settings["promotional_text"]
+                ):
+                    promotion_error = (
+                        "Promotional Text is required "
+                        "when the promotional section is shown."
+                    )
+
+                if promotion_error:
+                    flash(
+                        promotion_error,
+                        "error"
+                    )
+
+                    return render_template(
+                        "public_website_settings.html",
+                        settings=settings,
+                        public_website_url=public_website_url
+                    )
+
+
                 if len(settings["about_image_url"]) > 2000:
                     flash(
                         (
@@ -9990,6 +10082,9 @@ def public_website_settings():
                     hero_headline,
                     intro_heading,
                     intro_description,
+                    show_promotional_section,
+                    promotional_heading,
+                    promotional_text,
                     show_about_section,
                     about_heading,
                     about_description,
@@ -10004,7 +10099,7 @@ def public_website_settings():
                     %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s, %s,
-                    %s
+                    %s, %s, %s, %s
                 )
                 ON CONFLICT (spa_id)
                 DO UPDATE SET
@@ -10012,6 +10107,15 @@ def public_website_settings():
                     intro_heading = EXCLUDED.intro_heading,
                     intro_description = (
                         EXCLUDED.intro_description
+                    ),
+                    show_promotional_section = (
+                        EXCLUDED.show_promotional_section
+                    ),
+                    promotional_heading = (
+                        EXCLUDED.promotional_heading
+                    ),
+                    promotional_text = (
+                        EXCLUDED.promotional_text
                     ),
                     show_about_section = (
                         EXCLUDED.show_about_section
@@ -10040,6 +10144,9 @@ def public_website_settings():
                 settings["hero_headline"],
                 settings["intro_heading"],
                 settings["intro_description"],
+                settings["show_promotional_section"],
+                settings["promotional_heading"],
+                settings["promotional_text"],
                 settings["show_about_section"],
                 settings["about_heading"],
                 settings["about_description"],
@@ -10067,6 +10174,9 @@ def public_website_settings():
                 hero_headline,
                 intro_heading,
                 intro_description,
+                show_promotional_section,
+                promotional_heading,
+                promotional_text,
                 show_about_section,
                 about_heading,
                 about_description,
@@ -10087,15 +10197,18 @@ def public_website_settings():
                 "hero_headline": row[0],
                 "intro_heading": row[1],
                 "intro_description": row[2],
-                "show_about_section": row[3],
-                "about_heading": row[4],
-                "about_description": row[5],
-                "about_image_url": row[6] or "",
-                "about_image_alt": row[7] or "",
-                "services_heading": row[8],
-                "services_description": row[9],
-                "booking_heading": row[10],
-                "booking_description": row[11],
+                "show_promotional_section": row[3],
+                "promotional_heading": row[4] or "",
+                "promotional_text": row[5] or "",
+                "show_about_section": row[6],
+                "about_heading": row[7],
+                "about_description": row[8],
+                "about_image_url": row[9] or "",
+                "about_image_alt": row[10] or "",
+                "services_heading": row[11],
+                "services_description": row[12],
+                "booking_heading": row[13],
+                "booking_description": row[14],
             }
 
         else:
