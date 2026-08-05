@@ -1,0 +1,322 @@
+{% extends "base.html" %}
+
+{% block title %}
+Additional Add-ons & Menu | Peach Suite Pro
+{% endblock %}
+
+{% block content %}
+
+<style>
+    .menu-manager-page {
+        max-width: 1100px;
+    }
+
+    .menu-summary-grid {
+        display: grid;
+        grid-template-columns:
+            repeat(2, minmax(180px, 260px));
+        gap: 14px;
+        margin: 20px 0;
+    }
+
+    .menu-summary-card {
+        padding: 16px;
+        background: #ffffff;
+        border: 1px solid #dddddd;
+        border-radius: 10px;
+    }
+
+    .menu-summary-card strong {
+        display: block;
+        margin-top: 4px;
+        font-size: 1.5rem;
+    }
+
+    .menu-filter-row,
+    .menu-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+    }
+
+    .menu-filter-row {
+        margin: 18px 0;
+    }
+
+    .menu-status {
+        display: inline-block;
+        padding: 4px 9px;
+        border-radius: 999px;
+        font-size: 0.88rem;
+        font-weight: 600;
+    }
+
+    .menu-status-active {
+        background: #e7f5ea;
+        color: #245c31;
+    }
+
+    .menu-status-hidden {
+        background: #eeeeee;
+        color: #555555;
+    }
+
+    .hidden-menu-row {
+        opacity: 0.75;
+    }
+
+    @media (max-width: 650px) {
+        .menu-summary-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+
+
+<div class="menu-manager-page">
+
+    <div class="page-tool-pills">
+
+        <a
+            href="{{ url_for('public_website_settings') }}"
+            class="tool-pill tool-pill-small"
+        >
+            Public Website Settings
+        </a>
+
+        <a
+            href="{{ public_menu_url }}"
+            class="tool-pill tool-pill-small"
+            target="_blank"
+            rel="noopener"
+        >
+            View Website Menu
+        </a>
+
+    </div>
+
+
+    <div class="page-title">
+        <h1>Additional Add-ons &amp; Menu</h1>
+    </div>
+
+
+    <p>
+        Manage optional add-ons, enhancements, and
+        other price-menu items shown below Featured
+        Services on the public website.
+    </p>
+
+
+    <div class="menu-summary-grid">
+
+        <div class="menu-summary-card">
+            Shown Items
+            <strong>{{ active_count }}</strong>
+        </div>
+
+        <div class="menu-summary-card">
+            Hidden Items
+            <strong>{{ hidden_count }}</strong>
+        </div>
+
+    </div>
+
+
+    <div class="page-tool-pills">
+
+        <a
+            href="{{
+                url_for(
+                    'add_public_website_menu_item'
+                )
+            }}"
+            class="tool-pill tool-pill-small"
+        >
+            Add Menu Item
+        </a>
+
+    </div>
+
+
+    <div class="menu-filter-row">
+
+        <a
+            href="{{
+                url_for(
+                    'public_website_menu_items',
+                    status='active'
+                )
+            }}"
+            class="tool-pill tool-pill-small"
+        >
+            Shown ({{ active_count }})
+        </a>
+
+        <a
+            href="{{
+                url_for(
+                    'public_website_menu_items',
+                    status='hidden'
+                )
+            }}"
+            class="tool-pill tool-pill-small"
+        >
+            Hidden ({{ hidden_count }})
+        </a>
+
+        <a
+            href="{{
+                url_for(
+                    'public_website_menu_items',
+                    status='all'
+                )
+            }}"
+            class="tool-pill tool-pill-small"
+        >
+            All
+        </a>
+
+    </div>
+
+
+    {% if menu_items %}
+
+        <div class="table-container">
+
+            <table class="appointments-table">
+
+                <thead>
+                    <tr>
+                        <th>Menu Item</th>
+                        <th>Price</th>
+                        <th>Display Order</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+
+                    {% for item in menu_items %}
+
+                        <tr
+                            {% if not item[4] %}
+                                class="hidden-menu-row"
+                            {% endif %}
+                        >
+
+                            <td>
+                                <strong>{{ item[1] }}</strong>
+                            </td>
+
+                            <td>
+                                ${{ '%.2f'|format(item[2]) }}
+                            </td>
+
+                            <td>
+                                {{
+                                    item[3]
+                                    if item[3] is not none
+                                    else 'By name'
+                                }}
+                            </td>
+
+                            <td>
+
+                                {% if item[4] %}
+
+                                    <span
+                                        class="
+                                            menu-status
+                                            menu-status-active
+                                        "
+                                    >
+                                        Shown
+                                    </span>
+
+                                {% else %}
+
+                                    <span
+                                        class="
+                                            menu-status
+                                            menu-status-hidden
+                                        "
+                                    >
+                                        Hidden
+                                    </span>
+
+                                {% endif %}
+
+                            </td>
+
+                            <td>
+
+                                <div class="menu-actions">
+
+                                    <a
+                                        href="{{
+                                            url_for(
+                                                'edit_public_website_menu_item',
+                                                menu_item_id=item[0]
+                                            )
+                                        }}"
+                                        class="
+                                            tool-pill
+                                            tool-pill-small
+                                        "
+                                    >
+                                        Edit
+                                    </a>
+
+                                    <form
+                                        method="POST"
+                                        action="{{
+                                            url_for(
+                                                'toggle_public_website_menu_item',
+                                                menu_item_id=item[0]
+                                            )
+                                        }}"
+                                        style="margin:0;"
+                                    >
+                                        <button
+                                            type="submit"
+                                            class="
+                                                tool-pill
+                                                tool-pill-small
+                                            "
+                                        >
+                                            {{
+                                                'Hide'
+                                                if item[4]
+                                                else 'Show'
+                                            }}
+                                        </button>
+                                    </form>
+
+                                </div>
+
+                            </td>
+
+                        </tr>
+
+                    {% endfor %}
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+    {% else %}
+
+        <div class="empty-state">
+            No menu items match this view.
+        </div>
+
+    {% endif %}
+
+</div>
+
+{% endblock %}

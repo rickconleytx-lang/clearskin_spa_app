@@ -25,7 +25,56 @@
             --muted: #6f6662;
             --white: #ffffff;
             --border: #eadbd5;
-            --shadow: 0 14px 40px rgba(79, 55, 45, 0.10);
+            --shadow:
+                0 14px 40px rgba(79, 55, 45, 0.10);
+        }
+
+        body.theme-coastal-blue {
+            --peach: #86bfd1;
+            --peach-dark: #3f7f96;
+            --peach-light: #e7f4f8;
+            --cream: #f7fbfd;
+            --text: #26343a;
+            --muted: #60747c;
+            --border: #cfe3ea;
+            --shadow:
+                0 14px 40px rgba(48, 91, 108, 0.12);
+        }
+
+        body.theme-sage-wellness {
+            --peach: #9bb79d;
+            --peach-dark: #5f7e63;
+            --peach-light: #e9f1e8;
+            --cream: #fafcf8;
+            --text: #29352d;
+            --muted: #66736a;
+            --border: #d7e2d5;
+            --shadow:
+                0 14px 40px rgba(66, 91, 69, 0.11);
+        }
+
+        body.theme-soft-stone {
+            --peach: #acb2b6;
+            --peach-dark: #687177;
+            --peach-light: #eceff1;
+            --cream: #fafafa;
+            --text: #2f3335;
+            --muted: #6b7276;
+            --border: #dfe3e5;
+            --shadow:
+                0 14px 40px rgba(63, 70, 74, 0.11);
+        }
+
+        body.theme-lavender-calm {
+            --peach: #b9a9d2;
+            --peach-dark: #7a669b;
+            --peach-light: #eee8f5;
+            --cream: #fbf9fd;
+            --text: #332e3a;
+            --muted: #71687a;
+            --border: #dfd6e9;
+            --shadow:
+                0 14px 40px rgba(83, 65, 105, 0.12);
         }
 
         * {
@@ -57,7 +106,7 @@
             position: sticky;
             top: 0;
             z-index: 100;
-            background: rgba(255, 250, 247, 0.96);
+            background: var(--cream);
             border-bottom: 1px solid var(--border);
             backdrop-filter: blur(12px);
         }
@@ -144,7 +193,7 @@
         }
 
         .nav-more summary:focus-visible {
-            outline: 3px solid rgba(185, 111, 89, 0.3);
+            outline: 3px solid var(--peach-light);
             outline-offset: 5px;
             border-radius: 4px;
         }
@@ -159,7 +208,7 @@
             border: 1px solid var(--border);
             border-radius: 16px;
             background: var(--white);
-            box-shadow: 0 18px 45px rgba(75, 55, 48, 0.16);
+            box-shadow: var(--shadow);
         }
 
         .nav-more-menu a {
@@ -170,7 +219,7 @@
         }
 
         .nav-more-menu a:hover {
-            background: #fff4ef;
+            background: var(--peach-light);
         }
 
 
@@ -198,11 +247,11 @@
         .button-primary {
             background: var(--peach-dark);
             color: var(--white);
-            box-shadow: 0 10px 24px rgba(185, 111, 89, 0.25);
+            box-shadow: var(--shadow);
         }
 
         .button-primary:hover {
-            background: #a85e49;
+            background: var(--peach-dark);
         }
 
         .button-secondary {
@@ -224,13 +273,13 @@
             background:
                 radial-gradient(
                     circle at 82% 20%,
-                    rgba(217, 144, 120, 0.22),
+                    var(--peach-light),
                     transparent 35%
                 ),
                 linear-gradient(
                     135deg,
-                    #fffaf7 0%,
-                    #f9eee9 100%
+                    var(--cream) 0%,
+                    var(--peach-light) 100%
                 );
         }
 
@@ -285,8 +334,8 @@
             background:
                 linear-gradient(
                     145deg,
-                    rgba(255, 255, 255, 0.95),
-                    rgba(247, 232, 226, 0.95)
+                    var(--white),
+                    var(--peach-light)
                 );
             box-shadow: var(--shadow);
             overflow: hidden;
@@ -300,7 +349,7 @@
             top: -70px;
             right: -55px;
             border-radius: 50%;
-            background: rgba(217, 144, 120, 0.22);
+            background: var(--peach-light);
         }
 
         .hero-card::after {
@@ -311,7 +360,7 @@
             bottom: -60px;
             left: -50px;
             border-radius: 50%;
-            background: rgba(185, 111, 89, 0.12);
+            background: var(--peach-light);
         }
 
         .hero-card-content {
@@ -345,7 +394,7 @@
 
         .promotion-section {
             padding: 34px 24px;
-            background: #ffffff;
+            background: var(--white);
         }
 
         .promotion-card {
@@ -359,12 +408,12 @@
             background:
                 linear-gradient(
                     135deg,
-                    #f8e7df 0%,
-                    #fff7f2 100%
+                    var(--peach-light) 0%,
+                    var(--cream) 100%
                 );
-            border: 1px solid rgba(185, 111, 89, 0.2);
+            border: 1px solid var(--border);
             border-radius: 22px;
-            box-shadow: 0 12px 30px rgba(83, 55, 43, 0.08);
+            box-shadow: var(--shadow);
         }
 
         .promotion-copy {
@@ -424,7 +473,7 @@
         }
 
         .about-section {
-            background: #fffaf6;
+            background: var(--cream);
         }
 
         .about-layout {
@@ -447,7 +496,7 @@
             max-height: 480px;
             object-fit: cover;
             border-radius: 24px;
-            box-shadow: 0 18px 45px rgba(83, 55, 43, 0.14);
+            box-shadow: var(--shadow);
         }
 
         .about-image-placeholder {
@@ -461,12 +510,12 @@
             background:
                 linear-gradient(
                     145deg,
-                    #fff7f1,
-                    #f0d8cb
+                    var(--cream),
+                    var(--peach-light)
                 );
-            border: 1px solid rgba(126, 82, 63, 0.16);
+            border: 1px solid var(--border);
             border-radius: 24px;
-            box-shadow: 0 18px 45px rgba(83, 55, 43, 0.14);
+            box-shadow: var(--shadow);
         }
 
         .about-image-mark {
@@ -476,10 +525,10 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            background: #ffffff;
-            border: 1px solid rgba(126, 82, 63, 0.18);
+            background: var(--white);
+            border: 1px solid var(--border);
             border-radius: 50%;
-            color: #7d5240;
+            color: var(--peach-dark);
             font-size: 2rem;
             font-weight: 800;
             letter-spacing: 0.08em;
@@ -487,12 +536,12 @@
 
         .about-image-placeholder strong {
             margin-bottom: 7px;
-            color: #4f362d;
+            color: var(--text);
             font-size: 1.35rem;
         }
 
         .about-image-placeholder span {
-            color: #765c51;
+            color: var(--muted);
         }
 
         .about-copy h2 {
@@ -581,6 +630,57 @@
             text-align: center;
         }
 
+        .additional-menu-section {
+            background: var(--cream);
+        }
+
+        .additional-menu-card {
+            max-width: 980px;
+            margin: 0 auto;
+            padding: 42px;
+            border: 1px solid var(--border);
+            border-radius: 28px;
+            background: var(--white);
+            box-shadow: var(--shadow);
+        }
+
+        .additional-menu-grid {
+            display: grid;
+            grid-template-columns:
+                repeat(2, minmax(0, 1fr));
+            column-gap: 52px;
+        }
+
+        .additional-menu-item {
+            display: flex;
+            align-items: baseline;
+            gap: 10px;
+            padding: 16px 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .additional-menu-name {
+            font-family:
+                Georgia,
+                "Times New Roman",
+                serif;
+            font-size: 1.08rem;
+            font-weight: 600;
+        }
+
+        .additional-menu-leader {
+            flex: 1;
+            min-width: 18px;
+            border-bottom:
+                2px dotted var(--border);
+        }
+
+        .additional-menu-price {
+            color: var(--peach-dark);
+            font-weight: 800;
+            white-space: nowrap;
+        }
+
         .cta-section {
             padding: 80px 24px;
             background: var(--peach-light);
@@ -612,7 +712,7 @@
 
         .site-footer {
             padding: 34px 24px;
-            background: #241f1d;
+            background: var(--text);
             color: rgba(255, 255, 255, 0.72);
         }
 
@@ -716,6 +816,14 @@
                 grid-template-columns: 1fr;
             }
 
+            .additional-menu-card {
+                padding: 28px 22px;
+            }
+
+            .additional-menu-grid {
+                grid-template-columns: 1fr;
+            }
+
             .cta-section {
                 padding: 60px 20px;
             }
@@ -732,7 +840,12 @@
     </style>
 </head>
 
-<body>
+<body class="theme-{{
+    (
+        website_settings.website_color_scheme
+        or 'peach_cream'
+    )|replace('_', '-')
+}}">
 
     <header class="site-header">
         <div class="header-inner">
@@ -1036,6 +1149,99 @@
 
             </div>
         </section>
+
+
+        {% if (
+            website_settings.show_additional_menu_section
+            and additional_menu_items
+        ) %}
+
+            <section
+                id="additional-menu"
+                class="
+                    section
+                    additional-menu-section
+                "
+            >
+                <div class="section-inner">
+
+                    <div class="section-heading">
+
+                        <p class="eyebrow">
+                            Optional Enhancements
+                        </p>
+
+                        <h2>
+                            {{
+                                website_settings
+                                .additional_menu_heading
+                            }}
+                        </h2>
+
+                        {% if
+                            website_settings
+                            .additional_menu_description
+                        %}
+                            <p>
+                                {{
+                                    website_settings
+                                    .additional_menu_description
+                                }}
+                            </p>
+                        {% endif %}
+
+                    </div>
+
+
+                    <div class="additional-menu-card">
+
+                        <div class="additional-menu-grid">
+
+                            {% for item in
+                                additional_menu_items
+                            %}
+
+                                <div
+                                    class="
+                                        additional-menu-item
+                                    "
+                                >
+
+                                    <span
+                                        class="
+                                            additional-menu-name
+                                        "
+                                    >
+                                        {{ item.name }}
+                                    </span>
+
+                                    <span
+                                        class="
+                                            additional-menu-leader
+                                        "
+                                        aria-hidden="true"
+                                    ></span>
+
+                                    <span
+                                        class="
+                                            additional-menu-price
+                                        "
+                                    >
+                                        {{ item.price }}
+                                    </span>
+
+                                </div>
+
+                            {% endfor %}
+
+                        </div>
+
+                    </div>
+
+                </div>
+            </section>
+
+        {% endif %}
 
 
         <section class="cta-section">

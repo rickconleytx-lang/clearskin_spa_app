@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+
+{% block title %}
+{{ form_title }} | Peach Suite Pro
+{% endblock %}
+
+{% block content %}
+
+<style>
+    .menu-item-form-page {
+        max-width: 760px;
+    }
+
+    .menu-item-form-card {
+        padding: 24px;
+        background: #ffffff;
+        border: 1px solid #dddddd;
+        border-radius: 12px;
+    }
+
+    .menu-item-field {
+        margin-bottom: 22px;
+    }
+
+    .menu-item-field label {
+        display: block;
+        margin-bottom: 7px;
+        font-weight: 700;
+    }
+
+    .menu-item-field input[type="text"],
+    .menu-item-field input[type="number"] {
+        width: 100%;
+        max-width: 520px;
+    }
+
+    .menu-item-help {
+        margin-top: 6px;
+        color: #666666;
+        font-size: 0.92rem;
+    }
+
+    .menu-item-checkbox {
+        display: flex;
+        gap: 9px;
+        align-items: flex-start;
+    }
+</style>
+
+
+<div class="menu-item-form-page">
+
+    <div class="page-tool-pills">
+
+        <a
+            href="{{
+                url_for(
+                    'public_website_menu_items'
+                )
+            }}"
+            class="tool-pill tool-pill-small"
+        >
+            Additional Menu
+        </a>
+
+    </div>
+
+
+    <div class="page-title">
+        <h1>{{ form_title }}</h1>
+    </div>
+
+
+    <form method="POST" class="menu-item-form-card">
+
+        {% set submitted_name =
+            submitted.get('item_name')
+            if submitted
+            else (
+                menu_item[1]
+                if menu_item
+                else ''
+            )
+        %}
+
+        {% set submitted_price =
+            submitted.get('price')
+            if submitted
+            else (
+                menu_item[2]
+                if menu_item
+                else ''
+            )
+        %}
+
+        {% set submitted_order =
+            submitted.get('sort_order')
+            if submitted
+            else (
+                menu_item[3]
+                if menu_item
+                and menu_item[3] is not none
+                else ''
+            )
+        %}
+
+
+        <div class="menu-item-field">
+
+            <label for="item_name">
+                Menu Item Name
+            </label>
+
+            <input
+                type="text"
+                id="item_name"
+                name="item_name"
+                maxlength="180"
+                value="{{ submitted_name }}"
+                required
+            >
+
+        </div>
+
+
+        <div class="menu-item-field">
+
+            <label for="price">
+                Price
+            </label>
+
+            <input
+                type="number"
+                id="price"
+                name="price"
+                min="0"
+                step="0.01"
+                value="{{ submitted_price }}"
+                required
+            >
+
+            <p class="menu-item-help">
+                Prices such as 20, 15, and 7.50 are
+                supported.
+            </p>
+
+        </div>
+
+
+        <div class="menu-item-field">
+
+            <label for="sort_order">
+                Display Order
+            </label>
+
+            <input
+                type="number"
+                id="sort_order"
+                name="sort_order"
+                min="1"
+                max="999"
+                step="1"
+                value="{{ submitted_order }}"
+                placeholder="Example: 10"
+            >
+
+            <p class="menu-item-help">
+                Lower numbers appear first. Leave blank
+                to sort by name.
+            </p>
+
+        </div>
+
+
+        <div class="menu-item-field">
+
+            <div class="menu-item-checkbox">
+
+                <input
+                    type="checkbox"
+                    id="is_active"
+                    name="is_active"
+                    {% if submitted %}
+                        {% if submitted.get('is_active') %}
+                            checked
+                        {% endif %}
+                    {% elif not menu_item or menu_item[4] %}
+                        checked
+                    {% endif %}
+                >
+
+                <label for="is_active">
+                    Show this item on the website
+                </label>
+
+            </div>
+
+        </div>
+
+
+        <div class="page-tool-pills">
+
+            <button
+                type="submit"
+                class="btn btn-primary"
+            >
+                Save Menu Item
+            </button>
+
+            <a
+                href="{{
+                    url_for(
+                        'public_website_menu_items'
+                    )
+                }}"
+                class="tool-pill tool-pill-small"
+            >
+                Cancel
+            </a>
+
+        </div>
+
+    </form>
+
+</div>
+
+{% endblock %}

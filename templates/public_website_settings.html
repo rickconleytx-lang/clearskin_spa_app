@@ -97,6 +97,89 @@
     .website-settings-checkbox label {
         margin: 0;
     }
+
+    .theme-selector-grid {
+        display: grid;
+        grid-template-columns:
+            repeat(2, minmax(0, 1fr));
+        gap: 14px;
+        margin-top: 16px;
+    }
+
+    .theme-option {
+        position: relative;
+    }
+
+    .theme-option input {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+        pointer-events: none;
+    }
+
+    .theme-card {
+        display: block;
+        min-height: 138px;
+        padding: 16px;
+        border: 2px solid #dddddd;
+        border-radius: 12px;
+        background: #ffffff;
+        cursor: pointer;
+        transition:
+            border-color 0.18s ease,
+            box-shadow 0.18s ease,
+            transform 0.18s ease;
+    }
+
+    .theme-card:hover {
+        transform: translateY(-2px);
+        box-shadow:
+            0 8px 22px rgba(0, 0, 0, 0.08);
+    }
+
+    .theme-option input:checked + .theme-card {
+        border-color: #b96f59;
+        box-shadow:
+            0 0 0 3px rgba(185, 111, 89, 0.15);
+    }
+
+    .theme-option input:focus-visible + .theme-card {
+        outline: 3px solid rgba(185, 111, 89, 0.28);
+        outline-offset: 3px;
+    }
+
+    .theme-card-title {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: 800;
+    }
+
+    .theme-card-description {
+        display: block;
+        min-height: 42px;
+        color: #666666;
+        font-size: 0.9rem;
+    }
+
+    .theme-swatches {
+        display: flex;
+        gap: 7px;
+        margin-top: 14px;
+    }
+
+    .theme-swatch {
+        width: 28px;
+        height: 28px;
+        border: 1px solid rgba(0, 0, 0, 0.10);
+        border-radius: 50%;
+    }
+
+    @media (max-width: 680px) {
+        .theme-selector-grid {
+            grid-template-columns: 1fr;
+        }
+    }
 </style>
 
 
@@ -153,6 +236,291 @@
     <div class="website-settings-card">
 
         <form method="POST">
+
+            <section class="website-settings-section">
+
+                <h2>Website Color Scheme</h2>
+
+                <p>
+                    Select a coordinated color palette for
+                    the entire public website. The layout,
+                    content, services, and booking features
+                    remain unchanged.
+                </p>
+
+
+                <div class="theme-selector-grid">
+
+
+                    <div class="theme-option">
+
+                        <input
+                            type="radio"
+                            id="theme_peach_cream"
+                            name="website_color_scheme"
+                            value="peach_cream"
+                            {% if (
+                                settings.website_color_scheme
+                                or 'peach_cream'
+                            ) == 'peach_cream' %}
+                                checked
+                            {% endif %}
+                        >
+
+                        <label
+                            for="theme_peach_cream"
+                            class="theme-card"
+                        >
+                            <span class="theme-card-title">
+                                Peach &amp; Cream
+                            </span>
+
+                            <span
+                                class="theme-card-description"
+                            >
+                                Warm peach, cream, and
+                                natural brown tones.
+                            </span>
+
+                            <span class="theme-swatches">
+                                <span
+                                    class="theme-swatch"
+                                    style="background:#d99078;"
+                                ></span>
+                                <span
+                                    class="theme-swatch"
+                                    style="background:#f7e8e2;"
+                                ></span>
+                                <span
+                                    class="theme-swatch"
+                                    style="background:#fffaf7;"
+                                ></span>
+                                <span
+                                    class="theme-swatch"
+                                    style="background:#302b29;"
+                                ></span>
+                            </span>
+                        </label>
+
+                    </div>
+
+
+                    <div class="theme-option">
+
+                        <input
+                            type="radio"
+                            id="theme_coastal_blue"
+                            name="website_color_scheme"
+                            value="coastal_blue"
+                            {% if
+                                settings.website_color_scheme
+                                == 'coastal_blue'
+                            %}
+                                checked
+                            {% endif %}
+                        >
+
+                        <label
+                            for="theme_coastal_blue"
+                            class="theme-card"
+                        >
+                            <span class="theme-card-title">
+                                Coastal Blue
+                            </span>
+
+                            <span
+                                class="theme-card-description"
+                            >
+                                Airy powder blue, pale aqua,
+                                and calming navy accents.
+                            </span>
+
+                            <span class="theme-swatches">
+                                <span
+                                    class="theme-swatch"
+                                    style="background:#86bfd1;"
+                                ></span>
+                                <span
+                                    class="theme-swatch"
+                                    style="background:#e7f4f8;"
+                                ></span>
+                                <span
+                                    class="theme-swatch"
+                                    style="background:#f7fbfd;"
+                                ></span>
+                                <span
+                                    class="theme-swatch"
+                                    style="background:#26343a;"
+                                ></span>
+                            </span>
+                        </label>
+
+                    </div>
+
+
+                    <div class="theme-option">
+
+                        <input
+                            type="radio"
+                            id="theme_sage_wellness"
+                            name="website_color_scheme"
+                            value="sage_wellness"
+                            {% if
+                                settings.website_color_scheme
+                                == 'sage_wellness'
+                            %}
+                                checked
+                            {% endif %}
+                        >
+
+                        <label
+                            for="theme_sage_wellness"
+                            class="theme-card"
+                        >
+                            <span class="theme-card-title">
+                                Sage Wellness
+                            </span>
+
+                            <span
+                                class="theme-card-description"
+                            >
+                                Soft sage, eucalyptus,
+                                ivory, and forest accents.
+                            </span>
+
+                            <span class="theme-swatches">
+                                <span
+                                    class="theme-swatch"
+                                    style="background:#9bb79d;"
+                                ></span>
+                                <span
+                                    class="theme-swatch"
+                                    style="background:#e9f1e8;"
+                                ></span>
+                                <span
+                                    class="theme-swatch"
+                                    style="background:#fafcf8;"
+                                ></span>
+                                <span
+                                    class="theme-swatch"
+                                    style="background:#29352d;"
+                                ></span>
+                            </span>
+                        </label>
+
+                    </div>
+
+
+                    <div class="theme-option">
+
+                        <input
+                            type="radio"
+                            id="theme_soft_stone"
+                            name="website_color_scheme"
+                            value="soft_stone"
+                            {% if
+                                settings.website_color_scheme
+                                == 'soft_stone'
+                            %}
+                                checked
+                            {% endif %}
+                        >
+
+                        <label
+                            for="theme_soft_stone"
+                            class="theme-card"
+                        >
+                            <span class="theme-card-title">
+                                Soft Stone
+                            </span>
+
+                            <span
+                                class="theme-card-description"
+                            >
+                                Elegant pearl gray, warm
+                                white, and charcoal tones.
+                            </span>
+
+                            <span class="theme-swatches">
+                                <span
+                                    class="theme-swatch"
+                                    style="background:#acb2b6;"
+                                ></span>
+                                <span
+                                    class="theme-swatch"
+                                    style="background:#eceff1;"
+                                ></span>
+                                <span
+                                    class="theme-swatch"
+                                    style="background:#fafafa;"
+                                ></span>
+                                <span
+                                    class="theme-swatch"
+                                    style="background:#2f3335;"
+                                ></span>
+                            </span>
+                        </label>
+
+                    </div>
+
+
+                    <div class="theme-option">
+
+                        <input
+                            type="radio"
+                            id="theme_lavender_calm"
+                            name="website_color_scheme"
+                            value="lavender_calm"
+                            {% if
+                                settings.website_color_scheme
+                                == 'lavender_calm'
+                            %}
+                                checked
+                            {% endif %}
+                        >
+
+                        <label
+                            for="theme_lavender_calm"
+                            class="theme-card"
+                        >
+                            <span class="theme-card-title">
+                                Lavender Calm
+                            </span>
+
+                            <span
+                                class="theme-card-description"
+                            >
+                                Soothing lavender, blush
+                                gray, white, and muted plum.
+                            </span>
+
+                            <span class="theme-swatches">
+                                <span
+                                    class="theme-swatch"
+                                    style="background:#b9a9d2;"
+                                ></span>
+                                <span
+                                    class="theme-swatch"
+                                    style="background:#eee8f5;"
+                                ></span>
+                                <span
+                                    class="theme-swatch"
+                                    style="background:#fbf9fd;"
+                                ></span>
+                                <span
+                                    class="theme-swatch"
+                                    style="background:#332e3a;"
+                                ></span>
+                            </span>
+                        </label>
+
+                    </div>
+
+
+                </div>
+
+            </section>
+
 
             <section class="website-settings-section">
 
@@ -500,6 +868,106 @@
                         maxlength="1000"
                         required
                     >{{ settings.services_description }}</textarea>
+
+                </div>
+
+            </section>
+
+
+            <section class="website-settings-section">
+
+                <h2>Additional Add-ons &amp; Menu</h2>
+
+                <p>
+                    Display a separate optional price menu
+                    below Featured Services. Menu items are
+                    managed independently from the Service
+                    Catalog.
+                </p>
+
+
+                <div class="website-settings-field">
+
+                    <div style="
+                        display:flex;
+                        align-items:flex-start;
+                        gap:10px;
+                    ">
+
+                        <input
+                            type="checkbox"
+                            id="show_additional_menu_section"
+                            name="show_additional_menu_section"
+                            {% if
+                                settings.show_additional_menu_section
+                            %}
+                                checked
+                            {% endif %}
+                        >
+
+                        <label
+                            for="show_additional_menu_section"
+                        >
+                            <strong>
+                                Show Additional Add-ons
+                                &amp; Menu on Website
+                            </strong>
+                        </label>
+
+                    </div>
+
+                </div>
+
+
+                <div class="website-settings-field">
+
+                    <label for="additional_menu_heading">
+                        Section Heading
+                    </label>
+
+                    <input
+                        type="text"
+                        id="additional_menu_heading"
+                        name="additional_menu_heading"
+                        maxlength="180"
+                        value="{{
+                            settings.additional_menu_heading
+                            or ''
+                        }}"
+                    >
+
+                </div>
+
+
+                <div class="website-settings-field">
+
+                    <label
+                        for="additional_menu_description"
+                    >
+                        Section Description
+                    </label>
+
+                    <textarea
+                        id="additional_menu_description"
+                        name="additional_menu_description"
+                        maxlength="1000"
+                    >{{ settings.additional_menu_description or '' }}</textarea>
+
+                </div>
+
+
+                <div class="page-tool-pills">
+
+                    <a
+                        href="{{
+                            url_for(
+                                'public_website_menu_items'
+                            )
+                        }}"
+                        class="tool-pill tool-pill-small"
+                    >
+                        Manage Menu Items
+                    </a>
 
                 </div>
 

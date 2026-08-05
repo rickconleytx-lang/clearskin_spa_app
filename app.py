@@ -1219,6 +1219,8 @@ CLEAR_SKIN_PUBLIC_HOSTS = {
 CLEAR_SKIN_PUBLIC_SPA_ID = 1
 
 CLEAR_SKIN_PUBLIC_WEBSITE_DEFAULTS = {
+    "website_color_scheme": "peach_cream",
+
     "hero_headline": (
         "Healthy skin begins with personalized care."
     ),
@@ -1272,6 +1274,17 @@ CLEAR_SKIN_PUBLIC_WEBSITE_DEFAULTS = {
         "and let Clear Skin Esthetics take care of the rest."
     ),
 
+    "show_additional_menu_section": False,
+
+    "additional_menu_heading": (
+        "Additional Add-ons & Menu"
+    ),
+
+    "additional_menu_description": (
+        "Enhance your treatment with optional "
+        "add-ons and specialty services."
+    ),
+
     "appointment_contact_email": "",
     "appointment_contact_phone": "",
 }
@@ -1304,6 +1317,7 @@ def route_clear_skin_public_home():
         )
 
         services = []
+        additional_menu_items = []
 
         conn = get_db_connection()
         cur = conn.cursor()
@@ -1348,6 +1362,27 @@ def route_clear_skin_public_home():
 
             cur.execute("""
                 SELECT
+                    item_name,
+                    price
+                FROM public_website_menu_items
+                WHERE spa_id = %s
+                  AND is_active = TRUE
+                ORDER BY
+                    sort_order NULLS LAST,
+                    item_name,
+                    menu_item_id
+            """, (
+                CLEAR_SKIN_PUBLIC_SPA_ID,
+            ))
+
+            for row in cur.fetchall():
+                additional_menu_items.append({
+                    "name": row[0],
+                    "price": f"${row[1]:,.2f}",
+                })
+
+            cur.execute("""
+                SELECT
                     hero_headline,
                     intro_heading,
                     intro_description,
@@ -1361,8 +1396,12 @@ def route_clear_skin_public_home():
                     about_image_alt,
                     services_heading,
                     services_description,
+                    show_additional_menu_section,
+                    additional_menu_heading,
+                    additional_menu_description,
                     booking_heading,
-                    booking_description
+                    booking_description,
+                    website_color_scheme
                 FROM public_website_settings
                 WHERE spa_id = %s
             """, (
@@ -1386,8 +1425,18 @@ def route_clear_skin_public_home():
                     "about_image_alt": settings_row[10] or "",
                     "services_heading": settings_row[11],
                     "services_description": settings_row[12],
-                    "booking_heading": settings_row[13],
-                    "booking_description": settings_row[14],
+                    "show_additional_menu_section":
+                        settings_row[13],
+                    "additional_menu_heading":
+                        settings_row[14],
+                    "additional_menu_description":
+                        settings_row[15],
+                    "booking_heading": settings_row[16],
+                    "booking_description": settings_row[17],
+                    "website_color_scheme": (
+                        settings_row[18]
+                        or "peach_cream"
+                    ),
             }
 
         except Exception:
@@ -1402,6 +1451,8 @@ def route_clear_skin_public_home():
         return render_template(
             "public_site/clear_skin_home.html",
             services=services,
+            additional_menu_items=
+                additional_menu_items,
             website_settings=website_settings,
         )
 
@@ -9734,10 +9785,15 @@ def public_website_settings():
                         about_description,
                         services_heading,
                         services_description,
+                        show_additional_menu_section,
+                        additional_menu_heading,
+                        additional_menu_description,
                         booking_heading,
-                        booking_description
+                        booking_description,
+                        website_color_scheme
                     )
                     VALUES (
+                        %s, %s, %s, %s,
                         %s, %s, %s, %s,
                         %s, %s, %s, %s,
                         %s, %s, %s, %s,
@@ -9772,11 +9828,23 @@ def public_website_settings():
                         services_description = (
                             EXCLUDED.services_description
                         ),
+                        show_additional_menu_section = (
+                            EXCLUDED.show_additional_menu_section
+                        ),
+                        additional_menu_heading = (
+                            EXCLUDED.additional_menu_heading
+                        ),
+                        additional_menu_description = (
+                            EXCLUDED.additional_menu_description
+                        ),
                         booking_heading = (
                             EXCLUDED.booking_heading
                         ),
                         booking_description = (
                             EXCLUDED.booking_description
+                        ),
+                        website_color_scheme = (
+                            EXCLUDED.website_color_scheme
                         ),
                         updated_at = NOW()
                 """, (
@@ -9792,8 +9860,16 @@ def public_website_settings():
                     defaults["about_description"],
                     defaults["services_heading"],
                     defaults["services_description"],
+                    defaults[
+                        "show_additional_menu_section"
+                    ],
+                    defaults["additional_menu_heading"],
+                    defaults[
+                        "additional_menu_description"
+                    ],
                     defaults["booking_heading"],
                     defaults["booking_description"],
+                    defaults["website_color_scheme"],
                 ))
 
                 conn.commit()
@@ -9809,6 +9885,13 @@ def public_website_settings():
 
             else:
                 settings = {
+                    "website_color_scheme": (
+                        request.form.get(
+                            "website_color_scheme"
+                        )
+                        or "peach_cream"
+                    ).strip().lower(),
+
                     "hero_headline": (
                         request.form.get(
                             "hero_headline"
@@ -9896,6 +9979,25 @@ def public_website_settings():
                         or ""
                     ).strip(),
 
+                    "show_additional_menu_section": (
+                        "show_additional_menu_section"
+                        in request.form
+                    ),
+
+                    "additional_menu_heading": (
+                        request.form.get(
+                            "additional_menu_heading"
+                        )
+                        or ""
+                    ).strip(),
+
+                    "additional_menu_description": (
+                        request.form.get(
+                            "additional_menu_description"
+                        )
+                        or ""
+                    ).strip(),
+
                     "booking_heading": (
                         request.form.get(
                             "booking_heading"
@@ -9924,6 +10026,29 @@ def public_website_settings():
                         or ""
                     ).strip(),
                 }
+
+                allowed_color_schemes = {
+                    "peach_cream",
+                    "coastal_blue",
+                    "sage_wellness",
+                    "soft_stone",
+                    "lavender_calm",
+                }
+
+                if (
+                    settings["website_color_scheme"]
+                    not in allowed_color_schemes
+                ):
+                    flash(
+                        "Select a valid website color scheme.",
+                        "error"
+                    )
+
+                    return render_template(
+                        "public_website_settings.html",
+                        settings=settings,
+                        public_website_url=public_website_url
+                    )
 
                 field_rules = {
                     "hero_headline": (
@@ -10122,6 +10247,64 @@ def public_website_settings():
                         public_website_url=public_website_url
                     )
 
+                menu_heading = settings[
+                    "additional_menu_heading"
+                ]
+
+                menu_description = settings[
+                    "additional_menu_description"
+                ]
+
+                if len(menu_heading) > 180:
+                    flash(
+                        (
+                            "Additional Menu Heading must "
+                            "be 180 characters or fewer."
+                        ),
+                        "error"
+                    )
+
+                    return render_template(
+                        "public_website_settings.html",
+                        settings=settings,
+                        public_website_url=public_website_url
+                    )
+
+                if len(menu_description) > 1000:
+                    flash(
+                        (
+                            "Additional Menu Description "
+                            "must be 1000 characters or fewer."
+                        ),
+                        "error"
+                    )
+
+                    return render_template(
+                        "public_website_settings.html",
+                        settings=settings,
+                        public_website_url=public_website_url
+                    )
+
+                if (
+                    settings[
+                        "show_additional_menu_section"
+                    ]
+                    and not menu_heading
+                ):
+                    flash(
+                        (
+                            "Additional Menu Heading is "
+                            "required when the section is shown."
+                        ),
+                        "error"
+                    )
+
+                    return render_template(
+                        "public_website_settings.html",
+                        settings=settings,
+                        public_website_url=public_website_url
+                    )
+
                 contact_email = settings[
                     "appointment_contact_email"
                 ]
@@ -10204,12 +10387,17 @@ def public_website_settings():
                     about_image_alt,
                     services_heading,
                     services_description,
+                    show_additional_menu_section,
+                    additional_menu_heading,
+                    additional_menu_description,
                     booking_heading,
                     booking_description,
                     appointment_contact_email,
-                    appointment_contact_phone
+                    appointment_contact_phone,
+                    website_color_scheme
                 )
                 VALUES (
+                    %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s, %s,
@@ -10247,6 +10435,15 @@ def public_website_settings():
                     services_description = (
                         EXCLUDED.services_description
                     ),
+                    show_additional_menu_section = (
+                        EXCLUDED.show_additional_menu_section
+                    ),
+                    additional_menu_heading = (
+                        EXCLUDED.additional_menu_heading
+                    ),
+                    additional_menu_description = (
+                        EXCLUDED.additional_menu_description
+                    ),
                     booking_heading = (
                         EXCLUDED.booking_heading
                     ),
@@ -10258,6 +10455,9 @@ def public_website_settings():
                     ),
                     appointment_contact_phone = (
                         EXCLUDED.appointment_contact_phone
+                    ),
+                    website_color_scheme = (
+                        EXCLUDED.website_color_scheme
                     ),
                     updated_at = NOW()
             """, (
@@ -10275,12 +10475,18 @@ def public_website_settings():
                 settings["about_image_alt"] or None,
                 settings["services_heading"],
                 settings["services_description"],
+                settings[
+                    "show_additional_menu_section"
+                ],
+                settings["additional_menu_heading"],
+                settings["additional_menu_description"],
                 settings["booking_heading"],
                 settings["booking_description"],
                 settings["appointment_contact_email"]
                     or None,
                 settings["appointment_contact_phone"]
                     or None,
+                settings["website_color_scheme"],
             ))
 
             conn.commit()
@@ -10309,10 +10515,14 @@ def public_website_settings():
                 about_image_alt,
                 services_heading,
                 services_description,
+                show_additional_menu_section,
+                additional_menu_heading,
+                additional_menu_description,
                 booking_heading,
                 booking_description,
                 appointment_contact_email,
-                appointment_contact_phone
+                appointment_contact_phone,
+                website_color_scheme
             FROM public_website_settings
             WHERE spa_id = %s
         """, (spa_id,))
@@ -10334,12 +10544,20 @@ def public_website_settings():
                 "about_image_alt": row[10] or "",
                 "services_heading": row[11],
                 "services_description": row[12],
-                "booking_heading": row[13],
-                "booking_description": row[14],
-                "appointment_contact_email":
+                "show_additional_menu_section":
+                    row[13],
+                "additional_menu_heading":
+                    row[14] or "",
+                "additional_menu_description":
                     row[15] or "",
+                "booking_heading": row[16],
+                "booking_description": row[17],
+                "appointment_contact_email":
+                    row[18] or "",
                 "appointment_contact_phone":
-                    row[16] or "",
+                    row[19] or "",
+                "website_color_scheme":
+                    row[20] or "peach_cream",
             }
 
         else:
@@ -10366,6 +10584,655 @@ def public_website_settings():
 
 
 
+
+
+
+############################################
+#
+#   PUBLIC WEBSITE ADDITIONAL MENU ITEMS
+#
+############################################
+
+@app.route("/public-website-menu-items")
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def public_website_menu_items():
+    spa_id = current_spa_id()
+
+    status_filter = (
+        request.args.get("status")
+        or "active"
+    ).strip().lower()
+
+    if status_filter not in {
+        "active",
+        "hidden",
+        "all"
+    }:
+        status_filter = "active"
+
+    query = """
+        SELECT
+            menu_item_id,
+            item_name,
+            price,
+            sort_order,
+            is_active
+        FROM public_website_menu_items
+        WHERE spa_id = %s
+    """
+
+    params = [spa_id]
+
+    if status_filter == "active":
+        query += """
+          AND is_active = TRUE
+        """
+
+    elif status_filter == "hidden":
+        query += """
+          AND is_active = FALSE
+        """
+
+    query += """
+        ORDER BY
+            is_active DESC,
+            sort_order NULLS LAST,
+            item_name,
+            menu_item_id
+    """
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            query,
+            tuple(params)
+        )
+
+        menu_items = cur.fetchall()
+
+        cur.execute("""
+            SELECT
+                COUNT(*) FILTER (
+                    WHERE is_active = TRUE
+                ),
+                COUNT(*) FILTER (
+                    WHERE is_active = FALSE
+                )
+            FROM public_website_menu_items
+            WHERE spa_id = %s
+        """, (spa_id,))
+
+        count_row = cur.fetchone()
+
+        active_count = count_row[0] or 0
+        hidden_count = count_row[1] or 0
+
+    finally:
+        cur.close()
+        conn.close()
+
+    request_host = (
+        request.host.split(":", 1)[0].lower()
+    )
+
+    request_port = (
+        request.host.split(":", 1)[1]
+        if ":" in request.host
+        else ""
+    )
+
+    if request_host in {
+        "127.0.0.1",
+        "localhost"
+    }:
+        port_suffix = (
+            f":{request_port}"
+            if request_port
+            else ""
+        )
+
+        public_menu_url = (
+            "http://clearskinesthetics.localhost"
+            f"{port_suffix}/#additional-menu"
+        )
+
+    else:
+        public_menu_url = (
+            "https://clearskinesthetics."
+            "peachsuitepro.com/#additional-menu"
+        )
+
+    return render_template(
+        "public_website_menu_items.html",
+        menu_items=menu_items,
+        status_filter=status_filter,
+        active_count=active_count,
+        hidden_count=hidden_count,
+        public_menu_url=public_menu_url
+    )
+
+
+@app.route(
+    "/public-website-menu-items/add",
+    methods=["GET", "POST"]
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def add_public_website_menu_item():
+    from decimal import Decimal, InvalidOperation
+
+    spa_id = current_spa_id()
+
+    if request.method == "POST":
+        item_name = (
+            request.form.get("item_name")
+            or ""
+        ).strip()
+
+        price_raw = (
+            request.form.get("price")
+            or ""
+        ).strip()
+
+        sort_order_raw = (
+            request.form.get("sort_order")
+            or ""
+        ).strip()
+
+        is_active = (
+            "is_active" in request.form
+        )
+
+        if not item_name:
+            flash(
+                "Menu item name is required.",
+                "error"
+            )
+
+            return render_template(
+                "public_website_menu_item_form.html",
+                menu_item=None,
+                submitted=request.form,
+                form_title="Add Menu Item"
+            )
+
+        if len(item_name) > 180:
+            flash(
+                (
+                    "Menu item name must be "
+                    "180 characters or fewer."
+                ),
+                "error"
+            )
+
+            return render_template(
+                "public_website_menu_item_form.html",
+                menu_item=None,
+                submitted=request.form,
+                form_title="Add Menu Item"
+            )
+
+        try:
+            price = Decimal(price_raw)
+        except (
+            InvalidOperation,
+            TypeError,
+            ValueError
+        ):
+            flash(
+                "Enter a valid menu price.",
+                "error"
+            )
+
+            return render_template(
+                "public_website_menu_item_form.html",
+                menu_item=None,
+                submitted=request.form,
+                form_title="Add Menu Item"
+            )
+
+        if price < 0:
+            flash(
+                "Menu price cannot be negative.",
+                "error"
+            )
+
+            return render_template(
+                "public_website_menu_item_form.html",
+                menu_item=None,
+                submitted=request.form,
+                form_title="Add Menu Item"
+            )
+
+        sort_order = None
+
+        if sort_order_raw:
+            try:
+                sort_order = int(sort_order_raw)
+            except (TypeError, ValueError):
+                flash(
+                    "Display order must be a number.",
+                    "error"
+                )
+
+                return render_template(
+                    "public_website_menu_item_form.html",
+                    menu_item=None,
+                    submitted=request.form,
+                    form_title="Add Menu Item"
+                )
+
+            if not 1 <= sort_order <= 999:
+                flash(
+                    (
+                        "Display order must be "
+                        "between 1 and 999."
+                    ),
+                    "error"
+                )
+
+                return render_template(
+                    "public_website_menu_item_form.html",
+                    menu_item=None,
+                    submitted=request.form,
+                    form_title="Add Menu Item"
+                )
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        try:
+            cur.execute("""
+                INSERT INTO public_website_menu_items (
+                    spa_id,
+                    item_name,
+                    price,
+                    sort_order,
+                    is_active
+                )
+                VALUES (%s, %s, %s, %s, %s)
+            """, (
+                spa_id,
+                item_name,
+                price,
+                sort_order,
+                is_active
+            ))
+
+            conn.commit()
+
+        except Exception as exc:
+            conn.rollback()
+
+            if (
+                "public_website_menu_items_spa_name_key"
+                in str(exc)
+            ):
+                flash(
+                    (
+                        "A menu item with that name "
+                        "already exists."
+                    ),
+                    "error"
+                )
+            else:
+                raise
+
+            return render_template(
+                "public_website_menu_item_form.html",
+                menu_item=None,
+                submitted=request.form,
+                form_title="Add Menu Item"
+            )
+
+        finally:
+            cur.close()
+            conn.close()
+
+        flash(
+            "Menu item added successfully.",
+            "success"
+        )
+
+        return redirect(
+            url_for("public_website_menu_items")
+        )
+
+    return render_template(
+        "public_website_menu_item_form.html",
+        menu_item=None,
+        submitted=None,
+        form_title="Add Menu Item"
+    )
+
+
+@app.route(
+    "/public-website-menu-items/"
+    "<int:menu_item_id>/edit",
+    methods=["GET", "POST"]
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def edit_public_website_menu_item(
+    menu_item_id
+):
+    from decimal import Decimal, InvalidOperation
+
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                menu_item_id,
+                item_name,
+                price,
+                sort_order,
+                is_active
+            FROM public_website_menu_items
+            WHERE menu_item_id = %s
+              AND spa_id = %s
+        """, (
+            menu_item_id,
+            spa_id
+        ))
+
+        menu_item = cur.fetchone()
+
+        if not menu_item:
+            flash(
+                "Menu item not found.",
+                "error"
+            )
+
+            return redirect(
+                url_for(
+                    "public_website_menu_items"
+                )
+            )
+
+        if request.method == "POST":
+            item_name = (
+                request.form.get("item_name")
+                or ""
+            ).strip()
+
+            price_raw = (
+                request.form.get("price")
+                or ""
+            ).strip()
+
+            sort_order_raw = (
+                request.form.get("sort_order")
+                or ""
+            ).strip()
+
+            is_active = (
+                "is_active" in request.form
+            )
+
+            if not item_name:
+                flash(
+                    "Menu item name is required.",
+                    "error"
+                )
+
+                return render_template(
+                    "public_website_menu_item_form.html",
+                    menu_item=menu_item,
+                    submitted=request.form,
+                    form_title="Edit Menu Item"
+                )
+
+            if len(item_name) > 180:
+                flash(
+                    (
+                        "Menu item name must be "
+                        "180 characters or fewer."
+                    ),
+                    "error"
+                )
+
+                return render_template(
+                    "public_website_menu_item_form.html",
+                    menu_item=menu_item,
+                    submitted=request.form,
+                    form_title="Edit Menu Item"
+                )
+
+            try:
+                price = Decimal(price_raw)
+            except (
+                InvalidOperation,
+                TypeError,
+                ValueError
+            ):
+                flash(
+                    "Enter a valid menu price.",
+                    "error"
+                )
+
+                return render_template(
+                    "public_website_menu_item_form.html",
+                    menu_item=menu_item,
+                    submitted=request.form,
+                    form_title="Edit Menu Item"
+                )
+
+            if price < 0:
+                flash(
+                    "Menu price cannot be negative.",
+                    "error"
+                )
+
+                return render_template(
+                    "public_website_menu_item_form.html",
+                    menu_item=menu_item,
+                    submitted=request.form,
+                    form_title="Edit Menu Item"
+                )
+
+            sort_order = None
+
+            if sort_order_raw:
+                try:
+                    sort_order = int(
+                        sort_order_raw
+                    )
+                except (TypeError, ValueError):
+                    flash(
+                        (
+                            "Display order must "
+                            "be a number."
+                        ),
+                        "error"
+                    )
+
+                    return render_template(
+                        "public_website_menu_item_form.html",
+                        menu_item=menu_item,
+                        submitted=request.form,
+                        form_title="Edit Menu Item"
+                    )
+
+                if not 1 <= sort_order <= 999:
+                    flash(
+                        (
+                            "Display order must be "
+                            "between 1 and 999."
+                        ),
+                        "error"
+                    )
+
+                    return render_template(
+                        "public_website_menu_item_form.html",
+                        menu_item=menu_item,
+                        submitted=request.form,
+                        form_title="Edit Menu Item"
+                    )
+
+            try:
+                cur.execute("""
+                    UPDATE public_website_menu_items
+                    SET
+                        item_name = %s,
+                        price = %s,
+                        sort_order = %s,
+                        is_active = %s,
+                        updated_at = NOW()
+                    WHERE menu_item_id = %s
+                      AND spa_id = %s
+                """, (
+                    item_name,
+                    price,
+                    sort_order,
+                    is_active,
+                    menu_item_id,
+                    spa_id
+                ))
+
+                conn.commit()
+
+            except Exception as exc:
+                conn.rollback()
+
+                if (
+                    "public_website_menu_items_spa_name_key"
+                    in str(exc)
+                ):
+                    flash(
+                        (
+                            "A menu item with that name "
+                            "already exists."
+                        ),
+                        "error"
+                    )
+                else:
+                    raise
+
+                return render_template(
+                    "public_website_menu_item_form.html",
+                    menu_item=menu_item,
+                    submitted=request.form,
+                    form_title="Edit Menu Item"
+                )
+
+            flash(
+                "Menu item updated successfully.",
+                "success"
+            )
+
+            return redirect(
+                url_for(
+                    "public_website_menu_items"
+                )
+            )
+
+        return render_template(
+            "public_website_menu_item_form.html",
+            menu_item=menu_item,
+            submitted=None,
+            form_title="Edit Menu Item"
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route(
+    "/public-website-menu-items/"
+    "<int:menu_item_id>/toggle",
+    methods=["POST"]
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def toggle_public_website_menu_item(
+    menu_item_id
+):
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                item_name,
+                is_active
+            FROM public_website_menu_items
+            WHERE menu_item_id = %s
+              AND spa_id = %s
+        """, (
+            menu_item_id,
+            spa_id
+        ))
+
+        row = cur.fetchone()
+
+        if not row:
+            flash(
+                "Menu item not found.",
+                "error"
+            )
+
+            return redirect(
+                url_for(
+                    "public_website_menu_items"
+                )
+            )
+
+        new_status = not bool(row[1])
+
+        cur.execute("""
+            UPDATE public_website_menu_items
+            SET
+                is_active = %s,
+                updated_at = NOW()
+            WHERE menu_item_id = %s
+              AND spa_id = %s
+        """, (
+            new_status,
+            menu_item_id,
+            spa_id
+        ))
+
+        conn.commit()
+
+        flash(
+            (
+                f"{row[0]} is now "
+                f"{'shown' if new_status else 'hidden'}."
+            ),
+            "success"
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    return redirect(
+        url_for(
+            "public_website_menu_items"
+        )
+    )
 
 
 #############################
