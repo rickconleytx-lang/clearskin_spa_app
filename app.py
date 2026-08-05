@@ -1221,6 +1221,9 @@ CLEAR_SKIN_PUBLIC_SPA_ID = 1
 CLEAR_SKIN_PUBLIC_WEBSITE_DEFAULTS = {
     "website_color_scheme": "peach_cream",
 
+    "include_marketing_sms_in_10dlc_application":
+        False,
+
     "hero_headline": (
         "Healthy skin begins with personalized care."
     ),
@@ -9790,14 +9793,15 @@ def public_website_settings():
                         additional_menu_description,
                         booking_heading,
                         booking_description,
-                        website_color_scheme
+                        website_color_scheme,
+                        include_marketing_sms_in_10dlc_application
                     )
                     VALUES (
                         %s, %s, %s, %s,
                         %s, %s, %s, %s,
                         %s, %s, %s, %s,
                         %s, %s, %s, %s,
-                        %s, %s
+                        %s, %s, %s
                     )
                     ON CONFLICT (spa_id)
                     DO UPDATE SET
@@ -9846,6 +9850,9 @@ def public_website_settings():
                         website_color_scheme = (
                             EXCLUDED.website_color_scheme
                         ),
+                        include_marketing_sms_in_10dlc_application = (
+                            EXCLUDED.include_marketing_sms_in_10dlc_application
+                        ),
                         updated_at = NOW()
                 """, (
                     spa_id,
@@ -9870,6 +9877,9 @@ def public_website_settings():
                     defaults["booking_heading"],
                     defaults["booking_description"],
                     defaults["website_color_scheme"],
+                    defaults[
+                        "include_marketing_sms_in_10dlc_application"
+                    ],
                 ))
 
                 conn.commit()
@@ -9891,6 +9901,11 @@ def public_website_settings():
                         )
                         or "peach_cream"
                     ).strip().lower(),
+
+                    "include_marketing_sms_in_10dlc_application": (
+                        "include_marketing_sms_in_10dlc_application"
+                        in request.form
+                    ),
 
                     "hero_headline": (
                         request.form.get(
@@ -10394,7 +10409,8 @@ def public_website_settings():
                     booking_description,
                     appointment_contact_email,
                     appointment_contact_phone,
-                    website_color_scheme
+                    website_color_scheme,
+                    include_marketing_sms_in_10dlc_application
                 )
                 VALUES (
                     %s, %s, %s, %s,
@@ -10402,7 +10418,7 @@ def public_website_settings():
                     %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s, %s,
-                    %s, %s
+                    %s, %s, %s
                 )
                 ON CONFLICT (spa_id)
                 DO UPDATE SET
@@ -10459,6 +10475,9 @@ def public_website_settings():
                     website_color_scheme = (
                         EXCLUDED.website_color_scheme
                     ),
+                    include_marketing_sms_in_10dlc_application = (
+                        EXCLUDED.include_marketing_sms_in_10dlc_application
+                    ),
                     updated_at = NOW()
             """, (
                 spa_id,
@@ -10487,6 +10506,9 @@ def public_website_settings():
                 settings["appointment_contact_phone"]
                     or None,
                 settings["website_color_scheme"],
+                settings[
+                    "include_marketing_sms_in_10dlc_application"
+                ],
             ))
 
             conn.commit()
@@ -10522,7 +10544,8 @@ def public_website_settings():
                 booking_description,
                 appointment_contact_email,
                 appointment_contact_phone,
-                website_color_scheme
+                website_color_scheme,
+                include_marketing_sms_in_10dlc_application
             FROM public_website_settings
             WHERE spa_id = %s
         """, (spa_id,))
@@ -10558,6 +10581,8 @@ def public_website_settings():
                     row[19] or "",
                 "website_color_scheme":
                     row[20] or "peach_cream",
+                "include_marketing_sms_in_10dlc_application":
+                    bool(row[21]),
             }
 
         else:
@@ -49835,7 +49860,8 @@ def _render_public_booking_page(
                 business_name="Online Booking",
                 organization_name="",
                 business_address="",
-                services=[]
+                services=[],
+                include_marketing_sms_consent=False
             ), 404
 
         spa_id = booking_row[0]
@@ -49857,6 +49883,22 @@ def _render_public_booking_page(
             or spa_name
             or "Online Booking"
         )
+
+        include_marketing_sms_consent = False
+
+        cur.execute("""
+            SELECT
+                include_marketing_sms_in_10dlc_application
+            FROM public_website_settings
+            WHERE spa_id = %s
+        """, (spa_id,))
+
+        marketing_setting_row = cur.fetchone()
+
+        if marketing_setting_row:
+            include_marketing_sms_consent = bool(
+                marketing_setting_row[0]
+            )
 
         organization_name = ""
 
@@ -50684,6 +50726,9 @@ def _render_public_booking_page(
 
             coach_booking_advice=
                 coach_booking_advice,
+
+            include_marketing_sms_consent=
+                include_marketing_sms_consent,
 
             booking_csrf_token=
                 booking_csrf_token
@@ -51518,6 +51563,11 @@ def public_booking_confirm(
         == "1"
     )
 
+    marketing_sms_consent = (
+        request.form.get("marketing_sms_consent")
+        == "1"
+    )
+
 
     booking_for_other_raw = (
         request.form.get(
@@ -51697,7 +51747,9 @@ def public_booking_confirm(
         cur.execute("""
             SELECT
                 bs.spa_id,
-                bs.business_unit_id
+                bs.business_unit_id,
+                s.spa_name,
+                bu.unit_name
             FROM booking_settings bs
 
             JOIN business_units bu
@@ -51730,6 +51782,43 @@ def public_booking_confirm(
 
         spa_id = booking_row[0]
         business_unit_id = booking_row[1]
+
+        spa_name = str(
+            booking_row[2] or ""
+        ).strip()
+
+        unit_name = str(
+            booking_row[3] or ""
+        ).strip()
+
+        business_name = (
+            unit_name
+            or spa_name
+            or "This business"
+        )
+
+        include_marketing_sms_consent = False
+
+        cur.execute("""
+            SELECT
+                include_marketing_sms_in_10dlc_application
+            FROM public_website_settings
+            WHERE spa_id = %s
+        """, (spa_id,))
+
+        marketing_setting_row = cur.fetchone()
+
+        if marketing_setting_row:
+            include_marketing_sms_consent = bool(
+                marketing_setting_row[0]
+            )
+
+        # Never accept a forged marketing-consent field
+        # when the business has not enabled that option.
+        marketing_sms_consent = bool(
+            marketing_sms_consent
+            and include_marketing_sms_consent
+        )
 
 
         confirmation = (
@@ -51786,11 +51875,32 @@ def public_booking_confirm(
 
             client_id = confirmation["client_id"]
 
+            service_consent_version = (
+                "public_service_sms_2026_08_04"
+            )
+
+            service_consent_text = (
+                "I agree to receive service-related text "
+                f"messages from {business_name} at the number "
+                "I provided about this appointment, including "
+                "appointment confirmations, reminders, "
+                "scheduling updates, and cancellations. "
+                "Message frequency varies. Message and data "
+                "rates may apply. Reply STOP to opt out or "
+                "HELP for help. Consent is not a condition "
+                "of purchase. Mobile opt-in information will "
+                "not be sold or shared with third parties for "
+                "promotional or marketing purposes. "
+                f"Consent text version: {service_consent_version}."
+            )
+
             cur.execute("""
                 UPDATE clients
                 SET
                     sms_opt_in = TRUE,
-                    sms_opt_out = FALSE
+                    sms_opt_out = FALSE,
+                    sms_consent_timestamp =
+                        CURRENT_TIMESTAMP
                 WHERE client_id = %s
                   AND spa_id = %s
                   AND business_unit_id = %s
@@ -51817,18 +51927,8 @@ def public_booking_confirm(
                 client_id,
                 phone,
                 True,
-                "public_website_booking_checkbox",
-                (
-                    "I agree to receive service-related text "
-                    "messages from Clear Skin Esthetics regarding "
-                    "appointment confirmations, reminders, "
-                    "scheduling updates, and cancellations. "
-                    "Message frequency varies. Message and data "
-                    "rates may apply. Reply STOP to opt out or "
-                    "HELP for help. Consent is not a condition "
-                    "of purchase. Consent text version: "
-                    "clear_skin_service_sms_2026_08_02."
-                )
+                "public_website_booking_service_checkbox",
+                service_consent_text
             ))
 
             add_consent_record(
@@ -51838,13 +51938,93 @@ def public_booking_confirm(
                 consent_type="SMS",
                 consent_status=True,
                 consent_source=(
-                    "Public Website Booking Checkbox"
+                    "Public Website Booking "
+                    "Service SMS Checkbox"
                 ),
                 consent_note=(
                     "Client voluntarily selected the "
                     "optional service SMS consent checkbox. "
-                    "Consent text version: "
-                    "clear_skin_service_sms_2026_08_02."
+                    f"Consent text version: "
+                    f"{service_consent_version}."
+                ),
+                updated_by=None
+            )
+
+
+        if marketing_sms_consent:
+
+            client_id = confirmation["client_id"]
+
+            marketing_consent_version = (
+                "public_marketing_sms_2026_08_04"
+            )
+
+            marketing_consent_text = (
+                "I agree to receive recurring promotional "
+                f"and marketing text messages from "
+                f"{business_name} at the number I provided, "
+                "including special offers, service "
+                "promotions, skincare tips, and event "
+                "announcements. Message frequency varies. "
+                "Message and data rates may apply. Reply "
+                "STOP to opt out or HELP for help. Consent "
+                "is not a condition of purchase. Mobile "
+                "opt-in information will not be sold or "
+                "shared with third parties for promotional "
+                "or marketing purposes. "
+                f"Consent text version: "
+                f"{marketing_consent_version}."
+            )
+
+            cur.execute("""
+                UPDATE clients
+                SET
+                    sms_marketing_status = 'opt_in'
+                WHERE client_id = %s
+                  AND spa_id = %s
+                  AND business_unit_id = %s
+            """, (
+                client_id,
+                spa_id,
+                business_unit_id
+            ))
+
+            cur.execute("""
+                INSERT INTO sms_consent_log (
+                    spa_id,
+                    business_unit_id,
+                    client_id,
+                    phone_number,
+                    consent_given,
+                    consent_method,
+                    consent_text
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (
+                spa_id,
+                business_unit_id,
+                client_id,
+                phone,
+                True,
+                "public_website_booking_marketing_checkbox",
+                marketing_consent_text
+            ))
+
+            add_consent_record(
+                cur=cur,
+                spa_id=spa_id,
+                client_id=client_id,
+                consent_type="SMS Marketing",
+                consent_status=True,
+                consent_source=(
+                    "Public Website Booking "
+                    "Marketing SMS Checkbox"
+                ),
+                consent_note=(
+                    "Client voluntarily selected the "
+                    "separate optional marketing SMS "
+                    "consent checkbox. Consent text version: "
+                    f"{marketing_consent_version}."
                 ),
                 updated_by=None
             )

@@ -1954,6 +1954,14 @@
 
                                     {% if not preview_mode %}
 
+                                        <p style="
+                                            margin:18px 0 10px;
+                                            font-weight:800;
+                                        ">
+                                            Text Message Preferences
+                                        </p>
+
+
                                         <div class="service-sms-consent">
 
                                             <input
@@ -1964,14 +1972,23 @@
                                             >
 
                                             <label for="serviceSmsConsent">
-                                                I agree to receive service-related text messages
-                                                from Clear Skin Esthetics at the number I provided 
-                                                about this appointment, regarding appointment
-                                                confirmations, reminders, scheduling updates, and
-                                                cancellations. Message frequency varies. Message
-                                                and data rates may apply. Reply STOP to opt out or
-                                                HELP for help. Consent is not a condition of
-                                                purchase.
+                                                I agree to receive
+                                                service-related text messages
+                                                from {{ business_name }} at
+                                                the number I provided about
+                                                this appointment, including
+                                                appointment confirmations,
+                                                reminders, scheduling updates,
+                                                and cancellations. Message
+                                                frequency varies. Message and
+                                                data rates may apply. Reply
+                                                STOP to opt out or HELP for
+                                                help. Consent is not a
+                                                condition of purchase. Mobile
+                                                opt-in information will not be
+                                                sold or shared with third
+                                                parties for promotional or
+                                                marketing purposes.
 
                                                 <a
                                                     href="/sms-terms"
@@ -1988,11 +2005,76 @@
                                                     target="_blank"
                                                     rel="noopener"
                                                 >
-                                                    Privacy Policy
-                                                </a>.
+                                                    Privacy Policy.
+                                                </a>
                                             </label>
 
                                         </div>
+
+
+                                        {% if
+                                            include_marketing_sms_consent
+                                        %}
+
+                                            <div
+                                                class="
+                                                    service-sms-consent
+                                                "
+                                                style="margin-top:14px;"
+                                            >
+
+                                                <input
+                                                    type="checkbox"
+                                                    id="marketingSmsConsent"
+                                                    name="marketing_sms_consent"
+                                                    value="1"
+                                                >
+
+                                                <label
+                                                    for="marketingSmsConsent"
+                                                >
+                                                    I agree to receive
+                                                    recurring promotional and
+                                                    marketing text messages
+                                                    from {{ business_name }}
+                                                    at the number I provided,
+                                                    including special offers,
+                                                    service promotions,
+                                                    skincare tips, and event
+                                                    announcements. Message
+                                                    frequency varies. Message
+                                                    and data rates may apply.
+                                                    Reply STOP to opt out or
+                                                    HELP for help. Consent is
+                                                    not a condition of
+                                                    purchase. Mobile opt-in
+                                                    information will not be
+                                                    sold or shared with third
+                                                    parties for promotional
+                                                    or marketing purposes.
+
+                                                    <a
+                                                        href="/sms-terms"
+                                                        target="_blank"
+                                                        rel="noopener"
+                                                    >
+                                                        SMS Terms
+                                                    </a>
+
+                                                    and
+
+                                                    <a
+                                                        href="/privacy"
+                                                        target="_blank"
+                                                        rel="noopener"
+                                                    >
+                                                        Privacy Policy.
+                                                    </a>
+                                                </label>
+
+                                            </div>
+
+                                        {% endif %}
 
                                     {% endif %}
 <br>

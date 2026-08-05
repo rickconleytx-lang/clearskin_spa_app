@@ -976,6 +976,67 @@
 
             <section class="website-settings-section">
 
+                <h2>SMS Consent &amp; 10DLC</h2>
+
+                <p>
+                    Service-related SMS consent is always
+                    presented as a separate, optional,
+                    unchecked checkbox on the public booking
+                    form.
+                </p>
+
+
+                <div class="website-settings-field">
+
+                    <div class="website-settings-checkbox">
+
+                        <input
+                            type="checkbox"
+                            id="include_marketing_sms_in_10dlc_application"
+                            name="include_marketing_sms_in_10dlc_application"
+                            {% if
+                                settings
+                                .include_marketing_sms_in_10dlc_application
+                            %}
+                                checked
+                            {% endif %}
+                        >
+
+                        <label
+                            for="include_marketing_sms_in_10dlc_application"
+                        >
+                            <strong>
+                                Include Marketing in 10DLC
+                                Application
+                            </strong>
+
+                            <span class="website-settings-help">
+                                When selected, the public
+                                booking form displays a
+                                second, separate, optional,
+                                unchecked marketing-SMS
+                                consent checkbox.
+                            </span>
+
+                            <span class="website-settings-help">
+                                This setting does not approve
+                                or enable marketing messages.
+                                Marketing SMS remains blocked
+                                until carrier approval is
+                                recorded by Peach Suite Pro
+                                Master Admin.
+                            </span>
+                        </label>
+
+                    </div>
+
+                </div>
+
+            </section>
+
+
+            <section class="website-settings-section">
+
                 <h2>Booking Section</h2>
 
                 <div class="website-settings-field">
