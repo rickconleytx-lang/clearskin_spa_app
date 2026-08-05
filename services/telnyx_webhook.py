@@ -507,6 +507,327 @@ def _resolve_sms_assignment(cursor, routing_phone):
     }
 
 
+
+TELNYX_DELIVERY_EVENT_TYPES = {
+    "message.sent",
+    "message.delivered",
+    "message.finalized",
+}
+
+TELNYX_FAILURE_STATUSES = {
+    "failed",
+    "sending_failed",
+    "delivery_failed",
+    "gw_timeout",
+    "dlr_timeout",
+    "expired",
+    "rejected",
+    "undeliverable",
+}
+
+TELNYX_FINAL_PROVIDER_STATUSES = (
+    TELNYX_FAILURE_STATUSES
+    | {
+        "delivered",
+        "delivery_unconfirmed",
+    }
+)
+
+
+def _extract_delivery_status(event):
+    event_data = event["data"]
+    payload = event_data["payload"]
+    event_type = event_data["event_type"].strip()
+
+    recipient = _first_to_entry(payload)
+
+    provider_status = str(
+        recipient.get("status") or ""
+    ).strip().lower()
+
+    if provider_status:
+        return provider_status
+
+    if event_type == "message.sent":
+        return "sent"
+
+    if event_type == "message.delivered":
+        return "delivered"
+
+    return "finalized"
+
+
+def _extract_delivery_error(payload):
+    errors = payload.get("errors")
+
+    if not isinstance(errors, list) or not errors:
+        return None, None
+
+    first_error = errors[0]
+
+    if not isinstance(first_error, dict):
+        return None, None
+
+    error_code = first_error.get("code")
+    title = str(
+        first_error.get("title") or ""
+    ).strip()
+    detail = str(
+        first_error.get("detail") or ""
+    ).strip()
+
+    message_parts = []
+
+    if title:
+        message_parts.append(title)
+
+    if detail and detail != title:
+        message_parts.append(detail)
+
+    error_message = " — ".join(message_parts)
+
+    if not error_message:
+        error_message = None
+
+    if error_message:
+        error_message = error_message[:1000]
+
+    if error_code is not None:
+        error_code = str(error_code)[:255]
+
+    return error_code, error_message
+
+
+def _application_sms_status(
+    event_type,
+    provider_status,
+):
+    if provider_status in TELNYX_FAILURE_STATUSES:
+        return "failed"
+
+    if provider_status == "queued":
+        return "queued"
+
+    # Preserve the application's existing status vocabulary.
+    # Exact delivery state remains in provider_status.
+    return "sent"
+
+
+def _mark_webhook_unmatched(
+    cursor,
+    webhook_log_id,
+    reason,
+):
+    cursor.execute("""
+        UPDATE telnyx_webhook_log
+        SET
+            processing_status = 'unmatched',
+            is_processed = FALSE,
+            error_message = %s,
+            processed_at = NULL
+        WHERE webhook_log_id = %s
+    """, (
+        reason,
+        webhook_log_id,
+    ))
+
+
+def process_telnyx_delivery_event(
+    cursor,
+    event,
+    metadata,
+    assignment,
+    webhook_log_id,
+):
+    """
+    Apply a verified delivery event only to an outbound SMS
+    owned by the same spa, workspace, and phone assignment.
+    """
+
+    event_type = metadata["event_type"]
+
+    if event_type not in TELNYX_DELIVERY_EVENT_TYPES:
+        return {
+            "delivery_processed": False,
+            "sms_message_id": None,
+            "status_changed": False,
+        }
+
+    provider_message_id = metadata[
+        "provider_message_id"
+    ]
+
+    if not provider_message_id:
+        _mark_webhook_unmatched(
+            cursor,
+            webhook_log_id,
+            "Delivery event is missing provider message ID.",
+        )
+
+        return {
+            "delivery_processed": False,
+            "sms_message_id": None,
+            "status_changed": False,
+        }
+
+    cursor.execute("""
+        SELECT
+            sms_message_id,
+            status,
+            provider_status,
+            provider_error_code,
+            provider_error_message,
+            provider_received_at
+        FROM sms_messages
+        WHERE provider_message_id = %s
+          AND spa_id = %s
+          AND business_unit_id = %s
+          AND direction = 'outbound'
+          AND (
+                sms_phone_number_id = %s
+                OR sms_phone_number_id IS NULL
+              )
+        ORDER BY sms_message_id
+        LIMIT 2
+        FOR UPDATE
+    """, (
+        provider_message_id,
+        assignment["spa_id"],
+        assignment["business_unit_id"],
+        assignment["sms_phone_number_id"],
+    ))
+
+    message_rows = cursor.fetchall()
+
+    if len(message_rows) > 1:
+        raise RuntimeError(
+            "Multiple owned SMS records match the same "
+            "Telnyx provider message ID."
+        )
+
+    if not message_rows:
+        _mark_webhook_unmatched(
+            cursor,
+            webhook_log_id,
+            "No owned outbound SMS record matched the "
+            "provider message ID.",
+        )
+
+        return {
+            "delivery_processed": False,
+            "sms_message_id": None,
+            "status_changed": False,
+        }
+
+    message_row = message_rows[0]
+
+    sms_message_id = message_row[0]
+    current_status = str(
+        message_row[1] or ""
+    ).strip().lower()
+    current_provider_status = str(
+        message_row[2] or ""
+    ).strip().lower()
+
+    provider_status = _extract_delivery_status(
+        event
+    )
+
+    payload = event["data"]["payload"]
+
+    (
+        provider_error_code,
+        provider_error_message,
+    ) = _extract_delivery_error(payload)
+
+    new_application_status = (
+        _application_sms_status(
+            event_type,
+            provider_status,
+        )
+    )
+
+    # Webhook deliveries may arrive out of order.
+    # Never let message.sent downgrade a finalized result.
+    preserve_finalized_state = (
+        event_type == "message.sent"
+        and (
+            current_status == "failed"
+            or current_provider_status
+            in TELNYX_FINAL_PROVIDER_STATUSES
+        )
+    )
+
+    if preserve_finalized_state:
+        status_changed = False
+
+    else:
+        cursor.execute("""
+            UPDATE sms_messages
+            SET
+                status = %s,
+                provider_status = %s,
+                provider_error_code = %s,
+                provider_error_message = %s,
+                provider_received_at = COALESCE(
+                    %s,
+                    CURRENT_TIMESTAMP
+                ),
+                sms_phone_number_id = COALESCE(
+                    sms_phone_number_id,
+                    %s
+                ),
+                sender_phone = COALESCE(
+                    sender_phone,
+                    %s
+                ),
+                receiving_phone = COALESCE(
+                    receiving_phone,
+                    %s
+                ),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE sms_message_id = %s
+        """, (
+            new_application_status,
+            provider_status,
+            provider_error_code,
+            provider_error_message,
+            metadata["event_occurred_at"],
+            assignment["sms_phone_number_id"],
+            metadata["sender_phone"],
+            metadata["receiving_phone"],
+            sms_message_id,
+        ))
+
+        status_changed = True
+
+    cursor.execute("""
+        UPDATE telnyx_webhook_log
+        SET
+            sms_message_id = %s,
+            is_processed = TRUE,
+            processing_status = 'processed',
+            error_message = NULL,
+            processed_at = CURRENT_TIMESTAMP
+        WHERE webhook_log_id = %s
+    """, (
+        sms_message_id,
+        webhook_log_id,
+    ))
+
+    return {
+        "delivery_processed": True,
+        "sms_message_id": sms_message_id,
+        "status_changed": status_changed,
+        "provider_status": (
+            current_provider_status
+            if preserve_finalized_state
+            else provider_status
+        ),
+    }
+
+
+
 def record_verified_telnyx_event(
     event,
     *,
@@ -621,10 +942,7 @@ def record_verified_telnyx_event(
 
         row = cursor.fetchone()
 
-        if owns_connection:
-            connection.commit()
-
-        return {
+        receipt = {
             "webhook_log_id": row[0],
             "receive_count": row[1],
             "processing_status": row[2],
@@ -632,7 +950,43 @@ def record_verified_telnyx_event(
             "business_unit_id": row[4],
             "sms_phone_number_id": row[5],
             "duplicate": row[1] > 1,
+            "delivery_processed": False,
+            "sms_message_id": None,
+            "status_changed": False,
         }
+
+        if (
+            not receipt["duplicate"]
+            and assignment
+            and metadata["event_type"]
+                in TELNYX_DELIVERY_EVENT_TYPES
+        ):
+            delivery_result = (
+                process_telnyx_delivery_event(
+                    cursor=cursor,
+                    event=event,
+                    metadata=metadata,
+                    assignment=assignment,
+                    webhook_log_id=row[0],
+                )
+            )
+
+            receipt.update(delivery_result)
+
+            cursor.execute("""
+                SELECT processing_status
+                FROM telnyx_webhook_log
+                WHERE webhook_log_id = %s
+            """, (row[0],))
+
+            receipt["processing_status"] = (
+                cursor.fetchone()[0]
+            )
+
+        if owns_connection:
+            connection.commit()
+
+        return receipt
 
     except Exception:
         if owns_connection:
