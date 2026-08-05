@@ -27,11 +27,76 @@
         :root {
             --peach: #e6a27e;
             --peach-dark: #b86845;
+            --peach-light: #f7e8e2;
             --cream: #fffaf7;
             --ink: #332b27;
             --muted: #746a64;
             --border: #eaded7;
             --card: #ffffff;
+            --page-start: #fffaf7;
+            --page-end: #f8eee8;
+            --header-start: #fff7f2;
+            --header-end: #f7dfd2;
+        }
+
+        body.theme-coastal-blue {
+            --peach: #86bfd1;
+            --peach-dark: #3f7f96;
+            --peach-light: #e7f4f8;
+            --cream: #f7fbfd;
+            --ink: #26343a;
+            --muted: #62747c;
+            --border: #cfe4eb;
+            --card: #ffffff;
+            --page-start: #f7fbfd;
+            --page-end: #e7f4f8;
+            --header-start: #f7fbfd;
+            --header-end: #d9eef4;
+        }
+
+        body.theme-sage-wellness {
+            --peach: #9bb79d;
+            --peach-dark: #5f7e63;
+            --peach-light: #e9f1e8;
+            --cream: #fafcf8;
+            --ink: #29352d;
+            --muted: #68766b;
+            --border: #d6e2d5;
+            --card: #ffffff;
+            --page-start: #fafcf8;
+            --page-end: #e9f1e8;
+            --header-start: #fafcf8;
+            --header-end: #dfeadd;
+        }
+
+        body.theme-soft-stone {
+            --peach: #acb2b6;
+            --peach-dark: #687177;
+            --peach-light: #eceff1;
+            --cream: #fafafa;
+            --ink: #2f3335;
+            --muted: #6f767a;
+            --border: #dde1e3;
+            --card: #ffffff;
+            --page-start: #fafafa;
+            --page-end: #eceff1;
+            --header-start: #fafafa;
+            --header-end: #e4e7e9;
+        }
+
+        body.theme-lavender-calm {
+            --peach: #b9a9d2;
+            --peach-dark: #7a669b;
+            --peach-light: #eee8f5;
+            --cream: #fbf9fd;
+            --ink: #332e3a;
+            --muted: #716a79;
+            --border: #e1d9eb;
+            --card: #ffffff;
+            --page-start: #fbf9fd;
+            --page-end: #eee8f5;
+            --header-start: #fbf9fd;
+            --header-end: #e7def1;
         }
 
         * {
@@ -61,8 +126,8 @@
             background:
                 linear-gradient(
                     150deg,
-                    #fffaf7 0%,
-                    #f8eee8 100%
+                    var(--page-start) 0%,
+                    var(--page-end) 100%
                 );
         }
 
@@ -97,14 +162,14 @@
             background:
                 linear-gradient(
                     135deg,
-                    #fff7f2,
-                    #f7dfd2
+                    var(--header-start),
+                    var(--header-end)
                 );
         }
 
         .booking-header.booking-header-banner {
             padding: 0;
-            background: #ffffff;
+            background: var(--card);
         }
 
         .booking-banner-image {
@@ -235,7 +300,7 @@
         .service-card-selected {
             border-color: var(--peach);
             box-shadow:
-                0 0 0 2px rgba(230, 162, 126, 0.18);
+                0 0 0 2px var(--peach-light);
         }
 
         .service-select-button {
@@ -394,10 +459,11 @@
         .coach-booking-card {
             margin: 0 0 18px;
             padding: 17px 18px;
-            border: 1px solid #efc4ad;
+            border: 1px solid var(--peach);
             border-radius: 14px;
-            background: #fff7f1;
-            box-shadow: 0 8px 20px rgba(91, 55, 39, 0.07);
+            background: var(--peach-light);
+            box-shadow:
+                0 8px 20px rgba(40, 40, 40, 0.07);
         }
 
         .coach-booking-header {
@@ -718,7 +784,7 @@
                 display: inline-flex;
                 align-items: center;
                 margin-bottom: 20px;
-                color: #6f6662;
+                color: var(--muted);
                 font-size: 0.95rem;
                 font-weight: 700;
                 text-decoration: none;
@@ -728,12 +794,12 @@
             }
 
             .public-booking-back-link:hover {
-                color: #b96f59;
+                color: var(--peach-dark);
                 transform: translateX(-3px);
             }
 
             .public-booking-back-link:focus-visible {
-                outline: 3px solid rgba(185, 111, 89, 0.35);
+                outline: 3px solid var(--peach-light);
                 outline-offset: 4px;
                 border-radius: 4px;
             }
@@ -745,9 +811,9 @@
                 width: min(100%, 620px);
                 margin: 0 0 18px;
                 padding: 16px;
-                border: 1px solid #eadbd5;
+                border: 1px solid var(--border);
                 border-radius: 14px;
-                background: #fffaf7;
+                background: var(--cream);
                 text-align: left;
             }
 
@@ -759,21 +825,26 @@
             }
 
             .service-sms-consent label {
-                color: #4f4743;
+                color: var(--ink);
                 font-size: 0.88rem;
                 line-height: 1.55;
                 cursor: pointer;
             }
 
             .service-sms-consent a {
-                color: #b96f59;
+                color: var(--peach-dark);
                 font-weight: 700;
             }
         }
     </style>
 </head>
 
-<body>
+<body class="theme-{{
+    (
+        website_color_scheme
+        or 'peach_cream'
+    )|replace('_', '-')
+}}">
 
     <main class="booking-wrap">
 

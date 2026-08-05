@@ -49864,6 +49864,7 @@ def _render_public_booking_page(
                 organization_name="",
                 business_address="",
                 services=[],
+                website_color_scheme="peach_cream",
                 include_marketing_sms_consent=False
             ), 404
 
@@ -49887,20 +49888,27 @@ def _render_public_booking_page(
             or "Online Booking"
         )
 
+        website_color_scheme = "peach_cream"
         include_marketing_sms_consent = False
 
         cur.execute("""
             SELECT
+                website_color_scheme,
                 include_marketing_sms_in_10dlc_application
             FROM public_website_settings
             WHERE spa_id = %s
         """, (spa_id,))
 
-        marketing_setting_row = cur.fetchone()
+        website_setting_row = cur.fetchone()
 
-        if marketing_setting_row:
+        if website_setting_row:
+            website_color_scheme = str(
+                website_setting_row[0]
+                or "peach_cream"
+            ).strip().lower()
+
             include_marketing_sms_consent = bool(
-                marketing_setting_row[0]
+                website_setting_row[1]
             )
 
         organization_name = ""
@@ -50730,6 +50738,9 @@ def _render_public_booking_page(
             coach_booking_advice=
                 coach_booking_advice,
 
+            website_color_scheme=
+                website_color_scheme,
+
             include_marketing_sms_consent=
                 include_marketing_sms_consent,
 
@@ -51425,6 +51436,8 @@ def public_booking_confirm(
     import re
     from datetime import datetime
 
+    website_color_scheme = "peach_cream"
+
     public_booking_slug = str(
         public_booking_slug or ""
     ).strip().lower()
@@ -51451,6 +51464,8 @@ def public_booking_confirm(
                 "public_booking_confirmation.html",
                 success=False,
                 preview_mode=False,
+                website_color_scheme=
+                    website_color_scheme,
                 message=message,
                 back_url=url_for(
                     "public_booking",
@@ -51800,20 +51815,27 @@ def public_booking_confirm(
             or "This business"
         )
 
+        website_color_scheme = "peach_cream"
         include_marketing_sms_consent = False
 
         cur.execute("""
             SELECT
+                website_color_scheme,
                 include_marketing_sms_in_10dlc_application
             FROM public_website_settings
             WHERE spa_id = %s
         """, (spa_id,))
 
-        marketing_setting_row = cur.fetchone()
+        website_setting_row = cur.fetchone()
 
-        if marketing_setting_row:
+        if website_setting_row:
+            website_color_scheme = str(
+                website_setting_row[0]
+                or "peach_cream"
+            ).strip().lower()
+
             include_marketing_sms_consent = bool(
-                marketing_setting_row[0]
+                website_setting_row[1]
             )
 
         # Never accept a forged marketing-consent field
@@ -52230,6 +52252,9 @@ def public_booking_confirm(
                 validation["duration_minutes"],
 
             price_display=price_display,
+
+            website_color_scheme=
+                website_color_scheme,
 
             back_url=url_for(
                 "public_booking",
