@@ -3947,7 +3947,8 @@ def send_communication(
     client_id=None,
     message_type=None,
     language_code=None,
-    template_id=None
+    template_id=None,
+    business_unit_id=None
 ):
     channel = (channel or "").lower().strip()
     language_code = normalize_language_code(language_code or get_default_language())
@@ -3981,6 +3982,11 @@ def send_communication(
         }
 
     if channel == "sms":
+        if not business_unit_id:
+            raise ValueError(
+                "SMS communication requires business_unit_id."
+            )
+
         length_check = validate_sms_length(communication["body"])
 
         if not length_check["valid"]:
@@ -3996,6 +4002,7 @@ def send_communication(
 
         sms_result = send_compliant_sms(
             spa_id=spa_id,
+            business_unit_id=business_unit_id,
             client_id=client_id,
             recipient_phone=recipient,
             message_body=communication["body"],
@@ -4066,6 +4073,9 @@ def log_sms_message(
     message_type,
     direction,
     status,
+    sms_phone_number_id=None,
+    sender_phone=None,
+    receiving_phone=None,
     provider_message_id=None,
     provider_status=None,
     provider_error_code=None,
@@ -4084,6 +4094,9 @@ def log_sms_message(
             message_type,
             direction,
             status,
+            sms_phone_number_id,
+            sender_phone,
+            receiving_phone,
             provider_message_id,
             provider_status,
             provider_error_code,
@@ -4091,7 +4104,10 @@ def log_sms_message(
             created_at
         )
         VALUES (
-            %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW()
+            %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s,
+            NOW()
         )
     """, (
         spa_id,
@@ -4102,6 +4118,9 @@ def log_sms_message(
         message_type,
         direction,
         status,
+        sms_phone_number_id,
+        sender_phone,
+        receiving_phone,
         provider_message_id,
         provider_status,
         provider_error_code,
@@ -4880,6 +4899,7 @@ def send_birthday_reminder_sms(reminder_id, spa_id):
         try:
             result = send_communication(
                 spa_id=spa_id,
+                business_unit_id=business_unit_id,
                 channel="sms",
                 recipient=recipient_phone,
                 template_type="birthday_message",
@@ -4957,6 +4977,15 @@ def send_birthday_reminder_sms(reminder_id, spa_id):
                 message_type="birthday",
                 direction="outbound",
                 status=result_status,
+                sms_phone_number_id=result.get(
+                    "sms_phone_number_id"
+                ),
+                sender_phone=result.get(
+                    "sender_phone"
+                ),
+                receiving_phone=result.get(
+                    "receiving_phone"
+                ),
                 provider_message_id=result.get(
                     "provider_message_id"
                 ),
@@ -5011,10 +5040,12 @@ def send_template_sms(
     recipient_phone,
     template_type,
     merge_data,
-    message_type=None
+    message_type=None,
+    business_unit_id=None
 ):
     return send_communication(
         spa_id=spa_id,
+        business_unit_id=business_unit_id,
         channel="sms",
         recipient=recipient_phone,
         template_type=template_type,
@@ -5132,6 +5163,7 @@ def send_appointment_reminder_sms(reminder_id, spa_id):
         try:
             result = send_communication(
                 spa_id=spa_id,
+                business_unit_id=business_unit_id,
                 channel="sms",
                 recipient=recipient_phone,
                 template_type="appointment_reminder",
@@ -5261,6 +5293,15 @@ def send_appointment_reminder_sms(reminder_id, spa_id):
                 message_type="appointment_reminder",
                 direction="outbound",
                 status=result_status,
+                sms_phone_number_id=result.get(
+                    "sms_phone_number_id"
+                ),
+                sender_phone=result.get(
+                    "sender_phone"
+                ),
+                receiving_phone=result.get(
+                    "receiving_phone"
+                ),
                 provider_message_id=result.get(
                     "provider_message_id"
                 ),
@@ -5814,8 +5855,95 @@ def merge_template_preview(message_text, merge_data):
 
 
 
+def resolve_sms_phone_number(
+    spa_id,
+    business_unit_id,
+    provider="telnyx"
+):
+    """
+    Resolve the active default SMS sender for a workspace.
+
+    A workspace assignment takes priority over a spa-level
+    default assignment. Sending fails closed when no active
+    assignment exists.
+    """
+
+    if not spa_id:
+        raise ValueError(
+            "resolve_sms_phone_number requires spa_id."
+        )
+
+    if not business_unit_id:
+        raise ValueError(
+            "resolve_sms_phone_number requires business_unit_id."
+        )
+
+    normalized_provider = (
+        provider or "telnyx"
+    ).strip().lower()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                sms_phone_number_id,
+                spa_id,
+                business_unit_id,
+                provider,
+                phone_number,
+                messaging_profile_id,
+                campaign_id
+            FROM sms_phone_numbers
+            WHERE spa_id = %s
+              AND provider = %s
+              AND is_active = TRUE
+              AND is_default = TRUE
+              AND (
+                    business_unit_id = %s
+                    OR business_unit_id IS NULL
+                  )
+            ORDER BY
+                CASE
+                    WHEN business_unit_id = %s THEN 0
+                    ELSE 1
+                END,
+                sms_phone_number_id
+            LIMIT 1
+        """, (
+            spa_id,
+            normalized_provider,
+            business_unit_id,
+            business_unit_id
+        ))
+
+        row = cur.fetchone()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if not row:
+        raise PermissionError(
+            "SMS sending is unavailable because this workspace "
+            "does not have an active phone-number assignment."
+        )
+
+    return {
+        "sms_phone_number_id": row[0],
+        "spa_id": row[1],
+        "business_unit_id": row[2],
+        "provider": row[3],
+        "phone_number": row[4],
+        "messaging_profile_id": row[5],
+        "campaign_id": row[6]
+    }
+
+
 def send_compliant_sms(
     spa_id,
+    business_unit_id,
     client_id,
     recipient_phone,
     message_body,
@@ -5824,6 +5952,11 @@ def send_compliant_sms(
     if not spa_id:
         raise ValueError(
             "send_compliant_sms requires spa_id."
+        )
+
+    if not business_unit_id:
+        raise ValueError(
+            "send_compliant_sms requires business_unit_id."
         )
 
     sms_permissions = get_sms_business_permissions(
@@ -5845,15 +5978,6 @@ def send_compliant_sms(
         },
         flush=True
     )
-
-    normalized_message_type = (
-        message_type or "manual"
-    ).strip().lower()
-
-
-
-
-
 
     normalized_message_type = (
         message_type or "manual"
@@ -5906,11 +6030,18 @@ def send_compliant_sms(
                 or "SMS service is currently unavailable."
             )
 
+    sender = resolve_sms_phone_number(
+        spa_id=spa_id,
+        business_unit_id=business_unit_id,
+        provider="telnyx"
+    )
+
     final_message = message_body
 
     result = send_sms_message(
-        recipient_phone,
-        final_message
+        from_phone=sender["phone_number"],
+        to_phone=recipient_phone,
+        message_body=final_message
     )
 
     if not isinstance(result, dict):
@@ -5919,7 +6050,14 @@ def send_compliant_sms(
         }
 
     result["spa_id"] = spa_id
+    result["business_unit_id"] = business_unit_id
     result["client_id"] = client_id
+    result["sms_phone_number_id"] = sender[
+        "sms_phone_number_id"
+    ]
+    result["sender_phone"] = sender["phone_number"]
+    result["receiving_phone"] = recipient_phone
+    result["provider"] = sender["provider"]
     result["message_type"] = normalized_message_type
     result["final_message_body"] = final_message
     result["is_marketing_message"] = (
@@ -16191,13 +16329,27 @@ def get_sms_template(spa_id, template_type):
 # ==========================================================
 
 
-def send_sms_message(to_phone, message_body):
+def send_sms_message(
+    from_phone,
+    to_phone,
+    message_body
+):
     """
     Low-level SMS delivery function.
 
-    Business compliance must be verified by
-    send_compliant_sms() before this function is called.
+    Business compliance and sender ownership must be verified
+    by send_compliant_sms() before this function is called.
     """
+
+    if not from_phone:
+        raise ValueError(
+            "send_sms_message requires from_phone."
+        )
+
+    if not to_phone:
+        raise ValueError(
+            "send_sms_message requires to_phone."
+        )
 
     sms_enabled = (
         os.getenv("SMS_ENABLED", "false").lower()
@@ -16217,25 +16369,16 @@ def send_sms_message(to_phone, message_body):
                 "SMS sending is disabled by the "
                 "Peach Suite Pro system switch."
             ),
+            "sender_phone": from_phone,
+            "receiving_phone": to_phone,
             "final_message_body": final_message_body
         }
 
     try:
-        print(
-            "FINAL SMS BODY BEING SENT:",
-            final_message_body,
-            flush=True
-        )
-
         result = send_sms_telnyx(
+            from_phone,
             to_phone,
             final_message_body
-        )
-
-        print(
-            "TELNYX RESULT:",
-            result,
-            flush=True
         )
 
         message_data = result.get(
@@ -16243,27 +16386,39 @@ def send_sms_message(to_phone, message_body):
             result
         )
 
+        provider_message_id = message_data.get("id")
+        provider_status = message_data.get(
+            "record_type",
+            "accepted"
+        )
+
+        print(
+            "[SMS DELIVERY ACCEPTED]",
+            {
+                "provider": "telnyx",
+                "provider_message_id": provider_message_id,
+                "provider_status": provider_status
+            },
+            flush=True
+        )
+
         return {
             "success": True,
             "status": "sent",
-            "provider_message_id": (
-                message_data.get("id")
-            ),
-            "provider_status": (
-                message_data.get(
-                    "record_type",
-                    "accepted"
-                )
-            ),
+            "provider_message_id": provider_message_id,
+            "provider_status": provider_status,
             "provider_error_code": None,
             "provider_error_message": None,
+            "sender_phone": from_phone,
+            "receiving_phone": to_phone,
             "final_message_body": final_message_body
         }
 
     except Exception as error:
         print(
             "[SMS DELIVERY ERROR]",
-            error,
+            type(error).__name__,
+            str(error),
             flush=True
         )
 
@@ -16274,12 +16429,10 @@ def send_sms_message(to_phone, message_body):
             "provider_status": None,
             "provider_error_code": None,
             "provider_error_message": str(error),
+            "sender_phone": from_phone,
+            "receiving_phone": to_phone,
             "final_message_body": final_message_body
         }
-
-
-
-
 
 
 #   ----------------------------------------------
@@ -17672,6 +17825,7 @@ def client_messaging_settings(client_id):
 
 def send_birthday_sms_month():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
     spa_now = get_spa_now()
     today = spa_now.date()
     campaign_year = today.year
@@ -17700,6 +17854,7 @@ def send_birthday_sms_month():
             c.birth_date
         FROM clients c
         WHERE c.spa_id = %s
+          AND c.business_unit_id = %s
           AND c.active_client = TRUE
           AND c.phone IS NOT NULL
           AND c.phone <> ''
@@ -17710,7 +17865,11 @@ def send_birthday_sms_month():
           AND c.sms_opt_out = FALSE
 
         ORDER BY EXTRACT(DAY FROM c.birth_date), c.first_name
-    """, (spa_id, campaign_month))
+    """, (
+        spa_id,
+        business_unit_id,
+        campaign_month
+    ))
 
     birthday_clients = cur.fetchall()
 
@@ -17733,6 +17892,7 @@ def send_birthday_sms_month():
 
         result = send_communication(
             spa_id=spa_id,
+            business_unit_id=business_unit_id,
             channel="sms",
             recipient=phone,
             template_type="birthday_message",
@@ -17745,7 +17905,26 @@ def send_birthday_sms_month():
             sent_count += 1
         else:
             failed_count += 1
-            print("Birthday SMS failed:", result)
+            print(
+                "[BIRTHDAY SMS SEND FAILED]",
+                {
+                    "spa_id": spa_id,
+                    "business_unit_id": business_unit_id,
+                    "client_id": client_id,
+                    "status": result.get("status"),
+                    "provider_status": result.get(
+                        "provider_status"
+                    ),
+                    "provider_error_code": result.get(
+                        "provider_error_code"
+                    ),
+                    "error": (
+                        result.get("provider_error_message")
+                        or result.get("error")
+                    )
+                },
+                flush=True
+            )
 
 
     cur.close()
@@ -17873,6 +18052,7 @@ def sms_preview(client_id):
         try:
             result = send_compliant_sms(
                 spa_id=spa_id,
+                business_unit_id=business_unit_id,
                 client_id=client[0],
                 recipient_phone=client[3],
                 message_body=message_body,
@@ -17912,6 +18092,15 @@ def sms_preview(client_id):
                 message_type="manual",
                 direction="outbound",
                 status=status,
+                sms_phone_number_id=result.get(
+                    "sms_phone_number_id"
+                ),
+                sender_phone=result.get(
+                    "sender_phone"
+                ),
+                receiving_phone=result.get(
+                    "receiving_phone"
+                ),
                 provider_message_id=result.get(
                     "provider_message_id"
                 ),
@@ -18160,6 +18349,7 @@ def sms_conversation_send(client_id):
     try:
         result = send_compliant_sms(
             spa_id=spa_id,
+            business_unit_id=business_unit_id,
             client_id=client_id,
             recipient_phone=client[3],
             message_body=message_body,
@@ -18199,6 +18389,15 @@ def sms_conversation_send(client_id):
             message_type="manual",
             direction="outbound",
             status=status,
+            sms_phone_number_id=result.get(
+                "sms_phone_number_id"
+            ),
+            sender_phone=result.get(
+                "sender_phone"
+            ),
+            receiving_phone=result.get(
+                "receiving_phone"
+            ),
             provider_message_id=result.get(
                 "provider_message_id"
             ),
@@ -18809,8 +19008,6 @@ def sms_group_preview():
 @require_workspace_permission("can_send_sms")
 
 def sms_group_send():
-    print("SMS GROUP SEND ROUTE HIT", flush=True)
-
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
     language_code = get_request_language()
@@ -18988,6 +19185,7 @@ def sms_group_send():
 
             result = send_communication(
                 spa_id=spa_id,
+                business_unit_id=business_unit_id,
                 channel="sms",
                 recipient=phone,
                 template_type=template_type,
@@ -19007,6 +19205,15 @@ def sms_group_send():
                 message_type="group_send",
                 direction="outbound",
                 status="sent" if result.get("success") else "failed",
+                sms_phone_number_id=result.get(
+                    "sms_phone_number_id"
+                ),
+                sender_phone=result.get(
+                    "sender_phone"
+                ),
+                receiving_phone=result.get(
+                    "receiving_phone"
+                ),
                 provider_message_id=result.get("provider_message_id"),
                 provider_status=result.get("provider_status"),
                 provider_error_code=result.get("provider_error_code"),
@@ -19472,6 +19679,7 @@ def resend_sms(sms_message_id):
     try:
         result = send_compliant_sms(
             spa_id=spa_id,
+            business_unit_id=business_unit_id,
             client_id=client_id,
             recipient_phone=phone_number,
             message_body=message_body,
@@ -19511,6 +19719,15 @@ def resend_sms(sms_message_id):
             message_type=resend_log_type,
             direction="outbound",
             status=status,
+            sms_phone_number_id=result.get(
+                "sms_phone_number_id"
+            ),
+            sender_phone=result.get(
+                "sender_phone"
+            ),
+            receiving_phone=result.get(
+                "receiving_phone"
+            ),
             provider_message_id=result.get(
                 "provider_message_id"
             ),
@@ -21708,7 +21925,17 @@ def send_one_reminder(reminder_id):
                 if success:
                     flash("Appointment reminder SMS sent.", "success")
                 else:
-                    flash(f"Appointment reminder SMS failed: {result}", "error")
+                    reminder_error = (
+                        result.get("provider_error_message")
+                        or result.get("error")
+                        or "SMS could not be sent."
+                    )
+
+                    flash(
+                        "Appointment reminder SMS failed: "
+                        f"{reminder_error}",
+                        "error"
+                    )
 
                 return redirect(url_for("reminder_queue"))
 

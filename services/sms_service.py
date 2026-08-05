@@ -26,20 +26,30 @@ def format_us_phone(phone):
 #
 ######################################################
 
-def send_sms_telnyx(to_phone, message_body):
+def send_sms_telnyx(
+    from_phone,
+    to_phone,
+    message_body
+):
     api_key = os.getenv("TELNYX_API_KEY")
-    from_number = os.getenv("TELNYX_FROM_NUMBER")
 
     if not api_key:
         raise ValueError("Missing TELNYX_API_KEY")
 
-    if not from_number:
-        raise ValueError("Missing TELNYX_FROM_NUMBER")
+    if not from_phone:
+        raise ValueError(
+            "Missing explicit Telnyx sender number"
+        )
+
+    if not to_phone:
+        raise ValueError(
+            "Missing SMS recipient number"
+        )
 
     url = "https://api.telnyx.com/v2/messages"
 
     payload = {
-        "from": from_number,
+        "from": format_us_phone(from_phone),
         "to": format_us_phone(to_phone),
         "text": message_body
     }
@@ -48,8 +58,6 @@ def send_sms_telnyx(to_phone, message_body):
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
     }
-
-    print("TELNYX PAYLOAD:", payload)
 
     response = requests.post(
         url,
@@ -61,13 +69,12 @@ def send_sms_telnyx(to_phone, message_body):
     try:
         data = response.json()
     except Exception:
-        data = {
-            "raw_response": response.text
-        }
+        data = {}
 
     if response.status_code not in (200, 201, 202):
-        raise Exception(
-            f"Telnyx SMS failed: {data}"
+        raise RuntimeError(
+            "Telnyx SMS failed with HTTP "
+            f"{response.status_code}."
         )
 
     return data
@@ -83,7 +90,8 @@ def send_sms(
     message_body,
     spa_id=None,
     client_id=None,
-    message_type="service"
+    message_type="service",
+    from_phone=None
 ):
     if not spa_id:
         raise ValueError(
@@ -137,7 +145,14 @@ def send_sms(
     ).lower()
 
     if provider == "telnyx":
+        if not from_phone:
+            raise ValueError(
+                "send_sms requires an explicitly resolved "
+                "from_phone."
+            )
+
         return send_sms_telnyx(
+            from_phone,
             to_phone,
             message_body
         )
