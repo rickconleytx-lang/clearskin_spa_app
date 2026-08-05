@@ -727,6 +727,14 @@ BOOKING_HELP_TOPICS = [
         "title": "Booking Control Center"
     },
     {
+        "page_key": "public_website_settings",
+        "title": "Website Settings"
+    },
+    {
+        "page_key": "service_catalog",
+        "title": "Service Catalog"
+    },
+    {
         "page_key": "booking_business_hours",
         "title": "Business Hours"
     },
@@ -920,7 +928,29 @@ HELP_CONTEXT_MAP = {
                 "before sharing the public booking page."
             ),
             "booking_internal_preview"
-        )
+        ),
+
+        "public_website_settings":
+            build_booking_help_context(
+                "Website Settings",
+                (
+                    "Customize the public website content, theme, "
+                    "About section, service introduction, booking "
+                    "message, photo, and SMS consent options."
+                ),
+                "public_website_settings"
+            ),
+
+        "service_types":
+            build_booking_help_context(
+                "Service Catalog",
+                (
+                    "Manage service names, prices, durations, public "
+                    "descriptions, website visibility, display order, "
+                    "and online-booking availability."
+                ),
+                "service_catalog"
+            ),
 
 }
 
