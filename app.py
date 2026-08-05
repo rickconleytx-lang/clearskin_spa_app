@@ -29973,35 +29973,220 @@ def expenses_home():
 #    good 4/27
 #  ------------------------------------------
 
+def _load_expense_form_options(cur, spa_id):
+    """
+    Load active expense lookup values for one spa only.
+    """
+
+    cur.execute("""
+        SELECT vendors_name
+        FROM vendor_name
+        WHERE spa_id = %s
+          AND is_active = TRUE
+        ORDER BY vendors_name
+    """, (spa_id,))
+
+    vendors = cur.fetchall()
+
+    cur.execute("""
+        SELECT expense_cat_name
+        FROM expense_categories
+        WHERE spa_id = %s
+          AND is_active = TRUE
+        ORDER BY expense_cat_name
+    """, (spa_id,))
+
+    categories = cur.fetchall()
+
+    cur.execute("""
+        SELECT payment_method
+        FROM payment_methods
+        WHERE spa_id = %s
+          AND is_active = TRUE
+        ORDER BY payment_method
+    """, (spa_id,))
+
+    payment_methods = cur.fetchall()
+
+    return vendors, categories, payment_methods
+
+
+def _validate_expense_lookup_values(
+    cur,
+    spa_id,
+    vendor_name,
+    category,
+    payment_method
+):
+    """
+    Prevent manually submitted lookup values from crossing spas.
+    """
+
+    cur.execute("""
+        SELECT 1
+        FROM vendor_name
+        WHERE spa_id = %s
+          AND vendors_name = %s
+          AND is_active = TRUE
+        LIMIT 1
+    """, (
+        spa_id,
+        vendor_name
+    ))
+
+    if cur.fetchone() is None:
+        return (
+            "The selected vendor is not available "
+            "for this business."
+        )
+
+    if category:
+        cur.execute("""
+            SELECT 1
+            FROM expense_categories
+            WHERE spa_id = %s
+              AND expense_cat_name = %s
+              AND is_active = TRUE
+            LIMIT 1
+        """, (
+            spa_id,
+            category
+        ))
+
+        if cur.fetchone() is None:
+            return (
+                "The selected expense category is not "
+                "available for this business."
+            )
+
+    if payment_method:
+        cur.execute("""
+            SELECT 1
+            FROM payment_methods
+            WHERE spa_id = %s
+              AND payment_method = %s
+              AND is_active = TRUE
+            LIMIT 1
+        """, (
+            spa_id,
+            payment_method
+        ))
+
+        if cur.fetchone() is None:
+            return (
+                "The selected payment method is not "
+                "available for this business."
+            )
+
+    return None
+
+
+
 @app.route("/expenses/add", methods=["GET", "POST"])
+@login_required
+@spa_required
 def add_expense():
     spa_id = current_spa_id()
+
     conn = get_db_connection()
     cur = conn.cursor()
 
     if request.method == "POST":
-        expense_date = request.form.get("expense_date")
-        vendor_name = request.form.get("vendor_name")
-        category = request.form.get("category")
-        description = request.form.get("description")
-        amount = request.form.get("amount")
-        payment_method = request.form.get("payment_method")
-        receipt_file = request.form.get("receipt_file")
-        notes = request.form.get("notes")
+        expense_date = (
+            request.form.get("expense_date")
+            or ""
+        ).strip()
 
-        if not expense_date or not vendor_name or not amount:
-            flash("Expense date, vendor name, and amount are required.", "error")
+        vendor_name = (
+            request.form.get("vendor_name")
+            or ""
+        ).strip()
+
+        category = (
+            request.form.get("category")
+            or ""
+        ).strip()
+
+        description = (
+            request.form.get("description")
+            or ""
+        ).strip()
+
+        amount_value = (
+            request.form.get("amount")
+            or ""
+        ).strip()
+
+        payment_method = (
+            request.form.get("payment_method")
+            or ""
+        ).strip()
+
+        receipt_file = (
+            request.form.get("receipt_file")
+            or ""
+        ).strip()
+
+        notes = (
+            request.form.get("notes")
+            or ""
+        ).strip()
+
+        if (
+            not expense_date
+            or not vendor_name
+            or not amount_value
+        ):
+            flash(
+                (
+                    "Expense date, vendor name, and "
+                    "amount are required."
+                ),
+                "error"
+            )
+
             cur.close()
             conn.close()
-            return redirect(url_for("add_expense"))
+
+            return redirect(
+                url_for("add_expense")
+            )
 
         try:
-            amount = Decimal(amount)
-        except:
-            flash("Amount must be a valid number.", "error")
+            amount = Decimal(amount_value)
+
+        except Exception:
+            flash(
+                "Amount must be a valid number.",
+                "error"
+            )
+
             cur.close()
             conn.close()
-            return redirect(url_for("add_expense"))
+
+            return redirect(
+                url_for("add_expense")
+            )
+
+        lookup_error = (
+            _validate_expense_lookup_values(
+                cur,
+                spa_id,
+                vendor_name,
+                category,
+                payment_method
+            )
+        )
+
+        if lookup_error:
+            flash(lookup_error, "error")
+
+            cur.close()
+            conn.close()
+
+            return redirect(
+                url_for("add_expense")
+            )
 
         cur.execute("""
             INSERT INTO expenses (
@@ -30015,48 +30200,44 @@ def add_expense():
                 receipt_file,
                 notes
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s
+            )
         """, (
             spa_id,
             expense_date,
             vendor_name,
-            category,
-            description,
+            category or None,
+            description or None,
             amount,
-            payment_method,
-            receipt_file,
-            notes
+            payment_method or None,
+            receipt_file or None,
+            notes or None
         ))
 
         conn.commit()
+
         cur.close()
         conn.close()
 
-        flash("Expense added successfully.", "success")
-        return redirect(url_for("expenses_home"))
+        flash(
+            "Expense added successfully.",
+            "success"
+        )
 
-    cur.execute("""
-        SELECT vendors_name
-        FROM vendor_name
-        ORDER BY vendors_name ASC
-    """)
-    vendors = cur.fetchall()
+        return redirect(
+            url_for("expenses_home")
+        )
 
-    cur.execute("""
-        SELECT expense_cat_name
-        FROM expense_categories
-        WHERE spa_id = %s
-        ORDER BY expense_cat_name ASC
-    """, (spa_id,))
-    categories = cur.fetchall()
-
-    cur.execute("""
-        SELECT payment_method
-        FROM payment_methods
-        WHERE spa_id =%s
-        ORDER BY payment_method ASC
-    """, (spa_id,))
-    payment_methods = cur.fetchall()
+    (
+        vendors,
+        categories,
+        payment_methods
+    ) = _load_expense_form_options(
+        cur,
+        spa_id
+    )
 
     cur.close()
     conn.close()
@@ -30071,34 +30252,67 @@ def add_expense():
 
 
 
-
-
 #  ------------------------------------------
 #      EXPENSE REPORT
 #  good 4/27
 #  ------------------------------------------
 
 
-@app.route("/expenses/report", methods=["GET"])
+@app.route(
+    "/expenses/report",
+    methods=["GET"]
+)
 @login_required
 @spa_required
 def expense_report():
     spa_id = current_spa_id()
 
-    start_date = request.args.get("start_date", "").strip()
-    end_date = request.args.get("end_date", "").strip()
-    category = request.args.get("category", "").strip()
-    vendor_name = request.args.get("vendor_name", "").strip()
+    start_date = (
+        request.args.get("start_date", "")
+        or ""
+    ).strip()
+
+    end_date = (
+        request.args.get("end_date", "")
+        or ""
+    ).strip()
+
+    category = (
+        request.args.get("category", "")
+        or ""
+    ).strip()
+
+    vendor_name = (
+        request.args.get("vendor_name", "")
+        or ""
+    ).strip()
 
     conn = get_db_connection()
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT expense_cat_id, expense_cat_name
+        SELECT
+            expense_cat_id,
+            expense_cat_name
         FROM expense_categories
+        WHERE spa_id = %s
+          AND is_active = TRUE
         ORDER BY expense_cat_name
-    """)
+    """, (spa_id,))
+
     category_options = cur.fetchall()
+
+    cur.execute("""
+        SELECT
+            vendor_id,
+            vendors_name
+        FROM vendor_name
+        WHERE spa_id = %s
+          AND is_active = TRUE
+        ORDER BY vendors_name
+    """, (spa_id,))
+
+    vendor_options = cur.fetchall()
 
     query = """
         SELECT
@@ -30115,6 +30329,7 @@ def expense_report():
         FROM expenses
         WHERE spa_id = %s
     """
+
     params = [spa_id]
 
     if start_date:
@@ -30130,10 +30345,12 @@ def expense_report():
         params.append(category)
 
     if vendor_name:
-        query += " AND vendor_name ILIKE %s"
-        params.append(f"%{vendor_name}%")
+        query += " AND vendor_name = %s"
+        params.append(vendor_name)
 
-    query += " ORDER BY expense_date DESC, created_at DESC"
+    query += """
+        ORDER BY expense_date DESC, created_at DESC
+    """
 
     cur.execute(query, tuple(params))
     expenses = cur.fetchall()
@@ -30143,6 +30360,7 @@ def expense_report():
         FROM expenses
         WHERE spa_id = %s
     """
+
     total_params = [spa_id]
 
     if start_date:
@@ -30158,10 +30376,14 @@ def expense_report():
         total_params.append(category)
 
     if vendor_name:
-        total_query += " AND vendor_name ILIKE %s"
-        total_params.append(f"%{vendor_name}%")
+        total_query += " AND vendor_name = %s"
+        total_params.append(vendor_name)
 
-    cur.execute(total_query, tuple(total_params))
+    cur.execute(
+        total_query,
+        tuple(total_params)
+    )
+
     report_total = cur.fetchone()[0]
 
     category_totals_query = """
@@ -30171,36 +30393,69 @@ def expense_report():
         FROM expenses
         WHERE spa_id = %s
     """
+
     category_totals_params = [spa_id]
 
     if start_date:
-        category_totals_query += " AND expense_date >= %s"
-        category_totals_params.append(start_date)
+        category_totals_query += (
+            " AND expense_date >= %s"
+        )
+
+        category_totals_params.append(
+            start_date
+        )
 
     if end_date:
-        category_totals_query += " AND expense_date <= %s"
-        category_totals_params.append(end_date)
+        category_totals_query += (
+            " AND expense_date <= %s"
+        )
+
+        category_totals_params.append(
+            end_date
+        )
 
     if category:
-        category_totals_query += " AND category = %s"
-        category_totals_params.append(category)
+        category_totals_query += (
+            " AND category = %s"
+        )
+
+        category_totals_params.append(
+            category
+        )
 
     if vendor_name:
-        category_totals_query += " AND vendor_name ILIKE %s"
-        category_totals_params.append(f"%{vendor_name}%")
+        category_totals_query += (
+            " AND vendor_name = %s"
+        )
+
+        category_totals_params.append(
+            vendor_name
+        )
 
     category_totals_query += """
         GROUP BY category
         ORDER BY category
     """
 
-    cur.execute(category_totals_query, tuple(category_totals_params))
+    cur.execute(
+        category_totals_query,
+        tuple(category_totals_params)
+    )
+
     category_totals_rows = cur.fetchall()
 
     category_totals = {}
+
     for row in category_totals_rows:
-        category_name = row[0] if row[0] else "Uncategorized"
-        category_totals[category_name] = row[1]
+        category_name = (
+            row[0]
+            if row[0]
+            else "Uncategorized"
+        )
+
+        category_totals[
+            category_name
+        ] = row[1]
 
     cur.close()
     conn.close()
@@ -30212,27 +30467,11 @@ def expense_report():
         category=category,
         vendor_name=vendor_name,
         category_options=category_options,
+        vendor_options=vendor_options,
         expenses=expenses,
         report_total=report_total,
         category_totals=category_totals
     )
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -30243,7 +30482,10 @@ def expense_report():
 
 
 
-@app.route("/expenses/edit/<int:expense_id>", methods=["GET", "POST"])
+@app.route(
+    "/expenses/edit/<int:expense_id>",
+    methods=["GET", "POST"]
+)
 @login_required
 @spa_required
 def edit_expense(expense_id):
@@ -30253,18 +30495,115 @@ def edit_expense(expense_id):
     cur = conn.cursor()
 
     if request.method == "POST":
-        expense_date = request.form.get("expense_date")
-        vendor_name = request.form.get("vendor_name")
-        category = request.form.get("category")
-        description = request.form.get("description")
-        amount = request.form.get("amount")
-        payment_method = request.form.get("payment_method")
-        receipt_file = request.form.get("receipt_file")
-        notes = request.form.get("notes")
+        expense_date = (
+            request.form.get("expense_date")
+            or ""
+        ).strip()
+
+        vendor_name = (
+            request.form.get("vendor_name")
+            or ""
+        ).strip()
+
+        category = (
+            request.form.get("category")
+            or ""
+        ).strip()
+
+        description = (
+            request.form.get("description")
+            or ""
+        ).strip()
+
+        amount_value = (
+            request.form.get("amount")
+            or ""
+        ).strip()
+
+        payment_method = (
+            request.form.get("payment_method")
+            or ""
+        ).strip()
+
+        receipt_file = (
+            request.form.get("receipt_file")
+            or ""
+        ).strip()
+
+        notes = (
+            request.form.get("notes")
+            or ""
+        ).strip()
+
+        if (
+            not expense_date
+            or not vendor_name
+            or not amount_value
+        ):
+            flash(
+                (
+                    "Expense date, vendor name, and "
+                    "amount are required."
+                ),
+                "error"
+            )
+
+            cur.close()
+            conn.close()
+
+            return redirect(
+                url_for(
+                    "edit_expense",
+                    expense_id=expense_id
+                )
+            )
+
+        try:
+            amount = Decimal(amount_value)
+
+        except Exception:
+            flash(
+                "Amount must be a valid number.",
+                "error"
+            )
+
+            cur.close()
+            conn.close()
+
+            return redirect(
+                url_for(
+                    "edit_expense",
+                    expense_id=expense_id
+                )
+            )
+
+        lookup_error = (
+            _validate_expense_lookup_values(
+                cur,
+                spa_id,
+                vendor_name,
+                category,
+                payment_method
+            )
+        )
+
+        if lookup_error:
+            flash(lookup_error, "error")
+
+            cur.close()
+            conn.close()
+
+            return redirect(
+                url_for(
+                    "edit_expense",
+                    expense_id=expense_id
+                )
+            )
 
         cur.execute("""
             UPDATE expenses
-            SET expense_date = %s,
+            SET
+                expense_date = %s,
                 vendor_name = %s,
                 category = %s,
                 description = %s,
@@ -30277,33 +30616,47 @@ def edit_expense(expense_id):
         """, (
             expense_date,
             vendor_name,
-            category,
-            description,
+            category or None,
+            description or None,
             amount,
-            payment_method,
-            receipt_file,
-            notes,
+            payment_method or None,
+            receipt_file or None,
+            notes or None,
             spa_id,
             expense_id
         ))
 
         if cur.rowcount == 0:
             conn.rollback()
+
             cur.close()
             conn.close()
 
             flash(
-                "Expense not found or not authorized.",
+                (
+                    "Expense not found or "
+                    "not authorized."
+                ),
                 "error"
             )
-            return redirect(url_for("expenses_home"))
+
+            return redirect(
+                url_for("expenses_home")
+            )
 
         conn.commit()
+
         cur.close()
         conn.close()
 
-        flash("Expense updated successfully.", "success")
-        return redirect(url_for("expenses_home"))
+        flash(
+            "Expense updated successfully.",
+            "success"
+        )
+
+        return redirect(
+            url_for("expenses_home")
+        )
 
     cur.execute("""
         SELECT
@@ -30331,29 +30684,23 @@ def edit_expense(expense_id):
         cur.close()
         conn.close()
 
-        flash("Expense not found.", "error")
-        return redirect(url_for("expenses_home"))
+        flash(
+            "Expense not found.",
+            "error"
+        )
 
-    cur.execute("""
-        SELECT vendors_name
-        FROM vendor_name
-        ORDER BY vendors_name ASC
-    """)
-    vendors = cur.fetchall()
+        return redirect(
+            url_for("expenses_home")
+        )
 
-    cur.execute("""
-        SELECT expense_cat_name
-        FROM expense_categories
-        ORDER BY expense_cat_name ASC
-    """)
-    categories = cur.fetchall()
-
-    cur.execute("""
-        SELECT payment_method
-        FROM payment_methods
-        ORDER BY payment_method ASC
-    """)
-    payment_methods = cur.fetchall()
+    (
+        vendors,
+        categories,
+        payment_methods
+    ) = _load_expense_form_options(
+        cur,
+        spa_id
+    )
 
     cur.close()
     conn.close()
@@ -30365,8 +30712,6 @@ def edit_expense(expense_id):
         categories=categories,
         payment_methods=payment_methods
     )
-
-
 
 
 
@@ -30410,6 +30755,8 @@ def export_expense_report_csv():
     spa_id = current_spa_id()
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
+    category = request.args.get("category")
+    vendor_name = request.args.get("vendor_name")
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -30427,7 +30774,7 @@ def export_expense_report_csv():
         WHERE spa_id =%s
            AND 1=1
     """
-    params = []
+    params = [spa_id]
 
     if start_date:
         query += " AND expense_date >= %s"
@@ -30437,9 +30784,17 @@ def export_expense_report_csv():
         query += " AND expense_date <= %s"
         params.append(end_date)
 
+    if category:
+        query += " AND category = %s"
+        params.append(category)
+
+    if vendor_name:
+        query += " AND vendor_name = %s"
+        params.append(vendor_name)
+
     query += " ORDER BY expense_date DESC, expense_id DESC"
 
-    cur.execute(query, params)
+    cur.execute(query, tuple(params))
     rows = cur.fetchall()
 
     cur.close()
@@ -30493,6 +30848,8 @@ def export_expense_report_xlsx():
     spa_id = current_spa_id()
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
+    category = request.args.get("category")
+    vendor_name = request.args.get("vendor_name")
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -30510,7 +30867,7 @@ def export_expense_report_xlsx():
         WHERE spa_id =%s
            AND 1=1
     """
-    params = []
+    params = [spa_id]
 
     if start_date:
         query += " AND expense_date >= %s"
@@ -30520,9 +30877,17 @@ def export_expense_report_xlsx():
         query += " AND expense_date <= %s"
         params.append(end_date)
 
+    if category:
+        query += " AND category = %s"
+        params.append(category)
+
+    if vendor_name:
+        query += " AND vendor_name = %s"
+        params.append(vendor_name)
+
     query += " ORDER BY expense_date DESC, expense_id DESC"
 
-    cur.execute(query, params)
+    cur.execute(query, tuple(params))
     rows = cur.fetchall()
 
     cur.close()

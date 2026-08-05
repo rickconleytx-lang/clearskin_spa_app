@@ -60,7 +60,27 @@
 
     <div class="form-group">
         <label for="vendor_name">Vendor</label>
-        <input type="text" id="vendor_name" name="vendor_name" value="{{ vendor_name or '' }}">
+
+        <select
+            id="vendor_name"
+            name="vendor_name"
+            autocomplete="off"
+        >
+            <option value="">
+                All Vendors
+            </option>
+
+            {% for item in vendor_options %}
+                <option
+                    value="{{ item[1] }}"
+                    {% if vendor_name == item[1] %}
+                        selected
+                    {% endif %}
+                >
+                    {{ item[1] }}
+                </option>
+            {% endfor %}
+        </select>
     </div>
 
     <br>
