@@ -546,6 +546,62 @@
             </section>
 
 
+            <section class="website-settings-section">
+
+                <h2>Appointment Support Contact</h2>
+
+                <p>
+                    These business-facing contact details
+                    appear in web-booking confirmation
+                    emails. They are separate from the
+                    Peach Suite Pro account owner's
+                    personal contact information.
+                </p>
+
+                <div class="website-settings-field">
+
+                    <label for="appointment_contact_email">
+                        Appointment Support Email
+                    </label>
+
+                    <input
+                        type="email"
+                        id="appointment_contact_email"
+                        name="appointment_contact_email"
+                        maxlength="254"
+                        value="{{
+                            settings.appointment_contact_email
+                            or ''
+                        }}"
+                        autocomplete="email"
+                    >
+
+                </div>
+
+
+                <div class="website-settings-field">
+
+                    <label for="appointment_contact_phone">
+                        Appointment Support Phone
+                    </label>
+
+                    <input
+                        type="tel"
+                        id="appointment_contact_phone"
+                        name="appointment_contact_phone"
+                        maxlength="50"
+                        value="{{
+                            settings.appointment_contact_phone
+                            or ''
+                        }}"
+                        autocomplete="tel"
+                    >
+
+                </div>
+
+            </section>
+
+
             <div class="website-settings-actions">
 
                 <button

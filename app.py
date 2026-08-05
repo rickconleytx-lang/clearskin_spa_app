@@ -1272,6 +1272,8 @@ CLEAR_SKIN_PUBLIC_WEBSITE_DEFAULTS = {
         "and let Clear Skin Esthetics take care of the rest."
     ),
 
+    "appointment_contact_email": "",
+    "appointment_contact_phone": "",
 }
 
 
@@ -8635,23 +8637,59 @@ def match_existing_client_booking(incoming_booking_id):
 import os
 import requests
 
-def send_email(to, subject, body):
+def send_email(
+    to,
+    subject,
+    body,
+    html_body=None,
+    add_footer=True
+):
+    if add_footer:
+        final_body = add_email_footer(body)
+    else:
+        final_body = (body or "").strip()
 
-    final_body = add_email_footer(body)
+    mailgun_api_key = os.environ.get(
+        "MAILGUN_API_KEY",
+        ""
+    ).strip()
 
-    mailgun_api_key = os.environ.get("MAILGUN_API_KEY", "").strip()
-    mailgun_domain = os.environ.get("MAILGUN_DOMAIN", "").strip()
-    mailgun_from = os.environ.get("MAILGUN_FROM", "").strip()
+    mailgun_domain = os.environ.get(
+        "MAILGUN_DOMAIN",
+        ""
+    ).strip()
+
+    mailgun_from = os.environ.get(
+        "MAILGUN_FROM",
+        ""
+    ).strip()
+
+    mailgun_payload = {
+        "from": mailgun_from,
+        "to": [to],
+        "subject": subject,
+        "text": final_body
+    }
+
+    final_html_body = (
+        str(html_body or "").strip()
+    )
+
+    if final_html_body:
+        mailgun_payload["html"] = (
+            final_html_body
+        )
 
     response = requests.post(
-        f"https://api.mailgun.net/v3/{mailgun_domain}/messages",
-        auth=("api", mailgun_api_key),
-        data={
-            "from": mailgun_from,
-            "to": [to],
-            "subject": subject,
-            "text": final_body
-        },
+        (
+            "https://api.mailgun.net/v3/"
+            f"{mailgun_domain}/messages"
+        ),
+        auth=(
+            "api",
+            mailgun_api_key
+        ),
+        data=mailgun_payload,
         timeout=20
     )
 
@@ -9871,6 +9909,20 @@ def public_website_settings():
                         )
                         or ""
                     ).strip(),
+
+                    "appointment_contact_email": (
+                        request.form.get(
+                            "appointment_contact_email"
+                        )
+                        or ""
+                    ).strip(),
+
+                    "appointment_contact_phone": (
+                        request.form.get(
+                            "appointment_contact_phone"
+                        )
+                        or ""
+                    ).strip(),
                 }
 
                 field_rules = {
@@ -10070,6 +10122,66 @@ def public_website_settings():
                         public_website_url=public_website_url
                     )
 
+                contact_email = settings[
+                    "appointment_contact_email"
+                ]
+
+                contact_phone = settings[
+                    "appointment_contact_phone"
+                ]
+
+                if len(contact_email) > 254:
+                    flash(
+                        (
+                            "Appointment Support Email must "
+                            "be 254 characters or fewer."
+                        ),
+                        "error"
+                    )
+
+                    return render_template(
+                        "public_website_settings.html",
+                        settings=settings,
+                        public_website_url=public_website_url
+                    )
+
+                if (
+                    contact_email
+                    and (
+                        "@" not in contact_email
+                        or contact_email.startswith("@")
+                        or contact_email.endswith("@")
+                    )
+                ):
+                    flash(
+                        (
+                            "Enter a valid Appointment "
+                            "Support Email address."
+                        ),
+                        "error"
+                    )
+
+                    return render_template(
+                        "public_website_settings.html",
+                        settings=settings,
+                        public_website_url=public_website_url
+                    )
+
+                if len(contact_phone) > 50:
+                    flash(
+                        (
+                            "Appointment Support Phone must "
+                            "be 50 characters or fewer."
+                        ),
+                        "error"
+                    )
+
+                    return render_template(
+                        "public_website_settings.html",
+                        settings=settings,
+                        public_website_url=public_website_url
+                    )
+
                 success_message = (
                     "Public website settings updated."
                 )
@@ -10093,13 +10205,16 @@ def public_website_settings():
                     services_heading,
                     services_description,
                     booking_heading,
-                    booking_description
+                    booking_description,
+                    appointment_contact_email,
+                    appointment_contact_phone
                 )
                 VALUES (
                     %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s, %s,
-                    %s, %s, %s, %s
+                    %s, %s, %s, %s,
+                    %s, %s
                 )
                 ON CONFLICT (spa_id)
                 DO UPDATE SET
@@ -10138,6 +10253,12 @@ def public_website_settings():
                     booking_description = (
                         EXCLUDED.booking_description
                     ),
+                    appointment_contact_email = (
+                        EXCLUDED.appointment_contact_email
+                    ),
+                    appointment_contact_phone = (
+                        EXCLUDED.appointment_contact_phone
+                    ),
                     updated_at = NOW()
             """, (
                 spa_id,
@@ -10156,6 +10277,10 @@ def public_website_settings():
                 settings["services_description"],
                 settings["booking_heading"],
                 settings["booking_description"],
+                settings["appointment_contact_email"]
+                    or None,
+                settings["appointment_contact_phone"]
+                    or None,
             ))
 
             conn.commit()
@@ -10185,7 +10310,9 @@ def public_website_settings():
                 services_heading,
                 services_description,
                 booking_heading,
-                booking_description
+                booking_description,
+                appointment_contact_email,
+                appointment_contact_phone
             FROM public_website_settings
             WHERE spa_id = %s
         """, (spa_id,))
@@ -10209,6 +10336,10 @@ def public_website_settings():
                 "services_description": row[12],
                 "booking_heading": row[13],
                 "booking_description": row[14],
+                "appointment_contact_email":
+                    row[15] or "",
+                "appointment_contact_phone":
+                    row[16] or "",
             }
 
         else:
@@ -49721,17 +49852,41 @@ def _queue_public_booking_confirmation_email(
     this helper is called.
     """
 
+    import re
+    from html import escape
+
     cur.execute("""
         SELECT
             COALESCE(
                 NULLIF(TRIM(bu.unit_name), ''),
                 NULLIF(TRIM(s.spa_name), ''),
                 'Your Appointment Provider'
+            ),
+            COALESCE(
+                NULLIF(
+                    TRIM(
+                        pws.appointment_contact_email
+                    ),
+                    ''
+                ),
+                ''
+            ),
+            COALESCE(
+                NULLIF(
+                    TRIM(
+                        pws.appointment_contact_phone
+                    ),
+                    ''
+                ),
+                ''
             )
         FROM business_units bu
 
         JOIN spas s
           ON s.spa_id = bu.spa_id
+
+        LEFT JOIN public_website_settings pws
+          ON pws.spa_id = s.spa_id
 
         WHERE bu.spa_id = %s
           AND bu.business_unit_id = %s
@@ -49748,6 +49903,62 @@ def _queue_public_booking_confirmation_email(
         if workspace_row and workspace_row[0]
         else "Your Appointment Provider"
     )
+
+    business_email = (
+        workspace_row[1]
+        if workspace_row and workspace_row[1]
+        else ""
+    )
+
+    business_phone_raw = (
+        workspace_row[2]
+        if workspace_row and workspace_row[2]
+        else ""
+    )
+
+    phone_digits = re.sub(
+        r"\D",
+        "",
+        business_phone_raw
+    )
+
+    business_phone_display = (
+        business_phone_raw
+    )
+
+    business_phone_tel = ""
+
+    if (
+        len(phone_digits) == 11
+        and phone_digits.startswith("1")
+    ):
+        local_phone = phone_digits[1:]
+
+        business_phone_display = (
+            f"({local_phone[:3]}) "
+            f"{local_phone[3:6]}-"
+            f"{local_phone[6:]}"
+        )
+
+        business_phone_tel = (
+            f"+1{local_phone}"
+        )
+
+    elif len(phone_digits) == 10:
+        business_phone_display = (
+            f"({phone_digits[:3]}) "
+            f"{phone_digits[3:6]}-"
+            f"{phone_digits[6:]}"
+        )
+
+        business_phone_tel = (
+            f"+1{phone_digits}"
+        )
+
+    elif phone_digits:
+        business_phone_tel = (
+            f"+{phone_digits}"
+        )
 
     date_display = (
         appointment_date
@@ -49793,6 +50004,34 @@ def _queue_public_booking_confirmation_email(
             f"{appointment_for_name}\n"
         )
 
+    if business_email and business_phone_display:
+        assistance_text = (
+            f"For assistance with your appointment, "
+            f"contact {workspace_name} at "
+            f"{business_email} or call "
+            f"{business_phone_display}."
+        )
+
+    elif business_email:
+        assistance_text = (
+            f"For assistance with your appointment, "
+            f"contact {workspace_name} at "
+            f"{business_email}."
+        )
+
+    elif business_phone_display:
+        assistance_text = (
+            f"For assistance with your appointment, "
+            f"contact {workspace_name} by calling "
+            f"{business_phone_display}."
+        )
+
+    else:
+        assistance_text = (
+            f"For assistance with your appointment, "
+            f"contact {workspace_name} directly."
+        )
+
     text_body = (
         f"Hello {booked_by_name},\n\n"
         f"{appointment_intro}\n\n"
@@ -49807,8 +50046,392 @@ def _queue_public_booking_confirmation_email(
         f"Please contact {workspace_name} directly "
         f"if you need to make changes to the "
         f"appointment.\n\n"
-        f"We look forward to seeing you!"
+        f"We look forward to seeing you!\n\n"
+        f"----------------------------------------\n\n"
+        f"This email was sent by Peach Suite Pro "
+        f"on behalf of {workspace_name} regarding "
+        f"your appointment. Please review all "
+        f"booking details before taking action.\n\n"
+        f"{assistance_text}\n\n"
+        f"Peach Suite Pro provides the online "
+        f"booking and business-management technology. "
+        f"{workspace_name} is responsible for the "
+        f"services, appointments, policies, and "
+        f"client support."
     )
+
+    safe_workspace_name = escape(
+        str(workspace_name or "")
+    )
+
+    safe_booked_by_name = escape(
+        str(booked_by_name or "")
+    )
+
+    safe_appointment_for_name = escape(
+        str(appointment_for_name or "")
+    )
+
+    safe_service_name = escape(
+        str(service_name or "")
+    )
+
+    safe_provider_name = escape(
+        str(provider_name or "")
+    )
+
+    safe_date_display = escape(
+        str(date_display or "")
+    )
+
+    safe_time_display = escape(
+        str(time_display or "")
+    )
+
+    safe_price_display = escape(
+        str(price_display or "")
+    )
+
+    safe_business_email = escape(
+        str(business_email or "")
+    )
+
+    safe_business_email_attr = escape(
+        str(business_email or ""),
+        quote=True
+    )
+
+    safe_business_phone_display = escape(
+        str(business_phone_display or "")
+    )
+
+    safe_business_phone_tel = escape(
+        str(business_phone_tel or ""),
+        quote=True
+    )
+
+    recipient_rows = ""
+
+    if booking_for_other:
+        recipient_rows = f"""
+            <tr>
+                <td style="
+                    padding:8px 12px;
+                    border-bottom:1px solid #e8e8e8;
+                    font-weight:600;
+                    width:165px;
+                ">
+                    Booked By
+                </td>
+                <td style="
+                    padding:8px 12px;
+                    border-bottom:1px solid #e8e8e8;
+                ">
+                    {safe_booked_by_name}
+                </td>
+            </tr>
+        """
+
+    recipient_rows += f"""
+        <tr>
+            <td style="
+                padding:8px 12px;
+                border-bottom:1px solid #e8e8e8;
+                font-weight:600;
+                width:165px;
+            ">
+                Appointment For
+            </td>
+            <td style="
+                padding:8px 12px;
+                border-bottom:1px solid #e8e8e8;
+            ">
+                {safe_appointment_for_name}
+            </td>
+        </tr>
+    """
+
+    if business_email and business_phone_display:
+        assistance_html = f"""
+            For assistance with your appointment,
+            contact {safe_workspace_name} at
+            <a
+                href="mailto:{safe_business_email_attr}"
+                style="color:#555555;"
+            >
+                {safe_business_email}
+            </a>
+            or call
+            <a href="tel:{safe_business_phone_tel}" style="color:#555555;">{safe_business_phone_display}</a>.
+        """
+
+    elif business_email:
+        assistance_html = f"""
+            For assistance with your appointment,
+            contact {safe_workspace_name} at
+            <a
+                href="mailto:{safe_business_email_attr}"
+                style="color:#555555;"
+            >
+                {safe_business_email}
+            </a>.
+        """
+
+    elif business_phone_display:
+        assistance_html = f"""
+            For assistance with your appointment,
+            contact {safe_workspace_name} by calling
+            <a
+                href="tel:{safe_business_phone_tel}"
+                style="color:#555555;"
+            >
+                {safe_business_phone_display}
+            </a>.
+        """
+
+    else:
+        assistance_html = f"""
+            For assistance with your appointment,
+            contact {safe_workspace_name} directly.
+        """
+
+    html_body = f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1"
+    >
+    <title>{escape(subject_line)}</title>
+</head>
+
+<body style="
+    margin:0;
+    padding:24px 12px;
+    background:#f6f6f6;
+    font-family:Arial, Helvetica, sans-serif;
+    color:#333333;
+">
+    <div style="
+        max-width:640px;
+        margin:0 auto;
+        padding:28px;
+        background:#ffffff;
+        border:1px solid #e7e7e7;
+        border-radius:12px;
+    ">
+        <h1 style="
+            margin:0 0 18px;
+            font-size:26px;
+            line-height:1.25;
+            color:#222222;
+        ">
+            Appointment Confirmed
+        </h1>
+
+        <p style="
+            margin:0 0 14px;
+            font-size:16px;
+            line-height:1.6;
+        ">
+            Hello {safe_booked_by_name},
+        </p>
+
+        <p style="
+            margin:0 0 22px;
+            font-size:16px;
+            line-height:1.6;
+        ">
+            {escape(appointment_intro)}
+        </p>
+
+        <table
+            role="presentation"
+            style="
+                width:100%;
+                border-collapse:collapse;
+                margin:0 0 22px;
+                font-size:15px;
+                line-height:1.45;
+                border:1px solid #e8e8e8;
+            "
+        >
+            <tr>
+                <td style="
+                    padding:8px 12px;
+                    border-bottom:1px solid #e8e8e8;
+                    font-weight:600;
+                    width:165px;
+                ">
+                    Confirmation Number
+                </td>
+                <td style="
+                    padding:8px 12px;
+                    border-bottom:1px solid #e8e8e8;
+                ">
+                    {escape(str(appointment_id))}
+                </td>
+            </tr>
+
+            {recipient_rows}
+
+            <tr>
+                <td style="
+                    padding:8px 12px;
+                    border-bottom:1px solid #e8e8e8;
+                    font-weight:600;
+                ">
+                    Service
+                </td>
+                <td style="
+                    padding:8px 12px;
+                    border-bottom:1px solid #e8e8e8;
+                ">
+                    {safe_service_name}
+                </td>
+            </tr>
+
+            <tr>
+                <td style="
+                    padding:8px 12px;
+                    border-bottom:1px solid #e8e8e8;
+                    font-weight:600;
+                ">
+                    Provider
+                </td>
+                <td style="
+                    padding:8px 12px;
+                    border-bottom:1px solid #e8e8e8;
+                ">
+                    {safe_provider_name}
+                </td>
+            </tr>
+
+            <tr>
+                <td style="
+                    padding:8px 12px;
+                    border-bottom:1px solid #e8e8e8;
+                    font-weight:600;
+                ">
+                    Date
+                </td>
+                <td style="
+                    padding:8px 12px;
+                    border-bottom:1px solid #e8e8e8;
+                ">
+                    {safe_date_display}
+                </td>
+            </tr>
+
+            <tr>
+                <td style="
+                    padding:8px 12px;
+                    border-bottom:1px solid #e8e8e8;
+                    font-weight:600;
+                ">
+                    Time
+                </td>
+                <td style="
+                    padding:8px 12px;
+                    border-bottom:1px solid #e8e8e8;
+                ">
+                    {safe_time_display}
+                </td>
+            </tr>
+
+            <tr>
+                <td style="
+                    padding:8px 12px;
+                    border-bottom:1px solid #e8e8e8;
+                    font-weight:600;
+                ">
+                    Duration
+                </td>
+                <td style="
+                    padding:8px 12px;
+                    border-bottom:1px solid #e8e8e8;
+                ">
+                    {int(duration_minutes)} minutes
+                </td>
+            </tr>
+
+            <tr>
+                <td style="
+                    padding:8px 12px;
+                    font-weight:600;
+                ">
+                    Price
+                </td>
+                <td style="padding:8px 12px;">
+                    {safe_price_display}
+                </td>
+            </tr>
+        </table>
+
+        <p style="
+            margin:0 0 14px;
+            font-size:15px;
+            line-height:1.6;
+        ">
+            Please contact {safe_workspace_name}
+            directly if you need to make changes to
+            the appointment.
+        </p>
+
+        <p style="
+            margin:0 0 26px;
+            font-size:15px;
+            line-height:1.6;
+        ">
+            We look forward to seeing you!
+        </p>
+
+        <div style="
+            padding-top:18px;
+            border-top:1px solid #dddddd;
+        ">
+            <p style="
+                margin:0 0 12px;
+                font-size:12px;
+                line-height:1.55;
+                color:#666666;
+            ">
+                This email was sent by Peach Suite Pro
+                on behalf of {safe_workspace_name}
+                regarding your appointment. Please
+                review all booking details before
+                taking action.
+            </p>
+
+            <p style="
+                margin:0 0 12px;
+                font-size:12px;
+                line-height:1.55;
+                color:#666666;
+            ">
+                {assistance_html}
+            </p>
+
+            <p style="
+                margin:0;
+                font-size:12px;
+                line-height:1.55;
+                color:#666666;
+            ">
+                Peach Suite Pro provides the online
+                booking and business-management
+                technology. {safe_workspace_name} is
+                responsible for the services,
+                appointments, policies, and client
+                support.
+            </p>
+        </div>
+    </div>
+</body>
+</html>
+""".strip()
 
     cur.execute("""
         INSERT INTO email_queue (
@@ -49836,7 +50459,7 @@ def _queue_public_booking_confirmation_email(
             %s,
             %s,
             %s,
-            NULL,
+            %s,
             'pending',
             CURRENT_TIMESTAMP,
             CURRENT_TIMESTAMP
@@ -49851,7 +50474,8 @@ def _queue_public_booking_confirmation_email(
         recipient_email,
         booked_by_name,
         subject_line,
-        text_body
+        text_body,
+        html_body
     ))
 
     queued_row = cur.fetchone()
@@ -49860,9 +50484,6 @@ def _queue_public_booking_confirmation_email(
         return None
 
     return queued_row[0]
-
-
-
 
 
 @app.route("/book/<public_booking_slug>")
@@ -52630,6 +53251,7 @@ def process_email_automation_queue(
                         recipient_email,
                         subject_line,
                         text_body,
+                        html_body,
                         attempt_count,
                         maximum_attempts
                     FROM email_queue
@@ -52657,6 +53279,7 @@ def process_email_automation_queue(
                         recipient_email,
                         subject_line,
                         text_body,
+                        html_body,
                         attempt_count,
                         maximum_attempts
                     FROM email_queue
@@ -52689,6 +53312,7 @@ def process_email_automation_queue(
                 recipient_email,
                 subject_line,
                 text_body,
+                html_body,
                 previous_attempt_count,
                 maximum_attempts
             ) = row
@@ -52733,15 +53357,32 @@ def process_email_automation_queue(
         provider_message_id = None
         error_message = None
 
-        final_text_body = add_email_footer(
-            text_body
-        )
+        if email_type == "booking_confirmation":
+            final_text_body = (
+                str(text_body or "").strip()
+            )
+
+            final_html_body = (
+                str(html_body or "").strip()
+                or None
+            )
+
+        else:
+            final_text_body = add_email_footer(
+                text_body
+            )
+
+            # Preserve the existing text-only
+            # behavior for all other queue types.
+            final_html_body = None
 
         try:
             response = send_email(
                 to=recipient_email,
                 subject=subject_line,
-                body=final_text_body
+                body=final_text_body,
+                html_body=final_html_body,
+                add_footer=False
             )
 
             provider_status = str(
