@@ -1404,7 +1404,8 @@ def route_clear_skin_public_home():
                     additional_menu_description,
                     booking_heading,
                     booking_description,
-                    website_color_scheme
+                    website_color_scheme,
+                    include_marketing_sms_in_10dlc_application
                 FROM public_website_settings
                 WHERE spa_id = %s
             """, (
@@ -1440,6 +1441,8 @@ def route_clear_skin_public_home():
                         settings_row[18]
                         or "peach_cream"
                     ),
+                    "include_marketing_sms_in_10dlc_application":
+                        bool(settings_row[19]),
             }
 
         except Exception:

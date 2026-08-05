@@ -710,6 +710,118 @@
             color: rgba(255, 255, 255, 0.78);
         }
 
+        .sms-policy-section {
+            padding: 76px 24px;
+            background: var(--white);
+        }
+
+        .sms-policy-card {
+            max-width: 1060px;
+            margin: 0 auto;
+            padding: 48px;
+            border: 1px solid var(--border);
+            border-radius: 30px;
+            background: var(--peach-light);
+            box-shadow: var(--shadow);
+        }
+
+        .sms-policy-heading {
+            max-width: 780px;
+            margin: 0 auto 30px;
+            text-align: center;
+        }
+
+        .sms-policy-heading h2 {
+            margin: 0 0 14px;
+            font-family:
+                Georgia,
+                "Times New Roman",
+                serif;
+            font-size: clamp(2rem, 4vw, 3rem);
+            font-weight: 500;
+        }
+
+        .sms-policy-heading p {
+            margin: 0;
+            line-height: 1.75;
+        }
+
+        .sms-policy-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 18px;
+        }
+
+        .sms-policy-panel {
+            padding: 25px;
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            background: var(--white);
+        }
+
+        .sms-policy-panel h3 {
+            margin: 0 0 12px;
+            font-family:
+                Georgia,
+                "Times New Roman",
+                serif;
+            font-size: 1.35rem;
+        }
+
+        .sms-policy-panel p {
+            margin: 0 0 14px;
+            line-height: 1.72;
+        }
+
+        .sms-policy-panel p:last-child {
+            margin-bottom: 0;
+        }
+
+        .sms-policy-notice {
+            margin-top: 20px;
+            padding: 25px;
+            border-radius: 20px;
+            background: var(--text);
+            color: var(--white);
+        }
+
+        .sms-policy-notice p {
+            margin: 0 0 14px;
+            line-height: 1.72;
+        }
+
+        .sms-policy-notice p:last-child {
+            margin-bottom: 0;
+        }
+
+        .sms-policy-links {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 12px 24px;
+            margin-top: 24px;
+        }
+
+        .sms-policy-links a {
+            color: var(--peach-dark);
+            font-weight: 800;
+        }
+
+        @media (max-width: 760px) {
+            .sms-policy-section {
+                padding: 58px 18px;
+            }
+
+            .sms-policy-card {
+                padding: 30px 20px;
+                border-radius: 24px;
+            }
+
+            .sms-policy-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
         .site-footer {
             padding: 34px 24px;
             background: var(--text);
@@ -1261,6 +1373,163 @@
                 >
                     Schedule an Appointment
                 </a>
+
+            </div>
+        </section>
+
+
+        <section
+            id="sms-consent"
+            class="sms-policy-section"
+        >
+            <div class="sms-policy-card">
+
+                <div class="sms-policy-heading">
+
+                    <p class="eyebrow">
+                        Text Messaging
+                    </p>
+
+                    <h2>
+                        SMS Messaging &amp; Consent
+                    </h2>
+
+                    <p>
+                        Clear Skin Esthetics offers optional
+                        text messaging to clients who expressly
+                        choose to participate.
+                    </p>
+
+                </div>
+
+
+                <div class="sms-policy-grid">
+
+                    <div class="sms-policy-panel">
+
+                        <h3>
+                            How to Opt In
+                        </h3>
+
+                        <p>
+                            Clients may opt in during online
+                            booking by selecting the applicable
+                            optional, unchecked SMS consent
+                            checkbox.
+                        </p>
+
+                        <p>
+                            Service messages may include
+                            appointment confirmations,
+                            reminders, scheduling or
+                            rescheduling updates, cancellation
+                            notices, provider or location
+                            updates, and replies to
+                            appointment-related questions.
+                        </p>
+
+                        {% if
+                            website_settings
+                            .include_marketing_sms_in_10dlc_application
+                        %}
+
+                            <p>
+                                Marketing messages may include
+                                special offers, service
+                                promotions, skincare tips, and
+                                event announcements. Marketing
+                                consent is requested through a
+                                separate optional, unchecked
+                                checkbox and is not combined
+                                with service-message consent.
+                            </p>
+
+                        {% endif %}
+
+                    </div>
+
+
+                    <div class="sms-policy-panel">
+
+                        <h3>
+                            How to Opt Out or Get Help
+                        </h3>
+
+                        <p>
+                            Reply <strong>STOP</strong> to opt
+                            out of text messages. A final
+                            confirmation message may be sent
+                            after an opt-out request.
+                        </p>
+
+                        <p>
+                            Reply <strong>HELP</strong> for
+                            assistance. Clients may also
+                            contact Clear Skin Esthetics to
+                            withdraw consent through another
+                            reasonable method.
+                        </p>
+
+                        <p>
+                            After opting out, appointment
+                            communications may be provided by
+                            email or telephone when available.
+                        </p>
+
+                    </div>
+
+                </div>
+
+
+                <div class="sms-policy-notice">
+
+                    <p>
+                        <strong>
+                            Consent is not a condition of
+                            purchase. Message frequency may
+                            vary. Message and data rates may
+                            apply.
+                        </strong>
+                    </p>
+
+                    <p>
+                        <strong>
+                            Mobile information will not be
+                            shared with third parties or
+                            affiliates for marketing or
+                            promotional purposes. Text
+                            messaging originator opt-in data
+                            and consent information will not
+                            be shared with any third parties.
+                        </strong>
+                    </p>
+
+                </div>
+
+
+                <div class="sms-policy-links">
+
+                    <a
+                        href="{{
+                            url_for(
+                                'clear_skin_sms_terms'
+                            )
+                        }}"
+                    >
+                        SMS Terms
+                    </a>
+
+                    <a
+                        href="{{
+                            url_for(
+                                'clear_skin_privacy'
+                            )
+                        }}"
+                    >
+                        Privacy Policy
+                    </a>
+
+                </div>
 
             </div>
         </section>
