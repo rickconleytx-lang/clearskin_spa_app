@@ -39,7 +39,7 @@ from werkzeug.security import (
     check_password_hash
 )
 
-from psycopg2 import sql
+from psycopg2 import IntegrityError, sql
 from psycopg2.extras import RealDictCursor
 
 from apscheduler.schedulers.background import (
@@ -4283,6 +4283,49 @@ def get_sms_eligible_clients(
 #      GET CLIENT STATUSES
 #
 ##################################
+
+
+DEFAULT_CLIENT_STATUSES = (
+    "Current",
+    "Previous",
+    "Prior Client",
+    "Inactive",
+    "Event Contact",
+)
+
+
+def seed_client_status_defaults(cursor, spa_id):
+    """
+    Create the standard tenant-owned Client Status options.
+
+    This helper is safe to call repeatedly. Existing options are
+    matched without regard to capitalization or surrounding spaces.
+    """
+
+    for status_name in DEFAULT_CLIENT_STATUSES:
+        cursor.execute("""
+            INSERT INTO client_statuses (
+                spa_id,
+                status_name,
+                is_active
+            )
+            SELECT
+                %s,
+                %s,
+                TRUE
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM client_statuses
+                WHERE spa_id = %s
+                  AND LOWER(BTRIM(status_name))
+                      = LOWER(BTRIM(%s))
+            )
+        """, (
+            spa_id,
+            status_name,
+            spa_id,
+            status_name,
+        ))
 
 
 def get_client_statuses(spa_id):
@@ -9354,11 +9397,32 @@ def get_dropdown_options(config_key, spa_id):
 
 
 
+def current_dropdown_spa_id():
+    """
+    Resolve the tenant selected for dropdown administration.
+
+    Regular users use the request-scoped spa. Master Admin uses the
+    business selected in the session without changing platform-wide
+    current_spa_id() behavior.
+    """
+    if is_master_admin():
+        return session.get("spa_id")
+
+    return current_spa_id()
+
+
 @app.route("/dropdowns/<dropdown_key>", methods=["GET", "POST"])
 @login_required
 @spa_required
 def manage_dropdown(dropdown_key):
-    spa_id = current_spa_id()
+    spa_id = current_dropdown_spa_id()
+
+    if not spa_id:
+        flash(
+            "Select a business before managing dropdowns.",
+            "error",
+        )
+        return redirect(url_for("admin"))
 
     config = DROPDOWN_CONFIG.get(dropdown_key)
 
@@ -9370,98 +9434,309 @@ def manage_dropdown(dropdown_key):
     pk = config["pk"]
     value_col = config["value"]
     extra_col = config.get("extra_value")
+    active_col = config.get("active_column")
     spa_scoped = config.get("spa_scoped", True)
 
-    conn = get_db_connection()
-    cur = conn.cursor()
+    conn = None
+    cur = None
+    dropdown_labels = {}
+    rows = []
 
-    cur.execute("""
-        SELECT dropdown_key, display_label
-        FROM spa_dropdown_labels
-        WHERE spa_id = %s
-    """, (spa_id,))
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
 
-    label_rows = cur.fetchall()
-    dropdown_labels = {row[0]: row[1] for row in label_rows}
-    current_label = dropdown_labels.get(dropdown_key, config["title"])
+        cur.execute("""
+            SELECT dropdown_key, display_label
+            FROM spa_dropdown_labels
+            WHERE spa_id = %s
+        """, (spa_id,))
 
-    if request.method == "POST":
-        value = request.form.get("value", "").strip()
-        extra_value = request.form.get("extra_value", "").strip() if extra_col else None
+        label_rows = cur.fetchall()
+        dropdown_labels = {
+            row[0]: row[1]
+            for row in label_rows
+        }
 
-        if not value:
-            flash(f"{config['label']} is required.", "error")
-            cur.close()
-            conn.close()
-            return redirect(url_for("manage_dropdown", dropdown_key=dropdown_key))
+        if request.method == "POST":
+            value = request.form.get(
+                "value",
+                "",
+            ).strip()
+
+            extra_value = None
+
+            if extra_col:
+                extra_value = (
+                    request.form.get(
+                        "extra_value",
+                        "",
+                    ).strip()
+                    or None
+                )
+
+            if not value:
+                flash(
+                    f"{config['label']} is required.",
+                    "error",
+                )
+                return redirect(
+                    url_for(
+                        "manage_dropdown",
+                        dropdown_key=dropdown_key,
+                    )
+                )
+
+            select_columns = [pk]
+
+            if active_col:
+                select_columns.append(active_col)
+
+            duplicate_conditions = [
+                (
+                    f"LOWER(BTRIM({value_col})) "
+                    "= LOWER(BTRIM(%s))"
+                )
+            ]
+            duplicate_params = [value]
+
+            if spa_scoped:
+                duplicate_conditions.append(
+                    "spa_id = %s"
+                )
+                duplicate_params.append(spa_id)
+
+            cur.execute(
+                f"""
+                    SELECT {", ".join(select_columns)}
+                    FROM {table}
+                    WHERE {
+                        " AND ".join(
+                            duplicate_conditions
+                        )
+                    }
+                    LIMIT 1
+                """,
+                duplicate_params,
+            )
+
+            existing = cur.fetchone()
+
+            if existing:
+                existing_id = existing[0]
+                existing_is_active = (
+                    existing[1]
+                    if active_col
+                    else True
+                )
+
+                if active_col and not existing_is_active:
+                    update_parts = [
+                        f"{active_col} = TRUE"
+                    ]
+                    update_params = []
+
+                    if extra_col:
+                        update_parts.append(
+                            f"{extra_col} = %s"
+                        )
+                        update_params.append(
+                            extra_value
+                        )
+
+                    update_conditions = [
+                        f"{pk} = %s"
+                    ]
+                    update_params.append(existing_id)
+
+                    if spa_scoped:
+                        update_conditions.append(
+                            "spa_id = %s"
+                        )
+                        update_params.append(spa_id)
+
+                    cur.execute(
+                        f"""
+                            UPDATE {table}
+                            SET {", ".join(update_parts)}
+                            WHERE {
+                                " AND ".join(
+                                    update_conditions
+                                )
+                            }
+                        """,
+                        update_params,
+                    )
+
+                    conn.commit()
+
+                    flash(
+                        (
+                            f"{value} already existed and "
+                            "has been reactivated."
+                        ),
+                        "success",
+                    )
+
+                else:
+                    flash(
+                        (
+                            f"{value} already exists in "
+                            f"{config['title']}."
+                        ),
+                        "error",
+                    )
+
+                return redirect(
+                    url_for(
+                        "manage_dropdown",
+                        dropdown_key=dropdown_key,
+                    )
+                )
+
+            insert_columns = [value_col]
+            insert_values = [value]
+
+            if spa_scoped:
+                insert_columns.insert(0, "spa_id")
+                insert_values.insert(0, spa_id)
+
+            if extra_col:
+                insert_columns.append(extra_col)
+                insert_values.append(extra_value)
+
+            placeholders = ", ".join(
+                ["%s"] * len(insert_values)
+            )
+
+            cur.execute(
+                f"""
+                    INSERT INTO {table} (
+                        {", ".join(insert_columns)}
+                    )
+                    VALUES ({placeholders})
+                """,
+                insert_values,
+            )
+
+            conn.commit()
+
+            flash(
+                f"{config['title']} item added.",
+                "success",
+            )
+
+            return redirect(
+                url_for(
+                    "manage_dropdown",
+                    dropdown_key=dropdown_key,
+                )
+            )
+
+        select_columns = [pk, value_col]
 
         if extra_col:
-            cur.execute(f"""
-                INSERT INTO {table} (spa_id, {value_col}, {extra_col})
-                VALUES (%s, %s, %s)
-            """, (spa_id, value, extra_value))
-        else:
-            cur.execute(f"""
-                INSERT INTO {table} (spa_id, {value_col})
-                VALUES (%s, %s)
-            """, (spa_id, value))
+            select_columns.append(extra_col)
 
-        conn.commit()
-        cur.close()
-        conn.close()
+        list_conditions = []
+        list_params = []
 
-        flash(f"{config['title']} item added.", "success")
-        return redirect(url_for("manage_dropdown", dropdown_key=dropdown_key))
+        if spa_scoped:
+            list_conditions.append("spa_id = %s")
+            list_params.append(spa_id)
 
-    if extra_col:
-        cur.execute(f"""
-            SELECT {pk}, {value_col}, {extra_col}
+        query = f"""
+            SELECT {", ".join(select_columns)}
             FROM {table}
-            WHERE spa_id = %s
-            ORDER BY {value_col}
-        """, (spa_id,))
-    else:
-        cur.execute(f"""
-            SELECT {pk}, {value_col}
-            FROM {table}
-            WHERE spa_id = %s
-            ORDER BY {value_col}
-        """, (spa_id,))
+        """
 
-    rows = cur.fetchall()
+        if list_conditions:
+            query += (
+                " WHERE "
+                + " AND ".join(list_conditions)
+            )
 
-    cur.close()
-    conn.close()
+        query += f" ORDER BY {value_col}"
+
+        cur.execute(query, list_params)
+        rows = cur.fetchall()
+
+    except IntegrityError as error:
+        if conn:
+            conn.rollback()
+
+        print(
+            "[DROPDOWN INTEGRITY ERROR]",
+            type(error).__name__,
+        )
+
+        flash(
+            (
+                f"That {config['label'].lower()} already "
+                "exists or conflicts with another item."
+            ),
+            "error",
+        )
+
+        return redirect(
+            url_for(
+                "manage_dropdown",
+                dropdown_key=dropdown_key,
+            )
+        )
+
+    except Exception as error:
+        if conn:
+            conn.rollback()
+
+        print(
+            "[DROPDOWN SAVE ERROR]",
+            repr(error),
+        )
+
+        flash(
+            (
+                f"{config['title']} could not be saved. "
+                "No changes were made."
+            ),
+            "error",
+        )
+
+        return redirect(
+            url_for(
+                "manage_dropdown",
+                dropdown_key=dropdown_key,
+            )
+        )
+
+    finally:
+        if cur:
+            cur.close()
+
+        if conn:
+            conn.close()
 
     return render_template(
         "manage_dropdown.html",
         dropdown_key=dropdown_key,
         config=config,
         rows=rows,
-        dropdown_labels=dropdown_labels
+        dropdown_labels=dropdown_labels,
     )
-
-
-
-
-
-
-
-
-#  --------------------------------
-#
-#     DROP DOWNS  DELETE FUNCTION
-#
-# ROUTE:  admin/dropdowns
-#           spa_id good
-#  ------------------------------
 
 
 @app.route("/dropdowns/<dropdown_key>/delete/<int:item_id>", methods=["POST"])
 @login_required
 @spa_required
 def delete_dropdown_item(dropdown_key, item_id):
-    spa_id = current_spa_id()
+    spa_id = current_dropdown_spa_id()
+
+    if not spa_id:
+        flash(
+            "Select a business before managing dropdowns.",
+            "error",
+        )
+        return redirect(url_for("admin"))
 
     config = DROPDOWN_CONFIG.get(dropdown_key)
 
@@ -9507,7 +9782,14 @@ def delete_dropdown_item(dropdown_key, item_id):
 @login_required
 @spa_required
 def update_dropdown_labels():
-    spa_id = current_spa_id()
+    spa_id = current_dropdown_spa_id()
+
+    if not spa_id:
+        flash(
+            "Select a business before updating dropdown labels.",
+            "error",
+        )
+        return redirect(url_for("admin"))
 
     skin_types = request.form.get("skin_types", "").strip()
     fitzpatrick_types = request.form.get("fitzpatrick_types", "").strip()
@@ -12606,6 +12888,11 @@ def master_admin_add_business():
 
         spa_id = cur.fetchone()[0]
 
+        seed_client_status_defaults(
+            cur,
+            spa_id,
+        )
+
         registration_number = build_registration_number(
             spa_name,
             spa_id
@@ -14356,14 +14643,19 @@ def add_spa():
                 RETURNING spa_id
             """, (
                 spa_name,
-                owner_first_name,
-                owner_last_name,
+                owner_first_name or None,
+                owner_last_name or None,
                 owner_email,
-                owner_phone,
-                timezone_name
+                owner_phone or None,
+                timezone_name or "America/Chicago"
             ))
 
             spa_id = cur.fetchone()[0]
+
+            seed_client_status_defaults(
+                cur,
+                spa_id,
+            )
 
             cur.execute("""
                 INSERT INTO users (
@@ -14390,9 +14682,22 @@ def add_spa():
             flash("Spa and owner admin user created successfully.", "success")
             return redirect(url_for("home"))
 
-        except Exception as e:
+        except Exception as error:
             conn.rollback()
-            flash(f"Error creating spa: {e}", "error")
+
+            print(
+                "[ADD SPA ERROR]",
+                repr(error),
+            )
+
+            flash(
+                (
+                    "The business could not be created. "
+                    "No changes were saved."
+                ),
+                "error",
+            )
+
             return redirect(url_for("add_spa"))
 
         finally:
