@@ -5886,3 +5886,52 @@ inside the existing category panel.
     }
 
 }
+
+/* =========================================================
+   COMPACT APPLICATION HEADER
+========================================================= */
+
+.banner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 52px;
+    box-sizing: border-box;
+    padding: 5px 12px;
+}
+
+.banner img {
+    display: block;
+    width: auto;
+    height: 42px;
+    max-width: 100%;
+    max-height: 42px;
+    object-fit: contain;
+}
+
+.header-bar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 2ch;
+    min-height: 52px;
+    box-sizing: border-box;
+    padding: 6px 16px;
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+}
+
+.header-right h1 {
+    margin: 0;
+    font-size: 1.35rem;
+    line-height: 1.2;
+    text-align: left;
+}
+
+.app-menu-trigger {
+    padding: 7px 14px;
+}

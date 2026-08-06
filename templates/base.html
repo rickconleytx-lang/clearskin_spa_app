@@ -30,9 +30,25 @@
     </div>
 
     <div class="header-bar">
-    <div class="header-right">
-      <h1>{{ spa_name }}</h1>
-    </div>
+
+        <button type="button"
+                id="appMenuButton"
+                class="app-menu-trigger"
+                aria-controls="appSidePanel"
+                aria-expanded="false">
+
+            <span class="app-menu-trigger-icon"
+                  aria-hidden="true">
+                ☰
+            </span>
+
+            <span>Menu</span>
+        </button>
+
+        <div class="header-right">
+            <h1>{{ spa_name }}</h1>
+        </div>
+
     </div>
 
 
@@ -63,23 +79,6 @@
      APP NAVIGATION
 ========================================================= -->
 
-<header class="app-header">
-
-    <button type="button"
-            id="appMenuButton"
-            class="app-menu-trigger"
-            aria-controls="appSidePanel"
-            aria-expanded="false">
-
-        <span class="app-menu-trigger-icon"
-              aria-hidden="true">
-            ☰
-        </span>
-
-        <span>Menu</span>
-    </button>
-
-</header>
 
 
 <!-- Darkened page background while menu is open -->
