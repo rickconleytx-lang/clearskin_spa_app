@@ -271,13 +271,12 @@
 </h3>
 
 <div class="calendar-weekdays">
-    <div>Sunday</div>
-    <div>Monday</div>
-    <div>Tuesday</div>
-    <div>Wednesday</div>
-    <div>Thursday</div>
-    <div>Friday</div>
-    <div>Saturday</div>
+    {% for day in week_days %}
+        <a href="{{ url_for('calendar_day_view', date=day.strftime('%Y-%m-%d')) }}"
+           title="Open Day View for {{ day.strftime('%A, %B %d, %Y') }}">
+            <div>{{ day.strftime('%A') }}</div>
+        </a>
+    {% endfor %}
 </div>
 
 <br>
