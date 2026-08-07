@@ -1,0 +1,131 @@
+{% extends "public_site/tenant_policy_base.html" %}
+
+{% block policy_content %}
+
+    <h2>Program Name and Consent Method</h2>
+
+    <p>
+        The {{ business_name }} service-messaging program provides
+        appointment-related text messages to clients who voluntarily opt in
+        through an optional, unchecked checkbox in the online booking form.
+    </p>
+
+    <p>
+        Checking the box is optional. Consent to receive text messages is
+        not a condition of purchasing or booking a service.
+    </p>
+
+
+    <h2>Types of Messages</h2>
+
+    <p>Service-related messages may include:</p>
+
+    <ul>
+        <li>Appointment confirmations;</li>
+        <li>Appointment reminders;</li>
+        <li>Scheduling or rescheduling updates;</li>
+        <li>Cancellation notices;</li>
+        <li>Provider or location updates; and</li>
+        <li>Replies to client-initiated appointment questions.</li>
+    </ul>
+
+
+    {% if
+        website_settings
+        .include_marketing_sms_in_10dlc_application
+    %}
+
+        <h2>Marketing Messages</h2>
+
+        <p>
+            Marketing messages may include special offers, service
+            information, business updates, and event announcements.
+            Marketing consent requires a separate optional, unchecked
+            consent checkbox and is not combined with service-message
+            consent.
+        </p>
+
+    {% endif %}
+
+
+    <h2>Message Frequency and Charges</h2>
+
+    <p>
+        Message frequency varies according to appointments, client requests,
+        and any messaging programs for which the client has separately
+        provided consent. Message and data rates may apply under the
+        recipient's wireless plan. Wireless carriers are not responsible
+        for delayed or undelivered messages.
+    </p>
+
+
+    <h2>Opting Out</h2>
+
+    <div class="notice-box">
+        Reply <strong>STOP</strong> to opt out. {{ business_name }} will
+        stop further messages covered by the opt-out request, except for a
+        final confirmation or messages otherwise permitted by law.
+    </div>
+
+    <p>
+        A client may also communicate a clear request to stop text messages
+        through another reasonable contact method. After opting out,
+        appointment communications may be provided by email or telephone
+        when available.
+    </p>
+
+
+    <h2>Help</h2>
+
+    <p>
+        Reply <strong>HELP</strong> for assistance or contact
+        {{ business_name }}.
+    </p>
+
+    {% if website_settings.appointment_contact_phone %}
+        <p>
+            Phone:
+            {{ website_settings.appointment_contact_phone }}
+        </p>
+    {% endif %}
+
+    {% if website_settings.appointment_contact_email %}
+        <p>
+            Email:
+            {{ website_settings.appointment_contact_email }}
+        </p>
+    {% endif %}
+
+
+    <h2>Privacy</h2>
+
+    <p>
+        Mobile information will not be shared with third parties or
+        affiliates for marketing or promotional purposes. Text messaging
+        originator opt-in data and consent information will not be shared
+        with any third parties.
+    </p>
+
+    <p>
+        Information may be shared with Peach Suite Pro,
+        telecommunications providers, and other service providers as
+        reasonably necessary to deliver and administer the messaging
+        service.
+    </p>
+
+    <p>
+        See the
+        <a href="{{ url_for('tenant_privacy') }}">Privacy Policy</a>
+        for additional information.
+    </p>
+
+
+    <h2>Changes to the Program</h2>
+
+    <p>
+        {{ business_name }} may modify or discontinue the messaging
+        program. Material changes will be reflected in the version of
+        these SMS Terms posted on this website.
+    </p>
+
+{% endblock %}

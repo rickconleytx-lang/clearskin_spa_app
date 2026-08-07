@@ -180,7 +180,8 @@ def validate_about_image_upload(uploaded_file):
 
 def upload_about_image_to_cloudinary(
     uploaded_file,
-    spa_id
+    spa_id,
+    business_unit_id
 ):
     if not CLOUDINARY_CONFIGURED:
         raise RuntimeError(
@@ -190,6 +191,7 @@ def upload_about_image_to_cloudinary(
     public_id = (
         "peach-suite-pro/"
         f"spa_{spa_id}/"
+        f"workspace_{business_unit_id}/"
         "website/about/main"
     )
 
@@ -1238,85 +1240,77 @@ def help_page_api(page_key):
 
 
 # =========================================================
-# CLEAR SKIN ESTHETICS — PUBLIC WEBSITE
+# REUSABLE PUBLIC WEBSITE DEFAULTS
+#
+# Neutral defaults for tenant/workspace public websites.
 # =========================================================
 
-CLEAR_SKIN_PUBLIC_HOSTS = {
-    "clearskinesthetics.peachsuitepro.com",
-    "clearskinesthetics.localhost",
-}
-
-CLEAR_SKIN_PUBLIC_SPA_ID = 1
-
-CLEAR_SKIN_PUBLIC_WEBSITE_DEFAULTS = {
+PUBLIC_WEBSITE_DEFAULTS = {
     "website_color_scheme": "peach_cream",
 
-    "include_marketing_sms_in_10dlc_application":
-        False,
+    "include_marketing_sms_in_10dlc_application": False,
+
+    "website_tagline": "Professional Services",
 
     "hero_headline": (
-        "Healthy skin begins with personalized care."
+        "Welcome. We're glad you're here."
     ),
+
+    "hero_description": (
+        "Explore our services, learn more about our business, "
+        "and book an appointment online."
+    ),
+
     "intro_heading": (
-        "Skincare designed for you"
+        "Personalized service for every client"
     ),
+
     "intro_description": (
-        "Every treatment begins with an understanding "
-        "of your skin and your goals. Together, we will "
-        "select the service that best supports your "
-        "skincare journey."
+        "Learn more about our services and choose the options "
+        "that best fit your needs."
     ),
 
     "show_promotional_section": False,
-
     "promotional_heading": "",
-
     "promotional_text": "",
 
     "show_about_section": True,
 
     "about_heading": (
-            "Personalized skincare with a personal touch"
+        "About Our Business"
     ),
 
     "about_description": (
-            "Clear Skin Esthetics provides thoughtful, "
-            "customized skincare in a comfortable and welcoming "
-            "environment. Each treatment is selected around your "
-            "skin, your goals, and the results you want to achieve."
+        "We are committed to providing professional, "
+        "personalized service in a welcoming environment."
     ),
 
     "about_image_url": "",
-
-    "about_image_alt": (
-            "Clear Skin Esthetics personalized skincare"
-    ),
+    "about_image_alt": "",
 
     "services_heading": (
-        "Professional treatments with a personal touch"
+        "Services designed around you"
     ),
+
     "services_description": (
-        "Explore a selection of treatments designed to "
-        "refresh, restore, and support healthier-looking skin."
+        "Explore the services currently offered by our business."
     ),
+
     "booking_heading": (
-        "Ready to make time for your skin?"
+        "Ready to schedule?"
     ),
+
     "booking_description": (
-        "Choose your service, select an available appointment, "
-        "and let Clear Skin Esthetics take care of the rest."
+        "Choose a service and select an available appointment time."
     ),
 
     "show_additional_menu_section": False,
 
     "additional_menu_heading": (
-        "Additional Add-ons & Menu"
+        "Additional Menu"
     ),
 
-    "additional_menu_description": (
-        "Enhance your treatment with optional "
-        "add-ons and specialty services."
-    ),
+    "additional_menu_description": "",
 
     "appointment_contact_email": "",
     "appointment_contact_phone": "",
@@ -1327,174 +1321,1037 @@ CLEAR_SKIN_PUBLIC_WEBSITE_DEFAULTS = {
 
 
 
-@app.before_request
-def route_clear_skin_public_home():
+def _build_unique_workspace_public_slug(
+    cur,
+    business_name,
+    business_unit_id
+):
     """
-    Show the Clear Skin public website when the request comes
-    through the Clear Skin Peach Suite Pro subdomain.
+    Build one safe globally unique public identifier for a
+    workspace's booking slug and hosted website subdomain.
 
-    The normal app.peachsuitepro.com root route remains unchanged.
+    The same identifier may be used for:
+        /book/<slug>
+        <slug>.peachsuitepro.com
+
+    Critical Peach Suite Pro hostnames are reserved.
     """
+    import re
+    import unicodedata
 
-    host = request.host.split(":", 1)[0].lower()
+    normalized_name = unicodedata.normalize(
+        "NFKD",
+        str(business_name or "")
+    )
 
-    if (
-        host in CLEAR_SKIN_PUBLIC_HOSTS
-        and request.method == "GET"
-        and request.path == "/"
-    ):
+    normalized_name = (
+        normalized_name
+        .encode("ascii", "ignore")
+        .decode("ascii")
+    )
 
+    base_slug = re.sub(
+        r"[^a-zA-Z0-9]+",
+        "-",
+        normalized_name
+    ).strip("-").lower()
 
-        website_settings = (
-            CLEAR_SKIN_PUBLIC_WEBSITE_DEFAULTS.copy()
+    if not base_slug:
+        base_slug = (
+            f"business-{business_unit_id}"
         )
 
-        services = []
-        additional_menu_items = []
+    # Leave room for a collision suffix while remaining
+    # comfortably inside booking_settings VARCHAR(120).
+    base_slug = base_slug[:100].strip("-")
 
-        conn = get_db_connection()
-        cur = conn.cursor()
+    if not base_slug:
+        base_slug = (
+            f"business-{business_unit_id}"
+        )
 
-        try:
-            cur.execute("""
-                SELECT
-                    service_name,
-                    public_description,
-                    default_duration_minutes
-                FROM service_name_types
-                WHERE spa_id = %s
-                  AND is_active = TRUE
-                  AND show_on_public_website = TRUE
-                ORDER BY
-                    website_sort_order NULLS LAST,
-                    service_name
-            """, (
-                CLEAR_SKIN_PUBLIC_SPA_ID,
-            ))
+    reserved_labels = {
+        "app",
+        "admin",
+        "api",
+        "www",
+        "mail",
+        "smtp",
+        "imap",
+        "pop",
+        "status",
+    }
 
-            for row in cur.fetchall():
-                service_name = row[0]
-                public_description = row[1]
-                duration_minutes = row[2]
+    candidate_number = 0
 
-                services.append({
-                    "name": service_name,
-                    "description": (
-                        public_description
-                        or (
-                            "Contact Clear Skin Esthetics "
-                            "to learn more about this service."
-                        )
-                    ),
-                    "duration": (
-                        f"{duration_minutes} minutes"
-                        if duration_minutes is not None
-                        else "Contact for duration"
-                    ),
-                })
-
-            cur.execute("""
-                SELECT
-                    item_name,
-                    price
-                FROM public_website_menu_items
-                WHERE spa_id = %s
-                  AND is_active = TRUE
-                ORDER BY
-                    sort_order NULLS LAST,
-                    item_name,
-                    menu_item_id
-            """, (
-                CLEAR_SKIN_PUBLIC_SPA_ID,
-            ))
-
-            for row in cur.fetchall():
-                additional_menu_items.append({
-                    "name": row[0],
-                    "price": f"${row[1]:,.2f}",
-                })
-
-            cur.execute("""
-                SELECT
-                    hero_headline,
-                    intro_heading,
-                    intro_description,
-                    show_promotional_section,
-                    promotional_heading,
-                    promotional_text,
-                    show_about_section,
-                    about_heading,
-                    about_description,
-                    about_image_url,
-                    about_image_alt,
-                    services_heading,
-                    services_description,
-                    show_additional_menu_section,
-                    additional_menu_heading,
-                    additional_menu_description,
-                    booking_heading,
-                    booking_description,
-                    website_color_scheme,
-                    include_marketing_sms_in_10dlc_application
-                FROM public_website_settings
-                WHERE spa_id = %s
-            """, (
-                CLEAR_SKIN_PUBLIC_SPA_ID,
-            ))
-
-            settings_row = cur.fetchone()
-
-            if settings_row:
-                website_settings = {
-                    "hero_headline": settings_row[0],
-                    "intro_heading": settings_row[1],
-                    "intro_description": settings_row[2],
-                    "show_promotional_section": settings_row[3],
-                    "promotional_heading": settings_row[4],
-                    "promotional_text": settings_row[5],
-                    "show_about_section": settings_row[6],
-                    "about_heading": settings_row[7],
-                    "about_description": settings_row[8],
-                    "about_image_url": settings_row[9] or "",
-                    "about_image_alt": settings_row[10] or "",
-                    "services_heading": settings_row[11],
-                    "services_description": settings_row[12],
-                    "show_additional_menu_section":
-                        settings_row[13],
-                    "additional_menu_heading":
-                        settings_row[14],
-                    "additional_menu_description":
-                        settings_row[15],
-                    "booking_heading": settings_row[16],
-                    "booking_description": settings_row[17],
-                    "website_color_scheme": (
-                        settings_row[18]
-                        or "peach_cream"
-                    ),
-                    "include_marketing_sms_in_10dlc_application":
-                        bool(settings_row[19]),
-            }
-
-        except Exception:
-            app.logger.exception(
-                "Could not load Clear Skin publicwebsite content."
+    while True:
+        if candidate_number == 0:
+            candidate = base_slug
+        elif candidate_number == 1:
+            candidate = (
+                f"{base_slug}-{business_unit_id}"
+            )
+        else:
+            candidate = (
+                f"{base_slug}-"
+                f"{business_unit_id}-"
+                f"{candidate_number}"
             )
 
-        finally:
-            cur.close()
-            conn.close()
+        candidate = candidate[:120].strip("-")
 
-        return render_template(
-            "public_site/clear_skin_home.html",
-            services=services,
-            additional_menu_items=
-                additional_menu_items,
-            website_settings=website_settings,
+        hostname = (
+            f"{candidate}.peachsuitepro.com"
         )
 
+        if candidate in reserved_labels:
+            candidate_number = max(
+                candidate_number + 1,
+                1
+            )
+            continue
+
+        cur.execute("""
+            SELECT
+                EXISTS (
+                    SELECT 1
+                    FROM booking_settings
+                    WHERE public_booking_slug = %s
+                ),
+                EXISTS (
+                    SELECT 1
+                    FROM public_website_domains
+                    WHERE hostname = %s
+                )
+        """, (
+            candidate,
+            hostname,
+        ))
+
+        slug_exists, hostname_exists = (
+            cur.fetchone()
+        )
+
+        if (
+            not slug_exists
+            and not hostname_exists
+        ):
+            return candidate
+
+        candidate_number += 1
 
 
+def _provision_new_business_workspace_foundation(
+    cur,
+    *,
+    spa_id,
+    administrator_user_id,
+    business_name,
+    actor_user_id=None,
+    contact_email="",
+    contact_phone=""
+):
+    """
+    Provision the required Enterprise, booking, and public
+    website foundation for one newly created business.
 
+    This function participates in the caller's transaction.
+    It does not commit independently.
+    """
+    defaults = PUBLIC_WEBSITE_DEFAULTS
+
+    # -----------------------------------------------------
+    # Default organization workspace
+    # -----------------------------------------------------
+    cur.execute("""
+        INSERT INTO business_units (
+            spa_id,
+            unit_name,
+            unit_type,
+            is_default,
+            is_active,
+            created_by,
+            updated_by
+        )
+        VALUES (
+            %s,
+            %s,
+            'organization',
+            TRUE,
+            TRUE,
+            %s,
+            %s
+        )
+        RETURNING business_unit_id
+    """, (
+        spa_id,
+        business_name,
+        actor_user_id,
+        actor_user_id,
+    ))
+
+    business_unit_id = cur.fetchone()[0]
+
+    # -----------------------------------------------------
+    # Administrator workspace membership
+    # -----------------------------------------------------
+    cur.execute("""
+        INSERT INTO business_unit_memberships (
+            spa_id,
+            business_unit_id,
+            user_id,
+            membership_role_code,
+            is_active,
+            granted_by
+        )
+        VALUES (
+            %s,
+            %s,
+            %s,
+            'organization_admin',
+            TRUE,
+            %s
+        )
+    """, (
+        spa_id,
+        business_unit_id,
+        administrator_user_id,
+        actor_user_id,
+    ))
+
+    # -----------------------------------------------------
+    # Shared safe public identifier
+    # -----------------------------------------------------
+    public_slug = (
+        _build_unique_workspace_public_slug(
+            cur,
+            business_name,
+            business_unit_id
+        )
+    )
+
+    # -----------------------------------------------------
+    # Disabled-safe online booking defaults
+    # -----------------------------------------------------
+    cur.execute("""
+        INSERT INTO booking_settings (
+            spa_id,
+            business_unit_id,
+            public_booking_slug,
+            created_by,
+            updated_by
+        )
+        VALUES (
+            %s,
+            %s,
+            %s,
+            %s,
+            %s
+        )
+    """, (
+        spa_id,
+        business_unit_id,
+        public_slug,
+        actor_user_id,
+        actor_user_id,
+    ))
+
+    # -----------------------------------------------------
+    # Neutral reusable public website defaults
+    # -----------------------------------------------------
+    cur.execute("""
+        INSERT INTO public_website_settings (
+            spa_id,
+            business_unit_id,
+
+            website_tagline,
+
+            hero_headline,
+            hero_description,
+
+            intro_heading,
+            intro_description,
+
+            show_promotional_section,
+            promotional_heading,
+            promotional_text,
+
+            show_about_section,
+            about_heading,
+            about_description,
+
+            services_heading,
+            services_description,
+
+            booking_heading,
+            booking_description,
+
+            show_additional_menu_section,
+            additional_menu_heading,
+            additional_menu_description,
+
+            website_color_scheme,
+
+            include_marketing_sms_in_10dlc_application,
+
+            appointment_contact_email,
+            appointment_contact_phone
+        )
+        VALUES (
+            %s,
+            %s,
+
+            %s,
+
+            %s,
+            %s,
+
+            %s,
+            %s,
+
+            %s,
+            %s,
+            %s,
+
+            %s,
+            %s,
+            %s,
+
+            %s,
+            %s,
+
+            %s,
+            %s,
+
+            %s,
+            %s,
+            %s,
+
+            %s,
+
+            %s,
+
+            %s,
+            %s
+        )
+    """, (
+        spa_id,
+        business_unit_id,
+
+        defaults["website_tagline"],
+
+        defaults["hero_headline"],
+        defaults["hero_description"],
+
+        defaults["intro_heading"],
+        defaults["intro_description"],
+
+        defaults["show_promotional_section"],
+        defaults["promotional_heading"],
+        defaults["promotional_text"],
+
+        defaults["show_about_section"],
+        defaults["about_heading"],
+        defaults["about_description"],
+
+        defaults["services_heading"],
+        defaults["services_description"],
+
+        defaults["booking_heading"],
+        defaults["booking_description"],
+
+        defaults["show_additional_menu_section"],
+        defaults["additional_menu_heading"],
+        defaults["additional_menu_description"],
+
+        defaults["website_color_scheme"],
+
+        defaults[
+            "include_marketing_sms_in_10dlc_application"
+        ],
+
+        str(contact_email or "").strip(),
+        str(contact_phone or "").strip(),
+    ))
+
+    # -----------------------------------------------------
+    # Peach Suite Pro hosted website domain
+    # -----------------------------------------------------
+    hostname = (
+        f"{public_slug}.peachsuitepro.com"
+    )
+
+    cur.execute("""
+        INSERT INTO public_website_domains (
+            spa_id,
+            business_unit_id,
+            hostname,
+            domain_type,
+            is_primary,
+            is_active
+        )
+        VALUES (
+            %s,
+            %s,
+            %s,
+            'hosted_subdomain',
+            TRUE,
+            TRUE
+        )
+    """, (
+        spa_id,
+        business_unit_id,
+        hostname,
+    ))
+
+    return {
+        "business_unit_id":
+            business_unit_id,
+        "public_booking_slug":
+            public_slug,
+        "public_website_hostname":
+            hostname,
+    }
+
+
+def _normalize_public_website_hostname(hostname):
+    """
+    Normalize a public website hostname for tenant resolution.
+
+    Local development hostnames such as:
+        clearskinesthetics.localhost
+    resolve through the corresponding hosted domain:
+        clearskinesthetics.peachsuitepro.com
+    """
+
+    hostname = str(
+        hostname or ""
+    ).strip().lower()
+
+    if ":" in hostname:
+        hostname = hostname.split(":", 1)[0]
+
+    hostname = hostname.rstrip(".")
+
+    if hostname.endswith(".localhost"):
+        subdomain = hostname[:-len(".localhost")]
+
+        if subdomain:
+            hostname = (
+                f"{subdomain}.peachsuitepro.com"
+            )
+
+    return hostname
+
+
+def _build_business_initials(business_name):
+    """
+    Create short display initials from the tenant business name.
+    """
+
+    words = [
+        word
+        for word in str(
+            business_name or ""
+        ).strip().split()
+        if word
+    ]
+
+    if not words:
+        return "PS"
+
+    if len(words) == 1:
+        return words[0][:2].upper()
+
+    return (
+        words[0][0]
+        + words[1][0]
+    ).upper()
+
+
+def _resolve_public_website_host(hostname):
+    """
+    Resolve a public hostname to one active Peach Suite Pro
+    tenant workspace.
+
+    This helper is not wired into request routing yet.
+    """
+
+    hostname = (
+        _normalize_public_website_hostname(
+            hostname
+        )
+    )
+
+    if not hostname:
+        return None
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                pwd.spa_id,
+                pwd.business_unit_id,
+                pwd.hostname,
+
+                s.spa_name,
+                bu.unit_name,
+
+                bs.public_booking_slug,
+                COALESCE(
+                    bs.public_booking_enabled,
+                    FALSE
+                )
+
+            FROM public_website_domains pwd
+
+            JOIN business_units bu
+              ON bu.business_unit_id =
+                    pwd.business_unit_id
+             AND bu.spa_id =
+                    pwd.spa_id
+
+            JOIN spas s
+              ON s.spa_id =
+                    pwd.spa_id
+
+            LEFT JOIN booking_settings bs
+              ON bs.spa_id =
+                    pwd.spa_id
+             AND bs.business_unit_id =
+                    pwd.business_unit_id
+
+            WHERE pwd.hostname = %s
+              AND pwd.is_active = TRUE
+              AND bu.is_active = TRUE
+              AND s.active = TRUE
+
+            LIMIT 1
+        """, (hostname,))
+
+        row = cur.fetchone()
+
+        if not row:
+            return None
+
+        spa_name = str(
+            row[3] or ""
+        ).strip()
+
+        unit_name = str(
+            row[4] or ""
+        ).strip()
+
+        business_name = (
+            unit_name
+            or spa_name
+            or "Business"
+        )
+
+        return {
+            "spa_id": row[0],
+            "business_unit_id": row[1],
+            "hostname": row[2],
+            "spa_name": spa_name,
+            "unit_name": unit_name,
+            "business_name": business_name,
+            "business_initials":
+                _build_business_initials(
+                    business_name
+                ),
+            "public_booking_slug":
+                str(row[5] or "").strip(),
+            "public_booking_enabled":
+                bool(row[6]),
+        }
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _get_public_website_url_for_workspace(
+    spa_id,
+    business_unit_id
+):
+    """
+    Return the primary public website URL for one workspace.
+
+    In local development, hosted Peach Suite Pro subdomains are
+    translated to the matching .localhost hostname while preserving
+    the current request port.
+    """
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                hostname
+
+            FROM public_website_domains
+
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND is_active = TRUE
+
+            ORDER BY
+                is_primary DESC,
+                public_website_domain_id
+
+            LIMIT 1
+        """, (
+            spa_id,
+            business_unit_id,
+        ))
+
+        row = cur.fetchone()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if not row:
+        return ""
+
+    hostname = str(
+        row[0] or ""
+    ).strip().lower()
+
+    if not hostname:
+        return ""
+
+    request_host = (
+        request.host.split(":", 1)[0].lower()
+    )
+
+    request_port = (
+        request.host.split(":", 1)[1]
+        if ":" in request.host
+        else ""
+    )
+
+    if (
+        request_host in {
+            "127.0.0.1",
+            "localhost",
+        }
+        and hostname.endswith(
+            ".peachsuitepro.com"
+        )
+    ):
+        subdomain = hostname[
+            :-len(".peachsuitepro.com")
+        ]
+
+        if subdomain:
+            port_suffix = (
+                f":{request_port}"
+                if request_port
+                else ""
+            )
+
+            return (
+                f"http://{subdomain}.localhost"
+                f"{port_suffix}/"
+            )
+
+    return f"https://{hostname}/"
+
+
+def _load_public_website_content(tenant):
+    """
+    Load reusable public website content for one tenant workspace.
+
+    This helper expects the workspace website migration to exist,
+    but it is not wired into request routing yet.
+    """
+
+    spa_id = tenant["spa_id"]
+    business_unit_id = tenant["business_unit_id"]
+    business_name = tenant["business_name"]
+
+    website_settings = (
+        PUBLIC_WEBSITE_DEFAULTS.copy()
+    )
+
+    services = []
+    additional_menu_items = []
+    website_links = []
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                website_tagline,
+                hero_headline,
+                hero_description,
+
+                intro_heading,
+                intro_description,
+
+                show_promotional_section,
+                promotional_heading,
+                promotional_text,
+
+                show_about_section,
+                about_heading,
+                about_description,
+                about_image_url,
+                about_image_alt,
+
+                services_heading,
+                services_description,
+
+                show_additional_menu_section,
+                additional_menu_heading,
+                additional_menu_description,
+
+                booking_heading,
+                booking_description,
+
+                website_color_scheme,
+                include_marketing_sms_in_10dlc_application,
+
+                appointment_contact_email,
+                appointment_contact_phone
+
+            FROM public_website_settings
+
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+
+            LIMIT 1
+        """, (
+            spa_id,
+            business_unit_id,
+        ))
+
+        row = cur.fetchone()
+
+        if row:
+            website_settings.update({
+                "website_tagline":
+                    row[0]
+                    if row[0] is not None
+                    else PUBLIC_WEBSITE_DEFAULTS[
+                        "website_tagline"
+                    ],
+
+                "hero_headline":
+                    row[1]
+                    if row[1] is not None
+                    else PUBLIC_WEBSITE_DEFAULTS[
+                        "hero_headline"
+                    ],
+
+                "hero_description":
+                    row[2]
+                    if row[2] is not None
+                    else PUBLIC_WEBSITE_DEFAULTS[
+                        "hero_description"
+                    ],
+
+                "intro_heading":
+                    row[3]
+                    if row[3] is not None
+                    else PUBLIC_WEBSITE_DEFAULTS[
+                        "intro_heading"
+                    ],
+
+                "intro_description":
+                    row[4]
+                    if row[4] is not None
+                    else PUBLIC_WEBSITE_DEFAULTS[
+                        "intro_description"
+                    ],
+
+                "show_promotional_section":
+                    bool(row[5]),
+
+                "promotional_heading":
+                    row[6] or "",
+
+                "promotional_text":
+                    row[7] or "",
+
+                "show_about_section":
+                    bool(row[8]),
+
+                "about_heading":
+                    row[9]
+                    if row[9] is not None
+                    else PUBLIC_WEBSITE_DEFAULTS[
+                        "about_heading"
+                    ],
+
+                "about_description":
+                    row[10]
+                    if row[10] is not None
+                    else PUBLIC_WEBSITE_DEFAULTS[
+                        "about_description"
+                    ],
+
+                "about_image_url":
+                    row[11] or "",
+
+                "about_image_alt":
+                    row[12] or "",
+
+                "services_heading":
+                    row[13]
+                    if row[13] is not None
+                    else PUBLIC_WEBSITE_DEFAULTS[
+                        "services_heading"
+                    ],
+
+                "services_description":
+                    row[14]
+                    if row[14] is not None
+                    else PUBLIC_WEBSITE_DEFAULTS[
+                        "services_description"
+                    ],
+
+                "show_additional_menu_section":
+                    bool(row[15]),
+
+                "additional_menu_heading":
+                    row[16]
+                    if row[16] is not None
+                    else PUBLIC_WEBSITE_DEFAULTS[
+                        "additional_menu_heading"
+                    ],
+
+                "additional_menu_description":
+                    row[17] or "",
+
+                "booking_heading":
+                    row[18]
+                    if row[18] is not None
+                    else PUBLIC_WEBSITE_DEFAULTS[
+                        "booking_heading"
+                    ],
+
+                "booking_description":
+                    row[19]
+                    if row[19] is not None
+                    else PUBLIC_WEBSITE_DEFAULTS[
+                        "booking_description"
+                    ],
+
+                "website_color_scheme":
+                    str(
+                        row[20]
+                        or PUBLIC_WEBSITE_DEFAULTS[
+                            "website_color_scheme"
+                        ]
+                    ).strip().lower(),
+
+                "include_marketing_sms_in_10dlc_application":
+                    bool(row[21]),
+
+                "appointment_contact_email":
+                    row[22] or "",
+
+                "appointment_contact_phone":
+                    row[23] or "",
+            })
+
+        cur.execute("""
+            SELECT
+                snt.service_name,
+                pws.public_description,
+                snt.default_duration_minutes
+
+            FROM public_website_services pws
+
+            JOIN service_name_types snt
+              ON snt.service_type_id =
+                    pws.service_type_id
+             AND snt.spa_id =
+                    pws.spa_id
+
+            WHERE pws.spa_id = %s
+              AND pws.business_unit_id = %s
+              AND pws.show_on_public_website = TRUE
+              AND snt.is_active = TRUE
+
+            ORDER BY
+                pws.website_sort_order NULLS LAST,
+                snt.service_name
+        """, (
+            spa_id,
+            business_unit_id,
+        ))
+
+        for row in cur.fetchall():
+            duration_minutes = row[2]
+
+            services.append({
+                "name": row[0],
+
+                "description": (
+                    row[1]
+                    or (
+                        f"Contact {business_name} "
+                        "to learn more about this service."
+                    )
+                ),
+
+                "duration": (
+                    f"{duration_minutes} minutes"
+                    if duration_minutes is not None
+                    else "Contact for duration"
+                ),
+            })
+
+        cur.execute("""
+            SELECT
+                item_name,
+                price
+
+            FROM public_website_menu_items
+
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND is_active = TRUE
+
+            ORDER BY
+                sort_order NULLS LAST,
+                item_name,
+                menu_item_id
+        """, (
+            spa_id,
+            business_unit_id,
+        ))
+
+        for row in cur.fetchall():
+            additional_menu_items.append({
+                "name": row[0],
+                "price": f"${row[1]:,.2f}",
+            })
+
+        cur.execute("""
+            SELECT
+                link_label,
+                link_url
+
+            FROM public_website_links
+
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND is_active = TRUE
+
+            ORDER BY
+                sort_order NULLS LAST,
+                link_label,
+                public_website_link_id
+        """, (
+            spa_id,
+            business_unit_id,
+        ))
+
+        for row in cur.fetchall():
+            website_links.append({
+                "label": row[0],
+                "url": row[1],
+            })
+
+        return {
+            "website_settings":
+                website_settings,
+
+            "services":
+                services,
+
+            "additional_menu_items":
+                additional_menu_items,
+
+            "website_links":
+                website_links,
+        }
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _render_public_tenant_home(tenant):
+    """
+    Render the reusable public website for one resolved
+    tenant workspace.
+
+    This helper is not wired into request routing yet.
+    """
+
+    content = (
+        _load_public_website_content(
+            tenant
+        )
+    )
+
+    return render_template(
+        "public_site/tenant_home.html",
+
+        business_name=
+            tenant["business_name"],
+
+        business_initials=
+            tenant["business_initials"],
+
+        public_booking_slug=
+            tenant["public_booking_slug"],
+
+        public_booking_enabled=
+            tenant["public_booking_enabled"],
+
+        website_settings=
+            content["website_settings"],
+
+        services=
+            content["services"],
+
+        additional_menu_items=
+            content[
+                "additional_menu_items"
+            ],
+
+        website_links=
+            content["website_links"],
+    )
+
+
+@app.before_request
+def route_public_tenant_home():
+    """
+    Render the reusable tenant website when an active public
+    website hostname requests the site root.
+
+    Requests for app.peachsuitepro.com and unknown hosts fall
+    through to the normal authenticated Peach Suite Pro routes.
+    """
+
+    if (
+        request.method != "GET"
+        or request.path != "/"
+    ):
+        return None
+
+    tenant = _resolve_public_website_host(
+        request.host
+    )
+
+    if not tenant:
+        return None
+
+    return _render_public_tenant_home(
+        tenant
+    )
 
 
 
@@ -8148,11 +9005,19 @@ def add_consent_record(
     consent_status,
     consent_source="Admin Updated",
     consent_note=None,
-    updated_by=None
+    updated_by=None,
+    *,
+    business_unit_id
 ):
+    if business_unit_id is None:
+        raise ValueError(
+            "business_unit_id is required for consent records"
+        )
+
     cur.execute("""
         INSERT INTO consent_records (
             spa_id,
+            business_unit_id,
             client_id,
             consent_type,
             consent_status,
@@ -8160,9 +9025,10 @@ def add_consent_record(
             consent_note,
             updated_by
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
     """, (
         spa_id,
+        business_unit_id,
         client_id,
         consent_type,
         consent_status,
@@ -8185,10 +9051,10 @@ def load_spa():
         "telnyx_sms_webhook",
         "public_booking",
         "public_booking_confirm",
-        "clear_skin_booking_policy",
-        "clear_skin_privacy",
-        "clear_skin_terms",
-        "clear_skin_sms_terms",
+        "tenant_booking_policy",
+        "tenant_privacy",
+        "tenant_terms",
+        "tenant_sms_terms",
     ):
         return
 
@@ -8969,94 +9835,156 @@ def send_email(
 
 
 # =========================================================
-# CLEAR SKIN ESTHETICS — PUBLIC POLICY PAGES
-# Place near the Clear Skin public-home code.
+# REUSABLE TENANT PUBLIC POLICY RENDERER
 # =========================================================
 
-from flask import abort  # Add abort to the existing Flask import if needed.
-
-
-def _is_clear_skin_public_host():
-    host = request.host.split(":", 1)[0].lower()
-
-    if host in CLEAR_SKIN_PUBLIC_HOSTS:
-
-        return True
-
-    # Allows easy browser testing at 127.0.0.1 while Flask is in debug mode.
-    return bool(
-        app.debug
-        and host in {"127.0.0.1", "localhost"}
-    )
-
-
-def _render_clear_skin_policy(
+def _render_public_tenant_policy(
+    tenant,
     template_name,
     page_title,
     page_intro,
     page_description
 ):
-    if not _is_clear_skin_public_host():
-        abort(404)
+    """
+    Render one public policy page for a resolved tenant
+    workspace.
+
+    This helper is not wired into public routes yet.
+    """
+
+    content = (
+        _load_public_website_content(
+            tenant
+        )
+    )
 
     return render_template(
         template_name,
-        page_title=page_title,
-        page_intro=page_intro,
-        page_description=page_description
+
+        page_title=
+            page_title,
+
+        page_intro=
+            page_intro,
+
+        page_description=
+            page_description,
+
+        business_name=
+            tenant["business_name"],
+
+        business_initials=
+            tenant["business_initials"],
+
+        public_booking_slug=
+            tenant["public_booking_slug"],
+
+        public_booking_enabled=
+            tenant["public_booking_enabled"],
+
+        website_settings=
+            content["website_settings"],
     )
 
 
+# =========================================================
+# TENANT PUBLIC POLICY PAGES
+# =========================================================
+
+
+def _resolve_public_tenant_request():
+    """
+    Resolve the current request hostname to one active
+    public tenant workspace or return 404.
+    """
+
+    tenant = _resolve_public_website_host(
+        request.host
+    )
+
+    if not tenant:
+        abort(404)
+
+    return tenant
+
+
 @app.route("/booking-policy")
-def clear_skin_booking_policy():
-    return _render_clear_skin_policy(
-        "public_site/clear_skin_booking_policy.html",
+def tenant_booking_policy():
+    tenant = _resolve_public_tenant_request()
+
+    business_name = tenant["business_name"]
+
+    return _render_public_tenant_policy(
+        tenant,
+        "public_site/tenant_booking_policy.html",
         "Booking & Cancellation Policy",
-        "Clear expectations for booking, rescheduling, late arrivals, and appointment care.",
-        "Clear Skin Esthetics booking and cancellation policy."
+        (
+            "Important information about booking, "
+            "rescheduling, cancellations, late arrivals, "
+            "and appointment expectations."
+        ),
+        (
+            f"{business_name} booking and "
+            "cancellation policy."
+        )
     )
 
 
 @app.route("/privacy")
-def clear_skin_privacy():
-    return _render_clear_skin_policy(
-        "public_site/clear_skin_privacy.html",
+def tenant_privacy():
+    tenant = _resolve_public_tenant_request()
+
+    business_name = tenant["business_name"]
+
+    return _render_public_tenant_policy(
+        tenant,
+        "public_site/tenant_privacy.html",
         "Privacy Policy",
-        "How Clear Skin Esthetics collects, uses, protects, and shares information.",
-        "Clear Skin Esthetics privacy policy."
+        (
+            f"How {business_name} collects, uses, "
+            "protects, and shares information."
+        ),
+        f"{business_name} privacy policy."
     )
 
 
 @app.route("/terms")
-def clear_skin_terms():
-    return _render_clear_skin_policy(
-        "public_site/clear_skin_terms.html",
+def tenant_terms():
+    tenant = _resolve_public_tenant_request()
+
+    business_name = tenant["business_name"]
+
+    return _render_public_tenant_policy(
+        tenant,
+        "public_site/tenant_terms.html",
         "Terms & Conditions",
-        "Terms governing the Clear Skin Esthetics website, booking system, and services.",
-        "Clear Skin Esthetics website and booking terms."
+        (
+            f"Terms governing the {business_name} "
+            "website, booking system, and services."
+        ),
+        (
+            f"{business_name} website and "
+            "booking terms."
+        )
     )
 
 
 @app.route("/sms-terms")
-def clear_skin_sms_terms():
-    return _render_clear_skin_policy(
-        "public_site/clear_skin_sms_terms.html",
+def tenant_sms_terms():
+    tenant = _resolve_public_tenant_request()
+
+    business_name = tenant["business_name"]
+
+    return _render_public_tenant_policy(
+        tenant,
+        "public_site/tenant_sms_terms.html",
         "SMS Terms",
-        "Terms for optional Clear Skin Esthetics appointment-related text messages.",
-        "Clear Skin Esthetics SMS messaging terms."
+        (
+            f"Terms for optional {business_name} "
+            "text messaging."
+        ),
+        f"{business_name} SMS messaging terms."
     )
-
-
-# IMPORTANT:
-# If Peach Suite Pro has a global public-endpoint allowlist, add:
-#
-# "clear_skin_booking_policy",
-# "clear_skin_privacy",
-# "clear_skin_terms",
-# "clear_skin_sms_terms",
-#
-# alongside the existing "public_booking" and "public_booking_confirm" entries.
-
 
 
 #  ----------------------
@@ -9849,37 +10777,17 @@ def update_dropdown_labels():
 )
 def public_website_about_photo():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
 
-    request_host = (
-        request.host.split(":", 1)[0].lower()
+    if not business_unit_id:
+        abort(403)
+
+    public_website_url = (
+        _get_public_website_url_for_workspace(
+            spa_id,
+            business_unit_id
+        )
     )
-
-    request_port = (
-        request.host.split(":", 1)[1]
-        if ":" in request.host
-        else ""
-    )
-
-    if request_host in {
-        "127.0.0.1",
-        "localhost"
-    }:
-        port_suffix = (
-            f":{request_port}"
-            if request_port
-            else ""
-        )
-
-        public_website_url = (
-            "http://clearskinesthetics.localhost"
-            f"{port_suffix}/"
-        )
-
-    else:
-        public_website_url = (
-            "https://clearskinesthetics."
-            "peachsuitepro.com/"
-        )
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -9892,19 +10800,26 @@ def public_website_about_photo():
                 about_image_alt
             FROM public_website_settings
             WHERE spa_id = %s
-        """, (spa_id,))
+              AND business_unit_id = %s
+        """, (
+            spa_id,
+            business_unit_id,
+        ))
 
         row = cur.fetchone()
 
         if not row:
             defaults = (
-                CLEAR_SKIN_PUBLIC_WEBSITE_DEFAULTS.copy()
+                PUBLIC_WEBSITE_DEFAULTS.copy()
             )
 
             cur.execute("""
                 INSERT INTO public_website_settings (
                     spa_id,
+                    business_unit_id,
+                    website_tagline,
                     hero_headline,
+                    hero_description,
                     intro_heading,
                     intro_description,
                     show_about_section,
@@ -9922,13 +10837,20 @@ def public_website_about_photo():
                     %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s, %s,
-                    %s, %s
+                    %s, %s, %s, %s,
+                    %s
                 )
-                ON CONFLICT (spa_id)
+                ON CONFLICT (
+                    spa_id,
+                    business_unit_id
+                )
                 DO NOTHING
             """, (
                 spa_id,
+                business_unit_id,
+                defaults["website_tagline"],
                 defaults["hero_headline"],
+                defaults["hero_description"],
                 defaults["intro_heading"],
                 defaults["intro_description"],
                 defaults["show_about_section"],
@@ -9952,7 +10874,11 @@ def public_website_about_photo():
                     about_image_alt
                 FROM public_website_settings
                 WHERE spa_id = %s
-            """, (spa_id,))
+                  AND business_unit_id = %s
+            """, (
+                spa_id,
+                business_unit_id,
+            ))
 
             row = cur.fetchone()
 
@@ -9986,7 +10912,11 @@ def public_website_about_photo():
                         about_image_public_id = NULL,
                         updated_at = NOW()
                     WHERE spa_id = %s
-                """, (spa_id,))
+                      AND business_unit_id = %s
+                """, (
+                    spa_id,
+                    business_unit_id,
+                ))
 
                 conn.commit()
 
@@ -10105,7 +11035,8 @@ def public_website_about_photo():
                 upload_result = (
                     upload_about_image_to_cloudinary(
                         uploaded_file,
-                        spa_id
+                        spa_id,
+                        business_unit_id
                     )
                 )
 
@@ -10138,11 +11069,13 @@ def public_website_about_photo():
                     about_image_alt = %s,
                     updated_at = NOW()
                 WHERE spa_id = %s
+                  AND business_unit_id = %s
             """, (
                 upload_result["secure_url"],
                 upload_result["public_id"],
                 image_alt,
                 spa_id,
+                business_unit_id,
             ))
 
             conn.commit()
@@ -10180,37 +11113,17 @@ def public_website_about_photo():
 )
 def public_website_settings():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
 
-    request_host = (
-        request.host.split(":", 1)[0].lower()
+    if not business_unit_id:
+        abort(403)
+
+    public_website_url = (
+        _get_public_website_url_for_workspace(
+            spa_id,
+            business_unit_id
+        )
     )
-
-    request_port = (
-        request.host.split(":", 1)[1]
-        if ":" in request.host
-        else ""
-    )
-
-    if request_host in {
-        "127.0.0.1",
-        "localhost"
-    }:
-        port_suffix = (
-            f":{request_port}"
-            if request_port
-            else ""
-        )
-
-        public_website_url = (
-            "http://clearskinesthetics.localhost"
-            f"{port_suffix}/"
-        )
-
-    else:
-        public_website_url = (
-            "https://clearskinesthetics."
-            "peachsuitepro.com/"
-        )
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -10224,13 +11137,16 @@ def public_website_settings():
 
             if action == "reset":
                 defaults = (
-                    CLEAR_SKIN_PUBLIC_WEBSITE_DEFAULTS.copy()
+                    PUBLIC_WEBSITE_DEFAULTS.copy()
                 )
 
                 cur.execute("""
                     INSERT INTO public_website_settings (
                         spa_id,
+                        business_unit_id,
+                        website_tagline,
                         hero_headline,
+                        hero_description,
                         intro_heading,
                         intro_description,
                         show_promotional_section,
@@ -10254,15 +11170,19 @@ def public_website_settings():
                         %s, %s, %s, %s,
                         %s, %s, %s, %s,
                         %s, %s, %s, %s,
-                        %s, %s, %s
+                        %s, %s, %s, %s,
+                        %s, %s
                     )
-                    ON CONFLICT (spa_id)
+                    ON CONFLICT (
+                        spa_id,
+                        business_unit_id
+                    )
                     DO UPDATE SET
+                        website_tagline = EXCLUDED.website_tagline,
                         hero_headline = EXCLUDED.hero_headline,
+                        hero_description = EXCLUDED.hero_description,
                         intro_heading = EXCLUDED.intro_heading,
-                        intro_description = (
-                            EXCLUDED.intro_description
-                        ),
+                        intro_description = EXCLUDED.intro_description,
                         show_promotional_section = (
                             EXCLUDED.show_promotional_section
                         ),
@@ -10309,7 +11229,10 @@ def public_website_settings():
                         updated_at = NOW()
                 """, (
                     spa_id,
+                    business_unit_id,
+                    defaults["website_tagline"],
                     defaults["hero_headline"],
+                    defaults["hero_description"],
                     defaults["intro_heading"],
                     defaults["intro_description"],
                     defaults["show_promotional_section"],
@@ -10360,9 +11283,23 @@ def public_website_settings():
                         in request.form
                     ),
 
+                    "website_tagline": (
+                        request.form.get(
+                            "website_tagline"
+                        )
+                        or ""
+                    ).strip(),
+
                     "hero_headline": (
                         request.form.get(
                             "hero_headline"
+                        )
+                        or ""
+                    ).strip(),
+
+                    "hero_description": (
+                        request.form.get(
+                            "hero_description"
                         )
                         or ""
                     ).strip(),
@@ -10519,9 +11456,17 @@ def public_website_settings():
                     )
 
                 field_rules = {
+                    "website_tagline": (
+                        "Website Tagline",
+                        180
+                    ),
                     "hero_headline": (
                         "Hero Headline",
                         180
+                    ),
+                    "hero_description": (
+                        "Hero Description",
+                        1000
                     ),
                     "intro_heading": (
                         "Intro Heading",
@@ -10842,7 +11787,10 @@ def public_website_settings():
             cur.execute("""
                 INSERT INTO public_website_settings (
                     spa_id,
+                    business_unit_id,
+                    website_tagline,
                     hero_headline,
+                    hero_description,
                     intro_heading,
                     intro_description,
                     show_promotional_section,
@@ -10871,15 +11819,19 @@ def public_website_settings():
                     %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s, %s,
-                    %s, %s, %s
+                    %s, %s, %s, %s,
+                    %s, %s
                 )
-                ON CONFLICT (spa_id)
+                ON CONFLICT (
+                    spa_id,
+                    business_unit_id
+                )
                 DO UPDATE SET
+                    website_tagline = EXCLUDED.website_tagline,
                     hero_headline = EXCLUDED.hero_headline,
+                    hero_description = EXCLUDED.hero_description,
                     intro_heading = EXCLUDED.intro_heading,
-                    intro_description = (
-                        EXCLUDED.intro_description
-                    ),
+                    intro_description = EXCLUDED.intro_description,
                     show_promotional_section = (
                         EXCLUDED.show_promotional_section
                     ),
@@ -10934,7 +11886,10 @@ def public_website_settings():
                     updated_at = NOW()
             """, (
                 spa_id,
+                business_unit_id,
+                settings["website_tagline"],
                 settings["hero_headline"],
+                settings["hero_description"],
                 settings["intro_heading"],
                 settings["intro_description"],
                 settings["show_promotional_section"],
@@ -10977,7 +11932,9 @@ def public_website_settings():
 
         cur.execute("""
             SELECT
+                website_tagline,
                 hero_headline,
+                hero_description,
                 intro_heading,
                 intro_description,
                 show_promotional_section,
@@ -11001,46 +11958,52 @@ def public_website_settings():
                 include_marketing_sms_in_10dlc_application
             FROM public_website_settings
             WHERE spa_id = %s
-        """, (spa_id,))
+              AND business_unit_id = %s
+        """, (
+            spa_id,
+            business_unit_id,
+        ))
 
         row = cur.fetchone()
 
         if row:
             settings = {
-                "hero_headline": row[0],
-                "intro_heading": row[1],
-                "intro_description": row[2],
-                "show_promotional_section": row[3],
-                "promotional_heading": row[4] or "",
-                "promotional_text": row[5] or "",
-                "show_about_section": row[6],
-                "about_heading": row[7],
-                "about_description": row[8],
-                "about_image_url": row[9] or "",
-                "about_image_alt": row[10] or "",
-                "services_heading": row[11],
-                "services_description": row[12],
+                "website_tagline": row[0] or "",
+                "hero_headline": row[1],
+                "hero_description": row[2] or "",
+                "intro_heading": row[3],
+                "intro_description": row[4],
+                "show_promotional_section": row[5],
+                "promotional_heading": row[6] or "",
+                "promotional_text": row[7] or "",
+                "show_about_section": row[8],
+                "about_heading": row[9],
+                "about_description": row[10],
+                "about_image_url": row[11] or "",
+                "about_image_alt": row[12] or "",
+                "services_heading": row[13],
+                "services_description": row[14],
                 "show_additional_menu_section":
-                    row[13],
+                    row[15],
                 "additional_menu_heading":
-                    row[14] or "",
+                    row[16] or "",
                 "additional_menu_description":
-                    row[15] or "",
-                "booking_heading": row[16],
-                "booking_description": row[17],
+                    row[17] or "",
+                "booking_heading": row[18],
+                "booking_description": row[19],
                 "appointment_contact_email":
-                    row[18] or "",
+                    row[20] or "",
                 "appointment_contact_phone":
-                    row[19] or "",
+                    row[21] or "",
                 "website_color_scheme":
-                    row[20] or "peach_cream",
+                    row[22] or "peach_cream",
                 "include_marketing_sms_in_10dlc_application":
-                    bool(row[21]),
+                    bool(row[23]),
             }
 
         else:
             settings = (
-                CLEAR_SKIN_PUBLIC_WEBSITE_DEFAULTS.copy()
+                PUBLIC_WEBSITE_DEFAULTS.copy()
             )
 
     finally:
@@ -11079,6 +12042,10 @@ def public_website_settings():
 )
 def public_website_menu_items():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
 
     status_filter = (
         request.args.get("status")
@@ -11101,9 +12068,13 @@ def public_website_menu_items():
             is_active
         FROM public_website_menu_items
         WHERE spa_id = %s
+          AND business_unit_id = %s
     """
 
-    params = [spa_id]
+    params = [
+        spa_id,
+        business_unit_id,
+    ]
 
     if status_filter == "active":
         query += """
@@ -11144,7 +12115,11 @@ def public_website_menu_items():
                 )
             FROM public_website_menu_items
             WHERE spa_id = %s
-        """, (spa_id,))
+              AND business_unit_id = %s
+        """, (
+            spa_id,
+            business_unit_id,
+        ))
 
         count_row = cur.fetchone()
 
@@ -11155,36 +12130,18 @@ def public_website_menu_items():
         cur.close()
         conn.close()
 
-    request_host = (
-        request.host.split(":", 1)[0].lower()
+    public_website_url = (
+        _get_public_website_url_for_workspace(
+            spa_id,
+            business_unit_id
+        )
     )
 
-    request_port = (
-        request.host.split(":", 1)[1]
-        if ":" in request.host
+    public_menu_url = (
+        f"{public_website_url}#additional-menu"
+        if public_website_url
         else ""
     )
-
-    if request_host in {
-        "127.0.0.1",
-        "localhost"
-    }:
-        port_suffix = (
-            f":{request_port}"
-            if request_port
-            else ""
-        )
-
-        public_menu_url = (
-            "http://clearskinesthetics.localhost"
-            f"{port_suffix}/#additional-menu"
-        )
-
-    else:
-        public_menu_url = (
-            "https://clearskinesthetics."
-            "peachsuitepro.com/#additional-menu"
-        )
 
     return render_template(
         "public_website_menu_items.html",
@@ -11209,6 +12166,10 @@ def add_public_website_menu_item():
     from decimal import Decimal, InvalidOperation
 
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
 
     if request.method == "POST":
         item_name = (
@@ -11332,14 +12293,16 @@ def add_public_website_menu_item():
             cur.execute("""
                 INSERT INTO public_website_menu_items (
                     spa_id,
+                    business_unit_id,
                     item_name,
                     price,
                     sort_order,
                     is_active
                 )
-                VALUES (%s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s)
             """, (
                 spa_id,
+                business_unit_id,
                 item_name,
                 price,
                 sort_order,
@@ -11352,8 +12315,12 @@ def add_public_website_menu_item():
             conn.rollback()
 
             if (
-                "public_website_menu_items_spa_name_key"
-                in str(exc)
+                (
+                    "uq_public_website_menu_item_workspace_name"
+                    in str(exc)
+                    or "public_website_menu_items_spa_name_key"
+                    in str(exc)
+                )
             ):
                 flash(
                     (
@@ -11409,6 +12376,10 @@ def edit_public_website_menu_item(
     from decimal import Decimal, InvalidOperation
 
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -11424,9 +12395,11 @@ def edit_public_website_menu_item(
             FROM public_website_menu_items
             WHERE menu_item_id = %s
               AND spa_id = %s
+              AND business_unit_id = %s
         """, (
             menu_item_id,
-            spa_id
+            spa_id,
+            business_unit_id
         ))
 
         menu_item = cur.fetchone()
@@ -11574,13 +12547,15 @@ def edit_public_website_menu_item(
                         updated_at = NOW()
                     WHERE menu_item_id = %s
                       AND spa_id = %s
+                      AND business_unit_id = %s
                 """, (
                     item_name,
                     price,
                     sort_order,
                     is_active,
                     menu_item_id,
-                    spa_id
+                    spa_id,
+                    business_unit_id
                 ))
 
                 conn.commit()
@@ -11589,8 +12564,12 @@ def edit_public_website_menu_item(
                 conn.rollback()
 
                 if (
-                    "public_website_menu_items_spa_name_key"
+                    (
+                    "uq_public_website_menu_item_workspace_name"
                     in str(exc)
+                    or "public_website_menu_items_spa_name_key"
+                    in str(exc)
+                )
                 ):
                     flash(
                         (
@@ -11646,6 +12625,10 @@ def toggle_public_website_menu_item(
     menu_item_id
 ):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -11658,9 +12641,11 @@ def toggle_public_website_menu_item(
             FROM public_website_menu_items
             WHERE menu_item_id = %s
               AND spa_id = %s
+              AND business_unit_id = %s
         """, (
             menu_item_id,
-            spa_id
+            spa_id,
+            business_unit_id
         ))
 
         row = cur.fetchone()
@@ -11686,10 +12671,12 @@ def toggle_public_website_menu_item(
                 updated_at = NOW()
             WHERE menu_item_id = %s
               AND spa_id = %s
+              AND business_unit_id = %s
         """, (
             new_status,
             menu_item_id,
-            spa_id
+            spa_id,
+            business_unit_id
         ))
 
         conn.commit()
@@ -11713,6 +12700,1014 @@ def toggle_public_website_menu_item(
     )
 
 
+############################################
+#
+#   PUBLIC WEBSITE LINKS
+#
+############################################
+
+@app.route("/public-website-links")
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def public_website_links():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
+
+    status_filter = (
+        request.args.get("status")
+        or "active"
+    ).strip().lower()
+
+    if status_filter not in {
+        "active",
+        "hidden",
+        "all"
+    }:
+        status_filter = "active"
+
+    query = """
+        SELECT
+            public_website_link_id,
+            link_label,
+            link_url,
+            sort_order,
+            is_active
+
+        FROM public_website_links
+
+        WHERE spa_id = %s
+          AND business_unit_id = %s
+    """
+
+    params = [
+        spa_id,
+        business_unit_id,
+    ]
+
+    if status_filter == "active":
+        query += """
+          AND is_active = TRUE
+        """
+
+    elif status_filter == "hidden":
+        query += """
+          AND is_active = FALSE
+        """
+
+    query += """
+        ORDER BY
+            is_active DESC,
+            sort_order NULLS LAST,
+            link_label,
+            public_website_link_id
+    """
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            query,
+            tuple(params)
+        )
+
+        website_links = cur.fetchall()
+
+        cur.execute("""
+            SELECT
+                COUNT(*) FILTER (
+                    WHERE is_active = TRUE
+                ),
+                COUNT(*) FILTER (
+                    WHERE is_active = FALSE
+                )
+
+            FROM public_website_links
+
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+        """, (
+            spa_id,
+            business_unit_id,
+        ))
+
+        count_row = cur.fetchone()
+
+        active_count = count_row[0] or 0
+        hidden_count = count_row[1] or 0
+
+    finally:
+        cur.close()
+        conn.close()
+
+    public_website_url = (
+        _get_public_website_url_for_workspace(
+            spa_id,
+            business_unit_id
+        )
+    )
+
+    return render_template(
+        "public_website_links.html",
+        website_links=website_links,
+        status_filter=status_filter,
+        active_count=active_count,
+        hidden_count=hidden_count,
+        public_website_url=public_website_url
+    )
+
+
+@app.route(
+    "/public-website-links/add",
+    methods=["GET", "POST"]
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def add_public_website_link():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
+
+    if request.method == "POST":
+        link_label = (
+            request.form.get("link_label")
+            or ""
+        ).strip()
+
+        link_url = (
+            request.form.get("link_url")
+            or ""
+        ).strip()
+
+        sort_order_raw = (
+            request.form.get("sort_order")
+            or ""
+        ).strip()
+
+        is_active = (
+            "is_active" in request.form
+        )
+
+        if not link_label:
+            flash(
+                "Link label is required.",
+                "error"
+            )
+
+            return render_template(
+                "public_website_link_form.html",
+                website_link=None,
+                submitted=request.form,
+                form_title="Add Website Link"
+            )
+
+        if len(link_label) > 180:
+            flash(
+                (
+                    "Link label must be "
+                    "180 characters or fewer."
+                ),
+                "error"
+            )
+
+            return render_template(
+                "public_website_link_form.html",
+                website_link=None,
+                submitted=request.form,
+                form_title="Add Website Link"
+            )
+
+        if not (
+            link_url.lower().startswith("http://")
+            or link_url.lower().startswith("https://")
+        ):
+            flash(
+                (
+                    "Website link must begin with "
+                    "http:// or https://."
+                ),
+                "error"
+            )
+
+            return render_template(
+                "public_website_link_form.html",
+                website_link=None,
+                submitted=request.form,
+                form_title="Add Website Link"
+            )
+
+        if len(link_url) > 2000:
+            flash(
+                (
+                    "Website link must be "
+                    "2000 characters or fewer."
+                ),
+                "error"
+            )
+
+            return render_template(
+                "public_website_link_form.html",
+                website_link=None,
+                submitted=request.form,
+                form_title="Add Website Link"
+            )
+
+        sort_order = None
+
+        if sort_order_raw:
+            try:
+                sort_order = int(
+                    sort_order_raw
+                )
+            except (
+                TypeError,
+                ValueError
+            ):
+                flash(
+                    "Display order must be a number.",
+                    "error"
+                )
+
+                return render_template(
+                    "public_website_link_form.html",
+                    website_link=None,
+                    submitted=request.form,
+                    form_title="Add Website Link"
+                )
+
+            if not 1 <= sort_order <= 999:
+                flash(
+                    (
+                        "Display order must be "
+                        "between 1 and 999."
+                    ),
+                    "error"
+                )
+
+                return render_template(
+                    "public_website_link_form.html",
+                    website_link=None,
+                    submitted=request.form,
+                    form_title="Add Website Link"
+                )
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        try:
+            cur.execute("""
+                INSERT INTO public_website_links (
+                    spa_id,
+                    business_unit_id,
+                    link_label,
+                    link_url,
+                    sort_order,
+                    is_active
+                )
+                VALUES (
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s
+                )
+            """, (
+                spa_id,
+                business_unit_id,
+                link_label,
+                link_url,
+                sort_order,
+                is_active,
+            ))
+
+            conn.commit()
+
+        finally:
+            cur.close()
+            conn.close()
+
+        flash(
+            "Website link added successfully.",
+            "success"
+        )
+
+        return redirect(
+            url_for("public_website_links")
+        )
+
+    return render_template(
+        "public_website_link_form.html",
+        website_link=None,
+        submitted=None,
+        form_title="Add Website Link"
+    )
+
+
+@app.route(
+    "/public-website-links/"
+    "<int:public_website_link_id>/edit",
+    methods=["GET", "POST"]
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def edit_public_website_link(
+    public_website_link_id
+):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                public_website_link_id,
+                link_label,
+                link_url,
+                sort_order,
+                is_active
+
+            FROM public_website_links
+
+            WHERE public_website_link_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+
+            LIMIT 1
+        """, (
+            public_website_link_id,
+            spa_id,
+            business_unit_id,
+        ))
+
+        website_link = cur.fetchone()
+
+        if not website_link:
+            flash(
+                "Website link not found.",
+                "error"
+            )
+
+            return redirect(
+                url_for("public_website_links")
+            )
+
+        if request.method == "POST":
+            link_label = (
+                request.form.get("link_label")
+                or ""
+            ).strip()
+
+            link_url = (
+                request.form.get("link_url")
+                or ""
+            ).strip()
+
+            sort_order_raw = (
+                request.form.get("sort_order")
+                or ""
+            ).strip()
+
+            is_active = (
+                "is_active" in request.form
+            )
+
+            if not link_label:
+                flash(
+                    "Link label is required.",
+                    "error"
+                )
+
+                return render_template(
+                    "public_website_link_form.html",
+                    website_link=website_link,
+                    submitted=request.form,
+                    form_title="Edit Website Link"
+                )
+
+            if len(link_label) > 180:
+                flash(
+                    (
+                        "Link label must be "
+                        "180 characters or fewer."
+                    ),
+                    "error"
+                )
+
+                return render_template(
+                    "public_website_link_form.html",
+                    website_link=website_link,
+                    submitted=request.form,
+                    form_title="Edit Website Link"
+                )
+
+            if not (
+                link_url.lower().startswith("http://")
+                or link_url.lower().startswith("https://")
+            ):
+                flash(
+                    (
+                        "Website link must begin with "
+                        "http:// or https://."
+                    ),
+                    "error"
+                )
+
+                return render_template(
+                    "public_website_link_form.html",
+                    website_link=website_link,
+                    submitted=request.form,
+                    form_title="Edit Website Link"
+                )
+
+            if len(link_url) > 2000:
+                flash(
+                    (
+                        "Website link must be "
+                        "2000 characters or fewer."
+                    ),
+                    "error"
+                )
+
+                return render_template(
+                    "public_website_link_form.html",
+                    website_link=website_link,
+                    submitted=request.form,
+                    form_title="Edit Website Link"
+                )
+
+            sort_order = None
+
+            if sort_order_raw:
+                try:
+                    sort_order = int(
+                        sort_order_raw
+                    )
+                except (
+                    TypeError,
+                    ValueError
+                ):
+                    flash(
+                        "Display order must be a number.",
+                        "error"
+                    )
+
+                    return render_template(
+                        "public_website_link_form.html",
+                        website_link=website_link,
+                        submitted=request.form,
+                        form_title="Edit Website Link"
+                    )
+
+                if not 1 <= sort_order <= 999:
+                    flash(
+                        (
+                            "Display order must be "
+                            "between 1 and 999."
+                        ),
+                        "error"
+                    )
+
+                    return render_template(
+                        "public_website_link_form.html",
+                        website_link=website_link,
+                        submitted=request.form,
+                        form_title="Edit Website Link"
+                    )
+
+            cur.execute("""
+                UPDATE public_website_links
+
+                SET
+                    link_label = %s,
+                    link_url = %s,
+                    sort_order = %s,
+                    is_active = %s,
+                    updated_at = NOW()
+
+                WHERE public_website_link_id = %s
+                  AND spa_id = %s
+                  AND business_unit_id = %s
+            """, (
+                link_label,
+                link_url,
+                sort_order,
+                is_active,
+                public_website_link_id,
+                spa_id,
+                business_unit_id,
+            ))
+
+            conn.commit()
+
+            flash(
+                "Website link updated successfully.",
+                "success"
+            )
+
+            return redirect(
+                url_for("public_website_links")
+            )
+
+        return render_template(
+            "public_website_link_form.html",
+            website_link=website_link,
+            submitted=None,
+            form_title="Edit Website Link"
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route(
+    "/public-website-links/"
+    "<int:public_website_link_id>/toggle",
+    methods=["POST"]
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def toggle_public_website_link(
+    public_website_link_id
+):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                link_label,
+                is_active
+
+            FROM public_website_links
+
+            WHERE public_website_link_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+        """, (
+            public_website_link_id,
+            spa_id,
+            business_unit_id,
+        ))
+
+        row = cur.fetchone()
+
+        if not row:
+            flash(
+                "Website link not found.",
+                "error"
+            )
+
+            return redirect(
+                url_for("public_website_links")
+            )
+
+        new_status = not bool(row[1])
+
+        cur.execute("""
+            UPDATE public_website_links
+
+            SET
+                is_active = %s,
+                updated_at = NOW()
+
+            WHERE public_website_link_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+        """, (
+            new_status,
+            public_website_link_id,
+            spa_id,
+            business_unit_id,
+        ))
+
+        conn.commit()
+
+        flash(
+            (
+                f"{row[0]} is now "
+                f"{'shown' if new_status else 'hidden'}."
+            ),
+            "success"
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    return redirect(
+        url_for("public_website_links")
+    )
+
+
+############################################
+#
+#   PUBLIC WEBSITE SERVICES
+#
+############################################
+
+@app.route("/public-website-services")
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def public_website_services():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
+
+    status_filter = (
+        request.args.get("status")
+        or "all"
+    ).strip().lower()
+
+    if status_filter not in {
+        "shown",
+        "hidden",
+        "all"
+    }:
+        status_filter = "all"
+
+    query = """
+        SELECT
+            snt.service_type_id,
+            snt.service_name,
+            snt.default_duration_minutes,
+            snt.default_price,
+            COALESCE(
+                pws.public_description,
+                ''
+            ) AS public_description,
+            COALESCE(
+                pws.show_on_public_website,
+                FALSE
+            ) AS show_on_public_website,
+            pws.website_sort_order
+
+        FROM service_name_types snt
+
+        LEFT JOIN public_website_services pws
+          ON pws.service_type_id =
+                snt.service_type_id
+         AND pws.spa_id =
+                snt.spa_id
+         AND pws.business_unit_id = %s
+
+        WHERE snt.spa_id = %s
+          AND snt.is_active = TRUE
+    """
+
+    params = [
+        business_unit_id,
+        spa_id,
+    ]
+
+    if status_filter == "shown":
+        query += """
+          AND COALESCE(
+                pws.show_on_public_website,
+                FALSE
+              ) = TRUE
+        """
+
+    elif status_filter == "hidden":
+        query += """
+          AND COALESCE(
+                pws.show_on_public_website,
+                FALSE
+              ) = FALSE
+        """
+
+    query += """
+        ORDER BY
+            COALESCE(
+                pws.show_on_public_website,
+                FALSE
+            ) DESC,
+            pws.website_sort_order NULLS LAST,
+            snt.service_name,
+            snt.service_type_id
+    """
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            query,
+            tuple(params)
+        )
+
+        services = cur.fetchall()
+
+        cur.execute("""
+            SELECT
+                COUNT(*) FILTER (
+                    WHERE COALESCE(
+                        pws.show_on_public_website,
+                        FALSE
+                    ) = TRUE
+                ),
+                COUNT(*) FILTER (
+                    WHERE COALESCE(
+                        pws.show_on_public_website,
+                        FALSE
+                    ) = FALSE
+                )
+
+            FROM service_name_types snt
+
+            LEFT JOIN public_website_services pws
+              ON pws.service_type_id =
+                    snt.service_type_id
+             AND pws.spa_id =
+                    snt.spa_id
+             AND pws.business_unit_id = %s
+
+            WHERE snt.spa_id = %s
+              AND snt.is_active = TRUE
+        """, (
+            business_unit_id,
+            spa_id,
+        ))
+
+        count_row = cur.fetchone()
+
+        shown_count = count_row[0] or 0
+        hidden_count = count_row[1] or 0
+
+    finally:
+        cur.close()
+        conn.close()
+
+    public_website_url = (
+        _get_public_website_url_for_workspace(
+            spa_id,
+            business_unit_id
+        )
+    )
+
+    public_services_url = (
+        f"{public_website_url}#services"
+        if public_website_url
+        else ""
+    )
+
+    return render_template(
+        "public_website_services.html",
+        services=services,
+        status_filter=status_filter,
+        shown_count=shown_count,
+        hidden_count=hidden_count,
+        public_services_url=public_services_url
+    )
+
+
+@app.route(
+    "/public-website-services/"
+    "<int:service_type_id>/edit",
+    methods=["GET", "POST"]
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def edit_public_website_service(
+    service_type_id
+):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                snt.service_type_id,
+                snt.service_name,
+                snt.default_duration_minutes,
+                snt.default_price,
+                COALESCE(
+                    pws.public_description,
+                    ''
+                ),
+                COALESCE(
+                    pws.show_on_public_website,
+                    FALSE
+                ),
+                pws.website_sort_order
+
+            FROM service_name_types snt
+
+            LEFT JOIN public_website_services pws
+              ON pws.service_type_id =
+                    snt.service_type_id
+             AND pws.spa_id =
+                    snt.spa_id
+             AND pws.business_unit_id = %s
+
+            WHERE snt.service_type_id = %s
+              AND snt.spa_id = %s
+              AND snt.is_active = TRUE
+
+            LIMIT 1
+        """, (
+            business_unit_id,
+            service_type_id,
+            spa_id,
+        ))
+
+        service = cur.fetchone()
+
+        if not service:
+            flash(
+                "Website service not found.",
+                "error"
+            )
+
+            return redirect(
+                url_for(
+                    "public_website_services"
+                )
+            )
+
+        if request.method == "POST":
+            public_description = (
+                request.form.get(
+                    "public_description"
+                )
+                or ""
+            ).strip()
+
+            show_on_public_website = (
+                "show_on_public_website"
+                in request.form
+            )
+
+            website_sort_order_raw = (
+                request.form.get(
+                    "website_sort_order"
+                )
+                or ""
+            ).strip()
+
+            if len(public_description) > 500:
+                flash(
+                    (
+                        "Public website description "
+                        "must be 500 characters or fewer."
+                    ),
+                    "error"
+                )
+
+                return render_template(
+                    "public_website_service_form.html",
+                    service=service,
+                    submitted=request.form
+                )
+
+            website_sort_order = None
+
+            if website_sort_order_raw:
+                try:
+                    website_sort_order = int(
+                        website_sort_order_raw
+                    )
+                except (
+                    TypeError,
+                    ValueError
+                ):
+                    flash(
+                        (
+                            "Website display order "
+                            "must be a number."
+                        ),
+                        "error"
+                    )
+
+                    return render_template(
+                        "public_website_service_form.html",
+                        service=service,
+                        submitted=request.form
+                    )
+
+                if not 1 <= website_sort_order <= 999:
+                    flash(
+                        (
+                            "Website display order must "
+                            "be between 1 and 999."
+                        ),
+                        "error"
+                    )
+
+                    return render_template(
+                        "public_website_service_form.html",
+                        service=service,
+                        submitted=request.form
+                    )
+
+            cur.execute("""
+                INSERT INTO public_website_services (
+                    spa_id,
+                    business_unit_id,
+                    service_type_id,
+                    public_description,
+                    show_on_public_website,
+                    website_sort_order
+                )
+                VALUES (
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s
+                )
+
+                ON CONFLICT (
+                    spa_id,
+                    business_unit_id,
+                    service_type_id
+                )
+
+                DO UPDATE SET
+                    public_description =
+                        EXCLUDED.public_description,
+                    show_on_public_website =
+                        EXCLUDED.show_on_public_website,
+                    website_sort_order =
+                        EXCLUDED.website_sort_order,
+                    updated_at = NOW()
+            """, (
+                spa_id,
+                business_unit_id,
+                service_type_id,
+                public_description or None,
+                show_on_public_website,
+                website_sort_order,
+            ))
+
+            conn.commit()
+
+            flash(
+                "Website service updated successfully.",
+                "success"
+            )
+
+            return redirect(
+                url_for(
+                    "public_website_services"
+                )
+            )
+
+        return render_template(
+            "public_website_service_form.html",
+            service=service,
+            submitted=None
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
 #############################
 #
 #   SERVICE TYPES LIST
@@ -11728,6 +13723,10 @@ def toggle_public_website_menu_item(
 )
 def service_types():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
 
     status_filter = (
         request.args.get("status")
@@ -11747,8 +13746,7 @@ def service_types():
             service_name,
             default_duration_minutes,
             default_price,
-            is_active,
-            show_on_public_website
+            is_active
         FROM service_name_types
         WHERE spa_id = %s
     """
@@ -11807,36 +13805,18 @@ def service_types():
         cur.close()
         conn.close()
 
-    request_host = (
-        request.host.split(":", 1)[0].lower()
+    public_website_url = (
+        _get_public_website_url_for_workspace(
+            spa_id,
+            business_unit_id
+        )
     )
 
-    request_port = (
-        request.host.split(":", 1)[1]
-        if ":" in request.host
+    public_services_url = (
+        f"{public_website_url}#services"
+        if public_website_url
         else ""
     )
-
-    if request_host in {
-        "127.0.0.1",
-        "localhost"
-    }:
-        port_suffix = (
-            f":{request_port}"
-            if request_port
-            else ""
-        )
-
-        public_services_url = (
-            "http://clearskinesthetics.localhost"
-            f"{port_suffix}/#services"
-        )
-
-    else:
-        public_services_url = (
-            "https://clearskinesthetics."
-            "peachsuitepro.com/#services"
-        )
 
     return render_template(
         "service_types.html",
@@ -11881,23 +13861,6 @@ def add_service_type():
             request.form.get("default_price") or ""
         ).strip()
 
-        public_description = (
-            request.form.get("public_description")
-            or ""
-        ).strip()
-
-        show_on_public_website = (
-            request.form.get(
-                "show_on_public_website"
-            )
-            == "on"
-        )
-
-        website_sort_order_raw = (
-            request.form.get("website_sort_order")
-            or ""
-        ).strip()
-
         if not service_name:
             flash("Service name is required.", "error")
             return redirect(url_for("add_service_type"))
@@ -11922,36 +13885,6 @@ def add_service_type():
             flash("Default service price cannot be negative.", "error")
             return redirect(url_for("add_service_type"))
 
-        if len(public_description) > 500:
-            flash(
-                "Public website description cannot exceed "
-                "500 characters.",
-                "error"
-            )
-            return redirect(url_for("add_service_type"))
-
-        website_sort_order = None
-
-        if website_sort_order_raw:
-            try:
-                website_sort_order = int(
-                    website_sort_order_raw
-                )
-            except (TypeError, ValueError):
-                flash(
-                    "Website display order must be a number.",
-                    "error"
-                )
-                return redirect(url_for("add_service_type"))
-
-            if not 1 <= website_sort_order <= 999:
-                flash(
-                    "Website display order must be between "
-                    "1 and 999.",
-                    "error"
-                )
-                return redirect(url_for("add_service_type"))
-
         conn = get_db_connection()
         cur = conn.cursor()
 
@@ -11961,15 +13894,9 @@ def add_service_type():
                 service_name,
                 default_duration_minutes,
                 default_price,
-                public_description,
-                show_on_public_website,
-                website_sort_order,
                 is_active
             )
             VALUES (
-                %s,
-                %s,
-                %s,
                 %s,
                 %s,
                 %s,
@@ -11980,10 +13907,7 @@ def add_service_type():
             spa_id,
             service_name,
             default_duration_minutes,
-            default_price,
-            public_description or None,
-            show_on_public_website,
-            website_sort_order
+            default_price
         ))
 
         conn.commit()
@@ -12043,24 +13967,6 @@ def edit_service_type(service_type_id):
             request.form.get("default_price") or ""
         ).strip()
 
-        public_description = (
-            request.form.get("public_description")
-            or ""
-        ).strip()
-
-        show_on_public_website = (
-            request.form.get(
-                "show_on_public_website"
-            )
-            == "on"
-        )
-
-        website_sort_order_raw = (
-            request.form.get("website_sort_order")
-            or ""
-        ).strip()
-
-
         if not service_name:
             flash("Service name is required.", "error")
             cur.close()
@@ -12091,73 +13997,18 @@ def edit_service_type(service_type_id):
                 service_type_id=service_type_id
             ))
 
-        if len(public_description) > 500:
-            flash(
-                "Public website description cannot exceed "
-                "500 characters.",
-                "error"
-            )
-            cur.close()
-            conn.close()
-
-            return redirect(url_for(
-                "edit_service_type",
-                service_type_id=service_type_id
-            ))
-
-        website_sort_order = None
-
-        if website_sort_order_raw:
-            try:
-                website_sort_order = int(
-                    website_sort_order_raw
-                )
-            except (TypeError, ValueError):
-                flash(
-                    "Website display order must be a number.",
-                    "error"
-                )
-                cur.close()
-                conn.close()
-
-                return redirect(url_for(
-                    "edit_service_type",
-                    service_type_id=service_type_id
-                ))
-
-            if not 1 <= website_sort_order <= 999:
-                flash(
-                    "Website display order must be between "
-                    "1 and 999.",
-                    "error"
-                )
-                cur.close()
-                conn.close()
-
-                return redirect(url_for(
-                    "edit_service_type",
-                    service_type_id=service_type_id
-                ))
-
-
         cur.execute("""
             UPDATE service_name_types
             SET
                 service_name = %s,
                 default_duration_minutes = %s,
-                default_price = %s,
-                public_description = %s,
-                show_on_public_website = %s,
-                website_sort_order = %s
+                default_price = %s
             WHERE service_type_id = %s
               AND spa_id = %s
         """, (
             service_name,
             default_duration_minutes,
             default_price,
-            public_description or None,
-            show_on_public_website,
-            website_sort_order,
             service_type_id,
             spa_id
         ))
@@ -12175,10 +14026,7 @@ def edit_service_type(service_type_id):
             service_name,
             default_duration_minutes,
             default_price,
-            is_active,
-            public_description,
-            show_on_public_website,
-            website_sort_order
+            is_active
         FROM service_name_types
         WHERE service_type_id = %s
           AND spa_id = %s
@@ -12856,6 +14704,41 @@ def master_admin_add_business():
             )
 
         # -----------------------------------------
+        # Resolve Enterprise foundation defaults
+        # -----------------------------------------
+        cur.execute("""
+            SELECT
+                st.subscription_tier_id,
+                ot.organization_type_id
+
+            FROM subscription_tiers st
+            CROSS JOIN organization_types ot
+
+            WHERE st.tier_code = 'solo'
+              AND st.is_active = TRUE
+              AND ot.type_code = 'solo_owner'
+              AND ot.is_active = TRUE
+
+            LIMIT 1
+        """)
+
+        enterprise_defaults = cur.fetchone()
+
+        if not enterprise_defaults:
+            raise RuntimeError(
+                "Required Solo / Solo Owner "
+                "Enterprise defaults were not found."
+            )
+
+        subscription_tier_id = (
+            enterprise_defaults[0]
+        )
+
+        organization_type_id = (
+            enterprise_defaults[1]
+        )
+
+        # -----------------------------------------
         # Create business
         # -----------------------------------------
         cur.execute(
@@ -12868,10 +14751,21 @@ def master_admin_add_business():
                 owner_email,
                 timezone_name,
                 subscription_status,
+                subscription_tier_id,
+                organization_type_id,
                 active
             )
             VALUES (
-                %s, %s, %s, %s, %s, %s, %s, TRUE
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                TRUE
             )
             RETURNING spa_id
             """,
@@ -12882,7 +14776,9 @@ def master_admin_add_business():
                 owner_phone or None,
                 owner_email,
                 timezone_name,
-                subscription_status
+                subscription_status,
+                subscription_tier_id,
+                organization_type_id
             )
         )
 
@@ -12950,6 +14846,25 @@ def master_admin_add_business():
 
         user_id = cur.fetchone()[0]
 
+        # -----------------------------------------
+        # Provision Enterprise workspace,
+        # booking, and public website foundation.
+        #
+        # This remains inside the same transaction.
+        # Any failure rolls back the entire business.
+        # -----------------------------------------
+        foundation = (
+            _provision_new_business_workspace_foundation(
+                cur,
+                spa_id=spa_id,
+                administrator_user_id=user_id,
+                business_name=spa_name,
+                actor_user_id=session.get("user_id"),
+                contact_email=owner_email,
+                contact_phone=owner_phone
+            )
+        )
+
         conn.commit()
 
         flash(
@@ -12957,7 +14872,9 @@ def master_admin_add_business():
                 f"{spa_name} was created successfully. "
                 f"Registration Number: {registration_number}. "
                 f"Business ID: {spa_id}. "
-                f"Administrator ID: {user_id}."
+                f"Administrator ID: {user_id}. "
+                f"Workspace ID: "
+                f"{foundation['business_unit_id']}."
             ),
             "success"
         )
@@ -14601,111 +16518,17 @@ def master_messaging_footers():
 
 @app.route("/add-spa", methods=["GET", "POST"])
 @login_required
-@spa_required
-
+@master_admin_required
 def add_spa():
-    require_master_admin()
+    """
+    Legacy compatibility route.
 
-    if request.method == "POST":
-        spa_name = request.form.get("spa_name", "").strip()
-        owner_first_name = request.form.get("owner_first_name", "").strip()
-        owner_last_name = request.form.get("owner_last_name", "").strip()
-        owner_email = request.form.get("owner_email", "").strip().lower()
-        owner_phone = request.form.get("owner_phone", "").strip()
-        timezone_name = request.form.get("timezone_name", "America/Chicago").strip()
-
-        username = request.form.get("username", "").strip().lower()
-        password = request.form.get("password", "").strip()
-
-        if not spa_name or not owner_email or not username or not password:
-            flash("Spa name, owner email, username, and password are required.", "error")
-            return redirect(url_for("add_spa"))
-
-        password_hash = generate_password_hash(password)
-
-        conn = get_db_connection()
-        cur = conn.cursor()
-
-        try:
-            cur.execute("""
-                INSERT INTO spas (
-                    spa_name,
-                    owner_first_name,
-                    owner_last_name,
-                    owner_email,
-                    owner_phone,
-                    timezone_name,
-                    active,
-                    sync_enabled,
-                    subscription_status
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, TRUE, FALSE, 'active')
-                RETURNING spa_id
-            """, (
-                spa_name,
-                owner_first_name or None,
-                owner_last_name or None,
-                owner_email,
-                owner_phone or None,
-                timezone_name or "America/Chicago"
-            ))
-
-            spa_id = cur.fetchone()[0]
-
-            seed_client_status_defaults(
-                cur,
-                spa_id,
-            )
-
-            cur.execute("""
-                INSERT INTO users (
-                    spa_id,
-                    first_name,
-                    last_name,
-                    email,
-                    username,
-                    password_hash,
-                    role,
-                    active
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, 'admin', TRUE)
-            """, (
-                spa_id,
-                owner_first_name,
-                owner_last_name,
-                owner_email,
-                username,
-                password_hash
-            ))
-
-            conn.commit()
-            flash("Spa and owner admin user created successfully.", "success")
-            return redirect(url_for("home"))
-
-        except Exception as error:
-            conn.rollback()
-
-            print(
-                "[ADD SPA ERROR]",
-                repr(error),
-            )
-
-            flash(
-                (
-                    "The business could not be created. "
-                    "No changes were saved."
-                ),
-                "error",
-            )
-
-            return redirect(url_for("add_spa"))
-
-        finally:
-            cur.close()
-            conn.close()
-
-    return render_template("add_spa.html")
-
+    Business creation is handled exclusively by the
+    Master Admin Add Business workflow.
+    """
+    return redirect(
+        url_for("master_admin_add_business")
+    )
 
 
 
@@ -23426,6 +25249,15 @@ def business_goals():
 @spa_required
 def client_contact_preferences():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to view client contact preferences.",
+            "error"
+        )
+        return redirect(url_for("dashboard"))
 
     search = request.args.get("search", "").strip()
     filter_status = request.args.get(
@@ -23497,10 +25329,14 @@ def client_contact_preferences():
                 )                                         -- 11
             FROM clients c
             WHERE c.spa_id = %s
+              AND c.business_unit_id = %s
               AND c.active_client = TRUE
         """
 
-        params = [spa_id]
+        params = [
+            spa_id,
+            business_unit_id
+        ]
 
         if search:
             query += """
@@ -23694,7 +25530,18 @@ def client_contact_preferences():
 @spa_required
 def edit_client_contact_preferences(client_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
     user_id = session.get("user_id")
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to edit client contact preferences.",
+            "error"
+        )
+        return redirect(
+            url_for("client_contact_preferences")
+        )
 
     valid_statuses = {
         "opt_in",
@@ -23852,9 +25699,14 @@ def edit_client_contact_preferences(client_id):
                 FROM clients
                 WHERE client_id = %s
                   AND spa_id = %s
+                  AND business_unit_id = %s
                   AND active_client = TRUE
                 """,
-                (client_id, spa_id)
+                (
+                    client_id,
+                    spa_id,
+                    business_unit_id
+                )
             )
 
             old_prefs = cur.fetchone()
@@ -23900,6 +25752,7 @@ def edit_client_contact_preferences(client_id):
                     email_marketing_status = %s
                 WHERE client_id = %s
                   AND spa_id = %s
+                  AND business_unit_id = %s
                   AND active_client = TRUE
                 """,
                 (
@@ -23911,9 +25764,20 @@ def edit_client_contact_preferences(client_id):
                     sms_marketing_status,
                     email_marketing_status,
                     client_id,
-                    spa_id
+                    spa_id,
+                    business_unit_id
                 )
             )
+
+            if cur.rowcount != 1:
+                conn.rollback()
+                flash(
+                    "Client not found or not authorized.",
+                    "error"
+                )
+                return redirect(
+                    url_for("client_contact_preferences")
+                )
 
             # -----------------------------------------
             # Consent history
@@ -23932,7 +25796,8 @@ def edit_client_contact_preferences(client_id):
                         f"{status_label(old_sms_status)} to "
                         f"{status_label(sms_status)}."
                     ),
-                    user_id
+                    user_id,
+                    business_unit_id=business_unit_id
                 )
 
             if old_email_status != email_status:
@@ -23948,7 +25813,8 @@ def edit_client_contact_preferences(client_id):
                         f"{status_label(old_email_status)} to "
                         f"{status_label(email_status)}."
                     ),
-                    user_id
+                    user_id,
+                    business_unit_id=business_unit_id
                 )
 
             if old_phone_status != phone_status:
@@ -23964,7 +25830,8 @@ def edit_client_contact_preferences(client_id):
                         f"{status_label(old_phone_status)} to "
                         f"{status_label(phone_status)}."
                     ),
-                    user_id
+                    user_id,
+                    business_unit_id=business_unit_id
                 )
 
             if (
@@ -23984,7 +25851,8 @@ def edit_client_contact_preferences(client_id):
                         "to "
                         f"{status_label(sms_marketing_status)}."
                     ),
-                    user_id
+                    user_id,
+                    business_unit_id=business_unit_id
                 )
 
             if (
@@ -24004,7 +25872,8 @@ def edit_client_contact_preferences(client_id):
                         "to "
                         f"{status_label(email_marketing_status)}."
                     ),
-                    user_id
+                    user_id,
+                    business_unit_id=business_unit_id
                 )
 
             conn.commit()
@@ -24045,9 +25914,14 @@ def edit_client_contact_preferences(client_id):
             FROM clients
             WHERE client_id = %s
               AND spa_id = %s
+              AND business_unit_id = %s
               AND active_client = TRUE
             """,
-            (client_id, spa_id)
+            (
+                client_id,
+                spa_id,
+                business_unit_id
+            )
         )
 
         client = cur.fetchone()
@@ -24115,6 +25989,17 @@ def edit_client_contact_preferences(client_id):
 @spa_required
 def client_consent_history(client_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to view client consent history.",
+            "error"
+        )
+        return redirect(
+            url_for("client_contact_preferences")
+        )
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -24124,7 +26009,12 @@ def client_consent_history(client_id):
         FROM clients
         WHERE client_id = %s
           AND spa_id = %s
-    """, (client_id, spa_id))
+          AND business_unit_id = %s
+    """, (
+        client_id,
+        spa_id,
+        business_unit_id
+    ))
 
     client = cur.fetchone()
 
@@ -24144,8 +26034,13 @@ def client_consent_history(client_id):
         FROM consent_records
         WHERE client_id = %s
           AND spa_id = %s
+          AND business_unit_id = %s
         ORDER BY created_at DESC
-    """, (client_id, spa_id))
+    """, (
+        client_id,
+        spa_id,
+        business_unit_id
+    ))
 
     records = cur.fetchall()
 
@@ -26676,6 +28571,16 @@ def delete_business_loan(loan_id):
 @spa_required
 def client_management():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to view clients.",
+            "error"
+        )
+        return redirect(url_for("dashboard"))
+
     search = request.args.get("search", "").strip()
     show_all = request.args.get("show_all")
     today = get_spa_today()
@@ -26701,6 +28606,7 @@ def client_management():
                     FROM appointments a1
                     WHERE a1.client_id = c.client_id
                       AND a1.spa_id = c.spa_id
+                      AND a1.business_unit_id = c.business_unit_id
                       AND a1.appointment_date <= %s
                 ) AS last_visit_date,
 
@@ -26709,6 +28615,7 @@ def client_management():
                     FROM appointments a2
                     WHERE a2.client_id = c.client_id
                       AND a2.spa_id = c.spa_id
+                      AND a2.business_unit_id = c.business_unit_id
                       AND a2.appointment_date >= %s
                 ) AS next_visit_date,
 
@@ -26721,6 +28628,7 @@ def client_management():
 
             FROM clients c
             WHERE c.spa_id = %s
+              AND c.business_unit_id = %s
               AND c.active_client = TRUE
               AND (
                    LOWER(c.first_name) LIKE %s
@@ -26732,6 +28640,7 @@ def client_management():
             today,
             today,
             spa_id,
+            business_unit_id,
             f"%{search.lower()}%",
             f"%{search.lower()}%",
             f"%{search}%"
@@ -26755,6 +28664,7 @@ def client_management():
                     FROM appointments a1
                     WHERE a1.client_id = c.client_id
                       AND a1.spa_id = c.spa_id
+                      AND a1.business_unit_id = c.business_unit_id
                       AND a1.appointment_date <= %s
                 ) AS last_visit_date,
 
@@ -26763,6 +28673,7 @@ def client_management():
                     FROM appointments a2
                     WHERE a2.client_id = c.client_id
                       AND a2.spa_id = c.spa_id
+                      AND a2.business_unit_id = c.business_unit_id
                       AND a2.appointment_date >= %s
                 ) AS next_visit_date,
 
@@ -26775,12 +28686,14 @@ def client_management():
 
             FROM clients c
             WHERE c.spa_id = %s
-            AND c.active_client = TRUE
+              AND c.business_unit_id = %s
+              AND c.active_client = TRUE
             ORDER BY c.last_name, c.first_name
         """, (
             today,
             today,
-            spa_id
+            spa_id,
+            business_unit_id
         ))
 
         rows = cur.fetchall()
@@ -26833,6 +28746,15 @@ def client_management():
 @spa_required
 def schedule_appointment_start():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to schedule an appointment.",
+            "error"
+        )
+        return redirect(url_for("appointments"))
 
     clients = []
     searched = False
@@ -26880,10 +28802,14 @@ def schedule_appointment_start():
                     phone
                 FROM clients
                 WHERE spa_id = %s
+                  AND business_unit_id = %s
                   AND active_client = TRUE
             """
 
-            params = [spa_id]
+            params = [
+                spa_id,
+                business_unit_id
+            ]
 
             if not show_all:
                 if client_name:
@@ -28915,6 +30841,15 @@ from datetime import date
 @spa_required
 def employee_pay_summary():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to view employee pay.",
+            "error"
+        )
+        return redirect(url_for("employees_home"))
 
     today = date.today()
     first_day = today.replace(day=1)
@@ -28938,11 +30873,17 @@ def employee_pay_summary():
         LEFT JOIN income i
             ON e.employee_id = i.employee_id
            AND i.spa_id = e.spa_id
+           AND i.business_unit_id = %s
            AND i.income_date BETWEEN %s AND %s
         WHERE e.spa_id = %s
         GROUP BY e.employee_id, e.first_name, e.last_name
         ORDER BY e.last_name, e.first_name
-    """, (start_date, end_date, spa_id))
+    """, (
+        business_unit_id,
+        start_date,
+        end_date,
+        spa_id
+    ))
 
     rows = cur.fetchall()
 
@@ -29021,50 +30962,134 @@ def add_employee_compensation():
         # Validation
         if not payment_date:
             flash("Payment date is required.", "error")
+
         elif not employee_id:
             flash("Employee is required.", "error")
+
         elif not detail_lines:
-            flash("Enter at least one compensation line with type and amount.", "error")
+            flash(
+                "Enter at least one compensation line "
+                "with type and amount.",
+                "error"
+            )
+
         else:
-            # Insert header
+            # -----------------------------------------
+            # Verify submitted employee belongs to
+            # the current spa.
+            # -----------------------------------------
             cur.execute("""
-                INSERT INTO employee_compensation (
-                    spa_id,
-                    employee_id,
-                    compensation_date,
-                    notes
-                )
-                VALUES (%s, %s, %s, %s)
-                RETURNING compensation_id
+                SELECT 1
+                FROM employees
+                WHERE employee_id = %s
+                  AND spa_id = %s
+                LIMIT 1
+            """, (
+                employee_id,
+                spa_id
+            ))
+
+            employee_is_authorized = (
+                cur.fetchone() is not None
+            )
+
+            submitted_type_ids = [
+                comp_type_id
+                for comp_type_id, amount
+                in detail_lines
+            ]
+
+            cur.execute("""
+                SELECT compensation_type_id
+                FROM compensation_types
+                WHERE spa_id = %s
+                  AND is_active = TRUE
+                  AND compensation_type_id = ANY(%s::int[])
             """, (
                 spa_id,
-                employee_id,
-                payment_date,
-                notes
+                submitted_type_ids
             ))
-            compensation_id = cur.fetchone()[0]
 
-            # Insert detail lines
-            for comp_type_id, amount in detail_lines:
+            authorized_type_ids = {
+                str(row[0])
+                for row in cur.fetchall()
+            }
+
+            compensation_types_are_authorized = (
+                authorized_type_ids
+                == {
+                    str(comp_type_id)
+                    for comp_type_id
+                    in submitted_type_ids
+                }
+            )
+
+            if not employee_is_authorized:
+                flash(
+                    "Employee not found or not authorized.",
+                    "error"
+                )
+
+            elif not compensation_types_are_authorized:
+                flash(
+                    (
+                        "One or more compensation types "
+                        "are not authorized."
+                    ),
+                    "error"
+                )
+
+            else:
+                # Insert header
                 cur.execute("""
-                    INSERT INTO employee_compensation_lines (
-                        compensation_id,
-                        compensation_type_id,
-                        amount
+                    INSERT INTO employee_compensation (
+                        spa_id,
+                        employee_id,
+                        compensation_date,
+                        notes
                     )
-                    VALUES (%s, %s, %s)
+                    VALUES (%s, %s, %s, %s)
+                    RETURNING compensation_id
                 """, (
-                    compensation_id,
-                    comp_type_id,
-                    amount
+                    spa_id,
+                    employee_id,
+                    payment_date,
+                    notes
                 ))
 
-            conn.commit()
-            cur.close()
-            conn.close()
+                compensation_id = (
+                    cur.fetchone()[0]
+                )
 
-            flash("Compensation saved successfully.", "success")
-            return redirect(url_for("employee_compensation_report"))
+                # Insert detail lines
+                for comp_type_id, amount in detail_lines:
+                    cur.execute("""
+                        INSERT INTO employee_compensation_lines (
+                            compensation_id,
+                            compensation_type_id,
+                            amount
+                        )
+                        VALUES (%s, %s, %s)
+                    """, (
+                        compensation_id,
+                        comp_type_id,
+                        amount
+                    ))
+
+                conn.commit()
+                cur.close()
+                conn.close()
+
+                flash(
+                    "Compensation saved successfully.",
+                    "success"
+                )
+
+                return redirect(
+                    url_for(
+                        "employee_compensation_report"
+                    )
+                )
 
     cur.close()
     conn.close()
@@ -29728,49 +31753,146 @@ def edit_employee_compensation(compensation_id):
         elif not detail_lines:
             flash("Enter at least one compensation line with type and amount.", "error")
         else:
-            # Update header
+            # -----------------------------------------
+            # Verify submitted employee and
+            # compensation types belong to this spa.
+            # -----------------------------------------
             cur.execute("""
-                UPDATE employee_compensation
-                SET employee_id = %s,
-                    compensation_date = %s,
-                    notes = %s
-                WHERE compensation_id = %s
+                SELECT 1
+                FROM employees
+                WHERE employee_id = %s
                   AND spa_id = %s
+                LIMIT 1
             """, (
                 employee_id,
-                payment_date,
-                notes,
-                compensation_id,
                 spa_id
             ))
 
-            # Remove old detail lines
-            cur.execute("""
-                DELETE FROM employee_compensation_lines
-                WHERE compensation_id = %s
-            """, (compensation_id,))
+            employee_is_authorized = (
+                cur.fetchone() is not None
+            )
 
-            # Insert updated detail lines
-            for comp_type_id, amount in detail_lines:
+            submitted_type_ids = [
+                comp_type_id
+                for comp_type_id, amount
+                in detail_lines
+            ]
+
+            cur.execute("""
+                SELECT compensation_type_id
+                FROM compensation_types
+                WHERE spa_id = %s
+                  AND is_active = TRUE
+                  AND compensation_type_id = ANY(%s::int[])
+            """, (
+                spa_id,
+                submitted_type_ids
+            ))
+
+            authorized_type_ids = {
+                str(row[0])
+                for row in cur.fetchall()
+            }
+
+            compensation_types_are_authorized = (
+                authorized_type_ids
+                == {
+                    str(comp_type_id)
+                    for comp_type_id
+                    in submitted_type_ids
+                }
+            )
+
+            if not employee_is_authorized:
+                flash(
+                    "Employee not found or not authorized.",
+                    "error"
+                )
+
+            elif not compensation_types_are_authorized:
+                flash(
+                    (
+                        "One or more compensation types "
+                        "are not authorized."
+                    ),
+                    "error"
+                )
+
+            else:
+                # Update only a compensation record
+                # owned by the current spa.
                 cur.execute("""
-                    INSERT INTO employee_compensation_lines (
-                        compensation_id,
-                        compensation_type_id,
-                        amount
-                    )
-                    VALUES (%s, %s, %s)
+                    UPDATE employee_compensation
+                    SET employee_id = %s,
+                        compensation_date = %s,
+                        notes = %s
+                    WHERE compensation_id = %s
+                      AND spa_id = %s
                 """, (
+                    employee_id,
+                    payment_date,
+                    notes,
                     compensation_id,
-                    comp_type_id,
-                    amount
+                    spa_id
                 ))
 
-            conn.commit()
-            cur.close()
-            conn.close()
+                if cur.rowcount == 0:
+                    conn.rollback()
 
-            flash("Compensation updated successfully.", "success")
-            return redirect(url_for("employee_compensation_history"))
+                    cur.close()
+                    conn.close()
+
+                    flash(
+                        (
+                            "Compensation record not found "
+                            "or not authorized."
+                        ),
+                        "error"
+                    )
+
+                    return redirect(
+                        url_for(
+                            "employee_compensation_history"
+                        )
+                    )
+
+                # Safe now: ownership of the parent
+                # compensation record was confirmed.
+                cur.execute("""
+                    DELETE FROM employee_compensation_lines
+                    WHERE compensation_id = %s
+                """, (
+                    compensation_id,
+                ))
+
+                for comp_type_id, amount in detail_lines:
+                    cur.execute("""
+                        INSERT INTO employee_compensation_lines (
+                            compensation_id,
+                            compensation_type_id,
+                            amount
+                        )
+                        VALUES (%s, %s, %s)
+                    """, (
+                        compensation_id,
+                        comp_type_id,
+                        amount
+                    ))
+
+                conn.commit()
+                cur.close()
+                conn.close()
+
+                flash(
+                    "Compensation updated successfully.",
+                    "success"
+                )
+
+                return redirect(
+                    url_for(
+                        "employee_compensation_history"
+                    )
+                )
 
     # Load header record
     cur.execute("""
@@ -29781,13 +31903,32 @@ def edit_employee_compensation(compensation_id):
     """, (compensation_id, spa_id))
     compensation = cur.fetchone()
 
-    # Load detail lines
+    if not compensation:
+        cur.close()
+        conn.close()
+
+        flash(
+            "Compensation record not found or not authorized.",
+            "error"
+        )
+
+        return redirect(
+            url_for(
+                "employee_compensation_history"
+            )
+        )
+
+    # Safe now: ownership of the parent record
+    # has been confirmed for the current spa.
     cur.execute("""
         SELECT compensation_type_id, amount
         FROM employee_compensation_lines
         WHERE compensation_id = %s
         ORDER BY compensation_type_id
-    """, (compensation_id,))
+    """, (
+        compensation_id,
+    ))
+
     existing_lines = cur.fetchall()
 
     cur.close()
@@ -31292,14 +33433,43 @@ def delete_expense(expense_id):
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute("DELETE FROM expenses WHERE expense_id = %s", (expense_id,))
+    cur.execute("""
+        DELETE FROM expenses
+        WHERE spa_id = %s
+          AND expense_id = %s
+    """, (
+        spa_id,
+        expense_id
+    ))
+
+    if cur.rowcount == 0:
+        conn.rollback()
+
+        cur.close()
+        conn.close()
+
+        flash(
+            "Expense not found or not authorized.",
+            "error"
+        )
+
+        return redirect(
+            url_for("expenses_home")
+        )
+
     conn.commit()
 
     cur.close()
     conn.close()
 
-    flash("Expense deleted successfully.", "success")
-    return redirect(url_for("expenses_home"))
+    flash(
+        "Expense deleted successfully.",
+        "success"
+    )
+
+    return redirect(
+        url_for("expenses_home")
+    )
 
 
 #  ------------------------------------------
@@ -33704,6 +35874,16 @@ def edit_automatic_expense(automatic_expense_id):
 @spa_required
 def add_income(appointment_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to add income.",
+            "error"
+        )
+        return redirect(url_for("income_report"))
+
     selected_date = request.args.get("date") or request.form.get("date") or ""
 
     def money_value(field_name):
@@ -33725,9 +35905,15 @@ def add_income(appointment_id):
         JOIN clients c
             ON a.client_id = c.client_id
            AND c.spa_id = a.spa_id
+           AND c.business_unit_id = a.business_unit_id
         WHERE a.appointment_id = %s
           AND a.spa_id = %s
-    """, (appointment_id, spa_id))
+          AND a.business_unit_id = %s
+    """, (
+        appointment_id,
+        spa_id,
+        business_unit_id
+    ))
     appt = cur.fetchone()
 
     if not appt:
@@ -33760,8 +35946,13 @@ def add_income(appointment_id):
         SELECT COALESCE(SUM(amount), 0.00)
         FROM client_credit_transactions
         WHERE spa_id = %s
+          AND business_unit_id = %s
           AND client_id = %s
-    """, (spa_id, appt[1]))
+    """, (
+        spa_id,
+        business_unit_id,
+        appt[1]
+    ))
     credit_balance = float(cur.fetchone()[0] or 0.00)
 
     if request.method == "POST":
@@ -33863,6 +36054,7 @@ def add_income(appointment_id):
             cur.execute("""
                 INSERT INTO client_credit_transactions (
                     spa_id,
+                    business_unit_id,
                     client_id,
                     source_type,
                     source_id,
@@ -33871,9 +36063,13 @@ def add_income(appointment_id):
                     amount,
                     notes
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s
+                )
             """, (
                 spa_id,
+                business_unit_id,
                 appt[1],
                 "Income",
                 None,
@@ -33900,6 +36096,7 @@ def add_income(appointment_id):
                 processor_payment_id,
                 notes,
                 spa_id,
+                business_unit_id,
                 employee_id,
                 credit_processor_id,
                 processing_fee_amount,
@@ -33910,7 +36107,12 @@ def add_income(appointment_id):
                 created_at
             )
             VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s,
+                %s, %s, %s,
+                CURRENT_TIMESTAMP
             )
         """, (
             income_date,
@@ -33928,6 +36130,7 @@ def add_income(appointment_id):
             processor_payment_id,
             notes,
             spa_id,
+            business_unit_id,
             employee_id,
             credit_processor_id,
             processing_fee_amount,
@@ -33980,8 +36183,41 @@ def add_income(appointment_id):
 @spa_required
 def edit_income(income_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to edit income.",
+            "error"
+        )
+        return redirect(url_for("income_report"))
+
     conn = get_db_connection()
     cur = conn.cursor()
+
+    cur.execute("""
+        SELECT income_id
+        FROM income
+        WHERE income_id = %s
+          AND spa_id = %s
+          AND business_unit_id = %s
+        LIMIT 1
+    """, (
+        income_id,
+        spa_id,
+        business_unit_id
+    ))
+
+    if not cur.fetchone():
+        cur.close()
+        conn.close()
+        flash(
+            "Income record not found in this "
+            "Provider Workspace.",
+            "error"
+        )
+        return redirect(url_for("income_report"))
 
     if request.method == "POST":
         income_date = request.form.get("income_date") or None
@@ -34038,6 +36274,63 @@ def edit_income(income_id):
         notes = request.form.get("notes") or None
         client_id = request.form.get("client_id") or None
 
+        if employee_id:
+            cur.execute("""
+                SELECT employee_id
+                FROM employees
+                WHERE employee_id = %s
+                  AND spa_id = %s
+                  AND is_active = TRUE
+                LIMIT 1
+            """, (
+                employee_id,
+                spa_id
+            ))
+
+            if not cur.fetchone():
+                cur.close()
+                conn.close()
+                flash(
+                    "Selected employee is not available "
+                    "for this business.",
+                    "error"
+                )
+                return redirect(
+                    url_for(
+                        "edit_income",
+                        income_id=income_id
+                    )
+                )
+
+        if client_id:
+            cur.execute("""
+                SELECT client_id
+                FROM clients
+                WHERE client_id = %s
+                  AND spa_id = %s
+                  AND business_unit_id = %s
+                LIMIT 1
+            """, (
+                client_id,
+                spa_id,
+                business_unit_id
+            ))
+
+            if not cur.fetchone():
+                cur.close()
+                conn.close()
+                flash(
+                    "Selected client is not available "
+                    "in this Provider Workspace.",
+                    "error"
+                )
+                return redirect(
+                    url_for(
+                        "edit_income",
+                        income_id=income_id
+                    )
+                )
+
         cur.execute("""
             UPDATE income
             SET
@@ -34062,6 +36355,7 @@ def edit_income(income_id):
                 client_id = %s
             WHERE income_id = %s
               AND spa_id = %s
+              AND business_unit_id = %s
         """, (
             income_date,
             income_type,
@@ -34083,8 +36377,20 @@ def edit_income(income_id):
             processor_additional_fee,
             client_id,
             income_id,
-            spa_id
+            spa_id,
+            business_unit_id
         ))
+
+        if cur.rowcount != 1:
+            conn.rollback()
+            cur.close()
+            conn.close()
+            flash(
+                "Income record could not be updated "
+                "in this Provider Workspace.",
+                "error"
+            )
+            return redirect(url_for("income_report"))
 
         conn.commit()
         cur.close()
@@ -34113,18 +36419,30 @@ def edit_income(income_id):
             c.first_name,
             c.last_name
         FROM income i
-        LEFT JOIN clients c ON i.client_id = c.client_id
+        LEFT JOIN clients c
+          ON i.client_id = c.client_id
+         AND c.spa_id = i.spa_id
+         AND c.business_unit_id = i.business_unit_id
         WHERE i.income_id = %s
           AND i.spa_id = %s
-    """, (income_id, spa_id))
+          AND i.business_unit_id = %s
+    """, (
+        income_id,
+        spa_id,
+        business_unit_id
+    ))
     income_record = cur.fetchone()
 
     cur.execute("""
         SELECT client_id, first_name, last_name
         FROM clients
         WHERE spa_id = %s
+          AND business_unit_id = %s
         ORDER BY last_name, first_name
-    """, (spa_id,))
+    """, (
+        spa_id,
+        business_unit_id
+    ))
     clients = cur.fetchall()
 
     cur.execute("""
@@ -34172,7 +36490,15 @@ def edit_income(income_id):
 @spa_required
 def income_report_csv():
     spa_id = current_spa_id()
-    role = session.get("role")
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to export income.",
+            "error"
+        )
+        return redirect(url_for("income_report"))
 
     today = date.today()
     first_day = today.replace(day=1)
@@ -34184,12 +36510,17 @@ def income_report_csv():
     conn = get_db_connection()
     cur = conn.cursor()
 
-    filter_sql = "WHERE i.income_date BETWEEN %s AND %s"
-    params = [start_date, end_date]
-
-    if role != "master_admin":
-        filter_sql += " AND i.spa_id = %s"
-        params.append(spa_id)
+    filter_sql = """
+        WHERE i.income_date BETWEEN %s AND %s
+          AND i.spa_id = %s
+          AND i.business_unit_id = %s
+    """
+    params = [
+        start_date,
+        end_date,
+        spa_id,
+        business_unit_id
+    ]
 
     if income_type:
         filter_sql += " AND i.income_type = %s"
@@ -34214,6 +36545,7 @@ def income_report_csv():
         LEFT JOIN clients c
             ON i.client_id = c.client_id
            AND i.spa_id = c.spa_id
+           AND i.business_unit_id = c.business_unit_id
         LEFT JOIN employees e
             ON i.employee_id = e.employee_id
            AND i.spa_id = e.spa_id
@@ -34274,7 +36606,15 @@ def income_report_csv():
 @spa_required
 def income_report_excel():
     spa_id = current_spa_id()
-    role = session.get("role")
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to export income.",
+            "error"
+        )
+        return redirect(url_for("income_report"))
 
     today = date.today()
     first_day = today.replace(day=1)
@@ -34286,12 +36626,17 @@ def income_report_excel():
     conn = get_db_connection()
     cur = conn.cursor()
 
-    filter_sql = "WHERE i.income_date BETWEEN %s AND %s"
-    params = [start_date, end_date]
-
-    if role != "master_admin":
-        filter_sql += " AND i.spa_id = %s"
-        params.append(spa_id)
+    filter_sql = """
+        WHERE i.income_date BETWEEN %s AND %s
+          AND i.spa_id = %s
+          AND i.business_unit_id = %s
+    """
+    params = [
+        start_date,
+        end_date,
+        spa_id,
+        business_unit_id
+    ]
 
     if income_type:
         filter_sql += " AND i.income_type = %s"
@@ -34316,6 +36661,7 @@ def income_report_excel():
         LEFT JOIN clients c
             ON i.client_id = c.client_id
            AND i.spa_id = c.spa_id
+           AND i.business_unit_id = c.business_unit_id
         LEFT JOIN employees e
             ON i.employee_id = e.employee_id
            AND i.spa_id = e.spa_id
@@ -34378,27 +36724,66 @@ def income_report_excel():
 @spa_required
 def delete_income(income_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
     start_date = request.form.get("start_date", "").strip()
     end_date = request.form.get("end_date", "").strip()
     income_type = request.form.get("income_type", "").strip()
 
+    redirect_args = {
+        "start_date": start_date,
+        "end_date": end_date,
+        "income_type": income_type
+    }
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to delete income.",
+            "error"
+        )
+        return redirect(
+            url_for("income_report", **redirect_args)
+        )
+
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute("DELETE FROM income WHERE income_id = %s", (income_id,))
-    conn.commit()
+    cur.execute("""
+        DELETE FROM income
+        WHERE income_id = %s
+          AND spa_id = %s
+          AND business_unit_id = %s
+    """, (
+        income_id,
+        spa_id,
+        business_unit_id
+    ))
 
+    if cur.rowcount != 1:
+        conn.rollback()
+        cur.close()
+        conn.close()
+
+        flash(
+            "Income record was not found in this "
+            "Provider Workspace.",
+            "error"
+        )
+
+        return redirect(
+            url_for("income_report", **redirect_args)
+        )
+
+    conn.commit()
     cur.close()
     conn.close()
 
     flash("Income record deleted.", "success")
 
-    return redirect(url_for(
-        "income_report",
-        start_date=start_date,
-        end_date=end_date,
-        income_type=income_type
-    ))
+    return redirect(
+        url_for("income_report", **redirect_args)
+    )
 
 
 
@@ -34425,7 +36810,15 @@ from db import get_db_connection
 @spa_required
 def income_report():
     spa_id = current_spa_id()
-    role = session.get("role")
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to view income.",
+            "error"
+        )
+        return redirect(url_for("dashboard"))
 
     today = date.today()
     first_day = today.replace(day=1)
@@ -34438,45 +36831,50 @@ def income_report():
     cur = conn.cursor()
 
     # Income type dropdown
-    if role == "master_admin":
-        cur.execute("""
-            SELECT DISTINCT income_type
-            FROM income
-            WHERE income_type IS NOT NULL
-              AND income_type <> ''
-            ORDER BY income_type
-        """)
-    else:
-        cur.execute("""
-            SELECT DISTINCT income_type
-            FROM income
-            WHERE spa_id = %s
-              AND income_type IS NOT NULL
-              AND income_type <> ''
-            ORDER BY income_type
-        """, (spa_id,))
+    cur.execute("""
+        SELECT DISTINCT income_type
+        FROM income
+        WHERE spa_id = %s
+          AND business_unit_id = %s
+          AND income_type IS NOT NULL
+          AND income_type <> ''
+        ORDER BY income_type
+    """, (
+        spa_id,
+        business_unit_id
+    ))
 
     income_type_options = [row[0] for row in cur.fetchall()]
 
     # Base filters
-    filter_sql = "WHERE income_date BETWEEN %s AND %s"
-    params = [start_date, end_date]
-
-    if role != "master_admin":
-        filter_sql += " AND spa_id = %s"
-        params.append(spa_id)
+    filter_sql = """
+        WHERE income_date BETWEEN %s AND %s
+          AND spa_id = %s
+          AND business_unit_id = %s
+    """
+    params = [
+        start_date,
+        end_date,
+        spa_id,
+        business_unit_id
+    ]
 
     if income_type:
         filter_sql += " AND income_type = %s"
         params.append(income_type)
 
     # Alias version for joined income queries
-    filter_sql_i = "WHERE i.income_date BETWEEN %s AND %s"
-    params_i = [start_date, end_date]
-
-    if role != "master_admin":
-        filter_sql_i += " AND i.spa_id = %s"
-        params_i.append(spa_id)
+    filter_sql_i = """
+        WHERE i.income_date BETWEEN %s AND %s
+          AND i.spa_id = %s
+          AND i.business_unit_id = %s
+    """
+    params_i = [
+        start_date,
+        end_date,
+        spa_id,
+        business_unit_id
+    ]
 
     if income_type:
         filter_sql_i += " AND i.income_type = %s"
@@ -34575,6 +36973,7 @@ def income_report():
         LEFT JOIN clients c
             ON i.client_id = c.client_id
            AND i.spa_id = c.spa_id
+           AND i.business_unit_id = c.business_unit_id
         LEFT JOIN employees e
             ON i.employee_id = e.employee_id
            AND i.spa_id = e.spa_id
@@ -34624,24 +37023,29 @@ from db import get_db_connection
 @spa_required
 def add_general_income():
     spa_id = current_spa_id()
-    role = session.get("role")
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to add income.",
+            "error"
+        )
+        return redirect(url_for("income_report"))
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    if role == "master_admin":
-        cur.execute("""
-            SELECT client_id, first_name, last_name
-            FROM clients
-            ORDER BY last_name, first_name
-        """)
-    else:
-        cur.execute("""
-            SELECT client_id, first_name, last_name
-            FROM clients
-            WHERE spa_id = %s
-            ORDER BY last_name, first_name
-        """, (spa_id,))
+    cur.execute("""
+        SELECT client_id, first_name, last_name
+        FROM clients
+        WHERE spa_id = %s
+          AND business_unit_id = %s
+        ORDER BY last_name, first_name
+    """, (
+        spa_id,
+        business_unit_id
+    ))
     clients = cur.fetchall()
 
     cur.execute("""
@@ -34670,7 +37074,10 @@ def add_general_income():
         tax_amount = request.form.get("tax_amount", "0").strip()
         total_amount = request.form.get("total_amount", "0").strip()
         payment_method = request.form.get("payment_method")
-        square_payment_id = request.form.get("square_payment_id", "").strip()
+        processor_payment_id = request.form.get(
+            "processor_payment_id",
+            ""
+        ).strip()
         notes = request.form.get("notes", "").strip()
 
         try:
@@ -34716,17 +37123,27 @@ def add_general_income():
         if client_id == "":
             client_id = None
 
-        # Safety check: client must belong to this spa
+        # Client must belong to the current Provider Workspace.
         if client_id:
             cur.execute("""
                 SELECT client_id
                 FROM clients
                 WHERE client_id = %s
                   AND spa_id = %s
-            """, (client_id, spa_id))
+                  AND business_unit_id = %s
+                LIMIT 1
+            """, (
+                client_id,
+                spa_id,
+                business_unit_id
+            ))
 
             if not cur.fetchone():
-                flash("Selected client does not belong to this spa.", "error")
+                flash(
+                    "Selected client is not available "
+                    "in this Provider Workspace.",
+                    "error"
+                )
                 cur.close()
                 conn.close()
                 return render_template(
@@ -34739,6 +37156,7 @@ def add_general_income():
         cur.execute("""
             INSERT INTO income (
                 spa_id,
+                business_unit_id,
                 income_date,
                 client_id,
                 appointment_id,
@@ -34750,12 +37168,19 @@ def add_general_income():
                 tax_amount,
                 total_amount,
                 payment_method,
-                square_payment_id,
+                processor_payment_id,
                 notes
             )
-            VALUES (%s, %s, %s, NULL, NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (
+                %s, %s, %s, %s,
+                NULL, NULL,
+                %s, %s, %s, %s,
+                %s, %s, %s, %s,
+                %s
+            )
         """, (
             spa_id,
+            business_unit_id,
             income_date,
             client_id,
             income_type,
@@ -34765,7 +37190,7 @@ def add_general_income():
             tax_amount,
             total_amount,
             payment_method,
-            square_payment_id,
+            processor_payment_id,
             notes
         ))
 
@@ -41811,19 +44236,31 @@ def complete_appointment(appointment_id):
 @spa_required
 def post_appointment_wrap_up(appointment_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
     user_id = session.get("user_id")
-    role = session.get("role")
     selected_date = request.args.get("date") or request.form.get("date") or ""
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to complete an appointment.",
+            "error"
+        )
+        return redirect(url_for("appointments"))
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    appt_filter = "WHERE a.appointment_id = %s"
-    appt_params = [appointment_id]
-
-    if role != "master_admin":
-        appt_filter += " AND a.spa_id = %s"
-        appt_params.append(spa_id)
+    appt_filter = """
+        WHERE a.appointment_id = %s
+          AND a.spa_id = %s
+          AND a.business_unit_id = %s
+    """
+    appt_params = [
+        appointment_id,
+        spa_id,
+        business_unit_id
+    ]
 
     if request.method == "POST":
         treatment_notes = request.form.get("treatment_notes", "")
@@ -41880,7 +44317,12 @@ def post_appointment_wrap_up(appointment_id):
                 updated_at = CURRENT_TIMESTAMP
             WHERE appointment_id = %s
               AND spa_id = %s
-        """, (appointment_id, appointment_spa_id))
+              AND business_unit_id = %s
+        """, (
+            appointment_id,
+            appointment_spa_id,
+            business_unit_id
+        ))
 
 
         if cur.rowcount == 0:
@@ -41927,10 +44369,15 @@ def post_appointment_wrap_up(appointment_id):
                 credit_earned
             FROM referrals
             WHERE spa_id = %s
+              AND business_unit_id = %s
               AND referred_client_id = %s
             ORDER BY referral_id DESC
             LIMIT 1
-        """, (appointment_spa_id, referred_client_id))
+        """, (
+            appointment_spa_id,
+            business_unit_id,
+            referred_client_id
+        ))
 
         referral_row = cur.fetchone()
 
@@ -41944,12 +44391,19 @@ def post_appointment_wrap_up(appointment_id):
                         first_completed_appointment_date = %s
                     WHERE referral_id = %s
                       AND spa_id = %s
-                """, (completed_date, referral_id, appointment_spa_id))
+                      AND business_unit_id = %s
+                """, (
+                    completed_date,
+                    referral_id,
+                    appointment_spa_id,
+                    business_unit_id
+                ))
 
                 if referrer_type == "Client" and referrer_client_id:
                     cur.execute("""
                         INSERT INTO client_credit_transactions (
                             spa_id,
+                            business_unit_id,
                             client_id,
                             source_type,
                             source_id,
@@ -41958,9 +44412,13 @@ def post_appointment_wrap_up(appointment_id):
                             amount,
                             notes
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        VALUES (
+                            %s, %s, %s, %s, %s,
+                            %s, %s, %s, %s
+                        )
                     """, (
                         appointment_spa_id,
+                        business_unit_id,
                         referrer_client_id,
                         "Referral",
                         referral_id,
@@ -41990,6 +44448,7 @@ def post_appointment_wrap_up(appointment_id):
         JOIN clients c
             ON a.client_id = c.client_id
            AND a.spa_id = c.spa_id
+           AND a.business_unit_id = c.business_unit_id
         {appt_filter}
     """, appt_params)
 
@@ -42045,8 +44504,48 @@ def post_appointment_wrap_up(appointment_id):
 
 
 @app.route("/post_appointment_wrap_up_saved/<int:appointment_id>")
+@login_required
+@spa_required
 def post_appointment_wrap_up_saved(appointment_id):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
 
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to view this confirmation.",
+            "error"
+        )
+        return redirect(url_for("appointments"))
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT appointment_id
+        FROM appointments
+        WHERE appointment_id = %s
+          AND spa_id = %s
+          AND business_unit_id = %s
+        LIMIT 1
+    """, (
+        appointment_id,
+        spa_id,
+        business_unit_id
+    ))
+
+    appointment_exists = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if not appointment_exists:
+        flash(
+            "Appointment not found in this "
+            "Provider Workspace.",
+            "error"
+        )
+        return redirect(url_for("appointments"))
 
     return render_template(
         "post_appointment_wrap_up_saved.html",
@@ -42168,7 +44667,15 @@ def appointment_history(appointment_id):
 @spa_required
 def client_history():
     spa_id = current_spa_id()
-    role = session.get("role")
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to view client history.",
+            "error"
+        )
+        return redirect(url_for("dashboard"))
 
     search = request.args.get("search", "").strip()
 
@@ -42178,13 +44685,13 @@ def client_history():
     query = """
         SELECT client_id, first_name, last_name
         FROM clients
-        WHERE 1=1
+        WHERE spa_id = %s
+          AND business_unit_id = %s
     """
-    params = []
-
-    if role != "master_admin":
-        query += " AND spa_id = %s"
-        params.append(spa_id)
+    params = [
+        spa_id,
+        business_unit_id
+    ]
 
     if search:
         query += """
@@ -42236,20 +44743,40 @@ def client_history():
 @spa_required
 def client_history_detail(client_id):
     spa_id = current_spa_id()
-    role = session.get("role")
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to view client history.",
+            "error"
+        )
+        return redirect(url_for("client_history"))
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    client_filter = "WHERE client_id = %s"
-    client_params = [client_id]
-
-    if role != "master_admin":
-        client_filter += " AND spa_id = %s"
-        client_params.append(spa_id)
+    client_filter = """
+        WHERE client_id = %s
+          AND spa_id = %s
+          AND business_unit_id = %s
+    """
+    client_params = [
+        client_id,
+        spa_id,
+        business_unit_id
+    ]
 
     cur.execute(f"""
-        SELECT client_id, first_name, last_name, phone, email, birth_date, spa_id
+        SELECT
+            client_id,
+            first_name,
+            last_name,
+            phone,
+            email,
+            birth_date,
+            spa_id,
+            business_unit_id
         FROM clients
         {client_filter}
     """, client_params)
@@ -42262,6 +44789,7 @@ def client_history_detail(client_id):
         return "Client not found", 404
 
     client_spa_id = client[6]
+    client_business_unit_id = client[7]
 
     cur.execute("""
         SELECT
@@ -42286,9 +44814,14 @@ def client_history_detail(client_id):
            AND a.spa_id = aw.spa_id
         WHERE a.client_id = %s
           AND a.spa_id = %s
+          AND a.business_unit_id = %s
         ORDER BY a.appointment_date DESC NULLS LAST,
                  a.appointment_time DESC NULLS LAST
-    """, (client_id, client_spa_id))
+    """, (
+        client_id,
+        client_spa_id,
+        client_business_unit_id
+    ))
 
     rows = cur.fetchall()
 
@@ -42317,20 +44850,40 @@ def client_history_detail(client_id):
 @spa_required
 def client_history_detail_two(client_id):
     spa_id = current_spa_id()
-    role = session.get("role")
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to view client history.",
+            "error"
+        )
+        return redirect(url_for("client_history"))
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    client_filter = "WHERE client_id = %s"
-    client_params = [client_id]
-
-    if role != "master_admin":
-        client_filter += " AND spa_id = %s"
-        client_params.append(spa_id)
+    client_filter = """
+        WHERE client_id = %s
+          AND spa_id = %s
+          AND business_unit_id = %s
+    """
+    client_params = [
+        client_id,
+        spa_id,
+        business_unit_id
+    ]
 
     cur.execute(f"""
-        SELECT client_id, first_name, last_name, phone, email, birth_date, spa_id
+        SELECT
+            client_id,
+            first_name,
+            last_name,
+            phone,
+            email,
+            birth_date,
+            spa_id,
+            business_unit_id
         FROM clients
         {client_filter}
     """, client_params)
@@ -42343,6 +44896,7 @@ def client_history_detail_two(client_id):
         return "Client not found", 404
 
     client_spa_id = client[6]
+    client_business_unit_id = client[7]
 
     cur.execute("""
         SELECT
@@ -42367,9 +44921,14 @@ def client_history_detail_two(client_id):
            AND a.spa_id = aw.spa_id
         WHERE a.client_id = %s
           AND a.spa_id = %s
+          AND a.business_unit_id = %s
         ORDER BY a.appointment_date DESC NULLS LAST,
                  a.appointment_time DESC NULLS LAST
-    """, (client_id, client_spa_id))
+    """, (
+        client_id,
+        client_spa_id,
+        client_business_unit_id
+    ))
 
     rows = cur.fetchall()
 
@@ -43174,11 +45733,15 @@ def add_new_client_step2():
                         last_name
                     FROM clients
                     WHERE spa_id = %s
+                      AND business_unit_id = %s
                       AND active_client = TRUE
                     ORDER BY
                         last_name,
                         first_name
-                """, (spa_id,))
+                """, (
+                    spa_id,
+                    business_unit_id
+                ))
 
                 clients_for_referral = (
                     cur.fetchall()
@@ -43209,8 +45772,75 @@ def add_new_client_step2():
 
             try:
                 referred_by_value = None
-                if step2.get("referrer_type") == "Client" and step2.get("referred_by"):
-                    referred_by_value = step2.get("referred_by")
+
+                if (
+                    step2.get("referrer_type") == "Client"
+                    and step2.get("referred_by")
+                ):
+                    requested_referrer_id = (
+                        step2.get("referred_by")
+                    )
+
+                    cur.execute("""
+                        SELECT client_id
+                        FROM clients
+                        WHERE client_id = %s
+                          AND spa_id = %s
+                          AND business_unit_id = %s
+                          AND active_client = TRUE
+                        LIMIT 1
+                    """, (
+                        requested_referrer_id,
+                        spa_id,
+                        business_unit_id
+                    ))
+
+                    valid_referrer = cur.fetchone()
+
+                    if not valid_referrer:
+                        conn.rollback()
+
+                        flash(
+                            "Selected referring client is not "
+                            "available in this Provider Workspace.",
+                            "error"
+                        )
+
+                        cur.execute("""
+                            SELECT
+                                client_id,
+                                first_name,
+                                last_name
+                            FROM clients
+                            WHERE spa_id = %s
+                              AND business_unit_id = %s
+                              AND active_client = TRUE
+                            ORDER BY
+                                last_name,
+                                first_name
+                        """, (
+                            spa_id,
+                            business_unit_id
+                        ))
+
+                        clients_for_referral = (
+                            cur.fetchall()
+                        )
+
+                        cur.close()
+                        conn.close()
+
+                        return render_template(
+                            "add_new_client_step2.html",
+                            step2_data=step2,
+                            selected_date=selected_date,
+                            clients_for_referral=(
+                                clients_for_referral
+                            ),
+                            duplicate_matches=[]
+                        )
+
+                    referred_by_value = valid_referrer[0]
 
                 cur.execute("""
                     INSERT INTO clients (
@@ -43288,35 +45918,36 @@ def add_new_client_step2():
                 referrer_phone = step2.get("referrer_phone", "").strip()
                 referrer_email = step2.get("referrer_email", "").strip()
 
-                if referrer_type == "Client" and referred_by:
+                if (
+                    referrer_type == "Client"
+                    and referred_by_value
+                ):
                     cur.execute("""
-                        SELECT 1
-                        FROM clients
-                        WHERE client_id = %s
-                          AND spa_id = %s
-                    """, (referred_by, spa_id))
-
-                    if cur.fetchone():
-                        cur.execute("""
-                            INSERT INTO referrals (
-                                spa_id,
-                                referred_client_id,
-                                referrer_type,
-                                referrer_client_id,
-                                referral_date
-                            )
-                            VALUES (%s, %s, %s, %s, CURRENT_DATE)
-                        """, (
+                        INSERT INTO referrals (
                             spa_id,
-                            new_client_id,
-                            "Client",
-                            int(referred_by)
-                        ))
+                            business_unit_id,
+                            referred_client_id,
+                            referrer_type,
+                            referrer_client_id,
+                            referral_date
+                        )
+                        VALUES (
+                            %s, %s, %s, %s, %s,
+                            CURRENT_DATE
+                        )
+                    """, (
+                        spa_id,
+                        business_unit_id,
+                        new_client_id,
+                        "Client",
+                        int(referred_by_value)
+                    ))
 
                 elif referrer_type == "Non-Client" and referrer_name:
                     cur.execute("""
                         INSERT INTO referrals (
                             spa_id,
+                            business_unit_id,
                             referred_client_id,
                             referrer_type,
                             referrer_name,
@@ -43325,9 +45956,13 @@ def add_new_client_step2():
                             referrer_email,
                             referral_date
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_DATE)
+                        VALUES (
+                            %s, %s, %s, %s, %s,
+                            %s, %s, %s, CURRENT_DATE
+                        )
                     """, (
                         spa_id,
+                        business_unit_id,
                         new_client_id,
                         "Non-Client",
                         referrer_name,
@@ -43380,9 +46015,13 @@ def add_new_client_step2():
         SELECT client_id, first_name, last_name
         FROM clients
         WHERE spa_id = %s
+          AND business_unit_id = %s
           AND active_client = TRUE
         ORDER BY last_name, first_name
-    """, (spa_id,))
+    """, (
+        spa_id,
+        business_unit_id
+    ))
 
     clients_for_referral = cur.fetchall()
 
@@ -43415,17 +46054,29 @@ def add_new_client_step2():
 @spa_required
 def edit_client(client_id):
     spa_id = current_spa_id()
-    role = session.get("role")
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to edit a client.",
+            "error"
+        )
+        return redirect(url_for("client_history"))
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    client_filter = "WHERE c.client_id = %s"
-    client_params = [client_id]
-
-    if role != "master_admin":
-        client_filter += " AND c.spa_id = %s"
-        client_params.append(spa_id)
+    client_filter = """
+        WHERE c.client_id = %s
+          AND c.spa_id = %s
+          AND c.business_unit_id = %s
+    """
+    client_params = [
+        client_id,
+        spa_id,
+        business_unit_id
+    ]
 
     cur.execute(f"""
         SELECT
@@ -43634,6 +46285,7 @@ def edit_client(client_id):
                     updated_at = CURRENT_TIMESTAMP
                 WHERE client_id = %s
                   AND spa_id = %s
+                  AND business_unit_id = %s
             """, (
                 first_name,
                 last_name,
@@ -43660,8 +46312,27 @@ def edit_client(client_id):
                 notes_three,
                 active_client,
                 client_id,
-                client_spa_id
+                client_spa_id,
+                client_business_unit_id
             ))
+
+            if cur.rowcount != 1:
+                conn.rollback()
+                cur.close()
+                conn.close()
+
+                flash(
+                    "Client could not be updated in this "
+                    "Provider Workspace.",
+                    "error"
+                )
+
+                return redirect(
+                    url_for(
+                        "edit_client",
+                        client_id=client_id
+                    )
+                )
 
             conn.commit()
             cur.close()
@@ -43677,8 +46348,13 @@ def edit_client(client_id):
         FROM appointments
         WHERE client_id = %s
           AND spa_id = %s
+          AND business_unit_id = %s
           AND LOWER(status) = 'completed'
-    """, (client_id, client_spa_id))
+    """, (
+        client_id,
+        client_spa_id,
+        client_business_unit_id
+    ))
     total_visits = cur.fetchone()[0]
 
     cur.execute("""
@@ -43686,7 +46362,12 @@ def edit_client(client_id):
         FROM income
         WHERE client_id = %s
           AND spa_id = %s
-    """, (client_id, client_spa_id))
+          AND business_unit_id = %s
+    """, (
+        client_id,
+        client_spa_id,
+        client_business_unit_id
+    ))
     total_revenue = cur.fetchone()[0]
 
     cur.execute("""
@@ -43694,10 +46375,15 @@ def edit_client(client_id):
         FROM appointments
         WHERE client_id = %s
           AND spa_id = %s
+          AND business_unit_id = %s
           AND LOWER(status) = 'completed'
         ORDER BY appointment_date DESC
         LIMIT 1
-    """, (client_id, client_spa_id))
+    """, (
+        client_id,
+        client_spa_id,
+        client_business_unit_id
+    ))
     last_visit = cur.fetchone()
 
     cur.execute("""
@@ -43705,11 +46391,16 @@ def edit_client(client_id):
         FROM appointments
         WHERE client_id = %s
           AND spa_id = %s
+          AND business_unit_id = %s
           AND LOWER(status) = 'booked'
           AND appointment_date >= CURRENT_DATE
         ORDER BY appointment_date, appointment_time
         LIMIT 1
-    """, (client_id, client_spa_id))
+    """, (
+        client_id,
+        client_spa_id,
+        client_business_unit_id
+    ))
     next_appt = cur.fetchone()
 
     cur.execute("""
@@ -43726,9 +46417,14 @@ def edit_client(client_id):
         FROM appointments
         WHERE client_id = %s
           AND spa_id = %s
+          AND business_unit_id = %s
         ORDER BY appointment_date DESC, appointment_time DESC
         LIMIT 10
-    """, (client_id, client_spa_id))
+    """, (
+        client_id,
+        client_spa_id,
+        client_business_unit_id
+    ))
     recent_appointments = cur.fetchall()
 
     cur.execute("""
@@ -43736,8 +46432,13 @@ def edit_client(client_id):
         FROM appointments
         WHERE client_id = %s
           AND spa_id = %s
+          AND business_unit_id = %s
           AND LOWER(status) = 'completed'
-    """, (client_id, client_spa_id))
+    """, (
+        client_id,
+        client_spa_id,
+        client_business_unit_id
+    ))
     lifetime_value = cur.fetchone()[0]
 
     cur.execute("""
@@ -43745,8 +46446,13 @@ def edit_client(client_id):
         FROM appointments
         WHERE client_id = %s
           AND spa_id = %s
+          AND business_unit_id = %s
           AND LOWER(status) = 'completed'
-    """, (client_id, client_spa_id))
+    """, (
+        client_id,
+        client_spa_id,
+        client_business_unit_id
+    ))
     average_ticket = cur.fetchone()[0]
 
     cur.execute("""
@@ -43754,7 +46460,12 @@ def edit_client(client_id):
         FROM client_credit_transactions
         WHERE client_id = %s
           AND spa_id = %s
-    """, (client_id, client_spa_id))
+          AND business_unit_id = %s
+    """, (
+        client_id,
+        client_spa_id,
+        client_business_unit_id
+    ))
     credit_balance = cur.fetchone()[0]
 
     cur.close()
@@ -43793,6 +46504,17 @@ def edit_client(client_id):
 @spa_required
 def deactivate_client(client_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to deactivate a client.",
+            "error"
+        )
+        return redirect(
+            url_for("client_management", show_all=1)
+        )
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -43802,14 +46524,36 @@ def deactivate_client(client_id):
         SET active_client = FALSE
         WHERE client_id = %s
           AND spa_id = %s
-    """, (client_id, spa_id))
+          AND business_unit_id = %s
+    """, (
+        client_id,
+        spa_id,
+        business_unit_id
+    ))
+
+    if cur.rowcount != 1:
+        conn.rollback()
+        cur.close()
+        conn.close()
+
+        flash(
+            "Client was not found in this "
+            "Provider Workspace.",
+            "error"
+        )
+
+        return redirect(
+            url_for("client_management", show_all=1)
+        )
 
     conn.commit()
     cur.close()
     conn.close()
 
     flash("Client has been deactivated.", "success")
-    return redirect(url_for("client_management", show_all=1))
+    return redirect(
+        url_for("client_management", show_all=1)
+    )
 
 
 
@@ -43828,6 +46572,15 @@ def deactivate_client(client_id):
 @spa_required
 def inactive_clients():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to view inactive clients.",
+            "error"
+        )
+        return redirect(url_for("client_management"))
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -43843,16 +46596,23 @@ def inactive_clients():
             client_status
         FROM clients
         WHERE spa_id = %s
+          AND business_unit_id = %s
           AND active_client = FALSE
         ORDER BY last_name, first_name
-    """, (spa_id,))
+    """, (
+        spa_id,
+        business_unit_id
+    ))
 
     rows = cur.fetchall()
 
     cur.close()
     conn.close()
 
-    return render_template("inactive_clients.html", rows=rows)
+    return render_template(
+        "inactive_clients.html",
+        rows=rows
+    )
 
 
 
@@ -43870,6 +46630,15 @@ def inactive_clients():
 @spa_required
 def reactivate_client(client_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to reactivate a client.",
+            "error"
+        )
+        return redirect(url_for("inactive_clients"))
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -43879,7 +46648,24 @@ def reactivate_client(client_id):
         SET active_client = TRUE
         WHERE client_id = %s
           AND spa_id = %s
-    """, (client_id, spa_id))
+          AND business_unit_id = %s
+    """, (
+        client_id,
+        spa_id,
+        business_unit_id
+    ))
+
+    if cur.rowcount != 1:
+        conn.rollback()
+        cur.close()
+        conn.close()
+
+        flash(
+            "Client was not found in this "
+            "Provider Workspace.",
+            "error"
+        )
+        return redirect(url_for("inactive_clients"))
 
     conn.commit()
     cur.close()
@@ -50824,7 +53610,11 @@ def _render_public_booking_page(
                 include_marketing_sms_in_10dlc_application
             FROM public_website_settings
             WHERE spa_id = %s
-        """, (spa_id,))
+              AND business_unit_id = %s
+        """, (
+            spa_id,
+            business_unit_id,
+        ))
 
         website_setting_row = cur.fetchone()
 
@@ -52751,7 +55541,11 @@ def public_booking_confirm(
                 include_marketing_sms_in_10dlc_application
             FROM public_website_settings
             WHERE spa_id = %s
-        """, (spa_id,))
+              AND business_unit_id = %s
+        """, (
+            spa_id,
+            business_unit_id,
+        ))
 
         website_setting_row = cur.fetchone()
 
@@ -52899,7 +55693,8 @@ def public_booking_confirm(
                     f"Consent text version: "
                     f"{service_consent_version}."
                 ),
-                updated_by=None
+                updated_by=None,
+                business_unit_id=business_unit_id
             )
 
 
@@ -52978,7 +55773,8 @@ def public_booking_confirm(
                     "consent checkbox. Consent text version: "
                     f"{marketing_consent_version}."
                 ),
-                updated_by=None
+                updated_by=None,
+                business_unit_id=business_unit_id
             )
 
 

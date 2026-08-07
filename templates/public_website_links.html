@@ -1,0 +1,334 @@
+{% extends "base.html" %}
+
+{% block title %}
+Website Links | Peach Suite Pro
+{% endblock %}
+
+{% block content %}
+
+<style>
+    .website-links-page {
+        max-width: 1100px;
+    }
+
+    .website-links-summary-grid {
+        display: grid;
+        grid-template-columns:
+            repeat(2, minmax(180px, 260px));
+        gap: 14px;
+        margin: 20px 0;
+    }
+
+    .website-links-summary-card {
+        padding: 16px;
+        background: #ffffff;
+        border: 1px solid #dddddd;
+        border-radius: 10px;
+    }
+
+    .website-links-summary-card strong {
+        display: block;
+        margin-top: 4px;
+        font-size: 1.5rem;
+    }
+
+    .website-links-filter-row,
+    .website-links-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+    }
+
+    .website-links-filter-row {
+        margin: 18px 0;
+    }
+
+    .website-link-status {
+        display: inline-block;
+        padding: 4px 9px;
+        border-radius: 999px;
+        font-size: 0.88rem;
+        font-weight: 600;
+    }
+
+    .website-link-status-active {
+        background: #e7f5ea;
+        color: #245c31;
+    }
+
+    .website-link-status-hidden {
+        background: #eeeeee;
+        color: #555555;
+    }
+
+    .hidden-website-link-row {
+        opacity: 0.75;
+    }
+
+    .website-link-url {
+        max-width: 430px;
+        overflow-wrap: anywhere;
+    }
+
+    @media (max-width: 650px) {
+        .website-links-summary-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+
+
+<div class="website-links-page">
+
+    <div class="page-tool-pills">
+
+        <a
+            href="{{ url_for('public_website_settings') }}"
+            class="tool-pill tool-pill-small"
+        >
+            Public Website Settings
+        </a>
+
+        {% if public_website_url %}
+
+            <a
+                href="{{ public_website_url }}"
+                class="tool-pill tool-pill-small"
+                target="_blank"
+                rel="noopener"
+            >
+                View Public Website
+            </a>
+
+        {% endif %}
+
+    </div>
+
+
+    <div class="page-title">
+        <h1>Website Links</h1>
+    </div>
+
+
+    <p>
+        Manage optional links displayed on this workspace's
+        public website. These can link to another business
+        website, social profile, gift card page, online store,
+        parent organization, or another useful destination.
+    </p>
+
+
+    <div class="website-links-summary-grid">
+
+        <div class="website-links-summary-card">
+            Shown Links
+            <strong>{{ active_count }}</strong>
+        </div>
+
+        <div class="website-links-summary-card">
+            Hidden Links
+            <strong>{{ hidden_count }}</strong>
+        </div>
+
+    </div>
+
+
+    <div class="page-tool-pills">
+
+        <a
+            href="{{ url_for('add_public_website_link') }}"
+            class="tool-pill tool-pill-small"
+        >
+            Add Website Link
+        </a>
+
+    </div>
+
+
+    <div class="website-links-filter-row">
+
+        <a
+            href="{{
+                url_for(
+                    'public_website_links',
+                    status='active'
+                )
+            }}"
+            class="tool-pill tool-pill-small"
+        >
+            Shown ({{ active_count }})
+        </a>
+
+        <a
+            href="{{
+                url_for(
+                    'public_website_links',
+                    status='hidden'
+                )
+            }}"
+            class="tool-pill tool-pill-small"
+        >
+            Hidden ({{ hidden_count }})
+        </a>
+
+        <a
+            href="{{
+                url_for(
+                    'public_website_links',
+                    status='all'
+                )
+            }}"
+            class="tool-pill tool-pill-small"
+        >
+            All
+        </a>
+
+    </div>
+
+
+    {% if website_links %}
+
+        <div class="table-container">
+
+            <table class="appointments-table">
+
+                <thead>
+                    <tr>
+                        <th>Label</th>
+                        <th>Destination</th>
+                        <th>Display Order</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+
+                    {% for item in website_links %}
+
+                        <tr
+                            {% if not item[4] %}
+                                class="hidden-website-link-row"
+                            {% endif %}
+                        >
+
+                            <td>
+                                <strong>{{ item[1] }}</strong>
+                            </td>
+
+                            <td class="website-link-url">
+                                <a
+                                    href="{{ item[2] }}"
+                                    target="_blank"
+                                    rel="noopener"
+                                >
+                                    {{ item[2] }}
+                                </a>
+                            </td>
+
+                            <td>
+                                {{
+                                    item[3]
+                                    if item[3] is not none
+                                    else 'By label'
+                                }}
+                            </td>
+
+                            <td>
+
+                                {% if item[4] %}
+
+                                    <span
+                                        class="
+                                            website-link-status
+                                            website-link-status-active
+                                        "
+                                    >
+                                        Shown
+                                    </span>
+
+                                {% else %}
+
+                                    <span
+                                        class="
+                                            website-link-status
+                                            website-link-status-hidden
+                                        "
+                                    >
+                                        Hidden
+                                    </span>
+
+                                {% endif %}
+
+                            </td>
+
+                            <td>
+
+                                <div class="website-links-actions">
+
+                                    <a
+                                        href="{{
+                                            url_for(
+                                                'edit_public_website_link',
+                                                public_website_link_id=item[0]
+                                            )
+                                        }}"
+                                        class="
+                                            tool-pill
+                                            tool-pill-small
+                                        "
+                                    >
+                                        Edit
+                                    </a>
+
+                                    <form
+                                        method="POST"
+                                        action="{{
+                                            url_for(
+                                                'toggle_public_website_link',
+                                                public_website_link_id=item[0]
+                                            )
+                                        }}"
+                                        style="margin:0;"
+                                    >
+                                        <button
+                                            type="submit"
+                                            class="
+                                                tool-pill
+                                                tool-pill-small
+                                            "
+                                        >
+                                            {{
+                                                'Hide'
+                                                if item[4]
+                                                else 'Show'
+                                            }}
+                                        </button>
+                                    </form>
+
+                                </div>
+
+                            </td>
+
+                        </tr>
+
+                    {% endfor %}
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+    {% else %}
+
+        <div class="empty-state">
+            No website links match this view.
+        </div>
+
+    {% endif %}
+
+</div>
+
+{% endblock %}

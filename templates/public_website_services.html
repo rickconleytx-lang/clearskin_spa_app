@@ -1,0 +1,314 @@
+{% extends "base.html" %}
+
+{% block title %}
+Website Services | Peach Suite Pro
+{% endblock %}
+
+{% block content %}
+
+<style>
+    .website-services-page {
+        max-width: 1100px;
+    }
+
+    .website-services-summary-grid {
+        display: grid;
+        grid-template-columns:
+            repeat(2, minmax(180px, 260px));
+        gap: 14px;
+        margin: 20px 0;
+    }
+
+    .website-services-summary-card {
+        padding: 16px;
+        background: #ffffff;
+        border: 1px solid #dddddd;
+        border-radius: 10px;
+    }
+
+    .website-services-summary-card strong {
+        display: block;
+        margin-top: 4px;
+        font-size: 1.5rem;
+    }
+
+    .website-services-filter-row,
+    .website-services-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+    }
+
+    .website-services-filter-row {
+        margin: 18px 0;
+    }
+
+    .website-service-status {
+        display: inline-block;
+        padding: 4px 9px;
+        border-radius: 999px;
+        font-size: 0.88rem;
+        font-weight: 600;
+    }
+
+    .website-service-status-shown {
+        background: #e7f5ea;
+        color: #245c31;
+    }
+
+    .website-service-status-hidden {
+        background: #eeeeee;
+        color: #555555;
+    }
+
+    .hidden-website-service-row {
+        opacity: 0.75;
+    }
+
+    @media (max-width: 650px) {
+        .website-services-summary-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+
+
+<div class="website-services-page">
+
+    <div class="page-tool-pills">
+
+        <a
+            href="{{ url_for('public_website_settings') }}"
+            class="tool-pill tool-pill-small"
+        >
+            Public Website Settings
+        </a>
+
+        {% if public_services_url %}
+
+            <a
+                href="{{ public_services_url }}"
+                class="tool-pill tool-pill-small"
+                target="_blank"
+                rel="noopener"
+            >
+                View Website Services
+            </a>
+
+        {% endif %}
+
+    </div>
+
+
+    <div class="page-title">
+        <h1>Website Services</h1>
+    </div>
+
+
+    <p>
+        Choose which active services from the shared Service Catalog
+        appear on this workspace's public website. Website descriptions
+        and display order are managed here without changing appointment
+        pricing or duration.
+    </p>
+
+
+    <div class="website-services-summary-grid">
+
+        <div class="website-services-summary-card">
+            Shown Services
+            <strong>{{ shown_count }}</strong>
+        </div>
+
+        <div class="website-services-summary-card">
+            Hidden Services
+            <strong>{{ hidden_count }}</strong>
+        </div>
+
+    </div>
+
+
+    <div class="website-services-filter-row">
+
+        <a
+            href="{{
+                url_for(
+                    'public_website_services',
+                    status='shown'
+                )
+            }}"
+            class="tool-pill tool-pill-small"
+        >
+            Shown ({{ shown_count }})
+        </a>
+
+        <a
+            href="{{
+                url_for(
+                    'public_website_services',
+                    status='hidden'
+                )
+            }}"
+            class="tool-pill tool-pill-small"
+        >
+            Hidden ({{ hidden_count }})
+        </a>
+
+        <a
+            href="{{
+                url_for(
+                    'public_website_services',
+                    status='all'
+                )
+            }}"
+            class="tool-pill tool-pill-small"
+        >
+            All
+        </a>
+
+    </div>
+
+
+    {% if services %}
+
+        <div class="table-container">
+
+            <table class="appointments-table">
+
+                <thead>
+                    <tr>
+                        <th>Service</th>
+                        <th>Standard Duration</th>
+                        <th>Standard Price</th>
+                        <th>Display Order</th>
+                        <th>Website Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+
+                    {% for service in services %}
+
+                        <tr
+                            {% if not service[5] %}
+                                class="hidden-website-service-row"
+                            {% endif %}
+                        >
+
+                            <td>
+                                <strong>{{ service[1] }}</strong>
+
+                                {% if service[4] %}
+
+                                    <div
+                                        style="
+                                            margin-top:6px;
+                                            font-size:0.9rem;
+                                            color:#666666;
+                                            max-width:380px;
+                                        "
+                                    >
+                                        {{ service[4] }}
+                                    </div>
+
+                                {% endif %}
+                            </td>
+
+                            <td>
+                                {% if service[2] is not none %}
+                                    {{ service[2] }} minutes
+                                {% else %}
+                                    Not set
+                                {% endif %}
+                            </td>
+
+                            <td>
+                                {% if service[3] is not none %}
+                                    ${{ '%.2f'|format(service[3]) }}
+                                {% else %}
+                                    Not set
+                                {% endif %}
+                            </td>
+
+                            <td>
+                                {{
+                                    service[6]
+                                    if service[6] is not none
+                                    else 'By name'
+                                }}
+                            </td>
+
+                            <td>
+
+                                {% if service[5] %}
+
+                                    <span
+                                        class="
+                                            website-service-status
+                                            website-service-status-shown
+                                        "
+                                    >
+                                        Shown
+                                    </span>
+
+                                {% else %}
+
+                                    <span
+                                        class="
+                                            website-service-status
+                                            website-service-status-hidden
+                                        "
+                                    >
+                                        Hidden
+                                    </span>
+
+                                {% endif %}
+
+                            </td>
+
+                            <td>
+
+                                <div class="website-services-actions">
+
+                                    <a
+                                        href="{{
+                                            url_for(
+                                                'edit_public_website_service',
+                                                service_type_id=service[0]
+                                            )
+                                        }}"
+                                        class="
+                                            tool-pill
+                                            tool-pill-small
+                                        "
+                                    >
+                                        Edit Website Display
+                                    </a>
+
+                                </div>
+
+                            </td>
+
+                        </tr>
+
+                    {% endfor %}
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+    {% else %}
+
+        <div class="empty-state">
+            No active services match this view.
+        </div>
+
+    {% endif %}
+
+</div>
+
+{% endblock %}

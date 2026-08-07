@@ -528,6 +528,30 @@
 
                 <div class="website-settings-field">
 
+                    <label for="website_tagline">
+                        Website Tagline
+                    </label>
+
+                    <input
+                        type="text"
+                        id="website_tagline"
+                        name="website_tagline"
+                        maxlength="180"
+                        value="{{ settings.website_tagline }}"
+                        required
+                    >
+
+                    <span class="website-settings-help">
+                        A short phrase that describes the
+                        business and appears near the business
+                        name on the public website.
+                    </span>
+
+                </div>
+
+
+                <div class="website-settings-field">
+
                     <label for="hero_headline">
                         Hero Headline
                     </label>
@@ -545,6 +569,27 @@
                     <span class="website-settings-help">
                         The main headline customers see when
                         they first open the website.
+                    </span>
+
+                </div>
+
+
+                <div class="website-settings-field">
+
+                    <label for="hero_description">
+                        Hero Description
+                    </label>
+
+                    <textarea
+                        id="hero_description"
+                        name="hero_description"
+                        maxlength="1000"
+                        required
+                    >{{ settings.hero_description }}</textarea>
+
+                    <span class="website-settings-help">
+                        Supporting text displayed with the
+                        main hero headline.
                     </span>
 
                 </div>
@@ -871,6 +916,22 @@
 
                 </div>
 
+
+                <div class="page-tool-pills">
+
+                    <a
+                        href="{{
+                            url_for(
+                                'public_website_services'
+                            )
+                        }}"
+                        class="tool-pill tool-pill-small"
+                    >
+                        Manage Website Services
+                    </a>
+
+                </div>
+
             </section>
 
 
@@ -967,6 +1028,35 @@
                         class="tool-pill tool-pill-small"
                     >
                         Manage Menu Items
+                    </a>
+
+                </div>
+
+            </section>
+
+
+            <section class="website-settings-section">
+
+                <h2>Website Links</h2>
+
+                <p>
+                    Add optional links to another business
+                    website, social profile, gift card page,
+                    online store, parent organization, or
+                    other useful destination.
+                </p>
+
+                <div class="page-tool-pills">
+
+                    <a
+                        href="{{
+                            url_for(
+                                'public_website_links'
+                            )
+                        }}"
+                        class="tool-pill tool-pill-small"
+                    >
+                        Manage Website Links
                     </a>
 
                 </div>

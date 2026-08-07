@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+
+{% block title %}
+{{ form_title }} | Peach Suite Pro
+{% endblock %}
+
+{% block content %}
+
+<style>
+    .website-link-form-page {
+        max-width: 760px;
+    }
+
+    .website-link-form-card {
+        padding: 24px;
+        background: #ffffff;
+        border: 1px solid #dddddd;
+        border-radius: 12px;
+    }
+
+    .website-link-field {
+        margin-bottom: 22px;
+    }
+
+    .website-link-field label {
+        display: block;
+        margin-bottom: 7px;
+        font-weight: 700;
+    }
+
+    .website-link-field input[type="text"],
+    .website-link-field input[type="url"],
+    .website-link-field input[type="number"] {
+        width: 100%;
+        max-width: 620px;
+    }
+
+    .website-link-help {
+        margin-top: 6px;
+        color: #666666;
+        font-size: 0.92rem;
+    }
+
+    .website-link-checkbox {
+        display: flex;
+        gap: 9px;
+        align-items: flex-start;
+    }
+</style>
+
+
+<div class="website-link-form-page">
+
+    <div class="page-tool-pills">
+
+        <a
+            href="{{ url_for('public_website_links') }}"
+            class="tool-pill tool-pill-small"
+        >
+            Website Links
+        </a>
+
+    </div>
+
+
+    <div class="page-title">
+        <h1>{{ form_title }}</h1>
+    </div>
+
+
+    <form method="POST" class="website-link-form-card">
+
+        {% set submitted_label =
+            submitted.get('link_label')
+            if submitted
+            else (
+                website_link[1]
+                if website_link
+                else ''
+            )
+        %}
+
+        {% set submitted_url =
+            submitted.get('link_url')
+            if submitted
+            else (
+                website_link[2]
+                if website_link
+                else ''
+            )
+        %}
+
+        {% set submitted_order =
+            submitted.get('sort_order')
+            if submitted
+            else (
+                website_link[3]
+                if website_link
+                and website_link[3] is not none
+                else ''
+            )
+        %}
+
+
+        <div class="website-link-field">
+
+            <label for="link_label">
+                Link Label
+            </label>
+
+            <input
+                type="text"
+                id="link_label"
+                name="link_label"
+                maxlength="180"
+                value="{{ submitted_label }}"
+                placeholder="Example: Visit Our Main Website"
+                required
+            >
+
+            <p class="website-link-help">
+                This is the text customers will see and click.
+            </p>
+
+        </div>
+
+
+        <div class="website-link-field">
+
+            <label for="link_url">
+                Destination URL
+            </label>
+
+            <input
+                type="url"
+                id="link_url"
+                name="link_url"
+                maxlength="2000"
+                value="{{ submitted_url }}"
+                placeholder="https://example.com"
+                required
+            >
+
+            <p class="website-link-help">
+                Enter the complete destination beginning with
+                http:// or https://.
+            </p>
+
+        </div>
+
+
+        <div class="website-link-field">
+
+            <label for="sort_order">
+                Display Order
+            </label>
+
+            <input
+                type="number"
+                id="sort_order"
+                name="sort_order"
+                min="1"
+                max="999"
+                step="1"
+                value="{{ submitted_order }}"
+                placeholder="Example: 10"
+            >
+
+            <p class="website-link-help">
+                Lower numbers appear first. Leave blank to
+                sort links by label.
+            </p>
+
+        </div>
+
+
+        <div class="website-link-field">
+
+            <div class="website-link-checkbox">
+
+                <input
+                    type="checkbox"
+                    id="is_active"
+                    name="is_active"
+                    {% if submitted %}
+                        {% if submitted.get('is_active') %}
+                            checked
+                        {% endif %}
+                    {% elif not website_link or website_link[4] %}
+                        checked
+                    {% endif %}
+                >
+
+                <label for="is_active">
+                    Show this link on the public website
+                </label>
+
+            </div>
+
+        </div>
+
+
+        <div class="page-tool-pills">
+
+            <button
+                type="submit"
+                class="btn btn-primary"
+            >
+                Save Website Link
+            </button>
+
+            <a
+                href="{{ url_for('public_website_links') }}"
+                class="tool-pill tool-pill-small"
+            >
+                Cancel
+            </a>
+
+        </div>
+
+    </form>
+
+</div>
+
+{% endblock %}

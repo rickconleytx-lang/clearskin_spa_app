@@ -1,0 +1,156 @@
+{% extends "public_site/tenant_policy_base.html" %}
+
+{% block policy_content %}
+
+    <h2>Acceptance of These Terms</h2>
+
+    <p>
+        By using this website or booking an appointment, you agree to these
+        Terms and Conditions and the linked Privacy Policy, SMS Terms, and
+        Booking &amp; Cancellation Policy.
+    </p>
+
+
+    <h2>Services</h2>
+
+    <p>
+        {{ business_name }} provides the services described on this website.
+        Website descriptions are general information and do not guarantee a
+        particular result or outcome.
+    </p>
+
+    <p>
+        When a service involves health, wellness, cosmetic, or other
+        professional considerations, clients are responsible for seeking
+        appropriate professional or medical advice when needed.
+    </p>
+
+
+    <h2>Appointments and Client Responsibilities</h2>
+
+    <p>
+        Clients are responsible for providing accurate contact, booking, and
+        other information reasonably required for the requested service and
+        for reviewing appointment confirmations.
+    </p>
+
+    <p>
+        {{ business_name }} may decline, modify, stop, or postpone a service
+        when reasonably necessary for safety, suitability, availability, or
+        professional judgment.
+    </p>
+
+
+    <h2>Prices and Payment</h2>
+
+    <p>
+        Prices and availability may change. Applicable prices, deposits,
+        taxes, and payment requirements will be disclosed before or at the
+        time of service. Third-party payment processors may apply their own
+        terms.
+    </p>
+
+
+    <h2>Cancellations and Rescheduling</h2>
+
+    <p>
+        Appointment changes are governed by the
+        <a href="{{ url_for('tenant_booking_policy') }}">
+            Booking &amp; Cancellation Policy
+        </a>.
+    </p>
+
+
+    <h2>Text Messages and Email</h2>
+
+    <p>
+        Text-message participation is optional and subject to the
+        <a href="{{ url_for('tenant_sms_terms') }}">SMS Terms</a>.
+        Consent to receive text messages is not a condition of purchasing a
+        service. Promotional email messages will include an available
+        unsubscribe method when required.
+    </p>
+
+
+    <h2>Website Content</h2>
+
+    <p>
+        Website text, branding, graphics, photographs, and other content may
+        be protected by intellectual-property laws. Content may not be
+        copied, republished, sold, or commercially exploited without
+        permission, except as allowed by law.
+    </p>
+
+
+    <h2>Acceptable Use</h2>
+
+    <p>
+        You may not misuse the website, attempt unauthorized access,
+        interfere with security, submit false booking information,
+        impersonate another person, or use the website for unlawful or
+        abusive purposes.
+    </p>
+
+
+    <h2>Third-Party Services</h2>
+
+    <p>
+        The website may rely on or link to third-party services, including
+        Peach Suite Pro, telecommunications providers, maps, payment
+        services, and social platforms. {{ business_name }} is not
+        responsible for a third party's independent services, availability,
+        or privacy practices.
+    </p>
+
+
+    <h2>Disclaimer</h2>
+
+    <p>
+        The website and online-booking functions are provided on an
+        “as available” basis. {{ business_name }} does not promise that the
+        website will always be uninterrupted, error-free, or available.
+    </p>
+
+
+    <h2>Limitation of Liability</h2>
+
+    <p>
+        To the fullest extent permitted by applicable law,
+        {{ business_name }} will not be liable for indirect, incidental,
+        special, or consequential damages arising solely from use of, or
+        inability to use, the website or online-booking system. Nothing in
+        these terms excludes liability that cannot legally be excluded.
+    </p>
+
+
+    <h2>Applicable Law</h2>
+
+    <p>
+        These terms are governed by applicable laws and regulations in the
+        jurisdiction in which {{ business_name }} operates, except where
+        another law is required to apply.
+    </p>
+
+
+    <h2>Changes and Contact</h2>
+
+    <p>
+        These terms may be updated periodically. Questions may be directed
+        to {{ business_name }}.
+    </p>
+
+    {% if website_settings.appointment_contact_phone %}
+        <p>
+            Phone:
+            {{ website_settings.appointment_contact_phone }}
+        </p>
+    {% endif %}
+
+    {% if website_settings.appointment_contact_email %}
+        <p>
+            Email:
+            {{ website_settings.appointment_contact_email }}
+        </p>
+    {% endif %}
+
+{% endblock %}

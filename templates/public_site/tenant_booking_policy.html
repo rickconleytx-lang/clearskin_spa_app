@@ -1,0 +1,99 @@
+{% extends "public_site/tenant_policy_base.html" %}
+
+{% block policy_content %}
+
+    <h2>Appointments</h2>
+
+    <p>
+        Appointments are subject to availability and are not guaranteed
+        until the booking process is completed and a confirmation is issued.
+        Please review the selected service, provider, date, and time carefully.
+    </p>
+
+
+    <h2>Cancellations and Rescheduling</h2>
+
+    <p>
+        Clients are asked to cancel or reschedule as soon as reasonably
+        possible so the appointment time may be offered to another client.
+    </p>
+
+    {% if website_settings.appointment_contact_phone
+        or website_settings.appointment_contact_email %}
+        <p>
+            Cancellations and rescheduling requests may be made through
+            the available booking tools or by contacting
+            {{ business_name }}.
+        </p>
+
+        {% if website_settings.appointment_contact_phone %}
+            <p>
+                Phone:
+                {{ website_settings.appointment_contact_phone }}
+            </p>
+        {% endif %}
+
+        {% if website_settings.appointment_contact_email %}
+            <p>
+                Email:
+                {{ website_settings.appointment_contact_email }}
+            </p>
+        {% endif %}
+    {% endif %}
+
+    <p>
+        Any cancellation, no-show, deposit, or rescheduling requirements
+        that apply to an appointment will be disclosed before booking or
+        otherwise communicated to the client.
+    </p>
+
+
+    <h2>Late Arrivals</h2>
+
+    <p>
+        Please arrive on time. A late arrival may require the service to
+        be shortened, modified, or rescheduled so later appointments are
+        not delayed.
+    </p>
+
+
+    <h2>Provider Changes and Business Cancellations</h2>
+
+    <p>
+        {{ business_name }} may need to reschedule or cancel an appointment
+        because of illness, emergencies, weather, equipment issues, staffing
+        changes, or other circumstances. When practical, reasonable efforts
+        will be made to contact the client and offer another available
+        appointment.
+    </p>
+
+
+    <h2>Service Suitability and Client Information</h2>
+
+    <p>
+        Clients should provide complete and accurate information that may
+        reasonably affect the requested service. {{ business_name }} may
+        decline, postpone, or modify a service when doing so is reasonably
+        necessary for safety, suitability, or service quality.
+    </p>
+
+
+    <h2>Prices, Promotions, and Gift Certificates</h2>
+
+    <p>
+        Prices, service descriptions, availability, promotions, packages,
+        and gift-certificate terms may change. Any material price, deposit,
+        or payment requirement will be shown or communicated before the
+        appointment is confirmed.
+    </p>
+
+
+    <h2>Policy Updates</h2>
+
+    <p>
+        This policy may be updated from time to time. The version posted
+        on this website at the time of booking will apply unless
+        {{ business_name }} provides different written terms.
+    </p>
+
+{% endblock %}
