@@ -1,151 +1,379 @@
 <div class="user-menu app-menu-category">
 
-    <button type="button"
-            class="user-menu-button app-menu-category-button"
-            onclick="togglefinancialsMenu()">
+<button type="button"
+        class="user-menu-button app-menu-category-button"
+        onclick="togglefinancialsMenu()">
 
-        <span class="app-menu-category-main">
+    <span class="app-menu-category-main">
 
-            <span class="app-menu-category-icon"
-                  aria-hidden="true">
-                📊
-            </span>
-
-            <span class="app-menu-category-label">
-                Financials
-            </span>
-
-        </span>
-
-        <span class="app-menu-category-chevron"
+        <span class="app-menu-category-icon"
               aria-hidden="true">
-            ›
+            📊
         </span>
 
-    </button>
+        <span class="app-menu-category-label">
+            Financials
+        </span>
+
+    </span>
+
+    <span class="app-menu-category-chevron"
+          aria-hidden="true">
+        ›
+    </span>
+
+</button>
 
 
-    <div id="financialsMenuDropdown"
-         class="user-menu-dropdown app-menu-submenu"
-         style="display:none;">
+<div id="financialsMenuDropdown"
+     class="user-menu-dropdown app-menu-submenu"
+     style="display:none;">
 
 
-        <!-- Income -->
-        <div class="app-menu-submenu-section">
+    <!-- Income -->
+    <div class="app-menu-submenu-section">
 
-            <div class="app-menu-submenu-heading">
-                💵 Income
-            </div>
-
-            <a href="{{ url_for('add_general_income') }}">
-                <span aria-hidden="true">➕</span>
-                <span>Add General Income</span>
-            </a>
-
-            <a href="{{ url_for('income_report') }}">
-                <span aria-hidden="true">📈</span>
-                <span>Income Report</span>
-            </a>
-
-            <a href="{{ url_for('income_home') }}">
-                <span aria-hidden="true">🏠</span>
-                <span>Income Home</span>
-            </a>
-
+        <div class="app-menu-submenu-heading">
+            💵 Income
         </div>
 
+        <a href="{{ url_for('add_general_income') }}">
+            <span aria-hidden="true">➕</span>
+            <span>Add Income</span>
+        </a>
 
-        <div class="user-menu-divider"></div>
+
+        <div class="app-nested-menu">
+
+            <button type="button"
+                    class="app-nested-menu-button"
+                    data-nested-menu-target="incomeToolsNestedMenu"
+                    aria-controls="incomeToolsNestedMenu"
+                    aria-expanded="false"
+                    aria-haspopup="true"
+                    onclick="toggleNestedAppMenu(
+                        'incomeToolsNestedMenu',
+                        this
+                    )">
+
+                <span class="app-nested-menu-button-main">
+
+                    <span aria-hidden="true">
+                        📊
+                    </span>
+
+                    <span>
+                        Income Tools
+                    </span>
+
+                </span>
+
+                <span class="app-nested-menu-chevron"
+                      aria-hidden="true">
+                    ›
+                </span>
+
+            </button>
 
 
-        <!-- Expenses -->
-        <div class="app-menu-submenu-section">
+            <div id="incomeToolsNestedMenu"
+                 class="app-nested-menu-pane"
+                 style="display:none;">
 
-            <div class="app-menu-submenu-heading">
-                🧾 Expenses
+                <div class="app-nested-menu-header">
+
+                    <div class="app-nested-menu-title">
+                        Income Tools
+                    </div>
+
+                    <button type="button"
+                            class="app-nested-menu-close"
+                            aria-label="Close Income Tools"
+                            onclick="closeNestedAppMenuById(
+                                'incomeToolsNestedMenu'
+                            )">
+                        ✕
+                    </button>
+
+                </div>
+
+
+                <a href="{{ url_for('income_report') }}">
+                    <span aria-hidden="true">📈</span>
+                    <span>Income Report</span>
+                </a>
+
+                <a href="{{ url_for('income_home') }}">
+                    <span aria-hidden="true">🏠</span>
+                    <span>Income Home</span>
+                </a>
+
             </div>
 
-            <a href="{{ url_for('add_expense') }}">
-                <span aria-hidden="true">➕</span>
-                <span>Add Expense</span>
-            </a>
-
-            <a href="{{ url_for('automatic_expenses') }}">
-                <span aria-hidden="true">🔁</span>
-                <span>Recurring Expenses</span>
-            </a>
-
-            <a href="{{ url_for('expense_report') }}">
-                <span aria-hidden="true">📉</span>
-                <span>Expense Report</span>
-            </a>
-
-            <a href="{{ url_for('expenses_home') }}">
-                <span aria-hidden="true">🏠</span>
-                <span>Expenses Home</span>
-            </a>
-
         </div>
-
-
-        <div class="user-menu-divider"></div>
-
-
-
-        <!-- Business Financing -->
-        <div class="app-menu-submenu-section">
-
-            <div class="app-menu-submenu-heading">
-                🏦 Business Financing
-            </div>
-
-            <a href="{{ url_for('business_financing_home') }}">
-                <span aria-hidden="true">💳</span>
-                <span>Business Loans</span>
-            </a>
-
-            <a href="{{ url_for('finance_home') }}">
-                <span aria-hidden="true">📋</span>
-                <span>Finance Home</span>
-            </a>
-
-            <a href="{{ url_for('financials_home') }}">
-                <span aria-hidden="true">📊</span>
-                <span>Financials Home</span>
-            </a>
-
-        </div>
-
-
-        <div class="user-menu-divider"></div>
-
-
-        <!-- Owner Funding -->
-        <div class="app-menu-submenu-section">
-
-            <div class="app-menu-submenu-heading">
-                👤 Owner Funding
-            </div>
-
-            <a href="{{ url_for('add_owner_contribution') }}">
-                <span aria-hidden="true">➕</span>
-                <span>Add Owner Contribution</span>
-            </a>
-
-            <a href="{{ url_for('add_owner_reimbursement') }}">
-                <span aria-hidden="true">↩️</span>
-                <span>Add Owner Reimbursement</span>
-            </a>
-
-            <a href="{{ url_for('funding_home') }}">
-                <span aria-hidden="true">💰</span>
-                <span>Owner Financing</span>
-            </a>
-
-        </div>
-
-
 
     </div>
+
+
+    <div class="user-menu-divider"></div>
+
+
+    <!-- Expenses -->
+    <div class="app-menu-submenu-section">
+
+        <div class="app-menu-submenu-heading">
+            🧾 Expenses
+        </div>
+
+        <a href="{{ url_for('add_expense') }}">
+            <span aria-hidden="true">➕</span>
+            <span>Add Expense</span>
+        </a>
+
+        <a href="{{ url_for('automatic_expenses') }}">
+            <span aria-hidden="true">🔁</span>
+            <span>Recurring Expenses</span>
+        </a>
+
+
+        <div class="app-nested-menu">
+
+            <button type="button"
+                    class="app-nested-menu-button"
+                    data-nested-menu-target="expenseToolsNestedMenu"
+                    aria-controls="expenseToolsNestedMenu"
+                    aria-expanded="false"
+                    aria-haspopup="true"
+                    onclick="toggleNestedAppMenu(
+                        'expenseToolsNestedMenu',
+                        this
+                    )">
+
+                <span class="app-nested-menu-button-main">
+
+                    <span aria-hidden="true">
+                        📊
+                    </span>
+
+                    <span>
+                        Expense Tools
+                    </span>
+
+                </span>
+
+                <span class="app-nested-menu-chevron"
+                      aria-hidden="true">
+                    ›
+                </span>
+
+            </button>
+
+
+            <div id="expenseToolsNestedMenu"
+                 class="app-nested-menu-pane"
+                 style="display:none;">
+
+                <div class="app-nested-menu-header">
+
+                    <div class="app-nested-menu-title">
+                        Expense Tools
+                    </div>
+
+                    <button type="button"
+                            class="app-nested-menu-close"
+                            aria-label="Close Expense Tools"
+                            onclick="closeNestedAppMenuById(
+                                'expenseToolsNestedMenu'
+                            )">
+                        ✕
+                    </button>
+
+                </div>
+
+
+                <a href="{{ url_for('expense_report') }}">
+                    <span aria-hidden="true">📉</span>
+                    <span>Expense Report</span>
+                </a>
+
+                <a href="{{ url_for('expenses_home') }}">
+                    <span aria-hidden="true">🏠</span>
+                    <span>Expenses Home</span>
+                </a>
+
+            </div>
+
+        </div>
+
+    </div>
+
+
+    <div class="user-menu-divider"></div>
+
+
+    <!-- Business Financing -->
+    <div class="app-menu-submenu-section">
+
+        <div class="app-nested-menu">
+
+            <button type="button"
+                    class="app-nested-menu-button"
+                    data-nested-menu-target="businessFinancingNestedMenu"
+                    aria-controls="businessFinancingNestedMenu"
+                    aria-expanded="false"
+                    aria-haspopup="true"
+                    onclick="toggleNestedAppMenu(
+                        'businessFinancingNestedMenu',
+                        this
+                    )">
+
+                <span class="app-nested-menu-button-main">
+
+                    <span aria-hidden="true">
+                        🏦
+                    </span>
+
+                    <span>
+                        Business Financing
+                    </span>
+
+                </span>
+
+                <span class="app-nested-menu-chevron"
+                      aria-hidden="true">
+                    ›
+                </span>
+
+            </button>
+
+
+            <div id="businessFinancingNestedMenu"
+                 class="app-nested-menu-pane"
+                 style="display:none;">
+
+                <div class="app-nested-menu-header">
+
+                    <div class="app-nested-menu-title">
+                        Business Financing
+                    </div>
+
+                    <button type="button"
+                            class="app-nested-menu-close"
+                            aria-label="Close Business Financing"
+                            onclick="closeNestedAppMenuById(
+                                'businessFinancingNestedMenu'
+                            )">
+                        ✕
+                    </button>
+
+                </div>
+
+
+                <a href="{{ url_for('business_financing_home') }}">
+                    <span aria-hidden="true">💳</span>
+                    <span>Business Loans</span>
+                </a>
+
+                <a href="{{ url_for('finance_home') }}">
+                    <span aria-hidden="true">📋</span>
+                    <span>Finance Home</span>
+                </a>
+
+                <a href="{{ url_for('financials_home') }}">
+                    <span aria-hidden="true">📊</span>
+                    <span>Financials Home</span>
+                </a>
+
+            </div>
+
+        </div>
+
+    </div>
+
+
+    <div class="user-menu-divider"></div>
+
+
+    <!-- Owner Funding -->
+    <div class="app-menu-submenu-section">
+
+        <div class="app-nested-menu">
+
+            <button type="button"
+                    class="app-nested-menu-button"
+                    data-nested-menu-target="ownerFundingNestedMenu"
+                    aria-controls="ownerFundingNestedMenu"
+                    aria-expanded="false"
+                    aria-haspopup="true"
+                    onclick="toggleNestedAppMenu(
+                        'ownerFundingNestedMenu',
+                        this
+                    )">
+
+                <span class="app-nested-menu-button-main">
+
+                    <span aria-hidden="true">
+                        👤
+                    </span>
+
+                    <span>
+                        Owner Funding
+                    </span>
+
+                </span>
+
+                <span class="app-nested-menu-chevron"
+                      aria-hidden="true">
+                    ›
+                </span>
+
+            </button>
+
+
+            <div id="ownerFundingNestedMenu"
+                 class="app-nested-menu-pane"
+                 style="display:none;">
+
+                <div class="app-nested-menu-header">
+
+                    <div class="app-nested-menu-title">
+                        Owner Funding
+                    </div>
+
+                    <button type="button"
+                            class="app-nested-menu-close"
+                            aria-label="Close Owner Funding"
+                            onclick="closeNestedAppMenuById(
+                                'ownerFundingNestedMenu'
+                            )">
+                        ✕
+                    </button>
+
+                </div>
+
+
+                <a href="{{ url_for('add_owner_contribution') }}">
+                    <span aria-hidden="true">➕</span>
+                    <span>Add Owner Contribution</span>
+                </a>
+
+                <a href="{{ url_for('add_owner_reimbursement') }}">
+                    <span aria-hidden="true">↩️</span>
+                    <span>Add Owner Reimbursement</span>
+                </a>
+
+                <a href="{{ url_for('funding_home') }}">
+                    <span aria-hidden="true">💰</span>
+                    <span>Owner Financing</span>
+                </a>
+
+            </div>
+
+        </div>
+
+    </div>
+
+
+</div>
 
 </div>

@@ -128,6 +128,7 @@
 
         {% set has_business_navigation = (
             nav_access.can_view_calendar
+            or nav_access.can_manage_online_booking
             or nav_access.can_view_communications
             or nav_access.can_view_clients
             or nav_access.can_view_inventory
@@ -187,6 +188,11 @@
 
         {% if nav_access.can_view_calendar %}
             {% include "partials/calendar_menu.html" %}
+        {% endif %}
+
+
+        {% if nav_access.can_manage_online_booking %}
+            {% include "partials/online_booking_menu.html" %}
         {% endif %}
 
 
@@ -1040,6 +1046,11 @@ function closeNestedAppMenuById(
 
 function toggleCalendarMenu() {
     toggleAppSubmenu("calendarMenuDropdown");
+}
+
+
+function toggleOnlineBookingMenu() {
+    toggleAppSubmenu("onlineBookingMenuDropdown");
 }
 
 

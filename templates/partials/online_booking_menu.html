@@ -2,17 +2,17 @@
 
     <button type="button"
             class="user-menu-button app-menu-category-button"
-            onclick="toggleCalendarMenu()">
+            onclick="toggleOnlineBookingMenu()">
 
         <span class="app-menu-category-main">
 
             <span class="app-menu-category-icon"
                   aria-hidden="true">
-                📅
+                🌐
             </span>
 
             <span class="app-menu-category-label">
-                Calendar & Appointments
+                Online Booking
             </span>
 
         </span>
@@ -25,16 +25,16 @@
     </button>
 
 
-    <div id="calendarMenuDropdown"
+    <div id="onlineBookingMenuDropdown"
          class="user-menu-dropdown app-menu-submenu"
          style="display:none;">
 
 
-        <!-- Schedule -->
+        <!-- Booking Management -->
         <div class="app-menu-submenu-section">
 
             <div class="app-menu-submenu-heading">
-                📆 Schedule
+                🍑 Booking Management
             </div>
 
 
@@ -42,23 +42,23 @@
 
                 <button type="button"
                         class="app-nested-menu-button"
-                        data-nested-menu-target="calendarViewsNestedMenu"
-                        aria-controls="calendarViewsNestedMenu"
+                        data-nested-menu-target="bookingControlNestedMenu"
+                        aria-controls="bookingControlNestedMenu"
                         aria-expanded="false"
                         aria-haspopup="true"
                         onclick="toggleNestedAppMenu(
-                            'calendarViewsNestedMenu',
+                            'bookingControlNestedMenu',
                             this
                         )">
 
                     <span class="app-nested-menu-button-main">
 
                         <span aria-hidden="true">
-                            📅
+                            🍑
                         </span>
 
                         <span>
-                            Calendar
+                            Booking Control Center
                         </span>
 
                     </span>
@@ -71,21 +71,21 @@
                 </button>
 
 
-                <div id="calendarViewsNestedMenu"
+                <div id="bookingControlNestedMenu"
                      class="app-nested-menu-pane"
                      style="display:none;">
 
                     <div class="app-nested-menu-header">
 
                         <div class="app-nested-menu-title">
-                            Calendar Views
+                            Booking Control Center
                         </div>
 
                         <button type="button"
                                 class="app-nested-menu-close"
-                                aria-label="Close Calendar Views"
+                                aria-label="Close Booking Control Center"
                                 onclick="closeNestedAppMenuById(
-                                    'calendarViewsNestedMenu'
+                                    'bookingControlNestedMenu'
                                 )">
                             ✕
                         </button>
@@ -93,96 +93,83 @@
                     </div>
 
 
-                    <a href="{{
-                        url_for(
-                            'calendar_day_view'
-                        )
-                    }}">
-                        <span aria-hidden="true">🗓️</span>
-                        <span>Day View</span>
+                    <a href="{{ url_for('booking_control_center') }}">
+                        <span aria-hidden="true">🏠</span>
+                        <span>Control Center Home</span>
                     </a>
 
-                    <a href="{{
-                        url_for(
-                            'calendar_view'
-                        )
-                    }}">
-                        <span aria-hidden="true">📅</span>
-                        <span>Week View</span>
+                    <a href="{{ url_for('booking_business_hours') }}">
+                        <span aria-hidden="true">🕒</span>
+                        <span>Business Hours</span>
                     </a>
 
-                    <a href="{{
-                        url_for(
-                            'calendar_month_view'
-                        )
-                    }}">
-                        <span aria-hidden="true">🗓️</span>
-                        <span>Month View</span>
+                    <a href="{{ url_for('booking_provider_hours') }}">
+                        <span aria-hidden="true">👤</span>
+                        <span>Provider Hours</span>
                     </a>
 
-                    <a href="{{
-                        url_for(
-                            'calendar_year_view'
-                        )
-                    }}">
-                        <span aria-hidden="true">📆</span>
-                        <span>Year View</span>
+                    <a href="{{ url_for('booking_provider_services') }}">
+                        <span aria-hidden="true">✨</span>
+                        <span>Provider Services</span>
+                    </a>
+
+                    <a href="{{ url_for('booking_provider_time_off') }}">
+                        <span aria-hidden="true">🚫</span>
+                        <span>Provider Time Off</span>
                     </a>
 
                 </div>
 
             </div>
 
-
-            <a href="{{ url_for('daily_schedule') }}">
-                <span aria-hidden="true">🗓️</span>
-                <span>Daily Schedule</span>
-            </a>
-
         </div>
 
 
         <div class="user-menu-divider"></div>
 
 
-        <!-- Appointments -->
+        <!-- Services -->
         <div class="app-menu-submenu-section">
 
             <div class="app-menu-submenu-heading">
-                Appointments
+                ✨ Services
             </div>
 
-            <a href="{{ url_for('add_appointment') }}">
-                <span aria-hidden="true">➕</span>
-                <span>Add Appointment</span>
-            </a>
-
-            <a href="{{ url_for('appointments') }}">
+            <a href="{{ url_for('service_types') }}">
                 <span aria-hidden="true">📋</span>
-                <span>View Appointments</span>
+                <span>Service Catalog</span>
+            </a>
+
+            <a href="{{ url_for('public_website_services') }}">
+                <span aria-hidden="true">🌐</span>
+                <span>Website Services</span>
             </a>
 
         </div>
-
-
 
 
         <div class="user-menu-divider"></div>
 
 
-        <!-- Imports -->
+        <!-- Website -->
         <div class="app-menu-submenu-section">
 
             <div class="app-menu-submenu-heading">
-                Imports
+                🌐 Public Website
             </div>
 
-            <a href="{{ url_for('godaddy_imports') }}">
-                <span aria-hidden="true">📥</span>
-                <span>GoDaddy Imports</span>
+            <a href="{{ url_for('public_website_settings') }}">
+                <span aria-hidden="true">⚙️</span>
+                <span>Website Settings</span>
+            </a>
+
+            <a href="{{ url_for('public_website_links') }}">
+                <span aria-hidden="true">🔗</span>
+                <span>Website Links</span>
             </a>
 
         </div>
+
 
     </div>
 
