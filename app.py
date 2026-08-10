@@ -363,7 +363,8 @@ def inject_global_context():
         "app_version": app.config.get("APP_VERSION"),
         "tagline": app.config.get("TAGLINE"),
         "current_year": datetime.now().year,
-        "godaddy_unreviewed_count": 0
+        "godaddy_unreviewed_count": 0,
+        "public_website_url": ""
     }
 
     context["q_launch_items"] = build_q_launch_items()
@@ -375,6 +376,16 @@ def inject_global_context():
 
     if not spa_id:
         return context
+
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id:
+        context["public_website_url"] = (
+            _get_public_website_url_for_workspace(
+                spa_id,
+                business_unit_id
+            )
+        )
 
     conn = get_db_connection()
     cur = conn.cursor()
