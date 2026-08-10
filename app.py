@@ -39908,7 +39908,10 @@ def morning_briefing():
             "icon": "🎂",
             "label": "Birthday today",
             "value": dashboard.get("birthdays_today", 0),
-            "url": None,
+            "url": url_for(
+                "daily_briefing_birthdays_today"
+            ),
+            "button": "View Details",
             "category": "Client Care",
             "priority": 80
         })
@@ -40770,6 +40773,16 @@ def acknowledge_coach_recommendation():
 def daily_briefing_today():
 
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to view the Daily Briefing.",
+            "error"
+        )
+        return redirect(url_for("morning_briefing"))
+
     spa_now = get_spa_now(spa_id)
     today = spa_now.date()
 
@@ -40792,12 +40805,19 @@ def daily_briefing_today():
             c.email
         FROM appointments a
         LEFT JOIN clients c
-            ON a.client_id = c.client_id
+          ON a.client_id = c.client_id
+         AND c.spa_id = a.spa_id
+         AND c.business_unit_id = a.business_unit_id
         WHERE a.spa_id = %s
+          AND a.business_unit_id = %s
           AND a.appointment_date = %s
           AND COALESCE(a.status, '') NOT IN ('Cancelled', 'Canceled')
         ORDER BY a.appointment_time ASC
-    """, (spa_id, today))
+    """, (
+        spa_id,
+        business_unit_id,
+        today
+    ))
 
     appointments = cur.fetchall()
 
@@ -40815,8 +40835,67 @@ def daily_briefing_today():
         today=today,
         appointments=appointments,
         appointment_count=appointment_count,
-        projected_revenue=projected_revenue,
-        action_url=url_for("priority_actions")
+        projected_revenue=projected_revenue
+    )
+
+
+@app.route("/daily-briefing/birthdays-today")
+@login_required
+@spa_required
+@require_workspace_permission("can_view_daily_briefing")
+def daily_briefing_birthdays_today():
+
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to view the Daily Briefing.",
+            "error"
+        )
+        return redirect(url_for("morning_briefing"))
+
+    spa_now = get_spa_now(spa_id)
+    today = spa_now.date()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            client_id,
+            first_name,
+            last_name,
+            phone,
+            email,
+            birth_date
+        FROM clients
+        WHERE spa_id = %s
+          AND business_unit_id = %s
+          AND birth_date IS NOT NULL
+          AND EXTRACT(MONTH FROM birth_date) = %s
+          AND EXTRACT(DAY FROM birth_date) = %s
+        ORDER BY
+            last_name,
+            first_name
+    """, (
+        spa_id,
+        business_unit_id,
+        today.month,
+        today.day
+    ))
+
+    birthdays = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "daily_briefing_birthdays_today.html",
+        today=today,
+        birthdays=birthdays,
+        birthday_count=len(birthdays)
     )
 
 

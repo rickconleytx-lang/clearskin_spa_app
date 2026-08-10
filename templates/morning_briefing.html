@@ -164,7 +164,7 @@
 %}
 
 {% set attention_count =
-    action_cards|length
+    (coach.recommendation_count if coach else 0) or 0
 %}
 
 
@@ -349,6 +349,13 @@
             Projected Revenue
         </div>
 
+        <div style="margin-top:12px;">
+            <a href="{{ url_for('daily_briefing_today') }}"
+               class="tool-pill tool-pill-small">
+                View Details
+            </a>
+        </div>
+
     </div>
 
 
@@ -374,6 +381,13 @@
             {% else %}
                 All clear
             {% endif %}
+        </div>
+
+        <div style="margin-top:12px;">
+            <a href="#coach-recommendations"
+               class="tool-pill tool-pill-small">
+                View Details
+            </a>
         </div>
 
     </div>
@@ -528,6 +542,58 @@
 
     </section>
 {% endif %}
+
+
+<br><br>
+
+
+<section id="coach-recommendations"
+         style="scroll-margin-top:20px;">
+
+    <h2>Coach Recommendations</h2>
+
+    {% if coach and coach.recommendations %}
+
+        <div class="briefing-grid">
+
+            {% for recommendation in coach.recommendations %}
+
+                <div class="dashboard-card">
+
+                    <h3>{{ recommendation.category }}</h3>
+
+                    <p>{{ recommendation.message }}</p>
+
+                    {% if recommendation.action_url %}
+
+                        <button type="button"
+                                class="tool-pill tool-pill-small"
+                                onclick='openCoachRecommendation(
+                                    {{ recommendation.action_url|tojson }},
+                                    {{ recommendation.category|tojson }}
+                                )'>
+                            View Details
+                        </button>
+
+                    {% endif %}
+
+                </div>
+
+            {% endfor %}
+
+        </div>
+
+    {% else %}
+
+        <div class="dashboard-card">
+            <p>
+                No items need your attention right now.
+            </p>
+        </div>
+
+    {% endif %}
+
+</section>
 
 
 <br><br>

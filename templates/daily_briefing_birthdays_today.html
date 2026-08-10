@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block title %}Birthdays Today{% endblock %}
+
+{% block content %}
+
+<div class="page-title">
+    <h1>Birthdays Today</h1>
+</div>
+
+<p class="muted-text">
+    Clients in the current workspace celebrating a birthday today.
+</p>
+
+<div style="margin-bottom:20px;">
+    <a href="{{ url_for('morning_briefing') }}"
+       class="tool-pill tool-pill-small">
+        Back to Daily Briefing
+    </a>
+</div>
+
+<div class="summary-card">
+    <div class="summary-label">Birthdays Today</div>
+    <div class="summary-value">{{ birthday_count }}</div>
+</div>
+
+{% if birthdays %}
+
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Client</th>
+                <th>Birthday</th>
+                <th>Phone</th>
+                <th>Email</th>
+                <th>Details</th>
+            </tr>
+        </thead>
+
+        <tbody>
+            {% for client in birthdays %}
+                <tr>
+                    <td>
+                        {{ client[1] or "" }}
+                        {{ client[2] or "" }}
+                    </td>
+
+                    <td>
+                        {% if client[5] %}
+                            {{ client[5].strftime("%B %d") }}
+                        {% else %}
+                            —
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        {{ client[3] or "—" }}
+                    </td>
+
+                    <td>
+                        {{ client[4] or "—" }}
+                    </td>
+
+                    <td>
+                        <a href="{{ url_for(
+                            'client_history_detail',
+                            client_id=client[0]
+                        ) }}"
+                           class="tool-pill tool-pill-small">
+                            View Client
+                        </a>
+                    </td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+{% else %}
+
+    <p class="muted-text">
+        No client birthdays today.
+    </p>
+
+{% endif %}
+
+{% endblock %}

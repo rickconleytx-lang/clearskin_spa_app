@@ -1714,7 +1714,7 @@ def build_action_cards(
             "icon": action.get("icon", "📌"),
             "title": action.get("label", "Action"),
             "message": str(action.get("value", "")),
-            "button": "View",
+            "button": action.get("button", "View"),
             "url": action.get("url")
         })
 
