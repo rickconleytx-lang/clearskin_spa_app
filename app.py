@@ -18302,6 +18302,11 @@ def sync_calendar():
 
 @app.route("/mailgun/godaddy-booking", methods=["POST"])
 def mailgun_godaddy_booking():
+    # Legacy/staging inbound route.
+    # Disabled in production until Mailgun webhook
+    # signature validation and tenant routing exist.
+    if os.environ.get("RENDER"):
+        abort(404)
 
     print("MAILGUN GODADDY ROUTE HIT", flush=True)
     print("SUBJECT:", request.form.get("subject", ""), flush=True)
@@ -59028,7 +59033,12 @@ def godaddy_booking_intake():
 
 
 @app.route("/test-secure")
+@login_required
+@master_admin_required
 def test_godaddy_secure_post():
+    if os.environ.get("RENDER"):
+        abort(404)
+
     with open("test_booking.txt", "r") as f:
         body = f.read()
 
