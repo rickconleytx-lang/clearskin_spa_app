@@ -100,13 +100,12 @@
                             <td>{{ row[5] or '—' }}</td>
                             <td class="amount-cell">{{ row[6]|currency }}</td>
                             <td class="amount-cell">{{ row[7]|currency }}</td>
-                            <td>{{ row[8] }}</td>
                             <td>{{ row[9] }}</td>
                             <td>{{ row[10] }}</td>
                             <td>
                                 {% if row[11] <= 0 %}
                                     <span class="badge badge-danger">{{ row[11] }}</span>
-                                {% elif row[10] <= 2 %}
+                                {% elif row[11] <= 2 %}
                                     <span class="badge badge-warning">{{ row[11] }}</span>
                                 {% else %}
                                     <span class="badge badge-success">{{ row[11] }}</span>
@@ -132,7 +131,7 @@
                         {% endfor %}
                     {% else %}
                         <tr>
-                            <td colspan="13" class="no-data">
+                            <td colspan="14" class="no-data">
                                 No inventory products found.
                             </td>
                         </tr>
