@@ -242,6 +242,7 @@
                         <th>Standard Duration</th>
                         <th>Standard Price</th>
                         <th>Status</th>
+                        <th>Show on Website</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -316,6 +317,79 @@
                                         "
                                     >
                                         Archived
+                                    </span>
+
+                                {% endif %}
+
+                            </td>
+
+
+                            <td>
+
+                                {% if service[4] %}
+
+                                    {% if service[5] %}
+
+                                        <span
+                                            class="
+                                                service-status
+                                                service-status-website
+                                            "
+                                        >
+                                            Shown
+                                        </span>
+
+                                    {% else %}
+
+                                        <span
+                                            class="
+                                                service-status
+                                                service-status-not-website
+                                            "
+                                        >
+                                            Hidden
+                                        </span>
+
+                                    {% endif %}
+
+                                    <form
+                                        method="POST"
+                                        action="{{ url_for(
+                                            'toggle_service_type_public_website',
+                                            service_type_id=service[0]
+                                        ) }}"
+                                        class="service-action-form"
+                                        style="margin-left:6px;"
+                                    >
+
+                                        <input
+                                            type="hidden"
+                                            name="status"
+                                            value="{{ status_filter }}"
+                                        >
+
+                                        <button
+                                            type="submit"
+                                            class="tool-pill tool-pill-small"
+                                        >
+                                            {% if service[5] %}
+                                                Hide
+                                            {% else %}
+                                                Show
+                                            {% endif %}
+                                        </button>
+
+                                    </form>
+
+                                {% else %}
+
+                                    <span
+                                        class="
+                                            service-status
+                                            service-status-not-website
+                                        "
+                                    >
+                                        Unavailable
                                     </span>
 
                                 {% endif %}

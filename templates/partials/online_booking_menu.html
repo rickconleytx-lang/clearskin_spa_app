@@ -177,6 +177,19 @@
                 View Website
             </a>
 
+            {% if public_booking_url %}
+
+                <a
+                    href="{{ public_booking_url }}"
+                    class="tool-pill tool-pill-small"
+                    target="_blank"
+                    rel="noopener"
+                >
+                    View Booking Page
+                </a>
+
+            {% endif %}
+
         </div>
 
 

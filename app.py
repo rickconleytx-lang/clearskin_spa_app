@@ -364,7 +364,8 @@ def inject_global_context():
         "tagline": app.config.get("TAGLINE"),
         "current_year": datetime.now().year,
         "godaddy_unreviewed_count": 0,
-        "public_website_url": ""
+        "public_website_url": "",
+        "public_booking_url": ""
     }
 
     context["q_launch_items"] = build_q_launch_items()
@@ -389,6 +390,29 @@ def inject_global_context():
 
     conn = get_db_connection()
     cur = conn.cursor()
+
+    if business_unit_id:
+        cur.execute("""
+            SELECT public_booking_slug
+            FROM booking_settings
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+            LIMIT 1
+        """, (
+            spa_id,
+            business_unit_id
+        ))
+
+        booking_row = cur.fetchone()
+
+        if booking_row and booking_row[0]:
+            context["public_booking_url"] = url_for(
+                "public_booking",
+                public_booking_slug=str(
+                    booking_row[0]
+                ).strip(),
+                _external=True
+            )
 
     cur.execute("""
         SELECT COUNT(*)
@@ -2191,6 +2215,26 @@ def _load_public_website_content(tenant):
               AND pws.business_unit_id = %s
               AND pws.show_on_public_website = TRUE
               AND snt.is_active = TRUE
+
+              AND EXISTS (
+                    SELECT 1
+
+                    FROM provider_service_types pst
+
+                    JOIN employees e
+                      ON e.employee_id =
+                            pst.provider_employee_id
+                     AND e.spa_id = pst.spa_id
+
+                    WHERE pst.spa_id = pws.spa_id
+                      AND pst.business_unit_id =
+                            pws.business_unit_id
+                      AND pst.service_type_id =
+                            pws.service_type_id
+                      AND pst.is_active = TRUE
+                      AND pst.is_publicly_bookable = TRUE
+                      AND e.is_active = TRUE
+              )
 
             ORDER BY
                 pws.website_sort_order NULLS LAST,
@@ -13753,34 +13797,50 @@ def service_types():
 
     query = """
         SELECT
-            service_type_id,
-            service_name,
-            default_duration_minutes,
-            default_price,
-            is_active
-        FROM service_name_types
-        WHERE spa_id = %s
+            snt.service_type_id,
+            snt.service_name,
+            snt.default_duration_minutes,
+            snt.default_price,
+            snt.is_active,
+            COALESCE(
+                pws.show_on_public_website,
+                FALSE
+            ) AS show_on_public_website
+
+        FROM service_name_types snt
+
+        LEFT JOIN public_website_services pws
+          ON pws.service_type_id =
+                snt.service_type_id
+         AND pws.spa_id =
+                snt.spa_id
+         AND pws.business_unit_id = %s
+
+        WHERE snt.spa_id = %s
     """
 
 
 
-    params = [spa_id]
+    params = [
+        business_unit_id,
+        spa_id,
+    ]
 
     if status_filter == "active":
         query += """
-            AND is_active = TRUE
+            AND snt.is_active = TRUE
         """
 
     elif status_filter == "archived":
         query += """
-            AND is_active = FALSE
+            AND snt.is_active = FALSE
         """
 
     query += """
         ORDER BY
-            is_active DESC,
-            service_name,
-            service_type_id
+            snt.is_active DESC,
+            snt.service_name,
+            snt.service_type_id
     """
 
     conn = get_db_connection()
@@ -13840,6 +13900,145 @@ def service_types():
 
 
 
+
+
+############################################
+#
+#   SERVICE CATALOG - WEBSITE VISIBILITY
+#
+############################################
+
+@app.route(
+    "/service-types/<int:service_type_id>/website-toggle",
+    methods=["POST"]
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def toggle_service_type_public_website(
+    service_type_id
+):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
+
+    return_status = (
+        request.form.get("status")
+        or "active"
+    ).strip().lower()
+
+    if return_status not in {
+        "active",
+        "archived",
+        "all"
+    }:
+        return_status = "active"
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                snt.service_name,
+                COALESCE(
+                    pws.show_on_public_website,
+                    FALSE
+                )
+
+            FROM service_name_types snt
+
+            LEFT JOIN public_website_services pws
+              ON pws.service_type_id =
+                    snt.service_type_id
+             AND pws.spa_id =
+                    snt.spa_id
+             AND pws.business_unit_id = %s
+
+            WHERE snt.service_type_id = %s
+              AND snt.spa_id = %s
+              AND snt.is_active = TRUE
+
+            LIMIT 1
+        """, (
+            business_unit_id,
+            service_type_id,
+            spa_id,
+        ))
+
+        row = cur.fetchone()
+
+        if not row:
+            flash(
+                "Active service could not be found.",
+                "error"
+            )
+
+            return redirect(
+                url_for(
+                    "service_types",
+                    status=return_status
+                )
+            )
+
+        new_status = not bool(row[1])
+
+        cur.execute("""
+            INSERT INTO public_website_services (
+                spa_id,
+                business_unit_id,
+                service_type_id,
+                show_on_public_website
+            )
+            VALUES (
+                %s,
+                %s,
+                %s,
+                %s
+            )
+
+            ON CONFLICT (
+                spa_id,
+                business_unit_id,
+                service_type_id
+            )
+
+            DO UPDATE SET
+                show_on_public_website =
+                    EXCLUDED.show_on_public_website,
+                updated_at = NOW()
+        """, (
+            spa_id,
+            business_unit_id,
+            service_type_id,
+            new_status,
+        ))
+
+        conn.commit()
+
+        flash(
+            (
+                f"{row[0]} is now "
+                f"{'shown' if new_status else 'hidden'} "
+                "on this workspace's public website."
+            ),
+            "success"
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    return redirect(
+        url_for(
+            "service_types",
+            status=return_status
+        )
+    )
 
 
 #################################
@@ -13961,6 +14160,10 @@ def add_service_type():
 )
 def edit_service_type(service_type_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -13976,6 +14179,10 @@ def edit_service_type(service_type_id):
 
         price_raw = (
             request.form.get("default_price") or ""
+        ).strip()
+
+        public_description = (
+            request.form.get("public_description") or ""
         ).strip()
 
         if not service_name:
@@ -14008,6 +14215,21 @@ def edit_service_type(service_type_id):
                 service_type_id=service_type_id
             ))
 
+        if len(public_description) > 500:
+            flash(
+                (
+                    "Public website description must be "
+                    "500 characters or fewer."
+                ),
+                "error"
+            )
+            cur.close()
+            conn.close()
+            return redirect(url_for(
+                "edit_service_type",
+                service_type_id=service_type_id
+            ))
+
         cur.execute("""
             UPDATE service_name_types
             SET
@@ -14024,6 +14246,37 @@ def edit_service_type(service_type_id):
             spa_id
         ))
 
+        cur.execute("""
+            INSERT INTO public_website_services (
+                spa_id,
+                business_unit_id,
+                service_type_id,
+                public_description
+            )
+            VALUES (
+                %s,
+                %s,
+                %s,
+                %s
+            )
+
+            ON CONFLICT (
+                spa_id,
+                business_unit_id,
+                service_type_id
+            )
+
+            DO UPDATE SET
+                public_description =
+                    EXCLUDED.public_description,
+                updated_at = NOW()
+        """, (
+            spa_id,
+            business_unit_id,
+            service_type_id,
+            public_description or None,
+        ))
+
         conn.commit()
         cur.close()
         conn.close()
@@ -14033,15 +14286,29 @@ def edit_service_type(service_type_id):
 
     cur.execute("""
         SELECT
-            service_type_id,
-            service_name,
-            default_duration_minutes,
-            default_price,
-            is_active
-        FROM service_name_types
-        WHERE service_type_id = %s
-          AND spa_id = %s
+            snt.service_type_id,
+            snt.service_name,
+            snt.default_duration_minutes,
+            snt.default_price,
+            snt.is_active,
+            COALESCE(
+                pws.public_description,
+                ''
+            ) AS public_description
+
+        FROM service_name_types snt
+
+        LEFT JOIN public_website_services pws
+          ON pws.service_type_id =
+                snt.service_type_id
+         AND pws.spa_id =
+                snt.spa_id
+         AND pws.business_unit_id = %s
+
+        WHERE snt.service_type_id = %s
+          AND snt.spa_id = %s
     """, (
+        business_unit_id,
         service_type_id,
         spa_id
     ))
@@ -50730,6 +50997,20 @@ def _booking_validate_selected_slot(
     if require_public:
         assignment_sql += """
           AND pst.is_publicly_bookable = TRUE
+
+          AND EXISTS (
+                SELECT 1
+
+                FROM public_website_services pws
+
+                WHERE pws.spa_id =
+                        pst.spa_id
+                  AND pws.business_unit_id =
+                        pst.business_unit_id
+                  AND pws.service_type_id =
+                        pst.service_type_id
+                  AND pws.show_on_public_website = TRUE
+          )
         """
 
     assignment_sql += """
@@ -53841,6 +54122,14 @@ def _render_public_booking_page(
                   ON snt.service_type_id =
                         pst.service_type_id
                  AND snt.spa_id = pst.spa_id
+
+                JOIN public_website_services pws
+                  ON pws.service_type_id =
+                        pst.service_type_id
+                 AND pws.spa_id = pst.spa_id
+                 AND pws.business_unit_id =
+                        pst.business_unit_id
+                 AND pws.show_on_public_website = TRUE
 
                 JOIN employees e
                   ON e.employee_id =

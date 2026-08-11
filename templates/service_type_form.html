@@ -224,6 +224,53 @@
             </div>
 
 
+            {% if service %}
+
+                <div class="service-form-section">
+
+                    <h2>Public Website</h2>
+
+                    <p class="service-form-help">
+                        The information below belongs only to the
+                        current workspace's public website. Service
+                        name, duration, and price remain shared
+                        Service Catalog values.
+                    </p>
+
+                    <div
+                        class="service-form-field"
+                        style="margin-top:18px;"
+                    >
+
+                        <label for="public_description">
+                            Public Website Description
+                        </label>
+
+                        <textarea
+                            id="public_description"
+                            name="public_description"
+                            maxlength="500"
+                            placeholder="Describe this service for prospective clients."
+                        >{{ service[5] or '' }}</textarea>
+
+                        <p class="service-form-help">
+                            This edits the same customer-facing
+                            description used on Website Services.
+                            Maximum 500 characters.
+                        </p>
+
+                    </div>
+
+                    <p class="service-form-help">
+                        Website visibility and display order can
+                        also be managed from Website Services.
+                    </p>
+
+                </div>
+
+            {% endif %}
+
+
             <div class="service-form-actions">
 
                 <button
