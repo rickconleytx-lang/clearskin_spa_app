@@ -17937,6 +17937,7 @@ def edit_feedback(feedback_id):
 
 @app.route("/feedback/resolve/<int:feedback_id>", methods=["POST"])
 @login_required
+@master_admin_required
 def resolve_feedback(feedback_id):
     conn = get_db_connection()
     cur = conn.cursor()
@@ -17977,9 +17978,9 @@ def resolve_feedback(feedback_id):
 
 
 @app.route("/feedback/reopen/<int:feedback_id>", methods=["POST"])
+@login_required
+@master_admin_required
 def reopen_feedback(feedback_id):
-    spa_id = current_spa_id()
-
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -17987,8 +17988,7 @@ def reopen_feedback(feedback_id):
         UPDATE user_feedback
         SET is_resolved = FALSE
         WHERE feedback_id = %s
-          AND spa_id = %s
-    """, (feedback_id, spa_id))
+    """, (feedback_id,))
 
     conn.commit()
     cur.close()
