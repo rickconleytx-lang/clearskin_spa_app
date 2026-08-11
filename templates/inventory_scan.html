@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Scan Inventory SKU{% endblock %}
+{% block title %}Scan / Enter Inventory SKU{% endblock %}
 
 {% block content %}
 
@@ -9,11 +9,12 @@
     <div class="page-header">
 
         <div>
-            <h1>Scan Inventory SKU</h1>
+            <h1>Scan / Enter Inventory SKU</h1>
 
             <p class="page-subtitle">
-                Scan with this device or pair a phone with
-                the inventory session open on this computer.
+                Enter a SKU or barcode manually, scan with this device,
+                or pair a phone with the inventory session open
+                on this computer.
             </p>
         </div>
 
@@ -33,6 +34,56 @@
 
     <div class="styled-form">
 <hr>
+        <h2>Enter SKU / Barcode</h2>
+
+        <p>
+            Type a product SKU or barcode below. If the product
+            already exists, Peach Suite Pro will open its product
+            page. If it is new, the Add Product page will open with
+            the SKU already filled in.
+        </p>
+
+        <form method="GET"
+              action="{{ url_for('inventory_scan_result') }}"
+              style="margin-top:14px; margin-bottom:28px;">
+
+            <div style="
+                display:flex;
+                gap:14px;
+                align-items:flex-end;
+                flex-wrap:wrap;
+            ">
+
+                <div style="
+                    width:260px;
+                    max-width:100%;
+                    flex:0 0 auto;
+                ">
+                    <label for="manual-sku">SKU / Barcode</label>
+
+                    <input type="text"
+                           id="manual-sku"
+                           name="sku"
+                           autocomplete="off"
+                           autofocus
+                           required
+                           style="
+                               width:100%;
+                               box-sizing:border-box;
+                           ">
+                </div>
+
+                <button type="submit"
+                        class="tool-pill tool-pill-small">
+                    Find Product
+                </button>
+
+            </div>
+
+        </form>
+
+        <hr>
+
         <h2>Scan With This Device</h2>
 
         <p>

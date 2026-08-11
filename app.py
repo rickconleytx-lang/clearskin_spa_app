@@ -26363,6 +26363,10 @@ def client_consent_history(client_id):
 @spa_required
 def inventory_home():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -26429,11 +26433,18 @@ def inventory_home():
         LEFT JOIN inventory_movements m
             ON p.product_id = m.product_id
            AND m.spa_id = %s
+           AND m.business_unit_id = %s
         WHERE p.spa_id = %s
+          AND p.business_unit_id = %s
           AND p.active = TRUE
         GROUP BY p.product_id
         ORDER BY p.product_name
-    """, (spa_id, spa_id))
+    """, (
+        spa_id,
+        business_unit_id,
+        spa_id,
+        business_unit_id,
+    ))
 
     inventory_rows = cur.fetchall()
 
@@ -26475,7 +26486,11 @@ def inventory_home():
 @spa_required
 def add_inventory_product():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
     prefill_sku = request.args.get("sku", "").strip()
+
+    if not business_unit_id:
+        abort(403)
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -26510,8 +26525,13 @@ def add_inventory_product():
                 SELECT product_id
                 FROM inventory_products
                 WHERE spa_id = %s
+                  AND business_unit_id = %s
                   AND sku = %s
-            """, (spa_id, sku))
+            """, (
+                spa_id,
+                business_unit_id,
+                sku,
+            ))
 
             existing = cur.fetchone()
 
@@ -26524,6 +26544,7 @@ def add_inventory_product():
             cur.execute("""
                 INSERT INTO inventory_products (
                     spa_id,
+                    business_unit_id,
                     sku,
                     expire_date,
                     vendor_company,
@@ -26534,10 +26555,14 @@ def add_inventory_product():
                     suggested_retail,
                     note
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s
+                )
                 RETURNING product_id
             """, (
                 spa_id,
+                business_unit_id,
                 sku,
                 expire_date,
                 vendor_company if vendor_company else None,
@@ -26556,14 +26581,16 @@ def add_inventory_product():
                 cur.execute("""
                     INSERT INTO inventory_movements (
                         spa_id,
+                        business_unit_id,
                         product_id,
                         movement_type,
                         quantity,
                         note
                     )
-                    VALUES (%s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s)
                 """, (
                     spa_id,
+                    business_unit_id,
                     product_id,
                     "added",
                     initial_quantity,
@@ -26608,6 +26635,10 @@ def add_inventory_product():
 @spa_required
 def add_inventory_stock(product_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -26617,8 +26648,13 @@ def add_inventory_stock(product_id):
         FROM inventory_products
         WHERE product_id = %s
           AND spa_id = %s
+          AND business_unit_id = %s
           AND active = TRUE
-    """, (product_id, spa_id))
+    """, (
+        product_id,
+        spa_id,
+        business_unit_id,
+    ))
 
     product = cur.fetchone()
 
@@ -26642,14 +26678,16 @@ def add_inventory_stock(product_id):
             cur.execute("""
                 INSERT INTO inventory_movements (
                     spa_id,
+                    business_unit_id,
                     product_id,
                     movement_type,
                     quantity,
                     note
                 )
-                VALUES (%s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s)
             """, (
                 spa_id,
+                business_unit_id,
                 product_id,
                 "added",
                 quantity,
@@ -26696,6 +26734,10 @@ def add_inventory_stock(product_id):
 @spa_required
 def record_inventory_sold(product_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -26705,8 +26747,13 @@ def record_inventory_sold(product_id):
         FROM inventory_products
         WHERE product_id = %s
           AND spa_id = %s
+          AND business_unit_id = %s
           AND active = TRUE
-    """, (product_id, spa_id))
+    """, (
+        product_id,
+        spa_id,
+        business_unit_id,
+    ))
 
     product = cur.fetchone()
 
@@ -26730,14 +26777,16 @@ def record_inventory_sold(product_id):
             cur.execute("""
                 INSERT INTO inventory_movements (
                     spa_id,
+                    business_unit_id,
                     product_id,
                     movement_type,
                     quantity,
                     note
                 )
-                VALUES (%s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s)
             """, (
                 spa_id,
+                business_unit_id,
                 product_id,
                 "sold",
                 quantity,
@@ -26784,6 +26833,10 @@ def record_inventory_sold(product_id):
 @spa_required
 def adjust_inventory_stock(product_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -26793,8 +26846,13 @@ def adjust_inventory_stock(product_id):
         FROM inventory_products
         WHERE product_id = %s
           AND spa_id = %s
+          AND business_unit_id = %s
           AND active = TRUE
-    """, (product_id, spa_id))
+    """, (
+        product_id,
+        spa_id,
+        business_unit_id,
+    ))
 
     product = cur.fetchone()
 
@@ -26825,14 +26883,16 @@ def adjust_inventory_stock(product_id):
             cur.execute("""
                 INSERT INTO inventory_movements (
                     spa_id,
+                    business_unit_id,
                     product_id,
                     movement_type,
                     quantity,
                     note
                 )
-                VALUES (%s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s)
             """, (
                 spa_id,
+                business_unit_id,
                 product_id,
                 movement_type,
                 quantity,
@@ -26877,6 +26937,10 @@ def adjust_inventory_stock(product_id):
 @spa_required
 def inventory_product_detail(product_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -26897,8 +26961,13 @@ def inventory_product_detail(product_id):
         FROM inventory_products
         WHERE product_id = %s
           AND spa_id = %s
+          AND business_unit_id = %s
           AND active = TRUE
-    """, (product_id, spa_id))
+    """, (
+        product_id,
+        spa_id,
+        business_unit_id,
+    ))
 
     product = cur.fetchone()
 
@@ -26927,8 +26996,13 @@ def inventory_product_detail(product_id):
             ), 0) AS total_in_stock
         FROM inventory_movements
         WHERE spa_id = %s
+          AND business_unit_id = %s
           AND product_id = %s
-    """, (spa_id, product_id))
+    """, (
+        spa_id,
+        business_unit_id,
+        product_id,
+    ))
 
     totals = cur.fetchone()
 
@@ -26940,9 +27014,14 @@ def inventory_product_detail(product_id):
             note
         FROM inventory_movements
         WHERE spa_id = %s
+          AND business_unit_id = %s
           AND product_id = %s
         ORDER BY movement_date DESC, movement_id DESC
-    """, (spa_id, product_id))
+    """, (
+        spa_id,
+        business_unit_id,
+        product_id,
+    ))
 
     movement_rows = cur.fetchall()
 
@@ -26974,6 +27053,10 @@ def inventory_product_detail(product_id):
 @spa_required
 def edit_inventory_product(product_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -26994,7 +27077,12 @@ def edit_inventory_product(product_id):
         FROM inventory_products
         WHERE product_id = %s
           AND spa_id = %s
-    """, (product_id, spa_id))
+          AND business_unit_id = %s
+    """, (
+        product_id,
+        spa_id,
+        business_unit_id,
+    ))
 
     product = cur.fetchone()
 
@@ -27040,6 +27128,7 @@ def edit_inventory_product(product_id):
                     active = %s
                 WHERE product_id = %s
                   AND spa_id = %s
+                  AND business_unit_id = %s
             """, (
                 sku,
                 expire_date,
@@ -27052,7 +27141,8 @@ def edit_inventory_product(product_id):
                 note if note else None,
                 active,
                 product_id,
-                spa_id
+                spa_id,
+                business_unit_id
             ))
 
             conn.commit()
@@ -27095,6 +27185,9 @@ def edit_inventory_product(product_id):
 @login_required
 @spa_required
 def inventory_scan():
+    if not current_business_unit_id():
+        abort(403)
+
     return render_template("inventory_scan.html")
 
 
@@ -27110,7 +27203,11 @@ def inventory_scan():
 @spa_required
 def inventory_scan_result():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
     scanned_sku = request.args.get("sku", "").strip()
+
+    if not business_unit_id:
+        abort(403)
 
     if not scanned_sku:
         flash("No SKU scanned.", "error")
@@ -27123,9 +27220,14 @@ def inventory_scan_result():
         SELECT product_id
         FROM inventory_products
         WHERE spa_id = %s
+          AND business_unit_id = %s
           AND sku = %s
           AND active = TRUE
-    """, (spa_id, scanned_sku))
+    """, (
+        spa_id,
+        business_unit_id,
+        scanned_sku,
+    ))
 
     product = cur.fetchone()
 
@@ -27168,7 +27270,11 @@ def inventory_scan_result():
 @spa_required
 def create_inventory_phone_scan_session():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
     user_id = session["user_id"]
+
+    if not business_unit_id:
+        abort(403)
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -27181,10 +27287,12 @@ def create_inventory_phone_scan_session():
                 status = 'closed',
                 closed_at = CURRENT_TIMESTAMP
             WHERE spa_id = %s
+              AND business_unit_id = %s
               AND created_by = %s
               AND status = 'active'
         """, (
             spa_id,
+            business_unit_id,
             user_id,
         ))
 
@@ -27218,6 +27326,7 @@ def create_inventory_phone_scan_session():
         cur.execute("""
             INSERT INTO inventory_scan_sessions (
                 spa_id,
+                business_unit_id,
                 created_by,
                 session_token,
                 pairing_code,
@@ -27226,6 +27335,7 @@ def create_inventory_phone_scan_session():
                 last_activity_at
             )
             VALUES (
+                %s,
                 %s,
                 %s,
                 %s,
@@ -27239,6 +27349,7 @@ def create_inventory_phone_scan_session():
                 expires_at
         """, (
             spa_id,
+            business_unit_id,
             user_id,
             session_token,
             pairing_code,
@@ -27410,7 +27521,8 @@ def submit_inventory_phone_scan(token):
         cur.execute("""
             SELECT
                 scan_session_id,
-                spa_id
+                spa_id,
+                business_unit_id
             FROM inventory_scan_sessions
             WHERE session_token = %s
               AND status = 'active'
@@ -27433,6 +27545,7 @@ def submit_inventory_phone_scan(token):
 
         scan_session_id = scanner_session[0]
         spa_id = scanner_session[1]
+        business_unit_id = scanner_session[2]
 
         # Prevent the camera callback from sending the same
         # barcode repeatedly within a short period.
@@ -27440,12 +27553,16 @@ def submit_inventory_phone_scan(token):
             SELECT 1
             FROM inventory_scan_events
             WHERE scan_session_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
               AND barcode = %s
               AND created_at >=
                     CURRENT_TIMESTAMP - INTERVAL '2 seconds'
             LIMIT 1
         """, (
             scan_session_id,
+            spa_id,
+            business_unit_id,
             barcode,
         ))
 
@@ -27463,10 +27580,12 @@ def submit_inventory_phone_scan(token):
             INSERT INTO inventory_scan_events (
                 scan_session_id,
                 spa_id,
+                business_unit_id,
                 barcode,
                 status
             )
             VALUES (
+                %s,
                 %s,
                 %s,
                 %s,
@@ -27476,6 +27595,7 @@ def submit_inventory_phone_scan(token):
         """, (
             scan_session_id,
             spa_id,
+            business_unit_id,
             barcode,
         ))
 
@@ -27485,7 +27605,13 @@ def submit_inventory_phone_scan(token):
             UPDATE inventory_scan_sessions
             SET last_activity_at = CURRENT_TIMESTAMP
             WHERE scan_session_id = %s
-        """, (scan_session_id,))
+              AND spa_id = %s
+              AND business_unit_id = %s
+        """, (
+            scan_session_id,
+            spa_id,
+            business_unit_id,
+        ))
 
         conn.commit()
 
@@ -27533,7 +27659,11 @@ def submit_inventory_phone_scan(token):
 @spa_required
 def poll_inventory_phone_scan(scan_session_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
     user_id = session["user_id"]
+
+    if not business_unit_id:
+        abort(403)
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -27546,12 +27676,14 @@ def poll_inventory_phone_scan(scan_session_id):
                 closed_at = CURRENT_TIMESTAMP
             WHERE scan_session_id = %s
               AND spa_id = %s
+              AND business_unit_id = %s
               AND created_by = %s
               AND status = 'active'
               AND expires_at <= CURRENT_TIMESTAMP
         """, (
             scan_session_id,
             spa_id,
+            business_unit_id,
             user_id,
         ))
 
@@ -27560,10 +27692,12 @@ def poll_inventory_phone_scan(scan_session_id):
             FROM inventory_scan_sessions
             WHERE scan_session_id = %s
               AND spa_id = %s
+              AND business_unit_id = %s
               AND created_by = %s
         """, (
             scan_session_id,
             spa_id,
+            business_unit_id,
             user_id,
         ))
 
@@ -27590,6 +27724,7 @@ def poll_inventory_phone_scan(scan_session_id):
             FROM inventory_scan_events
             WHERE scan_session_id = %s
               AND spa_id = %s
+              AND business_unit_id = %s
               AND status = 'pending'
             ORDER BY scan_event_id ASC
             LIMIT 1
@@ -27597,6 +27732,7 @@ def poll_inventory_phone_scan(scan_session_id):
         """, (
             scan_session_id,
             spa_id,
+            business_unit_id,
         ))
 
         scan_event = cur.fetchone()
@@ -27615,9 +27751,11 @@ def poll_inventory_phone_scan(scan_session_id):
                 processed_at = CURRENT_TIMESTAMP
             WHERE scan_event_id = %s
               AND spa_id = %s
+              AND business_unit_id = %s
         """, (
             scan_event[0],
             spa_id,
+            business_unit_id,
         ))
 
         cur.execute("""
@@ -27625,9 +27763,11 @@ def poll_inventory_phone_scan(scan_session_id):
             SET last_activity_at = CURRENT_TIMESTAMP
             WHERE scan_session_id = %s
               AND spa_id = %s
+              AND business_unit_id = %s
         """, (
             scan_session_id,
             spa_id,
+            business_unit_id,
         ))
 
         conn.commit()
@@ -27675,7 +27815,11 @@ def close_inventory_phone_scan_session(
     scan_session_id
 ):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
     user_id = session["user_id"]
+
+    if not business_unit_id:
+        abort(403)
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -27688,11 +27832,13 @@ def close_inventory_phone_scan_session(
                 closed_at = CURRENT_TIMESTAMP
             WHERE scan_session_id = %s
               AND spa_id = %s
+              AND business_unit_id = %s
               AND created_by = %s
               AND status = 'active'
         """, (
             scan_session_id,
             spa_id,
+            business_unit_id,
             user_id,
         ))
 
@@ -27782,6 +27928,10 @@ def close_inventory_phone_scan_session(
 @spa_required
 def deactivate_inventory_product(product_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -27791,7 +27941,12 @@ def deactivate_inventory_product(product_id):
         SET active = FALSE
         WHERE product_id = %s
           AND spa_id = %s
-    """, (product_id, spa_id))
+          AND business_unit_id = %s
+    """, (
+        product_id,
+        spa_id,
+        business_unit_id,
+    ))
 
     conn.commit()
 
