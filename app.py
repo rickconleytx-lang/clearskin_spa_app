@@ -4960,6 +4960,11 @@ def send_communication(
         return sms_result
 
     if channel == "email":
+        if not business_unit_id:
+            raise ValueError(
+                "Email communication requires business_unit_id."
+            )
+
         response = send_email(
             to=recipient,
             subject=communication["subject"],
@@ -23024,7 +23029,6 @@ def clear_email_history():
 @login_required
 @spa_required
 @require_workspace_permission("can_send_email")
-
 def send_one_birthday_offer_email(client_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -23035,7 +23039,6 @@ def send_one_birthday_offer_email(client_id):
             "warning"
         )
         return redirect(url_for("sms_email_terms"))
-
 
     spa_name = get_spa_name(spa_id)
     today = get_spa_today()
@@ -23059,52 +23062,84 @@ def send_one_birthday_offer_email(client_id):
             business_unit_id,
             client_id
         ))
+
         client = cur.fetchone()
 
         if not client:
-            flash("Client not found or missing email/birthday.", "error")
+            flash(
+                "Client not found or missing email/birthday.",
+                "error"
+            )
             return redirect(url_for("birthday_offers_home"))
 
         client_id, first_name, email, birth_date = client
-        campaign_year = get_birthday_campaign_year(birth_date, today)
+        campaign_year = get_birthday_campaign_year(
+            birth_date,
+            today
+        )
 
-
-        communication = build_communication(
+        result = send_communication(
             spa_id=spa_id,
+            business_unit_id=business_unit_id,
             channel="email",
+            recipient=email,
             template_type="birthday_message",
             merge_data={
+                "client_id": client_id,
                 "client_first_name": first_name or "",
                 "first_name": first_name or "",
                 "spa_name": spa_name or "",
-                "birth_month": birth_date.strftime("%B") if birth_date else ""
-            }
+                "birth_month": (
+                    birth_date.strftime("%B")
+                    if birth_date
+                    else ""
+                )
+            },
+            client_id=client_id,
+            message_type="birthday_message"
         )
 
-        if not communication:
-            flash(
-                "Birthday email template is not available.",
-                "error"
-            )
-            return redirect(url_for("birthday_offers_home"))
-
-        subject = (
-            communication.get("subject")
-            or f"{spa_name}, wishing you a Very Happy Birthday!"
+        sent_successfully = bool(
+            result and result.get("success")
         )
 
-        body = communication.get("body")
-
-        if not body:
-            flash(
-                "Birthday email template does not contain a message.",
-                "error"
+        cur.execute("""
+            INSERT INTO email_send_log (
+                spa_id,
+                business_unit_id,
+                client_id,
+                template_id,
+                email_type,
+                recipient_email,
+                subject_line,
+                sent_status,
+                error_message
             )
-            return redirect(url_for("birthday_offers_home"))
+            VALUES (
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s
+            )
+        """, (
+            spa_id,
+            business_unit_id,
+            client_id,
+            result.get("template_id") if result else None,
+            "birthday_message",
+            email,
+            result.get("subject") if result else None,
+            "Sent" if sent_successfully else "Failed",
+            (
+                None
+                if sent_successfully
+                else (
+                    result.get("error")
+                    if result
+                    else "Birthday email send failed."
+                )
+            )
+        ))
 
-        response = send_email(to=email, subject=subject, body=body)
-
-        if response.status_code == 200:
+        if sent_successfully:
             cur.execute("""
                 UPDATE client_birthday_offers
                 SET offer_sent = TRUE,
@@ -23113,7 +23148,11 @@ def send_one_birthday_offer_email(client_id):
                 WHERE spa_id = %s
                   AND client_id = %s
                   AND birthday_year = %s
-            """, (spa_id, client_id, campaign_year))
+            """, (
+                spa_id,
+                client_id,
+                campaign_year
+            ))
 
             if cur.rowcount == 0:
                 cur.execute("""
@@ -23125,24 +23164,35 @@ def send_one_birthday_offer_email(client_id):
                         offer_sent_date,
                         sent_status
                     )
-                    VALUES (%s, %s, %s, TRUE, CURRENT_DATE, 'Sent')
-                """, (spa_id, client_id, campaign_year))
+                    VALUES (
+                        %s, %s, %s,
+                        TRUE, CURRENT_DATE, 'Sent'
+                    )
+                """, (
+                    spa_id,
+                    client_id,
+                    campaign_year
+                ))
 
-            conn.commit()
             flash("Birthday email sent.", "success")
+
         else:
-            print("BIRTHDAY EMAIL FAILED:", response.status_code, response.text)
-            flash("Birthday email failed to send.", "error")
+            flash(
+                "Birthday email failed to send.",
+                "error"
+            )
+
+        conn.commit()
 
         return redirect(url_for("birthday_offers_home"))
+
+    except Exception:
+        conn.rollback()
+        raise
 
     finally:
         cur.close()
         conn.close()
-
-
-
-
 
 
 #   --------------------------------------
@@ -23162,7 +23212,6 @@ def send_one_birthday_offer_email(client_id):
 @login_required
 @spa_required
 @require_workspace_permission("can_send_email")
-
 def send_all_birthday_offer_emails():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -23204,46 +23253,29 @@ def send_all_birthday_offer_emails():
             spa_id,
             business_unit_id
         ))
+
         clients = cur.fetchall()
 
-
         for client_id, first_name, email, birth_date in clients:
-            this_year_birthday = birth_date.replace(year=today.year)
+            this_year_birthday = birth_date.replace(
+                year=today.year
+            )
 
             if this_year_birthday < today:
-                next_birth_date = birth_date.replace(year=today.year + 1)
+                next_birth_date = birth_date.replace(
+                    year=today.year + 1
+                )
             else:
                 next_birth_date = this_year_birthday
 
-            if not (today <= next_birth_date <= end_date):
+            if not (
+                today
+                <= next_birth_date
+                <= end_date
+            ):
                 continue
 
             campaign_year = next_birth_date.year
-
-            communication = build_communication(
-                spa_id=spa_id,
-                channel="email",
-                template_type="birthday_message",
-                merge_data={
-                    "client_first_name": first_name or "",
-                    "first_name": first_name or "",
-                    "spa_name": spa_name or "",
-                    "birth_month": birth_date.strftime("%B") if birth_date else ""
-                }
-            )
-
-            if not communication.get("success"):
-                failed_count += 1
-                continue
-
-            subject = communication.get("subject") or f"{spa_name}, wishing you a Very Happy Birthday!"
-            body = communication.get("body") or communication.get("message_body")
-
-            if not body:
-                failed_count += 1
-                continue
-
-
 
             cur.execute("""
                 SELECT offer_sent
@@ -23251,16 +23283,79 @@ def send_all_birthday_offer_emails():
                 WHERE spa_id = %s
                   AND client_id = %s
                   AND birthday_year = %s
-            """, (spa_id, client_id, campaign_year))
+            """, (
+                spa_id,
+                client_id,
+                campaign_year
+            ))
+
             offer_row = cur.fetchone()
 
             if offer_row and offer_row[0]:
                 continue
 
+            result = send_communication(
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                channel="email",
+                recipient=email,
+                template_type="birthday_message",
+                merge_data={
+                    "client_id": client_id,
+                    "client_first_name": first_name or "",
+                    "first_name": first_name or "",
+                    "spa_name": spa_name or "",
+                    "birth_month": (
+                        birth_date.strftime("%B")
+                        if birth_date
+                        else ""
+                    )
+                },
+                client_id=client_id,
+                message_type="birthday_message"
+            )
 
-            response = send_email(to=email, subject=subject, body=body)
+            sent_successfully = bool(
+                result and result.get("success")
+            )
 
-            if response.status_code == 200:
+            cur.execute("""
+                INSERT INTO email_send_log (
+                    spa_id,
+                    business_unit_id,
+                    client_id,
+                    template_id,
+                    email_type,
+                    recipient_email,
+                    subject_line,
+                    sent_status,
+                    error_message
+                )
+                VALUES (
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s
+                )
+            """, (
+                spa_id,
+                business_unit_id,
+                client_id,
+                result.get("template_id") if result else None,
+                "birthday_message",
+                email,
+                result.get("subject") if result else None,
+                "Sent" if sent_successfully else "Failed",
+                (
+                    None
+                    if sent_successfully
+                    else (
+                        result.get("error")
+                        if result
+                        else "Birthday email send failed."
+                    )
+                )
+            ))
+
+            if sent_successfully:
                 cur.execute("""
                     UPDATE client_birthday_offers
                     SET offer_sent = TRUE,
@@ -23269,7 +23364,11 @@ def send_all_birthday_offer_emails():
                     WHERE spa_id = %s
                       AND client_id = %s
                       AND birthday_year = %s
-                """, (spa_id, client_id, campaign_year))
+                """, (
+                    spa_id,
+                    client_id,
+                    campaign_year
+                ))
 
                 if cur.rowcount == 0:
                     cur.execute("""
@@ -23281,23 +23380,38 @@ def send_all_birthday_offer_emails():
                             offer_sent_date,
                             sent_status
                         )
-                        VALUES (%s, %s, %s, TRUE, CURRENT_DATE, 'Sent')
-                    """, (spa_id, client_id, campaign_year))
+                        VALUES (
+                            %s, %s, %s,
+                            TRUE, CURRENT_DATE, 'Sent'
+                        )
+                    """, (
+                        spa_id,
+                        client_id,
+                        campaign_year
+                    ))
 
                 sent_count += 1
+
             else:
-                print("BIRTHDAY EMAIL FAILED:", response.status_code, response.text)
                 failed_count += 1
 
         conn.commit()
-        flash(f"Birthday emails sent: {sent_count}. Failed: {failed_count}.", "success")
+
+        flash(
+            f"Birthday emails sent: {sent_count}. "
+            f"Failed: {failed_count}.",
+            "success"
+        )
+
         return redirect(url_for("birthday_offers_home"))
+
+    except Exception:
+        conn.rollback()
+        raise
 
     finally:
         cur.close()
         conn.close()
-
-
 
 
 #   --------------------------------------
@@ -23384,10 +23498,14 @@ def email_automation_queue():
                 ON eq.appointment_id =
                     a.appointment_id
                AND eq.spa_id = a.spa_id
+               AND eq.business_unit_id =
+                    a.business_unit_id
 
             LEFT JOIN clients c
                 ON eq.client_id = c.client_id
                AND eq.spa_id = c.spa_id
+               AND eq.business_unit_id =
+                    c.business_unit_id
 
             WHERE eq.spa_id = %s
               AND eq.business_unit_id = %s
@@ -31068,179 +31186,6 @@ def mark_birthday_offer_sent_disabled():
         cur.close()
         conn.close()
 
-
-
-
-
-
-
-
-
-
-#    --------------------------------------
-#
-#      BIRTHDAY OFFERS SEND
-#
-#
-#   ---------------------------------------
-
-
-@app.route("/birthday-offers/send/<int:client_id>", methods=["POST"])
-@login_required
-@spa_required
-@require_workspace_permission("can_send_email")
-
-def send_birthday_offer(client_id):
-
-    spa_id = current_spa_id()
-    business_unit_id = current_business_unit_id()
-
-    if business_unit_id is None:
-        flash(
-            "A valid Provider Workspace is required "
-            "to send a birthday offer.",
-            "error"
-        )
-        return redirect(url_for("birthday_offers_home"))
-
-    spa_now = get_spa_now()
-    today = spa_now.date()
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    cur.execute("""
-        SELECT first_name, last_name, email, birth_date
-        FROM clients
-        WHERE spa_id = %s
-          AND business_unit_id = %s
-          AND client_id = %s
-          AND active_client = TRUE
-    """, (
-        spa_id,
-        business_unit_id,
-        client_id
-    ))
-
-    client = cur.fetchone()
-
-    if not client:
-        cur.close()
-        conn.close()
-        flash("Client not found.", "error")
-        return redirect(url_for("birthday_offers"))
-
-    first_name, last_name, email, birth_date = client
-
-    if not birth_date:
-        cur.close()
-        conn.close()
-        flash("Client birthday not found.", "error")
-        return redirect(url_for("birthday_offers"))
-
-    campaign_year = get_birthday_campaign_year(birth_date, today)
-    if campaign_year is None:
-        cur.close()
-        conn.close()
-        flash("Client is not in the active birthday campaign window.", "error")
-        return redirect(url_for("birthday_offers"))
-
-    if not email or not email.strip():
-        cur.close()
-        conn.close()
-        flash("Client does not have an email address.", "error")
-        return redirect(url_for("birthday_offers"))
-
-    subject, body = build_birthday_email(first_name)
-
-    email_sent_successfully = False
-    error_note = None
-    email_template_id = None
-
-    try:
-        # Replace later with your actual Mailgun function
-        # email_sent_successfully = send_email_via_mailgun(email, subject, body)
-        pass
-    except Exception as e:
-        error_note = str(e)
-
-    if email_sent_successfully:
-        cur.execute("""
-            INSERT INTO client_birthday_offers (
-                spa_id,
-                client_id,
-                birthday_year,
-                offer_sent,
-                offer_sent_date,
-                acknowledged_by,
-                notes,
-                created_at,
-                email_template_id,
-                sent_status
-            )
-            VALUES (%s, %s, %s, TRUE, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (spa_id, client_id, birthday_year)
-            DO UPDATE SET
-                offer_sent = TRUE,
-                offer_sent_date = EXCLUDED.offer_sent_date,
-                acknowledged_by = EXCLUDED.acknowledged_by,
-                sent_status = EXCLUDED.sent_status,
-                email_template_id = EXCLUDED.email_template_id,
-                notes = EXCLUDED.notes
-        """, (
-            spa_id,
-            client_id,
-            campaign_year,
-            spa_now,
-            "system",
-            "Birthday email sent successfully",
-            spa_now,
-            email_template_id,
-            "sent"
-        ))
-
-        conn.commit()
-        flash(f"Birthday email sent to {first_name} {last_name}.", "success")
-    else:
-        cur.execute("""
-            INSERT INTO client_birthday_offers (
-                spa_id,
-                client_id,
-                birthday_year,
-                offer_sent,
-                offer_sent_date,
-                acknowledged_by,
-                notes,
-                created_at,
-                email_template_id,
-                sent_status
-            )
-            VALUES (%s, %s, %s, FALSE, NULL, %s, %s, %s, %s, %s)
-            ON CONFLICT (spa_id, client_id, birthday_year)
-            DO UPDATE SET
-                offer_sent = FALSE,
-                acknowledged_by = EXCLUDED.acknowledged_by,
-                sent_status = EXCLUDED.sent_status,
-                email_template_id = EXCLUDED.email_template_id,
-                notes = EXCLUDED.notes
-        """, (
-            spa_id,
-            client_id,
-            campaign_year,
-            "system",
-            error_note or "Email send failed",
-            spa_now,
-            email_template_id,
-            "failed"
-        ))
-
-        conn.commit()
-        flash("Birthday email could not be sent.", "error")
-
-    cur.close()
-    conn.close()
-
-    return redirect(url_for("birthday_offers_home"))
 
 
 
