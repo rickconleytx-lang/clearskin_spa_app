@@ -29557,6 +29557,15 @@ def schedule_appointment_start():
 @spa_required
 def income_home():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to view income.",
+            "error"
+        )
+        return redirect(url_for("dashboard"))
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -29566,14 +29575,22 @@ def income_home():
         SELECT COALESCE(SUM(total_amount), 0)
         FROM income
         WHERE spa_id = %s
-    """, (spa_id,))
+          AND business_unit_id = %s
+    """, (
+        spa_id,
+        business_unit_id
+    ))
     total_income = cur.fetchone()[0] or 0
 
     cur.execute("""
         SELECT COALESCE(SUM(amount), 0)
         FROM expenses
         WHERE spa_id = %s
-    """, (spa_id,))
+          AND business_unit_id = %s
+    """, (
+        spa_id,
+        business_unit_id
+    ))
     total_expenses = cur.fetchone()[0] or 0
 
     net_total = total_income - total_expenses
@@ -29592,9 +29609,14 @@ def income_home():
         LEFT JOIN clients c
             ON i.client_id = c.client_id
            AND i.spa_id = c.spa_id
+           AND i.business_unit_id = c.business_unit_id
         WHERE i.spa_id = %s
+          AND i.business_unit_id = %s
         ORDER BY i.income_date DESC, i.income_id DESC
-    """, (spa_id,))
+    """, (
+        spa_id,
+        business_unit_id
+    ))
     income_records = cur.fetchall()
 
     cur.close()
@@ -33243,6 +33265,15 @@ def employee_command_center(employee_id):
 @spa_required
 def expenses_home():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to view expenses.",
+            "error"
+        )
+        return redirect(url_for("dashboard"))
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -33261,25 +33292,38 @@ def expenses_home():
             created_at
         FROM expenses
         WHERE spa_id = %s
+          AND business_unit_id = %s
         ORDER BY expense_date DESC, expense_id DESC
         LIMIT 25
-    """, (spa_id,))
+    """, (
+        spa_id,
+        business_unit_id
+    ))
     expenses = cur.fetchall()
 
     cur.execute("""
         SELECT COALESCE(SUM(amount), 0)
         FROM expenses
         WHERE spa_id = %s
+          AND business_unit_id = %s
           AND expense_date = CURRENT_DATE
-    """, (spa_id,))
+    """, (
+        spa_id,
+        business_unit_id
+    ))
     today_total = cur.fetchone()[0]
 
     cur.execute("""
         SELECT COALESCE(SUM(amount), 0)
         FROM expenses
         WHERE spa_id = %s
-          AND DATE_TRUNC('month', expense_date) = DATE_TRUNC('month', CURRENT_DATE)
-    """, (spa_id,))
+          AND business_unit_id = %s
+          AND DATE_TRUNC('month', expense_date) =
+              DATE_TRUNC('month', CURRENT_DATE)
+    """, (
+        spa_id,
+        business_unit_id
+    ))
     month_total = cur.fetchone()[0]
 
     cur.close()
@@ -33431,6 +33475,15 @@ def _validate_expense_lookup_values(
 @spa_required
 def add_expense():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to add an expense.",
+            "error"
+        )
+        return redirect(url_for("expenses_home"))
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -33535,6 +33588,7 @@ def add_expense():
         cur.execute("""
             INSERT INTO expenses (
                 spa_id,
+                business_unit_id,
                 expense_date,
                 vendor_name,
                 category,
@@ -33546,10 +33600,11 @@ def add_expense():
             )
             VALUES (
                 %s, %s, %s, %s, %s,
-                %s, %s, %s, %s
+                %s, %s, %s, %s, %s
             )
         """, (
             spa_id,
+            business_unit_id,
             expense_date,
             vendor_name,
             category or None,
@@ -33610,6 +33665,15 @@ def add_expense():
 @spa_required
 def expense_report():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to view expense reports.",
+            "error"
+        )
+        return redirect(url_for("dashboard"))
 
     start_date = (
         request.args.get("start_date", "")
@@ -33672,9 +33736,13 @@ def expense_report():
             created_at
         FROM expenses
         WHERE spa_id = %s
+          AND business_unit_id = %s
     """
 
-    params = [spa_id]
+    params = [
+        spa_id,
+        business_unit_id
+    ]
 
     if start_date:
         query += " AND expense_date >= %s"
@@ -33703,9 +33771,13 @@ def expense_report():
         SELECT COALESCE(SUM(amount), 0)
         FROM expenses
         WHERE spa_id = %s
+          AND business_unit_id = %s
     """
 
-    total_params = [spa_id]
+    total_params = [
+        spa_id,
+        business_unit_id
+    ]
 
     if start_date:
         total_query += " AND expense_date >= %s"
@@ -33736,9 +33808,13 @@ def expense_report():
             COALESCE(SUM(amount), 0)
         FROM expenses
         WHERE spa_id = %s
+          AND business_unit_id = %s
     """
 
-    category_totals_params = [spa_id]
+    category_totals_params = [
+        spa_id,
+        business_unit_id
+    ]
 
     if start_date:
         category_totals_query += (
@@ -33834,6 +33910,15 @@ def expense_report():
 @spa_required
 def edit_expense(expense_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to edit an expense.",
+            "error"
+        )
+        return redirect(url_for("expenses_home"))
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -33956,6 +34041,7 @@ def edit_expense(expense_id):
                 receipt_file = %s,
                 notes = %s
             WHERE spa_id = %s
+              AND business_unit_id = %s
               AND expense_id = %s
         """, (
             expense_date,
@@ -33967,6 +34053,7 @@ def edit_expense(expense_id):
             receipt_file or None,
             notes or None,
             spa_id,
+            business_unit_id,
             expense_id
         ))
 
@@ -34016,9 +34103,11 @@ def edit_expense(expense_id):
             created_at
         FROM expenses
         WHERE spa_id = %s
+          AND business_unit_id = %s
           AND expense_id = %s
     """, (
         spa_id,
+        business_unit_id,
         expense_id
     ))
 
@@ -34071,15 +34160,27 @@ def edit_expense(expense_id):
 @spa_required
 def delete_expense(expense_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to delete an expense.",
+            "error"
+        )
+        return redirect(url_for("expenses_home"))
+
     conn = get_db_connection()
     cur = conn.cursor()
 
     cur.execute("""
         DELETE FROM expenses
         WHERE spa_id = %s
+          AND business_unit_id = %s
           AND expense_id = %s
     """, (
         spa_id,
+        business_unit_id,
         expense_id
     ))
 
@@ -34126,6 +34227,16 @@ import io
 @spa_required
 def export_expense_report_csv():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to export expenses.",
+            "error"
+        )
+        return redirect(url_for("expense_report"))
+
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
     category = request.args.get("category")
@@ -34144,10 +34255,14 @@ def export_expense_report_csv():
             payment_method,
             notes
         FROM expenses
-        WHERE spa_id =%s
-           AND 1=1
+        WHERE spa_id = %s
+          AND business_unit_id = %s
+          AND 1=1
     """
-    params = [spa_id]
+    params = [
+        spa_id,
+        business_unit_id
+    ]
 
     if start_date:
         query += " AND expense_date >= %s"
@@ -34219,6 +34334,16 @@ from collections import defaultdict
 @spa_required
 def export_expense_report_xlsx():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to export expenses.",
+            "error"
+        )
+        return redirect(url_for("expense_report"))
+
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
     category = request.args.get("category")
@@ -34237,10 +34362,14 @@ def export_expense_report_xlsx():
             payment_method,
             notes
         FROM expenses
-        WHERE spa_id =%s
-           AND 1=1
+        WHERE spa_id = %s
+          AND business_unit_id = %s
+          AND 1=1
     """
-    params = [spa_id]
+    params = [
+        spa_id,
+        business_unit_id
+    ]
 
     if start_date:
         query += " AND expense_date >= %s"
@@ -34464,6 +34593,7 @@ def advance_automatic_expense_date(current_date, frequency):
 def post_automatic_expense_payment(
     automatic_expense_id,
     spa_id,
+    business_unit_id,
     posting_type,
     require_due=False,
     create_coach_alert=False
@@ -34506,11 +34636,13 @@ def post_automatic_expense_payment(
 
             WHERE ae.automatic_expense_id = %s
               AND ae.spa_id = %s
+              AND ae.business_unit_id = %s
 
             FOR UPDATE OF ae
         """, (
             automatic_expense_id,
             spa_id,
+            business_unit_id,
         ))
 
         recurring_expense = cur.fetchone()
@@ -34588,11 +34720,13 @@ def post_automatic_expense_payment(
                     expense_id
                 FROM automatic_expense_occurrences
                 WHERE spa_id = %s
+                  AND business_unit_id = %s
                   AND automatic_expense_id = %s
                   AND scheduled_date = %s
                   AND posting_type = 'scheduled'
             """, (
                 spa_id,
+                business_unit_id,
                 automatic_expense_id,
                 scheduled_date,
             ))
@@ -34645,6 +34779,7 @@ def post_automatic_expense_payment(
         cur.execute("""
             INSERT INTO expenses (
                 spa_id,
+                business_unit_id,
                 expense_date,
                 vendor_name,
                 category,
@@ -34656,11 +34791,12 @@ def post_automatic_expense_payment(
             )
             VALUES (
                 %s, %s, %s, %s, %s,
-                %s, %s, NULL, %s
+                %s, %s, %s, NULL, %s
             )
             RETURNING expense_id
         """, (
             spa_id,
+            business_unit_id,
             expense_date,
             vendor_name,
             category_name,
@@ -34687,16 +34823,19 @@ def post_automatic_expense_payment(
                     posting_type = 'scheduled'
                 WHERE occurrence_id = %s
                   AND spa_id = %s
+                  AND business_unit_id = %s
             """, (
                 expense_id,
                 existing_occurrence[0],
                 spa_id,
+                business_unit_id,
             ))
 
         else:
             cur.execute("""
                 INSERT INTO automatic_expense_occurrences (
                     spa_id,
+                    business_unit_id,
                     automatic_expense_id,
                     scheduled_date,
                     expense_id,
@@ -34706,7 +34845,7 @@ def post_automatic_expense_payment(
                     posting_type
                 )
                 VALUES (
-                    %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
                     'posted', NULL,
                     CURRENT_TIMESTAMP,
                     %s
@@ -34714,6 +34853,7 @@ def post_automatic_expense_payment(
                 RETURNING occurrence_id
             """, (
                 spa_id,
+                business_unit_id,
                 automatic_expense_id,
                 scheduled_date,
                 expense_id,
@@ -34748,10 +34888,12 @@ def post_automatic_expense_payment(
                         updated_at = CURRENT_TIMESTAMP
                     WHERE automatic_expense_id = %s
                       AND spa_id = %s
+                      AND business_unit_id = %s
                 """, (
                     posted_date,
                     automatic_expense_id,
                     spa_id,
+                    business_unit_id,
                 ))
 
                 next_post_date = None
@@ -34770,11 +34912,13 @@ def post_automatic_expense_payment(
                         updated_at = CURRENT_TIMESTAMP
                     WHERE automatic_expense_id = %s
                       AND spa_id = %s
+                      AND business_unit_id = %s
                 """, (
                     next_post_date,
                     posted_date,
                     automatic_expense_id,
                     spa_id,
+                    business_unit_id,
                 ))
 
                 if (
@@ -34812,10 +34956,12 @@ def post_automatic_expense_payment(
                             coach_alert_acknowledged_at = NULL
                         WHERE occurrence_id = %s
                         AND spa_id = %s
+                        AND business_unit_id = %s
                     """, (
                         coach_alert_message,
                         occurrence_id,
                         spa_id,
+                        business_unit_id,
                     ))
 
         conn.commit()
@@ -34871,10 +35017,20 @@ def post_automatic_expense_payment(
 @spa_required
 def post_current_automatic_expense(automatic_expense_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to post recurring expenses.",
+            "error"
+        )
+        return redirect(url_for("automatic_expenses"))
 
     result = post_automatic_expense_payment(
         automatic_expense_id=automatic_expense_id,
         spa_id=spa_id,
+        business_unit_id=business_unit_id,
         posting_type="scheduled"
     )
 
@@ -34939,10 +35095,20 @@ def post_current_automatic_expense(automatic_expense_id):
 @spa_required
 def post_extra_automatic_expense(automatic_expense_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to post recurring expenses.",
+            "error"
+        )
+        return redirect(url_for("automatic_expenses"))
 
     result = post_automatic_expense_payment(
         automatic_expense_id=automatic_expense_id,
         spa_id=spa_id,
+        business_unit_id=business_unit_id,
         posting_type="extra"
     )
 
@@ -35008,6 +35174,7 @@ def post_extra_automatic_expense(automatic_expense_id):
 def record_automatic_expense_processing_error(
     automatic_expense_id,
     spa_id,
+    business_unit_id,
     error_message
 ):
     conn = get_db_connection()
@@ -35022,10 +35189,12 @@ def record_automatic_expense_processing_error(
                 updated_at = CURRENT_TIMESTAMP
             WHERE automatic_expense_id = %s
               AND spa_id = %s
+              AND business_unit_id = %s
         """, (
             error_message,
             automatic_expense_id,
             spa_id,
+            business_unit_id,
         ))
 
         conn.commit()
@@ -35063,12 +35232,13 @@ def process_due_automatic_expenses(dry_run=False):
             SELECT
                 automatic_expense_id,                -- 0
                 spa_id,                              -- 1
-                expense_name,                        -- 2
-                processing_type,                     -- 3
-                next_post_date,                      -- 4
-                frequency,                           -- 5
-                end_date,                            -- 6
-                COALESCE(skip_next_occurrence, FALSE) -- 7
+                business_unit_id,                    -- 2
+                expense_name,                        -- 3
+                processing_type,                     -- 4
+                next_post_date,                      -- 5
+                frequency,                           -- 6
+                end_date,                            -- 7
+                COALESCE(skip_next_occurrence, FALSE) -- 8
             FROM automatic_expenses
             WHERE is_active = TRUE
               AND processing_type IN (
@@ -35104,12 +35274,13 @@ def process_due_automatic_expenses(dry_run=False):
     for recurring_expense in recurring_expenses:
         automatic_expense_id = recurring_expense[0]
         spa_id = recurring_expense[1]
-        expense_name = recurring_expense[2]
-        processing_type = recurring_expense[3]
-        next_post_date = recurring_expense[4]
-        frequency = recurring_expense[5]
-        end_date = recurring_expense[6]
-        skip_next_occurrence = recurring_expense[7]
+        business_unit_id = recurring_expense[2]
+        expense_name = recurring_expense[3]
+        processing_type = recurring_expense[4]
+        next_post_date = recurring_expense[5]
+        frequency = recurring_expense[6]
+        end_date = recurring_expense[7]
+        skip_next_occurrence = recurring_expense[8]
 
         spa_today = get_spa_now(spa_id).date()
 
@@ -35184,6 +35355,7 @@ def process_due_automatic_expenses(dry_run=False):
                     automatic_expense_id
                 ),
                 spa_id=spa_id,
+                business_unit_id=business_unit_id,
                 posting_type="scheduled",
                 require_due=True,
                 create_coach_alert=(
@@ -35236,6 +35408,7 @@ def process_due_automatic_expenses(dry_run=False):
                     automatic_expense_id
                 ),
                 spa_id=spa_id,
+                business_unit_id=business_unit_id,
                 error_message=error_message
             )
 
@@ -35259,6 +35432,7 @@ def process_due_automatic_expenses(dry_run=False):
                     automatic_expense_id
                 ),
                 spa_id=spa_id,
+                business_unit_id=business_unit_id,
                 error_message=error_message
             )
 
@@ -35361,6 +35535,15 @@ def process_due_automatic_expenses_command(
 @spa_required
 def automatic_expenses():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to view recurring expenses.",
+            "error"
+        )
+        return redirect(url_for("dashboard"))
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -35392,11 +35575,15 @@ def automatic_expenses():
             ON ae.payment_method_id = pm.payment_method_id
            AND pm.spa_id = ae.spa_id
         WHERE ae.spa_id = %s
+          AND ae.business_unit_id = %s
         ORDER BY
             ae.is_active DESC,
             ae.next_post_date ASC,
             ae.expense_name ASC
-    """, (spa_id,))
+    """, (
+        spa_id,
+        business_unit_id
+    ))
 
     automatic_expense_rows = cur.fetchall()
 
@@ -35672,6 +35859,15 @@ def automatic_expenses():
 @spa_required
 def add_automatic_expense():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to add a recurring expense.",
+            "error"
+        )
+        return redirect(url_for("automatic_expenses"))
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -35918,6 +36114,7 @@ def add_automatic_expense():
             cur.execute("""
                 INSERT INTO automatic_expenses (
                     spa_id,
+                    business_unit_id,
                     expense_name,
                     vendor_name,
                     expense_cat_id,
@@ -35935,11 +36132,12 @@ def add_automatic_expense():
                 VALUES (
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
-                    %s, %s, %s, TRUE
+                    %s, %s, %s, %s, TRUE
                 )
                 RETURNING automatic_expense_id
             """, (
                 spa_id,
+                business_unit_id,
                 form_data["expense_name"],
                 form_data["vendor_name"] or None,
                 expense_cat_id,
@@ -36035,6 +36233,15 @@ def add_automatic_expense():
 @spa_required
 def edit_automatic_expense(automatic_expense_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to edit a recurring expense.",
+            "error"
+        )
+        return redirect(url_for("automatic_expenses"))
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -36059,9 +36266,11 @@ def edit_automatic_expense(automatic_expense_id):
         FROM automatic_expenses
         WHERE automatic_expense_id = %s
           AND spa_id = %s
+          AND business_unit_id = %s
     """, (
         automatic_expense_id,
         spa_id,
+        business_unit_id,
     ))
 
     automatic_expense = cur.fetchone()
@@ -36372,6 +36581,7 @@ def edit_automatic_expense(automatic_expense_id):
                     updated_at = CURRENT_TIMESTAMP
                 WHERE automatic_expense_id = %s
                   AND spa_id = %s
+                  AND business_unit_id = %s
             """, (
                 form_data["expense_name"],
                 form_data["vendor_name"] or None,
@@ -36387,6 +36597,7 @@ def edit_automatic_expense(automatic_expense_id):
                 form_data["processing_type"],
                 automatic_expense_id,
                 spa_id,
+                business_unit_id,
             ))
 
             if cur.rowcount == 0:
@@ -40103,8 +40314,14 @@ def dashboard():
         SELECT COALESCE(SUM(amount), 0)
         FROM expenses
         WHERE spa_id = %s
+          AND business_unit_id = %s
           AND expense_date BETWEEN %s AND %s
-    """, (spa_id, year_start, today))
+    """, (
+        spa_id,
+        business_unit_id,
+        year_start,
+        today
+    ))
 
     ytd_expenses = cur.fetchone()[0]
 
@@ -40640,6 +40857,7 @@ def morning_briefing():
             last_error_at             -- 8
         FROM automatic_expenses
         WHERE spa_id = %s
+        AND business_unit_id = %s
         AND is_active = TRUE
         AND (
                 last_error_message IS NOT NULL
@@ -40656,6 +40874,7 @@ def morning_briefing():
             expense_name ASC
     """, (
         spa_id,
+        business_unit_id,
         recurring_expense_window_end,
         today,
         today,
@@ -40776,8 +40995,11 @@ def morning_briefing():
           ON aeo.automatic_expense_id =
              ae.automatic_expense_id
          AND aeo.spa_id = ae.spa_id
+         AND aeo.business_unit_id =
+             ae.business_unit_id
 
         WHERE aeo.spa_id = %s
+          AND aeo.business_unit_id = %s
           AND aeo.occurrence_status = 'posted'
           AND aeo.coach_alert_required = TRUE
           AND aeo.coach_alert_acknowledged_at IS NULL
@@ -40788,7 +41010,10 @@ def morning_briefing():
             aeo.occurrence_id DESC
 
         LIMIT 5
-    """, (spa_id,))
+    """, (
+        spa_id,
+        business_unit_id
+    ))
 
     recurring_expense_alert_rows = cur.fetchall()
 
@@ -41303,6 +41528,7 @@ def acknowledge_coach_recommendation():
         }), 400
 
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
     spa_now = get_spa_now()
 
     mention_count = None
@@ -41327,11 +41553,13 @@ def acknowledge_coach_recommendation():
                         CURRENT_TIMESTAMP
                 WHERE occurrence_id = %s
                 AND spa_id = %s
+                AND business_unit_id = %s
                 AND coach_alert_required = TRUE
                 AND coach_alert_acknowledged_at IS NULL
             """, (
                 occurrence_id,
                 spa_id,
+                business_unit_id,
             ))
 
             if cur.rowcount == 0:
