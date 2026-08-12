@@ -59147,67 +59147,9 @@ def start_scheduler():
 #   -------------------
 
 
-@app.route("/test-godaddy-post")
-@login_required
-@spa_required
-def test_godaddy_post():
-    with open("test_booking.txt", "r") as f:
-        body = f.read()
-
-    with app.test_client() as client:
-        response = client.post(
-            "/godaddy-booking-intake",
-            data={"body": body}
-        )
-
-    return response.get_data(as_text=True)
-
-
-
-
-
-@app.route("/godaddy-booking-intake", methods=["POST"])
-def godaddy_booking_intake():
-
-    secret = request.headers.get("X-Webhook-Secret")
-
-    if secret != os.getenv("GODADDY_WEBHOOK_SECRET"):
-        return {"error": "Unauthorized"}, 401
-
-    body = request.form.get("body") or request.get_data(as_text=True)
-
-    if not body:
-        return {"error": "No booking body received"}, 400
-
-    spa_id = 1
-
-    result = import_godaddy_booking(body, spa_id)
-
-    return result, 200
-
-
-
-@app.route("/test-secure")
-@login_required
-@master_admin_required
-def test_godaddy_secure_post():
-    if os.environ.get("RENDER"):
-        abort(404)
-
-    with open("test_booking.txt", "r") as f:
-        body = f.read()
-
-    with app.test_client() as client:
-        response = client.post(
-            "/godaddy-booking-intake",
-            data={"body": body},
-            headers={
-                "X-Webhook-Secret": os.getenv("GODADDY_WEBHOOK_SECRET")
-            }
-        )
-    return response.get_data(as_text=True)
-
-
+# Legacy GoDaddy HTTP booking intake retired.
+# Clear Skin Esthetics currently imports GoDaddy bookings through
+# the Gmail poller until migration to Peach Suite Pro native booking.
 
 
 if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or os.environ.get("RENDER"):
