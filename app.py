@@ -22544,6 +22544,7 @@ def general_email():
 
 def general_email_preview():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
     spa_name = get_spa_name(spa_id)
 
     template_id = request.args.get("template_id")
@@ -22580,7 +22581,12 @@ def general_email_preview():
                 FROM clients
                 WHERE client_id = %s
                   AND spa_id = %s
-            """, (client_id, spa_id))
+                  AND business_unit_id = %s
+            """, (
+                client_id,
+                spa_id,
+                business_unit_id
+            ))
             client = cur.fetchone()
         else:
             client = None
@@ -22670,6 +22676,7 @@ def general_email_preview():
 
 def general_email_send():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
     language_code = get_request_language()
 
     if not sms_email_terms_accepted(spa_id):
@@ -22763,9 +22770,14 @@ def general_email_send():
                 FROM clients
                 WHERE client_id = %s
                   AND spa_id = %s
+                  AND business_unit_id = %s
                   AND email IS NOT NULL
                   AND email <> ''
-            """, (client_id, spa_id))
+            """, (
+                client_id,
+                spa_id,
+                business_unit_id
+            ))
 
             client = cur.fetchone()
 
@@ -22802,7 +22814,8 @@ def general_email_send():
                 client_id=client_id,
                 message_type=template_type,
                 language_code=language_code,
-                template_id=template_id
+                template_id=template_id,
+                business_unit_id=business_unit_id
             )
 
 
@@ -22823,6 +22836,7 @@ def general_email_send():
             cur.execute("""
                 INSERT INTO email_send_log (
                     spa_id,
+                    business_unit_id,
                     client_id,
                     template_id,
                     email_type,
@@ -22831,9 +22845,13 @@ def general_email_send():
                     sent_status,
                     error_message
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s
+                )
             """, (
                 spa_id,
+                business_unit_id,
                 client_id,
                 template_id,
                 template_type,
@@ -22893,6 +22911,7 @@ def general_email_send():
 
 def email_history():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -22911,10 +22930,15 @@ def email_history():
         LEFT JOIN clients c
             ON e.client_id = c.client_id
            AND e.spa_id = c.spa_id
+           AND e.business_unit_id = c.business_unit_id
         WHERE e.spa_id = %s
+          AND e.business_unit_id = %s
         ORDER BY e.sent_at DESC
         LIMIT 100
-    """, (spa_id,))
+    """, (
+        spa_id,
+        business_unit_id
+    ))
 
     rows = cur.fetchall()
 
@@ -22942,6 +22966,7 @@ def email_history():
 @require_workspace_permission("can_manage_messaging_compliance")
 def clear_email_history():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -22950,7 +22975,11 @@ def clear_email_history():
         cur.execute("""
             DELETE FROM email_send_log
             WHERE spa_id = %s
-        """, (spa_id,))
+              AND business_unit_id = %s
+        """, (
+            spa_id,
+            business_unit_id
+        ))
 
         conn.commit()
         flash("Email history cleared.", "success")
@@ -22998,6 +23027,7 @@ def clear_email_history():
 
 def send_one_birthday_offer_email(client_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
 
     if not sms_email_terms_accepted(spa_id):
         flash(
@@ -23018,12 +23048,17 @@ def send_one_birthday_offer_email(client_id):
             SELECT client_id, first_name, email, birth_date
             FROM clients
             WHERE spa_id = %s
+              AND business_unit_id = %s
               AND client_id = %s
               AND active_client = TRUE
               AND email IS NOT NULL
               AND TRIM(email) <> ''
               AND birth_date IS NOT NULL
-        """, (spa_id, client_id))
+        """, (
+            spa_id,
+            business_unit_id,
+            client_id
+        ))
         client = cur.fetchone()
 
         if not client:
@@ -23130,6 +23165,7 @@ def send_one_birthday_offer_email(client_id):
 
 def send_all_birthday_offer_emails():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
     spa_name = get_spa_name(spa_id)
     today = get_spa_today()
     end_date = today + timedelta(days=45)
@@ -23156,6 +23192,7 @@ def send_all_birthday_offer_emails():
                 c.birth_date
             FROM clients c
             WHERE c.spa_id = %s
+              AND c.business_unit_id = %s
               AND c.active_client = TRUE
               AND c.birth_date IS NOT NULL
               AND c.email IS NOT NULL
@@ -23163,7 +23200,10 @@ def send_all_birthday_offer_emails():
               AND c.email_opt_out = FALSE
               AND TRIM(c.email) <> ''
             ORDER BY c.last_name, c.first_name
-        """, (spa_id,))
+        """, (
+            spa_id,
+            business_unit_id
+        ))
         clients = cur.fetchall()
 
 
@@ -58628,6 +58668,7 @@ def process_email_automation_queue(
                     SELECT
                         email_queue_id,
                         spa_id,
+                        business_unit_id,
                         client_id,
                         appointment_id,
                         email_type,
@@ -58656,6 +58697,7 @@ def process_email_automation_queue(
                     SELECT
                         email_queue_id,
                         spa_id,
+                        business_unit_id,
                         client_id,
                         appointment_id,
                         email_type,
@@ -58689,6 +58731,7 @@ def process_email_automation_queue(
             (
                 selected_queue_id,
                 spa_id,
+                business_unit_id,
                 client_id,
                 appointment_id,
                 email_type,
@@ -58850,6 +58893,7 @@ def process_email_automation_queue(
                 cur.execute("""
                     INSERT INTO email_send_log (
                         spa_id,
+                        business_unit_id,
                         client_id,
                         email_type,
                         recipient_email,
@@ -58866,6 +58910,7 @@ def process_email_automation_queue(
                         %s,
                         %s,
                         %s,
+                        %s,
                         'Sent',
                         CURRENT_TIMESTAMP,
                         NULL,
@@ -58874,6 +58919,7 @@ def process_email_automation_queue(
                     )
                 """, (
                     spa_id,
+                    business_unit_id,
                     client_id,
                     email_type,
                     recipient_email,
@@ -58940,6 +58986,7 @@ def process_email_automation_queue(
                 cur.execute("""
                     INSERT INTO email_send_log (
                         spa_id,
+                        business_unit_id,
                         client_id,
                         email_type,
                         recipient_email,
@@ -58956,6 +59003,7 @@ def process_email_automation_queue(
                         %s,
                         %s,
                         %s,
+                        %s,
                         'Failed',
                         NULL,
                         %s,
@@ -58964,6 +59012,7 @@ def process_email_automation_queue(
                     )
                 """, (
                     spa_id,
+                    business_unit_id,
                     client_id,
                     email_type,
                     recipient_email,
