@@ -8331,16 +8331,6 @@ def split_client_name(full_name):
 #
 #   -----------------------
 
-def current_spa_id():
-    from flask import g, session
-
-    if "user_id" not in session:
-        return None
-
-    if is_master_admin():
-        return None
-
-    return getattr(g, "spa_id", None)
 
 
 
@@ -9101,8 +9091,6 @@ def load_spa():
         "login",
         "logout",
         "static",
-        "mailgun_godaddy_booking",
-        "godaddy_booking_intake",
         "telnyx_sms_webhook",
         "public_booking",
         "public_booking_confirm",
@@ -30254,12 +30242,21 @@ from datetime import date
 @spa_required
 def edit_client_full(client_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to edit a client.",
+            "error"
+        )
+        return redirect(url_for("client_management"))
 
     conn = get_db_connection()
     cur = conn.cursor()
 
     try:
-        # Always verify the client belongs to the current spa first
+        # Verify the client belongs to the current workspace first
         cur.execute("""
             SELECT
                 client_id,
@@ -30285,7 +30282,12 @@ def edit_client_full(client_id):
             FROM clients
             WHERE client_id = %s
               AND spa_id = %s
-        """, (client_id, spa_id))
+              AND business_unit_id = %s
+        """, (
+            client_id,
+            spa_id,
+            business_unit_id
+        ))
         client = cur.fetchone()
 
         if not client:
@@ -30598,6 +30600,7 @@ def edit_client_full(client_id):
                     updated_at = CURRENT_TIMESTAMP
                 WHERE client_id = %s
                   AND spa_id = %s
+                  AND business_unit_id = %s
             """, (
                 first_name,
                 last_name,
@@ -30616,7 +30619,8 @@ def edit_client_full(client_id):
                 notes_three,
                 active_client,
                 client_id,
-                spa_id
+                spa_id,
+                business_unit_id
             ))
 
             if cur.rowcount == 0:
@@ -43031,7 +43035,15 @@ def reports_range():
 @spa_required
 def client_health_profile(client_id):
     spa_id = current_spa_id()
-    role = session.get("role")
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to view client health information.",
+            "error"
+        )
+        return redirect(url_for("clients_home"))
 
     appointment_id = request.args.get("appointment_id") or request.form.get("appointment_id")
     selected_date = request.args.get("date") or request.form.get("date")
@@ -43039,18 +43051,22 @@ def client_health_profile(client_id):
     conn = get_db_connection()
     cur = conn.cursor()
 
-    client_filter = "WHERE client_id = %s"
-    client_params = [client_id]
-
-    if role != "master_admin":
-        client_filter += " AND spa_id = %s"
-        client_params.append(spa_id)
-
-    cur.execute(f"""
-        SELECT client_id, first_name, last_name, spa_id
+    cur.execute("""
+        SELECT
+            client_id,
+            first_name,
+            last_name,
+            spa_id,
+            business_unit_id
         FROM clients
-        {client_filter}
-    """, client_params)
+        WHERE client_id = %s
+          AND spa_id = %s
+          AND business_unit_id = %s
+    """, (
+        client_id,
+        spa_id,
+        business_unit_id
+    ))
     client = cur.fetchone()
 
     if not client:
