@@ -22287,11 +22287,18 @@ def email_template_preview(email_template_id):
 @login_required
 @spa_required
 @require_workspace_permission("can_send_email")
-
 def send_gift_certificate_email(gift_cert_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
     spa_name = get_spa_name(spa_id)
 
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to send a gift certificate email.",
+            "error"
+        )
+        return redirect(url_for("gift_certificates_home"))
 
     if not sms_email_terms_accepted(spa_id):
         flash(
@@ -22300,14 +22307,24 @@ def send_gift_certificate_email(gift_cert_id):
         )
         return redirect(url_for("sms_email_terms"))
 
+    reminder_type = (
+        request.form.get("reminder_type", "")
+        or ""
+    ).strip().lower()
+
+    allowed_reminder_types = {
+        "same_day",
+        "7_day",
+        "30_day"
+    }
+
+    if reminder_type not in allowed_reminder_types:
+        reminder_type = None
+
     conn = get_db_connection()
     cur = conn.cursor()
 
     try:
-        print("GIFT CERT EMAIL ROUTE HIT", flush=True)
-        print("SPA ID:", spa_id, flush=True)
-        print("GIFT CERT ID:", gift_cert_id, flush=True)
-
         cur.execute("""
             SELECT
                 gc.gift_cert_id,
@@ -22320,10 +22337,14 @@ def send_gift_certificate_email(gift_cert_id):
             FROM gift_certificates gc
             WHERE gc.gift_cert_id = %s
               AND gc.spa_id = %s
-        """, (gift_cert_id, spa_id))
-        gift_cert = cur.fetchone()
+              AND gc.business_unit_id = %s
+        """, (
+            gift_cert_id,
+            spa_id,
+            business_unit_id
+        ))
 
-        print("GIFT CERT ROW:", gift_cert, flush=True)
+        gift_cert = cur.fetchone()
 
         if not gift_cert:
             flash("Gift certificate not found.", "error")
@@ -22339,68 +22360,133 @@ def send_gift_certificate_email(gift_cert_id):
             purchaser_email
         ) = gift_cert
 
-        print("PURCHASER EMAIL:", purchaser_email, flush=True)
-
         if not purchaser_email or not purchaser_email.strip():
-            flash("No purchaser email found for this gift certificate.", "error")
+            flash(
+                "No purchaser email found for this gift certificate.",
+                "error"
+            )
             return redirect(url_for("gift_certificates_home"))
 
-        communication = build_communication(
+        result = send_communication(
             spa_id=spa_id,
+            business_unit_id=business_unit_id,
             channel="email",
+            recipient=purchaser_email,
             template_type="gift_certificate",
             merge_data={
                 "spa_name": spa_name or "",
                 "certificate_number": certificate_number or "",
-                "original_value": f"{float(original_value or 0):.2f}",
-                "remaining_balance": f"{float(remaining_balance or 0):.2f}",
-                "expires_date": expires_date.strftime("%Y-%m-%d") if expires_date else "",
+                "original_value": (
+                    f"{float(original_value or 0):.2f}"
+                ),
+                "remaining_balance": (
+                    f"{float(remaining_balance or 0):.2f}"
+                ),
+                "expires_date": (
+                    expires_date.strftime("%Y-%m-%d")
+                    if expires_date
+                    else ""
+                ),
                 "recipient_name": recipient_name or ""
-            }
+            },
+            message_type="gift_certificate"
         )
 
-        if not communication.get("success"):
-            flash(communication.get("error") or "Gift certificate email template is not available.", "error")
-            return redirect(url_for("gift_certificates_home"))
-
-        subject = communication.get("subject") or f"Your Gift Certificate from {spa_name}"
-        body = communication.get("message_body")
-
-
-        print("SUBJECT:", subject, flush=True)
-        print("ABOUT TO SEND EMAIL", flush=True)
-
-        response = send_email(
-            to=purchaser_email,
-            subject=subject,
-            body=body
+        sent_successfully = bool(
+            result and result.get("success")
         )
 
-        print("GIFT CERT EMAIL STATUS:", response.status_code, flush=True)
-        print("GIFT CERT EMAIL BODY:", response.text, flush=True)
+        cur.execute("""
+            INSERT INTO email_send_log (
+                spa_id,
+                business_unit_id,
+                gift_certificate_id,
+                template_id,
+                email_type,
+                recipient_email,
+                subject_line,
+                sent_status,
+                error_message
+            )
+            VALUES (
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s
+            )
+        """, (
+            spa_id,
+            business_unit_id,
+            gc_id,
+            result.get("template_id") if result else None,
+            "gift_certificate",
+            purchaser_email,
+            result.get("subject") if result else None,
+            "Sent" if sent_successfully else "Failed",
+            (
+                None
+                if sent_successfully
+                else (
+                    result.get("error")
+                    if result
+                    else "Gift certificate email send failed."
+                )
+            )
+        ))
 
-        if response.status_code == 200:
+        if reminder_type:
+            cur.execute("""
+                INSERT INTO gift_certificate_email_reminders (
+                    spa_id,
+                    business_unit_id,
+                    gift_cert_id,
+                    reminder_type,
+                    recipient_email,
+                    sent_date,
+                    sent_status,
+                    notes
+                )
+                VALUES (
+                    %s, %s, %s, %s,
+                    %s, CURRENT_TIMESTAMP, %s, %s
+                )
+            """, (
+                spa_id,
+                business_unit_id,
+                gc_id,
+                reminder_type,
+                purchaser_email,
+                "Sent" if sent_successfully else "Failed",
+                (
+                    None
+                    if sent_successfully
+                    else (
+                        result.get("error")
+                        if result
+                        else "Gift certificate reminder failed."
+                    )
+                )
+            ))
+
+        conn.commit()
+
+        if sent_successfully:
             flash("Gift certificate email sent.", "success")
         else:
             flash("Gift certificate email failed to send.", "error")
 
+        if reminder_type:
+            return redirect(
+                url_for("gift_certificate_reminders")
+            )
+
         return redirect(url_for("gift_certificates_home"))
 
-    except Exception as e:
-        print("GIFT CERT EMAIL ERROR:", repr(e), flush=True)
-        flash("There was a problem sending the gift certificate email.", "error")
-        return redirect(url_for("gift_certificates_home"))
+    except Exception:
+        conn.rollback()
+        raise
 
     finally:
         cur.close()
         conn.close()
-
-
-
-
-
-
-
 
 
 #   ---------------------------
@@ -29722,6 +29808,7 @@ def client_forms(client_id):
 @spa_required
 def gift_certificates_home():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
     spa_now = get_spa_now()
     today = spa_now.date()
 
@@ -29732,8 +29819,14 @@ def gift_certificates_home():
     conn = get_db_connection()
     cur = conn.cursor()
 
-    where_clauses = ["gc.spa_id = %s"]
-    params = [spa_id]
+    where_clauses = [
+        "gc.spa_id = %s",
+        "gc.business_unit_id = %s"
+    ]
+    params = [
+        spa_id,
+        business_unit_id
+    ]
 
     if certificate_search:
         where_clauses.append("gc.certificate_number ILIKE %s")
@@ -29780,16 +29873,27 @@ def gift_certificates_home():
             ON gc.gift_certificate_status_id = gcs.gift_certificate_status_id
            AND gc.spa_id = gcs.spa_id
         LEFT JOIN (
-            SELECT DISTINCT ON (gift_cert_id, spa_id)
+            SELECT DISTINCT ON (
                 gift_cert_id,
                 spa_id,
+                business_unit_id
+            )
+                gift_cert_id,
+                spa_id,
+                business_unit_id,
                 sent_status,
                 sent_date
             FROM gift_certificate_email_reminders
-            ORDER BY gift_cert_id, spa_id, sent_date DESC
+            ORDER BY
+                gift_cert_id,
+                spa_id,
+                business_unit_id,
+                sent_date DESC
         ) r
             ON gc.gift_cert_id = r.gift_cert_id
            AND gc.spa_id = r.spa_id
+           AND gc.business_unit_id =
+                r.business_unit_id
         {where_sql}
         {order_sql}
     """
@@ -29807,12 +29911,18 @@ def gift_certificates_home():
           ON gc.gift_certificate_status_id = gcs.gift_certificate_status_id
          AND gc.spa_id = gcs.spa_id
         WHERE gc.spa_id = %s
+          AND gc.business_unit_id = %s
           AND gcs.status_name = 'Active'
           AND gc.amount_paid > 0
           AND gc.is_redeemed = FALSE
           AND gc.remaining_balance > 0
           AND gc.expires_date BETWEEN %s AND (%s + INTERVAL '60 days')
-    """, (spa_id, today, today))
+    """, (
+        spa_id,
+        business_unit_id,
+        today,
+        today
+    ))
     expiring_gc_count = cur.fetchone()[0] or 0
 
     cur.execute("""
@@ -29838,7 +29948,11 @@ def gift_certificates_home():
           ON gc.gift_certificate_status_id = gcs.gift_certificate_status_id
          AND gc.spa_id = gcs.spa_id
         WHERE gc.spa_id = %s
-    """, (spa_id,))
+          AND gc.business_unit_id = %s
+    """, (
+        spa_id,
+        business_unit_id
+    ))
 
     gift_certificate_summary = cur.fetchone()
 
@@ -29877,6 +29991,16 @@ def gift_certificates_home():
 @spa_required
 def add_gift_certificate():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to add a gift certificate.",
+            "error"
+        )
+        return redirect(url_for("gift_certificates_home"))
+
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -29911,6 +30035,7 @@ def add_gift_certificate():
             cur.execute("""
                 INSERT INTO gift_certificates (
                     spa_id,
+                    business_unit_id,
                     certificate_number,
                     date_issued,
                     expires_date,
@@ -29925,9 +30050,14 @@ def add_gift_certificate():
                     notes,
                     gift_certificate_status_id
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s
+                )
             """, (
                 spa_id,
+                business_unit_id,
                 certificate_number,
                 date_issued,
                 expires_date,
@@ -29982,6 +30112,16 @@ def add_gift_certificate():
 @spa_required
 def edit_gift_certificate(certificate_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to edit a gift certificate.",
+            "error"
+        )
+        return redirect(url_for("gift_certificates_home"))
+
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -30032,6 +30172,7 @@ def edit_gift_certificate(certificate_id):
                 notes = %s
             WHERE gift_cert_id = %s
               AND spa_id = %s
+              AND business_unit_id = %s
         """, (
             certificate_number,
             date_issued,
@@ -30047,7 +30188,8 @@ def edit_gift_certificate(certificate_id):
             gift_certificate_status_id,
             notes,
             certificate_id,
-            spa_id
+            spa_id,
+            business_unit_id
         ))
 
         conn.commit()
@@ -30076,7 +30218,12 @@ def edit_gift_certificate(certificate_id):
         FROM gift_certificates
         WHERE gift_cert_id = %s
           AND spa_id = %s
-    """, (certificate_id, spa_id))
+          AND business_unit_id = %s
+    """, (
+        certificate_id,
+        spa_id,
+        business_unit_id
+    ))
     gift_certificate = cur.fetchone()
 
     if not gift_certificate:
@@ -30124,6 +30271,16 @@ def edit_gift_certificate(certificate_id):
 @spa_required
 def redeem_gift_certificate(certificate_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to redeem a gift certificate.",
+            "error"
+        )
+        return redirect(url_for("gift_certificates_home"))
+
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -30146,12 +30303,14 @@ def redeem_gift_certificate(certificate_id):
                 gift_certificate_status_id = %s
             WHERE gift_cert_id = %s
               AND spa_id = %s
+              AND business_unit_id = %s
         """, (
             redeemed_on,
             redeemed_by,
             redeemed_status_id,
             certificate_id,
-            spa_id
+            spa_id,
+            business_unit_id
         ))
 
         if cur.rowcount == 0:
@@ -30184,7 +30343,12 @@ def redeem_gift_certificate(certificate_id):
            AND gc.spa_id = gcs.spa_id
         WHERE gc.gift_cert_id = %s
           AND gc.spa_id = %s
-    """, (certificate_id, spa_id))
+          AND gc.business_unit_id = %s
+    """, (
+        certificate_id,
+        spa_id,
+        business_unit_id
+    ))
     gift_certificate = cur.fetchone()
 
     cur.close()
@@ -30221,6 +30385,7 @@ def redeem_gift_certificate(certificate_id):
 @require_workspace_permission("can_send_email")
 def gift_certificate_reminders():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
     active_status_id = get_status_id("Active")
 
     conn = get_db_connection()
@@ -30243,13 +30408,18 @@ def gift_certificate_reminders():
             END AS reminder_type
         FROM gift_certificates gc
         WHERE gc.spa_id = %s
+          AND gc.business_unit_id = %s
           AND gc.gift_certificate_status_id = %s
           AND gc.remaining_balance > 0
           AND gc.purchaser_email IS NOT NULL
           AND gc.purchaser_email <> ''
           AND gc.expires_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '30 days'
         ORDER BY gc.expires_date ASC, gc.gift_cert_id ASC
-    """, (spa_id, active_status_id))
+    """, (
+        spa_id,
+        business_unit_id,
+        active_status_id
+    ))
 
     rows = cur.fetchall()
 
@@ -30263,10 +30433,17 @@ def gift_certificate_reminders():
             SELECT 1
             FROM gift_certificate_email_reminders
             WHERE spa_id = %s
+              AND business_unit_id = %s
               AND gift_cert_id = %s
               AND reminder_type = %s
+              AND sent_status = 'Sent'
             LIMIT 1
-        """, (spa_id, gift_cert_id, reminder_type))
+        """, (
+            spa_id,
+            business_unit_id,
+            gift_cert_id,
+            reminder_type
+        ))
 
         already_sent = cur.fetchone()
 
@@ -30325,6 +30502,7 @@ def gift_certificate_reminders():
 @spa_required
 def gift_certificate_reminder_history():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
 
 
     conn = get_db_connection()
@@ -30349,9 +30527,15 @@ def gift_certificate_reminder_history():
         LEFT JOIN gift_certificates gc
             ON r.gift_cert_id = gc.gift_cert_id
            AND r.spa_id = gc.spa_id
+       AND r.business_unit_id =
+            gc.business_unit_id
         WHERE r.spa_id = %s
+          AND r.business_unit_id = %s
         ORDER BY r.sent_date DESC NULLS LAST, r.gc_email_reminder_id DESC
-    """, (spa_id,))
+    """, (
+        spa_id,
+        business_unit_id
+    ))
 
     reminders = cur.fetchall()
 
@@ -39758,6 +39942,7 @@ def dashboard():
        return redirect(url_for("feedback_admin"))
 
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -39817,12 +40002,18 @@ def dashboard():
         JOIN gift_certificate_statuses gcs
         ON gc.gift_certificate_status_id = gcs.gift_certificate_status_id
         WHERE gc.spa_id = %s
+        AND gc.business_unit_id = %s
         AND gcs.status_name = 'Active'
         AND gc.amount_paid > 0
         AND gc.is_redeemed = FALSE
         AND gc.remaining_balance > 0
         AND gc.expires_date BETWEEN %s AND (%s + INTERVAL '60 days')
-    """, (spa_id, today, today))
+    """, (
+        spa_id,
+        business_unit_id,
+        today,
+        today
+    ))
     expiring_gc_count = cur.fetchone()[0] or 0
 
     # Next appointment
