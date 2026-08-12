@@ -30813,6 +30813,16 @@ def edit_client_full(client_id):
 @require_workspace_permission("can_send_email")
 def birthday_offers_home():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to view birthday offers.",
+            "error"
+        )
+        return redirect(url_for("client_management"))
+
     spa_now = get_spa_now()
     today = spa_now.date()
     end_date = today + timedelta(days=45)
@@ -30838,10 +30848,15 @@ def birthday_offers_home():
            AND c.spa_id = cbo.spa_id
            AND cbo.birthday_year = %s
         WHERE c.spa_id = %s
+          AND c.business_unit_id = %s
           AND c.birth_date IS NOT NULL
           AND c.active_client = TRUE
         ORDER BY c.last_name, c.first_name
-    """, (today.year, spa_id))
+    """, (
+        today.year,
+        spa_id,
+        business_unit_id
+    ))
 
     rows = cur.fetchall()
 
@@ -31038,6 +31053,16 @@ def mark_birthday_offer_sent_disabled():
 def send_birthday_offer(client_id):
 
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to send a birthday offer.",
+            "error"
+        )
+        return redirect(url_for("birthday_offers_home"))
+
     spa_now = get_spa_now()
     today = spa_now.date()
 
@@ -31048,9 +31073,14 @@ def send_birthday_offer(client_id):
         SELECT first_name, last_name, email, birth_date
         FROM clients
         WHERE spa_id = %s
+          AND business_unit_id = %s
           AND client_id = %s
           AND active_client = TRUE
-    """, (spa_id, client_id))
+    """, (
+        spa_id,
+        business_unit_id,
+        client_id
+    ))
 
     client = cur.fetchone()
 
