@@ -55,7 +55,7 @@
     <input type="number" step="0.01" id="tax_amount" name="tax_amount" placeholder="0.00">
 
     <label for="tip_amount">Tip Amount</label>
-    <input type="number" step="0.01" id="tip_amount" name="tip_amount" placeholder"0.00">
+    <input type="number" step="0.01" id="tip_amount" name="tip_amount" placeholder="0.00">
 
     <label for="total_amount">Total Amount</label>
     <input type="number" step="0.01" id="total_amount" name="total_amount" value="0.00" readonly required>
@@ -86,6 +86,25 @@
         <input type="text" id="processor_payment_id" name="processor_payment_id">
     </div>
 
+    {% if square_sandbox_connected %}
+    <div id="square_retrieve_group" style="display: none; margin-top: 12px;">
+        <button
+            type="button"
+            id="retrieve_square_data"
+            class="btn"
+        >
+            Retrieve Square Data
+        </button>
+
+        <p
+            id="square_retrieve_status"
+            style="margin-top: 8px;"
+        ></p>
+
+        <div id="square_payment_candidates"></div>
+    </div>
+    {% endif %}
+
     <label for="notes">Notes</label>
     <textarea id="notes" name="notes" rows="4"></textarea>
 
@@ -108,6 +127,10 @@ document.addEventListener("DOMContentLoaded", function () {
     const creditProcessorGroup = document.getElementById("credit_processor_group");
     const creditProcessorField = document.getElementById("credit_processor_id");
     const processorPaymentGroup = document.getElementById("processor_payment_group");
+    const squareRetrieveGroup = document.getElementById("square_retrieve_group");
+    const retrieveSquareButton = document.getElementById("retrieve_square_data");
+    const squareRetrieveStatus = document.getElementById("square_retrieve_status");
+    const squarePaymentCandidates = document.getElementById("square_payment_candidates");
 
     function calculateTotal() {
         const service = parseFloat(serviceField.value) || 0;
@@ -150,6 +173,97 @@ document.addEventListener("DOMContentLoaded", function () {
             processorPaymentGroup.style.display = "none";
             document.getElementById("processor_payment_id").value = "";
         }
+
+        if (squareRetrieveGroup) {
+            squareRetrieveGroup.style.display =
+                paymentMethod === "square"
+                    ? "block"
+                    : "none";
+        }
+    }
+
+    async function retrieveSquareData() {
+        if (
+            !retrieveSquareButton
+            || !squareRetrieveStatus
+            || !squarePaymentCandidates
+        ) {
+            return;
+        }
+
+        retrieveSquareButton.disabled = true;
+        squareRetrieveStatus.textContent =
+            "Checking Square for recent payments...";
+        squarePaymentCandidates.textContent = "";
+
+        try {
+            const response = await fetch(
+                "{{ url_for(
+                    'square_recent_payments_for_income',
+                    appointment_id=appt[0]
+                ) }}"
+            );
+
+            const data = await response.json();
+
+            if (!response.ok || !data.ok) {
+                throw new Error(
+                    data.error
+                    || "Unable to retrieve Square payments."
+                );
+            }
+
+            const payments = data.payments || [];
+
+            if (!payments.length) {
+                squareRetrieveStatus.textContent =
+                    "No recent completed Square payments found.";
+                return;
+            }
+
+            squareRetrieveStatus.textContent =
+                `Found ${payments.length} recent completed Square payment`
+                + (payments.length === 1 ? "." : "s.");
+
+            payments.forEach(function (payment) {
+                const row = document.createElement("div");
+                row.style.padding = "8px 0";
+                row.style.borderBottom = "1px solid #ddd";
+
+                const total = (
+                    (payment.total_cents || 0) / 100
+                ).toFixed(2);
+
+                const fee = (
+                    (payment.processing_fee_cents || 0) / 100
+                ).toFixed(2);
+
+                let created = payment.created_at || "";
+
+                if (created) {
+                    const parsedDate = new Date(created);
+
+                    if (!Number.isNaN(parsedDate.getTime())) {
+                        created = parsedDate.toLocaleString();
+                    }
+                }
+
+                row.textContent =
+                    `${created} — $${total}`
+                    + ` — Fee $${fee}`
+                    + ` — Payment ${payment.payment_id}`;
+
+                squarePaymentCandidates.appendChild(row);
+            });
+
+        } catch (error) {
+            squareRetrieveStatus.textContent =
+                error.message
+                || "Unable to retrieve Square payments.";
+
+        } finally {
+            retrieveSquareButton.disabled = false;
+        }
     }
 
     serviceField.addEventListener("input", calculateTotal);
@@ -159,6 +273,13 @@ document.addEventListener("DOMContentLoaded", function () {
     creditAppliedField.addEventListener("input", calculateTotal);
 
     paymentMethodField.addEventListener("change", togglePaymentFields);
+
+    if (retrieveSquareButton) {
+        retrieveSquareButton.addEventListener(
+            "click",
+            retrieveSquareData
+        );
+    }
 
     calculateTotal();
     togglePaymentFields();

@@ -58,6 +58,7 @@ from services.coach import (
     build_action_cards
 )
 from services.sms_service import send_sms_telnyx
+from services import square_service
 
 
 # --------------------------------------------------
@@ -36534,6 +36535,27 @@ def add_income(appointment_id):
     credit_processors = cur.fetchall()
 
     cur.execute("""
+        SELECT EXISTS (
+            SELECT 1
+            FROM square_connections sc
+            JOIN square_locations sl
+              ON sl.square_connection_id = sc.square_connection_id
+             AND sl.spa_id = sc.spa_id
+             AND sl.business_unit_id = sc.business_unit_id
+             AND sl.environment = sc.environment
+            WHERE sc.spa_id = %s
+              AND sc.business_unit_id = %s
+              AND sc.environment = 'sandbox'
+              AND sc.connection_status = 'connected'
+              AND sl.is_active = TRUE
+        )
+    """, (
+        spa_id,
+        business_unit_id
+    ))
+    square_sandbox_connected = bool(cur.fetchone()[0])
+
+    cur.execute("""
         SELECT COALESCE(SUM(amount), 0.00)
         FROM client_credit_transactions
         WHERE spa_id = %s
@@ -36751,11 +36773,219 @@ def add_income(appointment_id):
         selected_date=selected_date,
         credit_processors=credit_processors,
         employees=employees,
-        credit_balance=credit_balance
+        credit_balance=credit_balance,
+        square_sandbox_connected=square_sandbox_connected
     )
 
 
 
+
+
+
+
+#  --------------------------------------------------
+#
+#     SQUARE V2 — RECENT PAYMENTS FOR ADD INCOME
+#
+#     Read-only Sandbox endpoint.
+#     No Income, inventory, client, or appointment
+#     records are written here.
+#
+#  --------------------------------------------------
+
+
+@app.route(
+    "/square/recent-payments/<int:appointment_id>",
+    methods=["GET"]
+)
+@login_required
+@spa_required
+def square_recent_payments_for_income(appointment_id):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        return jsonify({
+            "ok": False,
+            "error": (
+                "A valid Provider Workspace is required."
+            )
+        }), 400
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        # Appointment must belong to the current workspace.
+        cur.execute("""
+            SELECT appointment_id
+            FROM appointments
+            WHERE appointment_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            LIMIT 1
+        """, (
+            appointment_id,
+            spa_id,
+            business_unit_id
+        ))
+
+        if not cur.fetchone():
+            return jsonify({
+                "ok": False,
+                "error": "Appointment not found."
+            }), 404
+
+        # Route Square only through a location explicitly
+        # mapped to this exact PSP workspace.
+        cur.execute("""
+            SELECT
+                sc.square_connection_id,
+                sc.merchant_id,
+                sl.square_location_id,
+                sl.location_name
+            FROM square_connections sc
+            JOIN square_locations sl
+              ON sl.square_connection_id =
+                    sc.square_connection_id
+             AND sl.spa_id = sc.spa_id
+             AND sl.business_unit_id =
+                    sc.business_unit_id
+             AND sl.environment = sc.environment
+            WHERE sc.spa_id = %s
+              AND sc.business_unit_id = %s
+              AND sc.environment = 'sandbox'
+              AND sc.connection_status = 'connected'
+              AND sl.is_active = TRUE
+            ORDER BY
+                sl.is_default DESC,
+                sl.square_location_mapping_id
+            LIMIT 1
+        """, (
+            spa_id,
+            business_unit_id
+        ))
+
+        square_mapping = cur.fetchone()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if not square_mapping:
+        return jsonify({
+            "ok": False,
+            "error": (
+                "Square Sandbox is not connected "
+                "to this Provider Workspace."
+            )
+        }), 404
+
+    (
+        square_connection_id,
+        merchant_id,
+        square_location_id,
+        location_name
+    ) = square_mapping
+
+    try:
+        token = (
+            square_service
+            .get_square_sandbox_access_token()
+        )
+
+        payments = square_service.list_recent_payments(
+            access_token=token,
+            location_id=square_location_id,
+            limit=20,
+            environment="sandbox"
+        )
+
+    except square_service.SquareServiceError as exc:
+        return jsonify({
+            "ok": False,
+            "error": str(exc)
+        }), 502
+
+    def money_cents(value):
+        if not isinstance(value, dict):
+            return 0
+
+        try:
+            return int(value.get("amount") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    candidates = []
+
+    for payment in payments:
+        status = str(
+            payment.get("status") or ""
+        ).strip().upper()
+
+        if status != "COMPLETED":
+            continue
+
+        amount_cents = money_cents(
+            payment.get("amount_money")
+        )
+
+        tip_cents = money_cents(
+            payment.get("tip_money")
+        )
+
+        total_cents = money_cents(
+            payment.get("total_money")
+        )
+
+        if not total_cents:
+            total_cents = (
+                amount_cents
+                + tip_cents
+            )
+
+        processing_fee_cents = sum(
+            money_cents(
+                fee.get("amount_money")
+            )
+            for fee in (
+                payment.get("processing_fee")
+                or []
+            )
+            if isinstance(fee, dict)
+        )
+
+        candidates.append({
+            "payment_id": payment.get("id"),
+            "order_id": payment.get("order_id"),
+            "customer_id": payment.get(
+                "customer_id"
+            ),
+            "status": status,
+            "created_at": payment.get(
+                "created_at"
+            ),
+            "amount_before_tip_cents": (
+                amount_cents
+            ),
+            "tip_cents": tip_cents,
+            "total_cents": total_cents,
+            "processing_fee_cents": (
+                processing_fee_cents
+            ),
+        })
+
+    return jsonify({
+        "ok": True,
+        "environment": "sandbox",
+        "square_connection_id": (
+            square_connection_id
+        ),
+        "merchant_id": merchant_id,
+        "location_id": square_location_id,
+        "location_name": location_name,
+        "payments": candidates
+    })
 
 
 
