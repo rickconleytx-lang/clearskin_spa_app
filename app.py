@@ -62,6 +62,9 @@ from services.coach import (
 )
 from services.sms_service import send_sms_telnyx
 from services import square_service
+from services.square_client_sync import (
+    try_sync_client_to_square,
+)
 
 
 # --------------------------------------------------
@@ -30856,7 +30859,17 @@ def edit_client_full(client_id):
                 ))
 
             conn.commit()
-            flash("Client full record updated successfully.", "success")
+
+            _sync_saved_client_to_square_after_commit(
+                spa_id,
+                business_unit_id,
+                client_id
+            )
+
+            flash(
+                "Client full record updated successfully.",
+                "success"
+            )
             return redirect(url_for("client_management"))
 
         # ---------------- GET request ----------------
@@ -47701,6 +47714,95 @@ def client_history_detail_two(client_id):
 
 
 # =========================================================
+# CLIENT -> SQUARE POST-COMMIT SYNC
+# =========================================================
+
+
+def _sync_saved_client_to_square_after_commit(
+    spa_id,
+    business_unit_id,
+    client_id
+):
+    """
+    Best-effort Client -> Square synchronization.
+
+    PSP is already committed before this helper is called.
+
+    Current rollout:
+    - local development: Square Sandbox when configured
+    - Render production: intentionally disabled until
+      production OAuth/customer sync is deliberately enabled
+    """
+
+    if os.environ.get("RENDER"):
+        return {
+            "status": "skipped",
+            "reason": (
+                "production_square_client_sync_not_enabled"
+            ),
+            "client_id": client_id,
+        }
+
+    if not os.environ.get(
+        "SQUARE_SANDBOX_ACCESS_TOKEN",
+        ""
+    ).strip():
+        return {
+            "status": "skipped",
+            "reason": "square_sandbox_not_configured",
+            "client_id": client_id,
+        }
+
+    result = try_sync_client_to_square(
+        spa_id=spa_id,
+        business_unit_id=business_unit_id,
+        client_id=client_id,
+        actor_user_id=session.get("user_id"),
+        environment="sandbox",
+    )
+
+    status = result.get("status")
+
+    if status == "error":
+        app.logger.warning(
+            "Square client sync failed after PSP client save. "
+            "spa_id=%s business_unit_id=%s client_id=%s "
+            "reason=%s message=%s",
+            spa_id,
+            business_unit_id,
+            client_id,
+            result.get("reason"),
+            result.get("message")
+        )
+
+        flash(
+            "Client was saved in Peach Suite Pro, but Square "
+            "sync did not complete. It can be retried later.",
+            "warning"
+        )
+
+    elif status == "needs_attention":
+        app.logger.warning(
+            "Square client sync needs review after PSP client "
+            "save. spa_id=%s business_unit_id=%s client_id=%s "
+            "reason=%s",
+            spa_id,
+            business_unit_id,
+            client_id,
+            result.get("reason")
+        )
+
+        flash(
+            "Client was saved in Peach Suite Pro. Square found "
+            "a possible customer match that needs review before "
+            "it can be linked.",
+            "warning"
+        )
+
+    return result
+
+
+# =========================================================
 # CLIENT DUPLICATE DETECTION
 # =========================================================
 
@@ -48303,6 +48405,12 @@ def add_new_client():
                 cur.close()
                 conn.close()
 
+            _sync_saved_client_to_square_after_commit(
+                spa_id,
+                business_unit_id,
+                new_client_id
+            )
+
             flash("Client added successfully!", "success")
 
             session.pop("new_client_step1", None)
@@ -48708,6 +48816,12 @@ def add_new_client_step2():
                 cur.close()
                 conn.close()
 
+            _sync_saved_client_to_square_after_commit(
+                spa_id,
+                business_unit_id,
+                new_client_id
+            )
+
             flash("Client added successfully!", "success")
 
             session.pop("new_client_step1", None)
@@ -49055,6 +49169,12 @@ def edit_client(client_id):
             conn.commit()
             cur.close()
             conn.close()
+
+            _sync_saved_client_to_square_after_commit(
+                spa_id,
+                business_unit_id,
+                client_id
+            )
 
             flash("Client updated successfully!", "success")
             return redirect(url_for("client_history"))
