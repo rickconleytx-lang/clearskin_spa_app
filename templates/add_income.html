@@ -13,6 +13,19 @@
 <span style="color: red; font-size: x-small;">* Required Field</span>
 
 <form method="POST">
+    <input
+        type="hidden"
+        id="square_payment_id"
+        name="square_payment_id"
+        value=""
+    >
+    <input
+        type="hidden"
+        id="square_line_classifications"
+        name="square_line_classifications"
+        value="{}"
+    >
+
     <label for="income_date">Income Date<span style="color: red;"> *</span></label>
     <input type="date" id="income_date" name="income_date"
            value="{{ appt[2].strftime('%Y-%m-%d') }}" required>
@@ -114,12 +127,16 @@
     <textarea id="notes" name="notes" rows="4"></textarea>
 
     <br><br>
-    <button type="submit" class="btn">Save Income</button>
+    <button type="submit" class="btn">
+        Save Income &amp; Continue to Session Notes
+    </button>
     <a href="{{ url_for('daily_schedule', date=appt[2].strftime('%Y-%m-%d')) }}" class="btn">Cancel</a>
 </form>
 
 <script>
 document.addEventListener("DOMContentLoaded", function () {
+    const incomeTypeField = document.getElementById("income_type");
+    const descriptionField = document.getElementById("description");
     const serviceField = document.getElementById("service_amount");
     const retailField = document.getElementById("retail_amount");
     const taxField = document.getElementById("tax_amount");
@@ -132,6 +149,10 @@ document.addEventListener("DOMContentLoaded", function () {
     const creditProcessorGroup = document.getElementById("credit_processor_group");
     const creditProcessorField = document.getElementById("credit_processor_id");
     const processorPaymentGroup = document.getElementById("processor_payment_group");
+    const processorPaymentField = document.getElementById("processor_payment_id");
+    const squarePaymentIdField = document.getElementById("square_payment_id");
+    const squareLineClassificationsField =
+        document.getElementById("square_line_classifications");
     const squareRetrieveGroup = document.getElementById("square_retrieve_group");
     const retrieveSquareButton = document.getElementById("retrieve_square_data");
     const squareRetrieveStatus = document.getElementById("square_retrieve_status");
@@ -186,6 +207,15 @@ document.addEventListener("DOMContentLoaded", function () {
                     ? "block"
                     : "none";
         }
+
+        if (
+            paymentMethod !== "square"
+            && squarePaymentIdField
+            && squareLineClassificationsField
+        ) {
+            squarePaymentIdField.value = "";
+            squareLineClassificationsField.value = "{}";
+        }
     }
 
     function moneyFromCents(cents) {
@@ -204,6 +234,14 @@ document.addEventListener("DOMContentLoaded", function () {
 
         squarePaymentPreview.textContent =
             "Loading selected Square payment...";
+
+        if (
+            squarePaymentIdField
+            && squareLineClassificationsField
+        ) {
+            squarePaymentIdField.value = "";
+            squareLineClassificationsField.value = "{}";
+        }
 
         try {
             const baseUrl =
@@ -441,10 +479,101 @@ document.addEventListener("DOMContentLoaded", function () {
                 readyNote.style.marginTop = "12px";
                 readyNote.textContent =
                     "Classification complete. "
-                    + "Income has not been populated or saved yet.";
+                    + "Square is ready to populate Add Income.";
 
                 squarePaymentPreview.appendChild(
                     readyNote
+                );
+
+                const populateButton =
+                    document.createElement("button");
+
+                populateButton.type = "button";
+                populateButton.className = "btn";
+                populateButton.style.marginTop = "8px";
+                populateButton.textContent =
+                    "Populate Add Income";
+
+                populateButton.addEventListener(
+                    "click",
+                    function () {
+                        incomeTypeField.value =
+                            payment.income_type || "";
+
+                        serviceField.value = moneyFromCents(
+                            payment.service_amount_cents
+                        );
+
+                        retailField.value = moneyFromCents(
+                            payment.retail_amount_cents
+                        );
+
+                        taxField.value = moneyFromCents(
+                            payment.tax_amount_cents
+                        );
+
+                        tipField.value = moneyFromCents(
+                            payment.tip_amount_cents
+                        );
+
+                        creditAppliedField.value = "0.00";
+
+                        paymentMethodField.value = "Square";
+                        togglePaymentFields();
+
+                        if (creditProcessorField) {
+                            Array.from(
+                                creditProcessorField.options
+                            ).forEach(function (option) {
+                                if (
+                                    option.textContent
+                                        .trim()
+                                        .toLowerCase()
+                                    === "square"
+                                ) {
+                                    creditProcessorField.value =
+                                        option.value;
+                                }
+                            });
+                        }
+
+                        processorPaymentField.value =
+                            payment.payment_id;
+
+                        squarePaymentIdField.value =
+                            payment.payment_id;
+
+                        squareLineClassificationsField.value =
+                            JSON.stringify(
+                                lineClassifications || {}
+                            );
+
+                        if (
+                            descriptionField
+                            && !descriptionField.value.trim()
+                        ) {
+                            descriptionField.value = (
+                                payment.line_items || []
+                            )
+                                .map(function (line) {
+                                    return line.name || "";
+                                })
+                                .filter(Boolean)
+                                .join(", ");
+                        }
+
+                        calculateTotal();
+
+                        squareRetrieveStatus.textContent =
+                            "Square data populated. Review the "
+                            + "Income form, then save. PSP will "
+                            + "re-verify the Square transaction "
+                            + "before anything is written.";
+                    }
+                );
+
+                squarePaymentPreview.appendChild(
+                    populateButton
                 );
             }
 

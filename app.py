@@ -39,8 +39,10 @@ from werkzeug.security import (
     check_password_hash
 )
 
+import json
+
 from psycopg2 import IntegrityError, sql
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import Json, RealDictCursor
 
 from apscheduler.schedulers.background import (
     BackgroundScheduler
@@ -36589,6 +36591,17 @@ def add_income(appointment_id):
         notes = request.form.get("notes") or ""
         visit_id = None
 
+        selected_square_payment_id = (
+            request.form.get("square_payment_id") or ""
+        ).strip()
+
+        square_line_classifications_raw = (
+            request.form.get("square_line_classifications")
+            or "{}"
+        ).strip()
+
+        square_save_context = None
+
         if credit_applied < 0:
             flash("Credit applied cannot be negative.", "error")
             cur.close()
@@ -36627,9 +36640,792 @@ def add_income(appointment_id):
         processor_flat_fee = 0.00
         processor_additional_fee = 0.00
 
-        card_based_methods = ["card", "credit card", "apple pay", "google pay", "square"]
+        card_based_methods = [
+            "card",
+            "credit card",
+            "apple pay",
+            "google pay",
+            "square"
+        ]
 
-        if payment_method.lower() in card_based_methods and credit_processor_id:
+        # -------------------------------------------------
+        # Square V2 authoritative reconciliation.
+        #
+        # The browser may populate the Add Income form for
+        # convenience, but Square financial values are never
+        # trusted from the browser. On POST we retrieve and
+        # validate the selected payment/order again.
+        # -------------------------------------------------
+
+        if selected_square_payment_id:
+            if payment_method.lower() != "square":
+                flash(
+                    "A reviewed Square payment must use "
+                    "Square as the payment method.",
+                    "error"
+                )
+                cur.close()
+                conn.close()
+                return redirect(url_for(
+                    "add_income",
+                    appointment_id=appointment_id,
+                    date=selected_date
+                ))
+
+            if credit_applied != 0:
+                flash(
+                    "Client credit cannot be applied to a "
+                    "retrieved Square payment because Square "
+                    "has already captured the transaction.",
+                    "error"
+                )
+                cur.close()
+                conn.close()
+                return redirect(url_for(
+                    "add_income",
+                    appointment_id=appointment_id,
+                    date=selected_date
+                ))
+
+            try:
+                square_line_classifications = json.loads(
+                    square_line_classifications_raw
+                )
+            except (TypeError, ValueError):
+                square_line_classifications = None
+
+            if not isinstance(
+                square_line_classifications,
+                dict
+            ):
+                flash(
+                    "Square item classifications are invalid. "
+                    "Please review the payment again.",
+                    "error"
+                )
+                cur.close()
+                conn.close()
+                return redirect(url_for(
+                    "add_income",
+                    appointment_id=appointment_id,
+                    date=selected_date
+                ))
+
+            normalized_line_classifications = {}
+
+            for line_uid, classification in (
+                square_line_classifications.items()
+            ):
+                line_uid = str(line_uid or "").strip()
+                classification = str(
+                    classification or ""
+                ).strip().lower()
+
+                if (
+                    not line_uid
+                    or classification not in {
+                        "service",
+                        "retail"
+                    }
+                ):
+                    flash(
+                        "Square item classifications are invalid. "
+                        "Please review the payment again.",
+                        "error"
+                    )
+                    cur.close()
+                    conn.close()
+                    return redirect(url_for(
+                        "add_income",
+                        appointment_id=appointment_id,
+                        date=selected_date
+                    ))
+
+                normalized_line_classifications[
+                    line_uid
+                ] = classification
+
+            cur.execute("""
+                SELECT
+                    sc.square_connection_id,
+                    sc.merchant_id,
+                    sl.square_location_id
+                FROM square_connections sc
+                JOIN square_locations sl
+                  ON sl.square_connection_id =
+                        sc.square_connection_id
+                 AND sl.spa_id = sc.spa_id
+                 AND sl.business_unit_id =
+                        sc.business_unit_id
+                 AND sl.environment = sc.environment
+                WHERE sc.spa_id = %s
+                  AND sc.business_unit_id = %s
+                  AND sc.environment = 'sandbox'
+                  AND sc.connection_status = 'connected'
+                  AND sl.is_active = TRUE
+                ORDER BY
+                    sl.is_default DESC,
+                    sl.square_location_mapping_id
+                LIMIT 1
+            """, (
+                spa_id,
+                business_unit_id
+            ))
+
+            square_mapping = cur.fetchone()
+
+            if not square_mapping:
+                flash(
+                    "Square Sandbox is not connected to this "
+                    "Provider Workspace.",
+                    "error"
+                )
+                cur.close()
+                conn.close()
+                return redirect(url_for(
+                    "add_income",
+                    appointment_id=appointment_id,
+                    date=selected_date
+                ))
+
+            (
+                square_connection_id,
+                square_merchant_id,
+                square_location_id
+            ) = square_mapping
+
+            cur.execute("""
+                SELECT
+                    square_catalog_object_id,
+                    mapping_type
+                FROM square_catalog_mappings
+                WHERE square_connection_id = %s
+                  AND spa_id = %s
+                  AND business_unit_id = %s
+                  AND environment = 'sandbox'
+                  AND is_active = TRUE
+            """, (
+                square_connection_id,
+                spa_id,
+                business_unit_id
+            ))
+
+            catalog_classifications = {}
+
+            for (
+                square_catalog_object_id,
+                mapping_type
+            ) in cur.fetchall():
+                if mapping_type == "service_type":
+                    catalog_classifications[
+                        square_catalog_object_id
+                    ] = "service"
+
+                elif mapping_type == "inventory_product":
+                    catalog_classifications[
+                        square_catalog_object_id
+                    ] = "retail"
+
+            try:
+                square_token = (
+                    square_service
+                    .get_square_sandbox_access_token()
+                )
+
+                square_payment = (
+                    square_service.retrieve_payment(
+                        selected_square_payment_id,
+                        access_token=square_token,
+                        environment="sandbox"
+                    )
+                )
+            except square_service.SquareServiceError as exc:
+                flash(
+                    f"Square payment could not be verified: {exc}",
+                    "error"
+                )
+                cur.close()
+                conn.close()
+                return redirect(url_for(
+                    "add_income",
+                    appointment_id=appointment_id,
+                    date=selected_date
+                ))
+
+            payment_location_id = str(
+                square_payment.get("location_id") or ""
+            ).strip()
+
+            if payment_location_id != square_location_id:
+                flash(
+                    "The selected Square payment does not "
+                    "belong to this Provider Workspace.",
+                    "error"
+                )
+                cur.close()
+                conn.close()
+                return redirect(url_for(
+                    "add_income",
+                    appointment_id=appointment_id,
+                    date=selected_date
+                ))
+
+            payment_merchant_id = str(
+                square_payment.get("merchant_id") or ""
+            ).strip()
+
+            if (
+                square_merchant_id
+                and payment_merchant_id
+                and payment_merchant_id
+                    != square_merchant_id
+            ):
+                flash(
+                    "The selected Square merchant does not "
+                    "match this Provider Workspace.",
+                    "error"
+                )
+                cur.close()
+                conn.close()
+                return redirect(url_for(
+                    "add_income",
+                    appointment_id=appointment_id,
+                    date=selected_date
+                ))
+
+            if str(
+                square_payment.get("status") or ""
+            ).strip().upper() != "COMPLETED":
+                flash(
+                    "Only completed Square payments can be "
+                    "saved to Income.",
+                    "error"
+                )
+                cur.close()
+                conn.close()
+                return redirect(url_for(
+                    "add_income",
+                    appointment_id=appointment_id,
+                    date=selected_date
+                ))
+
+            square_order_id = str(
+                square_payment.get("order_id") or ""
+            ).strip()
+
+            if not square_order_id:
+                flash(
+                    "The Square payment does not have an "
+                    "order to reconcile.",
+                    "error"
+                )
+                cur.close()
+                conn.close()
+                return redirect(url_for(
+                    "add_income",
+                    appointment_id=appointment_id,
+                    date=selected_date
+                ))
+
+            try:
+                square_order = (
+                    square_service.retrieve_order(
+                        square_order_id,
+                        access_token=square_token,
+                        environment="sandbox"
+                    )
+                )
+            except square_service.SquareServiceError as exc:
+                flash(
+                    f"Square order could not be verified: {exc}",
+                    "error"
+                )
+                cur.close()
+                conn.close()
+                return redirect(url_for(
+                    "add_income",
+                    appointment_id=appointment_id,
+                    date=selected_date
+                ))
+
+            order_location_id = str(
+                square_order.get("location_id") or ""
+            ).strip()
+
+            if (
+                order_location_id
+                and order_location_id
+                    != square_location_id
+            ):
+                flash(
+                    "The selected Square order does not "
+                    "belong to this Provider Workspace.",
+                    "error"
+                )
+                cur.close()
+                conn.close()
+                return redirect(url_for(
+                    "add_income",
+                    appointment_id=appointment_id,
+                    date=selected_date
+                ))
+
+            valid_line_uids = {
+                str(item.get("uid") or "").strip()
+                for item in (
+                    square_order.get("line_items")
+                    or []
+                )
+                if str(item.get("uid") or "").strip()
+            }
+
+            if not set(
+                normalized_line_classifications
+            ).issubset(valid_line_uids):
+                flash(
+                    "One or more reviewed Square order items "
+                    "are no longer valid. Please review the "
+                    "payment again.",
+                    "error"
+                )
+                cur.close()
+                conn.close()
+                return redirect(url_for(
+                    "add_income",
+                    appointment_id=appointment_id,
+                    date=selected_date
+                ))
+
+            try:
+                square_preview = (
+                    square_service.build_income_preview(
+                        square_payment,
+                        square_order,
+                        catalog_classifications=(
+                            catalog_classifications
+                        ),
+                        line_classifications=(
+                            normalized_line_classifications
+                        )
+                    )
+                )
+            except ValueError as exc:
+                flash(
+                    f"Square payment could not be normalized: {exc}",
+                    "error"
+                )
+                cur.close()
+                conn.close()
+                return redirect(url_for(
+                    "add_income",
+                    appointment_id=appointment_id,
+                    date=selected_date
+                ))
+
+            if not square_preview["ready_for_income"]:
+                flash(
+                    "The Square payment still needs review "
+                    "before it can be saved to Income.",
+                    "error"
+                )
+                cur.close()
+                conn.close()
+                return redirect(url_for(
+                    "add_income",
+                    appointment_id=appointment_id,
+                    date=selected_date
+                ))
+
+            # Square is authoritative from this point forward.
+            service_amount = round(
+                square_preview[
+                    "service_amount_cents"
+                ] / 100,
+                2
+            )
+            retail_amount = round(
+                square_preview[
+                    "retail_amount_cents"
+                ] / 100,
+                2
+            )
+            tax_amount = round(
+                square_preview[
+                    "tax_amount_cents"
+                ] / 100,
+                2
+            )
+            tip_amount = round(
+                square_preview[
+                    "tip_amount_cents"
+                ] / 100,
+                2
+            )
+            total_amount = round(
+                square_preview[
+                    "total_amount_cents"
+                ] / 100,
+                2
+            )
+
+            income_type = square_preview["income_type"]
+            payment_method = "Square"
+            processor_payment_id = (
+                selected_square_payment_id
+            )
+
+            processing_fee_amount = round(
+                square_preview[
+                    "processing_fee_cents"
+                ] / 100,
+                2
+            )
+            net_received = round(
+                square_preview[
+                    "net_received_cents"
+                ] / 100,
+                2
+            )
+
+            # Store the configured Square rate as metadata,
+            # but DO NOT use it to calculate this payment.
+            cur.execute("""
+                SELECT
+                    credit_processor_id,
+                    percentage_fee,
+                    flat_fee,
+                    additional_fee
+                FROM credit_processors
+                WHERE spa_id = %s
+                  AND LOWER(
+                        credit_processor_name
+                      ) = 'square'
+                  AND is_active = TRUE
+                ORDER BY credit_processor_id
+                LIMIT 1
+            """, (spa_id,))
+
+            square_processor_row = cur.fetchone()
+
+            if not square_processor_row:
+                flash(
+                    "An active Square credit processor is "
+                    "required before saving this payment.",
+                    "error"
+                )
+                cur.close()
+                conn.close()
+                return redirect(url_for(
+                    "add_income",
+                    appointment_id=appointment_id,
+                    date=selected_date
+                ))
+
+            credit_processor_id = (
+                square_processor_row[0]
+            )
+            processor_percentage_fee = float(
+                square_processor_row[1] or 0
+            )
+            processor_flat_fee = float(
+                square_processor_row[2] or 0
+            )
+            processor_additional_fee = float(
+                square_processor_row[3] or 0
+            )
+
+            order_discount_cents = int(
+                (
+                    square_order.get(
+                        "total_discount_money"
+                    )
+                    or {}
+                ).get("amount")
+                or 0
+            )
+
+            # Reserve the payment before Income is inserted.
+            # The unique (environment, payment_id) index is
+            # the Square-specific idempotency boundary.
+            cur.execute("""
+                INSERT INTO square_payments (
+                    square_connection_id,
+                    spa_id,
+                    business_unit_id,
+                    environment,
+                    square_payment_id,
+                    square_order_id,
+                    square_customer_id,
+                    square_location_id,
+                    merchant_id,
+                    payment_status,
+                    tender_type,
+                    currency,
+                    amount_cents,
+                    service_amount_cents,
+                    retail_amount_cents,
+                    tax_amount_cents,
+                    tip_amount_cents,
+                    discount_amount_cents,
+                    processing_fee_cents,
+                    refunded_amount_cents,
+                    net_received_cents,
+                    square_created_at,
+                    square_updated_at,
+                    appointment_id,
+                    client_id,
+                    reconciliation_status,
+                    match_method,
+                    match_notes,
+                    retrieved_at,
+                    last_synced_at,
+                    reviewed_by,
+                    raw_payment,
+                    raw_order
+                )
+                VALUES (
+                    %s, %s, %s, 'sandbox', %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    'matched', %s, %s,
+                    CURRENT_TIMESTAMP,
+                    CURRENT_TIMESTAMP,
+                    %s, %s, %s
+                )
+                ON CONFLICT (
+                    environment,
+                    square_payment_id
+                )
+                DO NOTHING
+                RETURNING square_payment_record_id
+            """, (
+                square_connection_id,
+                spa_id,
+                business_unit_id,
+                selected_square_payment_id,
+                square_preview["order_id"],
+                square_preview["customer_id"],
+                square_location_id,
+                payment_merchant_id
+                or square_merchant_id,
+                square_preview["status"],
+                square_preview["source_type"],
+                square_preview["currency"],
+                square_preview[
+                    "total_amount_cents"
+                ],
+                square_preview[
+                    "service_amount_cents"
+                ],
+                square_preview[
+                    "retail_amount_cents"
+                ],
+                square_preview[
+                    "tax_amount_cents"
+                ],
+                square_preview[
+                    "tip_amount_cents"
+                ],
+                order_discount_cents,
+                square_preview[
+                    "processing_fee_cents"
+                ],
+                square_preview[
+                    "refunded_amount_cents"
+                ],
+                square_preview[
+                    "net_received_cents"
+                ],
+                square_preview["created_at"],
+                square_payment.get("updated_at"),
+                appt[0],
+                appt[1],
+                "appointment_review",
+                (
+                    "Reviewed and populated from "
+                    "Add Income."
+                ),
+                session.get("user_id"),
+                Json(square_payment),
+                Json(square_order)
+            ))
+
+            inserted_square_row = cur.fetchone()
+
+            if inserted_square_row:
+                square_payment_record_id = (
+                    inserted_square_row[0]
+                )
+            else:
+                cur.execute("""
+                    SELECT
+                        square_payment_record_id,
+                        spa_id,
+                        business_unit_id,
+                        income_id
+                    FROM square_payments
+                    WHERE environment = 'sandbox'
+                      AND square_payment_id = %s
+                    FOR UPDATE
+                """, (
+                    selected_square_payment_id,
+                ))
+
+                existing_square_row = cur.fetchone()
+
+                if not existing_square_row:
+                    conn.rollback()
+                    flash(
+                        "Square payment reconciliation could "
+                        "not be reserved. Please try again.",
+                        "error"
+                    )
+                    cur.close()
+                    conn.close()
+                    return redirect(url_for(
+                        "add_income",
+                        appointment_id=appointment_id,
+                        date=selected_date
+                    ))
+
+                if (
+                    existing_square_row[1] != spa_id
+                    or existing_square_row[2]
+                        != business_unit_id
+                ):
+                    conn.rollback()
+                    flash(
+                        "This Square payment is already owned "
+                        "by another Provider Workspace.",
+                        "error"
+                    )
+                    cur.close()
+                    conn.close()
+                    return redirect(url_for(
+                        "add_income",
+                        appointment_id=appointment_id,
+                        date=selected_date
+                    ))
+
+                if existing_square_row[3] is not None:
+                    conn.rollback()
+                    flash(
+                        "This Square payment has already been "
+                        "saved to Income.",
+                        "warning"
+                    )
+                    cur.close()
+                    conn.close()
+                    return redirect(url_for(
+                        "add_income",
+                        appointment_id=appointment_id,
+                        date=selected_date
+                    ))
+
+                square_payment_record_id = (
+                    existing_square_row[0]
+                )
+
+                cur.execute("""
+                    UPDATE square_payments
+                    SET
+                        square_connection_id = %s,
+                        square_order_id = %s,
+                        square_customer_id = %s,
+                        square_location_id = %s,
+                        merchant_id = %s,
+                        payment_status = %s,
+                        tender_type = %s,
+                        currency = %s,
+                        amount_cents = %s,
+                        service_amount_cents = %s,
+                        retail_amount_cents = %s,
+                        tax_amount_cents = %s,
+                        tip_amount_cents = %s,
+                        discount_amount_cents = %s,
+                        processing_fee_cents = %s,
+                        refunded_amount_cents = %s,
+                        net_received_cents = %s,
+                        square_created_at = %s,
+                        square_updated_at = %s,
+                        appointment_id = %s,
+                        client_id = %s,
+                        reconciliation_status = 'matched',
+                        match_method = %s,
+                        match_notes = %s,
+                        retrieved_at = CURRENT_TIMESTAMP,
+                        last_synced_at = CURRENT_TIMESTAMP,
+                        reviewed_by = %s,
+                        raw_payment = %s,
+                        raw_order = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE square_payment_record_id = %s
+                      AND spa_id = %s
+                      AND business_unit_id = %s
+                """, (
+                    square_connection_id,
+                    square_preview["order_id"],
+                    square_preview["customer_id"],
+                    square_location_id,
+                    payment_merchant_id
+                    or square_merchant_id,
+                    square_preview["status"],
+                    square_preview["source_type"],
+                    square_preview["currency"],
+                    square_preview[
+                        "total_amount_cents"
+                    ],
+                    square_preview[
+                        "service_amount_cents"
+                    ],
+                    square_preview[
+                        "retail_amount_cents"
+                    ],
+                    square_preview[
+                        "tax_amount_cents"
+                    ],
+                    square_preview[
+                        "tip_amount_cents"
+                    ],
+                    order_discount_cents,
+                    square_preview[
+                        "processing_fee_cents"
+                    ],
+                    square_preview[
+                        "refunded_amount_cents"
+                    ],
+                    square_preview[
+                        "net_received_cents"
+                    ],
+                    square_preview["created_at"],
+                    square_payment.get("updated_at"),
+                    appt[0],
+                    appt[1],
+                    "appointment_review",
+                    (
+                        "Reviewed and populated from "
+                        "Add Income."
+                    ),
+                    session.get("user_id"),
+                    Json(square_payment),
+                    Json(square_order),
+                    square_payment_record_id,
+                    spa_id,
+                    business_unit_id
+                ))
+
+            square_save_context = {
+                "square_payment_record_id": (
+                    square_payment_record_id
+                )
+            }
+
+        elif (
+            payment_method.lower() in card_based_methods
+            and credit_processor_id
+        ):
             cur.execute("""
                 SELECT percentage_fee, flat_fee, additional_fee
                 FROM credit_processors
@@ -36644,20 +37440,40 @@ def add_income(appointment_id):
                 flash("Invalid credit processor selected.", "error")
                 cur.close()
                 conn.close()
-                return redirect(url_for("add_income", appointment_id=appointment_id, date=selected_date))
+                return redirect(url_for(
+                    "add_income",
+                    appointment_id=appointment_id,
+                    date=selected_date
+                ))
 
-            processor_percentage_fee = float(processor_row[0] or 0)
-            processor_flat_fee = float(processor_row[1] or 0)
-            processor_additional_fee = float(processor_row[2] or 0)
+            processor_percentage_fee = float(
+                processor_row[0] or 0
+            )
+            processor_flat_fee = float(
+                processor_row[1] or 0
+            )
+            processor_additional_fee = float(
+                processor_row[2] or 0
+            )
 
             processing_fee_amount = round(
-                (total_amount * (processor_percentage_fee / 100))
+                (
+                    total_amount
+                    * (
+                        processor_percentage_fee
+                        / 100
+                    )
+                )
                 + processor_flat_fee
                 + processor_additional_fee,
                 2
             )
 
-            net_received = round(total_amount - processing_fee_amount, 2)
+            net_received = round(
+                total_amount
+                - processing_fee_amount,
+                2
+            )
 
         elif payment_method.lower() not in card_based_methods:
             credit_processor_id = None
@@ -36727,6 +37543,7 @@ def add_income(appointment_id):
                 %s, %s, %s,
                 CURRENT_TIMESTAMP
             )
+            RETURNING income_id
         """, (
             income_date,
             appt[1],
@@ -36752,6 +37569,45 @@ def add_income(appointment_id):
             processor_flat_fee,
             processor_additional_fee
         ))
+
+        new_income_id = cur.fetchone()[0]
+
+        if square_save_context:
+            cur.execute("""
+                UPDATE square_payments
+                SET
+                    income_id = %s,
+                    reconciliation_status = 'reconciled',
+                    reconciled_at = CURRENT_TIMESTAMP,
+                    last_synced_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE square_payment_record_id = %s
+                  AND spa_id = %s
+                  AND business_unit_id = %s
+                  AND income_id IS NULL
+            """, (
+                new_income_id,
+                square_save_context[
+                    "square_payment_record_id"
+                ],
+                spa_id,
+                business_unit_id
+            ))
+
+            if cur.rowcount != 1:
+                conn.rollback()
+                flash(
+                    "Square payment reconciliation could not "
+                    "be linked to Income. Nothing was saved.",
+                    "error"
+                )
+                cur.close()
+                conn.close()
+                return redirect(url_for(
+                    "add_income",
+                    appointment_id=appointment_id,
+                    date=selected_date
+                ))
 
         conn.commit()
         cur.close()
