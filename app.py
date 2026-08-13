@@ -68,6 +68,9 @@ from services.square_client_sync import (
 from services.square_service_sync import (
     try_sync_service_to_square,
 )
+from services.square_inventory_sync import (
+    try_sync_inventory_product_to_square,
+)
 
 
 # --------------------------------------------------
@@ -26447,6 +26450,86 @@ def client_consent_history(client_id):
 
 
 
+# =========================================================
+# INVENTORY -> SQUARE POST-COMMIT SYNC
+# =========================================================
+
+
+def _sync_saved_inventory_product_to_square_after_commit(
+    spa_id,
+    business_unit_id,
+    product_id,
+):
+    """
+    Best-effort PSP Inventory Product -> Square Catalog sync.
+
+    PSP is already committed before this helper is called.
+
+    Current rollout:
+    - local development: Square Sandbox when configured
+    - Render production: intentionally disabled until
+      production OAuth/catalog sync is deliberately enabled
+
+    This helper synchronizes product master data only.
+    It does not synchronize inventory_movements or stock counts.
+    """
+
+    if os.environ.get("RENDER"):
+        return {
+            "status": "skipped",
+            "reason": (
+                "production_square_inventory_sync_not_enabled"
+            ),
+            "inventory_product_id": product_id,
+        }
+
+    if not business_unit_id:
+        return {
+            "status": "skipped",
+            "reason": "workspace_not_selected",
+            "inventory_product_id": product_id,
+        }
+
+    if not os.environ.get(
+        "SQUARE_SANDBOX_ACCESS_TOKEN",
+        "",
+    ).strip():
+        return {
+            "status": "skipped",
+            "reason": "square_sandbox_not_configured",
+            "inventory_product_id": product_id,
+        }
+
+    result = try_sync_inventory_product_to_square(
+        spa_id=spa_id,
+        business_unit_id=business_unit_id,
+        inventory_product_id=product_id,
+        actor_user_id=session.get("user_id"),
+        environment="sandbox",
+    )
+
+    if result.get("status") == "error":
+        app.logger.warning(
+            "Square inventory sync failed after PSP product "
+            "save. spa_id=%s business_unit_id=%s "
+            "product_id=%s reason=%s message=%s",
+            spa_id,
+            business_unit_id,
+            product_id,
+            result.get("reason"),
+            result.get("message"),
+        )
+
+        flash(
+            "Inventory product was saved in Peach Suite Pro, "
+            "but Square sync did not complete. It can be "
+            "retried later.",
+            "warning",
+        )
+
+    return result
+
+
 #################################################
 ########################################################
 ##############################################################
@@ -26623,6 +26706,8 @@ def add_inventory_product():
             flash("Product name is required.", "error")
             return redirect(url_for("add_inventory_product"))
 
+        saved_product_id = None
+
         try:
 
             cur.execute("""
@@ -26702,10 +26787,7 @@ def add_inventory_product():
                 ))
 
             conn.commit()
-
-            flash("Inventory product added successfully.", "success")
-
-            return redirect(url_for("inventory_home"))
+            saved_product_id = product_id
 
         except Exception as e:
             conn.rollback()
@@ -26714,6 +26796,20 @@ def add_inventory_product():
         finally:
             cur.close()
             conn.close()
+
+        if saved_product_id is not None:
+            _sync_saved_inventory_product_to_square_after_commit(
+                spa_id,
+                business_unit_id,
+                saved_product_id,
+            )
+
+            flash(
+                "Inventory product added successfully.",
+                "success",
+            )
+
+            return redirect(url_for("inventory_home"))
 
     cur.close()
     conn.close()
@@ -27216,6 +27312,8 @@ def edit_inventory_product(product_id):
             flash("Product name is required.", "error")
             return redirect(url_for("edit_inventory_product", product_id=product_id))
 
+        product_saved = False
+
         try:
             cur.execute("""
                 UPDATE inventory_products
@@ -27250,8 +27348,7 @@ def edit_inventory_product(product_id):
             ))
 
             conn.commit()
-            flash("Inventory product updated successfully.", "success")
-            return redirect(url_for("inventory_product_detail", product_id=product_id))
+            product_saved = True
 
         except Exception as e:
             conn.rollback()
@@ -27260,6 +27357,25 @@ def edit_inventory_product(product_id):
         finally:
             cur.close()
             conn.close()
+
+        if product_saved:
+            _sync_saved_inventory_product_to_square_after_commit(
+                spa_id,
+                business_unit_id,
+                product_id,
+            )
+
+            flash(
+                "Inventory product updated successfully.",
+                "success",
+            )
+
+            return redirect(
+                url_for(
+                    "inventory_product_detail",
+                    product_id=product_id,
+                )
+            )
 
     cur.close()
     conn.close()
@@ -28052,10 +28168,19 @@ def deactivate_inventory_product(product_id):
         business_unit_id,
     ))
 
+    product_changed = cur.rowcount == 1
+
     conn.commit()
 
     cur.close()
     conn.close()
+
+    if product_changed:
+        _sync_saved_inventory_product_to_square_after_commit(
+            spa_id,
+            business_unit_id,
+            product_id,
+        )
 
     flash("Inventory product deactivated.", "success")
     return redirect(url_for("inventory_home"))
