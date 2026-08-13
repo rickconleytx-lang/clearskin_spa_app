@@ -350,6 +350,193 @@ def create_payment(
     return payment
 
 
+def create_customer(
+    customer,
+    *,
+    idempotency_key,
+    access_token,
+    environment="sandbox",
+):
+    """
+    Create one Square Customer profile.
+    """
+    if not isinstance(customer, dict):
+        raise ValueError(
+            "Square customer must be a dictionary."
+        )
+
+    idempotency_key = str(
+        idempotency_key or ""
+    ).strip()
+
+    if not idempotency_key:
+        raise ValueError(
+            "Square customer idempotency key is required."
+        )
+
+    payload = dict(customer)
+    payload["idempotency_key"] = idempotency_key
+
+    data = _square_request(
+        "POST",
+        "/customers",
+        access_token=access_token,
+        environment=environment,
+        json_body=payload,
+    )
+
+    created_customer = data.get("customer")
+
+    if not isinstance(created_customer, dict):
+        raise SquareServiceError(
+            "Square did not return the created customer."
+        )
+
+    return created_customer
+
+
+def retrieve_customer(
+    customer_id,
+    *,
+    access_token,
+    environment="sandbox",
+):
+    """
+    Retrieve one Square Customer profile.
+    """
+    customer_id = str(customer_id or "").strip()
+
+    if not customer_id:
+        raise ValueError(
+            "Square customer ID is required."
+        )
+
+    data = _square_request(
+        "GET",
+        f"/customers/{customer_id}",
+        access_token=access_token,
+        environment=environment,
+    )
+
+    customer = data.get("customer")
+
+    if not isinstance(customer, dict):
+        raise SquareServiceError(
+            "Square did not return the customer."
+        )
+
+    return customer
+
+
+def update_customer(
+    customer_id,
+    updates,
+    *,
+    access_token,
+    environment="sandbox",
+):
+    """
+    Update one Square Customer profile.
+
+    Square supports sparse updates. Callers should include
+    the current customer version whenever available so
+    concurrent updates are not silently overwritten.
+    """
+    customer_id = str(customer_id or "").strip()
+
+    if not customer_id:
+        raise ValueError(
+            "Square customer ID is required."
+        )
+
+    if not isinstance(updates, dict):
+        raise ValueError(
+            "Square customer updates must be a dictionary."
+        )
+
+    if not updates:
+        raise ValueError(
+            "Square customer updates cannot be empty."
+        )
+
+    data = _square_request(
+        "PUT",
+        f"/customers/{customer_id}",
+        access_token=access_token,
+        environment=environment,
+        json_body=updates,
+    )
+
+    customer = data.get("customer")
+
+    if not isinstance(customer, dict):
+        raise SquareServiceError(
+            "Square did not return the updated customer."
+        )
+
+    return customer
+
+
+def search_customers(
+    query,
+    *,
+    access_token,
+    environment="sandbox",
+    limit=100,
+    cursor=None,
+):
+    """
+    Search Square Customer profiles using a Square
+    SearchCustomers query object.
+    """
+    if not isinstance(query, dict):
+        raise ValueError(
+            "Square customer search query must be a dictionary."
+        )
+
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        raise ValueError(
+            "Square customer search limit must be an integer."
+        )
+
+    if limit < 1 or limit > 100:
+        raise ValueError(
+            "Square customer search limit must be between 1 and 100."
+        )
+
+    payload = {
+        "query": query,
+        "limit": limit,
+    }
+
+    cursor = str(cursor or "").strip()
+
+    if cursor:
+        payload["cursor"] = cursor
+
+    data = _square_request(
+        "POST",
+        "/customers/search",
+        access_token=access_token,
+        environment=environment,
+        json_body=payload,
+    )
+
+    customers = data.get("customers") or []
+
+    if not isinstance(customers, list):
+        raise SquareServiceError(
+            "Square returned an invalid customer search result."
+        )
+
+    return {
+        "customers": customers,
+        "cursor": data.get("cursor"),
+    }
+
+
 def list_recent_payments(
     *,
     access_token,
