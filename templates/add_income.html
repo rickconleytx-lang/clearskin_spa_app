@@ -102,6 +102,11 @@
         ></p>
 
         <div id="square_payment_candidates"></div>
+
+        <div
+            id="square_payment_preview"
+            style="margin-top: 14px;"
+        ></div>
     </div>
     {% endif %}
 
@@ -131,6 +136,7 @@ document.addEventListener("DOMContentLoaded", function () {
     const retrieveSquareButton = document.getElementById("retrieve_square_data");
     const squareRetrieveStatus = document.getElementById("square_retrieve_status");
     const squarePaymentCandidates = document.getElementById("square_payment_candidates");
+    const squarePaymentPreview = document.getElementById("square_payment_preview");
 
     function calculateTotal() {
         const service = parseFloat(serviceField.value) || 0;
@@ -179,6 +185,143 @@ document.addEventListener("DOMContentLoaded", function () {
                 paymentMethod === "square"
                     ? "block"
                     : "none";
+        }
+    }
+
+    function moneyFromCents(cents) {
+        return (
+            (Number(cents) || 0) / 100
+        ).toFixed(2);
+    }
+
+    async function previewSquarePayment(paymentId) {
+        if (!squarePaymentPreview) {
+            return;
+        }
+
+        squarePaymentPreview.textContent =
+            "Loading selected Square payment...";
+
+        try {
+            const baseUrl =
+                "{{ url_for(
+                    'square_payment_preview_for_income',
+                    appointment_id=appt[0]
+                ) }}";
+
+            const response = await fetch(
+                baseUrl
+                + "?payment_id="
+                + encodeURIComponent(paymentId)
+            );
+
+            const data = await response.json();
+
+            if (!response.ok || !data.ok) {
+                throw new Error(
+                    data.error
+                    || "Unable to review Square payment."
+                );
+            }
+
+            const payment = data.payment;
+
+            squarePaymentPreview.textContent = "";
+
+            const heading = document.createElement("h3");
+            heading.textContent = "Square Payment Preview";
+            squarePaymentPreview.appendChild(heading);
+
+            const summary = document.createElement("p");
+
+            summary.textContent =
+                `Total $${moneyFromCents(
+                    payment.total_amount_cents
+                )}`
+                + ` • Tax $${moneyFromCents(
+                    payment.tax_amount_cents
+                )}`
+                + ` • Tip $${moneyFromCents(
+                    payment.tip_amount_cents
+                )}`
+                + ` • Square Fee $${moneyFromCents(
+                    payment.processing_fee_cents
+                )}`
+                + ` • Net $${moneyFromCents(
+                    payment.net_received_cents
+                )}`;
+
+            squarePaymentPreview.appendChild(summary);
+
+            const status = document.createElement("p");
+
+            if (payment.ready_for_income) {
+                status.textContent =
+                    "Ready to populate Add Income.";
+            } else {
+                status.textContent =
+                    "Needs review before Add Income can be populated.";
+            }
+
+            squarePaymentPreview.appendChild(status);
+
+            const classified = document.createElement("p");
+
+            classified.textContent =
+                `Service $${moneyFromCents(
+                    payment.service_amount_cents
+                )}`
+                + ` • Retail $${moneyFromCents(
+                    payment.retail_amount_cents
+                )}`
+                + ` • Unmapped $${moneyFromCents(
+                    payment.unknown_amount_cents
+                )}`;
+
+            squarePaymentPreview.appendChild(classified);
+
+            const lineHeading = document.createElement("strong");
+            lineHeading.textContent = "Square Order Items";
+            squarePaymentPreview.appendChild(lineHeading);
+
+            const lineList = document.createElement("div");
+
+            (payment.line_items || []).forEach(
+                function (line) {
+                    const lineRow =
+                        document.createElement("div");
+
+                    lineRow.style.padding = "6px 0";
+
+                    const classification =
+                        line.classification === "unknown"
+                            ? "UNMAPPED"
+                            : line.classification.toUpperCase();
+
+                    lineRow.textContent =
+                        `${line.name || "Unnamed Item"}`
+                        + ` — $${moneyFromCents(
+                            line.sale_cents
+                        )}`
+                        + ` — ${classification}`;
+
+                    lineList.appendChild(lineRow);
+                }
+            );
+
+            squarePaymentPreview.appendChild(lineList);
+
+            const idText = document.createElement("p");
+            idText.style.fontSize = "0.85em";
+            idText.textContent =
+                `Square Payment ID: ${payment.payment_id}`;
+
+            squarePaymentPreview.appendChild(idText);
+
+        } catch (error) {
+            squarePaymentPreview.textContent =
+                error.message
+                || "Unable to review Square payment.";
         }
     }
 
@@ -248,10 +391,31 @@ document.addEventListener("DOMContentLoaded", function () {
                     }
                 }
 
-                row.textContent =
+                const text = document.createElement("span");
+
+                text.textContent =
                     `${created} — $${total}`
                     + ` — Fee $${fee}`
-                    + ` — Payment ${payment.payment_id}`;
+                    + ` — Payment ${payment.payment_id} `;
+
+                const reviewButton =
+                    document.createElement("button");
+
+                reviewButton.type = "button";
+                reviewButton.className = "btn";
+                reviewButton.textContent = "Review Payment";
+
+                reviewButton.addEventListener(
+                    "click",
+                    function () {
+                        previewSquarePayment(
+                            payment.payment_id
+                        );
+                    }
+                );
+
+                row.appendChild(text);
+                row.appendChild(reviewButton);
 
                 squarePaymentCandidates.appendChild(row);
             });

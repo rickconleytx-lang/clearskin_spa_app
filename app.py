@@ -36990,6 +36990,349 @@ def square_recent_payments_for_income(appointment_id):
 
 
 
+#  --------------------------------------------------
+#
+#     SQUARE V2 — SELECTED PAYMENT PREVIEW
+#
+#     Read-only.
+#     Retrieves the selected Square payment + order,
+#     verifies workspace/location ownership, applies
+#     saved catalog mappings, and returns a normalized
+#     PSP Add Income preview.
+#
+#  --------------------------------------------------
+
+
+@app.route(
+    "/square/payment-preview/<int:appointment_id>",
+    methods=["GET"]
+)
+@login_required
+@spa_required
+def square_payment_preview_for_income(appointment_id):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        return jsonify({
+            "ok": False,
+            "error": (
+                "A valid Provider Workspace is required."
+            )
+        }), 400
+
+    square_payment_id = (
+        request.args.get("payment_id") or ""
+    ).strip()
+
+    if not square_payment_id:
+        return jsonify({
+            "ok": False,
+            "error": "Square payment ID is required."
+        }), 400
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        # Appointment must belong to this exact workspace.
+        cur.execute("""
+            SELECT appointment_id
+            FROM appointments
+            WHERE appointment_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            LIMIT 1
+        """, (
+            appointment_id,
+            spa_id,
+            business_unit_id
+        ))
+
+        if not cur.fetchone():
+            return jsonify({
+                "ok": False,
+                "error": "Appointment not found."
+            }), 404
+
+        # Resolve Square connection/location only from
+        # server-side workspace configuration.
+        cur.execute("""
+            SELECT
+                sc.square_connection_id,
+                sc.merchant_id,
+                sl.square_location_id,
+                sl.location_name
+            FROM square_connections sc
+            JOIN square_locations sl
+              ON sl.square_connection_id =
+                    sc.square_connection_id
+             AND sl.spa_id = sc.spa_id
+             AND sl.business_unit_id =
+                    sc.business_unit_id
+             AND sl.environment = sc.environment
+            WHERE sc.spa_id = %s
+              AND sc.business_unit_id = %s
+              AND sc.environment = 'sandbox'
+              AND sc.connection_status = 'connected'
+              AND sl.is_active = TRUE
+            ORDER BY
+                sl.is_default DESC,
+                sl.square_location_mapping_id
+            LIMIT 1
+        """, (
+            spa_id,
+            business_unit_id
+        ))
+
+        square_mapping = cur.fetchone()
+
+        if not square_mapping:
+            return jsonify({
+                "ok": False,
+                "error": (
+                    "Square Sandbox is not connected "
+                    "to this Provider Workspace."
+                )
+            }), 404
+
+        (
+            square_connection_id,
+            merchant_id,
+            square_location_id,
+            location_name
+        ) = square_mapping
+
+        # Load only active mappings for this exact
+        # Square connection + PSP workspace.
+        cur.execute("""
+            SELECT
+                square_catalog_object_id,
+                mapping_type
+            FROM square_catalog_mappings
+            WHERE square_connection_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND environment = 'sandbox'
+              AND is_active = TRUE
+        """, (
+            square_connection_id,
+            spa_id,
+            business_unit_id
+        ))
+
+        catalog_classifications = {}
+
+        for catalog_object_id, mapping_type in cur.fetchall():
+            if mapping_type == "service_type":
+                catalog_classifications[
+                    catalog_object_id
+                ] = "service"
+
+            elif mapping_type == "inventory_product":
+                catalog_classifications[
+                    catalog_object_id
+                ] = "retail"
+
+    finally:
+        cur.close()
+        conn.close()
+
+    try:
+        token = (
+            square_service
+            .get_square_sandbox_access_token()
+        )
+
+        payment = square_service.retrieve_payment(
+            square_payment_id,
+            access_token=token,
+            environment="sandbox"
+        )
+
+    except square_service.SquareServiceError as exc:
+        return jsonify({
+            "ok": False,
+            "error": str(exc)
+        }), 502
+
+    payment_location_id = str(
+        payment.get("location_id") or ""
+    ).strip()
+
+    if payment_location_id != square_location_id:
+        return jsonify({
+            "ok": False,
+            "error": (
+                "Square payment does not belong to "
+                "this Provider Workspace."
+            )
+        }), 403
+
+    payment_merchant_id = str(
+        payment.get("merchant_id") or ""
+    ).strip()
+
+    if (
+        merchant_id
+        and payment_merchant_id
+        and payment_merchant_id != merchant_id
+    ):
+        return jsonify({
+            "ok": False,
+            "error": (
+                "Square merchant does not match "
+                "this Provider Workspace."
+            )
+        }), 403
+
+    payment_status = str(
+        payment.get("status") or ""
+    ).strip().upper()
+
+    if payment_status != "COMPLETED":
+        return jsonify({
+            "ok": False,
+            "error": (
+                "Only completed Square payments "
+                "can be reviewed for Income."
+            )
+        }), 409
+
+    square_order_id = str(
+        payment.get("order_id") or ""
+    ).strip()
+
+    if not square_order_id:
+        return jsonify({
+            "ok": False,
+            "error": (
+                "This Square payment does not have "
+                "an order to review."
+            )
+        }), 409
+
+    try:
+        order = square_service.retrieve_order(
+            square_order_id,
+            access_token=token,
+            environment="sandbox"
+        )
+
+    except square_service.SquareServiceError as exc:
+        return jsonify({
+            "ok": False,
+            "error": str(exc)
+        }), 502
+
+    order_location_id = str(
+        order.get("location_id") or ""
+    ).strip()
+
+    if (
+        order_location_id
+        and order_location_id != square_location_id
+    ):
+        return jsonify({
+            "ok": False,
+            "error": (
+                "Square order does not belong to "
+                "this Provider Workspace."
+            )
+        }), 403
+
+    try:
+        preview = square_service.build_income_preview(
+            payment,
+            order,
+            catalog_classifications=(
+                catalog_classifications
+            )
+        )
+
+    except ValueError as exc:
+        return jsonify({
+            "ok": False,
+            "error": str(exc)
+        }), 422
+
+    safe_lines = []
+
+    for line in preview["line_items"]:
+        safe_lines.append({
+            "sequence": line["sequence"],
+            "line_uid": line["line_uid"],
+            "catalog_object_id": (
+                line["catalog_object_id"]
+            ),
+            "name": line["name"],
+            "variation_name": (
+                line["variation_name"]
+            ),
+            "quantity": line["quantity"],
+            "classification": (
+                line["classification"]
+            ),
+            "sale_cents": line["sale_cents"],
+            "tax_cents": line["tax_cents"],
+            "total_cents": line["total_cents"],
+        })
+
+    return jsonify({
+        "ok": True,
+        "environment": "sandbox",
+        "location_id": square_location_id,
+        "location_name": location_name,
+        "payment": {
+            "payment_id": preview["payment_id"],
+            "order_id": preview["order_id"],
+            "customer_id": preview["customer_id"],
+            "status": preview["status"],
+            "created_at": preview["created_at"],
+            "service_amount_cents": (
+                preview["service_amount_cents"]
+            ),
+            "retail_amount_cents": (
+                preview["retail_amount_cents"]
+            ),
+            "other_amount_cents": (
+                preview["other_amount_cents"]
+            ),
+            "unknown_amount_cents": (
+                preview["unknown_amount_cents"]
+            ),
+            "tax_amount_cents": (
+                preview["tax_amount_cents"]
+            ),
+            "tip_amount_cents": (
+                preview["tip_amount_cents"]
+            ),
+            "total_amount_cents": (
+                preview["total_amount_cents"]
+            ),
+            "processing_fee_cents": (
+                preview["processing_fee_cents"]
+            ),
+            "net_received_cents": (
+                preview["net_received_cents"]
+            ),
+            "difference_cents": (
+                preview["difference_cents"]
+            ),
+            "income_type": preview["income_type"],
+            "requires_review": (
+                preview["requires_review"]
+            ),
+            "ready_for_income": (
+                preview["ready_for_income"]
+            ),
+            "line_items": safe_lines,
+        }
+    })
+
+
+
+
 
 #  --------------------------
 #
