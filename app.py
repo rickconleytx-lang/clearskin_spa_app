@@ -65,6 +65,9 @@ from services import square_service
 from services.square_client_sync import (
     try_sync_client_to_square,
 )
+from services.square_service_sync import (
+    try_sync_service_to_square,
+)
 
 
 # --------------------------------------------------
@@ -13780,6 +13783,82 @@ def toggle_service_type_public_website(
     )
 
 
+# =========================================================
+# SERVICE -> SQUARE POST-COMMIT SYNC
+# =========================================================
+
+
+def _sync_saved_service_to_square_after_commit(
+    spa_id,
+    business_unit_id,
+    service_type_id
+):
+    """
+    Best-effort PSP Service -> Square Catalog sync.
+
+    PSP is already committed before this helper is called.
+
+    Current rollout:
+    - local development: Square Sandbox when configured
+    - Render production: intentionally disabled until
+      production OAuth/catalog sync is deliberately enabled
+    """
+
+    if os.environ.get("RENDER"):
+        return {
+            "status": "skipped",
+            "reason": (
+                "production_square_service_sync_not_enabled"
+            ),
+            "service_type_id": service_type_id,
+        }
+
+    if not business_unit_id:
+        return {
+            "status": "skipped",
+            "reason": "workspace_not_selected",
+            "service_type_id": service_type_id,
+        }
+
+    if not os.environ.get(
+        "SQUARE_SANDBOX_ACCESS_TOKEN",
+        ""
+    ).strip():
+        return {
+            "status": "skipped",
+            "reason": "square_sandbox_not_configured",
+            "service_type_id": service_type_id,
+        }
+
+    result = try_sync_service_to_square(
+        spa_id=spa_id,
+        business_unit_id=business_unit_id,
+        service_type_id=service_type_id,
+        actor_user_id=session.get("user_id"),
+        environment="sandbox",
+    )
+
+    if result.get("status") == "error":
+        app.logger.warning(
+            "Square service sync failed after PSP service "
+            "save. spa_id=%s business_unit_id=%s "
+            "service_type_id=%s reason=%s message=%s",
+            spa_id,
+            business_unit_id,
+            service_type_id,
+            result.get("reason"),
+            result.get("message")
+        )
+
+        flash(
+            "Service was saved in Peach Suite Pro, but Square "
+            "sync did not complete. It can be retried later.",
+            "warning"
+        )
+
+    return result
+
+
 #################################
 #
 #
@@ -13796,6 +13875,10 @@ def toggle_service_type_public_website(
 )
 def add_service_type():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
 
     if request.method == "POST":
         service_name = (
@@ -13852,6 +13935,7 @@ def add_service_type():
                 %s,
                 TRUE
             )
+            RETURNING service_type_id
         """, (
             spa_id,
             service_name,
@@ -13859,9 +13943,17 @@ def add_service_type():
             default_price
         ))
 
+        new_service_type_id = cur.fetchone()[0]
+
         conn.commit()
         cur.close()
         conn.close()
+
+        _sync_saved_service_to_square_after_commit(
+            spa_id,
+            business_unit_id,
+            new_service_type_id
+        )
 
         flash("Service added successfully.", "success")
         return redirect(url_for("service_types"))
@@ -14020,6 +14112,12 @@ def edit_service_type(service_type_id):
         cur.close()
         conn.close()
 
+        _sync_saved_service_to_square_after_commit(
+            spa_id,
+            business_unit_id,
+            service_type_id
+        )
+
         flash("Service updated successfully.", "success")
         return redirect(url_for("service_types"))
 
@@ -14110,7 +14208,13 @@ def edit_service_type(service_type_id):
 )
 def archive_service_type(service_type_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
     user_id = session.get("user_id")
+
+    if not business_unit_id:
+        abort(403)
+
+    service_changed = False
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -14175,6 +14279,7 @@ def archive_service_type(service_type_id):
             ))
 
             conn.commit()
+            service_changed = True
 
             flash(
                 f"{service[0]} was archived successfully.",
@@ -14197,6 +14302,13 @@ def archive_service_type(service_type_id):
     finally:
         cur.close()
         conn.close()
+
+    if service_changed:
+        _sync_saved_service_to_square_after_commit(
+            spa_id,
+            business_unit_id,
+            service_type_id
+        )
 
     return redirect(
         url_for(
@@ -14224,6 +14336,12 @@ def archive_service_type(service_type_id):
 )
 def restore_service_type(service_type_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
+
+    service_changed = False
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -14272,6 +14390,7 @@ def restore_service_type(service_type_id):
             ))
 
             conn.commit()
+            service_changed = True
 
             flash(
                 f"{service[0]} was restored. "
@@ -14296,6 +14415,13 @@ def restore_service_type(service_type_id):
     finally:
         cur.close()
         conn.close()
+
+    if service_changed:
+        _sync_saved_service_to_square_after_commit(
+            spa_id,
+            business_unit_id,
+            service_type_id
+        )
 
     return redirect(
         url_for(
