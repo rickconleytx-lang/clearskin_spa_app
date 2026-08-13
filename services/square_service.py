@@ -71,6 +71,7 @@ def _square_request(
     access_token,
     environment="sandbox",
     params=None,
+    json_body=None,
     timeout=20,
 ):
     environment = normalize_square_environment(
@@ -95,6 +96,7 @@ def _square_request(
                 access_token
             ),
             params=params,
+            json=json_body,
             timeout=timeout,
         )
     except requests.RequestException as exc:
@@ -132,6 +134,220 @@ def _square_request(
         )
 
     return data
+
+
+def upsert_catalog_object(
+    catalog_object,
+    *,
+    idempotency_key,
+    access_token,
+    environment="sandbox",
+):
+    """
+    Create or update one Square Catalog object.
+
+    For creation, Square requires the supplied object ID to
+    begin with '#'. Square replaces it with a server ID.
+    """
+    if not isinstance(catalog_object, dict):
+        raise ValueError(
+            "Square catalog object must be a dictionary."
+        )
+
+    idempotency_key = str(
+        idempotency_key or ""
+    ).strip()
+
+    if not idempotency_key:
+        raise ValueError(
+            "Square catalog idempotency key is required."
+        )
+
+    data = _square_request(
+        "POST",
+        "/catalog/object",
+        access_token=access_token,
+        environment=environment,
+        json_body={
+            "idempotency_key": idempotency_key,
+            "object": catalog_object,
+        },
+    )
+
+    catalog_object_result = data.get(
+        "catalog_object"
+    )
+
+    if not isinstance(
+        catalog_object_result,
+        dict
+    ):
+        raise SquareServiceError(
+            "Square did not return the catalog object."
+        )
+
+    return {
+        "catalog_object": catalog_object_result,
+        "id_mappings": data.get("id_mappings") or [],
+    }
+
+
+def delete_catalog_object(
+    object_id,
+    *,
+    access_token,
+    environment="sandbox",
+):
+    """
+    Delete one Square Catalog object.
+    """
+    object_id = str(object_id or "").strip()
+
+    if not object_id:
+        raise ValueError(
+            "Square catalog object ID is required."
+        )
+
+    return _square_request(
+        "DELETE",
+        f"/catalog/object/{object_id}",
+        access_token=access_token,
+        environment=environment,
+    )
+
+
+def create_order(
+    order,
+    *,
+    idempotency_key,
+    access_token,
+    environment="sandbox",
+):
+    """
+    Create one Square Order.
+    """
+    if not isinstance(order, dict):
+        raise ValueError(
+            "Square order must be a dictionary."
+        )
+
+    idempotency_key = str(
+        idempotency_key or ""
+    ).strip()
+
+    if not idempotency_key:
+        raise ValueError(
+            "Square order idempotency key is required."
+        )
+
+    data = _square_request(
+        "POST",
+        "/orders",
+        access_token=access_token,
+        environment=environment,
+        json_body={
+            "idempotency_key": idempotency_key,
+            "order": order,
+        },
+    )
+
+    created_order = data.get("order")
+
+    if not isinstance(created_order, dict):
+        raise SquareServiceError(
+            "Square did not return the created order."
+        )
+
+    return created_order
+
+
+def create_payment(
+    *,
+    source_id,
+    amount_cents,
+    idempotency_key,
+    access_token,
+    environment="sandbox",
+    order_id=None,
+    location_id=None,
+    reference_id=None,
+    autocomplete=True,
+):
+    """
+    Create one Square payment.
+
+    amount_cents is expressed in the currency's smallest
+    denomination, such as cents for USD.
+    """
+    source_id = str(source_id or "").strip()
+
+    if not source_id:
+        raise ValueError(
+            "Square payment source ID is required."
+        )
+
+    try:
+        amount_cents = int(amount_cents)
+    except (TypeError, ValueError):
+        raise ValueError(
+            "Square payment amount must be an integer."
+        )
+
+    if amount_cents <= 0:
+        raise ValueError(
+            "Square payment amount must be greater than zero."
+        )
+
+    idempotency_key = str(
+        idempotency_key or ""
+    ).strip()
+
+    if not idempotency_key:
+        raise ValueError(
+            "Square payment idempotency key is required."
+        )
+
+    payload = {
+        "source_id": source_id,
+        "idempotency_key": idempotency_key,
+        "amount_money": {
+            "amount": amount_cents,
+            "currency": "USD",
+        },
+        "autocomplete": bool(autocomplete),
+    }
+
+    order_id = str(order_id or "").strip()
+
+    if order_id:
+        payload["order_id"] = order_id
+
+    location_id = str(location_id or "").strip()
+
+    if location_id:
+        payload["location_id"] = location_id
+
+    reference_id = str(reference_id or "").strip()
+
+    if reference_id:
+        payload["reference_id"] = reference_id
+
+    data = _square_request(
+        "POST",
+        "/payments",
+        access_token=access_token,
+        environment=environment,
+        json_body=payload,
+    )
+
+    payment = data.get("payment")
+
+    if not isinstance(payment, dict):
+        raise SquareServiceError(
+            "Square did not return the created payment."
+        )
+
+    return payment
 
 
 def list_recent_payments(
