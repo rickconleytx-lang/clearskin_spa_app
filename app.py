@@ -37241,12 +37241,64 @@ def square_payment_preview_for_income(appointment_id):
             )
         }), 403
 
+    service_line_uids = set(
+        request.args.getlist("service_line_uid")
+    )
+
+    retail_line_uids = set(
+        request.args.getlist("retail_line_uid")
+    )
+
+    if service_line_uids & retail_line_uids:
+        return jsonify({
+            "ok": False,
+            "error": (
+                "A Square order line cannot be both "
+                "Service and Retail."
+            )
+        }), 400
+
+    valid_line_uids = {
+        str(item.get("uid") or "").strip()
+        for item in (order.get("line_items") or [])
+        if str(item.get("uid") or "").strip()
+    }
+
+    submitted_line_uids = (
+        service_line_uids
+        | retail_line_uids
+    )
+
+    if not submitted_line_uids.issubset(
+        valid_line_uids
+    ):
+        return jsonify({
+            "ok": False,
+            "error": (
+                "One or more Square order lines "
+                "are invalid."
+            )
+        }), 400
+
+    line_classifications = {
+        line_uid: "service"
+        for line_uid in service_line_uids
+    }
+
+    line_classifications.update({
+        line_uid: "retail"
+        for line_uid in retail_line_uids
+    })
+
     try:
         preview = square_service.build_income_preview(
             payment,
             order,
             catalog_classifications=(
                 catalog_classifications
+            ),
+            line_classifications=(
+                line_classifications
             )
         )
 

@@ -194,7 +194,10 @@ document.addEventListener("DOMContentLoaded", function () {
         ).toFixed(2);
     }
 
-    async function previewSquarePayment(paymentId) {
+    async function previewSquarePayment(
+        paymentId,
+        lineClassifications = null
+    ) {
         if (!squarePaymentPreview) {
             return;
         }
@@ -209,10 +212,29 @@ document.addEventListener("DOMContentLoaded", function () {
                     appointment_id=appt[0]
                 ) }}";
 
+            const params = new URLSearchParams();
+            params.append("payment_id", paymentId);
+
+            if (lineClassifications) {
+                Object.entries(
+                    lineClassifications
+                ).forEach(function ([lineUid, value]) {
+                    if (value === "service") {
+                        params.append(
+                            "service_line_uid",
+                            lineUid
+                        );
+                    } else if (value === "retail") {
+                        params.append(
+                            "retail_line_uid",
+                            lineUid
+                        );
+                    }
+                });
+            }
+
             const response = await fetch(
-                baseUrl
-                + "?payment_id="
-                + encodeURIComponent(paymentId)
+                baseUrl + "?" + params.toString()
             );
 
             const data = await response.json();
@@ -285,6 +307,7 @@ document.addEventListener("DOMContentLoaded", function () {
             squarePaymentPreview.appendChild(lineHeading);
 
             const lineList = document.createElement("div");
+            const unmappedSelects = [];
 
             (payment.line_items || []).forEach(
                 function (line) {
@@ -293,23 +316,137 @@ document.addEventListener("DOMContentLoaded", function () {
 
                     lineRow.style.padding = "6px 0";
 
-                    const classification =
-                        line.classification === "unknown"
-                            ? "UNMAPPED"
-                            : line.classification.toUpperCase();
+                    const itemText =
+                        document.createElement("span");
 
-                    lineRow.textContent =
+                    itemText.textContent =
                         `${line.name || "Unnamed Item"}`
                         + ` — $${moneyFromCents(
                             line.sale_cents
-                        )}`
-                        + ` — ${classification}`;
+                        )}`;
+
+                    lineRow.appendChild(itemText);
+
+                    if (line.classification === "unknown") {
+                        const select =
+                            document.createElement("select");
+
+                        select.style.marginLeft = "8px";
+                        select.dataset.lineUid =
+                            line.line_uid || "";
+
+                        const blankOption =
+                            document.createElement("option");
+                        blankOption.value = "";
+                        blankOption.textContent =
+                            "Classify Item";
+
+                        const serviceOption =
+                            document.createElement("option");
+                        serviceOption.value = "service";
+                        serviceOption.textContent =
+                            "Service";
+
+                        const retailOption =
+                            document.createElement("option");
+                        retailOption.value = "retail";
+                        retailOption.textContent =
+                            "Retail";
+
+                        select.appendChild(blankOption);
+                        select.appendChild(serviceOption);
+                        select.appendChild(retailOption);
+
+                        lineRow.appendChild(select);
+                        unmappedSelects.push(select);
+
+                    } else {
+                        const classification =
+                            document.createElement("strong");
+
+                        classification.style.marginLeft =
+                            "8px";
+
+                        classification.textContent =
+                            line.classification.toUpperCase();
+
+                        lineRow.appendChild(
+                            classification
+                        );
+                    }
 
                     lineList.appendChild(lineRow);
                 }
             );
 
             squarePaymentPreview.appendChild(lineList);
+
+            if (unmappedSelects.length) {
+                const applyButton =
+                    document.createElement("button");
+
+                applyButton.type = "button";
+                applyButton.className = "btn";
+                applyButton.style.marginTop = "10px";
+                applyButton.textContent =
+                    "Apply Item Classifications";
+
+                applyButton.addEventListener(
+                    "click",
+                    function () {
+                        const classifications = {};
+                        let missing = false;
+
+                        unmappedSelects.forEach(
+                            function (select) {
+                                if (
+                                    !select.dataset.lineUid
+                                    || !select.value
+                                ) {
+                                    missing = true;
+                                    return;
+                                }
+
+                                classifications[
+                                    select.dataset.lineUid
+                                ] = select.value;
+                            }
+                        );
+
+                        if (missing) {
+                            squareRetrieveStatus.textContent =
+                                "Classify every unmapped Square item "
+                                + "as Service or Retail.";
+                            return;
+                        }
+
+                        squareRetrieveStatus.textContent = "";
+
+                        previewSquarePayment(
+                            payment.payment_id,
+                            classifications
+                        );
+                    }
+                );
+
+                squarePaymentPreview.appendChild(
+                    applyButton
+                );
+            }
+
+            if (payment.ready_for_income) {
+                const readyNote =
+                    document.createElement("p");
+
+                readyNote.style.marginTop = "12px";
+                readyNote.textContent =
+                    "Classification complete. "
+                    + "Income has not been populated or saved yet.";
+
+                squarePaymentPreview.appendChild(
+                    readyNote
+                );
+            }
 
             const idText = document.createElement("p");
             idText.style.fontSize = "0.85em";
