@@ -9545,270 +9545,6 @@ def telnyx_sms_webhook():
 
 
 
-#  -------------------------
-#
-#  SQUARE WEBHOOK
-#
-#
-# Not production-safe until signature validation, idempotency,
-# spa/location mapping, and duplicate protection are complete.
-#  ------------------
-#  -------------------------
-
-@app.route("/square/webhook", methods=["POST"])
-def square_webhook():
-
-    return "", 204
-
-    payload = request.get_data(as_text=True)
-    signature = request.headers.get("x-square-hmacsha256-signature")
-
-    # validate signature here
-
-    event = request.get_json()
-
-    # look for booking.created
-    # parse booking id and details
-    # insert into incoming_square_bookings if not already present
-
-    return "", 200
-
-
-
-
-
-
-#  -------------------
-#   Square Incomming Bookings
-# SQUARE_INTEGRATION_STAGING
-#
-#
-# Not production-safe until signature validation, idempotency,
-# spa/location mapping, and duplicate protection are complete.
-#  ------------------
-
-@app.route("/incoming_bookings")
-def incoming_bookings():
-
-    return "", 204
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    cur.execute("""
-        SELECT
-            incoming_booking_id,
-            square_booking_id,
-            client_name,
-            client_email,
-            client_phone,
-            appointment_date,
-            appointment_time,
-            service_name,
-            status,
-            created_at
-        FROM incoming_square_bookings
-        ORDER BY
-            CASE WHEN status = 'new' THEN 0 ELSE 1 END,
-            appointment_date,
-            appointment_time,
-            created_at DESC
-    """)
-    bookings = cur.fetchall()
-
-    cur.close()
-    conn.close()
-
-    return render_template("incoming_bookings.html", bookings=bookings)
-
-
-#  -------------------------------------
-#   Square Incoming Booking Review
-#
-#
-# Not production-safe until signature validation, idempotency,
-# spa/location mapping, and duplicate protection are complete.
-#  ------------------
-#  ------------------------------------
-
-@app.route("/incoming_bookings/<int:incoming_booking_id>")
-def review_incoming_booking(incoming_booking_id):
-
-    return "", 204
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    cur.execute("""
-        SELECT
-            incoming_booking_id,
-            square_booking_id,
-            client_name,
-            client_email,
-            client_phone,
-            appointment_date,
-            appointment_time,
-            service_name,
-            status,
-            raw_payload,
-            created_at
-        FROM incoming_square_bookings
-        WHERE incoming_booking_id = %s
-    """, (incoming_booking_id,))
-    booking = cur.fetchone()
-
-    cur.close()
-    conn.close()
-
-    if not booking:
-        flash("Incoming booking not found.", "error")
-        return redirect(url_for("incoming_bookings"))
-
-    return render_template("review_incoming_booking.html", booking=booking)
-
-
-
-
-#  ----------------------------------
-#
-#  SQUARE Ignore incoming
-#
-#
-# Not production-safe until signature validation, idempotency,
-# spa/location mapping, and duplicate protection are complete.
-#  ------------------
-#  ----------------------------------
-
-@app.route("/incoming_bookings/<int:incoming_booking_id>/ignore", methods=["POST"])
-def ignore_incoming_booking(incoming_booking_id):
-
-    return "", 204
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    cur.execute("""
-        UPDATE incoming_square_bookings
-        SET status = 'ignored',
-            reviewed_at = CURRENT_TIMESTAMP
-        WHERE incoming_booking_id = %s
-    """, (incoming_booking_id,))
-
-    conn.commit()
-    cur.close()
-    conn.close()
-
-    flash("Incoming booking marked as ignored.", "success")
-    return redirect(url_for("incoming_bookings"))
-
-
-
-#  ------------------------------
-#
-#  SQUARE ADD NEW CLIENT
-#
-#
-# Not production-safe until signature validation, idempotency,
-# spa/location mapping, and duplicate protection are complete.
-#  ------------------#  NOT SAFE    NOT  SAFE
-#  -----------------------------
-
-
-@app.route("/incoming_bookings/<int:incoming_booking_id>/add_new_client")
-def add_new_client_from_booking(incoming_booking_id):
-
-    return "", 204
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    try:
-        cur.execute("""
-            SELECT *
-            FROM incoming_bookings
-            WHERE incoming_booking_id = %s
-        """, (incoming_booking_id,))
-
-        booking = cur.fetchone()
-
-        if not booking:
-            flash("Booking record not found.", "error")
-            return redirect(url_for("home"))
-
-        return render_template(
-            "add_new_client.html",
-            booking=booking
-        )
-
-    except Exception as e:
-        flash(f"Error loading booking: {str(e)}", "error")
-        return redirect(url_for("home"))
-
-    finally:
-        cur.close()
-        conn.close()
-
-    cur.execute("""
-        SELECT
-            incoming_booking_id,
-            client_name,
-            client_email,
-            client_phone,
-            appointment_date,
-            appointment_time,
-            service_name
-        FROM incoming_square_bookings
-        WHERE incoming_booking_id = %s
-    """, (incoming_booking_id,))
-    booking = cur.fetchone()
-
-    cur.close()
-    conn.close()
-
-    if not booking:
-        flash("Incoming booking not found.", "error")
-        return redirect(url_for("incoming_bookings"))
-
-    first_name, last_name = split_client_name(booking[1])
-
-    session["incoming_booking_data"] = {
-        "incoming_booking_id": booking[0],
-        "first_name": first_name,
-        "last_name": last_name,
-        "email": booking[2] or "",
-        "phone": booking[3] or "",
-        "appointment_date": booking[4].strftime("%Y-%m-%d") if booking[4] else "",
-        "appointment_time": booking[5].strftime("%H:%M:%S") if booking[5] else "",
-        "service_name": booking[6] or ""
-    }
-
-    return redirect(url_for("add_new_client"))
-
-
-
-
-
-
-#  ------------------
-#
-#  SQUARE MATCH EXISTING
-#
-#
-# Not production-safe until signature validation, idempotency,
-# spa/location mapping, and duplicate protection are complete.
-#  ------------------#     NOT SAFE  NOT SAFE
-#  ------------------
-
-
-
-app.route("/incoming_bookings/<int:incoming_booking_id>/match_existing_client")
-def match_existing_client_booking(incoming_booking_id):
-    flash("Next step: choose existing client and create appointment.", "info")
-    return redirect(url_for("review_incoming_booking", incoming_booking_id=incoming_booking_id))
-
-
-
-
 #   --------------------------------------------------------------
 #
 #
@@ -43972,9 +43708,6 @@ def add_appointment():
 
         status = (request.form.get("status") or "booked").strip()
         notes = (request.form.get("notes") or "").strip()
-        incoming_booking_id = (
-            request.form.get("incoming_booking_id") or ""
-        ).strip()
 
         provider_employee_id_raw = (
         request.form.get("provider_employee_id") or ""
@@ -44235,32 +43968,11 @@ def add_appointment():
         )
 
 
-        if incoming_booking_id:
-            cur.execute("""
-                UPDATE incoming_square_bookings
-                SET status = 'imported',
-                    reviewed_at = CURRENT_TIMESTAMP
-                WHERE incoming_booking_id = %s
-                  AND spa_id = %s
-            """, (incoming_booking_id, spa_id))
-
-            session.pop("incoming_booking_data", None)
-
         conn.commit()
         cur.close()
         conn.close()
 
         return redirect(url_for("daily_schedule", date=appointment_date))
-
-    incoming_booking_id = request.args.get("incoming_booking_id", "")
-    prefill_date = request.args.get("appointment_date", "") or selected_date
-    prefill_time = request.args.get("appointment_time", "")
-    prefill_service_name = request.args.get("service_name", "")
-
-
-
-
-
 
     client_search = request.args.get("client_search", "").strip()
 
@@ -44353,10 +44065,6 @@ def add_appointment():
         service_types=service_types,
         selected_date=selected_date,
         client_id=client_id,
-        incoming_booking_id=incoming_booking_id,
-        prefill_date=prefill_date,
-        prefill_time=prefill_time,
-        prefill_service_name=prefill_service_name,
         providers=providers
     )
 
@@ -46714,29 +46422,6 @@ def add_new_client():
 
     step1_data = session.get("new_client_step1", {})
 
-    if not step1_data:
-        incoming_booking_data = session.get("incoming_booking_data", {})
-        if incoming_booking_data:
-            step1_data = {
-                "first_name": incoming_booking_data.get("first_name", ""),
-                "last_name": incoming_booking_data.get("last_name", ""),
-                "phone": incoming_booking_data.get("phone", ""),
-                "email": incoming_booking_data.get("email", ""),
-                "birth_date": "",
-                "address": "",
-                "city": "",
-                "state": "TX",
-                "zip": "",
-                "spa_location_id": "",
-                "preferred_location_id": "",
-                "client_status": "Current",
-                "preferred_language": "",
-                "ok_to_call": True,
-                "ok_to_text": True,
-                "ok_to_email": True,
-                "preferred_contact_method": ""
-            }
-
     locations = get_dropdown_options("spa_locations", spa_id)
     client_statuses = get_dropdown_options("client_statuses", spa_id)
     preferred_languages = get_dropdown_options("preferred_languages", spa_id)
@@ -46829,7 +46514,6 @@ def add_new_client_step2():
         if action == "save":
             step1 = session.get("new_client_step1", {})
             step2 = session.get("new_client_step2", {})
-            incoming_booking_data = session.get("incoming_booking_data", {})
 
             conn = get_db_connection()
             cur = conn.cursor()
@@ -47131,19 +46815,6 @@ def add_new_client_step2():
                 "new_client_duplicate_override",
                 None
             )
-
-            if incoming_booking_data:
-                session.pop("incoming_booking_data", None)
-                return redirect(url_for(
-                    "add_appointment",
-                    client_id=new_client_id,
-                    incoming_booking_id=incoming_booking_data.get("incoming_booking_id", ""),
-                    appointment_date=incoming_booking_data.get("appointment_date", ""),
-                    appointment_time=incoming_booking_data.get("appointment_time", ""),
-                    service_name=incoming_booking_data.get("service_name", "")
-                ))
-
-            session.pop("incoming_booking_data", None)
 
             if selected_date:
                 return redirect(url_for(
@@ -51026,7 +50697,6 @@ def cancel_new_client():
     session.pop("new_client_step1", None)
     session.pop("new_client_step2", None)
     session.pop("new_client_duplicate_override", None)
-    session.pop("incoming_booking_data", None)
 
     return redirect(
         url_for("client_management")

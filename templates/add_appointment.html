@@ -24,30 +24,14 @@
     {% if client_id %}
         <input type="hidden" name="client_id" value="{{ client_id }}">
     {% endif %}
-    {% if incoming_booking_id %}
-        <input type="hidden" name="incoming_booking_id" value="{{ incoming_booking_id }}">
-    {% endif %}
-    {% if prefill_date %}
-        <input type="hidden" name="prefill_date" value="{{ prefill_date }}">
-    {% endif %}
-    {% if prefill_time %}
-        <input type="hidden" name="prefill_time" value="{{ prefill_time }}">
-    {% endif %}
-    {% if prefill_service_name %}
-        <input type="hidden" name="prefill_service_name" value="{{ prefill_service_name }}">
-    {% endif %}
 
 </form>
 
 <br>
 
 <form method="POST">
-    <input type="hidden" name="incoming_booking_id" value="{{ incoming_booking_id or '' }}">
     <input type="hidden" name="selected_date" value="{{ selected_date or '' }}">
     <input type="hidden" name="client_search" value="{{ client_search or '' }}">
-    <input type="hidden" name="prefill_date" value="{{ prefill_date or '' }}">
-    <input type="hidden" name="prefill_time" value="{{ prefill_time or '' }}">
-    <input type="hidden" name="prefill_service_name" value="{{ prefill_service_name or '' }}">
 
     <label for="client_id">Select Client<span style="color: red;"> *</span></label>
     <select name="client_id" id="client_id" required>
@@ -62,12 +46,6 @@
 
 
     </select>
-
-    {% if prefill_service_name %}
-        <p style="background-color: #e8f4ff; border-left: 5px solid #2b6cb0; padding: 10px; margin: 15px 0;">
-            <strong>Square booked service:</strong> {{ prefill_service_name }}
-        </p>
-    {% endif %}
 
     <label for="service_type_id">
         Service<span style="color: red;"> *</span>
@@ -172,14 +150,14 @@
     <input type="date"
            id="appointment_date"
            name="appointment_date"
-           value="{{ prefill_date or selected_date or '' }}"
+           value="{{ selected_date or '' }}"
            required>
 
     <label for="appointment_time">Time<span style= "color: red;"> *</span></label>
     <input type="time"
            id="appointment_time"
            name="appointment_time"
-           value="{{ prefill_time[:5] if prefill_time else '' }}"
+           value=""
            required>
 
    
