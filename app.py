@@ -8528,6 +8528,7 @@ def log_audit(
 def log_appointment_history(
     cur,
     spa_id,
+    business_unit_id,
     appointment_id,
     client_id,
     user_id,
@@ -8543,6 +8544,7 @@ def log_appointment_history(
     cur.execute("""
         INSERT INTO appointment_history (
             spa_id,
+            business_unit_id,
             appointment_id,
             client_id,
             user_id,
@@ -8555,9 +8557,10 @@ def log_appointment_history(
             new_status,
             notes
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """, (
         spa_id,
+        business_unit_id,
         appointment_id,
         client_id,
         user_id,
@@ -38337,8 +38340,16 @@ def calendar_view():
 @spa_required
 def quick_reschedule_appointment(appointment_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
     user_id = session.get("user_id")
-    role = session.get("role")
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to reschedule an appointment.",
+            "error"
+        )
+        return redirect(url_for("calendar_view"))
 
     appointment_date = request.form.get("appointment_date")
     appointment_time = request.form.get("appointment_time")
@@ -38350,12 +38361,17 @@ def quick_reschedule_appointment(appointment_id):
     conn = get_db_connection()
     cur = conn.cursor()
 
-    filter_sql = "WHERE appointment_id = %s"
-    params = [appointment_id]
+    filter_sql = """
+        WHERE appointment_id = %s
+          AND spa_id = %s
+          AND business_unit_id = %s
+    """
 
-    if role != "master_admin":
-        filter_sql += " AND spa_id = %s"
-        params.append(spa_id)
+    params = [
+        appointment_id,
+        spa_id,
+        business_unit_id
+    ]
 
     cur.execute(f"""
         SELECT
@@ -38467,6 +38483,7 @@ def quick_reschedule_appointment(appointment_id):
     log_appointment_history(
         cur,
         spa_id=appointment_spa_id,
+        business_unit_id=appointment_business_unit_id,
         appointment_id=appointment_id,
         client_id=client_id,
         user_id=user_id,
@@ -38511,6 +38528,13 @@ def quick_reschedule_appointment(appointment_id):
 @spa_required
 def appointment_details(appointment_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        return {
+            "error":
+                "A valid Provider Workspace is required."
+        }, 403
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -38559,6 +38583,7 @@ def appointment_details(appointment_id):
         JOIN clients c
             ON a.client_id = c.client_id
         AND a.spa_id = c.spa_id
+        AND a.business_unit_id = c.business_unit_id
         LEFT JOIN service_name_types snt
             ON a.service_type_id = snt.service_type_id
         AND a.spa_id = snt.spa_id
@@ -38567,7 +38592,12 @@ def appointment_details(appointment_id):
         AND a.spa_id = s.spa_id
         WHERE a.appointment_id = %s
         AND a.spa_id = %s
-    """, (appointment_id, spa_id))
+        AND a.business_unit_id = %s
+    """, (
+        appointment_id,
+        spa_id,
+        business_unit_id
+    ))
 
 
 
@@ -38589,13 +38619,15 @@ def appointment_details(appointment_id):
             owner_reviewed_at = COALESCE(owner_reviewed_at, NOW())
         WHERE appointment_id = %s
           AND spa_id = %s
+          AND business_unit_id = %s
           AND (
                 COALESCE(owner_reviewed, FALSE) = FALSE
              OR owner_reviewed_at IS NULL
           )
     """, (
         appointment_id,
-        spa_id
+        spa_id,
+        business_unit_id
     ))
 
     # GoDaddy appointments also require import-review fields.
@@ -38608,6 +38640,7 @@ def appointment_details(appointment_id):
             import_status = 'Reviewed'
         WHERE appointment_id = %s
           AND spa_id = %s
+          AND business_unit_id = %s
           AND LOWER(COALESCE(external_source, '')) = 'godaddy'
           AND (
                 COALESCE(import_reviewed, FALSE) = FALSE
@@ -38616,7 +38649,8 @@ def appointment_details(appointment_id):
     """, (
         session.get("user_id"),
         appointment_id,
-        spa_id
+        spa_id,
+        business_unit_id
     ))
 
     conn.commit()
@@ -38694,6 +38728,13 @@ def appointment_details(appointment_id):
 @spa_required
 def save_appointment_todays_contact(appointment_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        return {
+            "error":
+                "A valid Provider Workspace is required."
+        }, 403
 
     submitted = request.get_json(
         silent=True
@@ -38747,13 +38788,15 @@ def save_appointment_todays_contact(appointment_id):
                 todays_contact_note = %s
             WHERE appointment_id = %s
               AND spa_id = %s
+              AND business_unit_id = %s
             RETURNING client_id
         """, (
             contact_name or None,
             contact_phone or None,
             contact_note or None,
             appointment_id,
-            spa_id
+            spa_id,
+            business_unit_id
         ))
 
         updated_row = cur.fetchone()
@@ -38775,9 +38818,11 @@ def save_appointment_todays_contact(appointment_id):
             FROM clients
             WHERE client_id = %s
               AND spa_id = %s
+              AND business_unit_id = %s
         """, (
             client_id,
-            spa_id
+            spa_id,
+            business_unit_id
         ))
 
         client_row = cur.fetchone()
@@ -40068,7 +40113,15 @@ def calendar_year_view():
 @spa_required
 def daily_schedule():
     spa_id = current_spa_id()
-    role = session.get("role")
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to view the daily schedule.",
+            "error"
+        )
+        return redirect(url_for("appointments"))
 
     selected_date = request.args.get("date")
 
@@ -40080,12 +40133,17 @@ def daily_schedule():
     conn = get_db_connection()
     cur = conn.cursor()
 
-    filter_sql = "WHERE a.appointment_date = %s"
-    params = [display_date]
+    filter_sql = """
+        WHERE a.appointment_date = %s
+          AND a.spa_id = %s
+          AND a.business_unit_id = %s
+    """
 
-    if role != "master_admin":
-        filter_sql += " AND a.spa_id = %s"
-        params.append(spa_id)
+    params = [
+        display_date,
+        spa_id,
+        business_unit_id
+    ]
 
     cur.execute(f"""
         SELECT
@@ -40105,6 +40163,7 @@ def daily_schedule():
         JOIN clients c
             ON a.client_id = c.client_id
         AND a.spa_id = c.spa_id
+        AND a.business_unit_id = c.business_unit_id
         LEFT JOIN services s
             ON a.service_id = s.service_id
         AND a.spa_id = s.spa_id
@@ -43700,7 +43759,15 @@ from datetime import date
 @spa_required
 def appointments():
     spa_id = current_spa_id()
-    role = session.get("role")
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to view appointments.",
+            "error"
+        )
+        return redirect(url_for("dashboard"))
 
     start_date = request.args.get("start_date", "").strip()
     end_date = request.args.get("end_date", "").strip()
@@ -43747,17 +43814,22 @@ def appointments():
         JOIN clients c
             ON a.client_id = c.client_id
            AND a.spa_id = c.spa_id
+           AND a.business_unit_id = c.business_unit_id
         LEFT JOIN service_name_types s
             ON a.service_type_id = s.service_type_id
            AND a.spa_id = s.spa_id
         WHERE 1=1
     """
 
-    params = []
+    params = [
+        spa_id,
+        business_unit_id
+    ]
 
-    if role != "master_admin":
-        query += " AND a.spa_id = %s"
-        params.append(spa_id)
+    query += """
+        AND a.spa_id = %s
+        AND a.business_unit_id = %s
+    """
 
     # ---------------------------------------------------------
     # Coach-selected appointment
@@ -44032,7 +44104,12 @@ def add_appointment():
             FROM clients
             WHERE client_id = %s
               AND spa_id = %s
-        """, (client_id, spa_id))
+              AND business_unit_id = %s
+        """, (
+            client_id,
+            spa_id,
+            business_unit_id
+        ))
 
         if not cur.fetchone():
             flash("Invalid client selected.", "error")
@@ -44146,6 +44223,7 @@ def add_appointment():
         log_appointment_history(
             cur,
             spa_id=spa_id,
+            business_unit_id=business_unit_id,
             appointment_id=appointment_id,
             client_id=client_id,
             user_id=user_id,
@@ -44191,10 +44269,15 @@ def add_appointment():
             SELECT client_id, first_name, last_name
             FROM clients
             WHERE spa_id = %s
+            AND business_unit_id = %s
             AND active_client = TRUE
             AND last_name ILIKE %s
             ORDER BY last_name, first_name
-        """, (spa_id, f"%{client_search}%"))
+        """, (
+            spa_id,
+            business_unit_id,
+            f"%{client_search}%"
+        ))
 
         clients = cur.fetchall()
 
@@ -44217,10 +44300,14 @@ def add_appointment():
             SELECT client_id, first_name, last_name
             FROM clients
             WHERE spa_id = %s
+            AND business_unit_id = %s
             AND active_client = TRUE
             ORDER BY last_name, first_name
             LIMIT 25
-        """, (spa_id,))
+        """, (
+            spa_id,
+            business_unit_id
+        ))
 
         clients = cur.fetchall()
 
@@ -44297,18 +44384,31 @@ def add_appointment():
 @spa_required
 def edit_appointment(appointment_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
     user_id = session.get("user_id")
-    role = session.get("role")
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to edit an appointment.",
+            "error"
+        )
+        return redirect(url_for("appointments"))
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    filter_sql = "WHERE appointment_id = %s"
-    params = [appointment_id]
+    filter_sql = """
+        WHERE appointment_id = %s
+          AND spa_id = %s
+          AND business_unit_id = %s
+    """
 
-    if role != "master_admin":
-        filter_sql += " AND spa_id = %s"
-        params.append(spa_id)
+    params = [
+        appointment_id,
+        spa_id,
+        business_unit_id
+    ]
 
 
     if request.method == "POST":
@@ -44465,6 +44565,7 @@ def edit_appointment(appointment_id):
         log_appointment_history(
             cur,
             spa_id=spa_id,
+            business_unit_id=business_unit_id,
             appointment_id=appointment_id,
             client_id=client_id,
             user_id=user_id,
@@ -44532,18 +44633,31 @@ def edit_appointment(appointment_id):
 @spa_required
 def delete_appointment(appointment_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
     user_id = session.get("user_id")
-    role = session.get("role")
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to delete an appointment.",
+            "error"
+        )
+        return redirect(url_for("appointments"))
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    filter_sql = "WHERE appointment_id = %s"
-    params = [appointment_id]
+    filter_sql = """
+        WHERE appointment_id = %s
+          AND spa_id = %s
+          AND business_unit_id = %s
+    """
 
-    if role != "master_admin":
-        filter_sql += " AND spa_id = %s"
-        params.append(spa_id)
+    params = [
+        appointment_id,
+        spa_id,
+        business_unit_id
+    ]
 
     cur.execute(f"""
         SELECT client_id, appointment_date, appointment_time, status
@@ -44579,6 +44693,7 @@ def delete_appointment(appointment_id):
     log_appointment_history(
         cur,
         spa_id=spa_id,
+        business_unit_id=business_unit_id,
         appointment_id=appointment_id,
         client_id=client_id,
         user_id=user_id,
@@ -44625,8 +44740,17 @@ def delete_appointment(appointment_id):
 @spa_required
 def cancel_appointment(appointment_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
     user_id = session.get("user_id")
-    role = session.get("role")
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to cancel an appointment.",
+            "error"
+        )
+        return redirect(url_for("appointments"))
+
     return_week_start = (
         request.form.get("return_week_start")
         or ""
@@ -44662,13 +44786,16 @@ def cancel_appointment(appointment_id):
 
     filter_sql = """
         WHERE appointment_id = %s
+          AND spa_id = %s
+          AND business_unit_id = %s
           AND (appointment_date + appointment_time) > CURRENT_TIMESTAMP
     """
-    params = [appointment_id]
 
-    if role != "master_admin":
-        filter_sql += " AND spa_id = %s"
-        params.append(spa_id)
+    params = [
+        appointment_id,
+        spa_id,
+        business_unit_id
+    ]
 
     cur.execute(f"""
         SELECT client_id, appointment_date, appointment_time, status
@@ -44719,6 +44846,7 @@ def cancel_appointment(appointment_id):
     log_appointment_history(
         cur,
         spa_id=spa_id,
+        business_unit_id=business_unit_id,
         appointment_id=appointment_id,
         client_id=client_id,
         user_id=user_id,
@@ -44758,18 +44886,31 @@ def cancel_appointment(appointment_id):
 @spa_required
 def reschedule_appointment(appointment_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
     user_id = session.get("user_id")
-    role = session.get("role")
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to reschedule an appointment.",
+            "error"
+        )
+        return redirect(url_for("appointments"))
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    appt_filter = "WHERE appointment_id = %s"
-    appt_params = [appointment_id]
+    appt_filter = """
+        WHERE appointment_id = %s
+          AND spa_id = %s
+          AND business_unit_id = %s
+    """
 
-    if role != "master_admin":
-        appt_filter += " AND spa_id = %s"
-        appt_params.append(spa_id)
+    appt_params = [
+        appointment_id,
+        spa_id,
+        business_unit_id
+    ]
 
     if request.method == "POST":
         service_type_id = (request.form.get("service_type_id") or "").strip()
@@ -44785,23 +44926,7 @@ def reschedule_appointment(appointment_id):
             conn.close()
             return redirect(url_for("reschedule_appointment", appointment_id=appointment_id))
 
-        if role == "master_admin":
-            cur.execute("""
-                SELECT spa_id
-                FROM appointments
-                WHERE appointment_id = %s
-            """, (appointment_id,))
-            appt_spa = cur.fetchone()
-
-            if not appt_spa:
-                flash("Appointment not found.", "error")
-                cur.close()
-                conn.close()
-                return redirect(url_for("appointments"))
-
-            service_spa_id = appt_spa[0]
-        else:
-            service_spa_id = spa_id
+        service_spa_id = spa_id
 
 
         cur.execute(f"""
@@ -44986,6 +45111,7 @@ def reschedule_appointment(appointment_id):
         log_appointment_history(
             cur,
             spa_id=service_spa_id,
+            business_unit_id=business_unit_id,
             appointment_id=appointment_id,
             client_id=client_id,
             user_id=user_id,
@@ -45008,12 +45134,17 @@ def reschedule_appointment(appointment_id):
         return redirect(url_for("daily_schedule", date=appointment_date or original_date))
 
 
-    select_filter = "WHERE a.appointment_id = %s"
-    select_params = [appointment_id]
+    select_filter = """
+        WHERE a.appointment_id = %s
+          AND a.spa_id = %s
+          AND a.business_unit_id = %s
+    """
 
-    if role != "master_admin":
-        select_filter += " AND a.spa_id = %s"
-        select_params.append(spa_id)
+    select_params = [
+        appointment_id,
+        spa_id,
+        business_unit_id
+    ]
 
 
 
@@ -45033,6 +45164,7 @@ def reschedule_appointment(appointment_id):
         JOIN clients c
             ON a.client_id = c.client_id
            AND a.spa_id = c.spa_id
+           AND a.business_unit_id = c.business_unit_id
         {select_filter}
     """, select_params)
 
@@ -45085,18 +45217,31 @@ def reschedule_appointment(appointment_id):
 @spa_required
 def complete_appointment(appointment_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
     user_id = session.get("user_id")
-    role = session.get("role")
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to complete an appointment.",
+            "error"
+        )
+        return redirect(url_for("appointments"))
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    filter_sql = "WHERE appointment_id = %s"
-    params = [appointment_id]
+    filter_sql = """
+        WHERE appointment_id = %s
+          AND spa_id = %s
+          AND business_unit_id = %s
+    """
 
-    if role != "master_admin":
-        filter_sql += " AND spa_id = %s"
-        params.append(spa_id)
+    params = [
+        appointment_id,
+        spa_id,
+        business_unit_id
+    ]
 
     cur.execute(f"""
         SELECT client_id, appointment_date, appointment_time, status
@@ -45119,13 +45264,16 @@ def complete_appointment(appointment_id):
 
     complete_filter_sql = """
         WHERE appointment_id = %s
+          AND spa_id = %s
+          AND business_unit_id = %s
           AND (appointment_date + appointment_time) <= CURRENT_TIMESTAMP
     """
-    complete_params = [appointment_id]
 
-    if role != "master_admin":
-        complete_filter_sql += " AND spa_id = %s"
-        complete_params.append(spa_id)
+    complete_params = [
+        appointment_id,
+        spa_id,
+        business_unit_id
+    ]
 
     cur.execute(f"""
         UPDATE appointments
@@ -45156,6 +45304,7 @@ def complete_appointment(appointment_id):
     log_appointment_history(
         cur,
         spa_id=spa_id,
+        business_unit_id=business_unit_id,
         appointment_id=appointment_id,
         client_id=client_id,
         user_id=user_id,
@@ -45256,13 +45405,14 @@ def post_appointment_wrap_up(appointment_id):
         cur.execute("""
             INSERT INTO appointment_wrap_up (
                 spa_id,
+                business_unit_id,
                 appointment_id,
                 treatment_notes,
                 products_used,
                 home_care_advice,
                 provider_notes
             )
-            VALUES (%s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (spa_id, appointment_id)
             DO UPDATE SET
                 treatment_notes = EXCLUDED.treatment_notes,
@@ -45271,6 +45421,7 @@ def post_appointment_wrap_up(appointment_id):
                 provider_notes = EXCLUDED.provider_notes
         """, (
             appointment_spa_id,
+            business_unit_id,
             appointment_id,
             treatment_notes,
             products_used,
@@ -45314,6 +45465,7 @@ def post_appointment_wrap_up(appointment_id):
         log_appointment_history(
             cur,
             spa_id=appointment_spa_id,
+            business_unit_id=business_unit_id,
             appointment_id=appointment_id,
             client_id=referred_client_id,
             user_id=user_id,
@@ -45440,7 +45592,12 @@ def post_appointment_wrap_up(appointment_id):
         FROM appointment_wrap_up
         WHERE appointment_id = %s
           AND spa_id = %s
-    """, (appointment_id, appointment_spa_id))
+          AND business_unit_id = %s
+    """, (
+        appointment_id,
+        appointment_spa_id,
+        business_unit_id
+    ))
 
     wrap_up = cur.fetchone()
 
@@ -45544,17 +45701,30 @@ def post_appointment_wrap_up_saved(appointment_id):
 @spa_required
 def appointment_history(appointment_id):
     spa_id = current_spa_id()
-    role = session.get("role")
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to view appointment history.",
+            "error"
+        )
+        return redirect(url_for("appointments"))
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    filter_sql = "WHERE a.appointment_id = %s"
-    params = [appointment_id]
+    filter_sql = """
+        WHERE a.appointment_id = %s
+          AND a.spa_id = %s
+          AND a.business_unit_id = %s
+    """
 
-    if role != "master_admin":
-        filter_sql += " AND a.spa_id = %s"
-        params.append(spa_id)
+    params = [
+        appointment_id,
+        spa_id,
+        business_unit_id
+    ]
 
     cur.execute(f"""
         SELECT
@@ -45568,6 +45738,7 @@ def appointment_history(appointment_id):
         JOIN clients c
             ON a.client_id = c.client_id
            AND a.spa_id = c.spa_id
+           AND a.business_unit_id = c.business_unit_id
         {filter_sql}
     """, params)
 
@@ -45595,8 +45766,14 @@ def appointment_history(appointment_id):
         LEFT JOIN users u
             ON ah.user_id = u.user_id
         WHERE ah.appointment_id = %s
+          AND ah.spa_id = %s
+          AND ah.business_unit_id = %s
         ORDER BY ah.created_at DESC
-    """, (appointment_id,))
+    """, (
+        appointment_id,
+        spa_id,
+        business_unit_id
+    ))
 
     history_rows = cur.fetchall()
 
@@ -45779,6 +45956,7 @@ def client_history_detail(client_id):
         LEFT JOIN appointment_wrap_up aw
             ON a.appointment_id = aw.appointment_id
            AND a.spa_id = aw.spa_id
+           AND a.business_unit_id = aw.business_unit_id
         WHERE a.client_id = %s
           AND a.spa_id = %s
           AND a.business_unit_id = %s
@@ -45886,6 +46064,7 @@ def client_history_detail_two(client_id):
         LEFT JOIN appointment_wrap_up aw
             ON a.appointment_id = aw.appointment_id
            AND a.spa_id = aw.spa_id
+           AND a.business_unit_id = aw.business_unit_id
         WHERE a.client_id = %s
           AND a.spa_id = %s
           AND a.business_unit_id = %s
