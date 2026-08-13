@@ -192,6 +192,39 @@ def upsert_catalog_object(
     }
 
 
+def retrieve_catalog_object(
+    object_id,
+    *,
+    access_token,
+    environment="sandbox",
+):
+    """
+    Retrieve one current Square Catalog object.
+    """
+    object_id = str(object_id or "").strip()
+
+    if not object_id:
+        raise ValueError(
+            "Square catalog object ID is required."
+        )
+
+    data = _square_request(
+        "GET",
+        f"/catalog/object/{object_id}",
+        access_token=access_token,
+        environment=environment,
+    )
+
+    catalog_object = data.get("object")
+
+    if not isinstance(catalog_object, dict):
+        raise SquareServiceError(
+            "Square did not return the catalog object."
+        )
+
+    return catalog_object
+
+
 def delete_catalog_object(
     object_id,
     *,
