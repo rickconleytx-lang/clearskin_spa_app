@@ -447,8 +447,25 @@ Square Control Center | Peach Suite Pro
     }
 
     .square-sync-button[disabled] {
-        opacity: 0.75;
+        opacity: 1;
         cursor: wait !important;
+
+        background: #f5b942 !important;
+        color: #3d2b00 !important;
+        border-color: #d99a16 !important;
+
+        font-weight: 700;
+
+        box-shadow:
+            0 0 0 3px
+            rgba(245, 185, 66, 0.25);
+    }
+
+    .square-sync-button[disabled]
+    .square-sync-spinner {
+        width: 16px;
+        height: 16px;
+        border-width: 3px;
     }
 
     @keyframes square-sync-spin {
