@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block title %}
+Payment Integrations | Peach Suite Pro
+{% endblock %}
+
+{% block content %}
+
+<style>
+.payment-integrations-page {
+    max-width: 1050px;
+    margin: 0 auto;
+}
+
+.payment-integrations-intro {
+    margin: 14px 0 24px 0;
+    max-width: 760px;
+}
+
+.payment-integration-grid {
+    display: grid;
+    grid-template-columns:
+        repeat(auto-fit, minmax(280px, 1fr));
+    gap: 18px;
+    margin-top: 20px;
+}
+
+.payment-integration-card {
+    border: 1px solid #ddd;
+    border-radius: 14px;
+    padding: 22px;
+    background: #fff;
+}
+
+.payment-integration-card h2 {
+    margin-top: 0;
+}
+
+.payment-integration-status {
+    font-weight: 700;
+    margin: 12px 0;
+}
+</style>
+
+<div class="payment-integrations-page">
+
+    <div class="page-tool-pills">
+        <a
+            href="{{ url_for('spa_management') }}"
+            class="tool-pill tool-pill-small"
+        >
+            Business Management
+        </a>
+    </div>
+
+    <div class="page-title">
+        <h1>Payment Integrations</h1>
+    </div>
+
+    <p class="payment-integrations-intro">
+        Connect and manage payment platforms that work with
+        Peach Suite Pro. Processor fee schedules used for manual
+        payment calculations remain under Credit Card Processors.
+    </p>
+
+    <div class="payment-integration-grid">
+
+        <div class="payment-integration-card">
+
+            <h2>Square</h2>
+
+            <p>
+                Manage Square account connections, Catalog
+                mappings, payment reconciliation, and sync
+                activity.
+            </p>
+
+            <div class="payment-integration-status">
+                Square V2 integration
+            </div>
+
+            <div class="page-tool-pills">
+                <a
+                    href="{{ url_for(
+                        'square_control_center'
+                    ) }}"
+                    class="tool-pill tool-pill-small"
+                >
+                    Open Square Control Center
+                </a>
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+{% endblock %}

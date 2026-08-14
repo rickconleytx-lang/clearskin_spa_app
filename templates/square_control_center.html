@@ -1,0 +1,395 @@
+{% extends "base.html" %}
+
+{% block title %}
+Square Control Center | Peach Suite Pro
+{% endblock %}
+
+{% block content %}
+
+<style>
+.square-control-page {
+    max-width: 1180px;
+    margin: 0 auto;
+}
+
+.square-banner {
+    border: 1px solid #ddd;
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin: 14px 0 22px 0;
+}
+
+.square-banner strong {
+    display: block;
+    margin-bottom: 4px;
+}
+
+.square-environment-section {
+    border: 1px solid #ddd;
+    border-radius: 14px;
+    padding: 20px;
+    margin: 20px 0;
+    background: #fff;
+}
+
+.square-environment-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    flex-wrap: wrap;
+}
+
+.square-environment-heading h2 {
+    margin: 0;
+}
+
+.square-status {
+    display: inline-block;
+    border: 1px solid #bbb;
+    border-radius: 999px;
+    padding: 5px 10px;
+    font-weight: 700;
+}
+
+.square-summary-grid {
+    display: grid;
+    grid-template-columns:
+        repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+    margin-top: 18px;
+}
+
+.square-summary-card {
+    border: 1px solid #ddd;
+    border-radius: 12px;
+    padding: 14px;
+}
+
+.square-summary-card strong {
+    display: block;
+    font-size: 1.45rem;
+    margin-top: 5px;
+}
+
+.square-connection-details {
+    margin-top: 18px;
+    line-height: 1.7;
+}
+
+.square-location-list {
+    margin: 8px 0 0 18px;
+}
+
+.square-table-wrap {
+    overflow-x: auto;
+    margin-top: 14px;
+}
+
+.square-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.square-table th,
+.square-table td {
+    border-bottom: 1px solid #ddd;
+    padding: 10px 8px;
+    text-align: left;
+    vertical-align: top;
+}
+
+.square-table th {
+    white-space: nowrap;
+}
+
+.square-empty {
+    padding: 18px 0;
+}
+
+.square-coming-actions {
+    margin: 22px 0;
+}
+</style>
+
+<div class="square-control-page">
+
+    <div class="page-tool-pills">
+        <a
+            href="{{ url_for('payment_integrations') }}"
+            class="tool-pill tool-pill-small"
+        >
+            Payment Integrations
+        </a>
+
+        <a
+            href="{{ url_for('spa_management') }}"
+            class="tool-pill tool-pill-small"
+        >
+            Business Management
+        </a>
+    </div>
+
+    <div class="page-title">
+        <h1>Square Control Center</h1>
+    </div>
+
+    <div class="square-banner">
+        <strong>Square V2 Status</strong>
+        Peach Suite Pro is currently using the Square Sandbox
+        for integration testing. Production OAuth and live
+        outbound synchronization are not enabled yet.
+    </div>
+
+    {% for item in square_environments %}
+
+        <section class="square-environment-section">
+
+            <div class="square-environment-heading">
+
+                <h2>
+                    {{ item.environment|title }}
+                </h2>
+
+                {% if
+                    item.connection
+                    and item.connection.connection_status
+                        == 'connected'
+                %}
+                    <span class="square-status">
+                        Connected
+                    </span>
+                {% else %}
+                    <span class="square-status">
+                        Disconnected
+                    </span>
+                {% endif %}
+
+            </div>
+
+            <div class="square-summary-grid">
+
+                <div class="square-summary-card">
+                    Customers Mapped
+                    <strong>
+                        {{ item.customer_mappings }}
+                    </strong>
+                </div>
+
+                <div class="square-summary-card">
+                    Services Mapped
+                    <strong>
+                        {{ item.service_mappings }}
+                    </strong>
+                </div>
+
+                <div class="square-summary-card">
+                    Products Mapped
+                    <strong>
+                        {{ item.product_mappings }}
+                    </strong>
+                </div>
+
+                <div class="square-summary-card">
+                    Square Payments
+                    <strong>
+                        {{ item.payment_count }}
+                    </strong>
+                </div>
+
+                <div class="square-summary-card">
+                    Reconciled
+                    <strong>
+                        {{ item.reconciled_count }}
+                    </strong>
+                </div>
+
+                <div class="square-summary-card">
+                    Needs Review
+                    <strong>
+                        {{ item.unreconciled_count }}
+                    </strong>
+                </div>
+
+            </div>
+
+            {% if item.connection %}
+
+                <div class="square-connection-details">
+
+                    <div>
+                        <strong>Merchant ID:</strong>
+                        {{ item.connection.merchant_id or 'Not available' }}
+                    </div>
+
+                    <div>
+                        <strong>Connected Since:</strong>
+                        {{ item.connection.connected_at or 'Not recorded' }}
+                    </div>
+
+                    <div>
+                        <strong>Last Successful Sync:</strong>
+                        {{ item.connection.last_sync_at or 'No sync recorded' }}
+                    </div>
+
+                    <div>
+                        <strong>Square Locations:</strong>
+
+                        {% if item.connection.locations %}
+                            <ul class="square-location-list">
+                                {% for location in item.connection.locations %}
+                                    <li>
+                                        {{
+                                            location.location_name
+                                            or location.square_location_id
+                                        }}
+
+                                        {% if location.is_default %}
+                                            — Default
+                                        {% endif %}
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        {% else %}
+                            No active Square location mapped.
+                        {% endif %}
+                    </div>
+
+                </div>
+
+            {% else %}
+
+                <p class="square-empty">
+                    No {{ item.environment }} Square connection
+                    is configured for this workspace.
+                </p>
+
+            {% endif %}
+
+        </section>
+
+    {% endfor %}
+
+    <div class="square-coming-actions">
+        <div class="page-tool-pills">
+
+            <span class="tool-pill tool-pill-small">
+                Sync Activity — Coming Next
+            </span>
+
+            <span class="tool-pill tool-pill-small">
+                Sync All — Coming Next
+            </span>
+
+            {% if not production_square_enabled %}
+                <span class="tool-pill tool-pill-small">
+                    Connect Live Square — Not Yet Enabled
+                </span>
+            {% endif %}
+
+        </div>
+    </div>
+
+    <section class="square-environment-section">
+
+        <h2>Recent Square Payments</h2>
+
+        {% if recent_payments %}
+
+            <div class="square-table-wrap">
+
+                <table class="square-table">
+
+                    <thead>
+                        <tr>
+                            <th>Environment</th>
+                            <th>Square Payment</th>
+                            <th>Status</th>
+                            <th>Amount</th>
+                            <th>Fee</th>
+                            <th>Net</th>
+                            <th>Reconciliation</th>
+                            <th>Income</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+
+                        {% for payment in recent_payments %}
+
+                            <tr>
+                                <td>
+                                    {{ payment.environment|title }}
+                                </td>
+
+                                <td>
+                                    {{ payment.square_payment_id }}
+                                </td>
+
+                                <td>
+                                    {{ payment.payment_status or '—' }}
+                                </td>
+
+                                <td>
+                                    ${{ "%.2f"|format(
+                                        (payment.amount_cents or 0)
+                                        / 100
+                                    ) }}
+                                </td>
+
+                                <td>
+                                    ${{ "%.2f"|format(
+                                        (
+                                            payment.processing_fee_cents
+                                            or 0
+                                        ) / 100
+                                    ) }}
+                                </td>
+
+                                <td>
+                                    ${{ "%.2f"|format(
+                                        (
+                                            payment.net_received_cents
+                                            or 0
+                                        ) / 100
+                                    ) }}
+                                </td>
+
+                                <td>
+                                    {{
+                                        payment.reconciliation_status
+                                        or '—'
+                                    }}
+                                </td>
+
+                                <td>
+                                    {% if payment.income_id %}
+                                        #{{ payment.income_id }}
+                                    {% else %}
+                                        Not linked
+                                    {% endif %}
+                                </td>
+                            </tr>
+
+                        {% endfor %}
+
+                    </tbody>
+
+                </table>
+
+            </div>
+
+        {% else %}
+
+            <p class="square-empty">
+                No Square payments have been staged for this
+                workspace yet.
+            </p>
+
+        {% endif %}
+
+    </section>
+
+</div>
+
+{% endblock %}

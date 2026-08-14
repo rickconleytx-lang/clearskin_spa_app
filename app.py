@@ -14477,6 +14477,317 @@ def spa_management():
 
 ##############################################
 #
+#   PAYMENT INTEGRATIONS
+#
+###############################################
+
+
+@app.route("/payment-integrations")
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_view_business_management"
+)
+def payment_integrations():
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
+
+    return render_template(
+        "payment_integrations.html"
+    )
+
+
+##############################################
+#
+#   SQUARE CONTROL CENTER
+#
+###############################################
+
+
+@app.route("/payment-integrations/square")
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_view_business_management"
+)
+def square_control_center():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                sc.square_connection_id,
+                sc.environment,
+                sc.merchant_id,
+                sc.connection_status,
+                sc.connected_at,
+                sc.last_sync_at,
+                sl.square_location_mapping_id,
+                sl.square_location_id,
+                sl.location_name,
+                sl.is_active,
+                sl.is_default
+            FROM square_connections sc
+            LEFT JOIN square_locations sl
+              ON sl.square_connection_id =
+                    sc.square_connection_id
+             AND sl.spa_id = sc.spa_id
+             AND sl.business_unit_id =
+                    sc.business_unit_id
+             AND sl.environment = sc.environment
+             AND sl.is_active = TRUE
+            WHERE sc.spa_id = %s
+              AND sc.business_unit_id = %s
+            ORDER BY
+                CASE
+                    WHEN sc.environment = 'production'
+                        THEN 1
+                    ELSE 2
+                END,
+                sc.square_connection_id DESC,
+                sl.is_default DESC,
+                sl.square_location_mapping_id
+        """, (
+            spa_id,
+            business_unit_id,
+        ))
+
+        connection_rows = cur.fetchall()
+        connections_by_id = {}
+
+        for row in connection_rows:
+            connection_id = row[0]
+
+            if connection_id not in connections_by_id:
+                connections_by_id[connection_id] = {
+                    "square_connection_id": row[0],
+                    "environment": row[1],
+                    "merchant_id": row[2],
+                    "connection_status": row[3],
+                    "connected_at": row[4],
+                    "last_sync_at": row[5],
+                    "locations": [],
+                }
+
+            if row[6] is not None:
+                connections_by_id[
+                    connection_id
+                ]["locations"].append({
+                    "square_location_mapping_id": row[6],
+                    "square_location_id": row[7],
+                    "location_name": row[8],
+                    "is_active": row[9],
+                    "is_default": row[10],
+                })
+
+        connections = list(
+            connections_by_id.values()
+        )
+
+        cur.execute("""
+            SELECT
+                environment,
+                COUNT(*) FILTER (
+                    WHERE is_active = TRUE
+                )
+            FROM square_customer_mappings
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+            GROUP BY environment
+        """, (
+            spa_id,
+            business_unit_id,
+        ))
+
+        customer_counts = {
+            row[0]: row[1]
+            for row in cur.fetchall()
+        }
+
+        cur.execute("""
+            SELECT
+                environment,
+                COUNT(*) FILTER (
+                    WHERE mapping_type = 'service_type'
+                      AND is_active = TRUE
+                ),
+                COUNT(*) FILTER (
+                    WHERE mapping_type =
+                        'inventory_product'
+                      AND is_active = TRUE
+                )
+            FROM square_catalog_mappings
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+            GROUP BY environment
+        """, (
+            spa_id,
+            business_unit_id,
+        ))
+
+        catalog_counts = {
+            row[0]: {
+                "services": row[1],
+                "products": row[2],
+            }
+            for row in cur.fetchall()
+        }
+
+        cur.execute("""
+            SELECT
+                environment,
+                COUNT(*),
+                COUNT(*) FILTER (
+                    WHERE income_id IS NOT NULL
+                ),
+                COUNT(*) FILTER (
+                    WHERE income_id IS NULL
+                )
+            FROM square_payments
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+            GROUP BY environment
+        """, (
+            spa_id,
+            business_unit_id,
+        ))
+
+        payment_counts = {
+            row[0]: {
+                "total": row[1],
+                "reconciled": row[2],
+                "unreconciled": row[3],
+            }
+            for row in cur.fetchall()
+        }
+
+        cur.execute("""
+            SELECT
+                environment,
+                square_payment_id,
+                payment_status,
+                amount_cents,
+                processing_fee_cents,
+                net_received_cents,
+                reconciliation_status,
+                income_id,
+                square_created_at,
+                retrieved_at
+            FROM square_payments
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+            ORDER BY
+                COALESCE(
+                    square_created_at,
+                    retrieved_at,
+                    created_at
+                ) DESC,
+                square_payment_record_id DESC
+            LIMIT 10
+        """, (
+            spa_id,
+            business_unit_id,
+        ))
+
+        recent_payments = [
+            {
+                "environment": row[0],
+                "square_payment_id": row[1],
+                "payment_status": row[2],
+                "amount_cents": row[3],
+                "processing_fee_cents": row[4],
+                "net_received_cents": row[5],
+                "reconciliation_status": row[6],
+                "income_id": row[7],
+                "square_created_at": row[8],
+                "retrieved_at": row[9],
+            }
+            for row in cur.fetchall()
+        ]
+
+    finally:
+        cur.close()
+        conn.close()
+
+    environments = []
+
+    for environment in (
+        "sandbox",
+        "production",
+    ):
+        connection = next(
+            (
+                item
+                for item in connections
+                if item["environment"] == environment
+            ),
+            None,
+        )
+
+        catalog = catalog_counts.get(
+            environment,
+            {},
+        )
+
+        payments = payment_counts.get(
+            environment,
+            {},
+        )
+
+        environments.append({
+            "environment": environment,
+            "connection": connection,
+            "customer_mappings": (
+                customer_counts.get(
+                    environment,
+                    0,
+                )
+            ),
+            "service_mappings": (
+                catalog.get(
+                    "services",
+                    0,
+                )
+            ),
+            "product_mappings": (
+                catalog.get(
+                    "products",
+                    0,
+                )
+            ),
+            "payment_count": payments.get(
+                "total",
+                0,
+            ),
+            "reconciled_count": payments.get(
+                "reconciled",
+                0,
+            ),
+            "unreconciled_count": payments.get(
+                "unreconciled",
+                0,
+            ),
+        })
+
+    return render_template(
+        "square_control_center.html",
+        square_environments=environments,
+        recent_payments=recent_payments,
+        production_square_enabled=False,
+    )
+
+
+##############################################
+#
 #   USER SETTINGS
 #
 #
