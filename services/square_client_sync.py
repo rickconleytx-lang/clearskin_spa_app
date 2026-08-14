@@ -323,6 +323,183 @@ def _build_update_payload(
     return payload
 
 
+def _is_square_invalid_phone_error(exc):
+    """
+    Identify only Square's specific invalid
+    phone_number validation failure.
+
+    Unrelated Square HTTP 400 responses must continue
+    to fail normally.
+    """
+    if not isinstance(
+        exc,
+        square_service.SquareServiceError,
+    ):
+        return False
+
+    message = str(
+        exc or ""
+    ).strip().lower()
+
+    return (
+        "http 400" in message
+        and "phone_number" in message
+        and "valid phone number" in message
+    )
+
+
+def _phone_omission_result_fields(
+    phone_omitted
+):
+    """
+    Add an audit note to a successful sync when Square
+    rejected the PSP phone value.
+
+    Peach Suite Pro's stored client phone is not changed.
+    """
+    if not phone_omitted:
+        return {}
+
+    return {
+        "reason": "square_phone_omitted_invalid",
+        "message": (
+            "Square rejected the PSP phone number as "
+            "invalid. The customer synchronized without "
+            "that phone value; the PSP client record was "
+            "not changed."
+        ),
+    }
+
+
+def _update_customer_with_phone_fallback(
+    customer_id,
+    updates,
+    *,
+    access_token,
+    environment,
+):
+    """
+    Attempt the normal Square Customer update.
+
+    If Square specifically rejects phone_number, retry
+    once with an empty phone string so Square does not
+    retain a stale phone value.
+
+    Every unrelated Square error is re-raised.
+    """
+    payload = dict(
+        updates or {}
+    )
+
+    try:
+        updated = (
+            square_service.update_customer(
+                customer_id,
+                payload,
+                access_token=access_token,
+                environment=environment,
+            )
+        )
+
+        return updated, False
+
+    except square_service.SquareServiceError as exc:
+        if (
+            "phone_number" not in payload
+            or not _is_square_invalid_phone_error(
+                exc
+            )
+        ):
+            raise
+
+        fallback_payload = dict(
+            payload
+        )
+
+        fallback_payload[
+            "phone_number"
+        ] = ""
+
+        updated = (
+            square_service.update_customer(
+                customer_id,
+                fallback_payload,
+                access_token=access_token,
+                environment=environment,
+            )
+        )
+
+        return updated, True
+
+
+def _create_customer_with_phone_fallback(
+    customer,
+    *,
+    idempotency_key,
+    access_token,
+    environment,
+):
+    """
+    Attempt normal Square Customer creation.
+
+    If Square specifically rejects phone_number, retry
+    exactly once without phone_number.
+
+    The fallback uses a separate deterministic
+    idempotency key because the request body changed.
+    """
+    payload = dict(
+        customer or {}
+    )
+
+    try:
+        created = (
+            square_service.create_customer(
+                payload,
+                idempotency_key=(
+                    idempotency_key
+                ),
+                access_token=access_token,
+                environment=environment,
+            )
+        )
+
+        return created, False
+
+    except square_service.SquareServiceError as exc:
+        if (
+            "phone_number" not in payload
+            or not _is_square_invalid_phone_error(
+                exc
+            )
+        ):
+            raise
+
+        fallback_payload = dict(
+            payload
+        )
+
+        fallback_payload.pop(
+            "phone_number",
+            None,
+        )
+
+        fallback_key = (
+            f"{idempotency_key}-no-phone"
+        )
+
+        created = (
+            square_service.create_customer(
+                fallback_payload,
+                idempotency_key=fallback_key,
+                access_token=access_token,
+                environment=environment,
+            )
+        )
+
+        return created, True
+
+
 def _search_exact(
     field_name,
     value,
@@ -451,20 +628,38 @@ def _find_existing_square_customer(
         )
 
     if profile["phone"]:
-        phone_matches = (
-            _unique_customers_by_id(
-                _search_exact(
-                    "phone_number",
-                    profile["phone"],
-                    access_token=(
-                        access_token
-                    ),
-                    environment=(
-                        environment
-                    ),
+        try:
+            phone_matches = (
+                _unique_customers_by_id(
+                    _search_exact(
+                        "phone_number",
+                        profile["phone"],
+                        access_token=(
+                            access_token
+                        ),
+                        environment=(
+                            environment
+                        ),
+                    )
                 )
             )
-        )
+
+        except square_service.SquareServiceError as exc:
+            if not _is_square_invalid_phone_error(
+                exc
+            ):
+                raise
+
+            # Square rejected the value itself. Do not
+            # change PSP, but stop using the bad phone
+            # for this synchronization attempt.
+            profile["phone"] = ""
+
+            profile[
+                "_square_phone_omitted"
+            ] = True
+
+            phone_matches = {}
 
     candidates = dict(
         email_matches
@@ -960,6 +1155,8 @@ def sync_client_to_square(
             "before Square synchronization."
         )
 
+    phone_omitted = False
+
     # -----------------------------------------------------
     # Existing mapping: update exactly that Square profile.
     # -----------------------------------------------------
@@ -1001,9 +1198,11 @@ def sync_client_to_square(
                 )
             )
 
-        updated = (
-            square_service
-            .update_customer(
+        (
+            updated,
+            fallback_phone_omitted,
+        ) = (
+            _update_customer_with_phone_fallback(
                 canonical_id,
                 _build_update_payload(
                     profile,
@@ -1017,6 +1216,11 @@ def sync_client_to_square(
                 ),
                 environment=environment,
             )
+        )
+
+        phone_omitted = (
+            phone_omitted
+            or fallback_phone_omitted
         )
 
         _persist_mapping(
@@ -1069,6 +1273,9 @@ def sync_client_to_square(
             "reference_id": (
                 reference_id
             ),
+            **_phone_omission_result_fields(
+                phone_omitted
+            ),
         }
 
     # -----------------------------------------------------
@@ -1082,6 +1289,12 @@ def sync_client_to_square(
                 access_token
             ),
             environment=environment,
+        )
+    )
+
+    phone_omitted = bool(
+        profile.get(
+            "_square_phone_omitted"
         )
     )
 
@@ -1121,9 +1334,11 @@ def sync_client_to_square(
             )
         )
 
-        updated = (
-            square_service
-            .update_customer(
+        (
+            updated,
+            fallback_phone_omitted,
+        ) = (
+            _update_customer_with_phone_fallback(
                 square_customer[
                     "id"
                 ],
@@ -1139,6 +1354,11 @@ def sync_client_to_square(
                 ),
                 environment=environment,
             )
+        )
+
+        phone_omitted = (
+            phone_omitted
+            or fallback_phone_omitted
         )
 
         mapping_row = (
@@ -1198,6 +1418,9 @@ def sync_client_to_square(
             "reference_id": (
                 reference_id
             ),
+            **_phone_omission_result_fields(
+                phone_omitted
+            ),
         }
 
     # -----------------------------------------------------
@@ -1207,9 +1430,11 @@ def sync_client_to_square(
     # succeeds but the PSP mapping write is interrupted.
     # -----------------------------------------------------
 
-    created = (
-        square_service
-        .create_customer(
+    (
+        created,
+        fallback_phone_omitted,
+    ) = (
+        _create_customer_with_phone_fallback(
             _build_create_payload(
                 profile
             ),
@@ -1223,6 +1448,11 @@ def sync_client_to_square(
             ),
             environment=environment,
         )
+    )
+
+    phone_omitted = (
+        phone_omitted
+        or fallback_phone_omitted
     )
 
     square_customer_id = str(
@@ -1284,6 +1514,9 @@ def sync_client_to_square(
         ),
         "reference_id": (
             reference_id
+        ),
+        **_phone_omission_result_fields(
+            phone_omitted
         ),
     }
 
