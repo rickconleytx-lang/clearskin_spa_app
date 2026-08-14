@@ -15006,6 +15006,233 @@ def square_control_center():
 
 ##############################################
 #
+#   SQUARE SYNC ACTIVITY
+#
+###############################################
+
+
+@app.route("/payment-integrations/square/sync-activity")
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_view_business_management"
+)
+def square_sync_activity():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
+
+    allowed_statuses = {
+        "all",
+        "pending",
+        "successful",
+        "failed",
+        "needs_attention",
+        "skipped",
+    }
+
+    allowed_entities = {
+        "all",
+        "client",
+        "service",
+        "inventory_product",
+    }
+
+    allowed_environments = {
+        "all",
+        "sandbox",
+        "production",
+    }
+
+    status_filter = (
+        request.args.get(
+            "status",
+            "all",
+        )
+        .strip()
+        .lower()
+    )
+
+    entity_filter = (
+        request.args.get(
+            "entity",
+            "all",
+        )
+        .strip()
+        .lower()
+    )
+
+    environment_filter = (
+        request.args.get(
+            "environment",
+            "all",
+        )
+        .strip()
+        .lower()
+    )
+
+    if status_filter not in allowed_statuses:
+        status_filter = "all"
+
+    if entity_filter not in allowed_entities:
+        entity_filter = "all"
+
+    if environment_filter not in allowed_environments:
+        environment_filter = "all"
+
+    where_parts = [
+        "spa_id = %s",
+        "business_unit_id = %s",
+    ]
+
+    params = [
+        spa_id,
+        business_unit_id,
+    ]
+
+    if status_filter != "all":
+        where_parts.append(
+            "sync_status = %s"
+        )
+        params.append(
+            status_filter
+        )
+
+    if entity_filter != "all":
+        where_parts.append(
+            "entity_type = %s"
+        )
+        params.append(
+            entity_filter
+        )
+
+    if environment_filter != "all":
+        where_parts.append(
+            "environment = %s"
+        )
+        params.append(
+            environment_filter
+        )
+
+    where_sql = " AND ".join(
+        where_parts
+    )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                COUNT(*),
+                COUNT(*) FILTER (
+                    WHERE sync_status = 'pending'
+                ),
+                COUNT(*) FILTER (
+                    WHERE sync_status = 'successful'
+                ),
+                COUNT(*) FILTER (
+                    WHERE sync_status = 'failed'
+                ),
+                COUNT(*) FILTER (
+                    WHERE sync_status = 'needs_attention'
+                ),
+                COUNT(*) FILTER (
+                    WHERE sync_status = 'skipped'
+                )
+            FROM square_sync_activity
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+        """, (
+            spa_id,
+            business_unit_id,
+        ))
+
+        summary_row = cur.fetchone()
+
+        summary = {
+            "all": summary_row[0],
+            "pending": summary_row[1],
+            "successful": summary_row[2],
+            "failed": summary_row[3],
+            "needs_attention": summary_row[4],
+            "skipped": summary_row[5],
+        }
+
+        cur.execute(f"""
+            SELECT
+                square_sync_activity_id,
+                environment,
+                entity_type,
+                entity_id,
+                trigger_action,
+                source,
+                sync_status,
+                raw_status,
+                result_action,
+                square_object_id,
+                square_parent_object_id,
+                reason,
+                message,
+                attempt_number,
+                retry_of_activity_id,
+                requested_by,
+                requested_at,
+                started_at,
+                completed_at,
+                created_at
+            FROM square_sync_activity
+            WHERE {where_sql}
+            ORDER BY
+                created_at DESC,
+                square_sync_activity_id DESC
+            LIMIT 100
+        """, tuple(params))
+
+        activity_rows = [
+            {
+                "square_sync_activity_id": row[0],
+                "environment": row[1],
+                "entity_type": row[2],
+                "entity_id": row[3],
+                "trigger_action": row[4],
+                "source": row[5],
+                "sync_status": row[6],
+                "raw_status": row[7],
+                "result_action": row[8],
+                "square_object_id": row[9],
+                "square_parent_object_id": row[10],
+                "reason": row[11],
+                "message": row[12],
+                "attempt_number": row[13],
+                "retry_of_activity_id": row[14],
+                "requested_by": row[15],
+                "requested_at": row[16],
+                "started_at": row[17],
+                "completed_at": row[18],
+                "created_at": row[19],
+            }
+            for row in cur.fetchall()
+        ]
+
+    finally:
+        cur.close()
+        conn.close()
+
+    return render_template(
+        "square_sync_activity.html",
+        activity_rows=activity_rows,
+        summary=summary,
+        status_filter=status_filter,
+        entity_filter=entity_filter,
+        environment_filter=environment_filter,
+    )
+
+
+##############################################
+#
 #   USER SETTINGS
 #
 #

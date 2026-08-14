@@ -1,0 +1,414 @@
+{% extends "base.html" %}
+
+{% block title %}
+Square Sync Activity | Peach Suite Pro
+{% endblock %}
+
+{% block content %}
+
+<style>
+.square-sync-page {
+    max-width: 1280px;
+    margin: 0 auto;
+}
+
+.square-sync-intro {
+    margin: 14px 0 20px 0;
+    max-width: 860px;
+}
+
+.square-sync-summary {
+    display: grid;
+    grid-template-columns:
+        repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+    margin: 20px 0;
+}
+
+.square-sync-summary-card {
+    border: 1px solid #ddd;
+    border-radius: 12px;
+    padding: 14px;
+    background: #fff;
+}
+
+.square-sync-summary-card strong {
+    display: block;
+    font-size: 1.45rem;
+    margin-top: 5px;
+}
+
+.square-sync-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: end;
+    margin: 20px 0;
+    padding: 16px;
+    border: 1px solid #ddd;
+    border-radius: 12px;
+    background: #fff;
+}
+
+.square-sync-filter-field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.square-sync-filter-field label {
+    font-weight: 700;
+}
+
+.square-sync-filter-field select {
+    min-width: 170px;
+    padding: 8px 10px;
+}
+
+.square-sync-table-wrap {
+    overflow-x: auto;
+    margin-top: 14px;
+}
+
+.square-sync-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #fff;
+}
+
+.square-sync-table th,
+.square-sync-table td {
+    border-bottom: 1px solid #ddd;
+    padding: 10px 8px;
+    text-align: left;
+    vertical-align: top;
+}
+
+.square-sync-table th {
+    white-space: nowrap;
+}
+
+.square-sync-status {
+    display: inline-block;
+    border: 1px solid #bbb;
+    border-radius: 999px;
+    padding: 4px 9px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.square-sync-detail {
+    max-width: 310px;
+    overflow-wrap: anywhere;
+}
+
+.square-sync-empty {
+    border: 1px solid #ddd;
+    border-radius: 12px;
+    padding: 22px;
+    background: #fff;
+    margin-top: 16px;
+}
+</style>
+
+<div class="square-sync-page">
+
+    <div class="page-tool-pills">
+        <a
+            href="{{ url_for('square_control_center') }}"
+            class="tool-pill tool-pill-small"
+        >
+            Square Control Center
+        </a>
+
+        <a
+            href="{{ url_for('payment_integrations') }}"
+            class="tool-pill tool-pill-small"
+        >
+            Payment Integrations
+        </a>
+    </div>
+
+    <div class="page-title">
+        <h1>Square Sync Activity</h1>
+    </div>
+
+    <p class="square-sync-intro">
+        Review Client, Service, and Inventory Product synchronization
+        activity for the current Provider Workspace. This page is
+        read-only while Square V2 synchronization and retry controls
+        are being completed.
+    </p>
+
+    <div class="square-sync-summary">
+
+        <div class="square-sync-summary-card">
+            All
+            <strong>{{ summary.all }}</strong>
+        </div>
+
+        <div class="square-sync-summary-card">
+            Pending
+            <strong>{{ summary.pending }}</strong>
+        </div>
+
+        <div class="square-sync-summary-card">
+            Successful
+            <strong>{{ summary.successful }}</strong>
+        </div>
+
+        <div class="square-sync-summary-card">
+            Failed
+            <strong>{{ summary.failed }}</strong>
+        </div>
+
+        <div class="square-sync-summary-card">
+            Needs Attention
+            <strong>{{ summary.needs_attention }}</strong>
+        </div>
+
+        <div class="square-sync-summary-card">
+            Skipped
+            <strong>{{ summary.skipped }}</strong>
+        </div>
+
+    </div>
+
+    <form
+        method="get"
+        action="{{ url_for('square_sync_activity') }}"
+        class="square-sync-filters"
+    >
+
+        <div class="square-sync-filter-field">
+            <label for="status">Status</label>
+            <select id="status" name="status">
+                <option value="all"
+                    {% if status_filter == 'all' %}selected{% endif %}
+                >
+                    All
+                </option>
+                <option value="pending"
+                    {% if status_filter == 'pending' %}selected{% endif %}
+                >
+                    Pending
+                </option>
+                <option value="successful"
+                    {% if status_filter == 'successful' %}selected{% endif %}
+                >
+                    Successful
+                </option>
+                <option value="failed"
+                    {% if status_filter == 'failed' %}selected{% endif %}
+                >
+                    Failed
+                </option>
+                <option value="needs_attention"
+                    {% if status_filter == 'needs_attention' %}selected{% endif %}
+                >
+                    Needs Attention
+                </option>
+                <option value="skipped"
+                    {% if status_filter == 'skipped' %}selected{% endif %}
+                >
+                    Skipped
+                </option>
+            </select>
+        </div>
+
+        <div class="square-sync-filter-field">
+            <label for="entity">Object</label>
+            <select id="entity" name="entity">
+                <option value="all"
+                    {% if entity_filter == 'all' %}selected{% endif %}
+                >
+                    All
+                </option>
+                <option value="client"
+                    {% if entity_filter == 'client' %}selected{% endif %}
+                >
+                    Clients
+                </option>
+                <option value="service"
+                    {% if entity_filter == 'service' %}selected{% endif %}
+                >
+                    Services
+                </option>
+                <option value="inventory_product"
+                    {% if entity_filter == 'inventory_product' %}selected{% endif %}
+                >
+                    Products
+                </option>
+            </select>
+        </div>
+
+        <div class="square-sync-filter-field">
+            <label for="environment">Environment</label>
+            <select id="environment" name="environment">
+                <option value="all"
+                    {% if environment_filter == 'all' %}selected{% endif %}
+                >
+                    All
+                </option>
+                <option value="sandbox"
+                    {% if environment_filter == 'sandbox' %}selected{% endif %}
+                >
+                    Sandbox
+                </option>
+                <option value="production"
+                    {% if environment_filter == 'production' %}selected{% endif %}
+                >
+                    Production
+                </option>
+            </select>
+        </div>
+
+        <div class="page-tool-pills">
+            <button
+                type="submit"
+                class="tool-pill tool-pill-small"
+            >
+                Apply Filters
+            </button>
+
+            <a
+                href="{{ url_for('square_sync_activity') }}"
+                class="tool-pill tool-pill-small"
+            >
+                Clear
+            </a>
+        </div>
+
+    </form>
+
+    {% if activity_rows %}
+
+        <div class="square-sync-table-wrap">
+
+            <table class="square-sync-table">
+
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Environment</th>
+                        <th>Object</th>
+                        <th>PSP ID</th>
+                        <th>Trigger</th>
+                        <th>Result</th>
+                        <th>Status</th>
+                        <th>Attempt</th>
+                        <th>Square ID</th>
+                        <th>Reason / Message</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+
+                    {% for activity in activity_rows %}
+
+                        <tr>
+                            <td>
+                                {{
+                                    activity.completed_at
+                                    or activity.created_at
+                                    or '—'
+                                }}
+                            </td>
+
+                            <td>
+                                {{ activity.environment|title }}
+                            </td>
+
+                            <td>
+                                {% if activity.entity_type == 'client' %}
+                                    Client
+                                {% elif activity.entity_type == 'service' %}
+                                    Service
+                                {% elif activity.entity_type == 'inventory_product' %}
+                                    Product
+                                {% else %}
+                                    {{ activity.entity_type }}
+                                {% endif %}
+                            </td>
+
+                            <td>
+                                #{{ activity.entity_id }}
+                            </td>
+
+                            <td>
+                                {{ activity.trigger_action|replace('_', ' ')|title }}
+                            </td>
+
+                            <td>
+                                {{
+                                    (
+                                        activity.result_action
+                                        or activity.raw_status
+                                        or '—'
+                                    )
+                                    |replace('_', ' ')
+                                    |title
+                                }}
+                            </td>
+
+                            <td>
+                                <span class="square-sync-status">
+                                    {{
+                                        activity.sync_status
+                                        |replace('_', ' ')
+                                        |title
+                                    }}
+                                </span>
+                            </td>
+
+                            <td>
+                                {{ activity.attempt_number }}
+                            </td>
+
+                            <td class="square-sync-detail">
+                                {{ activity.square_object_id or '—' }}
+                            </td>
+
+                            <td class="square-sync-detail">
+                                {% if activity.reason %}
+                                    <strong>
+                                        {{
+                                            activity.reason
+                                            |replace('_', ' ')
+                                        }}
+                                    </strong>
+                                {% endif %}
+
+                                {% if activity.message %}
+                                    {% if activity.reason %}
+                                        <br>
+                                    {% endif %}
+                                    {{ activity.message }}
+                                {% endif %}
+
+                                {% if not activity.reason and not activity.message %}
+                                    —
+                                {% endif %}
+                            </td>
+                        </tr>
+
+                    {% endfor %}
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+    {% else %}
+
+        <div class="square-sync-empty">
+            No Square synchronization activity matches the selected
+            filters for this workspace.
+        </div>
+
+    {% endif %}
+
+</div>
+
+{% endblock %}
