@@ -13787,6 +13787,209 @@ def toggle_service_type_public_website(
 
 
 # =========================================================
+# SQUARE SYNC ACTIVITY LOGGER
+# =========================================================
+
+
+def _record_square_sync_activity(
+    *,
+    spa_id,
+    business_unit_id,
+    environment,
+    entity_type,
+    entity_id,
+    trigger_action,
+    result,
+    source="automatic",
+    retry_of_activity_id=None,
+    attempt_number=1,
+):
+    """
+    Best-effort historical activity record for a completed
+    PSP -> Square synchronization attempt.
+
+    This logger never performs Square work itself and must
+    never roll back an already-saved PSP record.
+
+    Current production-disabled preflight skips intentionally
+    return before this logger is called so Sync Activity is not
+    filled with meaningless rollout-gate events.
+    """
+
+    if not business_unit_id:
+        return None
+
+    result = result or {}
+
+    raw_status = str(
+        result.get("status") or ""
+    ).strip().lower()
+
+    status_map = {
+        "synced": "successful",
+        "error": "failed",
+        "needs_attention": "needs_attention",
+        "skipped": "skipped",
+    }
+
+    sync_status = status_map.get(
+        raw_status,
+        "failed",
+    )
+
+    reason = result.get("reason")
+    message = result.get("message")
+
+    if raw_status not in status_map:
+        reason = (
+            reason
+            or "unexpected_square_sync_status"
+        )
+
+        if not message:
+            message = (
+                "Square synchronization returned an "
+                "unrecognized status."
+            )
+
+    square_connection_id = result.get(
+        "square_connection_id"
+    )
+
+    square_object_id = None
+    square_parent_object_id = None
+
+    if entity_type == "client":
+        square_object_id = result.get(
+            "square_customer_id"
+        )
+
+    elif entity_type in (
+        "service",
+        "inventory_product",
+    ):
+        square_object_id = result.get(
+            "square_catalog_object_id"
+        )
+        square_parent_object_id = result.get(
+            "square_item_id"
+        )
+
+    conn = None
+    cur = None
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        if not square_connection_id:
+            cur.execute("""
+                SELECT square_connection_id
+                FROM square_connections
+                WHERE spa_id = %s
+                  AND business_unit_id = %s
+                  AND environment = %s
+                ORDER BY square_connection_id DESC
+                LIMIT 1
+            """, (
+                spa_id,
+                business_unit_id,
+                environment,
+            ))
+
+            connection_row = cur.fetchone()
+
+            if connection_row:
+                square_connection_id = (
+                    connection_row[0]
+                )
+
+        cur.execute("""
+            INSERT INTO square_sync_activity (
+                spa_id,
+                business_unit_id,
+                square_connection_id,
+                environment,
+                entity_type,
+                entity_id,
+                trigger_action,
+                source,
+                sync_status,
+                raw_status,
+                result_action,
+                square_object_id,
+                square_parent_object_id,
+                reason,
+                message,
+                attempt_number,
+                retry_of_activity_id,
+                requested_by,
+                started_at,
+                completed_at
+            )
+            VALUES (
+                %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s,
+                CURRENT_TIMESTAMP,
+                CURRENT_TIMESTAMP
+            )
+            RETURNING square_sync_activity_id
+        """, (
+            spa_id,
+            business_unit_id,
+            square_connection_id,
+            environment,
+            entity_type,
+            entity_id,
+            trigger_action,
+            source,
+            sync_status,
+            raw_status or None,
+            result.get("action"),
+            square_object_id,
+            square_parent_object_id,
+            reason,
+            message,
+            attempt_number,
+            retry_of_activity_id,
+            session.get("user_id"),
+        ))
+
+        activity_id = cur.fetchone()[0]
+
+        conn.commit()
+
+        return activity_id
+
+    except Exception as exc:
+        if conn:
+            conn.rollback()
+
+        app.logger.warning(
+            "Square sync activity logging failed. "
+            "spa_id=%s business_unit_id=%s "
+            "entity_type=%s entity_id=%s "
+            "trigger_action=%s error=%s",
+            spa_id,
+            business_unit_id,
+            entity_type,
+            entity_id,
+            trigger_action,
+            exc,
+        )
+
+        return None
+
+    finally:
+        if cur:
+            cur.close()
+
+        if conn:
+            conn.close()
+
+
+# =========================================================
 # SERVICE -> SQUARE POST-COMMIT SYNC
 # =========================================================
 
@@ -13794,7 +13997,8 @@ def toggle_service_type_public_website(
 def _sync_saved_service_to_square_after_commit(
     spa_id,
     business_unit_id,
-    service_type_id
+    service_type_id,
+    trigger_action,
 ):
     """
     Best-effort PSP Service -> Square Catalog sync.
@@ -13839,6 +14043,16 @@ def _sync_saved_service_to_square_after_commit(
         service_type_id=service_type_id,
         actor_user_id=session.get("user_id"),
         environment="sandbox",
+    )
+
+    _record_square_sync_activity(
+        spa_id=spa_id,
+        business_unit_id=business_unit_id,
+        environment="sandbox",
+        entity_type="service",
+        entity_id=service_type_id,
+        trigger_action=trigger_action,
+        result=result,
     )
 
     if result.get("status") == "error":
@@ -13955,7 +14169,8 @@ def add_service_type():
         _sync_saved_service_to_square_after_commit(
             spa_id,
             business_unit_id,
-            new_service_type_id
+            new_service_type_id,
+            "add",
         )
 
         flash("Service added successfully.", "success")
@@ -14118,7 +14333,8 @@ def edit_service_type(service_type_id):
         _sync_saved_service_to_square_after_commit(
             spa_id,
             business_unit_id,
-            service_type_id
+            service_type_id,
+            "edit",
         )
 
         flash("Service updated successfully.", "success")
@@ -14310,7 +14526,8 @@ def archive_service_type(service_type_id):
         _sync_saved_service_to_square_after_commit(
             spa_id,
             business_unit_id,
-            service_type_id
+            service_type_id,
+            "archive",
         )
 
     return redirect(
@@ -14423,7 +14640,8 @@ def restore_service_type(service_type_id):
         _sync_saved_service_to_square_after_commit(
             spa_id,
             business_unit_id,
-            service_type_id
+            service_type_id,
+            "restore",
         )
 
     return redirect(
@@ -26770,6 +26988,7 @@ def _sync_saved_inventory_product_to_square_after_commit(
     spa_id,
     business_unit_id,
     product_id,
+    trigger_action,
 ):
     """
     Best-effort PSP Inventory Product -> Square Catalog sync.
@@ -26817,6 +27036,16 @@ def _sync_saved_inventory_product_to_square_after_commit(
         inventory_product_id=product_id,
         actor_user_id=session.get("user_id"),
         environment="sandbox",
+    )
+
+    _record_square_sync_activity(
+        spa_id=spa_id,
+        business_unit_id=business_unit_id,
+        environment="sandbox",
+        entity_type="inventory_product",
+        entity_id=product_id,
+        trigger_action=trigger_action,
+        result=result,
     )
 
     if result.get("status") == "error":
@@ -27113,6 +27342,7 @@ def add_inventory_product():
                 spa_id,
                 business_unit_id,
                 saved_product_id,
+                "add",
             )
 
             flash(
@@ -27674,6 +27904,7 @@ def edit_inventory_product(product_id):
                 spa_id,
                 business_unit_id,
                 product_id,
+                "edit",
             )
 
             flash(
@@ -28491,6 +28722,7 @@ def deactivate_inventory_product(product_id):
             spa_id,
             business_unit_id,
             product_id,
+            "deactivate",
         )
 
     flash("Inventory product deactivated.", "success")
@@ -31425,7 +31657,8 @@ def edit_client_full(client_id):
             _sync_saved_client_to_square_after_commit(
                 spa_id,
                 business_unit_id,
-                client_id
+                client_id,
+                "edit",
             )
 
             flash(
@@ -48283,7 +48516,8 @@ def client_history_detail_two(client_id):
 def _sync_saved_client_to_square_after_commit(
     spa_id,
     business_unit_id,
-    client_id
+    client_id,
+    trigger_action,
 ):
     """
     Best-effort Client -> Square synchronization.
@@ -48321,6 +48555,16 @@ def _sync_saved_client_to_square_after_commit(
         client_id=client_id,
         actor_user_id=session.get("user_id"),
         environment="sandbox",
+    )
+
+    _record_square_sync_activity(
+        spa_id=spa_id,
+        business_unit_id=business_unit_id,
+        environment="sandbox",
+        entity_type="client",
+        entity_id=client_id,
+        trigger_action=trigger_action,
+        result=result,
     )
 
     status = result.get("status")
@@ -48970,7 +49214,8 @@ def add_new_client():
             _sync_saved_client_to_square_after_commit(
                 spa_id,
                 business_unit_id,
-                new_client_id
+                new_client_id,
+                "add",
             )
 
             flash("Client added successfully!", "success")
@@ -49381,7 +49626,8 @@ def add_new_client_step2():
             _sync_saved_client_to_square_after_commit(
                 spa_id,
                 business_unit_id,
-                new_client_id
+                new_client_id,
+                "add",
             )
 
             flash("Client added successfully!", "success")
@@ -49735,7 +49981,8 @@ def edit_client(client_id):
             _sync_saved_client_to_square_after_commit(
                 spa_id,
                 business_unit_id,
-                client_id
+                client_id,
+                "edit",
             )
 
             flash("Client updated successfully!", "success")
