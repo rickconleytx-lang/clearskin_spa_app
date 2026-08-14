@@ -280,9 +280,38 @@ Square Control Center | Peach Suite Pro
                 Sync Activity
             </a>
 
-            <span class="tool-pill tool-pill-small">
-                Sync All — Coming Next
-            </span>
+            {% if square_sync_all_enabled %}
+
+                <form
+                    method="POST"
+                    action="{{ url_for('square_sync_all') }}"
+                    style="display:inline; margin:0;"
+                    onsubmit="return confirm(
+                        'Sync all active clients, assigned services, and active inventory products to Square Sandbox now?'
+                    );"
+                >
+                    <input
+                        type="hidden"
+                        name="square_sync_all_token"
+                        value="{{ square_sync_all_token }}"
+                    >
+
+                    <button
+                        type="submit"
+                        class="tool-pill tool-pill-small"
+                        style="font:inherit; cursor:pointer;"
+                    >
+                        Sync All to Sandbox
+                    </button>
+                </form>
+
+            {% else %}
+
+                <span class="tool-pill tool-pill-small">
+                    Sync All — Sandbox Only
+                </span>
+
+            {% endif %}
 
             {% if not production_square_enabled %}
                 <span class="tool-pill tool-pill-small">

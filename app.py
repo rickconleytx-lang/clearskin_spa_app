@@ -14996,12 +14996,567 @@ def square_control_center():
             ),
         })
 
+    square_sync_all_enabled = (
+        not bool(os.environ.get("RENDER"))
+    )
+
+    square_sync_all_token = None
+
+    if square_sync_all_enabled:
+        import secrets
+
+        square_sync_all_token = session.get(
+            "square_sync_all_token"
+        )
+
+        if not square_sync_all_token:
+            square_sync_all_token = (
+                secrets.token_urlsafe(32)
+            )
+
+            session[
+                "square_sync_all_token"
+            ] = square_sync_all_token
+
     return render_template(
         "square_control_center.html",
         square_environments=environments,
         recent_payments=recent_payments,
         production_square_enabled=False,
+        square_sync_all_enabled=(
+            square_sync_all_enabled
+        ),
+        square_sync_all_token=(
+            square_sync_all_token
+        ),
     )
+
+
+##############################################
+#
+#   SQUARE SYNC ALL - SANDBOX ONLY
+#
+###############################################
+
+
+@app.route(
+    "/payment-integrations/square/sync-all",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_view_business_management"
+)
+def square_sync_all():
+    """
+    Manually synchronize the current PSP workspace to
+    Square Sandbox.
+
+    Current rollout:
+    - Local development only
+    - Square Sandbox only
+    - Production / Render intentionally blocked
+
+    Eligible records:
+    - Active clients in the current workspace
+    - Active services assigned to at least one active
+      provider in the current workspace
+    - Active inventory products in the current workspace
+
+    Each Square attempt is independent and is recorded in
+    square_sync_activity with source='sync_all'.
+    """
+
+    import hmac
+
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
+
+    # -------------------------------------------------
+    # LIVE / RENDER SAFETY GATE
+    # -------------------------------------------------
+
+    if os.environ.get("RENDER"):
+        flash(
+            "Square Sync All is not enabled on the live "
+            "Peach Suite Pro server yet.",
+            "warning",
+        )
+
+        return redirect(
+            url_for("square_control_center")
+        )
+
+    # -------------------------------------------------
+    # REQUEST TOKEN
+    # -------------------------------------------------
+
+    submitted_token = request.form.get(
+        "square_sync_all_token",
+        "",
+    )
+
+    session_token = session.get(
+        "square_sync_all_token",
+        "",
+    )
+
+    if (
+        not submitted_token
+        or not session_token
+        or not hmac.compare_digest(
+            submitted_token,
+            session_token,
+        )
+    ):
+        abort(400)
+
+    # -------------------------------------------------
+    # SANDBOX TOKEN PREFLIGHT
+    # -------------------------------------------------
+
+    if not os.environ.get(
+        "SQUARE_SANDBOX_ACCESS_TOKEN",
+        "",
+    ).strip():
+        flash(
+            "Square Sandbox is not configured on this "
+            "development environment.",
+            "warning",
+        )
+
+        return redirect(
+            url_for("square_control_center")
+        )
+
+    lock_conn = get_db_connection()
+    lock_cur = lock_conn.cursor()
+
+    lock_acquired = False
+
+    lock_name = (
+        "square_sync_all:"
+        f"{spa_id}:"
+        f"{business_unit_id}:sandbox"
+    )
+
+    try:
+        # ---------------------------------------------
+        # ONE SYNC ALL PER WORKSPACE AT A TIME
+        # ---------------------------------------------
+
+        lock_cur.execute("""
+            SELECT pg_try_advisory_lock(
+                hashtextextended(%s, 0)
+            )
+        """, (
+            lock_name,
+        ))
+
+        lock_acquired = bool(
+            lock_cur.fetchone()[0]
+        )
+
+        if not lock_acquired:
+            flash(
+                "Square Sync All is already running for "
+                "this workspace.",
+                "warning",
+            )
+
+            return redirect(
+                url_for("square_control_center")
+            )
+
+        # ---------------------------------------------
+        # SANDBOX CONNECTION PREFLIGHT
+        # ---------------------------------------------
+
+        lock_cur.execute("""
+            SELECT square_connection_id
+            FROM square_connections
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND environment = 'sandbox'
+            ORDER BY square_connection_id DESC
+            LIMIT 1
+        """, (
+            spa_id,
+            business_unit_id,
+        ))
+
+        sandbox_connection = (
+            lock_cur.fetchone()
+        )
+
+        if not sandbox_connection:
+            flash(
+                "No Square Sandbox connection is "
+                "configured for this workspace.",
+                "warning",
+            )
+
+            return redirect(
+                url_for("square_control_center")
+            )
+
+        # ---------------------------------------------
+        # ACTIVE CLIENTS
+        # ---------------------------------------------
+
+        lock_cur.execute("""
+            SELECT client_id
+            FROM clients
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND active_client = TRUE
+            ORDER BY client_id
+        """, (
+            spa_id,
+            business_unit_id,
+        ))
+
+        client_ids = [
+            row[0]
+            for row in lock_cur.fetchall()
+        ]
+
+        # ---------------------------------------------
+        # WORKSPACE SERVICES
+        #
+        # Deliberately does NOT require
+        # is_publicly_bookable = TRUE.
+        #
+        # Square POS may need a service even when the
+        # service is hidden from online booking.
+        # ---------------------------------------------
+
+        lock_cur.execute("""
+            SELECT DISTINCT
+                snt.service_type_id
+            FROM service_name_types snt
+
+            JOIN provider_service_types pst
+              ON pst.spa_id = snt.spa_id
+             AND pst.service_type_id =
+                    snt.service_type_id
+
+            JOIN employees e
+              ON e.employee_id =
+                    pst.provider_employee_id
+             AND e.spa_id = pst.spa_id
+
+            WHERE snt.spa_id = %s
+              AND snt.is_active = TRUE
+              AND pst.business_unit_id = %s
+              AND pst.is_active = TRUE
+              AND e.is_active = TRUE
+
+            ORDER BY snt.service_type_id
+        """, (
+            spa_id,
+            business_unit_id,
+        ))
+
+        service_type_ids = [
+            row[0]
+            for row in lock_cur.fetchall()
+        ]
+
+        # ---------------------------------------------
+        # ACTIVE INVENTORY PRODUCTS
+        # ---------------------------------------------
+
+        lock_cur.execute("""
+            SELECT product_id
+            FROM inventory_products
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND active = TRUE
+            ORDER BY product_id
+        """, (
+            spa_id,
+            business_unit_id,
+        ))
+
+        product_ids = [
+            row[0]
+            for row in lock_cur.fetchall()
+        ]
+
+        # End the SELECT transaction while keeping the
+        # session-level advisory lock.
+        lock_conn.commit()
+
+        total_eligible = (
+            len(client_ids)
+            + len(service_type_ids)
+            + len(product_ids)
+        )
+
+        if total_eligible == 0:
+            flash(
+                "There are no active clients, assigned "
+                "services, or active inventory products "
+                "to synchronize.",
+                "warning",
+            )
+
+            return redirect(
+                url_for("square_control_center")
+            )
+
+        actor_user_id = session.get("user_id")
+
+        stats = {
+            "client": {
+                "synced": 0,
+                "needs_attention": 0,
+                "error": 0,
+                "skipped": 0,
+            },
+            "service": {
+                "synced": 0,
+                "needs_attention": 0,
+                "error": 0,
+                "skipped": 0,
+            },
+            "inventory_product": {
+                "synced": 0,
+                "needs_attention": 0,
+                "error": 0,
+                "skipped": 0,
+            },
+        }
+
+        activity_log_failures = 0
+
+        def record_result(
+            entity_type,
+            entity_id,
+            result,
+        ):
+            nonlocal activity_log_failures
+
+            result = result or {}
+
+            status = str(
+                result.get("status") or "error"
+            ).strip().lower()
+
+            if status not in (
+                "synced",
+                "needs_attention",
+                "error",
+                "skipped",
+            ):
+                status = "error"
+
+            stats[
+                entity_type
+            ][status] += 1
+
+            activity_id = (
+                _record_square_sync_activity(
+                    spa_id=spa_id,
+                    business_unit_id=(
+                        business_unit_id
+                    ),
+                    environment="sandbox",
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    trigger_action="sync_all",
+                    result=result,
+                    source="sync_all",
+                )
+            )
+
+            if not activity_id:
+                activity_log_failures += 1
+
+        # ---------------------------------------------
+        # CLIENTS
+        # ---------------------------------------------
+
+        for client_id in client_ids:
+            result = try_sync_client_to_square(
+                spa_id=spa_id,
+                business_unit_id=(
+                    business_unit_id
+                ),
+                client_id=client_id,
+                actor_user_id=actor_user_id,
+                environment="sandbox",
+            )
+
+            record_result(
+                "client",
+                client_id,
+                result,
+            )
+
+        # ---------------------------------------------
+        # SERVICES
+        # ---------------------------------------------
+
+        for service_type_id in service_type_ids:
+            result = try_sync_service_to_square(
+                spa_id=spa_id,
+                business_unit_id=(
+                    business_unit_id
+                ),
+                service_type_id=(
+                    service_type_id
+                ),
+                actor_user_id=actor_user_id,
+                environment="sandbox",
+            )
+
+            record_result(
+                "service",
+                service_type_id,
+                result,
+            )
+
+        # ---------------------------------------------
+        # INVENTORY PRODUCTS
+        # ---------------------------------------------
+
+        for product_id in product_ids:
+            result = (
+                try_sync_inventory_product_to_square(
+                    spa_id=spa_id,
+                    business_unit_id=(
+                        business_unit_id
+                    ),
+                    inventory_product_id=(
+                        product_id
+                    ),
+                    actor_user_id=actor_user_id,
+                    environment="sandbox",
+                )
+            )
+
+            record_result(
+                "inventory_product",
+                product_id,
+                result,
+            )
+
+        def summary_part(
+            label,
+            entity_type,
+        ):
+            values = stats[entity_type]
+
+            return (
+                f"{label}: "
+                f"{values['synced']} synced, "
+                f"{values['needs_attention']} "
+                "needs attention, "
+                f"{values['error']} failed, "
+                f"{values['skipped']} skipped"
+            )
+
+        summary = (
+            "Square Sandbox Sync All completed. "
+            + summary_part(
+                "Clients",
+                "client",
+            )
+            + " | "
+            + summary_part(
+                "Services",
+                "service",
+            )
+            + " | "
+            + summary_part(
+                "Products",
+                "inventory_product",
+            )
+        )
+
+        issue_count = (
+            stats["client"]["needs_attention"]
+            + stats["client"]["error"]
+            + stats["client"]["skipped"]
+            + stats["service"]["needs_attention"]
+            + stats["service"]["error"]
+            + stats["service"]["skipped"]
+            + stats[
+                "inventory_product"
+            ]["needs_attention"]
+            + stats[
+                "inventory_product"
+            ]["error"]
+            + stats[
+                "inventory_product"
+            ]["skipped"]
+        )
+
+        if activity_log_failures:
+            summary += (
+                " | Activity logging warnings: "
+                f"{activity_log_failures}"
+            )
+
+        flash(
+            summary,
+            (
+                "success"
+                if (
+                    issue_count == 0
+                    and activity_log_failures == 0
+                )
+                else "warning"
+            ),
+        )
+
+        return redirect(
+            url_for("square_control_center")
+        )
+
+    except Exception as exc:
+        app.logger.exception(
+            "Square Sync All failed unexpectedly. "
+            "spa_id=%s business_unit_id=%s error=%s",
+            spa_id,
+            business_unit_id,
+            exc,
+        )
+
+        flash(
+            "Square Sync All could not complete safely. "
+            "Peach Suite Pro business records were not "
+            "rolled back. Some Square attempts may have "
+            "completed before the error; review Sync "
+            "Activity before trying again.",
+            "error",
+        )
+
+        return redirect(
+            url_for("square_control_center")
+        )
+
+    finally:
+        if lock_acquired:
+            try:
+                lock_cur.execute("""
+                    SELECT pg_advisory_unlock(
+                        hashtextextended(%s, 0)
+                    )
+                """, (
+                    lock_name,
+                ))
+            except Exception:
+                pass
+
+        lock_cur.close()
+        lock_conn.close()
 
 
 ##############################################
