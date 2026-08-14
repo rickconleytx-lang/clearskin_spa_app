@@ -299,6 +299,7 @@ Square Sync Activity | Peach Suite Pro
                         <th>Attempt</th>
                         <th>Square ID</th>
                         <th>Reason / Message</th>
+                        <th>Action</th>
                     </tr>
                 </thead>
 
@@ -387,6 +388,45 @@ Square Sync Activity | Peach Suite Pro
                                 {% endif %}
 
                                 {% if not activity.reason and not activity.message %}
+                                    —
+                                {% endif %}
+                            </td>
+
+                            <td>
+                                {% if
+                                    activity.can_retry
+                                    and square_retry_enabled
+                                %}
+                                    <form
+                                        method="post"
+                                        action="{{ url_for(
+                                            'square_sync_activity_retry',
+                                            activity_id=activity.square_sync_activity_id
+                                        ) }}"
+                                    >
+                                        <input
+                                            type="hidden"
+                                            name="square_sync_retry_token"
+                                            value="{{ square_sync_retry_token }}"
+                                        >
+
+                                        <button
+                                            type="submit"
+                                            class="tool-pill tool-pill-small"
+                                        >
+                                            Try Again
+                                        </button>
+                                    </form>
+
+                                {% elif
+                                    activity.can_retry
+                                    and not square_retry_enabled
+                                %}
+                                    <span>
+                                        Retry not enabled live
+                                    </span>
+
+                                {% else %}
                                     —
                                 {% endif %}
                             </td>

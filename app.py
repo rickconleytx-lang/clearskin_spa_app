@@ -15182,7 +15182,17 @@ def square_sync_activity():
                 requested_at,
                 started_at,
                 completed_at,
-                created_at
+                created_at,
+                (
+                    sync_status = 'failed'
+                    AND environment = 'sandbox'
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM square_sync_activity child
+                        WHERE child.retry_of_activity_id =
+                            square_sync_activity.square_sync_activity_id
+                    )
+                ) AS can_retry
             FROM square_sync_activity
             WHERE {where_sql}
             ORDER BY
@@ -15213,6 +15223,7 @@ def square_sync_activity():
                 "started_at": row[17],
                 "completed_at": row[18],
                 "created_at": row[19],
+                "can_retry": row[20],
             }
             for row in cur.fetchall()
         ]
@@ -15221,6 +15232,20 @@ def square_sync_activity():
         cur.close()
         conn.close()
 
+    import secrets
+
+    square_sync_retry_token = session.get(
+        "square_sync_retry_token"
+    )
+
+    if not square_sync_retry_token:
+        square_sync_retry_token = secrets.token_urlsafe(
+            32
+        )
+        session[
+            "square_sync_retry_token"
+        ] = square_sync_retry_token
+
     return render_template(
         "square_sync_activity.html",
         activity_rows=activity_rows,
@@ -15228,7 +15253,268 @@ def square_sync_activity():
         status_filter=status_filter,
         entity_filter=entity_filter,
         environment_filter=environment_filter,
+        square_sync_retry_token=square_sync_retry_token,
+        square_retry_enabled=(
+            not bool(os.environ.get("RENDER"))
+        ),
     )
+
+
+##############################################
+#
+#   SQUARE SYNC ACTIVITY - TRY AGAIN
+#
+###############################################
+
+
+@app.route(
+    "/payment-integrations/square/sync-activity/"
+    "<int:activity_id>/retry",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_view_business_management"
+)
+def square_sync_activity_retry(activity_id):
+    import hmac
+
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
+
+    submitted_token = request.form.get(
+        "square_sync_retry_token",
+        "",
+    )
+
+    session_token = session.get(
+        "square_sync_retry_token",
+        "",
+    )
+
+    if (
+        not submitted_token
+        or not session_token
+        or not hmac.compare_digest(
+            submitted_token,
+            session_token,
+        )
+    ):
+        abort(400)
+
+    if os.environ.get("RENDER"):
+        flash(
+            "Square Try Again is not enabled on the live "
+            "Peach Suite Pro server yet.",
+            "warning",
+        )
+        return redirect(
+            url_for("square_sync_activity")
+        )
+
+    lock_conn = get_db_connection()
+    lock_cur = lock_conn.cursor()
+    lock_acquired = False
+
+    lock_name = (
+        "square_sync_activity_retry:"
+        f"{spa_id}:"
+        f"{business_unit_id}:"
+        f"{activity_id}"
+    )
+
+    try:
+        lock_cur.execute("""
+            SELECT pg_try_advisory_lock(
+                hashtextextended(%s, 0)
+            )
+        """, (
+            lock_name,
+        ))
+
+        lock_acquired = bool(
+            lock_cur.fetchone()[0]
+        )
+
+        if not lock_acquired:
+            flash(
+                "That Square sync retry is already in "
+                "progress.",
+                "warning",
+            )
+            return redirect(
+                url_for("square_sync_activity")
+            )
+
+        lock_cur.execute("""
+            SELECT
+                activity.environment,
+                activity.entity_type,
+                activity.entity_id,
+                activity.trigger_action,
+                activity.attempt_number
+            FROM square_sync_activity activity
+            WHERE activity.square_sync_activity_id = %s
+              AND activity.spa_id = %s
+              AND activity.business_unit_id = %s
+              AND activity.sync_status = 'failed'
+              AND activity.environment = 'sandbox'
+              AND NOT EXISTS (
+                    SELECT 1
+                    FROM square_sync_activity child
+                    WHERE child.retry_of_activity_id =
+                        activity.square_sync_activity_id
+              )
+        """, (
+            activity_id,
+            spa_id,
+            business_unit_id,
+        ))
+
+        activity = lock_cur.fetchone()
+
+        if not activity:
+            flash(
+                "That Square sync attempt is no longer "
+                "eligible for Try Again.",
+                "warning",
+            )
+            return redirect(
+                url_for("square_sync_activity")
+            )
+
+        (
+            environment,
+            entity_type,
+            entity_id,
+            trigger_action,
+            attempt_number,
+        ) = activity
+
+        actor_user_id = session.get("user_id")
+
+        if entity_type == "client":
+            result = try_sync_client_to_square(
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                client_id=entity_id,
+                actor_user_id=actor_user_id,
+                environment=environment,
+            )
+
+        elif entity_type == "service":
+            result = try_sync_service_to_square(
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                service_type_id=entity_id,
+                actor_user_id=actor_user_id,
+                environment=environment,
+            )
+
+        elif entity_type == "inventory_product":
+            result = (
+                try_sync_inventory_product_to_square(
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    inventory_product_id=entity_id,
+                    actor_user_id=actor_user_id,
+                    environment=environment,
+                )
+            )
+
+        else:
+            flash(
+                "This Square sync object type cannot "
+                "be retried.",
+                "error",
+            )
+            return redirect(
+                url_for("square_sync_activity")
+            )
+
+        retry_activity_id = (
+            _record_square_sync_activity(
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                environment=environment,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                trigger_action=trigger_action,
+                result=result,
+                source="retry",
+                retry_of_activity_id=activity_id,
+                attempt_number=attempt_number + 1,
+            )
+        )
+
+        if not retry_activity_id:
+            flash(
+                "Square Try Again completed, but Peach "
+                "Suite Pro could not record the retry "
+                "activity.",
+                "warning",
+            )
+
+            return redirect(
+                url_for("square_sync_activity")
+            )
+
+        status = result.get("status")
+
+        if status == "synced":
+            flash(
+                "Square synchronization completed "
+                "successfully.",
+                "success",
+            )
+
+        elif status == "needs_attention":
+            flash(
+                "Square synchronization ran again but "
+                "still needs review before Peach Suite "
+                "Pro can safely link it.",
+                "warning",
+            )
+
+        elif status == "skipped":
+            flash(
+                "Square synchronization was skipped. "
+                "Review the new Sync Activity entry for "
+                "details.",
+                "warning",
+            )
+
+        else:
+            flash(
+                "Square synchronization did not complete. "
+                "The new failed attempt is available for "
+                "review.",
+                "warning",
+            )
+
+        return redirect(
+            url_for("square_sync_activity")
+        )
+
+    finally:
+        if lock_acquired:
+            try:
+                lock_cur.execute("""
+                    SELECT pg_advisory_unlock(
+                        hashtextextended(%s, 0)
+                    )
+                """, (
+                    lock_name,
+                ))
+            except Exception:
+                pass
+
+        lock_cur.close()
+        lock_conn.close()
 
 
 ##############################################
