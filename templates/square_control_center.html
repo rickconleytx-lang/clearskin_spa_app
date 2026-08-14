@@ -285,10 +285,9 @@ Square Control Center | Peach Suite Pro
                 <form
                     method="POST"
                     action="{{ url_for('square_sync_all') }}"
+                    id="square-sync-all-form"
                     style="display:inline; margin:0;"
-                    onsubmit="return confirm(
-                        'Sync all active clients, assigned services, and active inventory products to Square Sandbox now?'
-                    );"
+                    onsubmit="return prepareSquareSyncAll(this);"
                 >
                     <input
                         type="hidden"
@@ -298,10 +297,19 @@ Square Control Center | Peach Suite Pro
 
                     <button
                         type="submit"
-                        class="tool-pill tool-pill-small"
+                        id="square-sync-all-button"
+                        class="tool-pill tool-pill-small square-sync-button"
                         style="font:inherit; cursor:pointer;"
                     >
-                        Sync All to Sandbox
+                        <span
+                            id="square-sync-all-spinner"
+                            class="square-sync-spinner"
+                            aria-hidden="true"
+                        ></span>
+
+                        <span id="square-sync-all-label">
+                            Sync All to Sandbox
+                        </span>
                     </button>
                 </form>
 
@@ -423,5 +431,78 @@ Square Control Center | Peach Suite Pro
     </section>
 
 </div>
+
+
+<style>
+    .square-sync-spinner {
+        display: none;
+        width: 14px;
+        height: 14px;
+        margin-right: 6px;
+        border: 2px solid currentColor;
+        border-right-color: transparent;
+        border-radius: 50%;
+        vertical-align: -2px;
+        animation: square-sync-spin 0.7s linear infinite;
+    }
+
+    .square-sync-button[disabled] {
+        opacity: 0.75;
+        cursor: wait !important;
+    }
+
+    @keyframes square-sync-spin {
+        to {
+            transform: rotate(360deg);
+        }
+    }
+</style>
+
+<script>
+    function prepareSquareSyncAll(form) {
+        const confirmed = window.confirm(
+            "Sync all active clients, assigned services, " +
+            "and active inventory products to Square " +
+            "Sandbox now?"
+        );
+
+        if (!confirmed) {
+            return false;
+        }
+
+        const button = form.querySelector(
+            "#square-sync-all-button"
+        );
+
+        const spinner = form.querySelector(
+            "#square-sync-all-spinner"
+        );
+
+        const label = form.querySelector(
+            "#square-sync-all-label"
+        );
+
+        if (button) {
+            button.disabled = true;
+
+            button.setAttribute(
+                "aria-busy",
+                "true"
+            );
+        }
+
+        if (spinner) {
+            spinner.style.display =
+                "inline-block";
+        }
+
+        if (label) {
+            label.textContent =
+                "Syncing with Square… Please wait";
+        }
+
+        return true;
+    }
+</script>
 
 {% endblock %}
