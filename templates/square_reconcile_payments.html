@@ -376,7 +376,19 @@ Reconcile Square Payments | Peach Suite Pro
                                 </td>
 
                                 <td>
-                                    {% if payment.customer_id %}
+                                    {% if payment.existing_income_link_candidate %}
+                                        <a
+                                            href="{{
+                                                url_for(
+                                                    'square_reconcile_review_existing_income',
+                                                    payment_id=payment.payment_id
+                                                )
+                                            }}"
+                                            class="tool-pill tool-pill-small"
+                                        >
+                                            Review Existing Income
+                                        </a>
+                                    {% elif payment.customer_id %}
                                         <a
                                             href="{{
                                                 url_for(

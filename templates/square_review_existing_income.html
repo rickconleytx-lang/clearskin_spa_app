@@ -1,0 +1,365 @@
+{% extends "base.html" %}
+
+{% block title %}
+Review Existing Income | Peach Suite Pro
+{% endblock %}
+
+{% block content %}
+
+<style>
+.square-existing-page {
+    max-width: 1100px;
+    margin: 0 auto;
+}
+
+.square-existing-intro {
+    max-width: 900px;
+    margin: 14px 0 20px 0;
+}
+
+.square-existing-card {
+    border: 1px solid #ddd;
+    border-radius: 12px;
+    padding: 18px;
+    background: #fff;
+    margin-top: 16px;
+}
+
+.square-existing-grid {
+    display: grid;
+    grid-template-columns:
+        repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+}
+
+.square-existing-label {
+    font-weight: 700;
+    display: block;
+    margin-bottom: 4px;
+}
+
+.square-existing-table-wrap {
+    overflow-x: auto;
+    margin-top: 12px;
+}
+
+.square-existing-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.square-existing-table th,
+.square-existing-table td {
+    border-bottom: 1px solid #ddd;
+    padding: 10px 8px;
+    text-align: left;
+    vertical-align: top;
+}
+
+.square-existing-status {
+    display: inline-block;
+    border: 1px solid #bbb;
+    border-radius: 999px;
+    padding: 4px 9px;
+    font-weight: 700;
+}
+
+.square-existing-id {
+    font-size: 0.86rem;
+    overflow-wrap: anywhere;
+}
+
+.square-existing-note {
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    padding: 12px;
+    margin-top: 14px;
+}
+</style>
+
+<div class="square-existing-page">
+
+    <div class="page-tool-pills">
+        <a
+            href="{{ url_for('square_reconcile_payments') }}"
+            class="tool-pill tool-pill-small"
+        >
+            Reconcile Square Payments
+        </a>
+
+        <a
+            href="{{ url_for('square_control_center') }}"
+            class="tool-pill tool-pill-small"
+        >
+            Square Control Center
+        </a>
+    </div>
+
+    <div class="page-title">
+        <h1>Review Existing Income</h1>
+    </div>
+
+    <p class="square-existing-intro">
+        Peach Suite Pro found an existing Income record for this
+        appointment. This page compares that record with the
+        authoritative Square payment before any link is allowed.
+    </p>
+
+    <div class="square-existing-card">
+        <h2>Client & Appointment</h2>
+
+        <div class="square-existing-grid">
+            <div>
+                <span class="square-existing-label">
+                    PSP Client
+                </span>
+                {{ client_name }}
+            </div>
+
+            <div>
+                <span class="square-existing-label">
+                    Appointment
+                </span>
+                {{ appointment_display }}
+            </div>
+
+            <div>
+                <span class="square-existing-label">
+                    Environment
+                </span>
+                {{ environment|title }}
+            </div>
+
+            <div>
+                <span class="square-existing-label">
+                    Square Location
+                </span>
+                {{ location_name or '—' }}
+            </div>
+        </div>
+    </div>
+
+    <div class="square-existing-card">
+        <h2>Existing PSP Income #{{ income_id }}</h2>
+
+        <div class="square-existing-grid">
+            <div>
+                <span class="square-existing-label">
+                    Income Date
+                </span>
+                {{ income_date.strftime('%m/%d/%Y') }}
+            </div>
+
+            <div>
+                <span class="square-existing-label">
+                    Service
+                </span>
+                ${{ '%.2f'|format(income_service_cents / 100) }}
+            </div>
+
+            <div>
+                <span class="square-existing-label">
+                    Retail
+                </span>
+                ${{ '%.2f'|format(income_retail_cents / 100) }}
+            </div>
+
+            <div>
+                <span class="square-existing-label">
+                    Tax
+                </span>
+                ${{ '%.2f'|format(income_tax_cents / 100) }}
+            </div>
+
+            <div>
+                <span class="square-existing-label">
+                    Tip
+                </span>
+                ${{ '%.2f'|format(income_tip_cents / 100) }}
+            </div>
+
+            <div>
+                <span class="square-existing-label">
+                    Total
+                </span>
+                ${{ '%.2f'|format(income_total_cents / 100) }}
+            </div>
+
+            <div>
+                <span class="square-existing-label">
+                    Payment Method
+                </span>
+                {{ income_payment_method or '—' }}
+            </div>
+
+            <div>
+                <span class="square-existing-label">
+                    Credit Processor
+                </span>
+                {{ income_processor_name or '—' }}
+            </div>
+        </div>
+    </div>
+
+    <div class="square-existing-card">
+        <h2>Square Payment</h2>
+
+        <div class="square-existing-grid">
+            <div>
+                <span class="square-existing-label">
+                    Date / Time
+                </span>
+                {{ payment_display }}
+            </div>
+
+            <div>
+                <span class="square-existing-label">
+                    Amount Before Tip
+                </span>
+                ${{ '%.2f'|format(square_before_tip_cents / 100) }}
+            </div>
+
+            <div>
+                <span class="square-existing-label">
+                    Tip
+                </span>
+                ${{ '%.2f'|format(square_tip_cents / 100) }}
+            </div>
+
+            <div>
+                <span class="square-existing-label">
+                    Total
+                </span>
+                ${{ '%.2f'|format(square_total_cents / 100) }}
+            </div>
+
+            <div>
+                <span class="square-existing-label">
+                    Actual Square Fee
+                </span>
+                ${{ '%.2f'|format(square_fee_cents / 100) }}
+            </div>
+
+            <div>
+                <span class="square-existing-label">
+                    Refunded
+                </span>
+                ${{ '%.2f'|format(square_refunded_cents / 100) }}
+            </div>
+
+            <div>
+                <span class="square-existing-label">
+                    Square Net
+                </span>
+                ${{ '%.2f'|format(square_net_cents / 100) }}
+            </div>
+        </div>
+
+        <p class="square-existing-id">
+            <strong>Payment ID:</strong>
+            {{ payment_id }}
+        </p>
+    </div>
+
+    <div class="square-existing-card">
+        <h2>Processor Comparison</h2>
+
+        <div class="square-existing-table-wrap">
+            <table class="square-existing-table">
+                <thead>
+                    <tr>
+                        <th></th>
+                        <th>Existing PSP</th>
+                        <th>Square Actual</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Processing Fee</strong></td>
+                        <td>
+                            ${{ '%.2f'|format(income_fee_cents / 100) }}
+                        </td>
+                        <td>
+                            ${{ '%.2f'|format(square_fee_cents / 100) }}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><strong>Net Received</strong></td>
+                        <td>
+                            ${{ '%.2f'|format(income_net_cents / 100) }}
+                        </td>
+                        <td>
+                            ${{ '%.2f'|format(square_net_cents / 100) }}
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            The existing PSP fee may have been estimated from the
+            configured Square percentage and flat fee. The Square
+            column reflects the actual payment data returned by
+            Square.
+        </p>
+    </div>
+
+    <div class="square-existing-card">
+        <h2>Link Safety Checks</h2>
+
+        <div class="square-existing-table-wrap">
+            <table class="square-existing-table">
+                <tbody>
+                    {% for check in checks %}
+                        <tr>
+                            <td>{{ check.label }}</td>
+                            <td>
+                                <span class="square-existing-status">
+                                    {% if check.passed %}
+                                        ✓ Passed
+                                    {% else %}
+                                        ⚠ Needs Review
+                                    {% endif %}
+                                </span>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if eligible_for_link %}
+            <div class="square-existing-note">
+                <strong>
+                    Eligible for controlled Square linking
+                </strong>
+                <p>
+                    The existing PSP Income and authoritative
+                    Square payment passed all current safety
+                    checks.
+                </p>
+            </div>
+        {% else %}
+            <div class="square-existing-note">
+                <strong>Linking is not eligible.</strong>
+                <p>
+                    One or more safeguards did not pass.
+                    Peach Suite Pro will not link this payment
+                    automatically.
+                </p>
+            </div>
+        {% endif %}
+
+        <div class="square-existing-note">
+            <strong>Read-only review</strong>
+            <p>
+                No Income, Square payment, inventory, or
+                reconciliation record can be changed from this
+                page yet.
+            </p>
+        </div>
+    </div>
+
+</div>
+
+{% endblock %}

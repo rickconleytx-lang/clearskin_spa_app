@@ -16468,12 +16468,28 @@ def square_reconcile_payments():
                     # -------------------------------------
 
                     cur.execute("""
-                        SELECT income_id
-                        FROM income
-                        WHERE spa_id = %s
-                          AND business_unit_id = %s
-                          AND appointment_id = %s
-                        ORDER BY income_id DESC
+                        SELECT
+                            i.income_id,
+                            i.client_id,
+                            i.service_amount,
+                            i.retail_amount,
+                            i.tax_amount,
+                            i.tip_amount,
+                            i.total_amount,
+                            i.payment_method,
+                            i.credit_processor_id,
+                            i.processing_fee_amount,
+                            i.net_received,
+                            cp.credit_processor_name
+                        FROM income i
+                        LEFT JOIN credit_processors cp
+                          ON cp.credit_processor_id =
+                                i.credit_processor_id
+                         AND cp.spa_id = i.spa_id
+                        WHERE i.spa_id = %s
+                          AND i.business_unit_id = %s
+                          AND i.appointment_id = %s
+                        ORDER BY i.income_id DESC
                     """, (
                         spa_id,
                         business_unit_id,
@@ -16489,18 +16505,170 @@ def square_reconcile_payments():
                             existing_income_rows[0]
                         )
 
-                        item["review_reason"] = (
-                            "This appointment already has "
-                            "PSP Income #"
-                            f"{existing_income[0]}. "
-                            "Review the existing Income "
-                            "before reconciling this Square "
-                            "payment."
+                        def income_dollars_to_cents(value):
+                            try:
+                                return int(
+                                    (
+                                        decimal.Decimal(
+                                            str(value or 0)
+                                        )
+                                        * 100
+                                    ).quantize(
+                                        decimal.Decimal("1")
+                                    )
+                                )
+                            except (
+                                decimal.InvalidOperation,
+                                TypeError,
+                                ValueError,
+                            ):
+                                return 0
+
+                        existing_service_cents = (
+                            income_dollars_to_cents(
+                                existing_income[2]
+                            )
+                        )
+                        existing_retail_cents = (
+                            income_dollars_to_cents(
+                                existing_income[3]
+                            )
+                        )
+                        existing_tax_cents = (
+                            income_dollars_to_cents(
+                                existing_income[4]
+                            )
+                        )
+                        existing_tip_cents = (
+                            income_dollars_to_cents(
+                                existing_income[5]
+                            )
+                        )
+                        existing_total_cents = (
+                            income_dollars_to_cents(
+                                existing_income[6]
+                            )
+                        )
+                        existing_fee_cents = (
+                            income_dollars_to_cents(
+                                existing_income[9]
+                            )
+                        )
+                        existing_net_cents = (
+                            income_dollars_to_cents(
+                                existing_income[10]
+                            )
+                        )
+
+                        existing_before_tip_cents = (
+                            existing_service_cents
+                            + existing_retail_cents
+                            + existing_tax_cents
+                        )
+
+                        square_before_tip_cents = (
+                            item["total_cents"]
+                            - item["tip_cents"]
+                        )
+
+                        processor_name = str(
+                            existing_income[11] or ""
+                        ).strip()
+
+                        processor_is_square = (
+                            processor_name.lower()
+                            == "square"
+                        )
+
+                        client_matches = (
+                            existing_income[1]
+                            == mapped_client["client_id"]
+                        )
+
+                        income_balances = (
+                            existing_before_tip_cents
+                            + existing_tip_cents
+                            == existing_total_cents
+                        )
+
+                        payment_amounts_match = (
+                            existing_total_cents
+                            == item["total_cents"]
+                            and existing_tip_cents
+                            == item["tip_cents"]
+                            and existing_before_tip_cents
+                            == square_before_tip_cents
+                        )
+
+                        single_existing_income = (
+                            len(existing_income_rows) == 1
+                        )
+
+                        link_candidate = bool(
+                            single_existing_income
+                            and processor_is_square
+                            and client_matches
+                            and income_balances
+                            and payment_amounts_match
                         )
 
                         item["existing_income_id"] = (
                             existing_income[0]
                         )
+
+                        item["existing_income"] = {
+                            "income_id": existing_income[0],
+                            "service_cents": (
+                                existing_service_cents
+                            ),
+                            "retail_cents": (
+                                existing_retail_cents
+                            ),
+                            "tax_cents": (
+                                existing_tax_cents
+                            ),
+                            "tip_cents": (
+                                existing_tip_cents
+                            ),
+                            "total_cents": (
+                                existing_total_cents
+                            ),
+                            "payment_method": (
+                                existing_income[7]
+                            ),
+                            "credit_processor_id": (
+                                existing_income[8]
+                            ),
+                            "processor_name": (
+                                processor_name
+                            ),
+                            "fee_cents": (
+                                existing_fee_cents
+                            ),
+                            "net_cents": (
+                                existing_net_cents
+                            ),
+                        }
+
+                        item[
+                            "existing_income_link_candidate"
+                        ] = link_candidate
+
+                        if link_candidate:
+                            item["review_reason"] = (
+                                "Existing Square Income #"
+                                f"{existing_income[0]} matches "
+                                "this payment and can be "
+                                "reviewed for linking."
+                            )
+                        else:
+                            item["review_reason"] = (
+                                "This appointment already has "
+                                "PSP Income #"
+                                f"{existing_income[0]}, but it "
+                                "does not meet the automatic "
+                                "link-review safeguards."
+                            )
 
                         continue
 
@@ -16573,6 +16741,610 @@ def square_reconcile_payments():
         ),
     )
 
+
+
+
+##############################################
+#
+#   SQUARE RECONCILIATION - REVIEW EXISTING
+#   INCOME
+#
+#   Read-only comparison screen.
+#
+#   - Retrieves one exact Square payment
+#   - Verifies workspace / merchant / location
+#   - Requires verified Square customer mapping
+#   - Requires exactly one PSP appointment
+#   - Requires exactly one existing PSP Income
+#   - Compares PSP amounts with Square payment
+#   - No Income / reconciliation writes
+#   - No PSP -> Square writes
+#
+###############################################
+
+
+@app.route(
+    "/payment-integrations/square/reconcile/review-existing-income",
+    methods=["GET"],
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_view_business_management"
+)
+def square_reconcile_review_existing_income():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
+
+    square_payment_id = str(
+        request.args.get("payment_id") or ""
+    ).strip()
+
+    if not square_payment_id:
+        flash(
+            "Square payment ID is required.",
+            "error",
+        )
+        return redirect(
+            url_for("square_reconcile_payments")
+        )
+
+    square_environment = (
+        _square_income_read_environment()
+    )
+
+    # -------------------------------------------------
+    # Resolve Square connection/location strictly from
+    # the authenticated PSP workspace.
+    # -------------------------------------------------
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                sc.square_connection_id,
+                sc.merchant_id,
+                sc.oauth_access_token_ciphertext,
+                sl.square_location_id,
+                sl.location_name
+            FROM square_connections sc
+            JOIN square_locations sl
+              ON sl.square_connection_id =
+                    sc.square_connection_id
+             AND sl.spa_id = sc.spa_id
+             AND sl.business_unit_id =
+                    sc.business_unit_id
+             AND sl.environment = sc.environment
+            WHERE sc.spa_id = %s
+              AND sc.business_unit_id = %s
+              AND sc.environment = %s
+              AND sc.connection_status = 'connected'
+              AND sl.is_active = TRUE
+              AND (
+                    sc.environment <> 'production'
+                    OR sl.is_default = TRUE
+              )
+            ORDER BY
+                sl.is_default DESC,
+                sl.square_location_mapping_id
+            LIMIT 1
+        """, (
+            spa_id,
+            business_unit_id,
+            square_environment,
+        ))
+
+        square_mapping = cur.fetchone()
+
+        if not square_mapping:
+            flash(
+                "Square is not connected to this Provider "
+                "Workspace for payment reconciliation.",
+                "error",
+            )
+            return redirect(
+                url_for("square_reconcile_payments")
+            )
+
+        (
+            square_connection_id,
+            merchant_id,
+            oauth_access_token_ciphertext,
+            square_location_id,
+            location_name,
+        ) = square_mapping
+
+        # Already-reconciled payments never enter this
+        # historical Income review workflow.
+        cur.execute("""
+            SELECT 1
+            FROM square_payments
+            WHERE square_connection_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND environment = %s
+              AND square_payment_id = %s
+              AND (
+                    income_id IS NOT NULL
+                    OR reconciliation_status =
+                        'reconciled'
+              )
+            LIMIT 1
+        """, (
+            square_connection_id,
+            spa_id,
+            business_unit_id,
+            square_environment,
+            square_payment_id,
+        ))
+
+        if cur.fetchone():
+            flash(
+                "This Square payment is already reconciled.",
+                "info",
+            )
+            return redirect(
+                url_for("square_reconcile_payments")
+            )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    # -------------------------------------------------
+    # Authoritative Square READ.
+    # -------------------------------------------------
+
+    try:
+        token = _square_income_read_access_token(
+            environment=square_environment,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            oauth_access_token_ciphertext=(
+                oauth_access_token_ciphertext
+            ),
+        )
+
+        payment = square_service.retrieve_payment(
+            square_payment_id,
+            access_token=token,
+            environment=square_environment,
+        )
+
+    except (
+        square_oauth.SquareOAuthError,
+        square_service.SquareServiceError,
+        ValueError,
+    ) as exc:
+        flash(
+            f"Square payment could not be verified: {exc}",
+            "error",
+        )
+        return redirect(
+            url_for("square_reconcile_payments")
+        )
+
+    payment_location_id = str(
+        payment.get("location_id") or ""
+    ).strip()
+
+    if payment_location_id != square_location_id:
+        abort(403)
+
+    payment_merchant_id = str(
+        payment.get("merchant_id") or ""
+    ).strip()
+
+    if (
+        merchant_id
+        and payment_merchant_id
+        and payment_merchant_id != merchant_id
+    ):
+        abort(403)
+
+    payment_status = str(
+        payment.get("status") or ""
+    ).strip().upper()
+
+    if payment_status != "COMPLETED":
+        flash(
+            "Only completed Square payments can be "
+            "reviewed against existing Income.",
+            "error",
+        )
+        return redirect(
+            url_for("square_reconcile_payments")
+        )
+
+    payment_local_datetime = (
+        _square_payment_local_datetime(
+            payment,
+            spa_id,
+        )
+    )
+
+    if payment_local_datetime is None:
+        flash(
+            "The Square payment date could not be "
+            "verified.",
+            "error",
+        )
+        return redirect(
+            url_for("square_reconcile_payments")
+        )
+
+    square_customer_id = str(
+        payment.get("customer_id") or ""
+    ).strip()
+
+    if not square_customer_id:
+        flash(
+            "This Square payment does not have a "
+            "Square customer attached.",
+            "warning",
+        )
+        return redirect(
+            url_for("square_reconcile_payments")
+        )
+
+    def square_money_cents(value):
+        if not isinstance(value, dict):
+            return 0
+
+        try:
+            return int(value.get("amount") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    amount_cents = square_money_cents(
+        payment.get("amount_money")
+    )
+    tip_cents = square_money_cents(
+        payment.get("tip_money")
+    )
+    total_cents = square_money_cents(
+        payment.get("total_money")
+    )
+
+    if not total_cents:
+        total_cents = amount_cents + tip_cents
+
+    fee_cents = sum(
+        square_money_cents(
+            fee.get("amount_money")
+        )
+        for fee in (
+            payment.get("processing_fee") or []
+        )
+        if isinstance(fee, dict)
+    )
+
+    refunded_cents = square_money_cents(
+        payment.get("refunded_money")
+    )
+
+    square_net_cents = (
+        total_cents
+        - fee_cents
+        - refunded_cents
+    )
+
+    square_before_tip_cents = (
+        total_cents - tip_cents
+    )
+
+    # -------------------------------------------------
+    # PSP READS.
+    #
+    # Re-derive the client, appointment and Income from
+    # authoritative workspace data. Do not trust an
+    # Income or appointment ID from the browser.
+    # -------------------------------------------------
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                scm.client_id,
+                c.first_name,
+                c.last_name
+            FROM square_customer_mappings scm
+            JOIN clients c
+              ON c.client_id = scm.client_id
+             AND c.spa_id = scm.spa_id
+             AND c.business_unit_id =
+                    scm.business_unit_id
+            WHERE scm.square_connection_id = %s
+              AND scm.spa_id = %s
+              AND scm.business_unit_id = %s
+              AND scm.environment = %s
+              AND scm.square_customer_id = %s
+              AND scm.is_active = TRUE
+            ORDER BY
+                scm.verified_at DESC NULLS LAST,
+                scm.square_customer_mapping_id DESC
+            LIMIT 1
+        """, (
+            square_connection_id,
+            spa_id,
+            business_unit_id,
+            square_environment,
+            square_customer_id,
+        ))
+
+        mapped_client_row = cur.fetchone()
+
+        if not mapped_client_row:
+            flash(
+                "The Square customer is not mapped to "
+                "a PSP client.",
+                "warning",
+            )
+            return redirect(
+                url_for("square_reconcile_payments")
+            )
+
+        mapped_client_id = mapped_client_row[0]
+
+        client_name = (
+            f"{mapped_client_row[1] or ''} "
+            f"{mapped_client_row[2] or ''}"
+        ).strip() or f"Client #{mapped_client_id}"
+
+        cur.execute("""
+            SELECT
+                appointment_id,
+                appointment_date,
+                appointment_time
+            FROM appointments
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND client_id = %s
+              AND appointment_date = %s
+            ORDER BY
+                appointment_time,
+                appointment_id
+        """, (
+            spa_id,
+            business_unit_id,
+            mapped_client_id,
+            payment_local_datetime.date(),
+        ))
+
+        appointment_rows = cur.fetchall()
+
+        if len(appointment_rows) != 1:
+            flash(
+                "This Square payment no longer has "
+                "exactly one matching PSP appointment "
+                "on the payment date.",
+                "warning",
+            )
+            return redirect(
+                url_for("square_reconcile_payments")
+            )
+
+        appointment = appointment_rows[0]
+
+        cur.execute("""
+            SELECT
+                i.income_id,
+                i.client_id,
+                i.income_date,
+                i.service_amount,
+                i.retail_amount,
+                i.tax_amount,
+                i.tip_amount,
+                i.total_amount,
+                i.payment_method,
+                i.processor_payment_id,
+                i.credit_processor_id,
+                i.processing_fee_amount,
+                i.net_received,
+                cp.credit_processor_name
+            FROM income i
+            LEFT JOIN credit_processors cp
+              ON cp.credit_processor_id =
+                    i.credit_processor_id
+             AND cp.spa_id = i.spa_id
+            WHERE i.spa_id = %s
+              AND i.business_unit_id = %s
+              AND i.appointment_id = %s
+            ORDER BY i.income_id DESC
+        """, (
+            spa_id,
+            business_unit_id,
+            appointment[0],
+        ))
+
+        income_rows = cur.fetchall()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if len(income_rows) != 1:
+        flash(
+            "This appointment no longer has exactly "
+            "one existing PSP Income record.",
+            "warning",
+        )
+        return redirect(
+            url_for("square_reconcile_payments")
+        )
+
+    income = income_rows[0]
+
+    def income_dollars_to_cents(value):
+        try:
+            return int(
+                (
+                    decimal.Decimal(str(value or 0))
+                    * 100
+                ).quantize(
+                    decimal.Decimal("1")
+                )
+            )
+        except (
+            decimal.InvalidOperation,
+            TypeError,
+            ValueError,
+        ):
+            return 0
+
+    income_service_cents = income_dollars_to_cents(
+        income[3]
+    )
+    income_retail_cents = income_dollars_to_cents(
+        income[4]
+    )
+    income_tax_cents = income_dollars_to_cents(
+        income[5]
+    )
+    income_tip_cents = income_dollars_to_cents(
+        income[6]
+    )
+    income_total_cents = income_dollars_to_cents(
+        income[7]
+    )
+    income_fee_cents = income_dollars_to_cents(
+        income[11]
+    )
+    income_net_cents = income_dollars_to_cents(
+        income[12]
+    )
+
+    income_before_tip_cents = (
+        income_service_cents
+        + income_retail_cents
+        + income_tax_cents
+    )
+
+    processor_name = str(
+        income[13] or ""
+    ).strip()
+
+    checks = [
+        {
+            "label": "Mapped client matches Income",
+            "passed": (
+                income[1] == mapped_client_id
+            ),
+        },
+        {
+            "label": "Existing processor is Square",
+            "passed": (
+                processor_name.lower() == "square"
+            ),
+        },
+        {
+            "label": (
+                "Existing processor payment reference "
+                "is compatible"
+            ),
+            "passed": (
+                not str(income[9] or "").strip()
+                or str(income[9] or "").strip()
+                    == square_payment_id
+            ),
+        },
+        {
+            "label": "No Square refund is recorded",
+            "passed": refunded_cents == 0,
+        },
+        {
+            "label": "PSP Income balances",
+            "passed": (
+                income_before_tip_cents
+                + income_tip_cents
+                == income_total_cents
+            ),
+        },
+        {
+            "label": "Total matches Square",
+            "passed": (
+                income_total_cents == total_cents
+            ),
+        },
+        {
+            "label": "Tip matches Square",
+            "passed": (
+                income_tip_cents == tip_cents
+            ),
+        },
+        {
+            "label": "Amount before tip matches Square",
+            "passed": (
+                income_before_tip_cents
+                == square_before_tip_cents
+            ),
+        },
+    ]
+
+    eligible_for_link = all(
+        check["passed"]
+        for check in checks
+    )
+
+    appointment_display = (
+        appointment[1].strftime("%m/%d/%Y")
+    )
+
+    if appointment[2]:
+        appointment_display += (
+            " "
+            + appointment[2].strftime(
+                "%I:%M %p"
+            ).lstrip("0")
+        )
+
+    payment_display = (
+        payment_local_datetime.strftime(
+            "%m/%d/%Y %I:%M %p"
+        ).replace(" 0", " ")
+    )
+
+    return render_template(
+        "square_review_existing_income.html",
+        environment=square_environment,
+        location_name=location_name,
+        payment_id=square_payment_id,
+        payment_display=payment_display,
+        client_name=client_name,
+        appointment_display=appointment_display,
+        income_id=income[0],
+        income_date=income[2],
+        income_service_cents=income_service_cents,
+        income_retail_cents=income_retail_cents,
+        income_tax_cents=income_tax_cents,
+        income_tip_cents=income_tip_cents,
+        income_total_cents=income_total_cents,
+        income_before_tip_cents=(
+            income_before_tip_cents
+        ),
+        income_payment_method=income[8],
+        income_processor_payment_id=income[9],
+        income_processor_name=processor_name,
+        income_fee_cents=income_fee_cents,
+        income_net_cents=income_net_cents,
+        square_before_tip_cents=(
+            square_before_tip_cents
+        ),
+        square_tip_cents=tip_cents,
+        square_total_cents=total_cents,
+        square_fee_cents=fee_cents,
+        square_refunded_cents=refunded_cents,
+        square_net_cents=square_net_cents,
+        checks=checks,
+        eligible_for_link=eligible_for_link,
+    )
 
 
 ##############################################
