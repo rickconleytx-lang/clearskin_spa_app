@@ -36,6 +36,10 @@ SQUARE_PRODUCTION_TOKEN_URL = (
     "https://connect.squareup.com/oauth2/token"
 )
 
+SQUARE_PRODUCTION_TOKEN_STATUS_URL = (
+    "https://connect.squareup.com/oauth2/token/status"
+)
+
 
 # Least-privilege permissions for the PSP Square V2 scope
 # that exists today:
@@ -559,6 +563,259 @@ def _safe_oauth_error_detail(
     ).strip()
 
 
+def retrieve_token_status(
+    access_token,
+    *,
+    timeout=20,
+):
+    """
+    Introspect one production Square access token.
+
+    Returns only non-secret token metadata:
+    - granted scopes
+    - expiration
+    - Square application ID
+    - Square merchant ID
+
+    The access token itself is never returned.
+    """
+    access_token = _require_text(
+        access_token,
+        "Square OAuth access token",
+    )
+
+    headers = _oauth_headers()
+
+    headers["Authorization"] = (
+        f"Bearer {access_token}"
+    )
+
+    try:
+        response = requests.post(
+            SQUARE_PRODUCTION_TOKEN_STATUS_URL,
+            headers=headers,
+            timeout=timeout,
+        )
+
+    except requests.RequestException as exc:
+        raise SquareOAuthError(
+            "Unable to verify Square OAuth token."
+        ) from exc
+
+    try:
+        data = response.json()
+
+    except ValueError:
+        data = {}
+
+    if not response.ok:
+        detail = _safe_oauth_error_detail(
+            data
+        )
+
+        message = (
+            "Square OAuth token verification failed "
+            f"with HTTP {response.status_code}."
+        )
+
+        if detail:
+            message += (
+                " "
+                + detail
+            )
+
+        raise SquareOAuthError(
+            message
+        )
+
+    if not isinstance(
+        data,
+        dict,
+    ):
+        raise SquareOAuthError(
+            "Square OAuth token status returned "
+            "an invalid response."
+        )
+
+    scopes = (
+        data.get("scopes")
+        or []
+    )
+
+    if not isinstance(
+        scopes,
+        list,
+    ):
+        raise SquareOAuthError(
+            "Square OAuth token status returned "
+            "invalid scopes."
+        )
+
+    clean_scopes = []
+
+    for scope in scopes:
+        scope = str(
+            scope or ""
+        ).strip()
+
+        if scope:
+            clean_scopes.append(
+                scope
+            )
+
+    client_id = _require_text(
+        data.get("client_id"),
+        "Square OAuth token application ID",
+    )
+
+    merchant_id = _require_text(
+        data.get("merchant_id"),
+        "Square OAuth token merchant ID",
+    )
+
+    expires_at_value = str(
+        data.get("expires_at")
+        or ""
+    ).strip()
+
+    parsed_expires_at = None
+
+    if expires_at_value:
+        try:
+            parsed_expires_at = (
+                datetime.fromisoformat(
+                    expires_at_value.replace(
+                        "Z",
+                        "+00:00",
+                    )
+                )
+            )
+
+        except ValueError as exc:
+            raise SquareOAuthError(
+                "Square OAuth token status "
+                "expiration timestamp is invalid."
+            ) from exc
+
+        if (
+            parsed_expires_at.tzinfo
+            is None
+        ):
+            raise SquareOAuthError(
+                "Square OAuth token status "
+                "expiration timestamp must include "
+                "a timezone."
+            )
+
+    return {
+        "scopes": clean_scopes,
+        "expires_at": parsed_expires_at,
+        "client_id": client_id,
+        "merchant_id": merchant_id,
+    }
+
+
+def validate_production_token_status(
+    status,
+    *,
+    expected_application_id,
+    expected_merchant_id=None,
+    required_scopes=None,
+):
+    """
+    Verify that token introspection matches PSP's expected
+    Square application, merchant, and required permissions.
+    """
+    if not isinstance(
+        status,
+        dict,
+    ):
+        raise SquareOAuthError(
+            "Square OAuth token status "
+            "must be an object."
+        )
+
+    expected_application_id = _require_text(
+        expected_application_id,
+        "Expected Square application ID",
+    )
+
+    actual_application_id = _require_text(
+        status.get("client_id"),
+        "Square OAuth token application ID",
+    )
+
+    if (
+        actual_application_id
+        != expected_application_id
+    ):
+        raise SquareOAuthError(
+            "Square OAuth token belongs to a "
+            "different Square application."
+        )
+
+    actual_merchant_id = _require_text(
+        status.get("merchant_id"),
+        "Square OAuth token merchant ID",
+    )
+
+    if expected_merchant_id:
+        expected_merchant_id = _require_text(
+            expected_merchant_id,
+            "Expected Square merchant ID",
+        )
+
+        if (
+            actual_merchant_id
+            != expected_merchant_id
+        ):
+            raise SquareOAuthError(
+                "Square OAuth token belongs to a "
+                "different Square merchant."
+            )
+
+    granted_scopes = {
+        str(scope or "").strip()
+        for scope in (
+            status.get("scopes")
+            or []
+        )
+        if str(scope or "").strip()
+    }
+
+    if required_scopes is None:
+        required_scopes = (
+            DEFAULT_PRODUCTION_SCOPES
+        )
+
+    required_scope_set = {
+        str(scope or "").strip()
+        for scope in required_scopes
+        if str(scope or "").strip()
+    }
+
+    missing_scopes = sorted(
+        required_scope_set
+        - granted_scopes
+    )
+
+    if missing_scopes:
+        raise SquareOAuthError(
+            "Square authorization is missing "
+            "required permissions: "
+            + ", ".join(
+                missing_scopes
+            )
+        )
+
+    return {
+        **status,
+        "scopes": sorted(
+            granted_scopes
+        ),
+    }
+
+
 def _oauth_post(
     payload,
     *,
@@ -751,7 +1008,6 @@ def refresh_access_token(
     *,
     application_id=None,
     application_secret=None,
-    redirect_uri=None,
     timeout=20,
 ):
     """
@@ -775,11 +1031,6 @@ def refresh_access_token(
         or get_production_application_secret()
     )
 
-    redirect_uri = (
-        redirect_uri
-        or get_production_redirect_uri()
-    )
-
     payload = {
         "client_id": _require_text(
             application_id,
@@ -791,10 +1042,6 @@ def refresh_access_token(
         ),
         "grant_type": "refresh_token",
         "refresh_token": refresh_token,
-        "redirect_uri": _require_text(
-            redirect_uri,
-            "Square production redirect URI",
-        ),
     }
 
     data = _oauth_post(
