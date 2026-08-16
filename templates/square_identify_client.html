@@ -227,10 +227,47 @@ Identify Square Client | Peach Suite Pro
                 </div>
             </div>
 
+            <form
+                method="post"
+                action="{{
+                    url_for(
+                        'square_reconcile_confirm_client'
+                    )
+                }}"
+                onsubmit="return confirm(
+                    'Confirm that this Square customer belongs to this PSP client?'
+                );"
+            >
+                <input
+                    type="hidden"
+                    name="square_client_match_token"
+                    value="{{ square_client_match_token }}"
+                >
+
+                <input
+                    type="hidden"
+                    name="payment_id"
+                    value="{{ payment_id }}"
+                >
+
+                <input
+                    type="hidden"
+                    name="client_id"
+                    value="{{ suggested_match.client_id }}"
+                >
+
+                <button
+                    type="submit"
+                    class="tool-pill tool-pill-small"
+                >
+                    Confirm Match
+                </button>
+            </form>
+
             <p>
-                <span class="square-identify-status">
-                    Suggested — confirmation not yet enabled
-                </span>
+                Confirming saves only the Square-to-PSP client
+                identity mapping. It does not change the customer
+                record in Square.
             </p>
         </div>
 

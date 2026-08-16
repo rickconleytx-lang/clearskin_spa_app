@@ -64,6 +64,8 @@ from services.sms_service import send_sms_telnyx
 from services import square_oauth
 from services import square_service
 from services.square_client_sync import (
+    SquareClientSyncError,
+    confirm_square_customer_mapping,
     try_sync_client_to_square,
 )
 from services.square_service_sync import (
@@ -16996,6 +16998,22 @@ def square_reconcile_identify_client():
         f"{square_customer.get('family_name') or ''}"
     ).strip() or "Unnamed Square Customer"
 
+    # Dedicated session token for the future explicit
+    # Confirm Match POST action.
+    import secrets
+
+    square_client_match_token = session.get(
+        "square_client_match_token"
+    )
+
+    if not square_client_match_token:
+        square_client_match_token = secrets.token_urlsafe(
+            32
+        )
+        session[
+            "square_client_match_token"
+        ] = square_client_match_token
+
     return render_template(
         "square_identify_client.html",
         environment=square_environment,
@@ -17021,6 +17039,447 @@ def square_reconcile_identify_client():
             suggested_match_method
         ),
         match_status=match_status,
+        square_client_match_token=(
+            square_client_match_token
+        ),
+    )
+
+
+
+##############################################
+#
+#   SQUARE RECONCILIATION - CONFIRM CLIENT
+#
+#   Explicit mapping confirmation only.
+#
+#   - POST only
+#   - Session token required
+#   - Re-fetches authoritative Square payment
+#   - Re-fetches authoritative Square customer
+#   - Re-validates workspace / merchant / location
+#   - Recomputes PSP match evidence server-side
+#   - Version 1 allows exactly one strong match only
+#   - Writes PSP mapping only
+#   - Does NOT write to Square
+#
+###############################################
+
+
+@app.route(
+    "/payment-integrations/square/reconcile/confirm-client",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_view_business_management"
+)
+def square_reconcile_confirm_client():
+    import hmac
+
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
+
+    submitted_token = request.form.get(
+        "square_client_match_token",
+        "",
+    )
+
+    session_token = session.get(
+        "square_client_match_token",
+        "",
+    )
+
+    if (
+        not submitted_token
+        or not session_token
+        or not hmac.compare_digest(
+            submitted_token,
+            session_token,
+        )
+    ):
+        abort(400)
+
+    square_payment_id = str(
+        request.form.get("payment_id") or ""
+    ).strip()
+
+    if not square_payment_id:
+        abort(400)
+
+    try:
+        client_id = int(
+            request.form.get("client_id") or 0
+        )
+    except (TypeError, ValueError):
+        abort(400)
+
+    if client_id <= 0:
+        abort(400)
+
+    actor_user_id = session.get("user_id")
+
+    try:
+        actor_user_id = int(actor_user_id)
+    except (TypeError, ValueError):
+        abort(403)
+
+    if actor_user_id <= 0:
+        abort(403)
+
+    square_environment = (
+        _square_income_read_environment()
+    )
+
+    # -------------------------------------------------
+    # Resolve the Square connection/location strictly
+    # from the authenticated PSP workspace.
+    # -------------------------------------------------
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                sc.square_connection_id,
+                sc.merchant_id,
+                sc.oauth_access_token_ciphertext,
+                sl.square_location_id
+            FROM square_connections sc
+            JOIN square_locations sl
+              ON sl.square_connection_id =
+                    sc.square_connection_id
+             AND sl.spa_id = sc.spa_id
+             AND sl.business_unit_id =
+                    sc.business_unit_id
+             AND sl.environment = sc.environment
+            WHERE sc.spa_id = %s
+              AND sc.business_unit_id = %s
+              AND sc.environment = %s
+              AND sc.connection_status = 'connected'
+              AND sl.is_active = TRUE
+              AND (
+                    sc.environment <> 'production'
+                    OR sl.is_default = TRUE
+              )
+            ORDER BY
+                sl.is_default DESC,
+                sl.square_location_mapping_id
+            LIMIT 1
+        """, (
+            spa_id,
+            business_unit_id,
+            square_environment,
+        ))
+
+        square_mapping = cur.fetchone()
+
+        if not square_mapping:
+            flash(
+                "Square is not connected to this Provider "
+                "Workspace for payment reconciliation.",
+                "error",
+            )
+            return redirect(
+                url_for("square_reconcile_payments")
+            )
+
+        (
+            square_connection_id,
+            merchant_id,
+            oauth_access_token_ciphertext,
+            square_location_id,
+        ) = square_mapping
+
+        # A reconciled payment should not create or alter a
+        # client identity mapping through this workflow.
+        cur.execute("""
+            SELECT 1
+            FROM square_payments
+            WHERE square_connection_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND environment = %s
+              AND square_payment_id = %s
+              AND (
+                    income_id IS NOT NULL
+                    OR reconciliation_status = 'reconciled'
+              )
+            LIMIT 1
+        """, (
+            square_connection_id,
+            spa_id,
+            business_unit_id,
+            square_environment,
+            square_payment_id,
+        ))
+
+        if cur.fetchone():
+            flash(
+                "This Square payment is already reconciled.",
+                "info",
+            )
+            return redirect(
+                url_for("square_reconcile_payments")
+            )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    # -------------------------------------------------
+    # Authoritative Square READS.
+    # No Square create/update call is permitted here.
+    # -------------------------------------------------
+
+    try:
+        token = _square_income_read_access_token(
+            environment=square_environment,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            oauth_access_token_ciphertext=(
+                oauth_access_token_ciphertext
+            ),
+        )
+
+        payment = square_service.retrieve_payment(
+            square_payment_id,
+            access_token=token,
+            environment=square_environment,
+        )
+
+    except (
+        square_oauth.SquareOAuthError,
+        square_service.SquareServiceError,
+        ValueError,
+    ) as exc:
+        flash(
+            f"Square payment could not be verified: {exc}",
+            "error",
+        )
+        return redirect(
+            url_for("square_reconcile_payments")
+        )
+
+    payment_location_id = str(
+        payment.get("location_id") or ""
+    ).strip()
+
+    if payment_location_id != square_location_id:
+        abort(403)
+
+    payment_merchant_id = str(
+        payment.get("merchant_id") or ""
+    ).strip()
+
+    if (
+        merchant_id
+        and payment_merchant_id
+        and payment_merchant_id != merchant_id
+    ):
+        abort(403)
+
+    payment_status = str(
+        payment.get("status") or ""
+    ).strip().upper()
+
+    if payment_status != "COMPLETED":
+        flash(
+            "Only completed Square payments can be used "
+            "to confirm a client match.",
+            "error",
+        )
+        return redirect(
+            url_for("square_reconcile_payments")
+        )
+
+    square_customer_id = str(
+        payment.get("customer_id") or ""
+    ).strip()
+
+    if not square_customer_id:
+        flash(
+            "This Square payment does not have a Square "
+            "customer attached.",
+            "warning",
+        )
+        return redirect(
+            url_for("square_reconcile_payments")
+        )
+
+    try:
+        square_customer = (
+            square_service.retrieve_customer(
+                square_customer_id,
+                access_token=token,
+                environment=square_environment,
+            )
+        )
+
+    except (
+        square_service.SquareServiceError,
+        ValueError,
+    ) as exc:
+        flash(
+            f"Square customer could not be verified: {exc}",
+            "error",
+        )
+        return redirect(
+            url_for(
+                "square_reconcile_identify_client",
+                payment_id=square_payment_id,
+            )
+        )
+
+    # -------------------------------------------------
+    # Recompute PSP identity evidence from current data.
+    #
+    # Do not trust a browser-submitted match method.
+    # Version 1 requires exactly ONE strong PSP match and
+    # that match must be the submitted client.
+    # -------------------------------------------------
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        duplicates = find_possible_client_duplicates(
+            cur,
+            spa_id,
+            business_unit_id,
+            square_customer.get("given_name"),
+            square_customer.get("family_name"),
+            square_customer.get("phone_number"),
+            square_customer.get("email_address"),
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    strong_matches = [
+        item
+        for item in duplicates
+        if item.get("strong_match")
+    ]
+
+    if len(strong_matches) != 1:
+        flash(
+            "The client match is no longer uniquely strong. "
+            "Please review the Square customer again.",
+            "warning",
+        )
+        return redirect(
+            url_for(
+                "square_reconcile_identify_client",
+                payment_id=square_payment_id,
+            )
+        )
+
+    selected_match = strong_matches[0]
+
+    try:
+        matched_client_id = int(
+            selected_match.get("client_id")
+        )
+    except (TypeError, ValueError):
+        abort(409)
+
+    if matched_client_id != client_id:
+        flash(
+            "The selected PSP client no longer matches the "
+            "authoritative Square customer strongly enough.",
+            "warning",
+        )
+        return redirect(
+            url_for(
+                "square_reconcile_identify_client",
+                payment_id=square_payment_id,
+            )
+        )
+
+    reasons = set(
+        selected_match.get("match_reasons") or []
+    )
+
+    if {
+        "Email",
+        "Phone",
+    }.issubset(reasons):
+        match_method = "confirmed_email_phone"
+
+    elif "Email" in reasons:
+        match_method = "confirmed_email"
+
+    elif "Phone" in reasons:
+        match_method = "confirmed_phone"
+
+    else:
+        # A strong match without email or phone evidence
+        # is not allowed by this Version 1 confirmation path.
+        abort(409)
+
+    # -------------------------------------------------
+    # PSP DATABASE WRITE ONLY.
+    #
+    # The helper independently re-verifies:
+    # - Square connection -> workspace/environment
+    # - PSP client -> workspace
+    # - mapping collision rules
+    #
+    # It does not call Square.
+    # -------------------------------------------------
+
+    try:
+        confirm_square_customer_mapping(
+            square_connection_id=(
+                square_connection_id
+            ),
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            environment=square_environment,
+            square_customer_id=square_customer_id,
+            client_id=client_id,
+            match_method=match_method,
+            actor_user_id=actor_user_id,
+        )
+
+    except SquareClientSyncError as exc:
+        flash(
+            f"Square client match was not saved: {exc}",
+            "error",
+        )
+        return redirect(
+            url_for(
+                "square_reconcile_identify_client",
+                payment_id=square_payment_id,
+            )
+        )
+
+    # Rotate the confirmation token after a successful
+    # state-changing request so the same POST cannot simply
+    # be replayed from the existing page.
+    session.pop(
+        "square_client_match_token",
+        None,
+    )
+
+    client_name = str(
+        selected_match.get("client_name")
+        or f"Client #{client_id}"
+    ).strip()
+
+    flash(
+        f"Square customer matched to {client_name}.",
+        "success",
+    )
+
+    return redirect(
+        url_for("square_reconcile_payments")
     )
 
 
