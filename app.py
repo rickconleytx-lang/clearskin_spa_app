@@ -17293,6 +17293,61 @@ def square_reconcile_review_existing_income():
         for check in checks
     )
 
+    # -------------------------------------------------
+    # Dedicated one-time token for the explicit
+    # "Link Square Payment to Existing Income" POST.
+    #
+    # Bind the session token to the exact authoritative
+    # Square payment + Income pair reviewed on this page.
+    # The future POST will still re-fetch and re-derive
+    # everything server-side before allowing any write.
+    # -------------------------------------------------
+
+    square_existing_income_link_token = None
+
+    if eligible_for_link:
+        link_context = session.get(
+            "square_existing_income_link_context"
+        )
+
+        context_matches = (
+            isinstance(link_context, dict)
+            and str(
+                link_context.get("payment_id") or ""
+            ).strip() == square_payment_id
+            and str(
+                link_context.get("income_id") or ""
+            ).strip() == str(income[0])
+            and str(
+                link_context.get("spa_id") or ""
+            ).strip() == str(spa_id)
+            and str(
+                link_context.get("business_unit_id") or ""
+            ).strip() == str(business_unit_id)
+            and bool(
+                str(
+                    link_context.get("token") or ""
+                ).strip()
+            )
+        )
+
+        if not context_matches:
+            link_context = {
+                "token": secrets.token_urlsafe(32),
+                "payment_id": square_payment_id,
+                "income_id": income[0],
+                "spa_id": spa_id,
+                "business_unit_id": business_unit_id,
+            }
+
+            session[
+                "square_existing_income_link_context"
+            ] = link_context
+
+        square_existing_income_link_token = str(
+            link_context.get("token") or ""
+        ).strip()
+
     appointment_display = (
         appointment[1].strftime("%m/%d/%Y")
     )
@@ -17344,6 +17399,1221 @@ def square_reconcile_review_existing_income():
         square_net_cents=square_net_cents,
         checks=checks,
         eligible_for_link=eligible_for_link,
+        square_existing_income_link_token=(
+            square_existing_income_link_token
+        ),
+    )
+
+
+
+
+##############################################
+#
+#   SQUARE RECONCILIATION - LINK EXISTING
+#   INCOME
+#
+#   Explicit historical reconciliation only.
+#
+#   - POST only
+#   - Dedicated one-time session token required
+#   - Token bound to exact payment + Income pair
+#   - Re-fetches authoritative Square payment
+#   - Re-fetches Square order when available
+#   - Re-validates workspace / merchant / location
+#   - Re-derives client / appointment / Income
+#   - Requires exactly one appointment + Income
+#   - Requires existing Square processor
+#   - Requires compatible processor payment ref
+#   - Requires exact amount / tip match
+#   - Requires zero Square refund
+#   - Rejects duplicate processor payment refs
+#   - Updates existing Income only
+#   - Does NOT create a second Income
+#   - Does NOT post historical inventory
+#   - Does NOT write to Square
+#
+###############################################
+
+
+@app.route(
+    "/payment-integrations/square/reconcile/link-existing-income",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_view_business_management"
+)
+def square_reconcile_link_existing_income():
+    import hmac
+
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
+
+    # -------------------------------------------------
+    # ONE-TIME REQUEST TOKEN + EXACT REVIEW CONTEXT
+    #
+    # The browser sends payment_id / income_id so a
+    # mismatched or stale form can be rejected early.
+    #
+    # Neither value becomes authoritative. The payment,
+    # client, appointment and Income are independently
+    # re-derived below before any write.
+    # -------------------------------------------------
+
+    link_context = session.get(
+        "square_existing_income_link_context"
+    )
+
+    if not isinstance(link_context, dict):
+        abort(400)
+
+    if (
+        str(
+            link_context.get("spa_id") or ""
+        ).strip() != str(spa_id)
+        or str(
+            link_context.get("business_unit_id") or ""
+        ).strip() != str(business_unit_id)
+    ):
+        abort(403)
+
+    submitted_token = str(
+        request.form.get(
+            "square_existing_income_link_token"
+        )
+        or ""
+    ).strip()
+
+    session_token = str(
+        link_context.get("token") or ""
+    ).strip()
+
+    if (
+        not submitted_token
+        or not session_token
+        or not hmac.compare_digest(
+            submitted_token,
+            session_token,
+        )
+    ):
+        abort(400)
+
+    square_payment_id = str(
+        link_context.get("payment_id") or ""
+    ).strip()
+
+    try:
+        expected_income_id = int(
+            link_context.get("income_id") or 0
+        )
+    except (TypeError, ValueError):
+        abort(400)
+
+    if (
+        not square_payment_id
+        or expected_income_id <= 0
+    ):
+        abort(400)
+
+    submitted_payment_id = str(
+        request.form.get("payment_id") or ""
+    ).strip()
+
+    try:
+        submitted_income_id = int(
+            request.form.get("income_id") or 0
+        )
+    except (TypeError, ValueError):
+        abort(400)
+
+    if (
+        submitted_payment_id != square_payment_id
+        or submitted_income_id != expected_income_id
+    ):
+        abort(400)
+
+    actor_user_id = session.get("user_id")
+
+    try:
+        actor_user_id = int(actor_user_id)
+    except (TypeError, ValueError):
+        abort(403)
+
+    if actor_user_id <= 0:
+        abort(403)
+
+    square_environment = (
+        _square_income_read_environment()
+    )
+
+    # -------------------------------------------------
+    # Resolve Square connection/location strictly from
+    # the authenticated current PSP workspace.
+    # -------------------------------------------------
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                sc.square_connection_id,
+                sc.merchant_id,
+                sc.oauth_access_token_ciphertext,
+                sl.square_location_id
+            FROM square_connections sc
+            JOIN square_locations sl
+              ON sl.square_connection_id =
+                    sc.square_connection_id
+             AND sl.spa_id = sc.spa_id
+             AND sl.business_unit_id =
+                    sc.business_unit_id
+             AND sl.environment = sc.environment
+            WHERE sc.spa_id = %s
+              AND sc.business_unit_id = %s
+              AND sc.environment = %s
+              AND sc.connection_status = 'connected'
+              AND sl.is_active = TRUE
+              AND (
+                    sc.environment <> 'production'
+                    OR sl.is_default = TRUE
+              )
+            ORDER BY
+                sl.is_default DESC,
+                sl.square_location_mapping_id
+            LIMIT 1
+        """, (
+            spa_id,
+            business_unit_id,
+            square_environment,
+        ))
+
+        square_mapping = cur.fetchone()
+
+        if not square_mapping:
+            flash(
+                "Square is not connected to this Provider "
+                "Workspace for payment reconciliation.",
+                "error",
+            )
+            return redirect(
+                url_for("square_reconcile_payments")
+            )
+
+        (
+            square_connection_id,
+            merchant_id,
+            oauth_access_token_ciphertext,
+            square_location_id,
+        ) = square_mapping
+
+        # Fast preflight before making another Square API
+        # call. The transaction below repeats this check
+        # under row locking before any write.
+        cur.execute("""
+            SELECT
+                spa_id,
+                business_unit_id,
+                income_id,
+                reconciliation_status
+            FROM square_payments
+            WHERE environment = %s
+              AND square_payment_id = %s
+            LIMIT 1
+        """, (
+            square_environment,
+            square_payment_id,
+        ))
+
+        existing_payment_preflight = cur.fetchone()
+
+        if existing_payment_preflight:
+            if (
+                existing_payment_preflight[0] != spa_id
+                or existing_payment_preflight[1]
+                    != business_unit_id
+            ):
+                abort(403)
+
+            if (
+                existing_payment_preflight[2] is not None
+                or str(
+                    existing_payment_preflight[3] or ""
+                ).strip().lower() == "reconciled"
+            ):
+                flash(
+                    "This Square payment is already "
+                    "reconciled.",
+                    "info",
+                )
+                return redirect(
+                    url_for("square_reconcile_payments")
+                )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    # -------------------------------------------------
+    # AUTHORITATIVE SQUARE READS
+    #
+    # No Square create/update request is permitted in
+    # this workflow.
+    # -------------------------------------------------
+
+    try:
+        square_token = (
+            _square_income_read_access_token(
+                environment=square_environment,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                oauth_access_token_ciphertext=(
+                    oauth_access_token_ciphertext
+                ),
+            )
+        )
+
+        square_payment = (
+            square_service.retrieve_payment(
+                square_payment_id,
+                access_token=square_token,
+                environment=square_environment,
+            )
+        )
+
+        square_order_id = str(
+            square_payment.get("order_id") or ""
+        ).strip()
+
+        square_order = {}
+
+        if square_order_id:
+            square_order = (
+                square_service.retrieve_order(
+                    square_order_id,
+                    access_token=square_token,
+                    environment=square_environment,
+                )
+            )
+
+    except (
+        square_oauth.SquareOAuthError,
+        square_service.SquareServiceError,
+        ValueError,
+    ) as exc:
+        flash(
+            f"Square payment could not be verified: {exc}",
+            "error",
+        )
+        return redirect(
+            url_for(
+                "square_reconcile_review_existing_income",
+                payment_id=square_payment_id,
+            )
+        )
+
+    payment_location_id = str(
+        square_payment.get("location_id") or ""
+    ).strip()
+
+    if payment_location_id != square_location_id:
+        abort(403)
+
+    payment_merchant_id = str(
+        square_payment.get("merchant_id") or ""
+    ).strip()
+
+    if (
+        merchant_id
+        and payment_merchant_id
+        and payment_merchant_id != merchant_id
+    ):
+        abort(403)
+
+    if square_order:
+        order_location_id = str(
+            square_order.get("location_id") or ""
+        ).strip()
+
+        if (
+            order_location_id
+            and order_location_id
+                != square_location_id
+        ):
+            abort(403)
+
+    payment_status = str(
+        square_payment.get("status") or ""
+    ).strip().upper()
+
+    if payment_status != "COMPLETED":
+        flash(
+            "Only completed Square payments can be "
+            "linked to existing Income.",
+            "error",
+        )
+        return redirect(
+            url_for(
+                "square_reconcile_review_existing_income",
+                payment_id=square_payment_id,
+            )
+        )
+
+    payment_local_datetime = (
+        _square_payment_local_datetime(
+            square_payment,
+            spa_id,
+        )
+    )
+
+    if payment_local_datetime is None:
+        flash(
+            "The Square payment date could not be "
+            "verified.",
+            "error",
+        )
+        return redirect(
+            url_for(
+                "square_reconcile_review_existing_income",
+                payment_id=square_payment_id,
+            )
+        )
+
+    square_customer_id = str(
+        square_payment.get("customer_id") or ""
+    ).strip()
+
+    if not square_customer_id:
+        flash(
+            "This Square payment no longer has a "
+            "Square customer attached.",
+            "warning",
+        )
+        return redirect(
+            url_for("square_reconcile_payments")
+        )
+
+    def square_money_cents(value):
+        if not isinstance(value, dict):
+            return 0
+
+        try:
+            return int(value.get("amount") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    amount_cents = square_money_cents(
+        square_payment.get("amount_money")
+    )
+
+    tip_cents = square_money_cents(
+        square_payment.get("tip_money")
+    )
+
+    total_cents = square_money_cents(
+        square_payment.get("total_money")
+    )
+
+    if not total_cents:
+        total_cents = amount_cents + tip_cents
+
+    fee_cents = sum(
+        square_money_cents(
+            fee.get("amount_money")
+        )
+        for fee in (
+            square_payment.get("processing_fee")
+            or []
+        )
+        if isinstance(fee, dict)
+    )
+
+    refunded_cents = square_money_cents(
+        square_payment.get("refunded_money")
+    )
+
+    square_net_cents = (
+        total_cents
+        - fee_cents
+        - refunded_cents
+    )
+
+    square_before_tip_cents = (
+        total_cents - tip_cents
+    )
+
+    source_type = str(
+        square_payment.get("source_type") or ""
+    ).strip()
+
+    payment_money = (
+        square_payment.get("total_money")
+        or square_payment.get("amount_money")
+        or {}
+    )
+
+    currency = str(
+        payment_money.get("currency") or ""
+    ).strip().upper()
+
+    order_discount_cents = square_money_cents(
+        square_order.get("total_discount_money")
+        if square_order
+        else None
+    )
+
+    # -------------------------------------------------
+    # GUARDED PSP TRANSACTION
+    #
+    # Everything is re-derived from authoritative
+    # workspace data. Existing Income is locked before
+    # the payment reservation/link is finalized.
+    # -------------------------------------------------
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        # Re-confirm the connection/location is still
+        # valid for this workspace before state changes.
+        cur.execute("""
+            SELECT 1
+            FROM square_connections sc
+            JOIN square_locations sl
+              ON sl.square_connection_id =
+                    sc.square_connection_id
+             AND sl.spa_id = sc.spa_id
+             AND sl.business_unit_id =
+                    sc.business_unit_id
+             AND sl.environment = sc.environment
+            WHERE sc.square_connection_id = %s
+              AND sc.spa_id = %s
+              AND sc.business_unit_id = %s
+              AND sc.environment = %s
+              AND sc.connection_status = 'connected'
+              AND sl.square_location_id = %s
+              AND sl.is_active = TRUE
+              AND (
+                    sc.environment <> 'production'
+                    OR sl.is_default = TRUE
+              )
+            LIMIT 1
+        """, (
+            square_connection_id,
+            spa_id,
+            business_unit_id,
+            square_environment,
+            square_location_id,
+        ))
+
+        if not cur.fetchone():
+            raise RuntimeError(
+                "The Square workspace connection changed. "
+                "Nothing was saved."
+            )
+
+        # Lock an existing reconciliation reservation,
+        # when present.
+        cur.execute("""
+            SELECT
+                square_payment_record_id,
+                spa_id,
+                business_unit_id,
+                income_id,
+                reconciliation_status
+            FROM square_payments
+            WHERE environment = %s
+              AND square_payment_id = %s
+            FOR UPDATE
+        """, (
+            square_environment,
+            square_payment_id,
+        ))
+
+        existing_square_row = cur.fetchone()
+
+        if existing_square_row:
+            if (
+                existing_square_row[1] != spa_id
+                or existing_square_row[2]
+                    != business_unit_id
+            ):
+                raise RuntimeError(
+                    "Square payment workspace ownership "
+                    "changed. Nothing was saved."
+                )
+
+            if (
+                existing_square_row[3] is not None
+                or str(
+                    existing_square_row[4] or ""
+                ).strip().lower() == "reconciled"
+            ):
+                raise RuntimeError(
+                    "This Square payment is already "
+                    "reconciled. Nothing was saved."
+                )
+
+        # Re-derive the exact mapped PSP client.
+        cur.execute("""
+            SELECT
+                scm.client_id,
+                c.first_name,
+                c.last_name
+            FROM square_customer_mappings scm
+            JOIN clients c
+              ON c.client_id = scm.client_id
+             AND c.spa_id = scm.spa_id
+             AND c.business_unit_id =
+                    scm.business_unit_id
+            WHERE scm.square_connection_id = %s
+              AND scm.spa_id = %s
+              AND scm.business_unit_id = %s
+              AND scm.environment = %s
+              AND scm.square_customer_id = %s
+              AND scm.is_active = TRUE
+            ORDER BY
+                scm.verified_at DESC NULLS LAST,
+                scm.square_customer_mapping_id DESC
+        """, (
+            square_connection_id,
+            spa_id,
+            business_unit_id,
+            square_environment,
+            square_customer_id,
+        ))
+
+        mapped_client_rows = cur.fetchall()
+
+        if len(mapped_client_rows) != 1:
+            raise RuntimeError(
+                "The Square customer no longer has "
+                "exactly one active PSP client mapping. "
+                "Nothing was saved."
+            )
+
+        mapped_client_id = mapped_client_rows[0][0]
+
+        # Re-derive and lock the exact appointment.
+        cur.execute("""
+            SELECT
+                appointment_id,
+                appointment_date,
+                appointment_time
+            FROM appointments
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND client_id = %s
+              AND appointment_date = %s
+            ORDER BY
+                appointment_time,
+                appointment_id
+            FOR UPDATE
+        """, (
+            spa_id,
+            business_unit_id,
+            mapped_client_id,
+            payment_local_datetime.date(),
+        ))
+
+        appointment_rows = cur.fetchall()
+
+        if len(appointment_rows) != 1:
+            raise RuntimeError(
+                "The payment no longer has exactly one "
+                "matching PSP appointment. Nothing was "
+                "saved."
+            )
+
+        appointment = appointment_rows[0]
+
+        # Re-derive and lock the sole existing Income.
+        cur.execute("""
+            SELECT
+                i.income_id,
+                i.client_id,
+                i.income_date,
+                i.service_amount,
+                i.retail_amount,
+                i.tax_amount,
+                i.tip_amount,
+                i.total_amount,
+                i.payment_method,
+                i.processor_payment_id,
+                i.credit_processor_id,
+                i.processing_fee_amount,
+                i.net_received,
+                cp.credit_processor_name
+            FROM income i
+            LEFT JOIN credit_processors cp
+              ON cp.credit_processor_id =
+                    i.credit_processor_id
+             AND cp.spa_id = i.spa_id
+            WHERE i.spa_id = %s
+              AND i.business_unit_id = %s
+              AND i.appointment_id = %s
+            ORDER BY i.income_id DESC
+            FOR UPDATE OF i
+        """, (
+            spa_id,
+            business_unit_id,
+            appointment[0],
+        ))
+
+        income_rows = cur.fetchall()
+
+        if len(income_rows) != 1:
+            raise RuntimeError(
+                "The appointment no longer has exactly "
+                "one existing PSP Income record. Nothing "
+                "was saved."
+            )
+
+        income = income_rows[0]
+
+        if income[0] != expected_income_id:
+            raise RuntimeError(
+                "The existing Income record changed "
+                "since review. Nothing was saved."
+            )
+
+        def income_dollars_to_cents(value):
+            try:
+                return int(
+                    (
+                        decimal.Decimal(
+                            str(value or 0)
+                        )
+                        * 100
+                    ).quantize(
+                        decimal.Decimal("1")
+                    )
+                )
+            except (
+                decimal.InvalidOperation,
+                TypeError,
+                ValueError,
+            ):
+                return 0
+
+        income_service_cents = (
+            income_dollars_to_cents(income[3])
+        )
+        income_retail_cents = (
+            income_dollars_to_cents(income[4])
+        )
+        income_tax_cents = (
+            income_dollars_to_cents(income[5])
+        )
+        income_tip_cents = (
+            income_dollars_to_cents(income[6])
+        )
+        income_total_cents = (
+            income_dollars_to_cents(income[7])
+        )
+
+        income_before_tip_cents = (
+            income_service_cents
+            + income_retail_cents
+            + income_tax_cents
+        )
+
+        processor_name = str(
+            income[13] or ""
+        ).strip()
+
+        processor_reference = str(
+            income[9] or ""
+        ).strip()
+
+        checks = [
+            (
+                "Mapped client matches Income",
+                income[1] == mapped_client_id,
+            ),
+            (
+                "Existing processor is Square",
+                processor_name.lower() == "square",
+            ),
+            (
+                "Existing processor payment reference "
+                "is compatible",
+                (
+                    not processor_reference
+                    or processor_reference
+                        == square_payment_id
+                ),
+            ),
+            (
+                "No Square refund is recorded",
+                refunded_cents == 0,
+            ),
+            (
+                "PSP Income balances",
+                (
+                    income_before_tip_cents
+                    + income_tip_cents
+                    == income_total_cents
+                ),
+            ),
+            (
+                "Total matches Square",
+                income_total_cents == total_cents,
+            ),
+            (
+                "Tip matches Square",
+                income_tip_cents == tip_cents,
+            ),
+            (
+                "Amount before tip matches Square",
+                income_before_tip_cents
+                    == square_before_tip_cents,
+            ),
+        ]
+
+        failed_checks = [
+            label
+            for label, passed in checks
+            if not passed
+        ]
+
+        if failed_checks:
+            raise RuntimeError(
+                "Historical Income link safeguards no "
+                "longer pass: "
+                + "; ".join(failed_checks)
+                + ". Nothing was saved."
+            )
+
+        # Additional duplicate-reference safeguard:
+        # no other Income in this workspace may already
+        # claim this Square payment ID.
+        cur.execute("""
+            SELECT income_id
+            FROM income
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND processor_payment_id = %s
+              AND income_id <> %s
+            FOR UPDATE
+        """, (
+            spa_id,
+            business_unit_id,
+            square_payment_id,
+            income[0],
+        ))
+
+        duplicate_income_refs = cur.fetchall()
+
+        if duplicate_income_refs:
+            raise RuntimeError(
+                "Another PSP Income record already "
+                "references this Square payment. Nothing "
+                "was saved."
+            )
+
+        match_method = "existing_income_review"
+
+        match_notes = (
+            "Linked to existing Income after guarded "
+            "historical reconciliation review. Existing "
+            "service/retail/tax classification preserved; "
+            "Square processing fee and net received are "
+            "authoritative. No historical inventory "
+            "movement was posted."
+        )
+
+        # ---------------------------------------------
+        # Reserve / refresh square_payments.
+        #
+        # Unique (environment, square_payment_id) remains
+        # the Square idempotency boundary.
+        # ---------------------------------------------
+
+        if existing_square_row:
+            square_payment_record_id = (
+                existing_square_row[0]
+            )
+
+        else:
+            cur.execute("""
+                INSERT INTO square_payments (
+                    square_connection_id,
+                    spa_id,
+                    business_unit_id,
+                    environment,
+                    square_payment_id,
+                    square_order_id,
+                    square_customer_id,
+                    square_location_id,
+                    merchant_id,
+                    payment_status,
+                    tender_type,
+                    currency,
+                    amount_cents,
+                    service_amount_cents,
+                    retail_amount_cents,
+                    tax_amount_cents,
+                    tip_amount_cents,
+                    discount_amount_cents,
+                    processing_fee_cents,
+                    refunded_amount_cents,
+                    net_received_cents,
+                    square_created_at,
+                    square_updated_at,
+                    appointment_id,
+                    client_id,
+                    reconciliation_status,
+                    match_method,
+                    match_notes,
+                    retrieved_at,
+                    last_synced_at,
+                    reviewed_by,
+                    raw_payment,
+                    raw_order
+                )
+                VALUES (
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    'matched', %s, %s,
+                    CURRENT_TIMESTAMP,
+                    CURRENT_TIMESTAMP,
+                    %s, %s, %s
+                )
+                ON CONFLICT (
+                    environment,
+                    square_payment_id
+                )
+                DO NOTHING
+                RETURNING square_payment_record_id
+            """, (
+                square_connection_id,
+                spa_id,
+                business_unit_id,
+                square_environment,
+                square_payment_id,
+                square_order_id or None,
+                square_customer_id,
+                square_location_id,
+                payment_merchant_id
+                or merchant_id,
+                payment_status,
+                source_type or None,
+                currency or None,
+                total_cents,
+                income_service_cents,
+                income_retail_cents,
+                income_tax_cents,
+                tip_cents,
+                order_discount_cents,
+                fee_cents,
+                refunded_cents,
+                square_net_cents,
+                square_payment.get("created_at"),
+                square_payment.get("updated_at"),
+                appointment[0],
+                mapped_client_id,
+                match_method,
+                match_notes,
+                actor_user_id,
+                Json(square_payment),
+                Json(square_order),
+            ))
+
+            inserted_square_row = cur.fetchone()
+
+            if inserted_square_row:
+                square_payment_record_id = (
+                    inserted_square_row[0]
+                )
+            else:
+                # A concurrent request may have created
+                # the unique reservation after our first
+                # SELECT. Lock and validate it now.
+                cur.execute("""
+                    SELECT
+                        square_payment_record_id,
+                        spa_id,
+                        business_unit_id,
+                        income_id,
+                        reconciliation_status
+                    FROM square_payments
+                    WHERE environment = %s
+                      AND square_payment_id = %s
+                    FOR UPDATE
+                """, (
+                    square_environment,
+                    square_payment_id,
+                ))
+
+                raced_square_row = cur.fetchone()
+
+                if not raced_square_row:
+                    raise RuntimeError(
+                        "Square payment reconciliation "
+                        "could not be reserved. Nothing "
+                        "was saved."
+                    )
+
+                if (
+                    raced_square_row[1] != spa_id
+                    or raced_square_row[2]
+                        != business_unit_id
+                ):
+                    raise RuntimeError(
+                        "Square payment workspace "
+                        "ownership changed. Nothing was "
+                        "saved."
+                    )
+
+                if (
+                    raced_square_row[3] is not None
+                    or str(
+                        raced_square_row[4] or ""
+                    ).strip().lower()
+                        == "reconciled"
+                ):
+                    raise RuntimeError(
+                        "This Square payment is already "
+                        "reconciled. Nothing was saved."
+                    )
+
+                square_payment_record_id = (
+                    raced_square_row[0]
+                )
+
+                existing_square_row = (
+                    raced_square_row
+                )
+
+        # Existing reservations are refreshed from the
+        # authoritative Square read before final linking.
+        if existing_square_row:
+            cur.execute("""
+                UPDATE square_payments
+                SET
+                    square_connection_id = %s,
+                    square_order_id = %s,
+                    square_customer_id = %s,
+                    square_location_id = %s,
+                    merchant_id = %s,
+                    payment_status = %s,
+                    tender_type = %s,
+                    currency = %s,
+                    amount_cents = %s,
+                    service_amount_cents = %s,
+                    retail_amount_cents = %s,
+                    tax_amount_cents = %s,
+                    tip_amount_cents = %s,
+                    discount_amount_cents = %s,
+                    processing_fee_cents = %s,
+                    refunded_amount_cents = %s,
+                    net_received_cents = %s,
+                    square_created_at = %s,
+                    square_updated_at = %s,
+                    appointment_id = %s,
+                    client_id = %s,
+                    reconciliation_status = 'matched',
+                    match_method = %s,
+                    match_notes = %s,
+                    retrieved_at = CURRENT_TIMESTAMP,
+                    last_synced_at = CURRENT_TIMESTAMP,
+                    reviewed_by = %s,
+                    raw_payment = %s,
+                    raw_order = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE square_payment_record_id = %s
+                  AND spa_id = %s
+                  AND business_unit_id = %s
+                  AND income_id IS NULL
+            """, (
+                square_connection_id,
+                square_order_id or None,
+                square_customer_id,
+                square_location_id,
+                payment_merchant_id
+                or merchant_id,
+                payment_status,
+                source_type or None,
+                currency or None,
+                total_cents,
+                income_service_cents,
+                income_retail_cents,
+                income_tax_cents,
+                tip_cents,
+                order_discount_cents,
+                fee_cents,
+                refunded_cents,
+                square_net_cents,
+                square_payment.get("created_at"),
+                square_payment.get("updated_at"),
+                appointment[0],
+                mapped_client_id,
+                match_method,
+                match_notes,
+                actor_user_id,
+                Json(square_payment),
+                Json(square_order),
+                square_payment_record_id,
+                spa_id,
+                business_unit_id,
+            ))
+
+            if cur.rowcount != 1:
+                raise RuntimeError(
+                    "Square payment reconciliation could "
+                    "not be refreshed safely. Nothing was "
+                    "saved."
+                )
+
+        authoritative_fee = (
+            decimal.Decimal(fee_cents)
+            / decimal.Decimal("100")
+        ).quantize(
+            decimal.Decimal("0.01")
+        )
+
+        authoritative_net = (
+            decimal.Decimal(square_net_cents)
+            / decimal.Decimal("100")
+        ).quantize(
+            decimal.Decimal("0.01")
+        )
+
+        # ---------------------------------------------
+        # UPDATE THE EXISTING INCOME — NEVER INSERT.
+        #
+        # Only the processor payment reference and the
+        # two Square-authoritative processor figures are
+        # changed by this historical workflow.
+        # ---------------------------------------------
+
+        cur.execute("""
+            UPDATE income
+            SET
+                processor_payment_id = %s,
+                processing_fee_amount = %s,
+                net_received = %s
+            WHERE income_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND appointment_id = %s
+              AND client_id = %s
+              AND (
+                    processor_payment_id IS NULL
+                    OR BTRIM(
+                        processor_payment_id
+                    ) = ''
+                    OR processor_payment_id = %s
+              )
+        """, (
+            square_payment_id,
+            authoritative_fee,
+            authoritative_net,
+            income[0],
+            spa_id,
+            business_unit_id,
+            appointment[0],
+            mapped_client_id,
+            square_payment_id,
+        ))
+
+        if cur.rowcount != 1:
+            raise RuntimeError(
+                "Existing Income could not be updated "
+                "safely. Nothing was saved."
+            )
+
+        # Final reconciliation link. Match the existing
+        # Add Income concurrency rule: only an unlinked
+        # square_payments row may become reconciled.
+        cur.execute("""
+            UPDATE square_payments
+            SET
+                income_id = %s,
+                reconciliation_status = 'reconciled',
+                reconciled_at = CURRENT_TIMESTAMP,
+                last_synced_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE square_payment_record_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND income_id IS NULL
+        """, (
+            income[0],
+            square_payment_record_id,
+            spa_id,
+            business_unit_id,
+        ))
+
+        if cur.rowcount != 1:
+            raise RuntimeError(
+                "Square payment reconciliation could not "
+                "be linked to the existing Income. "
+                "Nothing was saved."
+            )
+
+        conn.commit()
+
+    except RuntimeError as exc:
+        conn.rollback()
+        flash(str(exc), "error")
+
+        return redirect(
+            url_for(
+                "square_reconcile_review_existing_income",
+                payment_id=square_payment_id,
+            )
+        )
+
+    except Exception:
+        conn.rollback()
+
+        app.logger.exception(
+            "Historical Square existing-Income "
+            "reconciliation failed."
+        )
+
+        flash(
+            "Square payment reconciliation failed. "
+            "Nothing was saved.",
+            "error",
+        )
+
+        return redirect(
+            url_for(
+                "square_reconcile_review_existing_income",
+                payment_id=square_payment_id,
+            )
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    # Successful state change consumes the exact review
+    # token/context so the same form cannot be replayed.
+    session.pop(
+        "square_existing_income_link_context",
+        None,
+    )
+
+    flash(
+        "Square payment linked to existing Income "
+        f"#{expected_income_id}. Actual Square fee and "
+        "net received were saved.",
+        "success",
+    )
+
+    return redirect(
+        url_for("square_reconcile_payments")
     )
 
 

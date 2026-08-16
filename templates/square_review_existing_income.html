@@ -338,6 +338,62 @@ Review Existing Income | Peach Suite Pro
                     Square payment passed all current safety
                     checks.
                 </p>
+
+                {% if square_existing_income_link_token %}
+                    <p>
+                        This action will keep the existing
+                        Income record. It will attach the
+                        Square payment reference and replace
+                        only the estimated processing fee and
+                        net received with Square's actual
+                        values.
+                    </p>
+
+                    <p>
+                        No new Income record or historical
+                        inventory movement will be created by
+                        this action.
+                    </p>
+
+                    <form
+                        method="post"
+                        action="{{
+                            url_for(
+                                'square_reconcile_link_existing_income'
+                            )
+                        }}"
+                        onsubmit="return confirm(
+                            'Link this Square payment to existing Income #{{ income_id }}?'
+                        );"
+                    >
+                        <input
+                            type="hidden"
+                            name="square_existing_income_link_token"
+                            value="{{
+                                square_existing_income_link_token
+                            }}"
+                        >
+
+                        <input
+                            type="hidden"
+                            name="payment_id"
+                            value="{{ payment_id }}"
+                        >
+
+                        <input
+                            type="hidden"
+                            name="income_id"
+                            value="{{ income_id }}"
+                        >
+
+                        <button
+                            type="submit"
+                            class="tool-pill tool-pill-small"
+                        >
+                            Link Square Payment to Existing Income
+                        </button>
+                    </form>
+                {% endif %}
             </div>
         {% else %}
             <div class="square-existing-note">
@@ -351,11 +407,13 @@ Review Existing Income | Peach Suite Pro
         {% endif %}
 
         <div class="square-existing-note">
-            <strong>Read-only review</strong>
+            <strong>Controlled historical reconciliation</strong>
             <p>
-                No Income, Square payment, inventory, or
-                reconciliation record can be changed from this
-                page yet.
+                Linking is allowed only after the server
+                re-fetches Square and revalidates every safety
+                check. A successful link updates the existing
+                Income processor reference, actual Square fee,
+                actual net received, and reconciliation record.
             </p>
         </div>
     </div>
