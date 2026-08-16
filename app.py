@@ -16572,6 +16572,458 @@ def square_reconcile_payments():
     )
 
 
+
+##############################################
+#
+#   SQUARE RECONCILIATION - IDENTIFY CLIENT
+#
+#   Read-only identification screen.
+#
+#   - Retrieves one exact Square payment
+#   - Verifies workspace / merchant / location
+#   - Retrieves one exact Square customer
+#   - Reuses PSP duplicate-client matching
+#   - PSP SELECTs only
+#   - No mapping write
+#   - No PSP -> Square write
+#
+###############################################
+
+
+@app.route(
+    "/payment-integrations/square/reconcile/identify-client",
+    methods=["GET"],
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_view_business_management"
+)
+def square_reconcile_identify_client():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
+
+    square_payment_id = str(
+        request.args.get("payment_id") or ""
+    ).strip()
+
+    if not square_payment_id:
+        flash(
+            "Square payment ID is required.",
+            "error"
+        )
+        return redirect(
+            url_for("square_reconcile_payments")
+        )
+
+    square_environment = (
+        _square_income_read_environment()
+    )
+
+    # -------------------------------------------------
+    # Resolve only the Square connection/location for
+    # the current PSP workspace.
+    # -------------------------------------------------
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                sc.square_connection_id,
+                sc.merchant_id,
+                sc.oauth_access_token_ciphertext,
+                sl.square_location_id,
+                sl.location_name
+            FROM square_connections sc
+            JOIN square_locations sl
+              ON sl.square_connection_id =
+                    sc.square_connection_id
+             AND sl.spa_id = sc.spa_id
+             AND sl.business_unit_id =
+                    sc.business_unit_id
+             AND sl.environment = sc.environment
+            WHERE sc.spa_id = %s
+              AND sc.business_unit_id = %s
+              AND sc.environment = %s
+              AND sc.connection_status = 'connected'
+              AND sl.is_active = TRUE
+              AND (
+                    sc.environment <> 'production'
+                    OR sl.is_default = TRUE
+              )
+            ORDER BY
+                sl.is_default DESC,
+                sl.square_location_mapping_id
+            LIMIT 1
+        """, (
+            spa_id,
+            business_unit_id,
+            square_environment,
+        ))
+
+        square_mapping = cur.fetchone()
+
+        if not square_mapping:
+            flash(
+                "Square is not connected to this Provider "
+                "Workspace for payment reconciliation.",
+                "error"
+            )
+            return redirect(
+                url_for("square_reconcile_payments")
+            )
+
+        (
+            square_connection_id,
+            merchant_id,
+            oauth_access_token_ciphertext,
+            square_location_id,
+            location_name,
+        ) = square_mapping
+
+        # Already-reconciled payments should never enter
+        # the identity-matching workflow.
+        cur.execute("""
+            SELECT 1
+            FROM square_payments
+            WHERE square_connection_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND environment = %s
+              AND square_payment_id = %s
+              AND (
+                    income_id IS NOT NULL
+                    OR reconciliation_status = 'reconciled'
+              )
+            LIMIT 1
+        """, (
+            square_connection_id,
+            spa_id,
+            business_unit_id,
+            square_environment,
+            square_payment_id,
+        ))
+
+        if cur.fetchone():
+            flash(
+                "This Square payment is already reconciled.",
+                "info"
+            )
+            return redirect(
+                url_for("square_reconcile_payments")
+            )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    # -------------------------------------------------
+    # Square READS only:
+    # retrieve exact payment, then exact customer.
+    # -------------------------------------------------
+
+    try:
+        token = _square_income_read_access_token(
+            environment=square_environment,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            oauth_access_token_ciphertext=(
+                oauth_access_token_ciphertext
+            ),
+        )
+
+        payment = square_service.retrieve_payment(
+            square_payment_id,
+            access_token=token,
+            environment=square_environment,
+        )
+
+    except (
+        square_oauth.SquareOAuthError,
+        square_service.SquareServiceError,
+        ValueError,
+    ) as exc:
+        flash(
+            f"Square payment could not be loaded: {exc}",
+            "error"
+        )
+        return redirect(
+            url_for("square_reconcile_payments")
+        )
+
+    payment_location_id = str(
+        payment.get("location_id") or ""
+    ).strip()
+
+    if payment_location_id != square_location_id:
+        abort(403)
+
+    payment_merchant_id = str(
+        payment.get("merchant_id") or ""
+    ).strip()
+
+    if (
+        merchant_id
+        and payment_merchant_id
+        and payment_merchant_id != merchant_id
+    ):
+        abort(403)
+
+    payment_status = str(
+        payment.get("status") or ""
+    ).strip().upper()
+
+    if payment_status != "COMPLETED":
+        flash(
+            "Only completed Square payments can be "
+            "reviewed for client identification.",
+            "error"
+        )
+        return redirect(
+            url_for("square_reconcile_payments")
+        )
+
+    square_customer_id = str(
+        payment.get("customer_id") or ""
+    ).strip()
+
+    if not square_customer_id:
+        flash(
+            "This Square payment does not have a "
+            "Square customer attached.",
+            "warning"
+        )
+        return redirect(
+            url_for("square_reconcile_payments")
+        )
+
+    try:
+        square_customer = (
+            square_service.retrieve_customer(
+                square_customer_id,
+                access_token=token,
+                environment=square_environment,
+            )
+        )
+
+    except (
+        square_service.SquareServiceError,
+        ValueError,
+    ) as exc:
+        flash(
+            f"Square customer could not be loaded: {exc}",
+            "error"
+        )
+        return redirect(
+            url_for("square_reconcile_payments")
+        )
+
+    # -------------------------------------------------
+    # PSP READS only:
+    # detect any existing mapping and calculate possible
+    # PSP client matches using PSP's existing duplicate
+    # client confidence rules.
+    # -------------------------------------------------
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                scm.square_customer_mapping_id,
+                scm.client_id,
+                scm.match_method,
+                c.first_name,
+                c.last_name
+            FROM square_customer_mappings scm
+            JOIN clients c
+              ON c.client_id = scm.client_id
+             AND c.spa_id = scm.spa_id
+             AND c.business_unit_id =
+                    scm.business_unit_id
+            WHERE scm.square_connection_id = %s
+              AND scm.spa_id = %s
+              AND scm.business_unit_id = %s
+              AND scm.environment = %s
+              AND scm.square_customer_id = %s
+              AND scm.is_active = TRUE
+            ORDER BY
+                scm.verified_at DESC NULLS LAST,
+                scm.square_customer_mapping_id DESC
+            LIMIT 1
+        """, (
+            square_connection_id,
+            spa_id,
+            business_unit_id,
+            square_environment,
+            square_customer_id,
+        ))
+
+        existing_mapping_row = cur.fetchone()
+
+        existing_mapping = None
+
+        if existing_mapping_row:
+            existing_mapping = {
+                "mapping_id": existing_mapping_row[0],
+                "client_id": existing_mapping_row[1],
+                "match_method": existing_mapping_row[2],
+                "client_name": (
+                    f"{existing_mapping_row[3] or ''} "
+                    f"{existing_mapping_row[4] or ''}"
+                ).strip()
+                or (
+                    f"Client #{existing_mapping_row[1]}"
+                ),
+            }
+
+        duplicates = find_possible_client_duplicates(
+            cur,
+            spa_id,
+            business_unit_id,
+            square_customer.get("given_name"),
+            square_customer.get("family_name"),
+            square_customer.get("phone_number"),
+            square_customer.get("email_address"),
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    strong_matches = [
+        item
+        for item in duplicates
+        if item.get("strong_match")
+    ]
+
+    possible_matches = [
+        item
+        for item in duplicates
+        if not item.get("strong_match")
+    ]
+
+    suggested_match = None
+    suggested_match_method = None
+    match_status = "no_match"
+
+    if existing_mapping:
+        match_status = "already_mapped"
+
+    elif len(strong_matches) == 1:
+        suggested_match = strong_matches[0]
+        reasons = set(
+            suggested_match.get(
+                "match_reasons"
+            ) or []
+        )
+
+        if {
+            "Email",
+            "Phone",
+        }.issubset(reasons):
+            suggested_match_method = (
+                "confirmed_email_phone"
+            )
+
+        elif "Email" in reasons:
+            suggested_match_method = (
+                "confirmed_email"
+            )
+
+        else:
+            suggested_match_method = (
+                "confirmed_phone"
+            )
+
+        match_status = "strong_match"
+
+    elif len(strong_matches) > 1:
+        match_status = "multiple_strong_matches"
+
+    elif possible_matches:
+        match_status = "possible_name_match"
+
+    payment_local_datetime = (
+        _square_payment_local_datetime(
+            payment,
+            spa_id,
+        )
+    )
+
+    payment_display = "—"
+
+    if payment_local_datetime:
+        payment_display = (
+            payment_local_datetime.strftime(
+                "%m/%d/%Y %I:%M %p"
+            ).replace(" 0", " ")
+        )
+
+    def money_cents(value):
+        if not isinstance(value, dict):
+            return 0
+
+        try:
+            return int(
+                value.get("amount") or 0
+            )
+        except (TypeError, ValueError):
+            return 0
+
+    total_cents = money_cents(
+        payment.get("total_money")
+    )
+
+    if not total_cents:
+        total_cents = (
+            money_cents(
+                payment.get("amount_money")
+            )
+            + money_cents(
+                payment.get("tip_money")
+            )
+        )
+
+    square_customer_name = (
+        f"{square_customer.get('given_name') or ''} "
+        f"{square_customer.get('family_name') or ''}"
+    ).strip() or "Unnamed Square Customer"
+
+    return render_template(
+        "square_identify_client.html",
+        environment=square_environment,
+        location_name=location_name,
+        payment_id=square_payment_id,
+        payment_display=payment_display,
+        payment_total_cents=total_cents,
+        square_customer_id=square_customer_id,
+        square_customer_name=square_customer_name,
+        square_customer_email=(
+            square_customer.get("email_address")
+            or ""
+        ),
+        square_customer_phone=(
+            square_customer.get("phone_number")
+            or ""
+        ),
+        existing_mapping=existing_mapping,
+        strong_matches=strong_matches,
+        possible_matches=possible_matches,
+        suggested_match=suggested_match,
+        suggested_match_method=(
+            suggested_match_method
+        ),
+        match_status=match_status,
+    )
+
+
 ##############################################
 #
 #   SQUARE SYNC ALL - SANDBOX ONLY

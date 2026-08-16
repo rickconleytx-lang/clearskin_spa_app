@@ -744,6 +744,30 @@ def _persist_mapping(
     )
 
     try:
+        # Re-verify the Square connection itself belongs to this
+        # exact workspace/environment before storing an external
+        # identity against it.
+        cur.execute("""
+            SELECT square_connection_id
+            FROM square_connections
+            WHERE square_connection_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND environment = %s
+            LIMIT 1
+        """, (
+            square_connection_id,
+            spa_id,
+            business_unit_id,
+            environment
+        ))
+
+        if not cur.fetchone():
+            raise SquareClientSyncError(
+                "Square connection does not belong to this "
+                "PSP workspace/environment."
+            )
+
         # Re-verify the PSP client still belongs to this exact
         # workspace before storing the external identity.
         cur.execute("""
@@ -912,6 +936,120 @@ def _persist_mapping(
     finally:
         cur.close()
         conn.close()
+
+
+
+def confirm_square_customer_mapping(
+    *,
+    square_connection_id,
+    spa_id,
+    business_unit_id,
+    environment,
+    square_customer_id,
+    client_id,
+    match_method,
+    actor_user_id
+):
+    """
+    Persist a human-confirmed Square Customer -> PSP Client
+    identity mapping.
+
+    This helper performs PSP database work only.
+
+    It does NOT:
+    - create a Square customer
+    - update a Square customer
+    - search Square
+    - perform any PSP -> Square synchronization
+
+    The underlying persistence helper re-verifies workspace
+    ownership and enforces mapping collision guards.
+    """
+
+    environment = str(
+        environment or ""
+    ).strip().lower()
+
+    if environment not in {
+        "sandbox",
+        "production",
+    }:
+        raise SquareClientSyncError(
+            "Square environment must be sandbox or production."
+        )
+
+    square_customer_id = str(
+        square_customer_id or ""
+    ).strip()
+
+    if not square_customer_id:
+        raise SquareClientSyncError(
+            "Square customer ID is required."
+        )
+
+    allowed_match_methods = {
+        "confirmed_email",
+        "confirmed_phone",
+        "confirmed_email_phone",
+        "confirmed_name",
+        "manual_confirmed",
+    }
+
+    match_method = str(
+        match_method or ""
+    ).strip().lower()
+
+    if match_method not in allowed_match_methods:
+        raise SquareClientSyncError(
+            "Invalid confirmed Square client match method."
+        )
+
+    try:
+        square_connection_id = int(
+            square_connection_id
+        )
+        spa_id = int(spa_id)
+        business_unit_id = int(
+            business_unit_id
+        )
+        client_id = int(client_id)
+    except (TypeError, ValueError):
+        raise SquareClientSyncError(
+            "Square client mapping IDs must be valid integers."
+        )
+
+    if (
+        square_connection_id <= 0
+        or spa_id <= 0
+        or business_unit_id <= 0
+        or client_id <= 0
+    ):
+        raise SquareClientSyncError(
+            "Square client mapping IDs must be positive."
+        )
+
+    mapping = _persist_mapping(
+        square_connection_id=(
+            square_connection_id
+        ),
+        spa_id=spa_id,
+        business_unit_id=(
+            business_unit_id
+        ),
+        environment=environment,
+        square_customer_id=(
+            square_customer_id
+        ),
+        client_id=client_id,
+        match_method=match_method,
+        actor_user_id=actor_user_id,
+    )
+
+    return {
+        "status": "mapped",
+        "action": "confirmed",
+        **mapping,
+    }
 
 
 def _refresh_mapping_customer_id(

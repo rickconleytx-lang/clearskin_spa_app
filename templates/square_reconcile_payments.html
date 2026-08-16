@@ -309,6 +309,7 @@ Reconcile Square Payments | Peach Suite Pro
                             <th>PSP Client</th>
                             <th>Reason</th>
                             <th>Status</th>
+                            <th>Action</th>
                         </tr>
                     </thead>
 
@@ -372,6 +373,26 @@ Reconcile Square Payments | Peach Suite Pro
                                     <span class="square-reconcile-status">
                                         Needs Review
                                     </span>
+                                </td>
+
+                                <td>
+                                    {% if payment.customer_id %}
+                                        <a
+                                            href="{{
+                                                url_for(
+                                                    'square_reconcile_identify_client',
+                                                    payment_id=payment.payment_id
+                                                )
+                                            }}"
+                                            class="tool-pill tool-pill-small"
+                                        >
+                                            Identify Client
+                                        </a>
+                                    {% else %}
+                                        <span class="square-reconcile-status">
+                                            No Square Customer
+                                        </span>
+                                    {% endif %}
                                 </td>
                             </tr>
                         {% endfor %}

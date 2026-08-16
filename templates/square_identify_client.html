@@ -1,0 +1,333 @@
+{% extends "base.html" %}
+
+{% block title %}
+Identify Square Client | Peach Suite Pro
+{% endblock %}
+
+{% block content %}
+
+<style>
+.square-identify-page {
+    max-width: 1100px;
+    margin: 0 auto;
+}
+
+.square-identify-intro {
+    max-width: 850px;
+    margin: 14px 0 20px 0;
+}
+
+.square-identify-card {
+    border: 1px solid #ddd;
+    border-radius: 12px;
+    padding: 18px;
+    background: #fff;
+    margin-top: 16px;
+}
+
+.square-identify-grid {
+    display: grid;
+    grid-template-columns:
+        repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+}
+
+.square-identify-label {
+    font-weight: 700;
+    display: block;
+    margin-bottom: 4px;
+}
+
+.square-identify-table-wrap {
+    overflow-x: auto;
+    margin-top: 12px;
+}
+
+.square-identify-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.square-identify-table th,
+.square-identify-table td {
+    border-bottom: 1px solid #ddd;
+    padding: 10px 8px;
+    text-align: left;
+    vertical-align: top;
+}
+
+.square-identify-status {
+    display: inline-block;
+    border: 1px solid #bbb;
+    border-radius: 999px;
+    padding: 4px 9px;
+    font-weight: 700;
+}
+
+.square-identify-id {
+    font-size: 0.86rem;
+    overflow-wrap: anywhere;
+}
+</style>
+
+<div class="square-identify-page">
+
+    <div class="page-tool-pills">
+        <a
+            href="{{ url_for('square_reconcile_payments') }}"
+            class="tool-pill tool-pill-small"
+        >
+            Reconcile Square Payments
+        </a>
+
+        <a
+            href="{{ url_for('square_control_center') }}"
+            class="tool-pill tool-pill-small"
+        >
+            Square Control Center
+        </a>
+    </div>
+
+    <div class="page-title">
+        <h1>Identify Square Client</h1>
+    </div>
+
+    <p class="square-identify-intro">
+        Compare the customer attached to this completed Square
+        payment with clients in the current Peach Suite Pro
+        workspace. This screen is read-only. No client mapping
+        is saved until a future explicit Confirm Match action.
+    </p>
+
+    <div class="square-identify-card">
+        <h2>Square Payment</h2>
+
+        <div class="square-identify-grid">
+            <div>
+                <span class="square-identify-label">
+                    Date / Time
+                </span>
+                {{ payment_display }}
+            </div>
+
+            <div>
+                <span class="square-identify-label">
+                    Amount
+                </span>
+                ${{
+                    '%.2f'|format(
+                        payment_total_cents / 100
+                    )
+                }}
+            </div>
+
+            <div>
+                <span class="square-identify-label">
+                    Environment
+                </span>
+                {{ environment|title }}
+            </div>
+
+            <div>
+                <span class="square-identify-label">
+                    Square Location
+                </span>
+                {{ location_name or '—' }}
+            </div>
+        </div>
+
+        <p class="square-identify-id">
+            <strong>Payment ID:</strong>
+            {{ payment_id }}
+        </p>
+    </div>
+
+    <div class="square-identify-card">
+        <h2>Square Customer</h2>
+
+        <div class="square-identify-grid">
+            <div>
+                <span class="square-identify-label">
+                    Name
+                </span>
+                {{ square_customer_name }}
+            </div>
+
+            <div>
+                <span class="square-identify-label">
+                    Email
+                </span>
+                {{ square_customer_email or '—' }}
+            </div>
+
+            <div>
+                <span class="square-identify-label">
+                    Phone
+                </span>
+                {{ square_customer_phone or '—' }}
+            </div>
+        </div>
+
+        <p class="square-identify-id">
+            <strong>Square Customer ID:</strong>
+            {{ square_customer_id }}
+        </p>
+    </div>
+
+    {% if existing_mapping %}
+
+        <div class="square-identify-card">
+            <h2>Already Mapped</h2>
+
+            <p>
+                This Square customer is already mapped to
+                <strong>
+                    {{ existing_mapping.client_name }}
+                </strong>
+                (PSP Client #{{ existing_mapping.client_id }}).
+            </p>
+
+            <p>
+                <span class="square-identify-status">
+                    {{ existing_mapping.match_method or 'Mapped' }}
+                </span>
+            </p>
+        </div>
+
+    {% elif match_status == 'strong_match' %}
+
+        <div class="square-identify-card">
+            <h2>Suggested Match</h2>
+
+            <p>
+                Peach Suite Pro found one strong match using
+                exact normalized email and/or phone.
+            </p>
+
+            <div class="square-identify-grid">
+                <div>
+                    <span class="square-identify-label">
+                        PSP Client
+                    </span>
+                    {{ suggested_match.client_name }}
+                </div>
+
+                <div>
+                    <span class="square-identify-label">
+                        Match Evidence
+                    </span>
+                    {{ suggested_match.match_reason_display }}
+                </div>
+
+                <div>
+                    <span class="square-identify-label">
+                        PSP Status
+                    </span>
+                    {{ suggested_match.status_label }}
+                </div>
+            </div>
+
+            <p>
+                <span class="square-identify-status">
+                    Suggested — confirmation not yet enabled
+                </span>
+            </p>
+        </div>
+
+    {% elif match_status == 'multiple_strong_matches' %}
+
+        <div class="square-identify-card">
+            <h2>Multiple Strong Matches</h2>
+
+            <p>
+                More than one PSP client matched the Square
+                customer's email and/or phone. Peach Suite Pro
+                will not choose automatically.
+            </p>
+
+            <div class="square-identify-table-wrap">
+                <table class="square-identify-table">
+                    <thead>
+                        <tr>
+                            <th>PSP Client</th>
+                            <th>Email</th>
+                            <th>Phone</th>
+                            <th>Match</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for client in strong_matches %}
+                            <tr>
+                                <td>{{ client.client_name }}</td>
+                                <td>{{ client.email or '—' }}</td>
+                                <td>{{ client.phone or '—' }}</td>
+                                <td>
+                                    {{ client.match_reason_display }}
+                                </td>
+                                <td>{{ client.status_label }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    {% elif match_status == 'possible_name_match' %}
+
+        <div class="square-identify-card">
+            <h2>Possible Name Match</h2>
+
+            <p>
+                The name matches one or more PSP clients, but
+                email and phone did not provide a strong identity
+                match. User confirmation will be required.
+            </p>
+
+            <div class="square-identify-table-wrap">
+                <table class="square-identify-table">
+                    <thead>
+                        <tr>
+                            <th>PSP Client</th>
+                            <th>Email</th>
+                            <th>Phone</th>
+                            <th>Match</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for client in possible_matches %}
+                            <tr>
+                                <td>{{ client.client_name }}</td>
+                                <td>{{ client.email or '—' }}</td>
+                                <td>{{ client.phone or '—' }}</td>
+                                <td>
+                                    {{ client.match_reason_display }}
+                                </td>
+                                <td>{{ client.status_label }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    {% else %}
+
+        <div class="square-identify-card">
+            <h2>No PSP Match Found</h2>
+
+            <p>
+                No existing PSP client matched this Square
+                customer's normalized email, phone, or full name.
+                A future manual client-selection step will allow
+                the user to choose the correct PSP client without
+                guessing.
+            </p>
+        </div>
+
+    {% endif %}
+
+</div>
+
+{% endblock %}
