@@ -16159,6 +16159,31 @@ def square_reconcile_payments():
                             ).lstrip("0")
                         )
 
+                square_created_at = row[8]
+                square_created_display = "—"
+
+                if square_created_at:
+                    spa_zone = ZoneInfo(
+                        get_current_spa_timezone(
+                            spa_id
+                        )
+                    )
+
+                    if square_created_at.tzinfo is None:
+                        square_created_at = (
+                            square_created_at.replace(
+                                tzinfo=ZoneInfo("UTC")
+                            )
+                        )
+
+                    square_created_display = (
+                        square_created_at.astimezone(
+                            spa_zone
+                        ).strftime(
+                            "%m/%d/%Y %I:%M %p"
+                        ).replace(" 0", " ")
+                    )
+
                 reconciled_rows.append({
                     "payment_id": payment_id,
                     "status": row[1],
@@ -16181,6 +16206,9 @@ def square_reconcile_payments():
                         row[7] or 0
                     ),
                     "square_created_at": row[8],
+                    "square_created_display": (
+                        square_created_display
+                    ),
                     "reconciled_at": row[9],
                     "income_id": row[10],
                     "appointment_id": row[11],
