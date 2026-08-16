@@ -321,10 +321,49 @@ Square Control Center | Peach Suite Pro
 
             {% endif %}
 
-            {% if not production_square_enabled %}
+            {% if
+                production_square_connection
+                and production_square_connection.connection_status
+                    == "connected"
+            %}
+
                 <span class="tool-pill tool-pill-small">
-                    Connect Live Square — Not Yet Enabled
+                    Live Square Connected
                 </span>
+
+                {% if
+                    production_square_connection.live_sync_enabled
+                %}
+                    <span class="tool-pill tool-pill-small">
+                        Live Sync Enabled
+                    </span>
+                {% else %}
+                    <span class="tool-pill tool-pill-small">
+                        Live Sync Disabled
+                    </span>
+                {% endif %}
+
+            {% elif square_live_connect_enabled %}
+
+                <a
+                    href="{{ url_for('square_live_connect') }}"
+                    class="tool-pill tool-pill-small"
+                >
+                    Connect Live Square
+                </a>
+
+            {% elif square_live_connect_configured %}
+
+                <span class="tool-pill tool-pill-small">
+                    Connect Live Square — Production Server Only
+                </span>
+
+            {% else %}
+
+                <span class="tool-pill tool-pill-small">
+                    Connect Live Square — Configuration Required
+                </span>
+
             {% endif %}
 
         </div>

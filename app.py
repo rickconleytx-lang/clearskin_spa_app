@@ -61,6 +61,7 @@ from services.coach import (
     build_action_cards
 )
 from services.sms_service import send_sms_telnyx
+from services import square_oauth
 from services import square_service
 from services.square_client_sync import (
     try_sync_client_to_square,
@@ -14719,6 +14720,881 @@ def payment_integrations():
 
 ##############################################
 #
+#   SQUARE LIVE OAUTH
+#
+###############################################
+
+
+def _square_live_oauth_configured():
+    """
+    Return True only when all server-side production
+    Square OAuth configuration exists.
+
+    Values are never returned or logged here.
+    """
+    required_names = (
+        "SQUARE_PRODUCTION_APPLICATION_ID",
+        "SQUARE_PRODUCTION_APPLICATION_SECRET",
+        "SQUARE_PRODUCTION_REDIRECT_URI",
+        "SQUARE_OAUTH_ENCRYPTION_KEY",
+    )
+
+    return all(
+        str(
+            os.environ.get(
+                name,
+                "",
+            )
+            or ""
+        ).strip()
+        for name in required_names
+    )
+
+
+def _square_live_redirect_uri_is_valid():
+    """
+    Basic operational validation for the production
+    callback configured in the server environment.
+    """
+    redirect_uri = str(
+        os.environ.get(
+            "SQUARE_PRODUCTION_REDIRECT_URI",
+            "",
+        )
+        or ""
+    ).strip()
+
+    if not redirect_uri.startswith(
+        "https://"
+    ):
+        return False
+
+    expected_path = url_for(
+        "square_live_oauth_callback"
+    )
+
+    return redirect_uri.rstrip(
+        "/"
+    ).endswith(
+        expected_path.rstrip("/")
+    )
+
+
+@app.route(
+    "/payment-integrations/square/connect-live"
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_view_business_management"
+)
+def square_live_connect():
+    """
+    Begin production Square seller authorization.
+
+    Safety:
+    - deployed PSP server only
+    - does not enable live synchronization
+    - stores only a short-lived CSRF state in session
+    """
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
+
+    if not os.environ.get(
+        "RENDER"
+    ):
+        flash(
+            "Live Square authorization can only be "
+            "started from the deployed Peach Suite Pro "
+            "server.",
+            "warning",
+        )
+
+        return redirect(
+            url_for(
+                "square_control_center"
+            )
+        )
+
+    if not _square_live_oauth_configured():
+        flash(
+            "Live Square OAuth is not fully configured "
+            "on this server yet.",
+            "warning",
+        )
+
+        return redirect(
+            url_for(
+                "square_control_center"
+            )
+        )
+
+    if not _square_live_redirect_uri_is_valid():
+        flash(
+            "The configured Square production redirect "
+            "URL is not valid for this Peach Suite Pro "
+            "callback.",
+            "warning",
+        )
+
+        return redirect(
+            url_for(
+                "square_control_center"
+            )
+        )
+
+    state = secrets.token_urlsafe(
+        32
+    )
+
+    session[
+        "square_live_oauth"
+    ] = {
+        "state": state,
+        "spa_id": int(
+            spa_id
+        ),
+        "business_unit_id": int(
+            business_unit_id
+        ),
+        "issued_at": int(
+            time.time()
+        ),
+    }
+
+    authorization_url = (
+        square_oauth
+        .build_production_authorization_url(
+            state=state
+        )
+    )
+
+    return redirect(
+        authorization_url
+    )
+
+
+@app.route(
+    "/payment-integrations/square/oauth/callback"
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_view_business_management"
+)
+def square_live_oauth_callback():
+    """
+    Complete production Square seller authorization.
+
+    Flow:
+    - validate PSP session state/workspace
+    - exchange Square authorization code
+    - introspect token
+    - verify app, merchant, and scopes
+    - retrieve seller locations read-only
+    - AES-encrypt access + refresh tokens
+    - save production connection
+    - keep live_sync_enabled FALSE
+    """
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
+
+    if not os.environ.get(
+        "RENDER"
+    ):
+        abort(404)
+
+    oauth_record = session.get(
+        "square_live_oauth"
+    )
+
+    submitted_state = str(
+        request.args.get(
+            "state",
+            "",
+        )
+        or ""
+    ).strip()
+
+    if not isinstance(
+        oauth_record,
+        dict,
+    ):
+        abort(400)
+
+    expected_state = str(
+        oauth_record.get(
+            "state",
+            "",
+        )
+        or ""
+    ).strip()
+
+    try:
+        oauth_spa_id = int(
+            oauth_record.get(
+                "spa_id"
+            )
+        )
+
+        oauth_business_unit_id = int(
+            oauth_record.get(
+                "business_unit_id"
+            )
+        )
+
+        issued_at = int(
+            oauth_record.get(
+                "issued_at"
+            )
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+        abort(400)
+
+    now_timestamp = int(
+        time.time()
+    )
+
+    if (
+        oauth_spa_id != int(spa_id)
+        or oauth_business_unit_id
+            != int(business_unit_id)
+    ):
+        abort(400)
+
+    if (
+        not expected_state
+        or not submitted_state
+        or not secrets.compare_digest(
+            expected_state,
+            submitted_state,
+        )
+    ):
+        abort(400)
+
+    if (
+        issued_at > now_timestamp + 60
+        or now_timestamp - issued_at > 600
+    ):
+        session.pop(
+            "square_live_oauth",
+            None,
+        )
+
+        flash(
+            "The Square authorization session expired. "
+            "Please start the connection again.",
+            "warning",
+        )
+
+        return redirect(
+            url_for(
+                "square_control_center"
+            )
+        )
+
+    # State is valid and becomes single-use immediately.
+    session.pop(
+        "square_live_oauth",
+        None,
+    )
+
+    square_error = str(
+        request.args.get(
+            "error",
+            "",
+        )
+        or ""
+    ).strip()
+
+    if square_error:
+        if square_error == "access_denied":
+            message = (
+                "Square authorization was cancelled "
+                "or denied. No Square connection was saved."
+            )
+        else:
+            message = (
+                "Square could not authorize this connection. "
+                "No Square connection was saved."
+            )
+
+        flash(
+            message,
+            "warning",
+        )
+
+        return redirect(
+            url_for(
+                "square_control_center"
+            )
+        )
+
+    authorization_code = str(
+        request.args.get(
+            "code",
+            "",
+        )
+        or ""
+    ).strip()
+
+    if not authorization_code:
+        flash(
+            "Square did not return an authorization code. "
+            "No connection was saved.",
+            "warning",
+        )
+
+        return redirect(
+            url_for(
+                "square_control_center"
+            )
+        )
+
+    if not _square_live_oauth_configured():
+        flash(
+            "Live Square OAuth is not fully configured "
+            "on this server.",
+            "warning",
+        )
+
+        return redirect(
+            url_for(
+                "square_control_center"
+            )
+        )
+
+    if not _square_live_redirect_uri_is_valid():
+        flash(
+            "The configured Square production redirect "
+            "URL is invalid.",
+            "warning",
+        )
+
+        return redirect(
+            url_for(
+                "square_control_center"
+            )
+        )
+
+    try:
+        token_result = (
+            square_oauth
+            .exchange_authorization_code(
+                authorization_code
+            )
+        )
+
+        access_token = token_result[
+            "access_token"
+        ]
+
+        refresh_token = token_result[
+            "refresh_token"
+        ]
+
+        merchant_id = str(
+            token_result[
+                "merchant_id"
+            ]
+        ).strip()
+
+        application_id = (
+            square_oauth
+            .get_production_application_id()
+        )
+
+        token_status = (
+            square_oauth
+            .retrieve_token_status(
+                access_token
+            )
+        )
+
+        token_status = (
+            square_oauth
+            .validate_production_token_status(
+                token_status,
+                expected_application_id=(
+                    application_id
+                ),
+                expected_merchant_id=(
+                    merchant_id
+                ),
+            )
+        )
+
+        locations = (
+            square_service
+            .list_locations(
+                access_token=(
+                    access_token
+                ),
+                environment="production",
+            )
+        )
+
+        if not locations:
+            raise (
+                square_oauth
+                .SquareOAuthError(
+                    "Square returned no locations "
+                    "for the authorized merchant."
+                )
+            )
+
+        prepared_locations = []
+
+        for location in locations:
+            square_location_id = str(
+                location.get(
+                    "id"
+                )
+                or ""
+            ).strip()
+
+            location_merchant_id = str(
+                location.get(
+                    "merchant_id"
+                )
+                or ""
+            ).strip()
+
+            if (
+                location_merchant_id
+                and location_merchant_id
+                    != merchant_id
+            ):
+                raise (
+                    square_oauth
+                    .SquareOAuthError(
+                        "Square returned a location "
+                        "for a different merchant."
+                    )
+                )
+
+            location_status = str(
+                location.get(
+                    "status"
+                )
+                or ""
+            ).strip().upper()
+
+            location_name = str(
+                location.get(
+                    "name"
+                )
+                or location.get(
+                    "business_name"
+                )
+                or square_location_id
+            ).strip()
+
+            prepared_locations.append({
+                "square_location_id": (
+                    square_location_id
+                ),
+                "location_name": (
+                    location_name
+                ),
+                "is_active": (
+                    location_status
+                    == "ACTIVE"
+                ),
+            })
+
+        active_locations = [
+            location
+            for location
+            in prepared_locations
+            if location[
+                "is_active"
+            ]
+        ]
+
+        if not active_locations:
+            raise (
+                square_oauth
+                .SquareOAuthError(
+                    "The authorized Square merchant "
+                    "has no active locations."
+                )
+            )
+
+        default_location_id = None
+
+        if len(
+            active_locations
+        ) == 1:
+            default_location_id = (
+                active_locations[0][
+                    "square_location_id"
+                ]
+            )
+
+        access_ciphertext = (
+            square_oauth
+            .encrypt_token(
+                access_token,
+                spa_id=spa_id,
+                business_unit_id=(
+                    business_unit_id
+                ),
+                environment="production",
+                token_kind="access",
+            )
+        )
+
+        refresh_ciphertext = (
+            square_oauth
+            .encrypt_token(
+                refresh_token,
+                spa_id=spa_id,
+                business_unit_id=(
+                    business_unit_id
+                ),
+                environment="production",
+                token_kind="refresh",
+            )
+        )
+
+        granted_scopes = sorted(
+            set(
+                token_status.get(
+                    "scopes"
+                )
+                or []
+            )
+        )
+
+        oauth_scopes = " ".join(
+            granted_scopes
+        )
+
+        token_expires_at = (
+            token_status.get(
+                "expires_at"
+            )
+            or token_result.get(
+                "expires_at"
+            )
+        )
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        try:
+            cur.execute("""
+                SELECT
+                    square_connection_id,
+                    merchant_id
+                FROM square_connections
+                WHERE spa_id = %s
+                  AND business_unit_id = %s
+                  AND environment = 'production'
+                FOR UPDATE
+            """, (
+                spa_id,
+                business_unit_id,
+            ))
+
+            existing_connection = (
+                cur.fetchone()
+            )
+
+            if existing_connection:
+                (
+                    existing_connection_id,
+                    existing_merchant_id,
+                ) = existing_connection
+
+                existing_merchant_id = str(
+                    existing_merchant_id
+                    or ""
+                ).strip()
+
+                if (
+                    existing_merchant_id
+                    and existing_merchant_id
+                        != merchant_id
+                ):
+                    raise (
+                        square_oauth
+                        .SquareOAuthError(
+                            "This PSP workspace is already "
+                            "associated with a different "
+                            "production Square merchant. "
+                            "The existing connection was "
+                            "left unchanged."
+                        )
+                    )
+
+            cur.execute("""
+                INSERT INTO square_connections (
+                    spa_id,
+                    business_unit_id,
+                    environment,
+                    merchant_id,
+                    connection_status,
+                    oauth_access_token_ciphertext,
+                    oauth_refresh_token_ciphertext,
+                    oauth_token_expires_at,
+                    oauth_scopes,
+                    connected_at,
+                    oauth_token_last_verified_at,
+                    live_sync_enabled,
+                    updated_at
+                )
+                VALUES (
+                    %s,
+                    %s,
+                    'production',
+                    %s,
+                    'connected',
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    CURRENT_TIMESTAMP,
+                    CURRENT_TIMESTAMP,
+                    FALSE,
+                    CURRENT_TIMESTAMP
+                )
+                ON CONFLICT (
+                    spa_id,
+                    business_unit_id,
+                    environment
+                )
+                DO UPDATE SET
+                    merchant_id = EXCLUDED.merchant_id,
+                    connection_status = 'connected',
+                    oauth_access_token_ciphertext =
+                        EXCLUDED.oauth_access_token_ciphertext,
+                    oauth_refresh_token_ciphertext =
+                        EXCLUDED.oauth_refresh_token_ciphertext,
+                    oauth_token_expires_at =
+                        EXCLUDED.oauth_token_expires_at,
+                    oauth_scopes =
+                        EXCLUDED.oauth_scopes,
+                    connected_at =
+                        CURRENT_TIMESTAMP,
+                    oauth_token_last_verified_at =
+                        CURRENT_TIMESTAMP,
+                    live_sync_enabled = FALSE,
+                    updated_at =
+                        CURRENT_TIMESTAMP
+                RETURNING
+                    square_connection_id
+            """, (
+                spa_id,
+                business_unit_id,
+                merchant_id,
+                access_ciphertext,
+                refresh_ciphertext,
+                token_expires_at,
+                oauth_scopes,
+            ))
+
+            square_connection_id = (
+                cur.fetchone()[0]
+            )
+
+            # Preserve mapping IDs when a seller reconnects.
+            # Locations not returned by Square become inactive.
+            cur.execute("""
+                UPDATE square_locations
+                SET
+                    is_active = FALSE,
+                    is_default = FALSE,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE square_connection_id = %s
+                  AND spa_id = %s
+                  AND business_unit_id = %s
+                  AND environment = 'production'
+            """, (
+                square_connection_id,
+                spa_id,
+                business_unit_id,
+            ))
+
+            for location in prepared_locations:
+                square_location_id = (
+                    location[
+                        "square_location_id"
+                    ]
+                )
+
+                is_default = (
+                    default_location_id
+                    is not None
+                    and square_location_id
+                        == default_location_id
+                )
+
+                cur.execute("""
+                    INSERT INTO square_locations (
+                        square_connection_id,
+                        spa_id,
+                        business_unit_id,
+                        environment,
+                        square_location_id,
+                        location_name,
+                        is_active,
+                        is_default,
+                        updated_at
+                    )
+                    VALUES (
+                        %s,
+                        %s,
+                        %s,
+                        'production',
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        CURRENT_TIMESTAMP
+                    )
+                    ON CONFLICT (
+                        environment,
+                        square_location_id
+                    )
+                    DO UPDATE SET
+                        location_name =
+                            EXCLUDED.location_name,
+                        is_active =
+                            EXCLUDED.is_active,
+                        is_default =
+                            EXCLUDED.is_default,
+                        updated_at =
+                            CURRENT_TIMESTAMP
+                    WHERE
+                        square_locations.square_connection_id =
+                            EXCLUDED.square_connection_id
+                        AND square_locations.spa_id =
+                            EXCLUDED.spa_id
+                        AND square_locations.business_unit_id =
+                            EXCLUDED.business_unit_id
+                    RETURNING
+                        square_location_mapping_id
+                """, (
+                    square_connection_id,
+                    spa_id,
+                    business_unit_id,
+                    square_location_id,
+                    location[
+                        "location_name"
+                    ],
+                    location[
+                        "is_active"
+                    ],
+                    is_default,
+                ))
+
+                location_result = (
+                    cur.fetchone()
+                )
+
+                if not location_result:
+                    raise (
+                        square_oauth
+                        .SquareOAuthError(
+                            "A Square location is already "
+                            "assigned to another PSP workspace."
+                        )
+                    )
+
+            conn.commit()
+
+        except Exception:
+            conn.rollback()
+            raise
+
+        finally:
+            cur.close()
+            conn.close()
+
+    except (
+        square_oauth.SquareOAuthError,
+        square_service.SquareServiceError,
+    ) as exc:
+        app.logger.warning(
+            "Square Live OAuth connection failed "
+            "for spa_id=%s business_unit_id=%s: %s",
+            spa_id,
+            business_unit_id,
+            str(exc),
+        )
+
+        flash(
+            str(exc),
+            "warning",
+        )
+
+        return redirect(
+            url_for(
+                "square_control_center"
+            )
+        )
+
+    except Exception:
+        app.logger.exception(
+            "Unexpected Square Live OAuth error "
+            "for spa_id=%s business_unit_id=%s",
+            spa_id,
+            business_unit_id,
+        )
+
+        flash(
+            "Peach Suite Pro could not complete the "
+            "Square connection. No Live synchronization "
+            "was enabled.",
+            "warning",
+        )
+
+        return redirect(
+            url_for(
+                "square_control_center"
+            )
+        )
+
+    if len(
+        active_locations
+    ) == 1:
+        flash(
+            "Live Square connected successfully. "
+            "Live synchronization remains disabled.",
+            "success",
+        )
+
+    else:
+        flash(
+            "Live Square connected successfully. "
+            f"{len(active_locations)} active Square "
+            "locations were found. Live synchronization "
+            "remains disabled and a default location "
+            "must be selected before it can be enabled.",
+            "success",
+        )
+
+    return redirect(
+        url_for(
+            "square_control_center"
+        )
+    )
+
+
+##############################################
+#
 #   SQUARE CONTROL CENTER
 #
 ###############################################
@@ -14749,6 +15625,9 @@ def square_control_center():
                 sc.connection_status,
                 sc.connected_at,
                 sc.last_sync_at,
+                sc.live_sync_enabled,
+                sc.oauth_token_expires_at,
+                sc.oauth_token_last_verified_at,
                 sl.square_location_mapping_id,
                 sl.square_location_id,
                 sl.location_name,
@@ -14793,18 +15672,21 @@ def square_control_center():
                     "connection_status": row[3],
                     "connected_at": row[4],
                     "last_sync_at": row[5],
+                    "live_sync_enabled": bool(row[6]),
+                    "oauth_token_expires_at": row[7],
+                    "oauth_token_last_verified_at": row[8],
                     "locations": [],
                 }
 
-            if row[6] is not None:
+            if row[9] is not None:
                 connections_by_id[
                     connection_id
                 ]["locations"].append({
-                    "square_location_mapping_id": row[6],
-                    "square_location_id": row[7],
-                    "location_name": row[8],
-                    "is_active": row[9],
-                    "is_default": row[10],
+                    "square_location_mapping_id": row[9],
+                    "square_location_id": row[10],
+                    "location_name": row[11],
+                    "is_active": row[12],
+                    "is_default": row[13],
                 })
 
         connections = list(
@@ -14996,6 +15878,24 @@ def square_control_center():
             ),
         })
 
+    production_square_connection = next(
+        (
+            item
+            for item in connections
+            if item["environment"] == "production"
+        ),
+        None,
+    )
+
+    square_live_connect_configured = (
+        _square_live_oauth_configured()
+    )
+
+    square_live_connect_enabled = (
+        bool(os.environ.get("RENDER"))
+        and square_live_connect_configured
+    )
+
     square_sync_all_enabled = (
         not bool(os.environ.get("RENDER"))
     )
@@ -15023,6 +15923,15 @@ def square_control_center():
         square_environments=environments,
         recent_payments=recent_payments,
         production_square_enabled=False,
+        production_square_connection=(
+            production_square_connection
+        ),
+        square_live_connect_configured=(
+            square_live_connect_configured
+        ),
+        square_live_connect_enabled=(
+            square_live_connect_enabled
+        ),
         square_sync_all_enabled=(
             square_sync_all_enabled
         ),
