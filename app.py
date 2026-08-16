@@ -39756,6 +39756,35 @@ def add_income(appointment_id):
                 square_location_id
             ) = square_mapping
 
+            square_mapped_customer_id = None
+
+            cur.execute("""
+                SELECT square_customer_id
+                FROM square_customer_mappings
+                WHERE square_connection_id = %s
+                  AND spa_id = %s
+                  AND business_unit_id = %s
+                  AND environment = 'sandbox'
+                  AND client_id = %s
+                  AND is_active = TRUE
+                ORDER BY
+                    verified_at DESC NULLS LAST,
+                    square_customer_mapping_id DESC
+                LIMIT 1
+            """, (
+                square_connection_id,
+                spa_id,
+                business_unit_id,
+                appt[1],
+            ))
+
+            square_customer_mapping = cur.fetchone()
+
+            if square_customer_mapping:
+                square_mapped_customer_id = str(
+                    square_customer_mapping[0] or ""
+                ).strip() or None
+
             cur.execute("""
                 SELECT
                     square_catalog_mapping_id,
@@ -39871,6 +39900,31 @@ def add_income(appointment_id):
                     "but this appointment is dated "
                     f"{appt[2]}. Choose a Square payment "
                     "from the appointment date.",
+                    "error"
+                )
+                cur.close()
+                conn.close()
+                return redirect(url_for(
+                    "add_income",
+                    appointment_id=appointment_id,
+                    date=selected_date
+                ))
+
+            square_payment_customer_id = str(
+                square_payment.get("customer_id") or ""
+            ).strip()
+
+            if (
+                square_mapped_customer_id
+                and square_payment_customer_id
+                and square_payment_customer_id
+                    != square_mapped_customer_id
+            ):
+                flash(
+                    "The selected Square payment belongs "
+                    "to a different Square customer than "
+                    "this appointment client. Nothing was "
+                    "saved.",
                     "error"
                 )
                 cur.close()
@@ -41535,9 +41589,13 @@ def square_payment_preview_for_income(appointment_id):
     cur = conn.cursor()
 
     try:
-        # Appointment must belong to this exact workspace.
+        # Appointment context is authoritative and must
+        # belong to this exact PSP workspace.
         cur.execute("""
-            SELECT appointment_id
+            SELECT
+                appointment_id,
+                client_id,
+                appointment_date
             FROM appointments
             WHERE appointment_id = %s
               AND spa_id = %s
@@ -41549,11 +41607,19 @@ def square_payment_preview_for_income(appointment_id):
             business_unit_id
         ))
 
-        if not cur.fetchone():
+        preview_appointment = cur.fetchone()
+
+        if not preview_appointment:
             return jsonify({
                 "ok": False,
                 "error": "Appointment not found."
             }), 404
+
+        (
+            resolved_appointment_id,
+            appointment_client_id,
+            appointment_date,
+        ) = preview_appointment
 
         # Resolve Square connection/location only from
         # server-side workspace configuration.
@@ -41613,6 +41679,36 @@ def square_payment_preview_for_income(appointment_id):
             square_location_id,
             location_name
         ) = square_mapping
+
+        mapped_square_customer_id = None
+
+        cur.execute("""
+            SELECT square_customer_id
+            FROM square_customer_mappings
+            WHERE square_connection_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND environment = %s
+              AND client_id = %s
+              AND is_active = TRUE
+            ORDER BY
+                verified_at DESC NULLS LAST,
+                square_customer_mapping_id DESC
+            LIMIT 1
+        """, (
+            square_connection_id,
+            spa_id,
+            business_unit_id,
+            square_environment,
+            appointment_client_id,
+        ))
+
+        customer_mapping = cur.fetchone()
+
+        if customer_mapping:
+            mapped_square_customer_id = str(
+                customer_mapping[0] or ""
+            ).strip() or None
 
         # Load only active mappings for this exact
         # Square connection + PSP workspace.
@@ -41674,6 +41770,53 @@ def square_payment_preview_for_income(appointment_id):
             "ok": False,
             "error": str(exc)
         }), 502
+
+    payment_local_datetime = (
+        _square_payment_local_datetime(
+            payment,
+            spa_id,
+        )
+    )
+
+    if payment_local_datetime is None:
+        return jsonify({
+            "ok": False,
+            "error": (
+                "The Square payment date could not "
+                "be verified."
+            )
+        }), 422
+
+    if (
+        payment_local_datetime.date()
+        != appointment_date
+    ):
+        return jsonify({
+            "ok": False,
+            "error": (
+                "This Square payment is not from "
+                "the appointment date."
+            )
+        }), 409
+
+    payment_customer_id = str(
+        payment.get("customer_id") or ""
+    ).strip()
+
+    if (
+        mapped_square_customer_id
+        and payment_customer_id
+        and payment_customer_id
+            != mapped_square_customer_id
+    ):
+        return jsonify({
+            "ok": False,
+            "error": (
+                "This Square payment belongs to a "
+                "different Square customer than the "
+                "appointment client."
+            )
+        }), 409
 
     payment_location_id = str(
         payment.get("location_id") or ""
@@ -41851,7 +41994,7 @@ def square_payment_preview_for_income(appointment_id):
 
     return jsonify({
         "ok": True,
-        "environment": "sandbox",
+        "environment": square_environment,
         "location_id": square_location_id,
         "location_name": location_name,
         "payment": {
