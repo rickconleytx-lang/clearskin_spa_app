@@ -95,8 +95,8 @@ Identify Square Client | Peach Suite Pro
     <p class="square-identify-intro">
         Compare the customer attached to this completed Square
         payment with clients in the current Peach Suite Pro
-        workspace. This screen is read-only. No client mapping
-        is saved until a future explicit Confirm Match action.
+        workspace. Peach Suite Pro will only save a client mapping
+        after you explicitly confirm a strong verified match.
     </p>
 
     <div class="square-identify-card">
@@ -183,13 +183,24 @@ Identify Square Client | Peach Suite Pro
                 This Square customer is already mapped to
                 <strong>
                     {{ existing_mapping.client_name }}
-                </strong>
-                (PSP Client #{{ existing_mapping.client_id }}).
+                </strong>.
             </p>
 
             <p>
                 <span class="square-identify-status">
-                    {{ existing_mapping.match_method or 'Mapped' }}
+                    {% if existing_mapping.match_method == 'confirmed_email_phone' %}
+                        Confirmed by Email + Phone
+                    {% elif existing_mapping.match_method == 'confirmed_email' %}
+                        Confirmed by Email
+                    {% elif existing_mapping.match_method == 'confirmed_phone' %}
+                        Confirmed by Phone
+                    {% elif existing_mapping.match_method == 'confirmed_name' %}
+                        Confirmed by Name
+                    {% elif existing_mapping.match_method == 'manual_confirmed' %}
+                        Manually Confirmed
+                    {% else %}
+                        Mapped
+                    {% endif %}
                 </span>
             </p>
         </div>
