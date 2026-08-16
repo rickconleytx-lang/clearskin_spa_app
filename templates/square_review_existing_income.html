@@ -198,6 +198,20 @@ Review Existing Income | Peach Suite Pro
                 </span>
                 {{ income_processor_name or '—' }}
             </div>
+
+            <div>
+                <span class="square-existing-label">
+                    Estimated Processing Fee
+                </span>
+                ${{ '%.2f'|format(income_fee_cents / 100) }}
+            </div>
+
+            <div>
+                <span class="square-existing-label">
+                    Estimated Net Received
+                </span>
+                ${{ '%.2f'|format(income_net_cents / 100) }}
+            </div>
         </div>
     </div>
 
