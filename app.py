@@ -39315,6 +39315,102 @@ def _square_income_read_access_token(
     )
 
 
+
+def _square_parse_timestamp(value):
+    """
+    Parse a Square RFC-3339 timestamp as an aware datetime.
+    """
+    value = str(value or "").strip()
+
+    if not value:
+        return None
+
+    try:
+        parsed = datetime.fromisoformat(
+            value.replace("Z", "+00:00")
+        )
+    except ValueError:
+        return None
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(
+            tzinfo=timezone.utc
+        )
+
+    return parsed
+
+
+def _square_payment_local_datetime(
+    payment,
+    spa_id,
+):
+    """
+    Convert Square payment created_at into the configured
+    PSP spa timezone.
+    """
+    if not isinstance(payment, dict):
+        return None
+
+    parsed = _square_parse_timestamp(
+        payment.get("created_at")
+    )
+
+    if parsed is None:
+        return None
+
+    timezone_name = get_current_spa_timezone(
+        spa_id
+    )
+
+    return parsed.astimezone(
+        ZoneInfo(timezone_name)
+    )
+
+
+def _square_appointment_day_bounds_utc(
+    appointment_date,
+    spa_id,
+):
+    """
+    Return UTC RFC-3339 boundaries corresponding to the
+    appointment's local calendar date.
+
+    Example:
+        local 2026-06-07 00:00 through 2026-06-08 00:00
+        converted to UTC for Square's Payments API.
+    """
+    timezone_name = get_current_spa_timezone(
+        spa_id
+    )
+
+    spa_zone = ZoneInfo(
+        timezone_name
+    )
+
+    local_start = datetime.combine(
+        appointment_date,
+        datetime.min.time(),
+        tzinfo=spa_zone,
+    )
+
+    local_end = (
+        local_start
+        + timedelta(days=1)
+    )
+
+    def as_square_utc(value):
+        return (
+            value.astimezone(timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+
+    return (
+        as_square_utc(local_start),
+        as_square_utc(local_end),
+    )
+
+
 @app.route("/add_income/<int:appointment_id>", methods=["GET", "POST"])
 @login_required
 @spa_required
@@ -39734,6 +39830,47 @@ def add_income(appointment_id):
             except square_service.SquareServiceError as exc:
                 flash(
                     f"Square payment could not be verified: {exc}",
+                    "error"
+                )
+                cur.close()
+                conn.close()
+                return redirect(url_for(
+                    "add_income",
+                    appointment_id=appointment_id,
+                    date=selected_date
+                ))
+
+            square_payment_local_datetime = (
+                _square_payment_local_datetime(
+                    square_payment,
+                    spa_id,
+                )
+            )
+
+            if square_payment_local_datetime is None:
+                flash(
+                    "The Square payment date could not be "
+                    "verified. Nothing was saved.",
+                    "error"
+                )
+                cur.close()
+                conn.close()
+                return redirect(url_for(
+                    "add_income",
+                    appointment_id=appointment_id,
+                    date=selected_date
+                ))
+
+            if (
+                square_payment_local_datetime.date()
+                != appt[2]
+            ):
+                flash(
+                    "The selected Square payment is from "
+                    f"{square_payment_local_datetime.date()}, "
+                    "but this appointment is dated "
+                    f"{appt[2]}. Choose a Square payment "
+                    "from the appointment date.",
                     "error"
                 )
                 cur.close()
@@ -40928,7 +41065,7 @@ def add_income(appointment_id):
 #
 #     SQUARE V2 — RECENT PAYMENTS FOR ADD INCOME
 #
-#     Read-only Sandbox endpoint.
+#     Read-only appointment-aware Square endpoint.
 #     No Income, inventory, client, or appointment
 #     records are written here.
 #
@@ -40956,10 +41093,20 @@ def square_recent_payments_for_income(appointment_id):
     conn = get_db_connection()
     cur = conn.cursor()
 
+    square_mapping = None
+    mapped_square_customer_id = None
+    reconciled_payment_ids = set()
+
     try:
-        # Appointment must belong to the current workspace.
+        # ---------------------------------------------
+        # Appointment context is authoritative.
+        # ---------------------------------------------
         cur.execute("""
-            SELECT appointment_id
+            SELECT
+                appointment_id,
+                client_id,
+                appointment_date,
+                appointment_time
             FROM appointments
             WHERE appointment_id = %s
               AND spa_id = %s
@@ -40971,18 +41118,29 @@ def square_recent_payments_for_income(appointment_id):
             business_unit_id
         ))
 
-        if not cur.fetchone():
+        appointment = cur.fetchone()
+
+        if not appointment:
             return jsonify({
                 "ok": False,
                 "error": "Appointment not found."
             }), 404
 
-        # Route Square only through a location explicitly
-        # mapped to this exact PSP workspace.
+        (
+            resolved_appointment_id,
+            appointment_client_id,
+            appointment_date,
+            appointment_time,
+        ) = appointment
+
         square_environment = (
             _square_income_read_environment()
         )
 
+        # ---------------------------------------------
+        # Resolve only the Square connection/location
+        # belonging to this PSP workspace.
+        # ---------------------------------------------
         cur.execute("""
             SELECT
                 sc.square_connection_id,
@@ -41019,6 +41177,75 @@ def square_recent_payments_for_income(appointment_id):
 
         square_mapping = cur.fetchone()
 
+        if square_mapping:
+            square_connection_id = (
+                square_mapping[0]
+            )
+
+            # -----------------------------------------
+            # Existing verified/persistent client map.
+            #
+            # If one exists, payments belonging to a
+            # different known Square customer should
+            # not be presented for this appointment.
+            # -----------------------------------------
+            cur.execute("""
+                SELECT square_customer_id
+                FROM square_customer_mappings
+                WHERE square_connection_id = %s
+                  AND spa_id = %s
+                  AND business_unit_id = %s
+                  AND environment = %s
+                  AND client_id = %s
+                  AND is_active = TRUE
+                ORDER BY
+                    verified_at DESC NULLS LAST,
+                    square_customer_mapping_id DESC
+                LIMIT 1
+            """, (
+                square_connection_id,
+                spa_id,
+                business_unit_id,
+                square_environment,
+                appointment_client_id,
+            ))
+
+            customer_mapping = cur.fetchone()
+
+            if customer_mapping:
+                mapped_square_customer_id = str(
+                    customer_mapping[0] or ""
+                ).strip() or None
+
+            # -----------------------------------------
+            # Do not offer a payment that has already
+            # been reconciled to PSP Income.
+            # -----------------------------------------
+            cur.execute("""
+                SELECT square_payment_id
+                FROM square_payments
+                WHERE square_connection_id = %s
+                  AND spa_id = %s
+                  AND business_unit_id = %s
+                  AND environment = %s
+                  AND (
+                        income_id IS NOT NULL
+                        OR reconciliation_status =
+                            'reconciled'
+                  )
+            """, (
+                square_connection_id,
+                spa_id,
+                business_unit_id,
+                square_environment,
+            ))
+
+            reconciled_payment_ids = {
+                str(row[0] or "").strip()
+                for row in cur.fetchall()
+                if str(row[0] or "").strip()
+            }
+
     finally:
         cur.close()
         conn.close()
@@ -41040,6 +41267,25 @@ def square_recent_payments_for_income(appointment_id):
         location_name
     ) = square_mapping
 
+    begin_time, end_time = (
+        _square_appointment_day_bounds_utc(
+            appointment_date,
+            spa_id,
+        )
+    )
+
+    spa_zone = ZoneInfo(
+        get_current_spa_timezone(spa_id)
+    )
+
+    appointment_local_datetime = (
+        datetime.combine(
+            appointment_date,
+            appointment_time,
+            tzinfo=spa_zone,
+        )
+    )
+
     try:
         token = _square_income_read_access_token(
             environment=square_environment,
@@ -41053,7 +41299,9 @@ def square_recent_payments_for_income(appointment_id):
         payments = square_service.list_recent_payments(
             access_token=token,
             location_id=square_location_id,
-            limit=20,
+            begin_time=begin_time,
+            end_time=end_time,
+            limit=100,
             environment=square_environment
         )
 
@@ -41078,12 +41326,58 @@ def square_recent_payments_for_income(appointment_id):
     candidates = []
 
     for payment in payments:
+        if not isinstance(payment, dict):
+            continue
+
         status = str(
             payment.get("status") or ""
         ).strip().upper()
 
         if status != "COMPLETED":
             continue
+
+        payment_id = str(
+            payment.get("id") or ""
+        ).strip()
+
+        if (
+            not payment_id
+            or payment_id
+                in reconciled_payment_ids
+        ):
+            continue
+
+        payment_local_datetime = (
+            _square_payment_local_datetime(
+                payment,
+                spa_id,
+            )
+        )
+
+        if (
+            payment_local_datetime is None
+            or payment_local_datetime.date()
+                != appointment_date
+        ):
+            continue
+
+        square_customer_id = str(
+            payment.get("customer_id") or ""
+        ).strip()
+
+        client_match = False
+
+        if mapped_square_customer_id:
+            if square_customer_id:
+                if (
+                    square_customer_id
+                    != mapped_square_customer_id
+                ):
+                    # Known payment for another mapped
+                    # Square customer: do not offer it.
+                    continue
+
+                client_match = True
 
         amount_cents = money_cents(
             payment.get("amount_money")
@@ -41114,11 +41408,18 @@ def square_recent_payments_for_income(appointment_id):
             if isinstance(fee, dict)
         )
 
+        seconds_from_appointment = abs(
+            (
+                payment_local_datetime
+                - appointment_local_datetime
+            ).total_seconds()
+        )
+
         candidates.append({
-            "payment_id": payment.get("id"),
+            "payment_id": payment_id,
             "order_id": payment.get("order_id"),
-            "customer_id": payment.get(
-                "customer_id"
+            "customer_id": (
+                payment.get("customer_id")
             ),
             "status": status,
             "created_at": payment.get(
@@ -41132,7 +41433,40 @@ def square_recent_payments_for_income(appointment_id):
             "processing_fee_cents": (
                 processing_fee_cents
             ),
+            "client_match": client_match,
+            "minutes_from_appointment": int(
+                round(
+                    seconds_from_appointment
+                    / 60
+                )
+            ),
+            "_sort_client": (
+                0
+                if client_match
+                else 1
+            ),
+            "_sort_seconds": (
+                seconds_from_appointment
+            ),
         })
+
+    candidates.sort(
+        key=lambda item: (
+            item["_sort_client"],
+            item["_sort_seconds"],
+            item["payment_id"],
+        )
+    )
+
+    for candidate in candidates:
+        candidate.pop(
+            "_sort_client",
+            None
+        )
+        candidate.pop(
+            "_sort_seconds",
+            None
+        )
 
     return jsonify({
         "ok": True,
@@ -41143,10 +41477,17 @@ def square_recent_payments_for_income(appointment_id):
         "merchant_id": merchant_id,
         "location_id": square_location_id,
         "location_name": location_name,
+        "appointment_id": (
+            resolved_appointment_id
+        ),
+        "appointment_date": (
+            appointment_date.isoformat()
+        ),
+        "client_mapping_used": bool(
+            mapped_square_customer_id
+        ),
         "payments": candidates
     })
-
-
 
 
 #  --------------------------------------------------
