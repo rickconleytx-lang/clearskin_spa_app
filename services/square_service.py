@@ -1073,3 +1073,62 @@ def build_income_preview(
         ),
         "line_items": normalized_lines,
     }
+
+
+def list_locations(
+    *,
+    access_token,
+    environment="sandbox",
+):
+    """
+    Retrieve all Square locations for the authorized seller.
+
+    This function is read-only. It does not write to Square
+    or Peach Suite Pro.
+    """
+    data = _square_request(
+        "GET",
+        "/locations",
+        access_token=access_token,
+        environment=environment,
+    )
+
+    locations = (
+        data.get("locations")
+        or []
+    )
+
+    if not isinstance(
+        locations,
+        list,
+    ):
+        raise SquareServiceError(
+            "Square returned an invalid locations result."
+        )
+
+    clean_locations = []
+
+    for location in locations:
+        if not isinstance(
+            location,
+            dict,
+        ):
+            raise SquareServiceError(
+                "Square returned an invalid location record."
+            )
+
+        location_id = str(
+            location.get("id")
+            or ""
+        ).strip()
+
+        if not location_id:
+            raise SquareServiceError(
+                "Square location is missing its ID."
+            )
+
+        clean_locations.append(
+            location
+        )
+
+    return clean_locations
