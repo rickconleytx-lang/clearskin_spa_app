@@ -39249,6 +39249,72 @@ def edit_automatic_expense(automatic_expense_id):
 
 
 
+
+def _square_income_read_environment():
+    """
+    Environment used only for Add Income Square
+    payment/order retrieval.
+
+    Render uses the connected Square Production
+    OAuth account.
+
+    Local development continues using Sandbox.
+
+    This helper does NOT enable outbound sync.
+    """
+    if os.environ.get("RENDER"):
+        return "production"
+
+    return "sandbox"
+
+
+def _square_income_read_access_token(
+    *,
+    environment,
+    spa_id,
+    business_unit_id,
+    oauth_access_token_ciphertext=None,
+):
+    """
+    Resolve the token used by read-only Add Income
+    Square payment retrieval.
+
+    Production uses the encrypted workspace OAuth
+    credential stored in square_connections.
+
+    Sandbox uses the existing local Sandbox token.
+    """
+    environment = str(
+        environment or ""
+    ).strip().lower()
+
+    if environment == "production":
+        if not oauth_access_token_ciphertext:
+            raise square_oauth.SquareOAuthError(
+                "The connected Square Production "
+                "account does not have a stored "
+                "OAuth access token."
+            )
+
+        return square_oauth.decrypt_token(
+            oauth_access_token_ciphertext,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            environment="production",
+            token_kind="access",
+        )
+
+    if environment == "sandbox":
+        return (
+            square_service
+            .get_square_sandbox_access_token()
+        )
+
+    raise square_oauth.SquareOAuthError(
+        "Unsupported Square payment environment."
+    )
+
+
 @app.route("/add_income/<int:appointment_id>", methods=["GET", "POST"])
 @login_required
 @spa_required
@@ -39322,26 +39388,40 @@ def add_income(appointment_id):
     """, (spa_id,))
     credit_processors = cur.fetchall()
 
+    square_retrieval_environment = (
+        _square_income_read_environment()
+    )
+
     cur.execute("""
         SELECT EXISTS (
             SELECT 1
             FROM square_connections sc
             JOIN square_locations sl
-              ON sl.square_connection_id = sc.square_connection_id
+              ON sl.square_connection_id =
+                    sc.square_connection_id
              AND sl.spa_id = sc.spa_id
-             AND sl.business_unit_id = sc.business_unit_id
+             AND sl.business_unit_id =
+                    sc.business_unit_id
              AND sl.environment = sc.environment
             WHERE sc.spa_id = %s
               AND sc.business_unit_id = %s
-              AND sc.environment = 'sandbox'
+              AND sc.environment = %s
               AND sc.connection_status = 'connected'
               AND sl.is_active = TRUE
+              AND (
+                    sc.environment <> 'production'
+                    OR sl.is_default = TRUE
+              )
         )
     """, (
         spa_id,
-        business_unit_id
+        business_unit_id,
+        square_retrieval_environment
     ))
-    square_sandbox_connected = bool(cur.fetchone()[0])
+
+    square_retrieval_connected = bool(
+        cur.fetchone()[0]
+    )
 
     cur.execute("""
         SELECT COALESCE(SUM(amount), 0.00)
@@ -40835,7 +40915,7 @@ def add_income(appointment_id):
         credit_processors=credit_processors,
         employees=employees,
         credit_balance=credit_balance,
-        square_sandbox_connected=square_sandbox_connected
+        square_retrieval_connected=square_retrieval_connected
     )
 
 
@@ -40899,10 +40979,15 @@ def square_recent_payments_for_income(appointment_id):
 
         # Route Square only through a location explicitly
         # mapped to this exact PSP workspace.
+        square_environment = (
+            _square_income_read_environment()
+        )
+
         cur.execute("""
             SELECT
                 sc.square_connection_id,
                 sc.merchant_id,
+                sc.oauth_access_token_ciphertext,
                 sl.square_location_id,
                 sl.location_name
             FROM square_connections sc
@@ -40915,16 +41000,21 @@ def square_recent_payments_for_income(appointment_id):
              AND sl.environment = sc.environment
             WHERE sc.spa_id = %s
               AND sc.business_unit_id = %s
-              AND sc.environment = 'sandbox'
+              AND sc.environment = %s
               AND sc.connection_status = 'connected'
               AND sl.is_active = TRUE
+              AND (
+                    sc.environment <> 'production'
+                    OR sl.is_default = TRUE
+              )
             ORDER BY
                 sl.is_default DESC,
                 sl.square_location_mapping_id
             LIMIT 1
         """, (
             spa_id,
-            business_unit_id
+            business_unit_id,
+            square_environment
         ))
 
         square_mapping = cur.fetchone()
@@ -40937,32 +41027,40 @@ def square_recent_payments_for_income(appointment_id):
         return jsonify({
             "ok": False,
             "error": (
-                "Square Sandbox is not connected "
-                "to this Provider Workspace."
+                "Square is not connected to this "
+                "Provider Workspace for payment retrieval."
             )
         }), 404
 
     (
         square_connection_id,
         merchant_id,
+        oauth_access_token_ciphertext,
         square_location_id,
         location_name
     ) = square_mapping
 
     try:
-        token = (
-            square_service
-            .get_square_sandbox_access_token()
+        token = _square_income_read_access_token(
+            environment=square_environment,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            oauth_access_token_ciphertext=(
+                oauth_access_token_ciphertext
+            ),
         )
 
         payments = square_service.list_recent_payments(
             access_token=token,
             location_id=square_location_id,
             limit=20,
-            environment="sandbox"
+            environment=square_environment
         )
 
-    except square_service.SquareServiceError as exc:
+    except (
+        square_oauth.SquareOAuthError,
+        square_service.SquareServiceError,
+    ) as exc:
         return jsonify({
             "ok": False,
             "error": str(exc)
@@ -41038,7 +41136,7 @@ def square_recent_payments_for_income(appointment_id):
 
     return jsonify({
         "ok": True,
-        "environment": "sandbox",
+        "environment": square_environment,
         "square_connection_id": (
             square_connection_id
         ),
@@ -41118,10 +41216,15 @@ def square_payment_preview_for_income(appointment_id):
 
         # Resolve Square connection/location only from
         # server-side workspace configuration.
+        square_environment = (
+            _square_income_read_environment()
+        )
+
         cur.execute("""
             SELECT
                 sc.square_connection_id,
                 sc.merchant_id,
+                sc.oauth_access_token_ciphertext,
                 sl.square_location_id,
                 sl.location_name
             FROM square_connections sc
@@ -41134,16 +41237,21 @@ def square_payment_preview_for_income(appointment_id):
              AND sl.environment = sc.environment
             WHERE sc.spa_id = %s
               AND sc.business_unit_id = %s
-              AND sc.environment = 'sandbox'
+              AND sc.environment = %s
               AND sc.connection_status = 'connected'
               AND sl.is_active = TRUE
+              AND (
+                    sc.environment <> 'production'
+                    OR sl.is_default = TRUE
+              )
             ORDER BY
                 sl.is_default DESC,
                 sl.square_location_mapping_id
             LIMIT 1
         """, (
             spa_id,
-            business_unit_id
+            business_unit_id,
+            square_environment
         ))
 
         square_mapping = cur.fetchone()
@@ -41152,14 +41260,15 @@ def square_payment_preview_for_income(appointment_id):
             return jsonify({
                 "ok": False,
                 "error": (
-                    "Square Sandbox is not connected "
-                    "to this Provider Workspace."
+                    "Square is not connected to this "
+                    "Provider Workspace for payment retrieval."
                 )
             }), 404
 
         (
             square_connection_id,
             merchant_id,
+            oauth_access_token_ciphertext,
             square_location_id,
             location_name
         ) = square_mapping
@@ -41174,12 +41283,13 @@ def square_payment_preview_for_income(appointment_id):
             WHERE square_connection_id = %s
               AND spa_id = %s
               AND business_unit_id = %s
-              AND environment = 'sandbox'
+              AND environment = %s
               AND is_active = TRUE
         """, (
             square_connection_id,
             spa_id,
-            business_unit_id
+            business_unit_id,
+            square_environment
         ))
 
         catalog_classifications = {}
@@ -41200,18 +41310,25 @@ def square_payment_preview_for_income(appointment_id):
         conn.close()
 
     try:
-        token = (
-            square_service
-            .get_square_sandbox_access_token()
+        token = _square_income_read_access_token(
+            environment=square_environment,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            oauth_access_token_ciphertext=(
+                oauth_access_token_ciphertext
+            ),
         )
 
         payment = square_service.retrieve_payment(
             square_payment_id,
             access_token=token,
-            environment="sandbox"
+            environment=square_environment
         )
 
-    except square_service.SquareServiceError as exc:
+    except (
+        square_oauth.SquareOAuthError,
+        square_service.SquareServiceError,
+    ) as exc:
         return jsonify({
             "ok": False,
             "error": str(exc)
@@ -41277,7 +41394,7 @@ def square_payment_preview_for_income(appointment_id):
         order = square_service.retrieve_order(
             square_order_id,
             access_token=token,
-            environment="sandbox"
+            environment=square_environment
         )
 
     except square_service.SquareServiceError as exc:

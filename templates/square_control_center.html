@@ -136,9 +136,29 @@ Square Control Center | Peach Suite Pro
 
     <div class="square-banner">
         <strong>Square V2 Status</strong>
-        Peach Suite Pro is currently using the Square Sandbox
-        for integration testing. Production OAuth and live
-        outbound synchronization are not enabled yet.
+
+        {% if
+            production_square_connection
+            and production_square_connection.connection_status
+                == "connected"
+        %}
+            Peach Suite Pro is securely connected to
+            Square Production.
+
+            {% if
+                production_square_connection.live_sync_enabled
+            %}
+                Live outbound synchronization is enabled.
+            {% else %}
+                Live outbound synchronization remains disabled
+                while production validation is completed.
+            {% endif %}
+
+        {% else %}
+            Peach Suite Pro is currently using the Square
+            Sandbox for integration testing. Production Square
+            has not been connected for this workspace yet.
+        {% endif %}
     </div>
 
     {% for item in square_environments %}
