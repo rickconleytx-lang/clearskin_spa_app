@@ -1,0 +1,520 @@
+{% extends "base.html" %}
+
+{% block title %}
+Reconcile Square Payments | Peach Suite Pro
+{% endblock %}
+
+{% block content %}
+
+<style>
+.square-reconcile-page {
+    max-width: 1280px;
+    margin: 0 auto;
+}
+
+.square-reconcile-intro {
+    margin: 14px 0 20px 0;
+    max-width: 900px;
+}
+
+.square-reconcile-summary {
+    display: grid;
+    grid-template-columns:
+        repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    margin: 20px 0;
+}
+
+.square-reconcile-summary-card {
+    border: 1px solid #ddd;
+    border-radius: 12px;
+    padding: 14px;
+    background: #fff;
+}
+
+.square-reconcile-summary-card strong {
+    display: block;
+    font-size: 1.45rem;
+    margin-top: 5px;
+}
+
+.square-reconcile-section {
+    margin-top: 26px;
+}
+
+.square-reconcile-section h2 {
+    margin-bottom: 6px;
+}
+
+.square-reconcile-section-note {
+    margin: 0 0 12px 0;
+}
+
+.square-reconcile-table-wrap {
+    overflow-x: auto;
+    margin-top: 12px;
+}
+
+.square-reconcile-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #fff;
+}
+
+.square-reconcile-table th,
+.square-reconcile-table td {
+    border-bottom: 1px solid #ddd;
+    padding: 10px 8px;
+    text-align: left;
+    vertical-align: top;
+}
+
+.square-reconcile-table th {
+    white-space: nowrap;
+}
+
+.square-reconcile-status {
+    display: inline-block;
+    border: 1px solid #bbb;
+    border-radius: 999px;
+    padding: 4px 9px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.square-reconcile-empty,
+.square-reconcile-error {
+    border: 1px solid #ddd;
+    border-radius: 12px;
+    padding: 18px;
+    background: #fff;
+    margin-top: 12px;
+}
+
+.square-reconcile-payment-id {
+    max-width: 230px;
+    font-size: 0.86rem;
+    white-space: nowrap;
+}
+
+.square-reconcile-reason {
+    max-width: 340px;
+}
+</style>
+
+<div class="square-reconcile-page">
+
+    <div class="page-tool-pills">
+        <a
+            href="{{ url_for('square_control_center') }}"
+            class="tool-pill tool-pill-small"
+        >
+            Square Control Center
+        </a>
+
+        <a
+            href="{{ url_for('square_sync_activity') }}"
+            class="tool-pill tool-pill-small"
+        >
+            Sync Activity
+        </a>
+
+        <a
+            href="{{ url_for('payment_integrations') }}"
+            class="tool-pill tool-pill-small"
+        >
+            Payment Integrations
+        </a>
+    </div>
+
+    <div class="page-title">
+        <h1>Reconcile Square Payments</h1>
+    </div>
+
+    <p class="square-reconcile-intro">
+        Review completed Square payments for the current Provider
+        Workspace and connect them to Peach Suite Pro appointments
+        and Income. This first version is read-only until you choose
+        to continue through the existing Add Income reconciliation
+        workflow.
+    </p>
+
+    <p>
+        <strong>Environment:</strong>
+        {{ environment|title }}
+        {% if location_name %}
+            &nbsp;•&nbsp;
+            <strong>Square Location:</strong>
+            {{ location_name }}
+        {% endif %}
+    </p>
+
+    {% if square_error %}
+        <div class="square-reconcile-error">
+            <strong>Square could not be loaded.</strong><br>
+            {{ square_error }}
+        </div>
+    {% endif %}
+
+    <div class="square-reconcile-summary">
+
+        <div class="square-reconcile-summary-card">
+            Unreconciled Payments
+            <strong>{{ live_payment_count }}</strong>
+        </div>
+
+        <div class="square-reconcile-summary-card">
+            Ready to Reconcile
+            <strong>{{ needs_reconciliation|length }}</strong>
+        </div>
+
+        <div class="square-reconcile-summary-card">
+            Needs Review
+            <strong>{{ needs_review|length }}</strong>
+        </div>
+
+        <div class="square-reconcile-summary-card">
+            Reconciled
+            <strong>{{ reconciled_rows|length }}</strong>
+        </div>
+
+    </div>
+
+    <section class="square-reconcile-section">
+        <h2>Needs Reconciliation</h2>
+
+        <p class="square-reconcile-section-note">
+            These payments have a verified Square-to-PSP client
+            mapping and exactly one PSP appointment on the payment
+            date. Peach Suite Pro is suggesting the appointment,
+            not reconciling it automatically.
+        </p>
+
+        {% if needs_reconciliation %}
+
+            <div class="square-reconcile-table-wrap">
+                <table class="square-reconcile-table">
+                    <thead>
+                        <tr>
+                            <th>Square Payment</th>
+                            <th>Client</th>
+                            <th>Amount</th>
+                            <th>Tip</th>
+                            <th>Fee</th>
+                            <th>Suggested Appointment</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        {% for payment in needs_reconciliation %}
+                            <tr>
+                                <td>
+                                    {{ payment.local_display }}
+                                    <div class="square-reconcile-payment-id">
+                                        <span
+                                            title="{{ payment.payment_id }}"
+                                        >
+                                            {{
+                                                payment.payment_id[:10]
+                                            }}…{{
+                                                payment.payment_id[-6:]
+                                            }}
+                                        </span>
+                                    </div>
+                                </td>
+
+                                <td>
+                                    {{
+                                        payment.mapped_client.client_name
+                                    }}
+                                </td>
+
+                                <td>
+                                    ${{
+                                        '%.2f'|format(
+                                            payment.total_cents / 100
+                                        )
+                                    }}
+                                </td>
+
+                                <td>
+                                    ${{
+                                        '%.2f'|format(
+                                            payment.tip_cents / 100
+                                        )
+                                    }}
+                                </td>
+
+                                <td>
+                                    ${{
+                                        '%.2f'|format(
+                                            payment.fee_cents / 100
+                                        )
+                                    }}
+                                </td>
+
+                                <td>
+                                    {{ payment.appointment.display }}
+                                </td>
+
+                                <td>
+                                    <a
+                                        href="{{
+                                            url_for(
+                                                'add_income',
+                                                appointment_id=payment.appointment.appointment_id,
+                                                date=payment.appointment.appointment_date.isoformat()
+                                            )
+                                        }}"
+                                        class="tool-pill tool-pill-small"
+                                    >
+                                        Review in Add Income
+                                    </a>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+        {% else %}
+
+            <div class="square-reconcile-empty">
+                No Square payments currently have a single safe
+                appointment suggestion.
+            </div>
+
+        {% endif %}
+    </section>
+
+    <section class="square-reconcile-section">
+        <h2>Needs Review</h2>
+
+        <p class="square-reconcile-section-note">
+            Peach Suite Pro will not guess when the Square customer
+            or appointment cannot be identified safely.
+        </p>
+
+        {% if needs_review %}
+
+            <div class="square-reconcile-table-wrap">
+                <table class="square-reconcile-table">
+                    <thead>
+                        <tr>
+                            <th>Square Payment</th>
+                            <th>Amount</th>
+                            <th>Tip</th>
+                            <th>Fee</th>
+                            <th>PSP Client</th>
+                            <th>Reason</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        {% for payment in needs_review %}
+                            <tr>
+                                <td>
+                                    {{ payment.local_display }}
+                                    <div class="square-reconcile-payment-id">
+                                        <span
+                                            title="{{ payment.payment_id }}"
+                                        >
+                                            {{
+                                                payment.payment_id[:10]
+                                            }}…{{
+                                                payment.payment_id[-6:]
+                                            }}
+                                        </span>
+                                    </div>
+                                </td>
+
+                                <td>
+                                    ${{
+                                        '%.2f'|format(
+                                            payment.total_cents / 100
+                                        )
+                                    }}
+                                </td>
+
+                                <td>
+                                    ${{
+                                        '%.2f'|format(
+                                            payment.tip_cents / 100
+                                        )
+                                    }}
+                                </td>
+
+                                <td>
+                                    ${{
+                                        '%.2f'|format(
+                                            payment.fee_cents / 100
+                                        )
+                                    }}
+                                </td>
+
+                                <td>
+                                    {% if payment.mapped_client %}
+                                        {{
+                                            payment.mapped_client.client_name
+                                        }}
+                                    {% else %}
+                                        —
+                                    {% endif %}
+                                </td>
+
+                                <td class="square-reconcile-reason">
+                                    {{ payment.review_reason or 'Review required.' }}
+                                </td>
+
+                                <td>
+                                    <span class="square-reconcile-status">
+                                        Needs Review
+                                    </span>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+        {% else %}
+
+            <div class="square-reconcile-empty">
+                No unreconciled Square payments currently need
+                manual review.
+            </div>
+
+        {% endif %}
+    </section>
+
+    <section class="square-reconcile-section">
+        <h2>Reconciled</h2>
+
+        <p class="square-reconcile-section-note">
+            Payments already linked to Peach Suite Pro Income.
+        </p>
+
+        {% if reconciled_rows %}
+
+            <div class="square-reconcile-table-wrap">
+                <table class="square-reconcile-table">
+                    <thead>
+                        <tr>
+                            <th>Square Payment</th>
+                            <th>Client</th>
+                            <th>Appointment</th>
+                            <th>Total</th>
+                            <th>Service</th>
+                            <th>Retail</th>
+                            <th>Tip</th>
+                            <th>Fee</th>
+                            <th>Net</th>
+                            <th>Income</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        {% for payment in reconciled_rows %}
+                            <tr>
+                                <td>
+                                    {{
+                                        payment.square_created_at
+                                        or '—'
+                                    }}
+                                    <div class="square-reconcile-payment-id">
+                                        <span
+                                            title="{{ payment.payment_id }}"
+                                        >
+                                            {{
+                                                payment.payment_id[:10]
+                                            }}…{{
+                                                payment.payment_id[-6:]
+                                            }}
+                                        </span>
+                                    </div>
+                                </td>
+
+                                <td>
+                                    {{ payment.client_name }}
+                                </td>
+
+                                <td>
+                                    {{ payment.appointment_display }}
+                                </td>
+
+                                <td>
+                                    ${{
+                                        '%.2f'|format(
+                                            payment.amount_cents / 100
+                                        )
+                                    }}
+                                </td>
+
+                                <td>
+                                    ${{
+                                        '%.2f'|format(
+                                            payment.service_cents / 100
+                                        )
+                                    }}
+                                </td>
+
+                                <td>
+                                    ${{
+                                        '%.2f'|format(
+                                            payment.retail_cents / 100
+                                        )
+                                    }}
+                                </td>
+
+                                <td>
+                                    ${{
+                                        '%.2f'|format(
+                                            payment.tip_cents / 100
+                                        )
+                                    }}
+                                </td>
+
+                                <td>
+                                    ${{
+                                        '%.2f'|format(
+                                            payment.fee_cents / 100
+                                        )
+                                    }}
+                                </td>
+
+                                <td>
+                                    ${{
+                                        '%.2f'|format(
+                                            payment.net_cents / 100
+                                        )
+                                    }}
+                                </td>
+
+                                <td>
+                                    {% if payment.income_id %}
+                                        Income #{{ payment.income_id }}
+                                    {% else %}
+                                        —
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+        {% else %}
+
+            <div class="square-reconcile-empty">
+                No reconciled Square payments have been recorded
+                for this workspace yet.
+            </div>
+
+        {% endif %}
+    </section>
+
+</div>
+
+{% endblock %}
