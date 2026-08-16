@@ -39707,10 +39707,15 @@ def add_income(appointment_id):
                     line_uid
                 ] = classification
 
+            square_environment = (
+                _square_income_read_environment()
+            )
+
             cur.execute("""
                 SELECT
                     sc.square_connection_id,
                     sc.merchant_id,
+                    sc.oauth_access_token_ciphertext,
                     sl.square_location_id
                 FROM square_connections sc
                 JOIN square_locations sl
@@ -39722,23 +39727,28 @@ def add_income(appointment_id):
                  AND sl.environment = sc.environment
                 WHERE sc.spa_id = %s
                   AND sc.business_unit_id = %s
-                  AND sc.environment = 'sandbox'
+                  AND sc.environment = %s
                   AND sc.connection_status = 'connected'
                   AND sl.is_active = TRUE
+                  AND (
+                        sc.environment <> 'production'
+                        OR sl.is_default = TRUE
+                      )
                 ORDER BY
                     sl.is_default DESC,
                     sl.square_location_mapping_id
                 LIMIT 1
             """, (
                 spa_id,
-                business_unit_id
+                business_unit_id,
+                square_environment
             ))
 
             square_mapping = cur.fetchone()
 
             if not square_mapping:
                 flash(
-                    "Square Sandbox is not connected to this "
+                    "Square is not connected to this "
                     "Provider Workspace.",
                     "error"
                 )
@@ -39753,6 +39763,7 @@ def add_income(appointment_id):
             (
                 square_connection_id,
                 square_merchant_id,
+                square_oauth_access_token_ciphertext,
                 square_location_id
             ) = square_mapping
 
@@ -39764,7 +39775,7 @@ def add_income(appointment_id):
                 WHERE square_connection_id = %s
                   AND spa_id = %s
                   AND business_unit_id = %s
-                  AND environment = 'sandbox'
+                  AND environment = %s
                   AND client_id = %s
                   AND is_active = TRUE
                 ORDER BY
@@ -39775,6 +39786,7 @@ def add_income(appointment_id):
                 square_connection_id,
                 spa_id,
                 business_unit_id,
+                square_environment,
                 appt[1],
             ))
 
@@ -39798,12 +39810,13 @@ def add_income(appointment_id):
                 WHERE square_connection_id = %s
                   AND spa_id = %s
                   AND business_unit_id = %s
-                  AND environment = 'sandbox'
+                  AND environment = %s
                   AND is_active = TRUE
             """, (
                 square_connection_id,
                 spa_id,
-                business_unit_id
+                business_unit_id,
+                square_environment
             ))
 
             catalog_classifications = {}
@@ -39845,18 +39858,27 @@ def add_income(appointment_id):
 
             try:
                 square_token = (
-                    square_service
-                    .get_square_sandbox_access_token()
+                    _square_income_read_access_token(
+                        environment=square_environment,
+                        spa_id=spa_id,
+                        business_unit_id=business_unit_id,
+                        oauth_access_token_ciphertext=(
+                            square_oauth_access_token_ciphertext
+                        ),
+                    )
                 )
 
                 square_payment = (
                     square_service.retrieve_payment(
                         selected_square_payment_id,
                         access_token=square_token,
-                        environment="sandbox"
+                        environment=square_environment
                     )
                 )
-            except square_service.SquareServiceError as exc:
+            except (
+                square_oauth.SquareOAuthError,
+                square_service.SquareServiceError,
+            ) as exc:
                 flash(
                     f"Square payment could not be verified: {exc}",
                     "error"
@@ -40015,7 +40037,7 @@ def add_income(appointment_id):
                     square_service.retrieve_order(
                         square_order_id,
                         access_token=square_token,
-                        environment="sandbox"
+                        environment=square_environment
                     )
                 )
             except square_service.SquareServiceError as exc:
@@ -40267,7 +40289,7 @@ def add_income(appointment_id):
                     raw_order
                 )
                 VALUES (
-                    %s, %s, %s, 'sandbox', %s,
+                    %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
@@ -40287,6 +40309,7 @@ def add_income(appointment_id):
                 square_connection_id,
                 spa_id,
                 business_unit_id,
+                square_environment,
                 selected_square_payment_id,
                 square_preview["order_id"],
                 square_preview["customer_id"],
@@ -40349,10 +40372,11 @@ def add_income(appointment_id):
                         business_unit_id,
                         income_id
                     FROM square_payments
-                    WHERE environment = 'sandbox'
+                    WHERE environment = %s
                       AND square_payment_id = %s
                     FOR UPDATE
                 """, (
+                    square_environment,
                     selected_square_payment_id,
                 ))
 
