@@ -15958,19 +15958,25 @@ def square_control_center():
 ###############################################
 
 
-@app.route("/payment-integrations/square/reconcile")
-@login_required
-@spa_required
-@require_workspace_permission(
-    "can_view_business_management"
-)
-def square_reconcile_payments():
-    spa_id = current_spa_id()
-    business_unit_id = current_business_unit_id()
+def _build_square_reconciliation_state(
+    spa_id,
+    business_unit_id,
+):
+    """
+    Build the live Square reconciliation state for one
+    authenticated PSP Provider Workspace.
 
-    if not business_unit_id:
-        abort(403)
+    This helper is read-only:
 
+    - Square GETs only
+    - PSP SELECTs only
+    - no Income or inventory writes
+    - no PSP -> Square writes
+
+    The Reconcile Square Payments workbench, Daily Briefing,
+    and Coach Peach can consume this same authoritative state
+    without duplicating reconciliation rules.
+    """
     square_environment = (
         _square_income_read_environment()
     )
@@ -16238,16 +16244,15 @@ def square_reconcile_payments():
             "Workspace for payment reconciliation."
         )
 
-        return render_template(
-            "square_reconcile_payments.html",
-            environment=square_environment,
-            location_name=None,
-            needs_reconciliation=[],
-            needs_review=[],
-            reconciled_rows=[],
-            square_error=square_error,
-            live_payment_count=0,
-        )
+        return {
+            "environment": square_environment,
+            "location_name": None,
+            "needs_reconciliation": [],
+            "needs_review": [],
+            "reconciled_rows": [],
+            "square_error": square_error,
+            "live_payment_count": 0,
+        }
 
     (
         square_connection_id,
@@ -16380,6 +16385,7 @@ def square_reconcile_payments():
             "payment_date": (
                 payment_local_datetime.date()
             ),
+            "payment_datetime": payment_local_datetime,
             "local_display": (
                 payment_local_datetime.strftime(
                     "%m/%d/%Y %I:%M %p"
@@ -16726,19 +16732,354 @@ def square_reconcile_payments():
         if item["appointment"] is None
     ]
 
-    return render_template(
-        "square_reconcile_payments.html",
-        environment=square_environment,
-        location_name=location_name,
-        needs_reconciliation=(
+    return {
+        "environment": square_environment,
+        "location_name": location_name,
+        "needs_reconciliation": (
             needs_reconciliation
         ),
-        needs_review=needs_review,
-        reconciled_rows=reconciled_rows,
-        square_error=square_error,
-        live_payment_count=len(
+        "needs_review": needs_review,
+        "reconciled_rows": reconciled_rows,
+        "square_error": square_error,
+        "live_payment_count": len(
             live_candidates
         ),
+    }
+
+
+def _build_square_reconciliation_priority_action(
+    reconciliation_state,
+    today,
+):
+    """
+    Convert shared live Square reconciliation state into one
+    Daily Briefing / Coach Peach priority action.
+
+    No matching rules are duplicated here. This function only
+    classifies the already-built workbench state for presentation.
+    """
+    reconciliation_state = reconciliation_state or {}
+
+    unresolved = (
+        list(
+            reconciliation_state.get(
+                "needs_reconciliation",
+                []
+            ) or []
+        )
+        + list(
+            reconciliation_state.get(
+                "needs_review",
+                []
+            ) or []
+        )
+    )
+
+    if not unresolved:
+        return None
+
+    def attention_type(item):
+        if item.get("appointment") is not None:
+            return "Review in Add Income"
+
+        if item.get(
+            "existing_income_link_candidate"
+        ):
+            return "Review Existing Income"
+
+        if item.get("mapped_client"):
+            return "Match Appointment"
+
+        if item.get("customer_id"):
+            return "Identify Client"
+
+        return "No Square Customer"
+
+    type_order = (
+        "Review Existing Income",
+        "Review in Add Income",
+        "Match Appointment",
+        "Identify Client",
+        "No Square Customer",
+    )
+
+    type_counts = {
+        label: 0
+        for label in type_order
+    }
+
+    for item in unresolved:
+        type_counts[
+            attention_type(item)
+        ] += 1
+
+    type_summary_wording = {
+        "Review Existing Income": (
+            "existing Income match needs review",
+            "existing Income matches need review",
+        ),
+        "Review in Add Income": (
+            "ready for Add Income",
+            "ready for Add Income",
+        ),
+        "Match Appointment": (
+            "needs appointment matching",
+            "need appointment matching",
+        ),
+        "Identify Client": (
+            "needs client identification",
+            "need client identification",
+        ),
+        "No Square Customer": (
+            "needs manual review",
+            "need manual review",
+        ),
+    }
+
+    type_summary = " • ".join(
+        (
+            f"{type_counts[label]} "
+            + type_summary_wording[label][
+                0 if type_counts[label] == 1 else 1
+            ]
+        )
+        for label in type_order
+        if type_counts[label] > 0
+    )
+
+    actionable = [
+        item
+        for item in unresolved
+        if attention_type(item)
+        != "No Square Customer"
+    ]
+
+    coach_item_pool = actionable or unresolved
+
+    coach_item = min(
+        coach_item_pool,
+        key=lambda item: item.get(
+            "payment_datetime"
+        ),
+    )
+
+    coach_type = attention_type(coach_item)
+    payment_id = coach_item["payment_id"]
+
+    mapped_client = (
+        coach_item.get("mapped_client")
+        or {}
+    )
+
+    client_name = str(
+        mapped_client.get("client_name")
+        or ""
+    ).strip()
+
+    if not client_name:
+        client_name = "the client"
+
+    payment_count = len(unresolved)
+
+    if payment_count == 1:
+        coach_intro = (
+            "You have 1 Square payment that still needs "
+            "to be reconciled."
+        )
+    else:
+        coach_intro = (
+            f"You have {payment_count} Square payments "
+            "that still need to be reconciled."
+        )
+
+    workbench_url = url_for(
+        "square_reconcile_payments"
+    )
+
+    coach_url = workbench_url
+    coach_action_label = "Reconcile Payments"
+    coach_detail = (
+        "The oldest payment needs manual review."
+    )
+    coach_question = (
+        "Would you like to open Square Reconciliation "
+        "to review it?"
+    )
+
+    if coach_type == "Review in Add Income":
+        coach_action_label = "Review in Add Income"
+        appointment = coach_item["appointment"]
+
+        coach_url = url_for(
+            "add_income",
+            appointment_id=(
+                appointment["appointment_id"]
+            ),
+            date=(
+                appointment[
+                    "appointment_date"
+                ].isoformat()
+            ),
+            square_payment_id=payment_id,
+        )
+
+        coach_detail = (
+            f"The oldest actionable payment is mapped "
+            f"to {client_name} and has one same-date "
+            "appointment ready for Add Income review."
+        )
+
+        coach_question = (
+            "Would you like to review this Square "
+            "payment in Add Income?"
+        )
+
+    elif coach_type == "Review Existing Income":
+        coach_action_label = "Review Existing Income"
+        coach_url = url_for(
+            "square_reconcile_review_existing_income",
+            payment_id=payment_id,
+        )
+
+        existing_income_id = coach_item.get(
+            "existing_income_id"
+        )
+
+        coach_detail = (
+            "The oldest actionable payment appears to "
+            f"match existing PSP Income "
+            f"#{existing_income_id} and is ready for "
+            "guarded review."
+        )
+
+        coach_question = (
+            "Would you like to review the existing "
+            "Income match?"
+        )
+
+    elif coach_type == "Match Appointment":
+        coach_action_label = "Match Appointment"
+        coach_url = url_for(
+            "square_reconcile_match_appointment",
+            payment_id=payment_id,
+        )
+
+        review_reason = str(
+            coach_item.get("review_reason")
+            or ""
+        ).strip()
+
+        if review_reason:
+            coach_detail = (
+                f"The oldest actionable payment is mapped "
+                f"to {client_name}. {review_reason}"
+            )
+        else:
+            coach_detail = (
+                f"The oldest actionable payment is mapped "
+                f"to {client_name}, but the appointment "
+                "still needs to be matched."
+            )
+
+        coach_question = (
+            "Would you like to match this Square payment "
+            "to the correct appointment?"
+        )
+
+    elif coach_type == "Identify Client":
+        coach_action_label = "Identify Client"
+        coach_url = url_for(
+            "square_reconcile_identify_client",
+            payment_id=payment_id,
+        )
+
+        coach_detail = (
+            "The oldest actionable payment has a Square "
+            "customer that is not yet mapped to a PSP "
+            "client."
+        )
+
+        coach_question = (
+            "Would you like to identify the PSP client "
+            "for this Square payment?"
+        )
+
+    else:
+        coach_detail = (
+            "The oldest Square payment has no Square "
+            "customer attached and needs manual review."
+        )
+
+    oldest_unresolved_date = min(
+        item["payment_date"]
+        for item in unresolved
+        if item.get("payment_date") is not None
+    )
+
+    oldest_age_days = max(
+        0,
+        (today - oldest_unresolved_date).days,
+    )
+
+    # Coach highlights the oldest actionable payment, while
+    # overall Square priority reflects the oldest unresolved
+    # payment of any type. Older unresolved payments therefore
+    # steadily rise in priority.
+    action_priority = (
+        95
+        + min(oldest_age_days, 20)
+    )
+
+    payment_word = (
+        "payment"
+        if payment_count == 1
+        else "payments"
+    )
+
+    return {
+        "icon": "🟧",
+        "label": "Square Reconciliation",
+        "value": payment_count,
+        "card_message": (
+            f"{payment_count} Square {payment_word} "
+            f"need attention • {type_summary}"
+        ),
+        "url": workbench_url,
+        "button": "Reconcile Payments",
+        "category": "Square Reconciliation",
+        "priority": action_priority,
+        "coach_url": coach_url,
+        "coach_action_label": coach_action_label,
+        "coach_message": (
+            f"{coach_intro} {coach_detail}"
+        ),
+        "coach_question": coach_question,
+    }
+
+
+@app.route("/payment-integrations/square/reconcile")
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_view_business_management"
+)
+def square_reconcile_payments():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
+
+    reconciliation_state = (
+        _build_square_reconciliation_state(
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+        )
+    )
+
+    return render_template(
+        "square_reconcile_payments.html",
+        **reconciliation_state,
     )
 
 
@@ -50051,6 +50392,43 @@ def morning_briefing():
     # Priority action review
     # ---------------------------------------------------------
     priority_actions = []
+
+    # ---------------------------------------------------------
+    # Square reconciliation requiring attention
+    #
+    # Daily Briefing itself has a separate permission. Only
+    # expose Square reconciliation details when this user also
+    # has business-management permission.
+    # ---------------------------------------------------------
+    workspace_access = current_workspace_access()
+
+    if (
+        business_unit_id
+        and workspace_access.get(
+            "can_view_business_management",
+            False
+        )
+    ):
+        square_reconciliation_state = (
+            _build_square_reconciliation_state(
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+            )
+        )
+
+        square_priority_action = (
+            _build_square_reconciliation_priority_action(
+                reconciliation_state=(
+                    square_reconciliation_state
+                ),
+                today=today,
+            )
+        )
+
+        if square_priority_action:
+            priority_actions.append(
+                square_priority_action
+            )
 
     if dashboard.get("birthdays_today", 0) > 0:
         priority_actions.append({

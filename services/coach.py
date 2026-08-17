@@ -117,7 +117,8 @@ def add_observation(
     status,
     message,
     action_url=None,
-    question=None
+    question=None,
+    action_label=None
 ):
     observations.append({
         "category": category,
@@ -125,7 +126,8 @@ def add_observation(
         "status": status,
         "message": message,
         "action_url": action_url,
-        "question": question
+        "question": question,
+        "action_label": action_label
     })
 
 
@@ -291,17 +293,33 @@ def review_priority_actions(
         )
 
         action_value = action.get("value", 0) or 0
-        action_url = action.get("url")
+        action_url = action.get(
+            "coach_url",
+            action.get("url")
+        )
         action_priority = action.get("priority", 80)
 
-        if action_value == 1:
+        coach_message = action.get("coach_message")
+        coach_question = action.get("coach_question")
+
+        if coach_message:
+            message = str(coach_message)
+
+        elif action_value == 1:
             message = (
                 f"One item requires attention: {action_name}."
             )
+
         else:
             message = (
                 f"{action_value} items require attention: "
                 f"{action_name}."
+            )
+
+        if not coach_question:
+            coach_question = (
+                f"Would you like to review "
+                f"{action_name.lower()}?"
             )
 
         add_observation(
@@ -314,9 +332,9 @@ def review_priority_actions(
             status="attention",
             message=message,
             action_url=action_url,
-            question=(
-                f"Would you like to review "
-                f"{action_name.lower()}?"
+            question=coach_question,
+            action_label=action.get(
+                "coach_action_label"
             )
         )
 
@@ -1713,7 +1731,12 @@ def build_action_cards(
             "priority": action.get("priority", 50),
             "icon": action.get("icon", "📌"),
             "title": action.get("label", "Action"),
-            "message": str(action.get("value", "")),
+            "message": str(
+                action.get(
+                    "card_message",
+                    action.get("value", "")
+                )
+            ),
             "button": action.get("button", "View"),
             "url": action.get("url")
         })

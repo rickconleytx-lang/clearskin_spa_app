@@ -572,7 +572,10 @@
                                     {{ recommendation.action_url|tojson }},
                                     {{ recommendation.category|tojson }}
                                 )'>
-                            View Details
+                            {{
+                                recommendation.action_label
+                                or "View Details"
+                            }}
                         </button>
 
                     {% endif %}
