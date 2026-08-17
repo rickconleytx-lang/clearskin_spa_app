@@ -19035,10 +19035,59 @@ def square_reconcile_identify_client():
             )
         )
 
+    square_customer_first_name = str(
+        square_customer.get("given_name") or ""
+    ).strip()
+
+    square_customer_last_name = str(
+        square_customer.get("family_name") or ""
+    ).strip()
+
     square_customer_name = (
-        f"{square_customer.get('given_name') or ''} "
-        f"{square_customer.get('family_name') or ''}"
+        f"{square_customer_first_name} "
+        f"{square_customer_last_name}"
     ).strip() or "Unnamed Square Customer"
+
+    suggested_psp_first_name = ""
+    suggested_psp_last_name = ""
+    suggested_name_mismatch = False
+
+    if suggested_match:
+        suggested_psp_first_name = str(
+            suggested_match.get("first_name") or ""
+        ).strip()
+
+        suggested_psp_last_name = str(
+            suggested_match.get("last_name") or ""
+        ).strip()
+
+        def normalize_display_name(value):
+            return " ".join(
+                str(value or "")
+                .strip()
+                .lower()
+                .split()
+            )
+
+        suggested_name_mismatch = (
+            normalize_display_name(
+                square_customer_first_name
+            )
+            != normalize_display_name(
+                suggested_psp_first_name
+            )
+            or normalize_display_name(
+                square_customer_last_name
+            )
+            != normalize_display_name(
+                suggested_psp_last_name
+            )
+        )
+
+    square_name_update_available = bool(
+        square_customer_first_name
+        and square_customer_last_name
+    )
 
     # Dedicated session token for the future explicit
     # Confirm Match POST action.
@@ -19065,6 +19114,24 @@ def square_reconcile_identify_client():
         payment_total_cents=total_cents,
         square_customer_id=square_customer_id,
         square_customer_name=square_customer_name,
+        square_customer_first_name=(
+            square_customer_first_name
+        ),
+        square_customer_last_name=(
+            square_customer_last_name
+        ),
+        suggested_psp_first_name=(
+            suggested_psp_first_name
+        ),
+        suggested_psp_last_name=(
+            suggested_psp_last_name
+        ),
+        suggested_name_mismatch=(
+            suggested_name_mismatch
+        ),
+        square_name_update_available=(
+            square_name_update_available
+        ),
         square_customer_email=(
             square_customer.get("email_address")
             or ""
@@ -19160,6 +19227,17 @@ def square_reconcile_confirm_client():
         abort(400)
 
     if client_id <= 0:
+        abort(400)
+
+    name_action = str(
+        request.form.get("name_action")
+        or "keep_psp"
+    ).strip().lower()
+
+    if name_action not in {
+        "keep_psp",
+        "use_square",
+    }:
         abort(400)
 
     actor_user_id = session.get("user_id")
@@ -19465,6 +19543,62 @@ def square_reconcile_confirm_client():
         # is not allowed by this Version 1 confirmation path.
         abort(409)
 
+    square_first_name = str(
+        square_customer.get("given_name") or ""
+    ).strip()
+
+    square_last_name = str(
+        square_customer.get("family_name") or ""
+    ).strip()
+
+    psp_first_name = str(
+        selected_match.get("first_name") or ""
+    ).strip()
+
+    psp_last_name = str(
+        selected_match.get("last_name") or ""
+    ).strip()
+
+    def normalize_confirmed_name(value):
+        return " ".join(
+            str(value or "")
+            .strip()
+            .lower()
+            .split()
+        )
+
+    current_name_mismatch = (
+        normalize_confirmed_name(square_first_name)
+        != normalize_confirmed_name(psp_first_name)
+        or normalize_confirmed_name(square_last_name)
+        != normalize_confirmed_name(psp_last_name)
+    )
+
+    update_client_name = False
+
+    if name_action == "use_square":
+        if (
+            current_name_mismatch
+            and (
+                not square_first_name
+                or not square_last_name
+            )
+        ):
+            flash(
+                "The Square customer name is no longer complete. "
+                "Please review the client match again before "
+                "updating the PSP name.",
+                "warning",
+            )
+            return redirect(
+                url_for(
+                    "square_reconcile_identify_client",
+                    payment_id=square_payment_id,
+                )
+            )
+
+        update_client_name = current_name_mismatch
+
     # -------------------------------------------------
     # PSP DATABASE WRITE ONLY.
     #
@@ -19488,6 +19622,17 @@ def square_reconcile_confirm_client():
             client_id=client_id,
             match_method=match_method,
             actor_user_id=actor_user_id,
+            update_client_name=update_client_name,
+            client_first_name=(
+                square_first_name
+                if update_client_name
+                else None
+            ),
+            client_last_name=(
+                square_last_name
+                if update_client_name
+                else None
+            ),
         )
 
     except SquareClientSyncError as exc:
@@ -19510,15 +19655,28 @@ def square_reconcile_confirm_client():
         None,
     )
 
-    client_name = str(
-        selected_match.get("client_name")
-        or f"Client #{client_id}"
-    ).strip()
+    if update_client_name:
+        client_name = (
+            f"{square_first_name} "
+            f"{square_last_name}"
+        ).strip()
 
-    flash(
-        f"Square customer matched to {client_name}.",
-        "success",
-    )
+        flash(
+            f"Square customer matched to {client_name}. "
+            "The PSP client name was updated to match Square.",
+            "success",
+        )
+
+    else:
+        client_name = str(
+            selected_match.get("client_name")
+            or f"Client #{client_id}"
+        ).strip()
+
+        flash(
+            f"Square customer matched to {client_name}.",
+            "success",
+        )
 
     return redirect(
         url_for("square_reconcile_payments")
@@ -55048,6 +55206,9 @@ def find_possible_client_duplicates(
 
         duplicates.append({
             "client_id": client_id,
+
+            "first_name": existing_first_name or "",
+            "last_name": existing_last_name or "",
 
             "client_name": (
                 f"{existing_first_name or ''} "

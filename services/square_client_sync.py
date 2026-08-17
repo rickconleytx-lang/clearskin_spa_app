@@ -736,7 +736,10 @@ def _persist_mapping(
     square_customer_id,
     client_id,
     match_method,
-    actor_user_id
+    actor_user_id,
+    update_client_name=False,
+    client_first_name=None,
+    client_last_name=None
 ):
     conn = get_db_connection()
     cur = conn.cursor(
@@ -768,26 +771,61 @@ def _persist_mapping(
                 "PSP workspace/environment."
             )
 
-        # Re-verify the PSP client still belongs to this exact
+        # Re-verify and lock the PSP client in this exact
         # workspace before storing the external identity.
+        #
+        # An explicitly requested Square-name correction is
+        # performed inside this SAME transaction so the name
+        # update and identity mapping commit or roll back together.
         cur.execute("""
-            SELECT client_id
+            SELECT
+                client_id,
+                first_name,
+                last_name
             FROM clients
             WHERE client_id = %s
               AND spa_id = %s
               AND business_unit_id = %s
             LIMIT 1
+            FOR UPDATE
         """, (
             client_id,
             spa_id,
             business_unit_id
         ))
 
-        if not cur.fetchone():
+        client_row = cur.fetchone()
+
+        if not client_row:
             raise SquareClientSyncError(
                 "PSP client workspace changed before "
                 "Square mapping could be saved."
             )
+
+        if update_client_name:
+            cur.execute("""
+                UPDATE clients
+                SET
+                    first_name = %s,
+                    last_name = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE client_id = %s
+                  AND spa_id = %s
+                  AND business_unit_id = %s
+                RETURNING client_id
+            """, (
+                client_first_name,
+                client_last_name,
+                client_id,
+                spa_id,
+                business_unit_id
+            ))
+
+            if not cur.fetchone():
+                raise SquareClientSyncError(
+                    "PSP client name could not be updated "
+                    "inside the confirmed Square mapping."
+                )
 
         cur.execute("""
             SELECT
@@ -948,7 +986,10 @@ def confirm_square_customer_mapping(
     square_customer_id,
     client_id,
     match_method,
-    actor_user_id
+    actor_user_id,
+    update_client_name=False,
+    client_first_name=None,
+    client_last_name=None
 ):
     """
     Persist a human-confirmed Square Customer -> PSP Client
@@ -1004,6 +1045,28 @@ def confirm_square_customer_mapping(
             "Invalid confirmed Square client match method."
         )
 
+    update_client_name = bool(update_client_name)
+
+    client_first_name = str(
+        client_first_name or ""
+    ).strip()
+
+    client_last_name = str(
+        client_last_name or ""
+    ).strip()
+
+    if (
+        update_client_name
+        and (
+            not client_first_name
+            or not client_last_name
+        )
+    ):
+        raise SquareClientSyncError(
+            "Both Square first and last name are required "
+            "to update the PSP client name."
+        )
+
     try:
         square_connection_id = int(
             square_connection_id
@@ -1043,6 +1106,9 @@ def confirm_square_customer_mapping(
         client_id=client_id,
         match_method=match_method,
         actor_user_id=actor_user_id,
+        update_client_name=update_client_name,
+        client_first_name=client_first_name,
+        client_last_name=client_last_name,
     )
 
     return {

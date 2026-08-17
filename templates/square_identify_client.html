@@ -68,6 +68,25 @@ Identify Square Client | Peach Suite Pro
     font-size: 0.86rem;
     overflow-wrap: anywhere;
 }
+
+.square-name-mismatch {
+    border: 1px solid #d6a84b;
+    border-radius: 10px;
+    padding: 14px;
+    margin-top: 16px;
+    background: #fff9ec;
+}
+
+.square-name-mismatch h3 {
+    margin-top: 0;
+}
+
+.square-name-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 14px;
+}
 </style>
 
 <div class="square-identify-page">
@@ -245,9 +264,6 @@ Identify Square Client | Peach Suite Pro
                         'square_reconcile_confirm_client'
                     )
                 }}"
-                onsubmit="return confirm(
-                    'Confirm that this Square customer belongs to this PSP client?'
-                );"
             >
                 <input
                     type="hidden"
@@ -267,18 +283,112 @@ Identify Square Client | Peach Suite Pro
                     value="{{ suggested_match.client_id }}"
                 >
 
-                <button
-                    type="submit"
-                    class="tool-pill tool-pill-small"
-                >
-                    Confirm Match
-                </button>
+                {% if suggested_name_mismatch %}
+
+                    <div class="square-name-mismatch">
+                        <h3>Name / Spelling Mismatch</h3>
+
+                        <p>
+                            Peach Suite Pro found strong identity
+                            evidence, but the customer names are
+                            spelled differently.
+                        </p>
+
+                        <div class="square-identify-grid">
+                            <div>
+                                <span class="square-identify-label">
+                                    Square Name
+                                </span>
+                                {{ square_customer_name }}
+                            </div>
+
+                            <div>
+                                <span class="square-identify-label">
+                                    PSP Name
+                                </span>
+                                {{ suggested_match.client_name }}
+                            </div>
+                        </div>
+
+                        <p>
+                            Confirm these are the same person, then
+                            choose which name Peach Suite Pro should
+                            keep.
+                        </p>
+
+                        <div class="square-name-actions">
+                            <button
+                                type="submit"
+                                name="name_action"
+                                value="keep_psp"
+                                class="tool-pill tool-pill-small"
+                                onclick='return confirm({{
+                                    (
+                                        "Confirm these are the same person and keep the current PSP name: "
+                                        ~ suggested_match.client_name
+                                        ~ "?"
+                                    )|tojson
+                                }});'
+                            >
+                                Keep PSP Name —
+                                {{ suggested_match.client_name }}
+                            </button>
+
+                            {% if square_name_update_available %}
+                                <button
+                                    type="submit"
+                                    name="name_action"
+                                    value="use_square"
+                                    class="tool-pill tool-pill-small"
+                                    onclick='return confirm({{
+                                        (
+                                            "Confirm these are the same person and update the PSP name to: "
+                                            ~ square_customer_name
+                                            ~ "?"
+                                        )|tojson
+                                    }});'
+                                >
+                                    Update PSP Name to Square —
+                                    {{ square_customer_name }}
+                                </button>
+                            {% endif %}
+                        </div>
+
+                        {% if not square_name_update_available %}
+                            <p>
+                                Square does not currently provide both
+                                a first and last name, so Peach Suite Pro
+                                will not offer an automatic name update.
+                            </p>
+                        {% endif %}
+                    </div>
+
+                {% else %}
+
+                    <input
+                        type="hidden"
+                        name="name_action"
+                        value="keep_psp"
+                    >
+
+                    <button
+                        type="submit"
+                        class="tool-pill tool-pill-small"
+                        onclick="return confirm(
+                            'Confirm that this Square customer and PSP client are the same person?'
+                        );"
+                    >
+                        Confirm Same Person
+                    </button>
+
+                {% endif %}
             </form>
 
             <p>
-                Confirming saves only the Square-to-PSP client
-                identity mapping. It does not change the customer
-                record in Square.
+                Confirming saves the Square-to-PSP identity mapping.
+                If you choose the Square spelling, only the Peach
+                Suite Pro client name is updated. This reconciliation
+                step does not change the customer record in Square.
             </p>
         </div>
 
