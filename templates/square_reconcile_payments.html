@@ -388,6 +388,18 @@ Reconcile Square Payments | Peach Suite Pro
                                         >
                                             Review Existing Income
                                         </a>
+                                    {% elif payment.mapped_client %}
+                                        <a
+                                            href="{{
+                                                url_for(
+                                                    'square_reconcile_match_appointment',
+                                                    payment_id=payment.payment_id
+                                                )
+                                            }}"
+                                            class="tool-pill tool-pill-small"
+                                        >
+                                            Match Appointment
+                                        </a>
                                     {% elif payment.customer_id %}
                                         <a
                                             href="{{
@@ -528,6 +540,11 @@ Reconcile Square Payments | Peach Suite Pro
                                 <td>
                                     {% if payment.income_id %}
                                         Income #{{ payment.income_id }}
+                                        <div>
+                                            <span class="square-reconcile-status">
+                                                Payment Reconciled ✓
+                                            </span>
+                                        </div>
                                     {% else %}
                                         —
                                     {% endif %}

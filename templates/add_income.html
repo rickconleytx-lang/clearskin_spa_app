@@ -711,8 +711,29 @@ document.addEventListener("DOMContentLoaded", function () {
         );
     }
 
+    const preselectedSquarePaymentId =
+        {{ preselected_square_payment_id|tojson }};
+
     calculateTotal();
     togglePaymentFields();
+
+    if (
+        preselectedSquarePaymentId
+        && paymentMethodField
+        && squarePaymentPreview
+        && squareRetrieveStatus
+    ) {
+        paymentMethodField.value = "Square";
+        togglePaymentFields();
+
+        squareRetrieveStatus.textContent =
+            "Square payment selected from reconciliation. "
+            + "Review it below before populating Add Income.";
+
+        previewSquarePayment(
+            preselectedSquarePaymentId
+        );
+    }
 });
 </script>
 

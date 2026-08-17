@@ -1,0 +1,267 @@
+{% extends "base.html" %}
+
+{% block title %}
+Match Appointment | Peach Suite Pro
+{% endblock %}
+
+{% block content %}
+
+<style>
+.square-match-page {
+    max-width: 1100px;
+    margin: 0 auto;
+}
+
+.square-match-intro {
+    max-width: 900px;
+    margin: 14px 0 20px 0;
+}
+
+.square-match-card {
+    border: 1px solid #ddd;
+    border-radius: 12px;
+    padding: 18px;
+    background: #fff;
+    margin-top: 16px;
+}
+
+.square-match-grid {
+    display: grid;
+    grid-template-columns:
+        repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+}
+
+.square-match-label {
+    font-weight: 700;
+    display: block;
+    margin-bottom: 4px;
+}
+
+.square-match-table-wrap {
+    overflow-x: auto;
+    margin-top: 12px;
+}
+
+.square-match-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.square-match-table th,
+.square-match-table td {
+    border-bottom: 1px solid #ddd;
+    padding: 10px 8px;
+    text-align: left;
+    vertical-align: top;
+}
+
+.square-match-status {
+    display: inline-block;
+    border: 1px solid #bbb;
+    border-radius: 999px;
+    padding: 4px 9px;
+    font-weight: 700;
+}
+
+.square-match-id {
+    font-size: 0.86rem;
+    overflow-wrap: anywhere;
+}
+
+.square-match-note {
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    padding: 12px;
+    margin-top: 14px;
+}
+</style>
+
+<div class="square-match-page">
+
+    <div class="page-tool-pills">
+        <a
+            href="{{ url_for('square_reconcile_payments') }}"
+            class="tool-pill tool-pill-small"
+        >
+            Reconcile Square Payments
+        </a>
+
+        <a
+            href="{{ url_for('square_control_center') }}"
+            class="tool-pill tool-pill-small"
+        >
+            Square Control Center
+        </a>
+    </div>
+
+    <div class="page-title">
+        <h1>Match Appointment</h1>
+    </div>
+
+    <p class="square-match-intro">
+        Review the mapped PSP client and choose the correct
+        appointment from the Square payment date. Peach Suite Pro
+        will not change the appointment or create Income from this
+        page.
+    </p>
+
+    <div class="square-match-card">
+        <h2>Square Payment</h2>
+
+        <div class="square-match-grid">
+            <div>
+                <span class="square-match-label">
+                    PSP Client
+                </span>
+                {{ client_name }}
+            </div>
+
+            <div>
+                <span class="square-match-label">
+                    Square Payment
+                </span>
+                {{ payment_display }}
+            </div>
+
+            <div>
+                <span class="square-match-label">
+                    Total
+                </span>
+                ${{ '%.2f'|format(payment_total_cents / 100) }}
+            </div>
+
+            <div>
+                <span class="square-match-label">
+                    Tip
+                </span>
+                ${{ '%.2f'|format(payment_tip_cents / 100) }}
+            </div>
+
+            <div>
+                <span class="square-match-label">
+                    Square Fee
+                </span>
+                ${{ '%.2f'|format(payment_fee_cents / 100) }}
+            </div>
+
+            <div>
+                <span class="square-match-label">
+                    Environment
+                </span>
+                {{ environment|title }}
+            </div>
+
+            <div>
+                <span class="square-match-label">
+                    Square Location
+                </span>
+                {{ location_name or '—' }}
+            </div>
+        </div>
+
+        <div class="square-match-id" style="margin-top: 12px;">
+            Square Payment ID: {{ payment_id }}
+        </div>
+    </div>
+
+    <div class="square-match-card">
+        <h2>Appointments on {{ payment_date.strftime('%m/%d/%Y') }}</h2>
+
+        {% if appointments %}
+
+            <p>
+                Only appointments for {{ client_name }} in the
+                current Provider Workspace are shown.
+            </p>
+
+            <div class="square-match-table-wrap">
+                <table class="square-match-table">
+                    <thead>
+                        <tr>
+                            <th>Appointment</th>
+                            <th>Income Status</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        {% for appointment in appointments %}
+                            <tr>
+                                <td>
+                                    {{ appointment.display }}
+                                </td>
+
+                                <td>
+                                    {% if appointment.income_count %}
+                                        <span class="square-match-status">
+                                            {% if appointment.income_count == 1 %}
+                                                Existing Income #{{ appointment.income_id }}
+                                            {% else %}
+                                                {{ appointment.income_count }}
+                                                Existing Income Records
+                                            {% endif %}
+                                        </span>
+                                    {% else %}
+                                        <span class="square-match-status">
+                                            No Income Yet
+                                        </span>
+                                    {% endif %}
+                                </td>
+
+                                <td>
+                                    {% if appointment.income_count %}
+                                        <span class="square-match-status">
+                                            Add Income Blocked
+                                        </span>
+                                    {% else %}
+                                        <a
+                                            href="{{
+                                                url_for(
+                                                    'add_income',
+                                                    appointment_id=appointment.appointment_id,
+                                                    date=appointment.appointment_date.isoformat(),
+                                                    square_payment_id=payment_id
+                                                )
+                                            }}"
+                                            class="tool-pill tool-pill-small"
+                                        >
+                                            Use This Appointment
+                                        </a>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+        {% else %}
+
+            <div class="square-match-note">
+                <strong>No same-date appointment found.</strong>
+                Peach Suite Pro found no appointment for
+                {{ client_name }} on the Square payment date,
+                {{ payment_date.strftime('%m/%d/%Y') }}.
+                No appointment has been matched and no Income
+                has been created.
+            </div>
+
+            <p style="margin-top: 14px;">
+                Cross-date appointment matching is intentionally
+                not allowed in this workflow.
+            </p>
+
+        {% endif %}
+    </div>
+
+    <div class="square-match-note">
+        Selecting an appointment only opens the existing Add Income
+        Square review flow. Square payment details are re-verified
+        before the form can be populated and again before Income is
+        saved.
+    </div>
+
+</div>
+
+{% endblock %}
