@@ -43929,6 +43929,559 @@ def _square_appointment_day_bounds_utc(
     )
 
 
+
+# =========================================================
+# SERVICE RECIPIENT RESOLUTION
+#
+# Booked By, Service Recipient, and Payer are separate
+# identities. A "Booked for Someone Else" appointment must
+# be linked to a real PSP client before client-specific
+# closeout work can continue.
+# =========================================================
+
+
+def _complete_service_recipient_resolution_after_client_create(
+    spa_id,
+    business_unit_id,
+    new_client_id,
+    recipient_appointment_id=None
+):
+    context = session.get(
+        "service_recipient_resolution"
+    )
+
+    if not isinstance(context, dict):
+        return None
+
+    # The session context alone is not permission to link
+    # the next client that happens to be created. The Add
+    # New Client request must explicitly carry the same
+    # appointment marker established by the resolver.
+    try:
+        requested_appointment_id = int(
+            recipient_appointment_id
+        )
+    except (TypeError, ValueError):
+        session.pop(
+            "service_recipient_resolution",
+            None
+        )
+        return None
+
+    try:
+        context_spa_id = int(
+            context.get("spa_id")
+        )
+        context_business_unit_id = int(
+            context.get("business_unit_id")
+        )
+        appointment_id = int(
+            context.get("appointment_id")
+        )
+    except (TypeError, ValueError):
+        session.pop(
+            "service_recipient_resolution",
+            None
+        )
+        return None
+
+    if (
+        context_spa_id != int(spa_id)
+        or context_business_unit_id
+            != int(business_unit_id)
+        or appointment_id
+            != requested_appointment_id
+    ):
+        session.pop(
+            "service_recipient_resolution",
+            None
+        )
+        return None
+
+    selected_date = (
+        context.get("date")
+        or ""
+    )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            UPDATE appointments
+            SET service_recipient_client_id = %s
+            WHERE appointment_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND COALESCE(
+                    booking_for_other,
+                    FALSE
+                  ) = TRUE
+              AND service_recipient_client_id
+                    IS NULL
+        """, (
+            new_client_id,
+            appointment_id,
+            spa_id,
+            business_unit_id
+        ))
+
+        if cur.rowcount != 1:
+            conn.rollback()
+
+            # This explicit recipient-create attempt is over.
+            # Do not leave the appointment context available
+            # for some later Add New Client request.
+            session.pop(
+                "service_recipient_resolution",
+                None
+            )
+
+            flash(
+                "The client was created, but the "
+                "appointment recipient could not be "
+                "linked automatically. Please review "
+                "the service recipient.",
+                "warning"
+            )
+
+            return url_for(
+                "resolve_service_recipient",
+                appointment_id=appointment_id,
+                date=selected_date
+            )
+
+        conn.commit()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    session.pop(
+        "service_recipient_resolution",
+        None
+    )
+
+    flash(
+        "Service recipient linked successfully. "
+        "Continue checkout below.",
+        "success"
+    )
+
+    return url_for(
+        "add_income",
+        appointment_id=appointment_id,
+        date=selected_date
+    )
+
+
+@app.route(
+    "/appointments/<int:appointment_id>/"
+    "resolve-service-recipient",
+    methods=["GET", "POST"]
+)
+@login_required
+@spa_required
+def resolve_service_recipient(appointment_id):
+    spa_id = current_spa_id()
+    business_unit_id = (
+        current_business_unit_id()
+    )
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to resolve a service recipient.",
+            "error"
+        )
+        return redirect(
+            url_for("appointments")
+        )
+
+    selected_date = (
+        request.args.get("date")
+        or request.form.get("date")
+        or ""
+    )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            a.appointment_id,
+            a.client_id,
+            a.appointment_for,
+            COALESCE(
+                a.booking_for_other,
+                FALSE
+            ) AS booking_for_other,
+            a.service_recipient_client_id,
+            a.appointment_date,
+            a.appointment_time,
+            c.first_name,
+            c.last_name
+        FROM appointments a
+        JOIN clients c
+          ON c.client_id = a.client_id
+         AND c.spa_id = a.spa_id
+         AND c.business_unit_id =
+                a.business_unit_id
+        WHERE a.appointment_id = %s
+          AND a.spa_id = %s
+          AND a.business_unit_id = %s
+        LIMIT 1
+    """, (
+        appointment_id,
+        spa_id,
+        business_unit_id
+    ))
+
+    appointment = cur.fetchone()
+
+    if not appointment:
+        cur.close()
+        conn.close()
+
+        flash(
+            "Appointment not found.",
+            "error"
+        )
+
+        return redirect(
+            url_for("appointments")
+        )
+
+    (
+        _appointment_id,
+        booked_by_client_id,
+        appointment_for,
+        booking_for_other,
+        service_recipient_client_id,
+        appointment_date,
+        appointment_time,
+        booked_by_first_name,
+        booked_by_last_name
+    ) = appointment
+
+    if not selected_date and appointment_date:
+        selected_date = (
+            appointment_date.isoformat()
+        )
+
+    booked_by_name = (
+        f"{booked_by_first_name or ''} "
+        f"{booked_by_last_name or ''}"
+    ).strip()
+
+    appointment_for = (
+        appointment_for
+        or booked_by_name
+        or "Service Recipient"
+    ).strip()
+
+    # A normal appointment already belongs to the
+    # booking client. No recipient-resolution screen
+    # is necessary.
+    if not booking_for_other:
+        cur.close()
+        conn.close()
+
+        return redirect(
+            url_for(
+                "add_income",
+                appointment_id=appointment_id,
+                date=selected_date
+            )
+        )
+
+    # If another request already resolved this guest,
+    # continue directly to closeout.
+    if service_recipient_client_id:
+        cur.close()
+        conn.close()
+
+        return redirect(
+            url_for(
+                "add_income",
+                appointment_id=appointment_id,
+                date=selected_date
+            )
+        )
+
+    if request.method == "POST":
+        action = (
+            request.form.get("action")
+            or ""
+        ).strip().lower()
+
+        if action == "link":
+            requested_client_id = (
+                request.form.get("client_id")
+                or ""
+            ).strip()
+
+            try:
+                requested_client_id = int(
+                    requested_client_id
+                )
+            except (TypeError, ValueError):
+                requested_client_id = None
+
+            if not requested_client_id:
+                flash(
+                    "Select a client to link as the "
+                    "service recipient.",
+                    "error"
+                )
+            else:
+                cur.execute("""
+                    SELECT
+                        client_id,
+                        first_name,
+                        last_name
+                    FROM clients
+                    WHERE client_id = %s
+                      AND spa_id = %s
+                      AND business_unit_id = %s
+                    LIMIT 1
+                """, (
+                    requested_client_id,
+                    spa_id,
+                    business_unit_id
+                ))
+
+                selected_client = (
+                    cur.fetchone()
+                )
+
+                if not selected_client:
+                    flash(
+                        "The selected client is not "
+                        "available in this Provider "
+                        "Workspace.",
+                        "error"
+                    )
+                else:
+                    cur.execute("""
+                        UPDATE appointments
+                        SET service_recipient_client_id
+                                = %s
+                        WHERE appointment_id = %s
+                          AND spa_id = %s
+                          AND business_unit_id = %s
+                          AND COALESCE(
+                                booking_for_other,
+                                FALSE
+                              ) = TRUE
+                          AND service_recipient_client_id
+                                IS NULL
+                    """, (
+                        requested_client_id,
+                        appointment_id,
+                        spa_id,
+                        business_unit_id
+                    ))
+
+                    if cur.rowcount == 1:
+                        conn.commit()
+
+                        linked_name = (
+                            f"{selected_client[1] or ''} "
+                            f"{selected_client[2] or ''}"
+                        ).strip()
+
+                        session.pop(
+                            "service_recipient_resolution",
+                            None
+                        )
+
+                        cur.close()
+                        conn.close()
+
+                        flash(
+                            f"{linked_name} is now linked "
+                            "as the service recipient.",
+                            "success"
+                        )
+
+                        return redirect(
+                            url_for(
+                                "add_income",
+                                appointment_id=
+                                    appointment_id,
+                                date=selected_date
+                            )
+                        )
+
+                    conn.rollback()
+
+                    flash(
+                        "The service recipient could not "
+                        "be linked. Please refresh and "
+                        "try again.",
+                        "error"
+                    )
+
+        elif action == "create":
+            guest_parts = (
+                appointment_for.split(
+                    None,
+                    1
+                )
+            )
+
+            guest_first_name = (
+                guest_parts[0]
+                if guest_parts
+                else ""
+            )
+
+            guest_last_name = (
+                guest_parts[1]
+                if len(guest_parts) > 1
+                else ""
+            )
+
+            session[
+                "service_recipient_resolution"
+            ] = {
+                "appointment_id":
+                    appointment_id,
+                "spa_id":
+                    spa_id,
+                "business_unit_id":
+                    business_unit_id,
+                "date":
+                    selected_date,
+                "booked_by_client_id":
+                    booked_by_client_id,
+                "appointment_for":
+                    appointment_for
+            }
+
+            # Reuse the existing Add New Client flow.
+            # Only information actually known from the
+            # appointment is prefilled.
+            session["new_client_step1"] = {
+                "first_name":
+                    guest_first_name,
+                "last_name":
+                    guest_last_name,
+                "phone": "",
+                "email": "",
+                "birth_date": "",
+                "address": "",
+                "city": "",
+                "state": "TX",
+                "zip": "",
+                "spa_location_id": "",
+                "preferred_location_id": "",
+                "client_status": "Current",
+                "preferred_language": "",
+                "ok_to_call": True,
+                "ok_to_text": False,
+                "ok_to_email": False,
+                "preferred_contact_method": ""
+            }
+
+            session.pop(
+                "new_client_step2",
+                None
+            )
+            session.pop(
+                "new_client_duplicate_override",
+                None
+            )
+
+            cur.close()
+            conn.close()
+
+            return redirect(
+                url_for(
+                    "add_new_client",
+                    recipient_appointment_id=
+                        appointment_id
+                )
+            )
+
+        else:
+            flash(
+                "Choose Link Existing Client or "
+                "Create New Client.",
+                "error"
+            )
+
+    search_term = (
+        request.args.get("q")
+        or appointment_for
+        or ""
+    ).strip()
+
+    possible_clients = []
+
+    if search_term:
+        search_pattern = (
+            f"%{search_term}%"
+        )
+
+        cur.execute("""
+            SELECT
+                client_id,
+                first_name,
+                last_name,
+                phone,
+                email,
+                active_client,
+                client_status
+            FROM clients
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND (
+                    (
+                        COALESCE(first_name, '')
+                        || ' '
+                        || COALESCE(last_name, '')
+                    ) ILIKE %s
+                    OR COALESCE(email, '')
+                        ILIKE %s
+                    OR COALESCE(phone, '')
+                        ILIKE %s
+              )
+            ORDER BY
+                active_client DESC,
+                last_name,
+                first_name,
+                client_id
+            LIMIT 30
+        """, (
+            spa_id,
+            business_unit_id,
+            search_pattern,
+            search_pattern,
+            search_pattern
+        ))
+
+        possible_clients = (
+            cur.fetchall()
+        )
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "resolve_service_recipient.html",
+        appointment_id=appointment_id,
+        appointment_for=appointment_for,
+        booked_by_name=booked_by_name,
+        appointment_date=appointment_date,
+        appointment_time=appointment_time,
+        selected_date=selected_date,
+        search_term=search_term,
+        possible_clients=possible_clients
+    )
+
+
 @app.route("/add_income/<int:appointment_id>", methods=["GET", "POST"])
 @login_required
 @spa_required
@@ -43961,37 +44514,146 @@ def add_income(appointment_id):
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Get appointment and client info
+    # -------------------------------------------------
+    # Resolve the authoritative SERVICE client.
+    #
+    # appointments.client_id remains the booking/contact
+    # client. For "Booked for Someone Else", closeout must
+    # use service_recipient_client_id instead.
+    # -------------------------------------------------
+
     cur.execute("""
         SELECT
             a.appointment_id,
             a.client_id,
             a.appointment_date,
             a.appointment_time,
-            c.first_name,
-            c.last_name
+            COALESCE(
+                a.booking_for_other,
+                FALSE
+            ) AS booking_for_other,
+            a.service_recipient_client_id,
+            a.appointment_for
         FROM appointments a
-        JOIN clients c
-            ON a.client_id = c.client_id
-           AND c.spa_id = a.spa_id
-           AND c.business_unit_id = a.business_unit_id
         WHERE a.appointment_id = %s
           AND a.spa_id = %s
           AND a.business_unit_id = %s
+        LIMIT 1
     """, (
         appointment_id,
         spa_id,
         business_unit_id
     ))
-    appt = cur.fetchone()
 
-    if not appt:
+    appointment_identity = cur.fetchone()
+
+    if not appointment_identity:
         cur.close()
         conn.close()
         flash("Appointment not found.", "error")
         if selected_date:
-            return redirect(url_for("daily_schedule", date=selected_date))
-        return redirect(url_for("appointments"))
+            return redirect(
+                url_for(
+                    "daily_schedule",
+                    date=selected_date
+                )
+            )
+        return redirect(
+            url_for("appointments")
+        )
+
+    (
+        resolved_appointment_id,
+        booked_by_client_id,
+        resolved_appointment_date,
+        resolved_appointment_time,
+        booking_for_other,
+        service_recipient_client_id,
+        appointment_for
+    ) = appointment_identity
+
+    if (
+        booking_for_other
+        and not service_recipient_client_id
+    ):
+        cur.close()
+        conn.close()
+
+        flash(
+            "This appointment was booked for "
+            f"{appointment_for or 'someone else'}. "
+            "Link or create the service recipient "
+            "client before finishing the session.",
+            "warning"
+        )
+
+        return redirect(
+            url_for(
+                "resolve_service_recipient",
+                appointment_id=appointment_id,
+                date=(
+                    selected_date
+                    or (
+                        resolved_appointment_date
+                        .isoformat()
+                        if resolved_appointment_date
+                        else ""
+                    )
+                )
+            )
+        )
+
+    service_client_id = (
+        service_recipient_client_id
+        or booked_by_client_id
+    )
+
+    cur.execute("""
+        SELECT
+            first_name,
+            last_name
+        FROM clients
+        WHERE client_id = %s
+          AND spa_id = %s
+          AND business_unit_id = %s
+        LIMIT 1
+    """, (
+        service_client_id,
+        spa_id,
+        business_unit_id
+    ))
+
+    service_client = cur.fetchone()
+
+    if not service_client:
+        cur.close()
+        conn.close()
+
+        flash(
+            "The service recipient client could not "
+            "be found in this Provider Workspace.",
+            "error"
+        )
+
+        return redirect(
+            url_for(
+                "resolve_service_recipient",
+                appointment_id=appointment_id,
+                date=selected_date
+            )
+        )
+
+    # Preserve the existing appt tuple contract so all
+    # established Add Income logic now receives the
+    # SERVICE client without rewriting the financial flow.
+    appt = (
+        resolved_appointment_id,
+        service_client_id,
+        resolved_appointment_date,
+        resolved_appointment_time,
+        service_client[0],
+        service_client[1]
+    )
 
     cur.execute("""
         SELECT employee_id,
@@ -44083,6 +44745,40 @@ def add_income(appointment_id):
         selected_square_payment_id = (
             request.form.get("square_payment_id") or ""
         ).strip()
+
+        square_different_payer_confirmed = (
+            request.form.get(
+                "square_different_payer_confirmed"
+            ) == "1"
+        )
+
+        square_confirmed_payer_customer_id = (
+            request.form.get(
+                "square_confirmed_payer_customer_id"
+            )
+            or ""
+        ).strip()
+
+        # Square Income must always be backed by an actual
+        # reviewed Square transaction. The disabled Save
+        # button provides the normal UX guard; this server-side
+        # check prevents a direct/altered POST from bypassing it.
+        if (
+            payment_method.lower() == "square"
+            and not selected_square_payment_id
+        ):
+            flash(
+                "Retrieve and populate the Square payment "
+                "before saving Income.",
+                "error"
+            )
+            cur.close()
+            conn.close()
+            return redirect(url_for(
+                "add_income",
+                appointment_id=appointment_id,
+                date=selected_date
+            ))
 
         square_line_classifications_raw = (
             request.form.get("square_line_classifications")
@@ -44296,6 +44992,14 @@ def add_income(appointment_id):
 
             square_mapped_customer_id = None
 
+            square_match_method = (
+                "appointment_review"
+            )
+
+            square_match_notes = (
+                "Reviewed and populated from Add Income."
+            )
+
             cur.execute("""
                 SELECT square_customer_id
                 FROM square_customer_mappings
@@ -44463,26 +45167,115 @@ def add_income(appointment_id):
                 square_payment.get("customer_id") or ""
             ).strip()
 
-            if (
-                square_mapped_customer_id
-                and square_payment_customer_id
-                and square_payment_customer_id
-                    != square_mapped_customer_id
-            ):
-                flash(
-                    "The selected Square payment belongs "
-                    "to a different Square customer than "
-                    "this appointment client. Nothing was "
-                    "saved.",
-                    "error"
+            cur.execute("""
+                SELECT
+                    scm.client_id,
+                    c.first_name,
+                    c.last_name
+                FROM square_customer_mappings scm
+                JOIN clients c
+                  ON c.client_id = scm.client_id
+                 AND c.spa_id = scm.spa_id
+                 AND c.business_unit_id =
+                        scm.business_unit_id
+                WHERE scm.square_connection_id = %s
+                  AND scm.spa_id = %s
+                  AND scm.business_unit_id = %s
+                  AND scm.environment = %s
+                  AND scm.square_customer_id = %s
+                  AND scm.is_active = TRUE
+                ORDER BY
+                    scm.verified_at DESC NULLS LAST,
+                    scm.square_customer_mapping_id DESC
+                LIMIT 1
+            """, (
+                square_connection_id,
+                spa_id,
+                business_unit_id,
+                square_environment,
+                square_payment_customer_id
+            ))
+
+            payer_row = cur.fetchone()
+
+            payer_client_id = (
+                payer_row[0]
+                if payer_row
+                else None
+            )
+
+            possible_payer_name = (
+                (
+                    f"{payer_row[1] or ''} "
+                    f"{payer_row[2] or ''}"
+                ).strip()
+                if payer_row
+                else ""
+            )
+
+            if payer_client_id is not None:
+                # A known PSP identity is stronger evidence
+                # than one particular Square customer ID.
+                different_square_customer = (
+                    payer_client_id != appt[1]
                 )
-                cur.close()
-                conn.close()
-                return redirect(url_for(
-                    "add_income",
-                    appointment_id=appointment_id,
-                    date=selected_date
-                ))
+            else:
+                different_square_customer = bool(
+                    square_mapped_customer_id
+                    and square_payment_customer_id
+                    and square_payment_customer_id
+                        != square_mapped_customer_id
+                )
+
+            if different_square_customer:
+                confirmation_matches_payment = bool(
+                    square_different_payer_confirmed
+                    and
+                    square_confirmed_payer_customer_id
+                        == square_payment_customer_id
+                )
+
+                if not confirmation_matches_payment:
+                    service_name = (
+                        f"{appt[4] or ''} "
+                        f"{appt[5] or ''}"
+                    ).strip()
+
+                    payer_description = (
+                        possible_payer_name
+                        or "a different Square customer"
+                    )
+
+                    flash(
+                        "This Square payment is associated "
+                        f"with {payer_description}, while "
+                        f"the service recipient is "
+                        f"{service_name}. Review and confirm "
+                        "the different payer before saving.",
+                        "warning"
+                    )
+
+                    cur.close()
+                    conn.close()
+
+                    return redirect(url_for(
+                        "add_income",
+                        appointment_id=appointment_id,
+                        date=selected_date,
+                        square_payment_id=(
+                            selected_square_payment_id
+                        )
+                    ))
+
+                square_match_method = (
+                    "appointment_review_different_payer"
+                )
+
+                square_match_notes = (
+                    "Different Square customer confirmed "
+                    "for this service recipient. Reviewed "
+                    "and populated from Add Income."
+                )
 
             payment_location_id = str(
                 square_payment.get("location_id") or ""
@@ -44875,11 +45668,8 @@ def add_income(appointment_id):
                 square_payment.get("updated_at"),
                 appt[0],
                 appt[1],
-                "appointment_review",
-                (
-                    "Reviewed and populated from "
-                    "Add Income."
-                ),
+                square_match_method,
+                square_match_notes,
                 session.get("user_id"),
                 Json(square_payment),
                 Json(square_order)
@@ -45037,11 +45827,8 @@ def add_income(appointment_id):
                     square_payment.get("updated_at"),
                     appt[0],
                     appt[1],
-                    "appointment_review",
-                    (
-                        "Reviewed and populated from "
-                        "Add Income."
-                    ),
+                    square_match_method,
+                    square_match_notes,
                     session.get("user_id"),
                     Json(square_payment),
                     Json(square_order),
@@ -45669,6 +46456,106 @@ def add_income(appointment_id):
 
 
 
+
+def _square_income_appointment_context(
+    cur,
+    appointment_id,
+    spa_id,
+    business_unit_id
+):
+    """
+    Resolve the service recipient used by Square closeout.
+
+    appointments.client_id remains Booked By/contact.
+    service_recipient_client_id is authoritative when an
+    appointment was booked for someone else.
+    """
+
+    cur.execute("""
+        SELECT
+            a.appointment_id,
+            a.client_id,
+            COALESCE(
+                a.service_recipient_client_id,
+                a.client_id
+            ),
+            a.appointment_date,
+            a.appointment_time,
+            COALESCE(
+                a.booking_for_other,
+                FALSE
+            ),
+            a.service_recipient_client_id,
+            a.appointment_for,
+            c.first_name,
+            c.last_name
+        FROM appointments a
+        LEFT JOIN clients c
+          ON c.client_id = COALESCE(
+                a.service_recipient_client_id,
+                a.client_id
+             )
+         AND c.spa_id = a.spa_id
+         AND c.business_unit_id =
+                a.business_unit_id
+        WHERE a.appointment_id = %s
+          AND a.spa_id = %s
+          AND a.business_unit_id = %s
+        LIMIT 1
+    """, (
+        appointment_id,
+        spa_id,
+        business_unit_id
+    ))
+
+    row = cur.fetchone()
+
+    if not row:
+        return None
+
+    (
+        resolved_appointment_id,
+        booked_by_client_id,
+        service_client_id,
+        appointment_date,
+        appointment_time,
+        booking_for_other,
+        service_recipient_client_id,
+        appointment_for,
+        first_name,
+        last_name
+    ) = row
+
+    service_client_name = (
+        f"{first_name or ''} {last_name or ''}"
+    ).strip()
+
+    return {
+        "appointment_id":
+            resolved_appointment_id,
+        "booked_by_client_id":
+            booked_by_client_id,
+        "service_client_id":
+            service_client_id,
+        "appointment_date":
+            appointment_date,
+        "appointment_time":
+            appointment_time,
+        "booking_for_other":
+            bool(booking_for_other),
+        "service_recipient_client_id":
+            service_recipient_client_id,
+        "appointment_for":
+            appointment_for or service_client_name,
+        "service_client_name":
+            service_client_name,
+        "recipient_unresolved": bool(
+            booking_for_other
+            and not service_recipient_client_id
+        )
+    }
+
+
 #  --------------------------------------------------
 #
 #     SQUARE V2 — RECENT PAYMENTS FOR ADD INCOME
@@ -45703,43 +46590,52 @@ def square_recent_payments_for_income(appointment_id):
 
     square_mapping = None
     mapped_square_customer_id = None
+    square_customer_clients = {}
     reconciled_payment_ids = set()
 
     try:
         # ---------------------------------------------
-        # Appointment context is authoritative.
+        # Service recipient is authoritative for closeout.
         # ---------------------------------------------
-        cur.execute("""
-            SELECT
+        appointment_context = (
+            _square_income_appointment_context(
+                cur,
                 appointment_id,
-                client_id,
-                appointment_date,
-                appointment_time
-            FROM appointments
-            WHERE appointment_id = %s
-              AND spa_id = %s
-              AND business_unit_id = %s
-            LIMIT 1
-        """, (
-            appointment_id,
-            spa_id,
-            business_unit_id
-        ))
+                spa_id,
+                business_unit_id
+            )
+        )
 
-        appointment = cur.fetchone()
-
-        if not appointment:
+        if not appointment_context:
             return jsonify({
                 "ok": False,
                 "error": "Appointment not found."
             }), 404
 
-        (
-            resolved_appointment_id,
-            appointment_client_id,
-            appointment_date,
-            appointment_time,
-        ) = appointment
+        if appointment_context["recipient_unresolved"]:
+            return jsonify({
+                "ok": False,
+                "error": (
+                    "The service recipient must be linked "
+                    "before Square payments can be retrieved."
+                )
+            }), 409
+
+        resolved_appointment_id = (
+            appointment_context["appointment_id"]
+        )
+        appointment_client_id = (
+            appointment_context["service_client_id"]
+        )
+        appointment_date = (
+            appointment_context["appointment_date"]
+        )
+        appointment_time = (
+            appointment_context["appointment_time"]
+        )
+        service_client_name = (
+            appointment_context["service_client_name"]
+        )
 
         square_environment = (
             _square_income_read_environment()
@@ -45824,6 +46720,54 @@ def square_recent_payments_for_income(appointment_id):
                 mapped_square_customer_id = str(
                     customer_mapping[0] or ""
                 ).strip() or None
+
+            # Human-readable PSP identity for any
+            # mapped Square customer.
+            cur.execute("""
+                SELECT
+                    scm.square_customer_id,
+                    scm.client_id,
+                    c.first_name,
+                    c.last_name
+                FROM square_customer_mappings scm
+                JOIN clients c
+                  ON c.client_id = scm.client_id
+                 AND c.spa_id = scm.spa_id
+                 AND c.business_unit_id =
+                        scm.business_unit_id
+                WHERE scm.square_connection_id = %s
+                  AND scm.spa_id = %s
+                  AND scm.business_unit_id = %s
+                  AND scm.environment = %s
+                  AND scm.is_active = TRUE
+                ORDER BY
+                    scm.verified_at DESC NULLS LAST,
+                    scm.square_customer_mapping_id DESC
+            """, (
+                square_connection_id,
+                spa_id,
+                business_unit_id,
+                square_environment
+            ))
+
+            for (
+                known_square_customer_id,
+                known_client_id,
+                known_first_name,
+                known_last_name
+            ) in cur.fetchall():
+                key = str(
+                    known_square_customer_id or ""
+                ).strip()
+
+                if key and key not in square_customer_clients:
+                    square_customer_clients[key] = {
+                        "client_id": known_client_id,
+                        "name": (
+                            f"{known_first_name or ''} "
+                            f"{known_last_name or ''}"
+                        ).strip()
+                    }
 
             # -----------------------------------------
             # Do not offer a payment that has already
@@ -45974,18 +46918,44 @@ def square_recent_payments_for_income(appointment_id):
         ).strip()
 
         client_match = False
+        different_square_customer = False
+        possible_payer_name = None
 
-        if mapped_square_customer_id:
-            if square_customer_id:
-                if (
-                    square_customer_id
-                    != mapped_square_customer_id
-                ):
-                    # Known payment for another mapped
-                    # Square customer: do not offer it.
-                    continue
+        payer_mapping = (
+            square_customer_clients.get(
+                square_customer_id
+            )
+            if square_customer_id
+            else None
+        )
 
+        if payer_mapping:
+            if (
+                payer_mapping.get("client_id")
+                == appointment_client_id
+            ):
+                # This Square customer profile belongs to the
+                # actual PSP service recipient, even if the
+                # recipient has another preferred Square ID.
                 client_match = True
+            else:
+                possible_payer_name = (
+                    payer_mapping.get("name")
+                    or None
+                )
+                different_square_customer = True
+
+        elif (
+            mapped_square_customer_id
+            and square_customer_id
+        ):
+            if (
+                square_customer_id
+                == mapped_square_customer_id
+            ):
+                client_match = True
+            else:
+                different_square_customer = True
 
         amount_cents = money_cents(
             payment.get("amount_money")
@@ -46042,6 +47012,15 @@ def square_recent_payments_for_income(appointment_id):
                 processing_fee_cents
             ),
             "client_match": client_match,
+            "different_square_customer": (
+                different_square_customer
+            ),
+            "possible_payer_name": (
+                possible_payer_name
+            ),
+            "service_client_name": (
+                service_client_name
+            ),
             "minutes_from_appointment": int(
                 round(
                     seconds_from_appointment
@@ -46143,37 +47122,45 @@ def square_payment_preview_for_income(appointment_id):
     cur = conn.cursor()
 
     try:
-        # Appointment context is authoritative and must
-        # belong to this exact PSP workspace.
-        cur.execute("""
-            SELECT
+        appointment_context = (
+            _square_income_appointment_context(
+                cur,
                 appointment_id,
-                client_id,
-                appointment_date
-            FROM appointments
-            WHERE appointment_id = %s
-              AND spa_id = %s
-              AND business_unit_id = %s
-            LIMIT 1
-        """, (
-            appointment_id,
-            spa_id,
-            business_unit_id
-        ))
+                spa_id,
+                business_unit_id
+            )
+        )
 
-        preview_appointment = cur.fetchone()
-
-        if not preview_appointment:
+        if not appointment_context:
             return jsonify({
                 "ok": False,
                 "error": "Appointment not found."
             }), 404
 
-        (
-            resolved_appointment_id,
-            appointment_client_id,
-            appointment_date,
-        ) = preview_appointment
+        if appointment_context["recipient_unresolved"]:
+            return jsonify({
+                "ok": False,
+                "error": (
+                    "The service recipient must be linked "
+                    "before this Square payment can be reviewed."
+                )
+            }), 409
+
+        resolved_appointment_id = (
+            appointment_context["appointment_id"]
+        )
+        appointment_client_id = (
+            appointment_context["service_client_id"]
+        )
+        appointment_date = (
+            appointment_context["appointment_date"]
+        )
+        appointment_time = (
+            appointment_context["appointment_time"]
+        )
+        service_client_name = (
+            appointment_context["service_client_name"]
+        )
 
         # Resolve Square connection/location only from
         # server-side workspace configuration.
@@ -46263,6 +47250,54 @@ def square_payment_preview_for_income(appointment_id):
             mapped_square_customer_id = str(
                 customer_mapping[0] or ""
             ).strip() or None
+
+        square_customer_clients = {}
+
+        cur.execute("""
+            SELECT
+                scm.square_customer_id,
+                scm.client_id,
+                c.first_name,
+                c.last_name
+            FROM square_customer_mappings scm
+            JOIN clients c
+              ON c.client_id = scm.client_id
+             AND c.spa_id = scm.spa_id
+             AND c.business_unit_id =
+                    scm.business_unit_id
+            WHERE scm.square_connection_id = %s
+              AND scm.spa_id = %s
+              AND scm.business_unit_id = %s
+              AND scm.environment = %s
+              AND scm.is_active = TRUE
+            ORDER BY
+                scm.verified_at DESC NULLS LAST,
+                scm.square_customer_mapping_id DESC
+        """, (
+            square_connection_id,
+            spa_id,
+            business_unit_id,
+            square_environment
+        ))
+
+        for (
+            known_square_customer_id,
+            known_client_id,
+            known_first_name,
+            known_last_name
+        ) in cur.fetchall():
+            key = str(
+                known_square_customer_id or ""
+            ).strip()
+
+            if key and key not in square_customer_clients:
+                square_customer_clients[key] = {
+                    "client_id": known_client_id,
+                    "name": (
+                        f"{known_first_name or ''} "
+                        f"{known_last_name or ''}"
+                    ).strip()
+                }
 
         # Load only active mappings for this exact
         # Square connection + PSP workspace.
@@ -46357,20 +47392,35 @@ def square_payment_preview_for_income(appointment_id):
         payment.get("customer_id") or ""
     ).strip()
 
-    if (
-        mapped_square_customer_id
-        and payment_customer_id
-        and payment_customer_id
-            != mapped_square_customer_id
-    ):
-        return jsonify({
-            "ok": False,
-            "error": (
-                "This Square payment belongs to a "
-                "different Square customer than the "
-                "appointment client."
+    payer_mapping = (
+        square_customer_clients.get(
+            payment_customer_id
+        )
+        if payment_customer_id
+        else None
+    )
+
+    possible_payer_name = None
+
+    if payer_mapping:
+        different_square_customer = (
+            payer_mapping.get("client_id")
+            != appointment_client_id
+        )
+
+        if different_square_customer:
+            possible_payer_name = (
+                payer_mapping.get("name")
+                or None
             )
-        }), 409
+
+    else:
+        different_square_customer = bool(
+            mapped_square_customer_id
+            and payment_customer_id
+            and payment_customer_id
+                != mapped_square_customer_id
+        )
 
     payment_location_id = str(
         payment.get("location_id") or ""
@@ -46551,7 +47601,28 @@ def square_payment_preview_for_income(appointment_id):
         "environment": square_environment,
         "location_id": square_location_id,
         "location_name": location_name,
+        "appointment": {
+            "name": service_client_name,
+            "date": (
+                appointment_date.isoformat()
+                if appointment_date
+                else ""
+            ),
+            "time": (
+                appointment_time.strftime(
+                    "%I:%M %p"
+                ).lstrip("0")
+                if appointment_time
+                else ""
+            )
+        },
         "payment": {
+            "different_square_customer": (
+                different_square_customer
+            ),
+            "possible_payer_name": (
+                possible_payer_name
+            ),
             "payment_id": preview["payment_id"],
             "order_id": preview["order_id"],
             "customer_id": preview["customer_id"],
@@ -54964,6 +56035,102 @@ def post_appointment_wrap_up(appointment_id):
         business_unit_id
     ]
 
+    # -----------------------------------------------------
+    # Session Notes belong to the SERVICE RECIPIENT.
+    # Do not silently use Booked By for an unresolved guest.
+    # -----------------------------------------------------
+    cur.execute(f"""
+        SELECT
+            COALESCE(a.booking_for_other, FALSE),
+            a.service_recipient_client_id,
+            a.appointment_for,
+            a.appointment_date,
+            a.appointment_time
+        FROM appointments a
+        {appt_filter}
+        LIMIT 1
+    """, appt_params)
+
+    recipient_identity = cur.fetchone()
+
+    if not recipient_identity:
+        cur.close()
+        conn.close()
+
+        flash(
+            "Appointment not found or not authorized.",
+            "error"
+        )
+
+        if selected_date:
+            return redirect(
+                url_for(
+                    "daily_schedule",
+                    date=selected_date
+                )
+            )
+
+        return redirect(url_for("appointments"))
+
+    (
+        booking_for_other,
+        service_recipient_client_id,
+        appointment_for,
+        identity_date,
+        identity_time
+    ) = recipient_identity
+
+    if (
+        booking_for_other
+        and not service_recipient_client_id
+    ):
+        display_name = (
+            appointment_for
+            or "the service recipient"
+        )
+
+        display_date = (
+            identity_date.strftime(
+                "%B %d, %Y"
+            ).replace(" 0", " ")
+            if identity_date
+            else ""
+        )
+
+        display_time = (
+            identity_time.strftime(
+                "%I:%M %p"
+            ).lstrip("0")
+            if identity_time
+            else ""
+        )
+
+        cur.close()
+        conn.close()
+
+        flash(
+            f"{display_name} — {display_date} "
+            f"at {display_time}: link or create the "
+            "service recipient before completing "
+            "Session Notes.",
+            "warning"
+        )
+
+        return redirect(
+            url_for(
+                "resolve_service_recipient",
+                appointment_id=appointment_id,
+                date=(
+                    selected_date
+                    or (
+                        identity_date.isoformat()
+                        if identity_date
+                        else ""
+                    )
+                )
+            )
+        )
+
     if request.method == "POST":
         treatment_notes = request.form.get("treatment_notes", "")
         products_used = request.form.get("products_used", "")
@@ -54971,8 +56138,26 @@ def post_appointment_wrap_up(appointment_id):
         provider_notes = request.form.get("provider_notes", "")
 
         cur.execute(f"""
-            SELECT a.spa_id, a.client_id, a.appointment_date, appointment_time, a.status
+            SELECT
+                a.spa_id,
+                COALESCE(
+                    a.service_recipient_client_id,
+                    a.client_id
+                ) AS service_client_id,
+                a.appointment_date,
+                a.appointment_time,
+                a.status,
+                c.first_name,
+                c.last_name
             FROM appointments a
+            JOIN clients c
+              ON c.client_id = COALESCE(
+                    a.service_recipient_client_id,
+                    a.client_id
+                 )
+             AND c.spa_id = a.spa_id
+             AND c.business_unit_id =
+                    a.business_unit_id
             {appt_filter}
         """, appt_params)
 
@@ -54986,7 +56171,20 @@ def post_appointment_wrap_up(appointment_id):
                 return redirect(url_for("daily_schedule", date=selected_date))
             return redirect(url_for("appointments"))
 
-        appointment_spa_id, referred_client_id, completed_date, appointment_time, old_status  = valid_appointment
+        (
+            appointment_spa_id,
+            referred_client_id,
+            completed_date,
+            appointment_time,
+            old_status,
+            service_first_name,
+            service_last_name
+        ) = valid_appointment
+
+        service_client_name = (
+            f"{service_first_name or ''} "
+            f"{service_last_name or ''}"
+        ).strip()
 
         cur.execute("""
             INSERT INTO appointment_wrap_up (
@@ -55130,7 +56328,11 @@ def post_appointment_wrap_up(appointment_id):
                         completed_date,
                         "Earned",
                         reward_amount,
-                        f"Referral credit earned when referred client {referred_client_id} completed first appointment."
+                        (
+                            "Referral credit earned when "
+                            f"{service_client_name or 'the referred client'} "
+                            "completed first appointment."
+                        )
                     ))
 
         conn.commit()
@@ -55151,9 +56353,13 @@ def post_appointment_wrap_up(appointment_id):
             a.spa_id
         FROM appointments a
         JOIN clients c
-            ON a.client_id = c.client_id
-           AND a.spa_id = c.spa_id
-           AND a.business_unit_id = c.business_unit_id
+            ON c.client_id = COALESCE(
+                a.service_recipient_client_id,
+                a.client_id
+            )
+           AND c.spa_id = a.spa_id
+           AND c.business_unit_id =
+                a.business_unit_id
         {appt_filter}
     """, appt_params)
 
@@ -56097,6 +57303,41 @@ def add_new_client():
 
     selected_date = request.args.get("selected_date") or request.form.get("selected_date") or ""
 
+    recipient_appointment_id = (
+        request.args.get(
+            "recipient_appointment_id"
+        )
+        or request.form.get(
+            "recipient_appointment_id"
+        )
+        or ""
+    ).strip()
+
+    # A normal Add New Client entry means any abandoned
+    # service-recipient flow is stale and must not survive.
+    if (
+        request.method == "GET"
+        and not recipient_appointment_id
+    ):
+        abandoned_recipient_context = session.pop(
+            "service_recipient_resolution",
+            None
+        )
+
+        if abandoned_recipient_context is not None:
+            session.pop(
+                "new_client_step1",
+                None
+            )
+            session.pop(
+                "new_client_step2",
+                None
+            )
+            session.pop(
+                "new_client_duplicate_override",
+                None
+            )
+
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -56194,7 +57435,11 @@ def add_new_client():
             return redirect(
                 url_for(
                     "add_new_client",
-                    selected_date=selected_date
+                    selected_date=selected_date,
+                    recipient_appointment_id=(
+                        recipient_appointment_id
+                        or None
+                    )
                 )
             )
 
@@ -56302,7 +57547,11 @@ def add_new_client():
             return redirect(
                 url_for(
                     "add_new_client_step2",
-                    selected_date=selected_date
+                    selected_date=selected_date,
+                    recipient_appointment_id=(
+                        recipient_appointment_id
+                        or None
+                    )
                 )
             )
 
@@ -56399,6 +57648,20 @@ def add_new_client():
                 None
             )
 
+            recipient_return_url = (
+                _complete_service_recipient_resolution_after_client_create(
+                    spa_id,
+                    business_unit_id,
+                    new_client_id,
+                    recipient_appointment_id
+                )
+            )
+
+            if recipient_return_url:
+                return redirect(
+                    recipient_return_url
+                )
+
             if selected_date:
                 return redirect(url_for(
                     "add_appointment",
@@ -56465,9 +57728,27 @@ def add_new_client_step2():
 
     selected_date = request.args.get("selected_date") or request.form.get("selected_date") or ""
 
+    recipient_appointment_id = (
+        request.args.get(
+            "recipient_appointment_id"
+        )
+        or request.form.get(
+            "recipient_appointment_id"
+        )
+        or ""
+    ).strip()
+
     step1 = session.get("new_client_step1")
     if not step1:
-        return redirect(url_for("add_new_client"))
+        return redirect(
+            url_for(
+                "add_new_client",
+                recipient_appointment_id=(
+                    recipient_appointment_id
+                    or None
+                )
+            )
+        )
 
     if request.method == "POST":
         session["new_client_step2"] = {
@@ -56497,7 +57778,16 @@ def add_new_client_step2():
         )
 
         if action == "back":
-            return redirect(url_for("add_new_client", selected_date=selected_date))
+            return redirect(
+                url_for(
+                    "add_new_client",
+                    selected_date=selected_date,
+                    recipient_appointment_id=(
+                        recipient_appointment_id
+                        or None
+                    )
+                )
+            )
 
         if action == "save":
             step1 = session.get("new_client_step1", {})
@@ -56810,6 +58100,20 @@ def add_new_client_step2():
                 "new_client_duplicate_override",
                 None
             )
+
+            recipient_return_url = (
+                _complete_service_recipient_resolution_after_client_create(
+                    spa_id,
+                    business_unit_id,
+                    new_client_id,
+                    recipient_appointment_id
+                )
+            )
+
+            if recipient_return_url:
+                return redirect(
+                    recipient_return_url
+                )
 
             if selected_date:
                 return redirect(url_for(
@@ -60699,6 +62003,15 @@ def cancel_new_client():
     session.pop("new_client_step1", None)
     session.pop("new_client_step2", None)
     session.pop("new_client_duplicate_override", None)
+    session.pop(
+        "service_recipient_resolution",
+        None
+    )
+
+    if request.args.get("next") == "history":
+        return redirect(
+            url_for("client_history")
+        )
 
     return redirect(
         url_for("client_management")
@@ -60711,6 +62024,11 @@ def cancel_new_client():
 def clear_new_client():
     session.pop("new_client_step1", None)
     session.pop("new_client_step2", None)
+    session.pop("new_client_duplicate_override", None)
+    session.pop(
+        "service_recipient_resolution",
+        None
+    )
     return redirect(url_for("add_new_client"))
 
 

@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+    <title>Resolve Service Recipient</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f7f7f7;
+            margin: 0;
+            padding: 24px;
+            color: #222;
+        }
+
+        .page {
+            max-width: 850px;
+            margin: 0 auto;
+        }
+
+        .card {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            padding: 22px;
+            margin-bottom: 18px;
+        }
+
+        h1, h2 {
+            margin-top: 0;
+        }
+
+        .identity {
+            font-size: 1.05rem;
+            line-height: 1.7;
+        }
+
+        .notice {
+            background: #fff8dc;
+            border: 1px solid #e4cf7a;
+            border-radius: 8px;
+            padding: 14px;
+            margin-top: 16px;
+        }
+
+        .flash {
+            border-radius: 8px;
+            padding: 12px 14px;
+            margin-bottom: 14px;
+            border: 1px solid #ccc;
+            background: #f5f5f5;
+        }
+
+        .flash.success {
+            border-color: #86b798;
+            background: #edf8f1;
+        }
+
+        .flash.warning {
+            border-color: #e4cf7a;
+            background: #fff8dc;
+        }
+
+        .flash.error {
+            border-color: #dc9a9a;
+            background: #fff0f0;
+        }
+
+        .search-row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 18px;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            min-width: 220px;
+            padding: 10px;
+            border: 1px solid #bbb;
+            border-radius: 6px;
+        }
+
+        button,
+        .button {
+            display: inline-block;
+            border: none;
+            border-radius: 6px;
+            padding: 10px 16px;
+            cursor: pointer;
+            text-decoration: none;
+            font-size: 0.95rem;
+        }
+
+        .primary {
+            background: #198754;
+            color: white;
+        }
+
+        .secondary {
+            background: #0d6efd;
+            color: white;
+        }
+
+        .client-row {
+            border-top: 1px solid #eee;
+            padding: 14px 0;
+            display: flex;
+            justify-content: space-between;
+            gap: 14px;
+            align-items: center;
+        }
+
+        .client-row:first-of-type {
+            border-top: none;
+        }
+
+        .client-meta {
+            color: #666;
+            font-size: 0.9rem;
+            margin-top: 3px;
+        }
+
+        .inactive {
+            color: #9a6700;
+            font-weight: bold;
+        }
+
+        .actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+    </style>
+</head>
+
+<body>
+<div class="page">
+
+    {% with messages = get_flashed_messages(
+        with_categories=true
+    ) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="flash {{ category }}">
+                    {{ message }}
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <div class="card">
+        <h1>Resolve Service Recipient</h1>
+
+        <div class="identity">
+            <div>
+                <strong>Appointment For:</strong>
+                {{ appointment_for }}
+            </div>
+
+            <div>
+                <strong>Date:</strong>
+                {% if appointment_date %}
+                    {{ appointment_date.strftime(
+                        '%B %-d, %Y'
+                    ) }}
+                {% endif %}
+            </div>
+
+            <div>
+                <strong>Time:</strong>
+                {% if appointment_time %}
+                    {{ appointment_time.strftime(
+                        '%I:%M %p'
+                    ).lstrip('0') }}
+                {% endif %}
+            </div>
+
+            <div>
+                <strong>Booked By:</strong>
+                {{ booked_by_name }}
+            </div>
+        </div>
+
+        <div class="notice">
+            This appointment was booked for someone else.
+            Link the person receiving the service to a
+            Peach Suite Pro client before finishing the
+            session.
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Link Existing Client</h2>
+
+        <form method="get" class="search-row">
+            <input
+                type="hidden"
+                name="date"
+                value="{{ selected_date }}"
+            >
+
+            <input
+                type="text"
+                name="q"
+                value="{{ search_term }}"
+                placeholder="Search name, phone, or email"
+            >
+
+            <button
+                type="submit"
+                class="secondary"
+            >
+                Search Clients
+            </button>
+        </form>
+
+        {% if possible_clients %}
+            {% for client in possible_clients %}
+                <div class="client-row">
+                    <div>
+                        <strong>
+                            {{ client[1] }} {{ client[2] }}
+                        </strong>
+
+                        {% if not client[5] %}
+                            <span class="inactive">
+                                — Inactive
+                            </span>
+                        {% endif %}
+
+                        <div class="client-meta">
+                            {% if client[3] %}
+                                {{ client[3] }}
+                            {% endif %}
+
+                            {% if client[3] and client[4] %}
+                                •
+                            {% endif %}
+
+                            {% if client[4] %}
+                                {{ client[4] }}
+                            {% endif %}
+
+                            {% if client[6] %}
+                                • {{ client[6] }}
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <form method="post">
+                        <input
+                            type="hidden"
+                            name="date"
+                            value="{{ selected_date }}"
+                        >
+                        <input
+                            type="hidden"
+                            name="action"
+                            value="link"
+                        >
+                        <input
+                            type="hidden"
+                            name="client_id"
+                            value="{{ client[0] }}"
+                        >
+
+                        <button
+                            type="submit"
+                            class="primary"
+                        >
+                            Link This Client
+                        </button>
+                    </form>
+                </div>
+            {% endfor %}
+        {% else %}
+            <p>
+                No matching PSP clients were found for
+                “{{ search_term }}”.
+            </p>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <h2>Create New Client</h2>
+
+        <p>
+            If {{ appointment_for }} is not already a PSP
+            client, continue through the existing Add New
+            Client workflow. The guest name will be
+            prefilled and normal duplicate checking will
+            still run.
+        </p>
+
+        <div class="actions">
+            <form method="post">
+                <input
+                    type="hidden"
+                    name="date"
+                    value="{{ selected_date }}"
+                >
+                <input
+                    type="hidden"
+                    name="action"
+                    value="create"
+                >
+
+                <button
+                    type="submit"
+                    class="primary"
+                >
+                    Create New Client
+                </button>
+            </form>
+
+            <a
+                class="button secondary"
+                href="{{ url_for(
+                    'daily_schedule',
+                    date=selected_date
+                ) }}"
+            >
+                Cancel
+            </a>
+        </div>
+    </div>
+
+</div>
+</body>
+</html>

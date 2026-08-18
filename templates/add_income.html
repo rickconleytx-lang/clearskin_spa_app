@@ -6,9 +6,9 @@
 
 <h1>Add Income</h1>
 
-<p><strong>Client:</strong> {{ appt[4] }} {{ appt[5] }}</p>
-<p><strong>Appointment Date:</strong> {{ appt[2].strftime('%Y-%m-%d') }}</p>
-<p><strong>Appointment Time:</strong> {{ appt[3].strftime('%I:%M %p') }}</p>
+<p><strong>Name:</strong> {{ appt[4] }} {{ appt[5] }}</p>
+<p><strong>Date:</strong> {{ appt[2].strftime('%B %-d, %Y') }}</p>
+<p><strong>Time:</strong> {{ appt[3].strftime('%I:%M %p').lstrip('0') }}</p>
 
 <span style="color: red; font-size: x-small;">* Required Field</span>
 
@@ -24,6 +24,18 @@
         id="square_line_classifications"
         name="square_line_classifications"
         value="{}"
+    >
+    <input
+        type="hidden"
+        id="square_different_payer_confirmed"
+        name="square_different_payer_confirmed"
+        value=""
+    >
+    <input
+        type="hidden"
+        id="square_confirmed_payer_customer_id"
+        name="square_confirmed_payer_customer_id"
+        value=""
     >
 
     <label for="income_date">Income Date<span style="color: red;"> *</span></label>
@@ -105,6 +117,7 @@
             type="button"
             id="retrieve_square_data"
             class="btn"
+            style="background: green; color: white;"
         >
             Retrieve Square Data
         </button>
@@ -127,7 +140,12 @@
     <textarea id="notes" name="notes" rows="4"></textarea>
 
     <br><br>
-    <button type="submit" class="btn">
+    <button
+        type="submit"
+        id="save_income_button"
+        class="btn"
+        style="background: green; color: white;"
+    >
         Save Income &amp; Continue to Session Notes
     </button>
     <a href="{{ url_for('daily_schedule', date=appt[2].strftime('%Y-%m-%d')) }}" class="btn">Cancel</a>
@@ -137,6 +155,7 @@
 document.addEventListener("DOMContentLoaded", function () {
     const incomeTypeField = document.getElementById("income_type");
     const descriptionField = document.getElementById("description");
+    const notesField = document.getElementById("notes");
     const serviceField = document.getElementById("service_amount");
     const retailField = document.getElementById("retail_amount");
     const taxField = document.getElementById("tax_amount");
@@ -153,11 +172,171 @@ document.addEventListener("DOMContentLoaded", function () {
     const squarePaymentIdField = document.getElementById("square_payment_id");
     const squareLineClassificationsField =
         document.getElementById("square_line_classifications");
+    const squareDifferentPayerConfirmedField =
+        document.getElementById(
+            "square_different_payer_confirmed"
+        );
+    const squareConfirmedPayerCustomerIdField =
+        document.getElementById(
+            "square_confirmed_payer_customer_id"
+        );
     const squareRetrieveGroup = document.getElementById("square_retrieve_group");
     const retrieveSquareButton = document.getElementById("retrieve_square_data");
     const squareRetrieveStatus = document.getElementById("square_retrieve_status");
     const squarePaymentCandidates = document.getElementById("square_payment_candidates");
     const squarePaymentPreview = document.getElementById("square_payment_preview");
+    const saveIncomeButton = document.getElementById("save_income_button");
+
+    let squareReviewButtons = [];
+    let squareConfirmedPaymentId = "";
+    let squareGeneratedPayerNote = "";
+
+    function clearSquarePayerConfirmation() {
+        squareConfirmedPaymentId = "";
+
+        if (squareDifferentPayerConfirmedField) {
+            squareDifferentPayerConfirmedField.value = "";
+        }
+
+        if (squareConfirmedPayerCustomerIdField) {
+            squareConfirmedPayerCustomerIdField.value = "";
+        }
+    }
+
+    function clearSquareGeneratedPayerNote() {
+        if (
+            !notesField
+            || !squareGeneratedPayerNote
+        ) {
+            return;
+        }
+
+        const generatedNote =
+            squareGeneratedPayerNote;
+
+        const noteLines =
+            notesField.value.split("\n");
+
+        notesField.value = noteLines
+            .filter(function (line) {
+                return line !== generatedNote;
+            })
+            .join("\n");
+
+        // If staff edited that line, the exact generated
+        // text will not match and their edit is preserved.
+        squareGeneratedPayerNote = "";
+    }
+
+    function clearSquarePopulatedState() {
+        if (squarePaymentIdField) {
+            squarePaymentIdField.value = "";
+        }
+
+        if (squareLineClassificationsField) {
+            squareLineClassificationsField.value = "{}";
+        }
+
+        if (processorPaymentField) {
+            processorPaymentField.value = "";
+        }
+
+        clearSquareGeneratedPayerNote();
+
+        // If we have left Square, do not leave Square
+        // selected as the processor for another payment.
+        if (
+            paymentMethodField
+            && paymentMethodField.value
+                .trim()
+                .toLowerCase() !== "square"
+            && creditProcessorField
+            && creditProcessorField.selectedIndex >= 0
+        ) {
+            const selectedProcessor =
+                creditProcessorField.options[
+                    creditProcessorField.selectedIndex
+                ];
+
+            if (
+                selectedProcessor
+                && selectedProcessor.textContent
+                    .trim()
+                    .toLowerCase() === "square"
+            ) {
+                creditProcessorField.value = "";
+            }
+        }
+    }
+
+    function appendLabeledText(
+        parent,
+        label,
+        value
+    ) {
+        const strong =
+            document.createElement("strong");
+
+        strong.textContent = label;
+
+        parent.appendChild(strong);
+        parent.appendChild(
+            document.createTextNode(
+                " " + String(value || "")
+            )
+        );
+    }
+
+    function setPrimaryAction(button, label = null) {
+        if (!button) {
+            return;
+        }
+
+        button.disabled = false;
+        button.style.background = "green";
+        button.style.color = "white";
+        button.style.cursor = "";
+
+        if (label !== null) {
+            button.textContent = label;
+        }
+    }
+
+    function setSecondaryAction(button, label = null) {
+        if (!button) {
+            return;
+        }
+
+        button.disabled = false;
+        button.style.background = "";
+        button.style.color = "";
+        button.style.cursor = "";
+
+        if (label !== null) {
+            button.textContent = label;
+        }
+    }
+
+    function setCompletedAction(button, label = null) {
+        if (!button) {
+            return;
+        }
+
+        button.disabled = true;
+        button.style.background = "#9e9e9e";
+        button.style.color = "white";
+        button.style.cursor = "not-allowed";
+
+        if (label !== null) {
+            button.textContent = label;
+        }
+    }
+
+    function resetSquareReviewButtons() {
+        squareReviewButtons.forEach(function (button) {
+            setSecondaryAction(button, "Review Payment");
+        });
+    }
 
     function calculateTotal() {
         const service = parseFloat(serviceField.value) || 0;
@@ -193,7 +372,16 @@ document.addEventListener("DOMContentLoaded", function () {
 
         if (cardBasedMethods.includes(paymentMethod)) {
             creditProcessorGroup.style.display = "block";
-            processorPaymentGroup.style.display = "block";
+
+            // Square payment IDs are reconciliation data,
+            // not useful staff-facing appointment details.
+            // Keep the field/value in the form so the
+            // authoritative Square transaction still posts,
+            // but do not display the technical ID.
+            processorPaymentGroup.style.display =
+                paymentMethod === "square"
+                    ? "none"
+                    : "block";
         } else {
             creditProcessorGroup.style.display = "none";
             creditProcessorField.value = "";
@@ -215,6 +403,30 @@ document.addEventListener("DOMContentLoaded", function () {
         ) {
             squarePaymentIdField.value = "";
             squareLineClassificationsField.value = "{}";
+            clearSquarePayerConfirmation();
+        }
+
+        if (saveIncomeButton) {
+            const squareNeedsRetrievedPayment =
+                paymentMethod === "square"
+                && (
+                    !squarePaymentIdField
+                    || !squarePaymentIdField.value.trim()
+                );
+
+            saveIncomeButton.disabled =
+                squareNeedsRetrievedPayment;
+
+            saveIncomeButton.style.background =
+                squareNeedsRetrievedPayment
+                    ? "#9e9e9e"
+                    : "green";
+
+            saveIncomeButton.style.color = "white";
+            saveIncomeButton.style.cursor =
+                squareNeedsRetrievedPayment
+                    ? "not-allowed"
+                    : "";
         }
     }
 
@@ -226,22 +438,25 @@ document.addEventListener("DOMContentLoaded", function () {
 
     async function previewSquarePayment(
         paymentId,
-        lineClassifications = null
+        lineClassifications = null,
+        reviewButton = null
     ) {
         if (!squarePaymentPreview) {
             return;
         }
 
+        if (
+            squareConfirmedPaymentId
+            && squareConfirmedPaymentId !== paymentId
+        ) {
+            clearSquarePayerConfirmation();
+        }
+
         squarePaymentPreview.textContent =
             "Loading selected Square payment...";
 
-        if (
-            squarePaymentIdField
-            && squareLineClassificationsField
-        ) {
-            squarePaymentIdField.value = "";
-            squareLineClassificationsField.value = "{}";
-        }
+        clearSquarePopulatedState();
+        togglePaymentFields();
 
         try {
             const baseUrl =
@@ -285,6 +500,33 @@ document.addEventListener("DOMContentLoaded", function () {
             }
 
             const payment = data.payment;
+            const appointment = data.appointment || {};
+
+            const payerConfirmationStillValid = Boolean(
+                payment.different_square_customer
+                && squareConfirmedPaymentId
+                    === payment.payment_id
+                && squareDifferentPayerConfirmedField
+                && squareDifferentPayerConfirmedField.value
+                    === "1"
+                && squareConfirmedPayerCustomerIdField
+                && squareConfirmedPayerCustomerIdField.value
+                    === String(payment.customer_id || "")
+            );
+
+            let payerConfirmed = Boolean(
+                !payment.different_square_customer
+                || payerConfirmationStillValid
+            );
+
+            let nextSquareActionButton = null;
+
+            if (reviewButton) {
+                setCompletedAction(
+                    reviewButton,
+                    "Payment Reviewed ✓"
+                );
+            }
 
             squarePaymentPreview.textContent = "";
 
@@ -312,6 +554,198 @@ document.addEventListener("DOMContentLoaded", function () {
                 )}`;
 
             squarePaymentPreview.appendChild(summary);
+
+            if (payment.different_square_customer) {
+                const payerCard =
+                    document.createElement("div");
+
+                payerCard.style.padding = "12px";
+                payerCard.style.marginTop = "12px";
+                payerCard.style.marginBottom = "12px";
+                payerCard.style.border =
+                    "1px solid #d7a600";
+                payerCard.style.borderRadius = "6px";
+
+                const payerHeading =
+                    document.createElement("p");
+
+                payerHeading.style.margin =
+                    "0 0 8px 0";
+
+                payerHeading.textContent =
+                    "Different Payer";
+
+                payerHeading.style.fontWeight =
+                    "bold";
+
+                payerCard.appendChild(
+                    payerHeading
+                );
+
+                const appointmentText =
+                    document.createElement("p");
+
+                appointmentText.style.margin =
+                    "0 0 6px 0";
+
+                appendLabeledText(
+                    appointmentText,
+                    "Service Recipient:",
+                    appointment.name || ""
+                );
+
+                payerCard.appendChild(
+                    appointmentText
+                );
+
+                const appointmentWhen =
+                    document.createElement("p");
+
+                appointmentWhen.style.margin =
+                    "0 0 6px 0";
+
+                let displayDate =
+                    appointment.date || "";
+
+                if (displayDate) {
+                    const dateParts =
+                        displayDate.split("-");
+
+                    if (dateParts.length === 3) {
+                        const localDate =
+                            new Date(
+                                Number(dateParts[0]),
+                                Number(dateParts[1]) - 1,
+                                Number(dateParts[2])
+                            );
+
+                        displayDate =
+                            localDate.toLocaleDateString(
+                                undefined,
+                                {
+                                    month: "long",
+                                    day: "numeric",
+                                    year: "numeric"
+                                }
+                            );
+                    }
+                }
+
+                appendLabeledText(
+                    appointmentWhen,
+                    "Appointment:",
+                    displayDate
+                    + (
+                        appointment.time
+                            ? " at "
+                                + appointment.time
+                            : ""
+                    )
+                );
+
+                payerCard.appendChild(
+                    appointmentWhen
+                );
+
+                const payerText =
+                    document.createElement("p");
+
+                payerText.style.margin =
+                    "0 0 6px 0";
+
+                const payerName =
+                    payment.possible_payer_name
+                    || "Another Square Customer";
+
+                appendLabeledText(
+                    payerText,
+                    "Square Customer / Possible Payer:",
+                    payerName
+                );
+
+                payerCard.appendChild(
+                    payerText
+                );
+
+                const explanation =
+                    document.createElement("p");
+
+                explanation.style.margin =
+                    "0 0 10px 0";
+
+                explanation.textContent =
+                    "This Square payment is associated "
+                    + "with someone other than the "
+                    + "service recipient. Confirm that "
+                    + "this payment should be used for "
+                    + "this appointment.";
+
+                payerCard.appendChild(
+                    explanation
+                );
+
+                const confirmButton =
+                    document.createElement("button");
+
+                confirmButton.type = "button";
+                confirmButton.className = "btn";
+
+                const recipientName =
+                    appointment.name
+                    || "Service Recipient";
+
+                if (payerConfirmed) {
+                    setCompletedAction(
+                        confirmButton,
+                        "Different Payer Confirmed ✓"
+                    );
+                } else {
+                    setPrimaryAction(
+                        confirmButton,
+                        `Use This Payment for ${recipientName}`
+                    );
+                }
+
+                confirmButton.addEventListener(
+                    "click",
+                    function () {
+                        squareConfirmedPaymentId =
+                            payment.payment_id;
+
+                        squareDifferentPayerConfirmedField
+                            .value = "1";
+
+                        squareConfirmedPayerCustomerIdField
+                            .value = String(
+                                payment.customer_id || ""
+                            );
+
+                        payerConfirmed = true;
+
+                        setCompletedAction(
+                            confirmButton,
+                            "Different Payer Confirmed ✓"
+                        );
+
+                        if (nextSquareActionButton) {
+                            setPrimaryAction(
+                                nextSquareActionButton,
+                                nextSquareActionButton
+                                    .dataset
+                                    .primaryLabel
+                            );
+                        }
+                    }
+                );
+
+                payerCard.appendChild(
+                    confirmButton
+                );
+
+                squarePaymentPreview.appendChild(
+                    payerCard
+                );
+            }
 
             const status = document.createElement("p");
 
@@ -426,8 +860,23 @@ document.addEventListener("DOMContentLoaded", function () {
                 applyButton.type = "button";
                 applyButton.className = "btn";
                 applyButton.style.marginTop = "10px";
-                applyButton.textContent =
+                applyButton.dataset.primaryLabel =
                     "Apply Item Classifications";
+
+                nextSquareActionButton =
+                    applyButton;
+
+                if (payerConfirmed) {
+                    setPrimaryAction(
+                        applyButton,
+                        "Apply Item Classifications"
+                    );
+                } else {
+                    setCompletedAction(
+                        applyButton,
+                        "Confirm Different Payer First"
+                    );
+                }
 
                 applyButton.addEventListener(
                     "click",
@@ -460,6 +909,11 @@ document.addEventListener("DOMContentLoaded", function () {
 
                         squareRetrieveStatus.textContent = "";
 
+                        setCompletedAction(
+                            applyButton,
+                            "Applying..."
+                        );
+
                         previewSquarePayment(
                             payment.payment_id,
                             classifications
@@ -491,8 +945,23 @@ document.addEventListener("DOMContentLoaded", function () {
                 populateButton.type = "button";
                 populateButton.className = "btn";
                 populateButton.style.marginTop = "8px";
-                populateButton.textContent =
+                populateButton.dataset.primaryLabel =
                     "Populate Add Income";
+
+                nextSquareActionButton =
+                    populateButton;
+
+                if (payerConfirmed) {
+                    setPrimaryAction(
+                        populateButton,
+                        "Populate Add Income"
+                    );
+                } else {
+                    setCompletedAction(
+                        populateButton,
+                        "Confirm Different Payer First"
+                    );
+                }
 
                 populateButton.addEventListener(
                     "click",
@@ -548,6 +1017,13 @@ document.addEventListener("DOMContentLoaded", function () {
                                 lineClassifications || {}
                             );
 
+                        togglePaymentFields();
+
+                        setCompletedAction(
+                            populateButton,
+                            "Square Data Populated ✓"
+                        );
+
                         if (
                             descriptionField
                             && !descriptionField.value.trim()
@@ -560,6 +1036,46 @@ document.addEventListener("DOMContentLoaded", function () {
                                 })
                                 .filter(Boolean)
                                 .join(", ");
+                        }
+
+                        if (
+                            notesField
+                            && payment.different_square_customer
+                            && payerConfirmed
+                        ) {
+                            const payerName =
+                                payment.possible_payer_name
+                                || "another Square customer";
+
+                            const recipientName =
+                                appointment.name
+                                || "the service recipient";
+
+                            const payerNote =
+                                "Square payment associated with "
+                                + payerName
+                                + " confirmed for service recipient "
+                                + recipientName
+                                + ".";
+
+                            const existingNotes =
+                                notesField.value.trim();
+
+                            if (
+                                !existingNotes.includes(
+                                    payerNote
+                                )
+                            ) {
+                                notesField.value =
+                                    existingNotes
+                                    ? existingNotes
+                                        + "\n"
+                                        + payerNote
+                                    : payerNote;
+
+                                squareGeneratedPayerNote =
+                                    payerNote;
+                            }
                         }
 
                         calculateTotal();
@@ -577,17 +1093,17 @@ document.addEventListener("DOMContentLoaded", function () {
                 );
             }
 
-            const idText = document.createElement("p");
-            idText.style.fontSize = "0.85em";
-            idText.textContent =
-                `Square Payment ID: ${payment.payment_id}`;
-
-            squarePaymentPreview.appendChild(idText);
-
         } catch (error) {
             squarePaymentPreview.textContent =
                 error.message
                 || "Unable to review Square payment.";
+
+            if (reviewButton) {
+                setPrimaryAction(
+                    reviewButton,
+                    "Review Payment Again"
+                );
+            }
         }
     }
 
@@ -600,10 +1116,24 @@ document.addEventListener("DOMContentLoaded", function () {
             return;
         }
 
-        retrieveSquareButton.disabled = true;
+        setCompletedAction(
+            retrieveSquareButton,
+            "Checking Square..."
+        );
+
         squareRetrieveStatus.textContent =
             "Checking Square for recent payments...";
+
         squarePaymentCandidates.textContent = "";
+        squareReviewButtons = [];
+        clearSquarePayerConfirmation();
+
+        if (squarePaymentPreview) {
+            squarePaymentPreview.textContent = "";
+        }
+
+        clearSquarePopulatedState();
+        togglePaymentFields();
 
         try {
             const response = await fetch(
@@ -661,8 +1191,18 @@ document.addEventListener("DOMContentLoaded", function () {
 
                 text.textContent =
                     `${created} — $${total}`
-                    + ` — Fee $${fee}`
-                    + ` — Payment ${payment.payment_id} `;
+                    + ` — Fee $${fee}`;
+
+                if (payment.different_square_customer) {
+                    text.textContent +=
+                        ` — Possible Payer: `
+                        + (
+                            payment.possible_payer_name
+                            || "Different Square Customer"
+                        );
+                }
+
+                text.textContent += " ";
 
                 const reviewButton =
                     document.createElement("button");
@@ -671,11 +1211,34 @@ document.addEventListener("DOMContentLoaded", function () {
                 reviewButton.className = "btn";
                 reviewButton.textContent = "Review Payment";
 
+                squareReviewButtons.push(reviewButton);
+
+                if (squareReviewButtons.length === 1) {
+                    setPrimaryAction(
+                        reviewButton,
+                        "Review Payment"
+                    );
+                } else {
+                    setSecondaryAction(
+                        reviewButton,
+                        "Review Payment"
+                    );
+                }
+
                 reviewButton.addEventListener(
                     "click",
                     function () {
+                        resetSquareReviewButtons();
+
+                        setCompletedAction(
+                            reviewButton,
+                            "Reviewing..."
+                        );
+
                         previewSquarePayment(
-                            payment.payment_id
+                            payment.payment_id,
+                            null,
+                            reviewButton
                         );
                     }
                 );
@@ -692,7 +1255,17 @@ document.addEventListener("DOMContentLoaded", function () {
                 || "Unable to retrieve Square payments.";
 
         } finally {
-            retrieveSquareButton.disabled = false;
+            if (squareReviewButtons.length) {
+                setSecondaryAction(
+                    retrieveSquareButton,
+                    "Refresh Square Data"
+                );
+            } else {
+                setPrimaryAction(
+                    retrieveSquareButton,
+                    "Check Square Again"
+                );
+            }
         }
     }
 
@@ -702,7 +1275,54 @@ document.addEventListener("DOMContentLoaded", function () {
     tipField.addEventListener("input", calculateTotal);
     creditAppliedField.addEventListener("input", calculateTotal);
 
-    paymentMethodField.addEventListener("change", togglePaymentFields);
+    paymentMethodField.addEventListener(
+        "change",
+        function () {
+            const paymentMethod =
+                paymentMethodField.value.trim().toLowerCase();
+
+            clearSquarePopulatedState();
+            clearSquarePayerConfirmation();
+
+            if (paymentMethod === "square") {
+                // Do not carry a manually selected card
+                // processor into a new Square retrieval.
+                if (creditProcessorField) {
+                    creditProcessorField.value = "";
+                }
+
+                if (retrieveSquareButton) {
+                    setPrimaryAction(
+                        retrieveSquareButton,
+                        "Retrieve Square Data"
+                    );
+                }
+            } else {
+                if (retrieveSquareButton) {
+                    setPrimaryAction(
+                        retrieveSquareButton,
+                        "Retrieve Square Data"
+                    );
+                }
+
+                squareReviewButtons = [];
+
+                if (squarePaymentCandidates) {
+                    squarePaymentCandidates.textContent = "";
+                }
+
+                if (squarePaymentPreview) {
+                    squarePaymentPreview.textContent = "";
+                }
+
+                if (squareRetrieveStatus) {
+                    squareRetrieveStatus.textContent = "";
+                }
+            }
+
+            togglePaymentFields();
+        }
+    );
 
     if (retrieveSquareButton) {
         retrieveSquareButton.addEventListener(
@@ -729,6 +1349,13 @@ document.addEventListener("DOMContentLoaded", function () {
         squareRetrieveStatus.textContent =
             "Square payment selected from reconciliation. "
             + "Review it below before populating Add Income.";
+
+        if (retrieveSquareButton) {
+            setSecondaryAction(
+                retrieveSquareButton,
+                "Refresh Square Data"
+            );
+        }
 
         previewSquarePayment(
             preselectedSquarePaymentId

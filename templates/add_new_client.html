@@ -13,6 +13,11 @@
 <form method="POST" id="add-client-form">
 
     <input type="hidden" name="selected_date" value="{{ selected_date }}">
+    <input
+        type="hidden"
+        name="recipient_appointment_id"
+        value="{{ request.args.get('recipient_appointment_id', '') or request.form.get('recipient_appointment_id', '') }}"
+    >
 
     {% if duplicate_matches %}
         <div style="
