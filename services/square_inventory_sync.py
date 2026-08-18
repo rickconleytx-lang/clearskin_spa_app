@@ -1,5 +1,6 @@
 from copy import deepcopy
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from difflib import SequenceMatcher
 import hashlib
 
 from psycopg2 import IntegrityError
@@ -246,6 +247,250 @@ def _product_profile(product):
         "is_active": bool(
             product.get("active")
         ),
+    }
+
+
+def _find_existing_square_product_candidate(
+    profile,
+    *,
+    access_token,
+    environment,
+):
+    """
+    Conservatively detect an existing Square Catalog product
+    before creating an unmapped PSP inventory product.
+
+    Exact SKU is the strongest signal. Exact names and very
+    close name variants also require human review. This helper
+    never writes to Square or PSP.
+    """
+    target_name = (
+        square_service
+        .normalize_catalog_match_text(
+            profile["name"]
+        )
+    )
+
+    target_sku = str(
+        profile["sku"]
+        or ""
+    ).strip().casefold()
+
+    sku_matches = []
+    exact_name_matches = []
+    similar_name_matches = []
+
+    catalog_objects = (
+        square_service
+        .list_catalog_objects(
+            access_token=access_token,
+            environment=environment,
+            object_types=("ITEM",),
+        )
+    )
+
+    for catalog_object in (
+        catalog_objects
+    ):
+        if (
+            catalog_object.get("type")
+            != "ITEM"
+            or catalog_object.get(
+                "is_deleted"
+            )
+        ):
+            continue
+
+        item_data = (
+            catalog_object.get(
+                "item_data"
+            )
+            or {}
+        )
+
+        square_item_id = str(
+            catalog_object.get("id")
+            or ""
+        ).strip()
+
+        square_name = str(
+            item_data.get("name")
+            or ""
+        ).strip()
+
+        normalized_name = (
+            square_service
+            .normalize_catalog_match_text(
+                square_name
+            )
+        )
+
+        if not square_item_id:
+            continue
+
+        all_skus = []
+        matching_variation_ids = []
+
+        for variation in (
+            item_data.get(
+                "variations"
+            )
+            or []
+        ):
+            variation_id = str(
+                variation.get("id")
+                or ""
+            ).strip()
+
+            variation_data = (
+                variation.get(
+                    "item_variation_data"
+                )
+                or {}
+            )
+
+            square_sku = str(
+                variation_data.get("sku")
+                or ""
+            ).strip()
+
+            if square_sku:
+                all_skus.append(
+                    square_sku
+                )
+
+            if (
+                target_sku
+                and square_sku.casefold()
+                == target_sku
+                and variation_id
+            ):
+                matching_variation_ids.append(
+                    variation_id
+                )
+
+        candidate = {
+            "square_item_id": (
+                square_item_id
+            ),
+            "square_name": square_name,
+            "square_product_type": str(
+                item_data.get(
+                    "product_type"
+                )
+                or ""
+            ).strip(),
+            "square_skus": all_skus,
+        }
+
+        if matching_variation_ids:
+            candidate[
+                "matching_variation_ids"
+            ] = matching_variation_ids
+
+            sku_matches.append(
+                candidate
+            )
+            continue
+
+        if (
+            target_name
+            and normalized_name
+            == target_name
+        ):
+            exact_name_matches.append(
+                candidate
+            )
+            continue
+
+        if (
+            target_name
+            and normalized_name
+        ):
+            similarity = SequenceMatcher(
+                None,
+                target_name,
+                normalized_name,
+            ).ratio()
+
+            # Product names are intentionally held to a
+            # much higher similarity threshold than service
+            # names because SKU is the stronger identity.
+            if similarity >= 0.92:
+                candidate[
+                    "similarity"
+                ] = round(
+                    similarity,
+                    3,
+                )
+
+                similar_name_matches.append(
+                    candidate
+                )
+
+    if sku_matches:
+        return {
+            "status": "needs_attention",
+            "reason": (
+                "existing_square_product_sku_match"
+                if len(sku_matches) == 1
+                else "multiple_square_product_sku_matches"
+            ),
+            "candidate_count": (
+                len(sku_matches)
+            ),
+            "candidates": sku_matches,
+        }
+
+    if exact_name_matches:
+        return {
+            "status": "needs_attention",
+            "reason": (
+                "existing_square_product_name_match"
+                if len(exact_name_matches) == 1
+                else "multiple_square_product_name_matches"
+            ),
+            "candidate_count": (
+                len(exact_name_matches)
+            ),
+            "candidates": (
+                exact_name_matches
+            ),
+        }
+
+    if similar_name_matches:
+        similar_name_matches.sort(
+            key=lambda candidate: (
+                -candidate.get(
+                    "similarity",
+                    0,
+                ),
+                candidate.get(
+                    "square_name",
+                    "",
+                ).lower(),
+                candidate.get(
+                    "square_item_id",
+                    "",
+                ),
+            )
+        )
+
+        return {
+            "status": "needs_attention",
+            "reason": (
+                "similar_square_product_candidate"
+            ),
+            "candidate_count": (
+                len(similar_name_matches)
+            ),
+            "candidates": (
+                similar_name_matches
+            ),
+        }
+
+    return {
+        "status": "no_match",
     }
 
 
@@ -880,6 +1125,36 @@ def sync_inventory_product_to_square(
             "is_archived": (
                 not profile["is_active"]
             ),
+        }
+
+    # -----------------------------------------------------
+    # No mapping: inspect the existing Square Catalog before
+    # creating anything. A possible duplicate requires human
+    # review and causes no Square write.
+    # -----------------------------------------------------
+    catalog_guard = (
+        _find_existing_square_product_candidate(
+            profile,
+            access_token=access_token,
+            environment=environment,
+        )
+    )
+
+    if (
+        catalog_guard["status"]
+        == "needs_attention"
+    ):
+        return {
+            "status": "needs_attention",
+            "inventory_product_id": (
+                inventory_product_id
+            ),
+            "spa_id": spa_id,
+            "business_unit_id": (
+                business_unit_id
+            ),
+            "environment": environment,
+            **catalog_guard,
         }
 
     create_result = (

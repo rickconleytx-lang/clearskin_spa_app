@@ -1,4 +1,6 @@
 import os
+import re
+import unicodedata
 from datetime import datetime, timezone
 
 import requests
@@ -23,6 +25,36 @@ def normalize_square_environment(environment):
         )
 
     return value
+
+
+def normalize_catalog_match_text(value):
+    """
+    Normalize human-facing Catalog text for conservative
+    duplicate-candidate detection.
+
+    This is comparison-only. It never changes stored PSP or
+    Square names.
+    """
+    normalized = unicodedata.normalize(
+        "NFKD",
+        str(value or ""),
+    )
+
+    normalized = (
+        normalized
+        .encode("ascii", "ignore")
+        .decode("ascii")
+    )
+
+    normalized = re.sub(
+        r"[^a-zA-Z0-9]+",
+        " ",
+        normalized,
+    )
+
+    return " ".join(
+        normalized.lower().split()
+    )
 
 
 def get_square_sandbox_access_token():
@@ -223,6 +255,98 @@ def retrieve_catalog_object(
         )
 
     return catalog_object
+
+
+def list_catalog_objects(
+    *,
+    access_token,
+    environment="sandbox",
+    object_types=None,
+):
+    """
+    Read the current Square Catalog with cursor pagination.
+
+    This helper performs GET requests only.
+    """
+    params = {}
+
+    if object_types:
+        normalized_types = []
+
+        for object_type in object_types:
+            value = str(
+                object_type or ""
+            ).strip().upper()
+
+            if (
+                value
+                and value not in normalized_types
+            ):
+                normalized_types.append(
+                    value
+                )
+
+        if normalized_types:
+            params["types"] = ",".join(
+                normalized_types
+            )
+
+    objects = []
+    cursor = ""
+    seen_cursors = set()
+
+    while True:
+        request_params = dict(
+            params
+        )
+
+        if cursor:
+            request_params["cursor"] = (
+                cursor
+            )
+
+        data = _square_request(
+            "GET",
+            "/catalog/list",
+            access_token=access_token,
+            environment=environment,
+            params=request_params,
+        )
+
+        for catalog_object in (
+            data.get("objects")
+            or []
+        ):
+            if (
+                isinstance(
+                    catalog_object,
+                    dict,
+                )
+                and catalog_object.get("id")
+            ):
+                objects.append(
+                    catalog_object
+                )
+
+        next_cursor = str(
+            data.get("cursor") or ""
+        ).strip()
+
+        if not next_cursor:
+            break
+
+        if next_cursor in seen_cursors:
+            raise SquareServiceError(
+                "Square Catalog pagination "
+                "returned a repeated cursor."
+            )
+
+        seen_cursors.add(
+            next_cursor
+        )
+        cursor = next_cursor
+
+    return objects
 
 
 def delete_catalog_object(

@@ -1,5 +1,6 @@
 from copy import deepcopy
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from difflib import SequenceMatcher
 import hashlib
 
 from psycopg2 import IntegrityError
@@ -235,6 +236,256 @@ def _service_profile(service):
         "is_active": bool(
             service.get("is_active")
         ),
+    }
+
+
+def _find_existing_square_service_candidate(
+    profile,
+    *,
+    access_token,
+    environment,
+):
+    """
+    Conservatively detect an existing Square service before
+    creating an unmapped PSP service.
+
+    Exact or sufficiently similar candidates require human
+    review. This helper never writes to Square or PSP.
+    """
+    target_name = (
+        square_service
+        .normalize_catalog_match_text(
+            profile["name"]
+        )
+    )
+
+    target_tokens = set(
+        target_name.split()
+    )
+
+    exact_matches = []
+    similar_matches = []
+
+    catalog_objects = (
+        square_service
+        .list_catalog_objects(
+            access_token=access_token,
+            environment=environment,
+            object_types=("ITEM",),
+        )
+    )
+
+    for catalog_object in (
+        catalog_objects
+    ):
+        if (
+            catalog_object.get("type")
+            != "ITEM"
+            or catalog_object.get(
+                "is_deleted"
+            )
+        ):
+            continue
+
+        item_data = (
+            catalog_object.get(
+                "item_data"
+            )
+            or {}
+        )
+
+        product_type = str(
+            item_data.get(
+                "product_type"
+            )
+            or ""
+        ).strip().upper()
+
+        # PSP service sync creates and manages
+        # APPOINTMENTS_SERVICE items. Do not silently
+        # adopt unrelated retail/legacy Catalog objects.
+        if (
+            product_type
+            != "APPOINTMENTS_SERVICE"
+        ):
+            continue
+
+        square_item_id = str(
+            catalog_object.get("id")
+            or ""
+        ).strip()
+
+        square_name = str(
+            item_data.get("name")
+            or ""
+        ).strip()
+
+        normalized_name = (
+            square_service
+            .normalize_catalog_match_text(
+                square_name
+            )
+        )
+
+        if (
+            not square_item_id
+            or not normalized_name
+        ):
+            continue
+
+        variation_ids = []
+
+        for variation in (
+            item_data.get(
+                "variations"
+            )
+            or []
+        ):
+            variation_id = str(
+                variation.get("id")
+                or ""
+            ).strip()
+
+            if variation_id:
+                variation_ids.append(
+                    variation_id
+                )
+
+        candidate = {
+            "square_item_id": (
+                square_item_id
+            ),
+            "square_name": square_name,
+            "square_product_type": (
+                product_type
+            ),
+            "square_variation_ids": (
+                variation_ids
+            ),
+        }
+
+        if (
+            normalized_name
+            == target_name
+        ):
+            exact_matches.append(
+                candidate
+            )
+            continue
+
+        similarity = SequenceMatcher(
+            None,
+            target_name,
+            normalized_name,
+        ).ratio()
+
+        candidate_tokens = set(
+            normalized_name.split()
+        )
+
+        token_subset_match = (
+            len(target_tokens) >= 2
+            and len(candidate_tokens) >= 2
+            and (
+                target_tokens.issubset(
+                    candidate_tokens
+                )
+                or candidate_tokens.issubset(
+                    target_tokens
+                )
+            )
+        )
+
+        shared_tokens = (
+            target_tokens
+            .intersection(
+                candidate_tokens
+            )
+        )
+
+        token_prefix_match = (
+            bool(shared_tokens)
+            and any(
+                target_token
+                != candidate_token
+                and len(target_token) >= 5
+                and len(candidate_token) >= 5
+                and (
+                    target_token.startswith(
+                        candidate_token
+                    )
+                    or candidate_token.startswith(
+                        target_token
+                    )
+                )
+                for target_token in target_tokens
+                for candidate_token in candidate_tokens
+            )
+        )
+
+        if (
+            similarity >= 0.88
+            or token_subset_match
+            or token_prefix_match
+        ):
+            candidate["similarity"] = (
+                round(
+                    similarity,
+                    3,
+                )
+            )
+
+            similar_matches.append(
+                candidate
+            )
+
+    if exact_matches:
+        return {
+            "status": "needs_attention",
+            "reason": (
+                "existing_square_service_exact_match"
+                if len(exact_matches) == 1
+                else "multiple_square_service_exact_matches"
+            ),
+            "candidate_count": (
+                len(exact_matches)
+            ),
+            "candidates": exact_matches,
+        }
+
+    if similar_matches:
+        similar_matches.sort(
+            key=lambda candidate: (
+                -candidate.get(
+                    "similarity",
+                    0,
+                ),
+                candidate.get(
+                    "square_name",
+                    "",
+                ).lower(),
+                candidate.get(
+                    "square_item_id",
+                    "",
+                ),
+            )
+        )
+
+        return {
+            "status": "needs_attention",
+            "reason": (
+                "similar_square_service_candidate"
+            ),
+            "candidate_count": (
+                len(similar_matches)
+            ),
+            "candidates": (
+                similar_matches
+            ),
+        }
+
+    return {
+        "status": "no_match",
     }
 
 
@@ -865,6 +1116,36 @@ def sync_service_to_square(
             "available_for_booking": (
                 profile["is_active"]
             ),
+        }
+
+    # -----------------------------------------------------
+    # No mapping: inspect the existing Square Catalog before
+    # creating anything. A possible duplicate requires human
+    # review and causes no Square write.
+    # -----------------------------------------------------
+    catalog_guard = (
+        _find_existing_square_service_candidate(
+            profile,
+            access_token=access_token,
+            environment=environment,
+        )
+    )
+
+    if (
+        catalog_guard["status"]
+        == "needs_attention"
+    ):
+        return {
+            "status": "needs_attention",
+            "service_type_id": (
+                service_type_id
+            ),
+            "spa_id": spa_id,
+            "business_unit_id": (
+                business_unit_id
+            ),
+            "environment": environment,
+            **catalog_guard,
         }
 
     create_result = (
