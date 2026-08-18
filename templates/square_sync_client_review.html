@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div class="container py-4">
+
+    <div class="mb-4">
+        <a
+            href="{{ url_for('square_sync_activity') }}"
+            class="btn btn-outline-secondary btn-sm"
+        >
+            ← Back to Sync Activity
+        </a>
+    </div>
+
+    <div class="card shadow-sm">
+
+        <div class="card-body">
+
+            <h2 class="mb-2">
+                Review Square Client Match
+            </h2>
+
+            <p class="text-muted">
+                Peach Suite Pro found an existing Square customer
+                with matching contact information. Confirm that
+                these records belong to the same person before
+                linking them.
+            </p>
+
+            <div class="alert alert-warning">
+                <strong>No Square customer changes will be made.</strong>
+                Confirming this page saves only the Peach Suite Pro
+                ↔ Square identity mapping unless you explicitly
+                choose to update the PSP client name from Square.
+            </div>
+
+            <div class="row g-3 mt-2">
+
+                <div class="col-md-6">
+                    <div class="card h-100">
+                        <div class="card-body">
+
+                            <h5>Peach Suite Pro</h5>
+
+                            <p class="mb-1">
+                                <strong>Name:</strong>
+                                {{ client.first_name }}
+                                {{ client.last_name }}
+                            </p>
+
+                            <p class="mb-1">
+                                <strong>Email:</strong>
+                                {{ client.email or '—' }}
+                            </p>
+
+                            <p class="mb-0">
+                                <strong>Phone:</strong>
+                                {{ client.phone or '—' }}
+                            </p>
+
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-6">
+                    <div class="card h-100">
+                        <div class="card-body">
+
+                            <h5>Square</h5>
+
+                            <p class="mb-1">
+                                <strong>Name:</strong>
+                                {{ square_customer.get('given_name') or '' }}
+                                {{ square_customer.get('family_name') or '' }}
+                            </p>
+
+                            <p class="mb-1">
+                                <strong>Email:</strong>
+                                {{ square_customer.get('email_address') or '—' }}
+                            </p>
+
+                            <p class="mb-0">
+                                <strong>Phone:</strong>
+                                {{ square_customer.get('phone_number') or '—' }}
+                            </p>
+
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            {% if name_mismatch %}
+
+                <div class="alert alert-info mt-4">
+
+                    <strong>Name / Spelling Mismatch</strong>
+
+                    <p class="mb-0 mt-2">
+                        The names differ between Square and Peach
+                        Suite Pro. Choose which name Peach Suite Pro
+                        should keep after you confirm these are the
+                        same person.
+                    </p>
+
+                </div>
+
+            {% endif %}
+
+            <form
+                method="post"
+                class="mt-4"
+            >
+
+                <input
+                    type="hidden"
+                    name="square_sync_client_review_token"
+                    value="{{ square_sync_client_review_token }}"
+                >
+
+                {% if name_mismatch %}
+
+                    <div class="form-check mb-3">
+
+                        <input
+                            class="form-check-input"
+                            type="radio"
+                            name="name_action"
+                            id="keep_psp"
+                            value="keep_psp"
+                            checked
+                        >
+
+                        <label
+                            class="form-check-label"
+                            for="keep_psp"
+                        >
+                            <strong>Keep PSP Name</strong>
+                            — {{ client.first_name }}
+                            {{ client.last_name }}
+                        </label>
+
+                    </div>
+
+                    <div class="form-check mb-4">
+
+                        <input
+                            class="form-check-input"
+                            type="radio"
+                            name="name_action"
+                            id="use_square"
+                            value="use_square"
+                        >
+
+                        <label
+                            class="form-check-label"
+                            for="use_square"
+                        >
+                            <strong>Update PSP Name to Square</strong>
+                            —
+                            {{ square_customer.get('given_name') or '' }}
+                            {{ square_customer.get('family_name') or '' }}
+                        </label>
+
+                    </div>
+
+                {% else %}
+
+                    <input
+                        type="hidden"
+                        name="name_action"
+                        value="keep_psp"
+                    >
+
+                {% endif %}
+
+                <button
+                    type="submit"
+                    class="btn btn-primary"
+                >
+                    Confirm Same Client
+                </button>
+
+                <a
+                    href="{{ url_for('square_sync_activity') }}"
+                    class="btn btn-outline-secondary ms-2"
+                >
+                    Cancel
+                </a>
+
+            </form>
+
+        </div>
+
+    </div>
+
+</div>
+
+{% endblock %}

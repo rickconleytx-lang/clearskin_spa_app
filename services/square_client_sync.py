@@ -1526,6 +1526,91 @@ def sync_client_to_square(
             **match_result,
         }
 
+    # -----------------------------------------------------
+    # An unmapped PSP client with one exact Square contact
+    # match still requires human confirmation.
+    #
+    # Do not update the Square customer or persist a mapping
+    # merely because email and/or phone matched. This keeps
+    # name/spelling differences and identity decisions in the
+    # existing confirmed-mapping workflow.
+    #
+    # A PSP reference_id match remains the recovery path for
+    # an already-identified PSP-created Square customer.
+    # -----------------------------------------------------
+    if (
+        match_result["status"] == "matched"
+        and match_result.get("match_method")
+        in {"email", "phone", "email_phone"}
+    ):
+        candidate = (
+            match_result.get("customer")
+            or {}
+        )
+
+        square_customer_id = str(
+            candidate.get("id") or ""
+        ).strip()
+
+        if not square_customer_id:
+            raise SquareClientSyncError(
+                "Matched Square customer did not return an ID."
+            )
+
+        return {
+            "status": "needs_attention",
+            "reason": (
+                "existing_square_customer_contact_match_"
+                "requires_confirmation"
+            ),
+            "client_id": client_id,
+            "spa_id": spa_id,
+            "business_unit_id": business_unit_id,
+            "environment": environment,
+            "match_method": (
+                match_result.get("match_method")
+            ),
+            "square_customer_id": (
+                square_customer_id
+            ),
+            "message": (
+                "An existing Square customer matches this PSP "
+                "client by email and/or phone. Review and confirm "
+                "the identity before linking the records."
+            ),
+            "candidate_count": 1,
+            "candidate_ids": [
+                square_customer_id
+            ],
+            "candidate": {
+                "square_customer_id": (
+                    square_customer_id
+                ),
+                "given_name": str(
+                    candidate.get("given_name")
+                    or ""
+                ).strip(),
+                "family_name": str(
+                    candidate.get("family_name")
+                    or ""
+                ).strip(),
+                "email_address": str(
+                    candidate.get("email_address")
+                    or ""
+                ).strip(),
+                "phone_number": str(
+                    candidate.get("phone_number")
+                    or ""
+                ).strip(),
+            },
+            "psp_client": {
+                "given_name": profile["given_name"],
+                "family_name": profile["family_name"],
+                "email_address": profile["email"],
+                "phone_number": profile["phone"],
+            },
+        }
+
     if (
         match_result["status"]
         == "matched"

@@ -2,6 +2,7 @@ from copy import deepcopy
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from difflib import SequenceMatcher
 import hashlib
+import json
 
 from psycopg2 import IntegrityError
 from psycopg2.extras import RealDictCursor
@@ -648,6 +649,7 @@ def _update_idempotency_key(
     inventory_product_id,
     parent_version,
     profile,
+    payload,
 ):
     raw = "|".join([
         str(square_connection_id),
@@ -658,6 +660,14 @@ def _update_idempotency_key(
         str(profile["price_cents"]),
         str(profile["is_active"]),
     ])
+
+    # Include the complete request body so the same Square
+    # idempotency key is reused only for the same exact update.
+    raw += "|" + json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
 
     digest = hashlib.sha256(
         raw.encode("utf-8")
@@ -1040,6 +1050,7 @@ def sync_inventory_product_to_square(
                         inventory_product_id,
                         parent_version,
                         profile,
+                        updated_parent,
                     )
                 ),
                 access_token=access_token,

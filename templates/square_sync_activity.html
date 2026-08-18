@@ -462,6 +462,22 @@ Square Sync Activity | Peach Suite Pro
 
                             <td>
                                 {% if
+                                    activity.entity_type == 'client'
+                                    and activity.sync_status == 'needs_attention'
+                                    and activity.reason == 'existing_square_customer_contact_match_requires_confirmation'
+                                    and activity.square_object_id
+                                %}
+                                    <a
+                                        href="{{ url_for(
+                                            'square_sync_activity_review_client',
+                                            activity_id=activity.square_sync_activity_id
+                                        ) }}"
+                                        class="tool-pill tool-pill-small"
+                                    >
+                                        Review Client Match
+                                    </a>
+
+                                {% elif
                                     activity.can_retry
                                     and square_retry_enabled
                                 %}

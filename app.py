@@ -22189,6 +22189,355 @@ def square_sync_activity():
 
 ##############################################
 #
+#   SQUARE SYNC ACTIVITY - REVIEW CLIENT MATCH
+#
+###############################################
+
+
+@app.route(
+    "/payment-integrations/square/sync-activity/"
+    "<int:activity_id>/review-client",
+    methods=["GET", "POST"],
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_view_business_management"
+)
+def square_sync_activity_review_client(activity_id):
+    import hmac
+    import secrets
+
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
+
+    if request.method == "POST":
+        submitted_token = request.form.get(
+            "square_sync_client_review_token",
+            "",
+        )
+
+        session_token = session.get(
+            "square_sync_client_review_token",
+            "",
+        )
+
+        if (
+            not submitted_token
+            or not session_token
+            or not hmac.compare_digest(
+                submitted_token,
+                session_token,
+            )
+        ):
+            abort(400)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                square_connection_id,
+                environment,
+                entity_id,
+                square_object_id
+            FROM square_sync_activity
+            WHERE square_sync_activity_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND entity_type = 'client'
+              AND sync_status = 'needs_attention'
+              AND reason = (
+                    'existing_square_customer_contact_match_'
+                    'requires_confirmation'
+              )
+            LIMIT 1
+        """, (
+            activity_id,
+            spa_id,
+            business_unit_id,
+        ))
+
+        activity_row = cur.fetchone()
+
+        if not activity_row:
+            abort(404)
+
+        (
+            square_connection_id,
+            environment,
+            client_id,
+            square_customer_id,
+        ) = activity_row
+
+        square_customer_id = str(
+            square_customer_id or ""
+        ).strip()
+
+        if not square_customer_id:
+            abort(409)
+
+        cur.execute("""
+            SELECT
+                first_name,
+                last_name,
+                email,
+                phone
+            FROM clients
+            WHERE client_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            LIMIT 1
+        """, (
+            client_id,
+            spa_id,
+            business_unit_id,
+        ))
+
+        client_row = cur.fetchone()
+
+        if not client_row:
+            abort(404)
+
+        client = {
+            "client_id": client_id,
+            "first_name": client_row[0] or "",
+            "last_name": client_row[1] or "",
+            "email": client_row[2] or "",
+            "phone": client_row[3] or "",
+        }
+
+    finally:
+        cur.close()
+        conn.close()
+
+    try:
+        access_token = (
+            square_sync_auth
+            .resolve_square_sync_access_token(
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                environment=environment,
+            )
+        )
+
+        square_customer = (
+            square_service.retrieve_customer(
+                square_customer_id,
+                access_token=access_token,
+                environment=environment,
+            )
+        )
+
+    except (
+        square_sync_auth.SquareSyncAuthError,
+        square_service.SquareServiceError,
+    ) as exc:
+        flash(
+            f"Square customer could not be reviewed: {exc}",
+            "error",
+        )
+        return redirect(
+            url_for("square_sync_activity")
+        )
+
+    canonical_square_customer_id = str(
+        square_customer.get("id")
+        or square_customer_id
+    ).strip()
+
+    square_first_name = str(
+        square_customer.get("given_name") or ""
+    ).strip()
+
+    square_last_name = str(
+        square_customer.get("family_name") or ""
+    ).strip()
+
+    psp_first_name = str(
+        client["first_name"] or ""
+    ).strip()
+
+    psp_last_name = str(
+        client["last_name"] or ""
+    ).strip()
+
+    def normalize_review_name(value):
+        return " ".join(
+            str(value or "")
+            .strip()
+            .lower()
+            .split()
+        )
+
+    name_mismatch = (
+        normalize_review_name(square_first_name)
+        != normalize_review_name(psp_first_name)
+        or normalize_review_name(square_last_name)
+        != normalize_review_name(psp_last_name)
+    )
+
+    if request.method == "POST":
+        name_action = (
+            request.form.get(
+                "name_action",
+                "keep_psp",
+            )
+            .strip()
+            .lower()
+        )
+
+        if name_action not in {
+            "keep_psp",
+            "use_square",
+        }:
+            abort(400)
+
+        update_client_name = (
+            name_action == "use_square"
+            and name_mismatch
+        )
+
+        if (
+            update_client_name
+            and (
+                not square_first_name
+                or not square_last_name
+            )
+        ):
+            flash(
+                "Square does not currently have a complete "
+                "first and last name. Keep the PSP name or "
+                "review the Square customer.",
+                "warning",
+            )
+            return redirect(
+                url_for(
+                    "square_sync_activity_review_client",
+                    activity_id=activity_id,
+                )
+            )
+
+        try:
+            confirm_square_customer_mapping(
+                square_connection_id=(
+                    square_connection_id
+                ),
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                environment=environment,
+                square_customer_id=(
+                    canonical_square_customer_id
+                ),
+                client_id=client_id,
+                match_method="manual_confirmed",
+                actor_user_id=session.get("user_id"),
+                update_client_name=(
+                    update_client_name
+                ),
+                client_first_name=(
+                    square_first_name
+                    if update_client_name
+                    else None
+                ),
+                client_last_name=(
+                    square_last_name
+                    if update_client_name
+                    else None
+                ),
+            )
+
+        except SquareClientSyncError as exc:
+            flash(
+                f"Square client match was not saved: {exc}",
+                "error",
+            )
+            return redirect(
+                url_for(
+                    "square_sync_activity_review_client",
+                    activity_id=activity_id,
+                )
+            )
+
+        activity_conn = get_db_connection()
+        activity_cur = activity_conn.cursor()
+
+        try:
+            activity_cur.execute("""
+                UPDATE square_sync_activity
+                SET
+                    sync_status = 'successful',
+                    raw_status = 'synced',
+                    result_action = 'confirmed',
+                    reason = 'client_match_confirmed',
+                    message = (
+                        'Square customer identity was reviewed '
+                        'and confirmed. No Square customer update '
+                        'was performed.'
+                    ),
+                    completed_at = CURRENT_TIMESTAMP
+                WHERE square_sync_activity_id = %s
+                  AND spa_id = %s
+                  AND business_unit_id = %s
+                  AND entity_type = 'client'
+            """, (
+                activity_id,
+                spa_id,
+                business_unit_id,
+            ))
+
+            activity_conn.commit()
+
+        except Exception:
+            activity_conn.rollback()
+            raise
+
+        finally:
+            activity_cur.close()
+            activity_conn.close()
+
+        flash(
+            "Square client match confirmed.",
+            "success",
+        )
+
+        return redirect(
+            url_for(
+                "square_sync_activity",
+                entity="client",
+                environment=environment,
+            )
+        )
+
+    review_token = session.get(
+        "square_sync_client_review_token"
+    )
+
+    if not review_token:
+        review_token = secrets.token_urlsafe(32)
+        session[
+            "square_sync_client_review_token"
+        ] = review_token
+
+    return render_template(
+        "square_sync_client_review.html",
+        activity_id=activity_id,
+        environment=environment,
+        client=client,
+        square_customer=square_customer,
+        name_mismatch=name_mismatch,
+        square_sync_client_review_token=(
+            review_token
+        ),
+    )
+
+
+##############################################
+#
 #   SQUARE SYNC ACTIVITY - TRY AGAIN
 #
 ###############################################
