@@ -1268,6 +1268,150 @@
 
 
         {% if (
+            website_settings.show_services_two_section
+            and services_two
+        ) %}
+
+            <section
+                id="services-two"
+                class="section services-section"
+            >
+                <div class="section-inner">
+
+                    <div class="section-heading">
+
+                        <h2>
+                            {{ website_settings.services_two_heading }}
+                        </h2>
+
+                        {% if website_settings.services_two_description %}
+                            <p>
+                                {{ website_settings.services_two_description }}
+                            </p>
+                        {% endif %}
+
+                    </div>
+
+
+                    <div class="services-grid">
+
+                        {% for service in services_two %}
+
+                            <article class="service-card">
+
+                                <div class="service-number">
+                                    {{ loop.index }}
+                                </div>
+
+                                <h3>
+                                    {{ service.name }}
+                                </h3>
+
+                                <p>
+                                    {{ service.description }}
+                                </p>
+
+                                <span class="service-duration">
+                                    {{ service.duration }}
+                                </span>
+
+                            </article>
+
+                        {% endfor %}
+
+                    </div>
+
+
+                    {% if public_booking_enabled and public_booking_slug %}
+                        <div class="services-action">
+                            <a
+                                href="{{ url_for('public_booking', public_booking_slug=public_booking_slug) }}"
+                                class="button button-primary"
+                            >
+                                Book Now
+                            </a>
+                        </div>
+                    {% endif %}
+
+                </div>
+            </section>
+
+        {% endif %}
+
+
+        {% if (
+            website_settings.show_services_three_section
+            and services_three
+        ) %}
+
+            <section
+                id="services-three"
+                class="section services-section"
+            >
+                <div class="section-inner">
+
+                    <div class="section-heading">
+
+                        <h2>
+                            {{ website_settings.services_three_heading }}
+                        </h2>
+
+                        {% if website_settings.services_three_description %}
+                            <p>
+                                {{ website_settings.services_three_description }}
+                            </p>
+                        {% endif %}
+
+                    </div>
+
+
+                    <div class="services-grid">
+
+                        {% for service in services_three %}
+
+                            <article class="service-card">
+
+                                <div class="service-number">
+                                    {{ loop.index }}
+                                </div>
+
+                                <h3>
+                                    {{ service.name }}
+                                </h3>
+
+                                <p>
+                                    {{ service.description }}
+                                </p>
+
+                                <span class="service-duration">
+                                    {{ service.duration }}
+                                </span>
+
+                            </article>
+
+                        {% endfor %}
+
+                    </div>
+
+
+                    {% if public_booking_enabled and public_booking_slug %}
+                        <div class="services-action">
+                            <a
+                                href="{{ url_for('public_booking', public_booking_slug=public_booking_slug) }}"
+                                class="button button-primary"
+                            >
+                                Book Now
+                            </a>
+                        </div>
+                    {% endif %}
+
+                </div>
+            </section>
+
+        {% endif %}
+
+
+        {% if (
             website_settings.show_additional_menu_section
             and additional_menu_items
         ) %}

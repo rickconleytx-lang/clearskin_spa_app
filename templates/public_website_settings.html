@@ -937,6 +937,168 @@
 
             <section class="website-settings-section">
 
+                <h2>Services Two Section</h2>
+
+                <p>
+                    Add an optional second group of bookable services.
+                    The heading you enter here will also be used as
+                    this group's heading in PeachBook.
+                </p>
+
+
+                <div class="website-settings-field">
+
+                    <div style="
+                        display:flex;
+                        align-items:flex-start;
+                        gap:10px;
+                    ">
+
+                        <input
+                            type="checkbox"
+                            id="show_services_two_section"
+                            name="show_services_two_section"
+                            {% if settings.show_services_two_section %}
+                                checked
+                            {% endif %}
+                        >
+
+                        <label for="show_services_two_section">
+                            <strong>
+                                Show Services Two Section on Website
+                            </strong>
+                        </label>
+
+                    </div>
+
+                </div>
+
+
+                <div class="website-settings-field">
+
+                    <label for="services_two_heading">
+                        Services Two Heading
+                    </label>
+
+                    <input
+                        type="text"
+                        id="services_two_heading"
+                        name="services_two_heading"
+                        maxlength="180"
+                        value="{{
+                            settings.services_two_heading
+                            or ''
+                        }}"
+                    >
+
+                </div>
+
+
+                <div class="website-settings-field">
+
+                    <label for="services_two_description">
+                        Services Two Description
+                    </label>
+
+                    <textarea
+                        id="services_two_description"
+                        name="services_two_description"
+                        maxlength="1000"
+                    >{{ settings.services_two_description or '' }}</textarea>
+
+                </div>
+
+                <span class="website-settings-help">
+                    Assign services to this section from
+                    Manage Website Services.
+                </span>
+
+            </section>
+
+
+            <section class="website-settings-section">
+
+                <h2>Services Three Section</h2>
+
+                <p>
+                    Add an optional third group of bookable services.
+                    The heading you enter here will also be used as
+                    this group's heading in PeachBook.
+                </p>
+
+
+                <div class="website-settings-field">
+
+                    <div style="
+                        display:flex;
+                        align-items:flex-start;
+                        gap:10px;
+                    ">
+
+                        <input
+                            type="checkbox"
+                            id="show_services_three_section"
+                            name="show_services_three_section"
+                            {% if settings.show_services_three_section %}
+                                checked
+                            {% endif %}
+                        >
+
+                        <label for="show_services_three_section">
+                            <strong>
+                                Show Services Three Section on Website
+                            </strong>
+                        </label>
+
+                    </div>
+
+                </div>
+
+
+                <div class="website-settings-field">
+
+                    <label for="services_three_heading">
+                        Services Three Heading
+                    </label>
+
+                    <input
+                        type="text"
+                        id="services_three_heading"
+                        name="services_three_heading"
+                        maxlength="180"
+                        value="{{
+                            settings.services_three_heading
+                            or ''
+                        }}"
+                    >
+
+                </div>
+
+
+                <div class="website-settings-field">
+
+                    <label for="services_three_description">
+                        Services Three Description
+                    </label>
+
+                    <textarea
+                        id="services_three_description"
+                        name="services_three_description"
+                        maxlength="1000"
+                    >{{ settings.services_three_description or '' }}</textarea>
+
+                </div>
+
+                <span class="website-settings-help">
+                    Assign services to this section from
+                    Manage Website Services.
+                </span>
+
+            </section>
+
+
+            <section class="website-settings-section">
+
                 <h2>Additional Add-ons &amp; Menu</h2>
 
                 <p>

@@ -29,7 +29,8 @@ Edit Website Service | Peach Suite Pro
     }
 
     .website-service-field textarea,
-    .website-service-field input[type="number"] {
+    .website-service-field input[type="number"],
+    .website-service-field select {
         width: 100%;
         max-width: 620px;
     }
@@ -143,6 +144,16 @@ Edit Website Service | Peach Suite Pro
             )
         %}
 
+        {% set submitted_section =
+            submitted.get('website_section')
+            if submitted
+            else (
+                service[7]
+                if service[7]
+                else 'services'
+            )
+        %}
+
 
         <div class="website-service-field">
 
@@ -185,6 +196,52 @@ Edit Website Service | Peach Suite Pro
             <p class="website-service-help">
                 Lower numbers appear first. Leave blank to
                 sort the service by name.
+            </p>
+
+        </div>
+
+
+        <div class="website-service-field">
+
+            <label for="website_section">
+                Website Section
+            </label>
+
+            <select
+                id="website_section"
+                name="website_section"
+            >
+                <option
+                    value="services"
+                    {% if submitted_section == 'services' %}
+                        selected
+                    {% endif %}
+                >
+                    Services
+                </option>
+
+                <option
+                    value="services_two"
+                    {% if submitted_section == 'services_two' %}
+                        selected
+                    {% endif %}
+                >
+                    {{ services_two_label }}
+                </option>
+
+                <option
+                    value="services_three"
+                    {% if submitted_section == 'services_three' %}
+                        selected
+                    {% endif %}
+                >
+                    {{ services_three_label }}
+                </option>
+            </select>
+
+            <p class="website-service-help">
+                Choose which public website and PeachBook
+                service group this service belongs to.
             </p>
 
         </div>

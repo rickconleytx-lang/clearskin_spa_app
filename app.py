@@ -1347,6 +1347,18 @@ PUBLIC_WEBSITE_DEFAULTS = {
         "Explore the services currently offered by our business."
     ),
 
+    "show_services_two_section": False,
+    "services_two_heading": (
+        "Additional Services"
+    ),
+    "services_two_description": "",
+
+    "show_services_three_section": False,
+    "services_three_heading": (
+        "More Services"
+    ),
+    "services_three_description": "",
+
     "booking_heading": (
         "Ready to schedule?"
     ),
@@ -1634,6 +1646,14 @@ def _provision_new_business_workspace_foundation(
             services_heading,
             services_description,
 
+            show_services_two_section,
+            services_two_heading,
+            services_two_description,
+
+            show_services_three_section,
+            services_three_heading,
+            services_three_description,
+
             booking_heading,
             booking_description,
 
@@ -1673,6 +1693,14 @@ def _provision_new_business_workspace_foundation(
 
             %s,
             %s,
+            %s,
+
+            %s,
+            %s,
+            %s,
+
+            %s,
+            %s,
 
             %s,
             %s,
@@ -1707,6 +1735,14 @@ def _provision_new_business_workspace_foundation(
 
         defaults["services_heading"],
         defaults["services_description"],
+
+        defaults["show_services_two_section"],
+        defaults["services_two_heading"],
+        defaults["services_two_description"],
+
+        defaults["show_services_three_section"],
+        defaults["services_three_heading"],
+        defaults["services_three_description"],
 
         defaults["booking_heading"],
         defaults["booking_description"],
@@ -2030,6 +2066,8 @@ def _load_public_website_content(tenant):
     )
 
     services = []
+    services_two = []
+    services_three = []
     additional_menu_items = []
     website_links = []
 
@@ -2070,7 +2108,15 @@ def _load_public_website_content(tenant):
                 include_marketing_sms_in_10dlc_application,
 
                 appointment_contact_email,
-                appointment_contact_phone
+                appointment_contact_phone,
+
+                show_services_two_section,
+                services_two_heading,
+                services_two_description,
+
+                show_services_three_section,
+                services_three_heading,
+                services_three_description
 
             FROM public_website_settings
 
@@ -2211,13 +2257,55 @@ def _load_public_website_content(tenant):
 
                 "appointment_contact_phone":
                     row[23] or "",
+
+                "show_services_two_section":
+                    bool(row[24]),
+
+                "services_two_heading":
+                    row[25]
+                    if row[25] is not None
+                    else PUBLIC_WEBSITE_DEFAULTS.get(
+                        "services_two_heading",
+                        "",
+                    ),
+
+                "services_two_description":
+                    row[26]
+                    if row[26] is not None
+                    else PUBLIC_WEBSITE_DEFAULTS.get(
+                        "services_two_description",
+                        "",
+                    ),
+
+                "show_services_three_section":
+                    bool(row[27]),
+
+                "services_three_heading":
+                    row[28]
+                    if row[28] is not None
+                    else PUBLIC_WEBSITE_DEFAULTS.get(
+                        "services_three_heading",
+                        "",
+                    ),
+
+                "services_three_description":
+                    row[29]
+                    if row[29] is not None
+                    else PUBLIC_WEBSITE_DEFAULTS.get(
+                        "services_three_description",
+                        "",
+                    ),
             })
 
         cur.execute("""
             SELECT
                 snt.service_name,
                 pws.public_description,
-                snt.default_duration_minutes
+                snt.default_duration_minutes,
+                COALESCE(
+                    pws.website_section,
+                    'services'
+                ) AS website_section
 
             FROM public_website_services pws
 
@@ -2263,7 +2351,7 @@ def _load_public_website_content(tenant):
         for row in cur.fetchall():
             duration_minutes = row[2]
 
-            services.append({
+            service = {
                 "name": row[0],
 
                 "description": (
@@ -2279,7 +2367,20 @@ def _load_public_website_content(tenant):
                     if duration_minutes is not None
                     else "Contact for duration"
                 ),
-            })
+            }
+
+            website_section = str(
+                row[3] or "services"
+            ).strip().lower()
+
+            if website_section == "services_two":
+                services_two.append(service)
+
+            elif website_section == "services_three":
+                services_three.append(service)
+
+            else:
+                services.append(service)
 
         cur.execute("""
             SELECT
@@ -2340,6 +2441,12 @@ def _load_public_website_content(tenant):
             "services":
                 services,
 
+            "services_two":
+                services_two,
+
+            "services_three":
+                services_three,
+
             "additional_menu_items":
                 additional_menu_items,
 
@@ -2386,6 +2493,12 @@ def _render_public_tenant_home(tenant):
 
         services=
             content["services"],
+
+        services_two=
+            content["services_two"],
+
+        services_three=
+            content["services_three"],
 
         additional_menu_items=
             content[
@@ -10960,6 +11073,12 @@ def public_website_settings():
                         about_description,
                         services_heading,
                         services_description,
+                        show_services_two_section,
+                        services_two_heading,
+                        services_two_description,
+                        show_services_three_section,
+                        services_three_heading,
+                        services_three_description,
                         show_additional_menu_section,
                         additional_menu_heading,
                         additional_menu_description,
@@ -10974,7 +11093,9 @@ def public_website_settings():
                         %s, %s, %s, %s,
                         %s, %s, %s, %s,
                         %s, %s, %s, %s,
-                        %s, %s
+                        %s, %s,
+                        %s, %s, %s,
+                        %s, %s, %s
                     )
                     ON CONFLICT (
                         spa_id,
@@ -11007,6 +11128,24 @@ def public_website_settings():
                         ),
                         services_description = (
                             EXCLUDED.services_description
+                        ),
+                        show_services_two_section = (
+                            EXCLUDED.show_services_two_section
+                        ),
+                        services_two_heading = (
+                            EXCLUDED.services_two_heading
+                        ),
+                        services_two_description = (
+                            EXCLUDED.services_two_description
+                        ),
+                        show_services_three_section = (
+                            EXCLUDED.show_services_three_section
+                        ),
+                        services_three_heading = (
+                            EXCLUDED.services_three_heading
+                        ),
+                        services_three_description = (
+                            EXCLUDED.services_three_description
                         ),
                         show_additional_menu_section = (
                             EXCLUDED.show_additional_menu_section
@@ -11046,6 +11185,12 @@ def public_website_settings():
                     defaults["about_description"],
                     defaults["services_heading"],
                     defaults["services_description"],
+                    defaults["show_services_two_section"],
+                    defaults["services_two_heading"],
+                    defaults["services_two_description"],
+                    defaults["show_services_three_section"],
+                    defaults["services_three_heading"],
+                    defaults["services_three_description"],
                     defaults[
                         "show_additional_menu_section"
                     ],
@@ -11183,6 +11328,44 @@ def public_website_settings():
                     "services_description": (
                         request.form.get(
                             "services_description"
+                        )
+                        or ""
+                    ).strip(),
+
+                    "show_services_two_section": (
+                        "show_services_two_section"
+                        in request.form
+                    ),
+
+                    "services_two_heading": (
+                        request.form.get(
+                            "services_two_heading"
+                        )
+                        or ""
+                    ).strip(),
+
+                    "services_two_description": (
+                        request.form.get(
+                            "services_two_description"
+                        )
+                        or ""
+                    ).strip(),
+
+                    "show_services_three_section": (
+                        "show_services_three_section"
+                        in request.form
+                    ),
+
+                    "services_three_heading": (
+                        request.form.get(
+                            "services_three_heading"
+                        )
+                        or ""
+                    ).strip(),
+
+                    "services_three_description": (
+                        request.form.get(
+                            "services_three_description"
                         )
                         or ""
                     ).strip(),
@@ -11345,6 +11528,87 @@ def public_website_settings():
                             )
                         )
 
+
+
+                service_section_rules = (
+                    (
+                        "show_services_two_section",
+                        "services_two_heading",
+                        "services_two_description",
+                        "Services Two",
+                    ),
+                    (
+                        "show_services_three_section",
+                        "services_three_heading",
+                        "services_three_description",
+                        "Services Three",
+                    ),
+                )
+
+                for (
+                    show_field,
+                    heading_field,
+                    description_field,
+                    section_label,
+                ) in service_section_rules:
+                    heading_value = settings[
+                        heading_field
+                    ]
+
+                    description_value = settings[
+                        description_field
+                    ]
+
+                    if len(heading_value) > 180:
+                        flash(
+                            (
+                                f"{section_label} Heading must "
+                                "be 180 characters or fewer."
+                            ),
+                            "error"
+                        )
+
+                        return render_template(
+                            "public_website_settings.html",
+                            settings=settings,
+                            public_website_url=
+                                public_website_url
+                        )
+
+                    if len(description_value) > 1000:
+                        flash(
+                            (
+                                f"{section_label} Description "
+                                "must be 1000 characters or fewer."
+                            ),
+                            "error"
+                        )
+
+                        return render_template(
+                            "public_website_settings.html",
+                            settings=settings,
+                            public_website_url=
+                                public_website_url
+                        )
+
+                    if (
+                        settings[show_field]
+                        and not heading_value
+                    ):
+                        flash(
+                            (
+                                f"{section_label} Heading is "
+                                "required when the section is shown."
+                            ),
+                            "error"
+                        )
+
+                        return render_template(
+                            "public_website_settings.html",
+                            settings=settings,
+                            public_website_url=
+                                public_website_url
+                        )
 
 
                 promotion_error = None
@@ -11606,6 +11870,12 @@ def public_website_settings():
                     about_image_alt,
                     services_heading,
                     services_description,
+                    show_services_two_section,
+                    services_two_heading,
+                    services_two_description,
+                    show_services_three_section,
+                    services_three_heading,
+                    services_three_description,
                     show_additional_menu_section,
                     additional_menu_heading,
                     additional_menu_description,
@@ -11623,7 +11893,9 @@ def public_website_settings():
                     %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s, %s,
-                    %s, %s
+                    %s, %s,
+                    %s, %s, %s,
+                    %s, %s, %s
                 )
                 ON CONFLICT (
                     spa_id,
@@ -11658,6 +11930,24 @@ def public_website_settings():
                     ),
                     services_description = (
                         EXCLUDED.services_description
+                    ),
+                    show_services_two_section = (
+                        EXCLUDED.show_services_two_section
+                    ),
+                    services_two_heading = (
+                        EXCLUDED.services_two_heading
+                    ),
+                    services_two_description = (
+                        EXCLUDED.services_two_description
+                    ),
+                    show_services_three_section = (
+                        EXCLUDED.show_services_three_section
+                    ),
+                    services_three_heading = (
+                        EXCLUDED.services_three_heading
+                    ),
+                    services_three_description = (
+                        EXCLUDED.services_three_description
                     ),
                     show_additional_menu_section = (
                         EXCLUDED.show_additional_menu_section
@@ -11705,6 +11995,12 @@ def public_website_settings():
                 settings["about_image_alt"] or None,
                 settings["services_heading"],
                 settings["services_description"],
+                settings["show_services_two_section"],
+                settings["services_two_heading"],
+                settings["services_two_description"],
+                settings["show_services_three_section"],
+                settings["services_three_heading"],
+                settings["services_three_description"],
                 settings[
                     "show_additional_menu_section"
                 ],
@@ -11758,7 +12054,13 @@ def public_website_settings():
                 appointment_contact_email,
                 appointment_contact_phone,
                 website_color_scheme,
-                include_marketing_sms_in_10dlc_application
+                include_marketing_sms_in_10dlc_application,
+                show_services_two_section,
+                services_two_heading,
+                services_two_description,
+                show_services_three_section,
+                services_three_heading,
+                services_three_description
             FROM public_website_settings
             WHERE spa_id = %s
               AND business_unit_id = %s
@@ -11802,6 +12104,22 @@ def public_website_settings():
                     row[22] or "peach_cream",
                 "include_marketing_sms_in_10dlc_application":
                     bool(row[23]),
+                "show_services_two_section":
+                    bool(row[24]),
+                "services_two_heading":
+                    row[25] or PUBLIC_WEBSITE_DEFAULTS[
+                        "services_two_heading"
+                    ],
+                "services_two_description":
+                    row[26] or "",
+                "show_services_three_section":
+                    bool(row[27]),
+                "services_three_heading":
+                    row[28] or PUBLIC_WEBSITE_DEFAULTS[
+                        "services_three_heading"
+                    ],
+                "services_three_description":
+                    row[29] or "",
             }
 
         else:
@@ -13177,7 +13495,11 @@ def public_website_services():
                 pws.show_on_public_website,
                 FALSE
             ) AS show_on_public_website,
-            pws.website_sort_order
+            pws.website_sort_order,
+            COALESCE(
+                pws.website_section,
+                'services'
+            ) AS website_section
 
         FROM service_name_types snt
 
@@ -13219,6 +13541,15 @@ def public_website_services():
                 pws.show_on_public_website,
                 FALSE
             ) DESC,
+            CASE COALESCE(
+                pws.website_section,
+                'services'
+            )
+                WHEN 'services' THEN 1
+                WHEN 'services_two' THEN 2
+                WHEN 'services_three' THEN 3
+                ELSE 4
+            END,
             pws.website_sort_order NULLS LAST,
             snt.service_name,
             snt.service_type_id
@@ -13335,7 +13666,11 @@ def edit_public_website_service(
                     pws.show_on_public_website,
                     FALSE
                 ),
-                pws.website_sort_order
+                pws.website_sort_order,
+                COALESCE(
+                    pws.website_section,
+                    'services'
+                ) AS website_section
 
             FROM service_name_types snt
 
@@ -13371,6 +13706,48 @@ def edit_public_website_service(
                 )
             )
 
+        cur.execute("""
+            SELECT
+                services_two_heading,
+                services_three_heading
+
+            FROM public_website_settings
+
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+
+            LIMIT 1
+        """, (
+            spa_id,
+            business_unit_id,
+        ))
+
+        section_heading_row = cur.fetchone()
+
+        services_two_label = (
+            section_heading_row[0]
+            if (
+                section_heading_row
+                and section_heading_row[0]
+            )
+            else PUBLIC_WEBSITE_DEFAULTS.get(
+                "services_two_heading",
+                "Services Two",
+            )
+        )
+
+        services_three_label = (
+            section_heading_row[1]
+            if (
+                section_heading_row
+                and section_heading_row[1]
+            )
+            else PUBLIC_WEBSITE_DEFAULTS.get(
+                "services_three_heading",
+                "Services Three",
+            )
+        )
+
         if request.method == "POST":
             public_description = (
                 request.form.get(
@@ -13391,6 +13768,33 @@ def edit_public_website_service(
                 or ""
             ).strip()
 
+            website_section = (
+                request.form.get(
+                    "website_section"
+                )
+                or "services"
+            ).strip().lower()
+
+            allowed_website_sections = {
+                "services",
+                "services_two",
+                "services_three",
+            }
+
+            if website_section not in allowed_website_sections:
+                flash(
+                    "Select a valid Website Section.",
+                    "error"
+                )
+
+                return render_template(
+                    "public_website_service_form.html",
+                    service=service,
+                    submitted=request.form,
+                    services_two_label=services_two_label,
+                    services_three_label=services_three_label
+                )
+
             if len(public_description) > 500:
                 flash(
                     (
@@ -13403,7 +13807,9 @@ def edit_public_website_service(
                 return render_template(
                     "public_website_service_form.html",
                     service=service,
-                    submitted=request.form
+                    submitted=request.form,
+                    services_two_label=services_two_label,
+                    services_three_label=services_three_label
                 )
 
             website_sort_order = None
@@ -13428,7 +13834,9 @@ def edit_public_website_service(
                     return render_template(
                         "public_website_service_form.html",
                         service=service,
-                        submitted=request.form
+                        submitted=request.form,
+                    services_two_label=services_two_label,
+                    services_three_label=services_three_label
                     )
 
                 if not 1 <= website_sort_order <= 999:
@@ -13443,7 +13851,9 @@ def edit_public_website_service(
                     return render_template(
                         "public_website_service_form.html",
                         service=service,
-                        submitted=request.form
+                        submitted=request.form,
+                    services_two_label=services_two_label,
+                    services_three_label=services_three_label
                     )
 
             cur.execute("""
@@ -13453,9 +13863,11 @@ def edit_public_website_service(
                     service_type_id,
                     public_description,
                     show_on_public_website,
-                    website_sort_order
+                    website_sort_order,
+                    website_section
                 )
                 VALUES (
+                    %s,
                     %s,
                     %s,
                     %s,
@@ -13477,6 +13889,8 @@ def edit_public_website_service(
                         EXCLUDED.show_on_public_website,
                     website_sort_order =
                         EXCLUDED.website_sort_order,
+                    website_section =
+                        EXCLUDED.website_section,
                     updated_at = NOW()
             """, (
                 spa_id,
@@ -13485,6 +13899,7 @@ def edit_public_website_service(
                 public_description or None,
                 show_on_public_website,
                 website_sort_order,
+                website_section,
             ))
 
             conn.commit()
@@ -13503,7 +13918,9 @@ def edit_public_website_service(
         return render_template(
             "public_website_service_form.html",
             service=service,
-            submitted=None
+            submitted=None,
+            services_two_label=services_two_label,
+            services_three_label=services_three_label
         )
 
     finally:
@@ -65754,10 +66171,29 @@ def _render_public_booking_page(
         website_color_scheme = "peach_cream"
         include_marketing_sms_consent = False
 
+        show_services_two_section = False
+        services_two_heading = PUBLIC_WEBSITE_DEFAULTS.get(
+            "services_two_heading",
+            "Services Two",
+        )
+
+        show_services_three_section = False
+        services_three_heading = PUBLIC_WEBSITE_DEFAULTS.get(
+            "services_three_heading",
+            "Services Three",
+        )
+
         cur.execute("""
             SELECT
                 website_color_scheme,
-                include_marketing_sms_in_10dlc_application
+                include_marketing_sms_in_10dlc_application,
+
+                show_services_two_section,
+                services_two_heading,
+
+                show_services_three_section,
+                services_three_heading
+
             FROM public_website_settings
             WHERE spa_id = %s
               AND business_unit_id = %s
@@ -65776,6 +66212,24 @@ def _render_public_booking_page(
 
             include_marketing_sms_consent = bool(
                 website_setting_row[1]
+            )
+
+            show_services_two_section = bool(
+                website_setting_row[2]
+            )
+
+            services_two_heading = (
+                website_setting_row[3]
+                or services_two_heading
+            )
+
+            show_services_three_section = bool(
+                website_setting_row[4]
+            )
+
+            services_three_heading = (
+                website_setting_row[5]
+                or services_three_heading
             )
 
         organization_name = ""
@@ -65862,6 +66316,9 @@ def _render_public_booking_page(
         ).isoformat()
 
         services = []
+        services_primary = []
+        services_two = []
+        services_three = []
 
         if public_booking_enabled or preview_mode:
             service_sql = """
@@ -65893,7 +66350,14 @@ def _render_public_booking_page(
                             pst.is_publicly_bookable,
                             FALSE
                         )
-                    ) AS publicly_bookable
+                    ) AS publicly_bookable,
+
+                    COALESCE(
+                        pws.website_section,
+                        'services'
+                    ) AS website_section,
+
+                    pws.website_sort_order
 
                 FROM provider_service_types pst
 
@@ -65935,9 +66399,21 @@ def _render_public_booking_page(
             service_sql += """
                 GROUP BY
                     snt.service_type_id,
-                    snt.service_name
+                    snt.service_name,
+                    pws.website_section,
+                    pws.website_sort_order
 
                 ORDER BY
+                    CASE COALESCE(
+                        pws.website_section,
+                        'services'
+                    )
+                        WHEN 'services' THEN 1
+                        WHEN 'services_two' THEN 2
+                        WHEN 'services_three' THEN 3
+                        ELSE 4
+                    END,
+                    pws.website_sort_order NULLS LAST,
                     snt.service_name
             """
 
@@ -65956,7 +66432,23 @@ def _render_public_booking_page(
                         f"${service_price:,.2f}"
                     )
 
-                services.append({
+                website_section = str(
+                    row[6] or "services"
+                ).strip().lower()
+
+                if (
+                    website_section == "services_two"
+                    and not show_services_two_section
+                ):
+                    continue
+
+                if (
+                    website_section == "services_three"
+                    and not show_services_three_section
+                ):
+                    continue
+
+                service = {
                     "service_type_id": row[0],
                     "service_name": row[1],
 
@@ -65970,8 +66462,25 @@ def _render_public_booking_page(
                         int(row[4] or 0),
 
                     "publicly_bookable":
-                        bool(row[5])
-                })
+                        bool(row[5]),
+
+                    "website_section":
+                        website_section,
+
+                    "website_sort_order":
+                        row[7],
+                }
+
+                services.append(service)
+
+                if website_section == "services_two":
+                    services_two.append(service)
+
+                elif website_section == "services_three":
+                    services_three.append(service)
+
+                else:
+                    services_primary.append(service)
 
         selected_service_id = (
             availability_context.get(
@@ -66572,6 +67081,16 @@ def _render_public_booking_page(
             business_address=business_address,
 
             services=services,
+            services_primary=services_primary,
+
+            services_two=services_two,
+            services_two_heading=
+                services_two_heading,
+
+            services_three=services_three,
+            services_three_heading=
+                services_three_heading,
+
             selected_service_id=
                 selected_service_id,
             selected_service=

@@ -44,6 +44,15 @@ Website Services | Peach Suite Pro
         margin: 18px 0;
     }
 
+    .website-services-reminder {
+        margin: 0 0 18px;
+        padding: 12px 14px;
+        background: #f7f9fb;
+        border: 1px solid #d9e1e8;
+        border-radius: 10px;
+        line-height: 1.45;
+    }
+
     .website-service-status {
         display: inline-block;
         padding: 4px 9px;
@@ -170,6 +179,15 @@ Website Services | Peach Suite Pro
     </div>
 
 
+    <div class="website-services-reminder">
+        <strong>Website visibility reminder:</strong>
+        A service appears on your public website only when
+        <strong>Show on Website</strong> is enabled and at least one
+        active provider is assigned and marked
+        <strong>Publicly Bookable</strong>.
+    </div>
+
+
     {% if services %}
 
         <div class="table-container">
@@ -181,6 +199,7 @@ Website Services | Peach Suite Pro
                         <th>Service</th>
                         <th>Standard Duration</th>
                         <th>Standard Price</th>
+                        <th>Website Section</th>
                         <th>Display Order</th>
                         <th>Website Status</th>
                         <th>Actions</th>
@@ -229,6 +248,16 @@ Website Services | Peach Suite Pro
                                     ${{ '%.2f'|format(service[3]) }}
                                 {% else %}
                                     Not set
+                                {% endif %}
+                            </td>
+
+                            <td>
+                                {% if service[7] == 'services_two' %}
+                                    Services Two
+                                {% elif service[7] == 'services_three' %}
+                                    Services Three
+                                {% else %}
+                                    Services
                                 {% endif %}
                             </td>
 

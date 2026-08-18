@@ -243,6 +243,15 @@
             gap: 16px;
         }
 
+        .service-group + .service-group {
+            margin-top: 30px;
+        }
+
+        .service-group-title {
+            margin: 0 0 14px;
+            font-size: 1.15rem;
+        }
+
         .service-card {
             position: relative;
             padding: 20px;
@@ -974,11 +983,9 @@
 
                     {% if services %}
 
-                        <div class="service-grid">
+                        {% macro render_service_card(service) %}
 
-                            {% for service in services %}
-
-                                <article
+                            <article
                                     class="
                                         service-card
                                         {% if
@@ -1089,10 +1096,73 @@
                                     {% endif %}
 
                                 </article>
+                        {% endmacro %}
 
-                            {% endfor %}
 
-                        </div>
+                        {% if services_primary %}
+
+                            <div class="service-group">
+
+                                <div class="service-grid">
+
+                                    {% for service in services_primary %}
+
+                                        {{ render_service_card(service) }}
+
+                                    {% endfor %}
+
+                                </div>
+
+                            </div>
+
+                        {% endif %}
+
+
+                        {% if services_two %}
+
+                            <div class="service-group">
+
+                                <h3 class="service-group-title">
+                                    {{ services_two_heading }}
+                                </h3>
+
+                                <div class="service-grid">
+
+                                    {% for service in services_two %}
+
+                                        {{ render_service_card(service) }}
+
+                                    {% endfor %}
+
+                                </div>
+
+                            </div>
+
+                        {% endif %}
+
+
+                        {% if services_three %}
+
+                            <div class="service-group">
+
+                                <h3 class="service-group-title">
+                                    {{ services_three_heading }}
+                                </h3>
+
+                                <div class="service-grid">
+
+                                    {% for service in services_three %}
+
+                                        {{ render_service_card(service) }}
+
+                                    {% endfor %}
+
+                                </div>
+
+                            </div>
+
+                        {% endif %}
+
 
                     {% else %}
 
