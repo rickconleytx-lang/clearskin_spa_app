@@ -6,7 +6,7 @@ from psycopg2 import IntegrityError
 from psycopg2.extras import RealDictCursor
 
 from db import get_db_connection
-from services import square_service
+from services import square_service, square_sync_auth
 
 
 class SquareServiceSyncError(Exception):
@@ -182,17 +182,32 @@ def _load_sync_context(
         conn.close()
 
 
-def _resolve_access_token(environment):
-    if environment == "sandbox":
+def _resolve_access_token(
+    environment,
+    *,
+    spa_id,
+    business_unit_id,
+):
+    """
+    Resolve the workspace-scoped Square write credential.
+
+    Production remains guarded by the shared sync-auth
+    live_sync_enabled and OAuth verification requirements.
+    """
+    try:
         return (
-            square_service
-            .get_square_sandbox_access_token()
+            square_sync_auth
+            .resolve_square_sync_access_token(
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                environment=environment,
+            )
         )
 
-    raise SquareServiceSyncError(
-        "Production Square service sync is not enabled "
-        "until seller OAuth token handling is implemented."
-    )
+    except square_sync_auth.SquareSyncAuthError as exc:
+        raise SquareServiceSyncError(
+            str(exc)
+        ) from exc
 
 
 def _service_profile(service):
@@ -676,7 +691,7 @@ def sync_service_to_square(
       - mapped variation ID is the chargeable Catalog identity.
       - mapped parent ITEM ID is retained separately.
       - existing mappings always update the same Square objects.
-      - no production sync until OAuth handling is enabled.
+      - production sync requires the explicit workspace Live Sync gate.
     """
     context = _load_sync_context(
         spa_id,
@@ -701,7 +716,9 @@ def sync_service_to_square(
         }
 
     access_token = _resolve_access_token(
-        environment
+        environment,
+        spa_id=spa_id,
+        business_unit_id=business_unit_id,
     )
 
     square_connection_id = (

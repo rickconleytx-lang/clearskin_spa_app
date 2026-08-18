@@ -368,6 +368,35 @@ Square Control Center | Peach Suite Pro
                     <span class="tool-pill tool-pill-small">
                         Live Sync Disabled
                     </span>
+
+                    {% if square_live_sync_enable_token %}
+                        <form
+                            method="POST"
+                            action="{{ url_for('square_enable_live_sync') }}"
+                            style="display:inline; margin:0;"
+                            onsubmit="return confirm(
+                                'Enable Square Live Sync for this workspace? '
+                                + 'This verifies the Production Square connection '
+                                + 'and enables the Live Sync safety switch. '
+                                + 'This action does not sync customers, services, '
+                                + 'products, payments, or inventory.'
+                            );"
+                        >
+                            <input
+                                type="hidden"
+                                name="square_live_sync_enable_token"
+                                value="{{ square_live_sync_enable_token }}"
+                            >
+
+                            <button
+                                type="submit"
+                                class="tool-pill tool-pill-small"
+                                style="font:inherit; cursor:pointer;"
+                            >
+                                Enable Live Sync
+                            </button>
+                        </form>
+                    {% endif %}
                 {% endif %}
 
             {% elif square_live_connect_enabled %}
@@ -391,6 +420,35 @@ Square Control Center | Peach Suite Pro
                     Connect Live Square — Configuration Required
                 </span>
 
+            {% endif %}
+
+            {% if square_live_sync_disable_token %}
+                <form
+                    method="POST"
+                    action="{{ url_for('square_disable_live_sync') }}"
+                    style="display:inline; margin:0;"
+                    onsubmit="return confirm(
+                        'Disable Square Live Sync for this workspace? '
+                        + 'This immediately stops Peach Suite Pro from '
+                        + 'using Production Square write synchronization. '
+                        + 'It does not disconnect Square or alter existing '
+                        + 'Square data.'
+                    );"
+                >
+                    <input
+                        type="hidden"
+                        name="square_live_sync_disable_token"
+                        value="{{ square_live_sync_disable_token }}"
+                    >
+
+                    <button
+                        type="submit"
+                        class="tool-pill tool-pill-small"
+                        style="font:inherit; cursor:pointer;"
+                    >
+                        Disable Live Sync
+                    </button>
+                </form>
             {% endif %}
 
         </div>

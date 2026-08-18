@@ -63,6 +63,7 @@ from services.coach import (
 from services.sms_service import send_sms_telnyx
 from services import square_oauth
 from services import square_service
+from services import square_sync_auth
 from services.square_client_sync import (
     SquareClientSyncError,
     confirm_square_customer_mapping,
@@ -16498,11 +16499,11 @@ def square_control_center():
         not bool(os.environ.get("RENDER"))
     )
 
+    import secrets
+
     square_sync_all_token = None
 
     if square_sync_all_enabled:
-        import secrets
-
         square_sync_all_token = session.get(
             "square_sync_all_token"
         )
@@ -16515,6 +16516,54 @@ def square_control_center():
             session[
                 "square_sync_all_token"
             ] = square_sync_all_token
+
+    square_live_sync_enable_token = None
+
+    if (
+        os.environ.get("RENDER")
+        and production_square_connection
+        and production_square_connection[
+            "connection_status"
+        ] == "connected"
+        and not production_square_connection[
+            "live_sync_enabled"
+        ]
+    ):
+        square_live_sync_enable_token = session.get(
+            "square_live_sync_enable_token"
+        )
+
+        if not square_live_sync_enable_token:
+            square_live_sync_enable_token = (
+                secrets.token_urlsafe(32)
+            )
+
+            session[
+                "square_live_sync_enable_token"
+            ] = square_live_sync_enable_token
+
+    square_live_sync_disable_token = None
+
+    if (
+        os.environ.get("RENDER")
+        and any(
+            item["environment"] == "production"
+            and item["live_sync_enabled"]
+            for item in connections
+        )
+    ):
+        square_live_sync_disable_token = session.get(
+            "square_live_sync_disable_token"
+        )
+
+        if not square_live_sync_disable_token:
+            square_live_sync_disable_token = (
+                secrets.token_urlsafe(32)
+            )
+
+            session[
+                "square_live_sync_disable_token"
+            ] = square_live_sync_disable_token
 
     return render_template(
         "square_control_center.html",
@@ -16535,6 +16584,12 @@ def square_control_center():
         ),
         square_sync_all_token=(
             square_sync_all_token
+        ),
+        square_live_sync_enable_token=(
+            square_live_sync_enable_token
+        ),
+        square_live_sync_disable_token=(
+            square_live_sync_disable_token
         ),
     )
 
@@ -21052,6 +21107,226 @@ def square_reconcile_confirm_client():
 
     return redirect(
         url_for("square_reconcile_payments")
+    )
+
+
+##############################################
+#
+#   ENABLE SQUARE LIVE SYNC
+#
+###############################################
+
+
+@app.route(
+    "/payment-integrations/square/enable-live-sync",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_view_business_management"
+)
+def square_enable_live_sync():
+    """
+    Verify and enable PSP -> Square Production synchronization
+    for the current workspace.
+
+    This action performs no customer, service, product,
+    payment, order, or inventory synchronization.
+    """
+
+    import hmac
+
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
+
+    if not os.environ.get("RENDER"):
+        abort(404)
+
+    submitted_token = request.form.get(
+        "square_live_sync_enable_token",
+        "",
+    )
+
+    session_token = session.get(
+        "square_live_sync_enable_token",
+        "",
+    )
+
+    if (
+        not submitted_token
+        or not session_token
+        or not hmac.compare_digest(
+            submitted_token,
+            session_token,
+        )
+    ):
+        abort(400)
+
+    try:
+        result = (
+            square_sync_auth
+            .enable_square_production_live_sync(
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+            )
+        )
+
+    except (
+        square_sync_auth.SquareSyncAuthError
+    ) as exc:
+        flash(
+            str(exc),
+            "warning",
+        )
+
+        return redirect(
+            url_for(
+                "square_control_center"
+            )
+        )
+
+    session.pop(
+        "square_live_sync_enable_token",
+        None,
+    )
+
+    location_name = str(
+        result.get("location_name") or ""
+    ).strip()
+
+    if location_name:
+        message = (
+            "Square Live Sync is now enabled for "
+            f"{location_name}."
+        )
+    else:
+        message = (
+            "Square Live Sync is now enabled for "
+            "this workspace."
+        )
+
+    flash(
+        message,
+        "success",
+    )
+
+    return redirect(
+        url_for(
+            "square_control_center"
+        )
+    )
+
+
+##############################################
+#
+#   DISABLE SQUARE LIVE SYNC
+#
+###############################################
+
+
+@app.route(
+    "/payment-integrations/square/disable-live-sync",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_view_business_management"
+)
+def square_disable_live_sync():
+    """
+    Immediately disable PSP -> Square Production synchronization
+    for the current workspace.
+
+    This action performs no Square API call and does not
+    disconnect the Square account.
+    """
+
+    import hmac
+
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
+
+    if not os.environ.get("RENDER"):
+        abort(404)
+
+    submitted_token = request.form.get(
+        "square_live_sync_disable_token",
+        "",
+    )
+
+    session_token = session.get(
+        "square_live_sync_disable_token",
+        "",
+    )
+
+    if (
+        not submitted_token
+        or not session_token
+        or not hmac.compare_digest(
+            submitted_token,
+            session_token,
+        )
+    ):
+        abort(400)
+
+    try:
+        result = (
+            square_sync_auth
+            .disable_square_production_live_sync(
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+            )
+        )
+
+    except (
+        square_sync_auth.SquareSyncAuthError
+    ) as exc:
+        flash(
+            str(exc),
+            "warning",
+        )
+
+        return redirect(
+            url_for(
+                "square_control_center"
+            )
+        )
+
+    session.pop(
+        "square_live_sync_disable_token",
+        None,
+    )
+
+    session.pop(
+        "square_live_sync_enable_token",
+        None,
+    )
+
+    if result.get("disabled_count", 0):
+        flash(
+            "Square Live Sync is now disabled for "
+            "this workspace.",
+            "success",
+        )
+    else:
+        flash(
+            "Square Live Sync was already disabled for "
+            "this workspace.",
+            "info",
+        )
+
+    return redirect(
+        url_for(
+            "square_control_center"
+        )
     )
 
 

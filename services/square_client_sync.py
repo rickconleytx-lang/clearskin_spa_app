@@ -4,7 +4,7 @@ from psycopg2 import IntegrityError
 from psycopg2.extras import RealDictCursor
 
 from db import get_db_connection
-from services import square_service
+from services import square_service, square_sync_auth
 
 
 class SquareClientSyncError(RuntimeError):
@@ -219,24 +219,31 @@ def _load_sync_context(
 
 
 def _resolve_access_token(
-    environment
+    environment,
+    *,
+    spa_id,
+    business_unit_id,
 ):
     """
-    Sandbox currently uses the local environment token.
+    Resolve the workspace-scoped Square write credential.
 
-    Production seller OAuth/token decryption is intentionally
-    not enabled here yet.
+    Production remains guarded by the shared sync-auth
+    live_sync_enabled and OAuth verification requirements.
     """
-    if environment == "sandbox":
+    try:
         return (
-            square_service
-            .get_square_sandbox_access_token()
+            square_sync_auth
+            .resolve_square_sync_access_token(
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                environment=environment,
+            )
         )
 
-    raise SquareClientSyncError(
-        "Production Square customer sync is not enabled "
-        "until seller OAuth token handling is implemented."
-    )
+    except square_sync_auth.SquareSyncAuthError as exc:
+        raise SquareClientSyncError(
+            str(exc)
+        ) from exc
 
 
 def _customer_profile_values(
@@ -1291,7 +1298,7 @@ def sync_client_to_square(
       - reference_id is strongest fallback identity
       - email/phone matches must resolve to one Square customer
       - conflicting candidates return needs_attention
-      - no production sync until OAuth token handling is ready
+      - production sync requires the explicit workspace Live Sync gate
     """
     context = _load_sync_context(
         spa_id,
@@ -1323,7 +1330,9 @@ def sync_client_to_square(
 
     access_token = (
         _resolve_access_token(
-            environment
+            environment,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
         )
     )
 

@@ -6,7 +6,7 @@ from psycopg2 import IntegrityError
 from psycopg2.extras import RealDictCursor
 
 from db import get_db_connection
-from services import square_service
+from services import square_service, square_sync_auth
 
 
 class SquareInventorySyncError(Exception):
@@ -190,17 +190,32 @@ def _load_sync_context(
         conn.close()
 
 
-def _resolve_access_token(environment):
-    if environment == "sandbox":
+def _resolve_access_token(
+    environment,
+    *,
+    spa_id,
+    business_unit_id,
+):
+    """
+    Resolve the workspace-scoped Square write credential.
+
+    Production remains guarded by the shared sync-auth
+    live_sync_enabled and OAuth verification requirements.
+    """
+    try:
         return (
-            square_service
-            .get_square_sandbox_access_token()
+            square_sync_auth
+            .resolve_square_sync_access_token(
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                environment=environment,
+            )
         )
 
-    raise SquareInventorySyncError(
-        "Production Square inventory sync is not enabled "
-        "until seller OAuth token handling is implemented."
-    )
+    except square_sync_auth.SquareSyncAuthError as exc:
+        raise SquareInventorySyncError(
+            str(exc)
+        ) from exc
 
 
 def _product_profile(product):
@@ -686,7 +701,7 @@ def sync_inventory_product_to_square(
       - existing mappings always update the same Square objects.
       - inactive PSP products archive, rather than delete, the
         Square ITEM so Catalog identity is preserved.
-      - no production sync until OAuth handling is enabled.
+      - production sync requires the explicit workspace Live Sync gate.
     """
     context = _load_sync_context(
         spa_id,
@@ -713,7 +728,9 @@ def sync_inventory_product_to_square(
         }
 
     access_token = _resolve_access_token(
-        environment
+        environment,
+        spa_id=spa_id,
+        business_unit_id=business_unit_id,
     )
 
     square_connection_id = (
