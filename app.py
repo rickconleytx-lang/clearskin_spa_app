@@ -16495,8 +16495,21 @@ def square_control_center():
         and square_live_connect_configured
     )
 
+    square_sync_all_environment = (
+        "production"
+        if os.environ.get("RENDER")
+        else "sandbox"
+    )
+
     square_sync_all_enabled = (
-        not bool(os.environ.get("RENDER"))
+        square_sync_all_environment == "sandbox"
+        or sum(
+            1
+            for item in connections
+            if item["environment"] == "production"
+            and item["connection_status"] == "connected"
+            and item["live_sync_enabled"]
+        ) == 1
     )
 
     import secrets
@@ -16584,6 +16597,9 @@ def square_control_center():
         ),
         square_sync_all_token=(
             square_sync_all_token
+        ),
+        square_sync_all_environment=(
+            square_sync_all_environment
         ),
         square_live_sync_enable_token=(
             square_live_sync_enable_token
@@ -21332,7 +21348,7 @@ def square_disable_live_sync():
 
 ##############################################
 #
-#   SQUARE SYNC ALL - SANDBOX ONLY
+#   SQUARE SYNC ALL
 #
 ###############################################
 
@@ -21348,13 +21364,12 @@ def square_disable_live_sync():
 )
 def square_sync_all():
     """
-    Manually synchronize the current PSP workspace to
-    Square Sandbox.
+    Manually synchronize the current PSP workspace to Square.
 
     Current rollout:
-    - Local development only
-    - Square Sandbox only
-    - Production / Render intentionally blocked
+    - Local development -> Square Sandbox
+    - Render production -> Square Production only when the
+      workspace Live Sync safety gate is enabled
 
     Eligible records:
     - Active clients in the current workspace
@@ -21374,20 +21389,17 @@ def square_sync_all():
     if not business_unit_id:
         abort(403)
 
-    # -------------------------------------------------
-    # LIVE / RENDER SAFETY GATE
-    # -------------------------------------------------
+    environment = (
+        "production"
+        if os.environ.get("RENDER")
+        else "sandbox"
+    )
 
-    if os.environ.get("RENDER"):
-        flash(
-            "Square Sync All is not enabled on the live "
-            "Peach Suite Pro server yet.",
-            "warning",
-        )
-
-        return redirect(
-            url_for("square_control_center")
-        )
+    environment_label = (
+        "Production"
+        if environment == "production"
+        else "Sandbox"
+    )
 
     # -------------------------------------------------
     # REQUEST TOKEN
@@ -21414,22 +21426,41 @@ def square_sync_all():
         abort(400)
 
     # -------------------------------------------------
-    # SANDBOX TOKEN PREFLIGHT
+    # ENVIRONMENT AUTH PREFLIGHT
     # -------------------------------------------------
 
-    if not os.environ.get(
-        "SQUARE_SANDBOX_ACCESS_TOKEN",
-        "",
-    ).strip():
-        flash(
-            "Square Sandbox is not configured on this "
-            "development environment.",
-            "warning",
-        )
+    if environment == "sandbox":
+        if not os.environ.get(
+            "SQUARE_SANDBOX_ACCESS_TOKEN",
+            "",
+        ).strip():
+            flash(
+                "Square Sandbox is not configured on this "
+                "development environment.",
+                "warning",
+            )
 
-        return redirect(
-            url_for("square_control_center")
-        )
+            return redirect(
+                url_for("square_control_center")
+            )
+
+    else:
+        try:
+            square_sync_auth.resolve_square_sync_access_token(
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                environment="production",
+            )
+
+        except square_sync_auth.SquareSyncAuthError as exc:
+            flash(
+                str(exc),
+                "warning",
+            )
+
+            return redirect(
+                url_for("square_control_center")
+            )
 
     lock_conn = get_db_connection()
     lock_cur = lock_conn.cursor()
@@ -21439,7 +21470,8 @@ def square_sync_all():
     lock_name = (
         "square_sync_all:"
         f"{spa_id}:"
-        f"{business_unit_id}:sandbox"
+        f"{business_unit_id}:"
+        f"{environment}"
     )
 
     try:
@@ -21471,7 +21503,7 @@ def square_sync_all():
             )
 
         # ---------------------------------------------
-        # SANDBOX CONNECTION PREFLIGHT
+        # CONNECTION PREFLIGHT
         # ---------------------------------------------
 
         lock_cur.execute("""
@@ -21479,22 +21511,31 @@ def square_sync_all():
             FROM square_connections
             WHERE spa_id = %s
               AND business_unit_id = %s
-              AND environment = 'sandbox'
+              AND environment = %s
+              AND connection_status = 'connected'
+              AND (
+                    %s <> 'production'
+                    OR live_sync_enabled = TRUE
+              )
             ORDER BY square_connection_id DESC
-            LIMIT 1
+            LIMIT 2
         """, (
             spa_id,
             business_unit_id,
+            environment,
+            environment,
         ))
 
-        sandbox_connection = (
-            lock_cur.fetchone()
+        matching_connections = (
+            lock_cur.fetchall()
         )
 
-        if not sandbox_connection:
+        if len(matching_connections) != 1:
             flash(
-                "No Square Sandbox connection is "
-                "configured for this workspace.",
+                "Exactly one connected Square "
+                f"{environment_label} connection is required "
+                "for this workspace. Production also requires "
+                "Live Sync to be enabled.",
                 "warning",
             )
 
@@ -21664,7 +21705,7 @@ def square_sync_all():
                     business_unit_id=(
                         business_unit_id
                     ),
-                    environment="sandbox",
+                    environment=environment,
                     entity_type=entity_type,
                     entity_id=entity_id,
                     trigger_action="sync_all",
@@ -21688,7 +21729,7 @@ def square_sync_all():
                 ),
                 client_id=client_id,
                 actor_user_id=actor_user_id,
-                environment="sandbox",
+                environment=environment,
             )
 
             record_result(
@@ -21711,7 +21752,7 @@ def square_sync_all():
                     service_type_id
                 ),
                 actor_user_id=actor_user_id,
-                environment="sandbox",
+                environment=environment,
             )
 
             record_result(
@@ -21735,7 +21776,7 @@ def square_sync_all():
                         product_id
                     ),
                     actor_user_id=actor_user_id,
-                    environment="sandbox",
+                    environment=environment,
                 )
             )
 
@@ -21761,7 +21802,7 @@ def square_sync_all():
             )
 
         summary = (
-            "Square Sandbox Sync All completed. "
+            f"Square {environment_label} Sync All completed. "
             + summary_part(
                 "Clients",
                 "client",

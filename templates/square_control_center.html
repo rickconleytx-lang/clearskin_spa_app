@@ -314,6 +314,7 @@ Square Control Center | Peach Suite Pro
                     action="{{ url_for('square_sync_all') }}"
                     id="square-sync-all-form"
                     style="display:inline; margin:0;"
+                    data-square-environment="{{ square_sync_all_environment }}"
                     onsubmit="return prepareSquareSyncAll(this);"
                 >
                     <input
@@ -335,7 +336,12 @@ Square Control Center | Peach Suite Pro
                         ></span>
 
                         <span id="square-sync-all-label">
-                            Sync All to Sandbox
+                            Sync All to
+                            {% if square_sync_all_environment == "production" %}
+                                Production
+                            {% else %}
+                                Sandbox
+                            {% endif %}
                         </span>
                     </button>
                 </form>
@@ -343,7 +349,11 @@ Square Control Center | Peach Suite Pro
             {% else %}
 
                 <span class="tool-pill tool-pill-small">
-                    Sync All — Sandbox Only
+                    {% if square_sync_all_environment == "production" %}
+                        Sync All — Live Sync Required
+                    {% else %}
+                        Sync All — Unavailable
+                    {% endif %}
                 </span>
 
             {% endif %}
@@ -601,11 +611,29 @@ Square Control Center | Peach Suite Pro
 
 <script>
     function prepareSquareSyncAll(form) {
-        const confirmed = window.confirm(
-            "Sync all active clients, assigned services, " +
-            "and active inventory products to Square " +
-            "Sandbox now?"
+        const environment = (
+            form.dataset.squareEnvironment === "production"
+                ? "Production"
+                : "Sandbox"
         );
+
+        const message = (
+            environment === "Production"
+                ? (
+                    "Sync all active clients, assigned services, " +
+                    "and active inventory products to LIVE Square " +
+                    "Production now?\n\n" +
+                    "This can create or update real Square customers, " +
+                    "services, and products for this workspace."
+                )
+                : (
+                    "Sync all active clients, assigned services, " +
+                    "and active inventory products to Square " +
+                    "Sandbox now?"
+                )
+        );
+
+        const confirmed = window.confirm(message);
 
         if (!confirmed) {
             return false;
