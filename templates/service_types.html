@@ -243,6 +243,9 @@
                         <th>Standard Price</th>
                         <th>Status</th>
                         <th>Show on Website</th>
+                        {% if show_square_sync_status %}
+                            <th>Square</th>
+                        {% endif %}
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -396,6 +399,46 @@
 
                             </td>
 
+
+                            {% if show_square_sync_status %}
+                                <td>
+                                    {% set square_status =
+                                        square_sync_statuses.get(
+                                            service[0]
+                                        )
+                                    %}
+
+                                    {% if square_status == "needs_attention" %}
+                                        <a
+                                            href="{{ url_for(
+                                                'square_sync_activity',
+                                                entity='service',
+                                                entity_id=service[0],
+                                                environment=square_sync_environment
+                                            ) }}"
+                                            class="badge badge-warning"
+                                            title="View this service's Square sync activity"
+                                            style="text-decoration:none;"
+                                        >
+                                            ⚠️ Needs Attention
+                                        </a>
+                                    {% elif square_status == "synced" %}
+                                        <span
+                                            class="badge badge-success"
+                                            title="This service is linked to Square"
+                                        >
+                                            ✅ Synced
+                                        </span>
+                                    {% else %}
+                                        <span
+                                            style="color:#999;"
+                                            title="Not currently linked to Square"
+                                        >
+                                            —
+                                        </span>
+                                    {% endif %}
+                                </td>
+                            {% endif %}
 
                             <td>
 

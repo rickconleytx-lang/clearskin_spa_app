@@ -97,6 +97,24 @@ Square Sync Activity | Peach Suite Pro
     white-space: nowrap;
 }
 
+.square-sync-status-successful {
+    background: #dff3e4;
+    border-color: #78b887;
+    color: #176b32;
+}
+
+.square-sync-status-failed {
+    background: #fde2e1;
+    border-color: #d96b68;
+    color: #9f1f1b;
+}
+
+.square-sync-status-needs-attention {
+    background: #fff2bf;
+    border-color: #d6ad32;
+    color: #765700;
+}
+
 .square-sync-detail {
     max-width: 310px;
     overflow-wrap: anywhere;
@@ -179,6 +197,14 @@ Square Sync Activity | Peach Suite Pro
         action="{{ url_for('square_sync_activity') }}"
         class="square-sync-filters"
     >
+
+        {% if entity_id_filter %}
+            <input
+                type="hidden"
+                name="entity_id"
+                value="{{ entity_id_filter }}"
+            >
+        {% endif %}
 
         <div class="square-sync-filter-field">
             <label for="status">Status</label>
@@ -281,6 +307,38 @@ Square Sync Activity | Peach Suite Pro
 
     </form>
 
+    {% if entity_id_filter %}
+        <div
+            style="
+                margin: 16px 0 10px;
+                padding: 10px 14px;
+                border: 1px solid #ddd;
+                border-radius: 10px;
+                background: #fff;
+            "
+        >
+            <strong>
+                Showing Square sync history for
+                {% if entity_filter == 'client' %}
+                    Client
+                {% elif entity_filter == 'service' %}
+                    Service
+                {% elif entity_filter == 'inventory_product' %}
+                    Product
+                {% else %}
+                    PSP Record
+                {% endif %}
+                #{{ entity_id_filter }}
+            </strong>
+
+            &nbsp;·&nbsp;
+
+            <a href="{{ url_for('square_sync_activity') }}">
+                View All Sync Activity
+            </a>
+        </div>
+    {% endif %}
+
     {% if activity_rows %}
 
         <div class="square-sync-table-wrap">
@@ -353,7 +411,17 @@ Square Sync Activity | Peach Suite Pro
                             </td>
 
                             <td>
-                                <span class="square-sync-status">
+                                <span
+                                    class="square-sync-status
+                                        {% if activity.sync_status == 'successful' %}
+                                            square-sync-status-successful
+                                        {% elif activity.sync_status == 'failed' %}
+                                            square-sync-status-failed
+                                        {% elif activity.sync_status == 'needs_attention' %}
+                                            square-sync-status-needs-attention
+                                        {% endif %}
+                                    "
+                                >
                                     {{
                                         activity.sync_status
                                         |replace('_', ' ')

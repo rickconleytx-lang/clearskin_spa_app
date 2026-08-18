@@ -14019,6 +14019,35 @@ def service_types():
 
         services = cur.fetchall()
 
+        workspace_access = (
+            current_workspace_access() or {}
+        )
+
+        show_square_sync_status = bool(
+            workspace_access.get(
+                "can_view_business_management",
+                False,
+            )
+        )
+
+        square_sync_statuses = {}
+
+        if show_square_sync_status:
+            square_sync_statuses = (
+                _load_square_sync_display_statuses(
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    environment=(
+                        _square_income_read_environment()
+                    ),
+                    entity_type="service",
+                    entity_ids=[
+                        service[0]
+                        for service in services
+                    ],
+                )
+            )
+
         cur.execute("""
             SELECT
                 COUNT(*) FILTER (
@@ -14060,7 +14089,12 @@ def service_types():
         status_filter=status_filter,
         active_count=active_count,
         archived_count=archived_count,
-        public_services_url=public_services_url
+        public_services_url=public_services_url,
+        show_square_sync_status=(
+            show_square_sync_status
+        ),
+        square_sync_statuses=square_sync_statuses,
+        square_sync_environment=_square_income_read_environment(),
     )
 
 
@@ -14207,6 +14241,151 @@ def toggle_service_type_public_website(
 
 
 # =========================================================
+# =========================================================
+# SQUARE SYNC DISPLAY STATUS
+# =========================================================
+
+
+def _load_square_sync_display_statuses(
+    *,
+    spa_id,
+    business_unit_id,
+    environment,
+    entity_type,
+    entity_ids,
+):
+    """
+    Read-only Square synchronization display state.
+
+    Returns:
+        {
+            entity_id: "synced" | "needs_attention"
+        }
+
+    Rules:
+    - exact spa/workspace/environment only
+    - latest failed/needs_attention activity wins
+    - otherwise an active Square mapping means synced
+    - otherwise no display status
+    - no Square calls and no writes
+    """
+
+    allowed_entity_types = {
+        "client",
+        "service",
+        "inventory_product",
+    }
+
+    if entity_type not in allowed_entity_types:
+        return {}
+
+    normalized_ids = sorted({
+        int(entity_id)
+        for entity_id in entity_ids
+        if entity_id is not None
+    })
+
+    if not normalized_ids:
+        return {}
+
+    placeholders = ", ".join(
+        ["%s"] * len(normalized_ids)
+    )
+
+    statuses = {}
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(f"""
+            SELECT DISTINCT ON (entity_id)
+                entity_id,
+                sync_status
+            FROM square_sync_activity
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND environment = %s
+              AND entity_type = %s
+              AND entity_id IN ({placeholders})
+            ORDER BY
+                entity_id,
+                created_at DESC,
+                square_sync_activity_id DESC
+        """, (
+            spa_id,
+            business_unit_id,
+            environment,
+            entity_type,
+            *normalized_ids,
+        ))
+
+        for entity_id, sync_status in cur.fetchall():
+            if sync_status in {
+                "failed",
+                "needs_attention",
+            }:
+                statuses[entity_id] = "needs_attention"
+
+        if entity_type == "client":
+            cur.execute(f"""
+                SELECT DISTINCT client_id
+                FROM square_customer_mappings
+                WHERE spa_id = %s
+                  AND business_unit_id = %s
+                  AND environment = %s
+                  AND is_active = TRUE
+                  AND client_id IN ({placeholders})
+            """, (
+                spa_id,
+                business_unit_id,
+                environment,
+                *normalized_ids,
+            ))
+
+        else:
+            mapping_type = (
+                "service_type"
+                if entity_type == "service"
+                else "inventory_product"
+            )
+
+            entity_column = (
+                "service_type_id"
+                if entity_type == "service"
+                else "inventory_product_id"
+            )
+
+            cur.execute(f"""
+                SELECT DISTINCT {entity_column}
+                FROM square_catalog_mappings
+                WHERE spa_id = %s
+                  AND business_unit_id = %s
+                  AND environment = %s
+                  AND mapping_type = %s
+                  AND is_active = TRUE
+                  AND {entity_column} IN ({placeholders})
+            """, (
+                spa_id,
+                business_unit_id,
+                environment,
+                mapping_type,
+                *normalized_ids,
+            ))
+
+        for mapping_row in cur.fetchall():
+            entity_id = mapping_row[0]
+
+            if entity_id not in statuses:
+                statuses[entity_id] = "synced"
+
+        return statuses
+
+    finally:
+        cur.close()
+        conn.close()
+
+
 # SQUARE SYNC ACTIVITY LOGGER
 # =========================================================
 
@@ -21472,6 +21651,30 @@ def square_sync_activity():
         .lower()
     )
 
+    entity_id_raw = (
+        request.args.get(
+            "entity_id",
+            "",
+        )
+        .strip()
+    )
+
+    entity_id_filter = None
+
+    if entity_id_raw:
+        try:
+            entity_id_filter = int(
+                entity_id_raw
+            )
+        except (TypeError, ValueError):
+            entity_id_filter = None
+
+        if (
+            entity_id_filter is not None
+            and entity_id_filter <= 0
+        ):
+            entity_id_filter = None
+
     if status_filter not in allowed_statuses:
         status_filter = "all"
 
@@ -21513,6 +21716,14 @@ def square_sync_activity():
         )
         params.append(
             environment_filter
+        )
+
+    if entity_id_filter is not None:
+        where_parts.append(
+            "entity_id = %s"
+        )
+        params.append(
+            entity_id_filter
         )
 
     where_sql = " AND ".join(
@@ -21652,6 +21863,7 @@ def square_sync_activity():
         status_filter=status_filter,
         entity_filter=entity_filter,
         environment_filter=environment_filter,
+        entity_id_filter=entity_id_filter,
         square_sync_retry_token=square_sync_retry_token,
         square_retry_enabled=(
             not bool(os.environ.get("RENDER"))
@@ -34087,6 +34299,35 @@ def inventory_home():
 
     inventory_rows = cur.fetchall()
 
+    workspace_access = (
+        current_workspace_access() or {}
+    )
+
+    show_square_sync_status = bool(
+        workspace_access.get(
+            "can_view_business_management",
+            False,
+        )
+    )
+
+    square_sync_statuses = {}
+
+    if show_square_sync_status:
+        square_sync_statuses = (
+            _load_square_sync_display_statuses(
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                environment=(
+                    _square_income_read_environment()
+                ),
+                entity_type="inventory_product",
+                entity_ids=[
+                    row[0]
+                    for row in inventory_rows
+                ],
+            )
+        )
+
 
     total_stock = sum(row[11] for row in inventory_rows)
 
@@ -34102,7 +34343,12 @@ def inventory_home():
         inventory_rows=inventory_rows,
         total_stock=total_stock,
         total_wholesale_value=total_wholesale_value,
-        total_retail_value=total_retail_value
+        total_retail_value=total_retail_value,
+        show_square_sync_status=(
+            show_square_sync_status
+        ),
+        square_sync_statuses=square_sync_statuses,
+        square_sync_environment=_square_income_read_environment(),
     )
 
 
@@ -36821,6 +37067,35 @@ def client_management():
         rows = cur.fetchall()
         record_count = len(rows)
 
+    workspace_access = (
+        current_workspace_access() or {}
+    )
+
+    show_square_sync_status = bool(
+        workspace_access.get(
+            "can_view_business_management",
+            False,
+        )
+    )
+
+    square_sync_statuses = {}
+
+    if show_square_sync_status:
+        square_sync_statuses = (
+            _load_square_sync_display_statuses(
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                environment=(
+                    _square_income_read_environment()
+                ),
+                entity_type="client",
+                entity_ids=[
+                    row[0]
+                    for row in rows
+                ],
+            )
+        )
+
     cur.close()
     conn.close()
 
@@ -36829,7 +37104,12 @@ def client_management():
         clients=rows,
         record_count=record_count,
         search=search,
-        show_all=show_all
+        show_all=show_all,
+        show_square_sync_status=(
+            show_square_sync_status
+        ),
+        square_sync_statuses=square_sync_statuses,
+        square_sync_environment=_square_income_read_environment(),
     )
 
 

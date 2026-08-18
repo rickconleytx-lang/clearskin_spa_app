@@ -111,6 +111,9 @@
             <th>Birth Date</th>
             <th>Last Visit</th>
             <th>Next Visit</th>
+            {% if show_square_sync_status %}
+                <th>Square</th>
+            {% endif %}
             <th>Actions</th>
         </tr>
     </thead>
@@ -154,6 +157,46 @@
                     <span style="color: #999;">None Scheduled</span>
                 {% endif %}
             </td>
+
+            {% if show_square_sync_status %}
+                <td>
+                    {% set square_status =
+                        square_sync_statuses.get(
+                            row[0]
+                        )
+                    %}
+
+                    {% if square_status == "needs_attention" %}
+                        <a
+                            href="{{ url_for(
+                                'square_sync_activity',
+                                entity='client',
+                                entity_id=row[0],
+                                environment=square_sync_environment
+                            ) }}"
+                            class="badge badge-warning"
+                            title="View this client's Square sync activity"
+                            style="text-decoration:none;"
+                        >
+                            ⚠️ Needs Attention
+                        </a>
+                    {% elif square_status == "synced" %}
+                        <span
+                            class="badge badge-success"
+                            title="This client is linked to Square"
+                        >
+                            ✅ Synced
+                        </span>
+                    {% else %}
+                        <span
+                            style="color:#999;"
+                            title="Not currently linked to Square"
+                        >
+                            —
+                        </span>
+                    {% endif %}
+                </td>
+            {% endif %}
 
             <td>
                 <div class="page-tool-pills" style="gap: 6px; flex-wrap: wrap;">
