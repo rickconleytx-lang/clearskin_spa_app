@@ -42,6 +42,13 @@
             <span>Add Income</span>
         </a>
 
+        {% if nav_access.can_view_business_management %}
+            <a href="{{ url_for('square_reconcile_payments') }}">
+                <span aria-hidden="true">💳</span>
+                <span>Reconcile Square Payments</span>
+            </a>
+        {% endif %}
+
 
         <div class="app-nested-menu">
 
