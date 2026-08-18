@@ -264,7 +264,8 @@ Reconcile Square Payments | Peach Suite Pro
                                             url_for(
                                                 'add_income',
                                                 appointment_id=payment.appointment.appointment_id,
-                                                date=payment.appointment.appointment_date.isoformat()
+                                                date=payment.appointment.appointment_date.isoformat(),
+                                                square_payment_id=payment.payment_id
                                             )
                                         }}"
                                         class="tool-pill tool-pill-small"
