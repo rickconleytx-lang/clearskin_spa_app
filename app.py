@@ -16315,6 +16315,11 @@ def square_control_center():
                     "merchant_id": row[2],
                     "connection_status": row[3],
                     "connected_at": row[4],
+                    "connected_at_local": (
+                        format_square_control_datetime(
+                            row[4]
+                        )
+                    ),
                     "last_sync_at": row[5],
                     "last_sync_at_local": (
                         format_square_control_datetime(
