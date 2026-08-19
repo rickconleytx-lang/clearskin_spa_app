@@ -16286,6 +16286,25 @@ def square_control_center():
         connection_rows = cur.fetchall()
         connections_by_id = {}
 
+        square_control_timezone = ZoneInfo(
+            get_current_spa_timezone(spa_id)
+        )
+
+        def format_square_control_datetime(value):
+            if not value:
+                return None
+
+            if value.tzinfo is None:
+                value = value.replace(
+                    tzinfo=timezone.utc
+                )
+
+            return value.astimezone(
+                square_control_timezone
+            ).strftime(
+                "%m/%d/%Y %I:%M %p %Z"
+            )
+
         for row in connection_rows:
             connection_id = row[0]
 
@@ -16297,6 +16316,11 @@ def square_control_center():
                     "connection_status": row[3],
                     "connected_at": row[4],
                     "last_sync_at": row[5],
+                    "last_sync_at_local": (
+                        format_square_control_datetime(
+                            row[5]
+                        )
+                    ),
                     "live_sync_enabled": bool(row[6]),
                     "oauth_token_expires_at": row[7],
                     "oauth_token_last_verified_at": row[8],

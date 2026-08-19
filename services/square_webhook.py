@@ -589,6 +589,35 @@ def process_square_webhook(environment):
             "error": "Webhook storage failed.",
         }), 500
 
+    try:
+        from services.square_webhook_retail import (
+            process_recorded_square_retail_event,
+        )
+
+        processing_result = (
+            process_recorded_square_retail_event(
+                receipt["square_webhook_event_id"]
+            )
+        )
+
+    except Exception as error:
+        print(
+            "[SQUARE WEBHOOK PROCESSING ERROR]",
+            {
+                "environment": normalized_environment,
+                "event_id": receipt["event_id"],
+                "event_type": receipt["event_type"],
+                "payment_id": receipt["payment_id"],
+                "error_type": type(error).__name__,
+            },
+            flush=True,
+        )
+
+        return jsonify({
+            "success": False,
+            "error": "Webhook processing failed.",
+        }), 500
+
     print(
         "[SQUARE WEBHOOK VERIFIED]",
         {
@@ -598,9 +627,9 @@ def process_square_webhook(environment):
             "payment_id": receipt["payment_id"],
             "duplicate": receipt["duplicate"],
             "routed": receipt["spa_id"] is not None,
-            "processing_status": receipt[
-                "processing_status"
-            ],
+            "processing_status": (
+                processing_result.get("status")
+            ),
         },
         flush=True,
     )
