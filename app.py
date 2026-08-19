@@ -9230,6 +9230,7 @@ def load_spa():
         "logout",
         "static",
         "telnyx_sms_webhook",
+        "square_production_webhook",
         "public_booking",
         "public_booking_confirm",
         "tenant_booking_policy",
@@ -16189,6 +16190,27 @@ def square_live_oauth_callback():
         url_for(
             "square_control_center"
         )
+    )
+
+
+##############################################
+#
+#   SQUARE WEBHOOK
+#
+###############################################
+
+
+@app.route(
+    "/webhooks/square/production",
+    methods=["POST"],
+)
+def square_production_webhook():
+    from services.square_webhook import (
+        process_square_webhook,
+    )
+
+    return process_square_webhook(
+        "production"
     )
 
 
