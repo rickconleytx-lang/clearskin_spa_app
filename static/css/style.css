@@ -5920,6 +5920,10 @@ inside the existing category panel.
 }
 
 .header-bar {
+    position: sticky;
+    top: 0;
+    z-index: 9000;
+
     display: flex;
     align-items: center;
     justify-content: flex-start;
@@ -5927,6 +5931,10 @@ inside the existing category panel.
     min-height: 52px;
     box-sizing: border-box;
     padding: 6px 16px;
+
+    background: #fff7f0;
+    border-bottom: 1px solid #f0c9a8;
+    box-shadow: 0 2px 8px rgba(47, 31, 22, 0.08);
 }
 
 .header-right {
