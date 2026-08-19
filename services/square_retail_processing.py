@@ -5,6 +5,7 @@ from psycopg2.extras import Json
 
 from services.square_income_posting import (
     post_square_income_lines_and_inventory,
+    stage_square_payment_line_items,
 )
 
 
@@ -167,6 +168,516 @@ def _square_credit_processor(
         ),
         "additional_fee": float(
             row[3] or 0
+        ),
+    }
+
+
+def stage_square_payment_for_review(
+    cursor,
+    *,
+    context,
+    payment,
+    order,
+    preview,
+    catalog_mapping_details,
+):
+    """
+    Persist one authoritative completed Square payment and its
+    order lines for later review without creating Income or
+    inventory movements.
+
+    This path is intentionally limited to balanced,
+    non-refunded payments containing unknown/unmapped amounts.
+    Transaction ownership remains with the caller.
+    """
+
+    if not isinstance(context, dict):
+        raise SquareRetailProcessingError(
+            "Square workspace context is required."
+        )
+
+    if not isinstance(payment, dict):
+        raise SquareRetailProcessingError(
+            "Square payment is required."
+        )
+
+    if not isinstance(order, dict):
+        raise SquareRetailProcessingError(
+            "Square order is required."
+        )
+
+    if not isinstance(preview, dict):
+        raise SquareRetailProcessingError(
+            "Square Income preview is required."
+        )
+
+    spa_id = context.get("spa_id")
+    business_unit_id = context.get(
+        "business_unit_id"
+    )
+    square_connection_id = context.get(
+        "square_connection_id"
+    )
+
+    environment = str(
+        context.get("environment") or ""
+    ).strip().lower()
+
+    square_location_id = str(
+        context.get("square_location_id") or ""
+    ).strip()
+
+    merchant_id = str(
+        context.get("merchant_id") or ""
+    ).strip()
+
+    square_payment_id = str(
+        payment.get("id") or ""
+    ).strip()
+
+    square_order_id = str(
+        order.get("id") or ""
+    ).strip()
+
+    if (
+        not spa_id
+        or not business_unit_id
+        or not square_connection_id
+    ):
+        raise SquareRetailProcessingError(
+            "Square workspace context is incomplete."
+        )
+
+    if environment not in {
+        "sandbox",
+        "production",
+    }:
+        raise SquareRetailProcessingError(
+            "Square environment is invalid."
+        )
+
+    if not square_payment_id:
+        raise SquareRetailProcessingError(
+            "Square payment ID is unavailable."
+        )
+
+    if not square_order_id:
+        raise SquareRetailProcessingError(
+            "Square order ID is unavailable."
+        )
+
+    if (
+        str(
+            preview.get("status") or ""
+        ).strip().upper()
+        != "COMPLETED"
+    ):
+        raise SquareRetailProcessingError(
+            "Only completed Square payments can be staged."
+        )
+
+    if not preview.get("requires_review"):
+        raise SquareRetailProcessingError(
+            "Square payment does not require review."
+        )
+
+    if int(
+        preview.get("unknown_amount_cents") or 0
+    ) <= 0:
+        raise SquareRetailProcessingError(
+            "Review staging is limited to payments with "
+            "unknown or unmapped Square amounts."
+        )
+
+    if int(
+        preview.get("difference_cents") or 0
+    ) != 0:
+        raise SquareRetailProcessingError(
+            "Square payment totals do not balance."
+        )
+
+    if int(
+        preview.get("refunded_amount_cents") or 0
+    ) != 0:
+        raise SquareRetailProcessingError(
+            "Refunded Square payments require separate review."
+        )
+
+    mapped_client_id = _mapped_square_client_id(
+        cursor,
+        square_connection_id=square_connection_id,
+        spa_id=spa_id,
+        business_unit_id=business_unit_id,
+        environment=environment,
+        square_customer_id=preview.get(
+            "customer_id"
+        ),
+    )
+
+    payment_merchant_id = str(
+        payment.get("merchant_id") or ""
+    ).strip()
+
+    order_discount_cents = int(
+        (
+            order.get("total_discount_money")
+            or {}
+        ).get("amount")
+        or 0
+    )
+
+    match_method = "automatic_review_staging"
+
+    match_notes = (
+        "Automatically staged from a completed Square "
+        "payment containing unmapped line items. No Income "
+        "or inventory movement was posted."
+    )
+
+    cursor.execute("""
+        INSERT INTO square_payments (
+            square_connection_id,
+            spa_id,
+            business_unit_id,
+            environment,
+            square_payment_id,
+            square_order_id,
+            square_customer_id,
+            square_location_id,
+            merchant_id,
+            payment_status,
+            tender_type,
+            currency,
+            amount_cents,
+            service_amount_cents,
+            retail_amount_cents,
+            tax_amount_cents,
+            tip_amount_cents,
+            discount_amount_cents,
+            processing_fee_cents,
+            refunded_amount_cents,
+            net_received_cents,
+            square_created_at,
+            square_updated_at,
+            appointment_id,
+            client_id,
+            reconciliation_status,
+            match_method,
+            match_notes,
+            retrieved_at,
+            last_synced_at,
+            reviewed_by,
+            raw_payment,
+            raw_order
+        )
+        VALUES (
+            %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s,
+            %s, %s, %s,
+            NULL, %s,
+            'review', %s, %s,
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP,
+            NULL, %s, %s
+        )
+        ON CONFLICT (
+            environment,
+            square_payment_id
+        )
+        DO NOTHING
+        RETURNING square_payment_record_id
+    """, (
+        square_connection_id,
+        spa_id,
+        business_unit_id,
+        environment,
+        square_payment_id,
+        square_order_id,
+        preview.get("customer_id"),
+        square_location_id,
+        payment_merchant_id or merchant_id or None,
+        preview.get("status"),
+        preview.get("source_type"),
+        preview.get("currency"),
+        int(
+            preview.get("total_amount_cents")
+            or 0
+        ),
+        int(
+            preview.get("service_amount_cents")
+            or 0
+        ),
+        int(
+            preview.get("retail_amount_cents")
+            or 0
+        ),
+        int(
+            preview.get("tax_amount_cents")
+            or 0
+        ),
+        int(
+            preview.get("tip_amount_cents")
+            or 0
+        ),
+        order_discount_cents,
+        int(
+            preview.get("processing_fee_cents")
+            or 0
+        ),
+        int(
+            preview.get("refunded_amount_cents")
+            or 0
+        ),
+        int(
+            preview.get("net_received_cents")
+            or 0
+        ),
+        preview.get("created_at"),
+        payment.get("updated_at"),
+        mapped_client_id,
+        match_method,
+        match_notes,
+        Json(payment),
+        Json(order),
+    ))
+
+    inserted_row = cursor.fetchone()
+
+    if inserted_row:
+        square_payment_record_id = inserted_row[0]
+
+    else:
+        cursor.execute("""
+            SELECT
+                square_payment_record_id,
+                spa_id,
+                business_unit_id,
+                income_id,
+                appointment_id,
+                reconciliation_status
+            FROM square_payments
+            WHERE environment = %s
+              AND square_payment_id = %s
+            FOR UPDATE
+        """, (
+            environment,
+            square_payment_id,
+        ))
+
+        existing_row = cursor.fetchone()
+
+        if not existing_row:
+            raise SquareRetailProcessingError(
+                "Square payment could not be reserved "
+                "for review."
+            )
+
+        if (
+            existing_row[1] != spa_id
+            or existing_row[2] != business_unit_id
+        ):
+            raise SquareRetailProcessingError(
+                "Square payment belongs to another "
+                "Provider Workspace."
+            )
+
+        existing_status = str(
+            existing_row[5] or ""
+        ).strip().lower()
+
+        if (
+            existing_row[3] is not None
+            or existing_status == "reconciled"
+        ):
+            return {
+                "status": "already_reconciled",
+                "square_payment_record_id":
+                    existing_row[0],
+                "income_id": existing_row[3],
+                "square_payment_id":
+                    square_payment_id,
+            }
+
+        if existing_row[4] is not None:
+            return {
+                "status": "appointment_reserved",
+                "square_payment_record_id":
+                    existing_row[0],
+                "square_payment_id":
+                    square_payment_id,
+            }
+
+        if existing_status == "matched":
+            return {
+                "status": "already_matched",
+                "square_payment_record_id":
+                    existing_row[0],
+                "square_payment_id":
+                    square_payment_id,
+            }
+
+        square_payment_record_id = existing_row[0]
+
+        cursor.execute("""
+            UPDATE square_payments
+            SET
+                square_connection_id = %s,
+                square_order_id = %s,
+                square_customer_id = %s,
+                square_location_id = %s,
+                merchant_id = %s,
+                payment_status = %s,
+                tender_type = %s,
+                currency = %s,
+                amount_cents = %s,
+                service_amount_cents = %s,
+                retail_amount_cents = %s,
+                tax_amount_cents = %s,
+                tip_amount_cents = %s,
+                discount_amount_cents = %s,
+                processing_fee_cents = %s,
+                refunded_amount_cents = %s,
+                net_received_cents = %s,
+                square_created_at = %s,
+                square_updated_at = %s,
+                appointment_id = NULL,
+                client_id = %s,
+                reconciliation_status = 'review',
+                match_method = %s,
+                match_notes = %s,
+                retrieved_at = CURRENT_TIMESTAMP,
+                last_synced_at = CURRENT_TIMESTAMP,
+                reviewed_by = NULL,
+                raw_payment = %s,
+                raw_order = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE square_payment_record_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND income_id IS NULL
+              AND appointment_id IS NULL
+              AND reconciliation_status IN (
+                    'pending',
+                    'review',
+                    'ignored',
+                    'error'
+              )
+        """, (
+            square_connection_id,
+            square_order_id,
+            preview.get("customer_id"),
+            square_location_id,
+            payment_merchant_id or merchant_id or None,
+            preview.get("status"),
+            preview.get("source_type"),
+            preview.get("currency"),
+            int(
+                preview.get("total_amount_cents")
+                or 0
+            ),
+            int(
+                preview.get("service_amount_cents")
+                or 0
+            ),
+            int(
+                preview.get("retail_amount_cents")
+                or 0
+            ),
+            int(
+                preview.get("tax_amount_cents")
+                or 0
+            ),
+            int(
+                preview.get("tip_amount_cents")
+                or 0
+            ),
+            order_discount_cents,
+            int(
+                preview.get("processing_fee_cents")
+                or 0
+            ),
+            int(
+                preview.get("refunded_amount_cents")
+                or 0
+            ),
+            int(
+                preview.get("net_received_cents")
+                or 0
+            ),
+            preview.get("created_at"),
+            payment.get("updated_at"),
+            mapped_client_id,
+            match_method,
+            match_notes,
+            Json(payment),
+            Json(order),
+            square_payment_record_id,
+            spa_id,
+            business_unit_id,
+        ))
+
+        if cursor.rowcount != 1:
+            raise SquareRetailProcessingError(
+                "Square payment reservation changed "
+                "before review staging."
+            )
+
+    staged_lines = stage_square_payment_line_items(
+        cursor,
+        spa_id=spa_id,
+        business_unit_id=business_unit_id,
+        square_payment_record_id=(
+            square_payment_record_id
+        ),
+        preview=preview,
+        catalog_mapping_details=(
+            catalog_mapping_details
+        ),
+    )
+
+    review_line_count = sum(
+        1
+        for staged_line in staged_lines
+        if str(
+            (
+                staged_line["line"].get(
+                    "classification"
+                )
+                or "unknown"
+            )
+        ).strip().lower()
+        in {"unknown", "other"}
+    )
+
+    return {
+        "status": "staged_review",
+        "square_payment_record_id":
+            square_payment_record_id,
+        "square_payment_id":
+            square_payment_id,
+        "client_id": mapped_client_id,
+        "review_line_count": review_line_count,
+        "unknown_amount_cents": int(
+            preview.get("unknown_amount_cents")
+            or 0
+        ),
+        "total_amount_cents": int(
+            preview.get("total_amount_cents")
+            or 0
+        ),
+        "tax_amount_cents": int(
+            preview.get("tax_amount_cents")
+            or 0
+        ),
+        "processing_fee_cents": int(
+            preview.get("processing_fee_cents")
+            or 0
+        ),
+        "net_received_cents": int(
+            preview.get("net_received_cents")
+            or 0
         ),
     }
 

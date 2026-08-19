@@ -15,23 +15,25 @@ class SquarePaymentLinkError(SquareIncomePostingError):
     """Raised when a Square payment cannot be linked to Income."""
 
 
-def post_square_income_lines_and_inventory(
+def stage_square_payment_line_items(
     cursor,
     *,
     spa_id,
     business_unit_id,
-    income_id,
     square_payment_record_id,
-    square_payment_id,
     preview,
     catalog_mapping_details,
 ):
     """
-    Stage Square order lines, post mapped retail inventory
-    movements, and link the Square payment to Income.
+    Stage authoritative Square order lines without creating
+    Income or inventory movements.
 
-    The caller owns transaction control.
+    The caller owns transaction control. Returned staging
+    context can be used by the full Income/inventory posting
+    path after the line records are safely upserted.
     """
+
+    staged_lines = []
 
     for line in preview["line_items"]:
         raw_line = line.get("raw") or {}
@@ -274,6 +276,64 @@ def post_square_income_lines_and_inventory(
             square_payment_line_item_id,
             existing_inventory_movement_id,
         ) = cursor.fetchone()
+
+        staged_lines.append({
+            "line": line,
+            "mapping": mapping,
+            "retail_inventory_candidate":
+                retail_inventory_candidate,
+            "inventory_quantity": inventory_quantity,
+            "square_payment_line_item_id":
+                square_payment_line_item_id,
+            "existing_inventory_movement_id":
+                existing_inventory_movement_id,
+        })
+
+    return staged_lines
+
+
+def post_square_income_lines_and_inventory(
+    cursor,
+    *,
+    spa_id,
+    business_unit_id,
+    income_id,
+    square_payment_record_id,
+    square_payment_id,
+    preview,
+    catalog_mapping_details,
+):
+    """
+    Stage Square order lines, post mapped retail inventory
+    movements, and link the Square payment to Income.
+
+    The caller owns transaction control.
+    """
+
+    staged_lines = stage_square_payment_line_items(
+        cursor,
+        spa_id=spa_id,
+        business_unit_id=business_unit_id,
+        square_payment_record_id=square_payment_record_id,
+        preview=preview,
+        catalog_mapping_details=catalog_mapping_details,
+    )
+
+    for staged_line in staged_lines:
+        line = staged_line["line"]
+        mapping = staged_line["mapping"]
+        retail_inventory_candidate = staged_line[
+            "retail_inventory_candidate"
+        ]
+        inventory_quantity = staged_line[
+            "inventory_quantity"
+        ]
+        square_payment_line_item_id = staged_line[
+            "square_payment_line_item_id"
+        ]
+        existing_inventory_movement_id = staged_line[
+            "existing_inventory_movement_id"
+        ]
 
         if (
             retail_inventory_candidate

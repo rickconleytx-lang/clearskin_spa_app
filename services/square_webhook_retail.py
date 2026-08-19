@@ -8,6 +8,7 @@ from services.square_payment_context import (
 )
 from services.square_retail_processing import (
     process_standalone_square_retail,
+    stage_square_payment_for_review,
 )
 
 
@@ -58,12 +59,15 @@ def process_recorded_square_retail_event(
     Process one already-authenticated and already-recorded
     Square webhook event.
 
-    Only a routed payment.updated event with an authoritative,
+    A routed payment.updated event with an authoritative,
     completed, fully mapped pure Retail payment is eligible
     for automatic Income + inventory posting.
 
-    Non-Retail, mixed, unmapped, or otherwise review-required
-    payments are intentionally left out of automatic posting.
+    Completed, balanced, non-refunded payments containing
+    unknown/unmapped amounts are staged for review without
+    creating Income or inventory movements. Other non-Retail,
+    mixed, refunded, or review-required payments remain
+    outside automatic posting.
 
     The Square payment idempotency boundary protects Income
     and inventory from duplicate webhook/payment delivery.
@@ -317,6 +321,98 @@ def process_recorded_square_retail_event(
                 is not True
             or preview.get("requires_review")
         ):
+            unknown_amount_cents = int(
+                preview.get("unknown_amount_cents")
+                or 0
+            )
+
+            can_stage_unknown_review = (
+                str(
+                    preview.get("status") or ""
+                ).strip().upper()
+                == "COMPLETED"
+                and unknown_amount_cents > 0
+                and int(
+                    preview.get("difference_cents")
+                    or 0
+                ) == 0
+                and int(
+                    preview.get(
+                        "refunded_amount_cents"
+                    )
+                    or 0
+                ) == 0
+            )
+
+            if can_stage_unknown_review:
+                review_result = (
+                    stage_square_payment_for_review(
+                        cur,
+                        context=context,
+                        payment=payment,
+                        order=order,
+                        preview=preview,
+                        catalog_mapping_details=(
+                            mappings[
+                                "catalog_mapping_details"
+                            ]
+                        ),
+                    )
+                )
+
+                review_status = str(
+                    review_result.get("status")
+                    or ""
+                ).strip().lower()
+
+                if review_status == "staged_review":
+                    _set_event_status(
+                        cur,
+                        square_webhook_event_id=(
+                            square_webhook_event_id
+                        ),
+                        processing_status="processed",
+                        error_message=None,
+                    )
+
+                    if owns_connection:
+                        conn.commit()
+
+                    return {
+                        "status": "processed",
+                        "square_webhook_event_id":
+                            square_webhook_event_id,
+                        "review_result":
+                            review_result,
+                    }
+
+                reason = (
+                    "Automatic review staging skipped: "
+                    "Square payment is already reserved "
+                    "or reconciled."
+                )
+
+                _set_event_status(
+                    cur,
+                    square_webhook_event_id=(
+                        square_webhook_event_id
+                    ),
+                    processing_status="ignored",
+                    error_message=reason,
+                )
+
+                if owns_connection:
+                    conn.commit()
+
+                return {
+                    "status": "ignored",
+                    "square_webhook_event_id":
+                        square_webhook_event_id,
+                    "reason": reason,
+                    "review_result":
+                        review_result,
+                }
+
             reason = (
                 "Automatic Retail skipped: authoritative "
                 "Square payment is not a fully mapped, "
