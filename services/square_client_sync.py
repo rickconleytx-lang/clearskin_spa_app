@@ -15,6 +15,71 @@ def normalize_client_email(value):
     return str(value or "").strip().lower()
 
 
+_CLIENT_EMAIL_PLACEHOLDERS = {
+    "unknown",
+    "unknown@gmail.com",
+    "unknown@example.com",
+    "none",
+    "n/a",
+    "na",
+    "no email",
+    "no-email",
+    "noemail@example.com",
+}
+
+
+_CLIENT_PHONE_PLACEHOLDERS = {
+    "unknown",
+    "none",
+    "n/a",
+    "na",
+    "no phone",
+    "no-phone",
+    "99999999",
+    "9999999999",
+    "0000000000",
+}
+
+
+def _normalize_client_email_for_square(value):
+    email = normalize_client_email(value)
+
+    if (
+        not email
+        or email in _CLIENT_EMAIL_PLACEHOLDERS
+    ):
+        return ""
+
+    if not re.fullmatch(
+        r"[^@\s]+@[^@\s]+\.[^@\s]+",
+        email,
+    ):
+        return ""
+
+    return email
+
+
+def _is_client_phone_placeholder(value):
+    raw = str(value or "").strip().lower()
+
+    if not raw:
+        return False
+
+    if raw in _CLIENT_PHONE_PLACEHOLDERS:
+        return True
+
+    digits = re.sub(
+        r"[^0-9]",
+        "",
+        raw,
+    )
+
+    return (
+        len(digits) >= 7
+        and len(set(digits)) == 1
+    )
+
+
 def normalize_client_phone_for_square(value):
     """
     Normalize PSP client phone data conservatively for Square.
@@ -32,6 +97,9 @@ def normalize_client_phone_for_square(value):
     raw = str(value or "").strip()
 
     if not raw:
+        return ""
+
+    if _is_client_phone_placeholder(raw):
         return ""
 
     digits = re.sub(
@@ -250,12 +318,20 @@ def _customer_profile_values(
     client,
     reference_id
 ):
-    email = normalize_client_email(
-        client.get("email")
+    raw_email = str(
+        client.get("email") or ""
+    ).strip()
+
+    raw_phone = str(
+        client.get("phone") or ""
+    ).strip()
+
+    email = _normalize_client_email_for_square(
+        raw_email
     )
 
     phone = normalize_client_phone_for_square(
-        client.get("phone")
+        raw_phone
     )
 
     return {
@@ -268,6 +344,14 @@ def _customer_profile_values(
         "email": email,
         "phone": phone,
         "reference_id": reference_id,
+        "_square_email_suppressed": bool(
+            raw_email
+            and not email
+        ),
+        "_square_phone_suppressed": bool(
+            raw_phone
+            and not phone
+        ),
     }
 
 
@@ -304,8 +388,10 @@ def _build_update_payload(
     *,
     version=None
 ):
-    # PSP is authoritative. Empty strings intentionally clear
-    # Square email/phone if those values were removed in PSP.
+    # PSP is authoritative. A genuinely blank PSP contact
+    # value still clears Square. Placeholder or unusable PSP
+    # contact values are omitted so they are never used for
+    # Square matching and never overwrite valid Square data.
     payload = {
         "given_name": profile[
             "given_name"
@@ -313,16 +399,24 @@ def _build_update_payload(
         "family_name": profile[
             "family_name"
         ],
-        "email_address": profile[
-            "email"
-        ],
-        "phone_number": profile[
-            "phone"
-        ],
         "reference_id": profile[
             "reference_id"
         ],
     }
+
+    if not profile.get(
+        "_square_email_suppressed"
+    ):
+        payload["email_address"] = profile[
+            "email"
+        ]
+
+    if not profile.get(
+        "_square_phone_suppressed"
+    ):
+        payload["phone_number"] = profile[
+            "phone"
+        ]
 
     if version is not None:
         payload["version"] = version
