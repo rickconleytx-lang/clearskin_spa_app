@@ -259,19 +259,27 @@ Reconcile Square Payments | Peach Suite Pro
                                 </td>
 
                                 <td>
-                                    <a
-                                        href="{{
+                                    <form
+                                        method="post"
+                                        action="{{
                                             url_for(
-                                                'add_income',
-                                                appointment_id=payment.appointment.appointment_id,
-                                                date=payment.appointment.appointment_date.isoformat(),
-                                                square_payment_id=payment.payment_id
+                                                'square_reconcile_match_appointment'
                                             )
                                         }}"
-                                        class="tool-pill tool-pill-small"
+                                        style="display: inline;"
                                     >
-                                        Review in Add Income
-                                    </a>
+                                        <input
+                                            type="hidden"
+                                            name="payment_id"
+                                            value="{{ payment.payment_id }}"
+                                        >
+                                        <button
+                                            type="submit"
+                                            class="tool-pill tool-pill-small"
+                                        >
+                                            Review Payment
+                                        </button>
+                                    </form>
                                 </td>
                             </tr>
                         {% endfor %}
@@ -402,18 +410,30 @@ Reconcile Square Payments | Peach Suite Pro
                                         >
                                             Review Existing Income
                                         </a>
-                                    {% elif payment.mapped_client %}
-                                        <a
-                                            href="{{
+                                    {% elif payment.classification_action in
+                                          ['review_payment', 'manual_review']
+                                          or payment.mapped_client %}
+                                        <form
+                                            method="post"
+                                            action="{{
                                                 url_for(
-                                                    'square_reconcile_match_appointment',
-                                                    payment_id=payment.payment_id
+                                                    'square_reconcile_match_appointment'
                                                 )
                                             }}"
+                                            style="display: inline;"
+                                        >
+                                            <input
+                                                type="hidden"
+                                                name="payment_id"
+                                                value="{{ payment.payment_id }}"
+                                            >
+                                        <button
+                                            type="submit"
                                             class="tool-pill tool-pill-small"
                                         >
-                                            Match Appointment
-                                        </a>
+                                            Review Payment
+                                        </button>
+                                        </form>
                                     {% elif payment.customer_id %}
                                         <a
                                             href="{{

@@ -785,6 +785,90 @@ def retrieve_payment(
     return payment
 
 
+def batch_retrieve_orders(
+    square_order_ids,
+    *,
+    access_token,
+    location_id=None,
+    environment="sandbox",
+):
+    """
+    Retrieve up to 100 Square orders in one read-only request.
+
+    Duplicate and blank order IDs are removed before the request.
+    No PSP records are written and no Square records are changed.
+    """
+
+    if isinstance(square_order_ids, (str, bytes)):
+        raise ValueError(
+            "Square order IDs must be supplied as a collection."
+        )
+
+    try:
+        raw_order_ids = list(square_order_ids or [])
+    except TypeError as exc:
+        raise ValueError(
+            "Square order IDs must be supplied as a collection."
+        ) from exc
+
+    order_ids = []
+    seen_order_ids = set()
+
+    for raw_order_id in raw_order_ids:
+        order_id = str(raw_order_id or "").strip()
+
+        if not order_id or order_id in seen_order_ids:
+            continue
+
+        seen_order_ids.add(order_id)
+        order_ids.append(order_id)
+
+    if not order_ids:
+        return {
+            "orders": [],
+            "errors": [],
+        }
+
+    if len(order_ids) > 100:
+        raise ValueError(
+            "Square batch order retrieval is limited to 100 "
+            "unique order IDs per request."
+        )
+
+    payload = {
+        "order_ids": order_ids,
+    }
+
+    if location_id:
+        payload["location_id"] = str(
+            location_id
+        ).strip()
+
+    data = _square_request(
+        "POST",
+        "/orders/batch-retrieve",
+        access_token=access_token,
+        environment=environment,
+        json_body=payload,
+    )
+
+    orders = data.get("orders") or []
+    errors = data.get("errors") or []
+
+    if not isinstance(orders, list):
+        raise SquareServiceError(
+            "Square returned an invalid batch order result."
+        )
+
+    if not isinstance(errors, list):
+        errors = []
+
+    return {
+        "orders": orders,
+        "errors": errors,
+    }
+
+
 def retrieve_order(
     square_order_id,
     *,

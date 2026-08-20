@@ -71,11 +71,13 @@ from services.square_income_posting import (
 )
 from services.square_catalog_context import (
     SquareCatalogContextError,
+    load_square_catalog_mappings,
     persist_square_catalog_mapping,
 )
 from services.square_retail_processing import (
     SquareRetailProcessingError,
     process_standalone_square_retail,
+    stage_square_payment_for_review,
 )
 from services.square_client_sync import (
     SquareClientSyncError,
@@ -16699,7 +16701,7 @@ def _build_square_reconciliation_state(
 
     This helper is read-only:
 
-    - Square GETs only
+    - Square read-only API calls only
     - PSP SELECTs only
     - no Income or inventory writes
     - no PSP -> Square writes
@@ -17162,8 +17164,14 @@ def _build_square_reconciliation_state(
             else None
         )
 
+        square_order_id = str(
+            payment.get("order_id") or ""
+        ).strip()
+
         live_candidates.append({
             "payment_id": payment_id,
+            "order_id": square_order_id,
+            "_payment": payment,
             "customer_id": square_customer_id,
             "mapped_client": mapped_client,
             "payment_date": (
@@ -17186,6 +17194,419 @@ def _build_square_reconciliation_state(
         })
 
     # -------------------------------------------------
+    # READ-ONLY SQUARE ORDER CLASSIFICATION
+    #
+    # Transaction contents get the first vote.
+    #
+    # Retail / unknown / unsafe payments must never fall
+    # through to client or appointment matching merely
+    # because a Square customer happens to be present.
+    #
+    # Existing staged Resolve Items payments also stop here.
+    # -------------------------------------------------
+
+    if live_candidates:
+        classification_conn = get_db_connection()
+        classification_cur = classification_conn.cursor()
+
+        catalog_classifications = {}
+        mapping_error = None
+
+        try:
+            mapping_context = load_square_catalog_mappings(
+                classification_cur,
+                square_connection_id=square_connection_id,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                environment=square_environment,
+            )
+
+            catalog_classifications = (
+                mapping_context[
+                    "catalog_classifications"
+                ]
+            )
+
+        except (
+            SquareCatalogContextError,
+            ValueError,
+        ) as exc:
+            mapping_error = str(exc)
+
+        finally:
+            classification_cur.close()
+            classification_conn.close()
+
+        # A payment already staged for Resolve Items is
+        # definitively not ready for appointment matching.
+        for item in live_candidates:
+            staged_review = (
+                item.get("staged_review") or {}
+            )
+
+            if int(
+                staged_review.get("review_line_count") or 0
+            ) > 0:
+                item["transaction_classification"] = (
+                    "unknown"
+                )
+                item["classification_action"] = (
+                    "resolve_items"
+                )
+                item[
+                    "classification_blocks_appointment"
+                ] = True
+                item["review_reason"] = (
+                    "Square payment has items waiting for "
+                    "explicit PSP catalog classification."
+                )
+
+        pending_classification = [
+            item
+            for item in live_candidates
+            if not item.get(
+                "classification_blocks_appointment"
+            )
+        ]
+
+        if mapping_error:
+            square_error = square_error or mapping_error
+
+            for item in pending_classification:
+                item["transaction_classification"] = (
+                    "unavailable"
+                )
+                item["classification_action"] = (
+                    "review_payment"
+                )
+                item[
+                    "classification_blocks_appointment"
+                ] = True
+                item["review_reason"] = (
+                    "Square order classification is not "
+                    "currently available. No appointment "
+                    "was matched."
+                )
+
+        elif pending_classification:
+            order_ids = [
+                item["order_id"]
+                for item in pending_classification
+                if item.get("order_id")
+            ]
+
+            orders_by_id = {}
+            batch_error = None
+
+            if order_ids:
+                try:
+                    batch_result = (
+                        square_service.batch_retrieve_orders(
+                            order_ids,
+                            access_token=square_token,
+                            location_id=square_location_id,
+                            environment=square_environment,
+                        )
+                    )
+
+                    for order in (
+                        batch_result.get("orders") or []
+                    ):
+                        if not isinstance(order, dict):
+                            continue
+
+                        order_id = str(
+                            order.get("id") or ""
+                        ).strip()
+
+                        if (
+                            order_id
+                            and order_id not in orders_by_id
+                        ):
+                            orders_by_id[order_id] = order
+
+                except (
+                    square_service.SquareServiceError,
+                    ValueError,
+                ) as exc:
+                    batch_error = str(exc)
+                    square_error = (
+                        square_error or batch_error
+                    )
+
+            for item in pending_classification:
+                order_id = str(
+                    item.get("order_id") or ""
+                ).strip()
+
+                if batch_error:
+                    item[
+                        "transaction_classification"
+                    ] = "unavailable"
+                    item["classification_action"] = (
+                        "review_payment"
+                    )
+                    item[
+                        "classification_blocks_appointment"
+                    ] = True
+                    item["review_reason"] = (
+                        "Square order details could not be "
+                        "retrieved for classification. "
+                        "No appointment was matched."
+                    )
+                    continue
+
+                if not order_id:
+                    item[
+                        "transaction_classification"
+                    ] = "unavailable"
+                    item["classification_action"] = (
+                        "review_payment"
+                    )
+                    item[
+                        "classification_blocks_appointment"
+                    ] = True
+                    item["review_reason"] = (
+                        "Square payment has no order attached, "
+                        "so Service versus Retail cannot be "
+                        "classified safely. No appointment "
+                        "was matched."
+                    )
+                    continue
+
+                order = orders_by_id.get(order_id)
+
+                if not order:
+                    item[
+                        "transaction_classification"
+                    ] = "unavailable"
+                    item["classification_action"] = (
+                        "review_payment"
+                    )
+                    item[
+                        "classification_blocks_appointment"
+                    ] = True
+                    item["review_reason"] = (
+                        "Square order details were not returned "
+                        "for this payment. No appointment "
+                        "was matched."
+                    )
+                    continue
+
+                order_location_id = str(
+                    order.get("location_id") or ""
+                ).strip()
+
+                if (
+                    order_location_id
+                    and order_location_id
+                        != square_location_id
+                ):
+                    item[
+                        "transaction_classification"
+                    ] = "location_mismatch"
+                    item["classification_action"] = (
+                        "manual_review"
+                    )
+                    item[
+                        "classification_blocks_appointment"
+                    ] = True
+                    item["review_reason"] = (
+                        "Square order location does not match "
+                        "this Provider Workspace. No appointment "
+                        "was matched."
+                    )
+                    continue
+
+                try:
+                    preview = (
+                        square_service.build_income_preview(
+                            item.get("_payment") or {},
+                            order,
+                            catalog_classifications=(
+                                catalog_classifications
+                            ),
+                        )
+                    )
+
+                except (
+                    square_service.SquareServiceError,
+                    ValueError,
+                ):
+                    item[
+                        "transaction_classification"
+                    ] = "unavailable"
+                    item["classification_action"] = (
+                        "review_payment"
+                    )
+                    item[
+                        "classification_blocks_appointment"
+                    ] = True
+                    item["review_reason"] = (
+                        "Square order contents could not be "
+                        "classified safely. No appointment "
+                        "was matched."
+                    )
+                    continue
+
+                service_cents = int(
+                    preview.get(
+                        "service_amount_cents"
+                    )
+                    or 0
+                )
+
+                retail_cents = int(
+                    preview.get(
+                        "retail_amount_cents"
+                    )
+                    or 0
+                )
+
+                unknown_cents = int(
+                    preview.get(
+                        "unknown_amount_cents"
+                    )
+                    or 0
+                )
+
+                difference_cents = int(
+                    preview.get("difference_cents")
+                    or 0
+                )
+
+                refunded_cents = int(
+                    preview.get(
+                        "refunded_amount_cents"
+                    )
+                    or 0
+                )
+
+                is_safe_pure_retail = (
+                    preview.get("income_type") == "Retail"
+                    and preview.get(
+                        "ready_for_income"
+                    ) is True
+                    and not preview.get(
+                        "requires_review"
+                    )
+                    and service_cents == 0
+                    and retail_cents > 0
+                    and difference_cents == 0
+                    and refunded_cents == 0
+                )
+
+                item["classification_preview"] = {
+                    "income_type": preview.get(
+                        "income_type"
+                    ),
+                    "service_cents": service_cents,
+                    "retail_cents": retail_cents,
+                    "unknown_cents": unknown_cents,
+                    "difference_cents":
+                        difference_cents,
+                    "refunded_cents":
+                        refunded_cents,
+                    "requires_review": bool(
+                        preview.get(
+                            "requires_review"
+                        )
+                    ),
+                }
+
+                if is_safe_pure_retail:
+                    item[
+                        "transaction_classification"
+                    ] = "retail"
+                    item["classification_action"] = (
+                        "review_payment"
+                    )
+                    item[
+                        "classification_blocks_appointment"
+                    ] = True
+                    item["review_reason"] = (
+                        "Square order is classified as Retail. "
+                        "No appointment is required; review the "
+                        "payment for standalone Retail posting."
+                    )
+                    continue
+
+                if unknown_cents > 0:
+                    item[
+                        "transaction_classification"
+                    ] = "unknown"
+                    item["classification_action"] = (
+                        "review_payment"
+                    )
+                    item[
+                        "classification_blocks_appointment"
+                    ] = True
+
+                    if (
+                        difference_cents != 0
+                        or refunded_cents != 0
+                    ):
+                        item["review_reason"] = (
+                            "Square order contains unmapped "
+                            "items and also needs additional "
+                            "payment review. No appointment "
+                            "was matched."
+                        )
+                    else:
+                        item["review_reason"] = (
+                            "Square order contains unmapped "
+                            "items. Review the payment to "
+                            "resolve the item classification."
+                        )
+
+                    continue
+
+                if service_cents == 0:
+                    item[
+                        "transaction_classification"
+                    ] = "non_service_review"
+                    item["classification_action"] = (
+                        "review_payment"
+                    )
+                    item[
+                        "classification_blocks_appointment"
+                    ] = True
+                    item["review_reason"] = (
+                        "No Service was found in this Square "
+                        "order, but it is not safe for automatic "
+                        "Retail posting. No appointment "
+                        "was matched."
+                    )
+                    continue
+
+                if preview.get("requires_review"):
+                    item[
+                        "transaction_classification"
+                    ] = "service_review"
+                    item["classification_action"] = (
+                        "review_payment"
+                    )
+                    item[
+                        "classification_blocks_appointment"
+                    ] = True
+                    item["review_reason"] = (
+                        "A Service was found in this Square "
+                        "order, but the payment still requires "
+                        "review before appointment matching."
+                    )
+                    continue
+
+                # Only Service / Service + Retail that passed
+                # the same preview safeguards may continue to
+                # the existing client + appointment logic.
+                item["transaction_classification"] = (
+                    "service"
+                )
+                item[
+                    "classification_blocks_appointment"
+                ] = False
+
+    # -------------------------------------------------
     # PSP READ — conservative appointment matching
     #
     # Safe suggestion only when:
@@ -17204,6 +17625,11 @@ def _build_square_reconciliation_state(
 
         try:
             for item in live_candidates:
+                if item.get(
+                    "classification_blocks_appointment"
+                ):
+                    continue
+
                 mapped_client = item[
                     "mapped_client"
                 ]
@@ -17583,6 +18009,12 @@ def _build_square_reconciliation_priority_action(
         ):
             return "Review Existing Income"
 
+        if item.get("classification_action") in (
+            "review_payment",
+            "manual_review",
+        ):
+            return "Review Payment"
+
         if item.get("mapped_client"):
             return "Match Appointment"
 
@@ -17595,6 +18027,7 @@ def _build_square_reconciliation_priority_action(
         "Review Existing Income",
         "Review in Add Income",
         "Resolve Items",
+        "Review Payment",
         "Match Appointment",
         "Identify Client",
         "No Square Customer",
@@ -17622,6 +18055,10 @@ def _build_square_reconciliation_priority_action(
         "Resolve Items": (
             "has Square items to resolve",
             "have Square items to resolve",
+        ),
+        "Review Payment": (
+            "needs payment review",
+            "need payment review",
         ),
         "Match Appointment": (
             "needs appointment matching",
@@ -17790,12 +18227,35 @@ def _build_square_reconciliation_priority_action(
             "items now?"
         )
 
-    elif coach_type == "Match Appointment":
-        coach_action_label = "Match Appointment"
-        coach_url = url_for(
-            "square_reconcile_match_appointment",
-            payment_id=payment_id,
+    elif coach_type == "Review Payment":
+        coach_action_label = "Review Payment"
+        coach_url = workbench_url
+
+        review_reason = str(
+            coach_item.get("review_reason")
+            or ""
+        ).strip()
+
+        coach_detail = (
+            "Peach Suite Pro classified the oldest actionable "
+            "payment from its Square order before considering "
+            "any client or appointment match."
         )
+
+        if review_reason:
+            coach_detail += f" {review_reason}"
+
+        coach_question = (
+            "Would you like to review this Square payment?"
+        )
+
+    elif coach_type == "Match Appointment":
+        # Historical workbench state may identify a likely
+        # appointment candidate before the Square order items
+        # have been classified. Always send the user through
+        # the guarded payment-classification step first.
+        coach_action_label = "Review Payment"
+        coach_url = workbench_url
 
         review_reason = str(
             coach_item.get("review_reason")
@@ -17805,18 +18265,20 @@ def _build_square_reconciliation_priority_action(
         if review_reason:
             coach_detail = (
                 f"The oldest actionable payment is mapped "
-                f"to {client_name}. {review_reason}"
+                f"to {client_name}. {review_reason} "
+                "Peach Suite Pro will review the Square "
+                "order items before any appointment match."
             )
         else:
             coach_detail = (
                 f"The oldest actionable payment is mapped "
-                f"to {client_name}, but the appointment "
-                "still needs to be matched."
+                f"to {client_name}. Peach Suite Pro will "
+                "review the Square order items before any "
+                "appointment match."
             )
 
         coach_question = (
-            "Would you like to match this Square payment "
-            "to the correct appointment?"
+            "Would you like to review this Square payment?"
         )
 
     elif coach_type == "Identify Client":
@@ -18691,7 +19153,7 @@ def square_reconcile_resolve_items():
 
 @app.route(
     "/payment-integrations/square/reconcile/match-appointment",
-    methods=["GET"],
+    methods=["POST"],
 )
 @login_required
 @spa_required
@@ -18706,7 +19168,7 @@ def square_reconcile_match_appointment():
         abort(403)
 
     square_payment_id = str(
-        request.args.get("payment_id") or ""
+        request.form.get("payment_id") or ""
     ).strip()
 
     if not square_payment_id:
@@ -18852,6 +19314,19 @@ def square_reconcile_match_appointment():
             environment=square_environment,
         )
 
+        square_order_id = str(
+            payment.get("order_id") or ""
+        ).strip()
+
+        order = {}
+
+        if square_order_id:
+            order = square_service.retrieve_order(
+                square_order_id,
+                access_token=token,
+                environment=square_environment,
+            )
+
     except (
         square_oauth.SquareOAuthError,
         square_service.SquareServiceError,
@@ -18890,12 +19365,428 @@ def square_reconcile_match_appointment():
     if payment_status != "COMPLETED":
         flash(
             "Only completed Square payments can be "
-            "reviewed for appointment matching.",
+            "reviewed for reconciliation.",
             "error",
         )
         return redirect(
             url_for("square_reconcile_payments")
         )
+
+    # -------------------------------------------------
+    # CLASSIFY THE SALE BEFORE APPOINTMENT MATCHING.
+    #
+    # Service presence decides whether appointment
+    # reconciliation is appropriate. A mapped customer
+    # by itself never makes a payment a Service sale.
+    # -------------------------------------------------
+
+    if not square_order_id or not order:
+        flash(
+            "Peach Suite Pro could not inspect the "
+            "Square order items for this payment, so "
+            "it will not guess Service versus Retail.",
+            "warning",
+        )
+        return redirect(
+            url_for("square_reconcile_payments")
+        )
+
+    order_location_id = str(
+        order.get("location_id") or ""
+    ).strip()
+
+    if (
+        order_location_id
+        and order_location_id != square_location_id
+    ):
+        abort(403)
+
+    classification_conn = get_db_connection()
+    classification_cur = (
+        classification_conn.cursor()
+    )
+
+    try:
+        # ---------------------------------------------
+        # Reuse PSP's exact workspace-scoped Square
+        # catalog mapping loader.
+        # ---------------------------------------------
+
+        mapping_context = load_square_catalog_mappings(
+            classification_cur,
+            square_connection_id=square_connection_id,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            environment=square_environment,
+        )
+
+        catalog_classifications = (
+            mapping_context[
+                "catalog_classifications"
+            ]
+        )
+
+        catalog_mapping_details = (
+            mapping_context[
+                "catalog_mapping_details"
+            ]
+        )
+
+        preview = square_service.build_income_preview(
+            payment,
+            order,
+            catalog_classifications=(
+                catalog_classifications
+            ),
+        )
+
+        service_cents = int(
+            preview.get(
+                "service_amount_cents"
+            )
+            or 0
+        )
+
+        retail_cents = int(
+            preview.get(
+                "retail_amount_cents"
+            )
+            or 0
+        )
+
+        unknown_cents = int(
+            preview.get(
+                "unknown_amount_cents"
+            )
+            or 0
+        )
+
+        difference_cents = int(
+            preview.get(
+                "difference_cents"
+            )
+            or 0
+        )
+
+        refunded_cents = int(
+            preview.get(
+                "refunded_amount_cents"
+            )
+            or 0
+        )
+
+        context = {
+            "spa_id": spa_id,
+            "business_unit_id":
+                business_unit_id,
+            "square_connection_id":
+                square_connection_id,
+            "environment":
+                square_environment,
+            "square_location_id":
+                square_location_id,
+            "merchant_id":
+                merchant_id,
+        }
+
+        # ---------------------------------------------
+        # RETAIL ONLY
+        #
+        # No Service is involved. Stop appointment
+        # logic and use the existing guarded standalone
+        # Retail processor.
+        # ---------------------------------------------
+
+        is_safe_pure_retail = (
+            preview.get("income_type") == "Retail"
+            and preview.get(
+                "ready_for_income"
+            ) is True
+            and not preview.get(
+                "requires_review"
+            )
+            and service_cents == 0
+            and retail_cents > 0
+            and difference_cents == 0
+            and refunded_cents == 0
+        )
+
+        if is_safe_pure_retail:
+            result = (
+                process_standalone_square_retail(
+                    classification_cur,
+                    context=context,
+                    payment=payment,
+                    order=order,
+                    preview=preview,
+                    catalog_mapping_details=(
+                        catalog_mapping_details
+                    ),
+                )
+            )
+
+            classification_conn.commit()
+
+            result_status = str(
+                (result or {}).get(
+                    "status"
+                )
+                or ""
+            ).strip().lower()
+
+            income_id = (
+                (result or {}).get(
+                    "income_id"
+                )
+            )
+
+            if (
+                result_status
+                == "already_reconciled"
+            ):
+                flash(
+                    "This Square Retail payment is "
+                    "already reconciled.",
+                    "info",
+                )
+
+            else:
+                message = (
+                    "Square Retail sale was posted "
+                    "automatically."
+                )
+
+                if income_id:
+                    message += (
+                        f" Retail Income "
+                        f"#{income_id} was created."
+                    )
+
+                flash(
+                    message,
+                    "success",
+                )
+
+            return redirect(
+                url_for(
+                    "square_reconcile_payments"
+                )
+            )
+
+        # ---------------------------------------------
+        # UNKNOWN / UNMAPPED
+        #
+        # Do not interpret "not recognized as Service"
+        # as Retail. Stage the authoritative lines for
+        # explicit Resolve Items review.
+        # ---------------------------------------------
+
+        if unknown_cents > 0:
+            if (
+                difference_cents != 0
+                or refunded_cents != 0
+            ):
+                classification_conn.rollback()
+
+                flash(
+                    "This Square payment contains "
+                    "unmapped items and also needs "
+                    "additional payment review. "
+                    "No appointment was matched.",
+                    "warning",
+                )
+
+                return redirect(
+                    url_for(
+                        "square_reconcile_payments"
+                    )
+                )
+
+            stage_square_payment_for_review(
+                classification_cur,
+                context=context,
+                payment=payment,
+                order=order,
+                preview=preview,
+                catalog_mapping_details=(
+                    catalog_mapping_details
+                ),
+            )
+
+            # Confirm that the payment is genuinely in
+            # unresolved item-review state before
+            # committing or redirecting to Resolve Items.
+            classification_cur.execute("""
+                SELECT
+                    COUNT(*) FILTER (
+                        WHERE
+                            spli.reconciliation_status =
+                                'review'
+                    )
+                FROM square_payments sp
+                LEFT JOIN square_payment_line_items spli
+                  ON spli.square_payment_record_id =
+                        sp.square_payment_record_id
+                 AND spli.spa_id = sp.spa_id
+                 AND spli.business_unit_id =
+                        sp.business_unit_id
+                WHERE sp.environment = %s
+                  AND sp.square_payment_id = %s
+                  AND sp.spa_id = %s
+                  AND sp.business_unit_id = %s
+                  AND sp.income_id IS NULL
+                  AND sp.appointment_id IS NULL
+                  AND sp.reconciliation_status =
+                        'review'
+            """, (
+                square_environment,
+                square_payment_id,
+                spa_id,
+                business_unit_id,
+            ))
+
+            review_row = (
+                classification_cur.fetchone()
+            )
+
+            review_line_count = int(
+                (
+                    review_row[0]
+                    if review_row
+                    else 0
+                )
+                or 0
+            )
+
+            if review_line_count > 0:
+                classification_conn.commit()
+
+                flash(
+                    "Square payment items need "
+                    "classification before Peach "
+                    "Suite Pro can determine Service "
+                    "versus Retail.",
+                    "info",
+                )
+
+                return redirect(
+                    url_for(
+                        "square_reconcile_resolve_items",
+                        payment_id=(
+                            square_payment_id
+                        ),
+                    )
+                )
+
+            classification_conn.rollback()
+
+            flash(
+                "This Square payment could not be "
+                "staged safely for item resolution. "
+                "Nothing was posted or matched.",
+                "warning",
+            )
+
+            return redirect(
+                url_for(
+                    "square_reconcile_payments"
+                )
+            )
+
+        # ---------------------------------------------
+        # NO SERVICE, BUT NOT SAFE PURE RETAIL
+        #
+        # Critically, do not fall through to appointment
+        # matching merely because the customer maps.
+        # ---------------------------------------------
+
+        if service_cents == 0:
+            classification_conn.rollback()
+
+            flash(
+                "No Service was found in this Square "
+                "transaction, but it is not safe for "
+                "automatic Retail posting. "
+                "No appointment was matched.",
+                "warning",
+            )
+
+            return redirect(
+                url_for(
+                    "square_reconcile_payments"
+                )
+            )
+
+        # ---------------------------------------------
+        # SERVICE / SERVICE + RETAIL
+        #
+        # Only a safely classified transaction that
+        # actually contains a Service may continue to
+        # client + appointment reconciliation.
+        # ---------------------------------------------
+
+        if preview.get("requires_review"):
+            classification_conn.rollback()
+
+            flash(
+                "A Service was found in this Square "
+                "transaction, but the payment still "
+                "requires review before appointment "
+                "matching.",
+                "warning",
+            )
+
+            return redirect(
+                url_for(
+                    "square_reconcile_payments"
+                )
+            )
+
+        # Read-only classification transaction.
+        classification_conn.rollback()
+
+    except (
+        SquareCatalogContextError,
+        SquareRetailProcessingError,
+        ValueError,
+    ) as exc:
+        classification_conn.rollback()
+
+        flash(
+            "Square payment classification could "
+            f"not be completed safely: {exc}",
+            "error",
+        )
+
+        return redirect(
+            url_for(
+                "square_reconcile_payments"
+            )
+        )
+
+    except Exception:
+        classification_conn.rollback()
+
+        app.logger.exception(
+            "Historical Square payment "
+            "classification failed."
+        )
+
+        flash(
+            "Square payment classification failed. "
+            "Nothing was posted or matched.",
+            "error",
+        )
+
+        return redirect(
+            url_for(
+                "square_reconcile_payments"
+            )
+        )
+
+    finally:
+        classification_cur.close()
+        classification_conn.close()
 
     payment_local_datetime = (
         _square_payment_local_datetime(
