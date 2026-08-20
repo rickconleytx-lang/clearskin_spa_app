@@ -9,6 +9,10 @@ from psycopg2.extras import RealDictCursor
 
 from db import get_db_connection
 from services import square_service, square_sync_auth
+from services.square_catalog_context import (
+    SquareCatalogContextError,
+    persist_square_catalog_mapping,
+)
 
 
 class SquareServiceSyncError(Exception):
@@ -707,181 +711,32 @@ def _persist_mapping(
     )
 
     try:
-        cur.execute("""
-            SELECT service_type_id
-            FROM service_name_types
-            WHERE service_type_id = %s
-              AND spa_id = %s
-            LIMIT 1
-        """, (
-            service_type_id,
-            spa_id,
-        ))
-
-        if not cur.fetchone():
-            raise SquareServiceSyncError(
-                "PSP service changed before the Square "
-                "mapping could be saved."
-            )
-
-        cur.execute("""
-            SELECT
-                square_catalog_mapping_id,
-                square_catalog_object_id,
-                square_item_id,
-                service_type_id,
-                is_active
-            FROM square_catalog_mappings
-            WHERE square_connection_id = %s
-              AND spa_id = %s
-              AND business_unit_id = %s
-              AND environment = %s
-              AND mapping_type = 'service_type'
-              AND service_type_id = %s
-              AND is_active = TRUE
-            LIMIT 1
-            FOR UPDATE
-        """, (
-            square_connection_id,
-            spa_id,
-            business_unit_id,
-            environment,
-            service_type_id,
-        ))
-
-        existing_for_service = (
-            cur.fetchone()
+        row = persist_square_catalog_mapping(
+            cur,
+            square_connection_id=square_connection_id,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            environment=environment,
+            square_catalog_object_id=(
+                square_catalog_object_id
+            ),
+            square_item_id=square_item_id,
+            square_name=square_name,
+            mapping_type="service_type",
+            service_type_id=service_type_id,
+            actor_user_id=actor_user_id,
         )
 
-        if existing_for_service:
-            if (
-                existing_for_service[
-                    "square_catalog_object_id"
-                ]
-                != square_catalog_object_id
-            ):
-                raise SquareServiceSyncError(
-                    "PSP service already has a different "
-                    "active Square Catalog mapping."
-                )
-
-            if (
-                existing_for_service[
-                    "square_item_id"
-                ]
-                and existing_for_service[
-                    "square_item_id"
-                ] != square_item_id
-            ):
-                raise SquareServiceSyncError(
-                    "PSP service mapping points to a "
-                    "different Square parent item."
-                )
-
-            cur.execute("""
-                UPDATE square_catalog_mappings
-                SET
-                    square_item_id = %s,
-                    square_name = %s,
-                    square_sku = NULL,
-                    verified_by = %s,
-                    verified_at = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE square_catalog_mapping_id = %s
-                RETURNING
-                    square_catalog_mapping_id,
-                    square_catalog_object_id,
-                    square_item_id,
-                    square_name,
-                    service_type_id,
-                    is_active
-            """, (
-                square_item_id,
-                square_name,
-                actor_user_id,
-                existing_for_service[
-                    "square_catalog_mapping_id"
-                ],
-            ))
-
-            row = cur.fetchone()
-            conn.commit()
-
-            return dict(row)
-
-        cur.execute("""
-            SELECT
-                square_catalog_mapping_id,
-                mapping_type,
-                inventory_product_id,
-                service_type_id,
-                is_active
-            FROM square_catalog_mappings
-            WHERE square_connection_id = %s
-              AND square_catalog_object_id = %s
-            LIMIT 1
-            FOR UPDATE
-        """, (
-            square_connection_id,
-            square_catalog_object_id,
-        ))
-
-        existing_for_square = (
-            cur.fetchone()
-        )
-
-        if existing_for_square:
-            raise SquareServiceSyncError(
-                "Square Catalog variation is already mapped "
-                "to another PSP record."
-            )
-
-        cur.execute("""
-            INSERT INTO square_catalog_mappings (
-                square_connection_id,
-                spa_id,
-                business_unit_id,
-                environment,
-                square_catalog_object_id,
-                square_item_id,
-                square_name,
-                square_sku,
-                mapping_type,
-                inventory_product_id,
-                service_type_id,
-                is_active,
-                verified_by,
-                verified_at
-            )
-            VALUES (
-                %s, %s, %s, %s, %s,
-                %s, %s, NULL, 'service_type',
-                NULL, %s, TRUE, %s,
-                CURRENT_TIMESTAMP
-            )
-            RETURNING
-                square_catalog_mapping_id,
-                square_catalog_object_id,
-                square_item_id,
-                square_name,
-                service_type_id,
-                is_active
-        """, (
-            square_connection_id,
-            spa_id,
-            business_unit_id,
-            environment,
-            square_catalog_object_id,
-            square_item_id,
-            square_name,
-            service_type_id,
-            actor_user_id,
-        ))
-
-        row = cur.fetchone()
         conn.commit()
 
-        return dict(row)
+        return row
+
+    except SquareCatalogContextError as exc:
+        conn.rollback()
+
+        raise SquareServiceSyncError(
+            str(exc)
+        ) from exc
 
     except IntegrityError as exc:
         conn.rollback()

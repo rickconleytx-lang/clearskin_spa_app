@@ -1,0 +1,288 @@
+{% extends "base.html" %}
+
+{% block title %}
+Resolve Square Items | Peach Suite Pro
+{% endblock %}
+
+{% block content %}
+
+<style>
+.square-resolve-page {
+    max-width: 1100px;
+    margin: 0 auto;
+}
+
+.square-resolve-intro {
+    max-width: 850px;
+    margin: 12px 0 20px 0;
+}
+
+.square-resolve-card {
+    border: 1px solid #ddd;
+    border-radius: 12px;
+    background: #fff;
+    padding: 16px;
+    margin: 14px 0;
+}
+
+.square-resolve-meta {
+    font-size: 0.92rem;
+    margin-top: 6px;
+}
+
+.square-resolve-grid {
+    display: grid;
+    grid-template-columns:
+        repeat(auto-fit, minmax(260px, 1fr));
+    gap: 14px;
+    margin-top: 14px;
+}
+
+.square-resolve-form {
+    border-top: 1px solid #eee;
+    margin-top: 14px;
+    padding-top: 14px;
+}
+
+.square-resolve-form select {
+    width: 100%;
+    max-width: 420px;
+    padding: 8px;
+    margin: 6px 0 10px 0;
+}
+
+.square-resolve-status {
+    display: inline-block;
+    border: 1px solid #bbb;
+    border-radius: 999px;
+    padding: 4px 9px;
+    font-weight: 700;
+}
+</style>
+
+<div class="square-resolve-page">
+
+    <div class="page-tool-pills">
+        <a
+            href="{{ url_for('square_reconcile_payments') }}"
+            class="tool-pill tool-pill-small"
+        >
+            Back to Reconciliation
+        </a>
+    </div>
+
+    <div class="page-title">
+        <h1>Resolve Square Items</h1>
+    </div>
+
+    <p class="square-resolve-intro">
+        Peach Suite Pro will not guess whether an unknown Square
+        item is a Service or Retail product. Choose the exact PSP
+        catalog item below. Once every line is safely mapped, a pure
+        Retail payment can continue through the existing automatic
+        Retail reconciliation and inventory workflow.
+    </p>
+
+    <p>
+        <strong>Environment:</strong>
+        {{ environment|title }}
+        &nbsp;•&nbsp;
+        <strong>Payment:</strong>
+        {{ payment_id }}
+    </p>
+
+    {% for line in lines %}
+
+        <div class="square-resolve-card">
+
+            <h3>
+                {{ line.item_name or 'Unnamed Square Item' }}
+            </h3>
+
+            <div class="square-resolve-meta">
+                Quantity:
+                <strong>{{ line.quantity or '—' }}</strong>
+                &nbsp;•&nbsp;
+                Total:
+                <strong>
+                    ${{ '%.2f'|format(line.total_cents / 100) }}
+                </strong>
+            </div>
+
+            <div class="square-resolve-meta">
+                Square Catalog Variation:
+                {% if line.catalog_object_id %}
+                    <code>{{ line.catalog_object_id }}</code>
+                {% else %}
+                    —
+                {% endif %}
+            </div>
+
+            <div class="square-resolve-meta">
+                Current classification:
+                <strong>
+                    {{ line.classification|title }}
+                </strong>
+                &nbsp;•&nbsp;
+                <span class="square-resolve-status">
+                    {{ line.status|title }}
+                </span>
+            </div>
+
+            {% if line.mapped_target %}
+
+                <p>
+                    <strong>Current PSP Mapping:</strong>
+                    {{ line.mapped_target }}
+                    ({{ 'Retail Product'
+                        if line.mapping_type == 'inventory_product'
+                        else 'Service' }})
+                </p>
+
+            {% endif %}
+
+            {% if not line.catalog_object_id %}
+
+                <p>
+                    This Square line does not contain a catalog
+                    variation ID. It cannot be permanently mapped
+                    yet and must remain in review.
+                </p>
+
+            {% elif line.mapping_id %}
+
+                <p>
+                    The PSP catalog mapping is saved, but this
+                    Square line still requires review for another
+                    reconciliation reason.
+                </p>
+
+            {% elif line.status == 'review' %}
+
+                <div class="square-resolve-grid">
+
+                    <form
+                        method="post"
+                        class="square-resolve-form"
+                    >
+                        <input
+                            type="hidden"
+                            name="payment_id"
+                            value="{{ payment_id }}"
+                        >
+                        <input
+                            type="hidden"
+                            name="line_item_id"
+                            value="{{ line.line_item_id }}"
+                        >
+                        <input
+                            type="hidden"
+                            name="mapping_type"
+                            value="inventory_product"
+                        >
+
+                        <strong>
+                            Map as Retail Product
+                        </strong>
+
+                        <select
+                            name="target_id"
+                            required
+                        >
+                            <option value="">
+                                Choose PSP inventory product…
+                            </option>
+
+                            {% for product in inventory_products %}
+                                <option
+                                    value="{{ product.product_id }}"
+                                >
+                                    {{ product.product_name }}
+                                </option>
+                            {% endfor %}
+                        </select>
+
+                        <div>
+                            <button
+                                type="submit"
+                                class="tool-pill tool-pill-small"
+                            >
+                                Map to Retail Product
+                            </button>
+                        </div>
+                    </form>
+
+                    <form
+                        method="post"
+                        class="square-resolve-form"
+                    >
+                        <input
+                            type="hidden"
+                            name="payment_id"
+                            value="{{ payment_id }}"
+                        >
+                        <input
+                            type="hidden"
+                            name="line_item_id"
+                            value="{{ line.line_item_id }}"
+                        >
+                        <input
+                            type="hidden"
+                            name="mapping_type"
+                            value="service_type"
+                        >
+
+                        <strong>
+                            Map as Service
+                        </strong>
+
+                        <select
+                            name="target_id"
+                            required
+                        >
+                            <option value="">
+                                Choose PSP service…
+                            </option>
+
+                            {% for service in service_types %}
+                                <option
+                                    value="{{ service.service_type_id }}"
+                                >
+                                    {{ service.service_name }}
+                                </option>
+                            {% endfor %}
+                        </select>
+
+                        <div>
+                            <button
+                                type="submit"
+                                class="tool-pill tool-pill-small"
+                            >
+                                Map to Service
+                            </button>
+                        </div>
+                    </form>
+
+                </div>
+
+            {% else %}
+
+                <p>
+                    This line no longer requires catalog mapping.
+                </p>
+
+            {% endif %}
+
+        </div>
+
+    {% else %}
+
+        <div class="square-resolve-card">
+            No staged Square line items were found for this payment.
+        </div>
+
+    {% endfor %}
+
+</div>
+
+{% endblock %}

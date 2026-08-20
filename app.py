@@ -67,6 +67,15 @@ from services import square_sync_auth
 from services.square_income_posting import (
     SquarePaymentLinkError,
     post_square_income_lines_and_inventory,
+    stage_square_payment_line_items,
+)
+from services.square_catalog_context import (
+    SquareCatalogContextError,
+    persist_square_catalog_mapping,
+)
+from services.square_retail_processing import (
+    SquareRetailProcessingError,
+    process_standalone_square_retail,
 )
 from services.square_client_sync import (
     SquareClientSyncError,
@@ -16707,6 +16716,7 @@ def _build_square_reconciliation_state(
     customer_mappings = {}
     reconciled_rows = []
     reconciled_payment_ids = set()
+    staged_review_payments = {}
     square_error = None
 
     # -------------------------------------------------
@@ -16956,6 +16966,58 @@ def _build_square_reconciliation_state(
                     ),
                 })
 
+            # Load webhook-staged Square payments that are
+            # still genuinely unresolved. This remains read-only.
+            cur.execute("""
+                SELECT
+                    sp.square_payment_id,
+                    sp.square_payment_record_id,
+                    COUNT(
+                        spli.square_payment_line_item_id
+                    ) AS line_count,
+                    COUNT(*) FILTER (
+                        WHERE spli.reconciliation_status = 'review'
+                    ) AS review_line_count
+                FROM square_payments sp
+                LEFT JOIN square_payment_line_items spli
+                  ON spli.square_payment_record_id =
+                        sp.square_payment_record_id
+                 AND spli.spa_id = sp.spa_id
+                 AND spli.business_unit_id =
+                        sp.business_unit_id
+                WHERE sp.square_connection_id = %s
+                  AND sp.spa_id = %s
+                  AND sp.business_unit_id = %s
+                  AND sp.environment = %s
+                  AND sp.income_id IS NULL
+                  AND sp.appointment_id IS NULL
+                  AND sp.reconciliation_status = 'review'
+                GROUP BY
+                    sp.square_payment_id,
+                    sp.square_payment_record_id
+            """, (
+                square_connection_id,
+                spa_id,
+                business_unit_id,
+                square_environment,
+            ))
+
+            for row in cur.fetchall():
+                staged_payment_id = str(
+                    row[0] or ""
+                ).strip()
+
+                if not staged_payment_id:
+                    continue
+
+                staged_review_payments[
+                    staged_payment_id
+                ] = {
+                    "square_payment_record_id": row[1],
+                    "line_count": int(row[2] or 0),
+                    "review_line_count": int(row[3] or 0),
+                }
+
     finally:
         cur.close()
         conn.close()
@@ -17118,6 +17180,9 @@ def _build_square_reconciliation_state(
             "fee_cents": fee_cents,
             "appointment": None,
             "review_reason": None,
+            "staged_review": (
+                staged_review_payments.get(payment_id)
+            ),
         })
 
     # -------------------------------------------------
@@ -17504,6 +17569,15 @@ def _build_square_reconciliation_priority_action(
         if item.get("appointment") is not None:
             return "Review in Add Income"
 
+        staged_review = (
+            item.get("staged_review") or {}
+        )
+
+        if int(
+            staged_review.get("review_line_count") or 0
+        ) > 0:
+            return "Resolve Items"
+
         if item.get(
             "existing_income_link_candidate"
         ):
@@ -17520,6 +17594,7 @@ def _build_square_reconciliation_priority_action(
     type_order = (
         "Review Existing Income",
         "Review in Add Income",
+        "Resolve Items",
         "Match Appointment",
         "Identify Client",
         "No Square Customer",
@@ -17543,6 +17618,10 @@ def _build_square_reconciliation_priority_action(
         "Review in Add Income": (
             "ready for Add Income",
             "ready for Add Income",
+        ),
+        "Resolve Items": (
+            "has Square items to resolve",
+            "have Square items to resolve",
         ),
         "Match Appointment": (
             "needs appointment matching",
@@ -17679,6 +17758,38 @@ def _build_square_reconciliation_priority_action(
             "Income match?"
         )
 
+    elif coach_type == "Resolve Items":
+        coach_action_label = "Resolve Items"
+        coach_url = url_for(
+            "square_reconcile_resolve_items",
+            payment_id=payment_id,
+        )
+
+        staged_review = (
+            coach_item.get("staged_review") or {}
+        )
+
+        review_line_count = int(
+            staged_review.get("review_line_count") or 0
+        )
+
+        item_word = (
+            "item"
+            if review_line_count == 1
+            else "items"
+        )
+
+        coach_detail = (
+            f"The oldest actionable payment has "
+            f"{review_line_count} Square {item_word} "
+            "that need an explicit PSP catalog mapping."
+        )
+
+        coach_question = (
+            "Would you like to resolve the Square "
+            "items now?"
+        )
+
     elif coach_type == "Match Appointment":
         coach_action_label = "Match Appointment"
         coach_url = url_for(
@@ -17803,6 +17914,739 @@ def square_reconcile_payments():
         "square_reconcile_payments.html",
         **reconciliation_state,
     )
+
+
+
+###############################################
+#
+#   SQUARE RECONCILIATION - RESOLVE ITEMS
+#
+#   Explicit catalog mapping for webhook-staged
+#   Square payment lines.
+#
+#   - Exact current workspace/environment only
+#   - No PSP -> Square writes
+#   - User explicitly chooses Service or Retail
+#   - Mapping + restaging share one transaction
+#   - Pure resolved Retail may use the existing
+#     standalone Retail posting engine
+#
+###############################################
+
+
+@app.route(
+    "/payment-integrations/square/reconcile/resolve-items",
+    methods=["GET", "POST"],
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_view_business_management"
+)
+def square_reconcile_resolve_items():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
+
+    square_payment_id = str(
+        request.values.get("payment_id") or ""
+    ).strip()
+
+    if not square_payment_id:
+        flash(
+            "Square payment ID is required.",
+            "error",
+        )
+        return redirect(
+            url_for("square_reconcile_payments")
+        )
+
+    square_environment = (
+        _square_income_read_environment()
+    )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        parent_sql = """
+            SELECT
+                square_payment_record_id,
+                square_connection_id,
+                square_location_id,
+                merchant_id,
+                raw_payment,
+                raw_order,
+                income_id,
+                appointment_id,
+                reconciliation_status
+            FROM square_payments
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND environment = %s
+              AND square_payment_id = %s
+            LIMIT 1
+        """
+
+        if request.method == "POST":
+            parent_sql = parent_sql.rstrip() + """
+            FOR UPDATE
+            """
+
+        cur.execute(
+            parent_sql,
+            (
+                spa_id,
+                business_unit_id,
+                square_environment,
+                square_payment_id,
+            ),
+        )
+
+        parent = cur.fetchone()
+
+        if not parent:
+            flash(
+                "The staged Square payment could not "
+                "be found for this Provider Workspace.",
+                "error",
+            )
+            return redirect(
+                url_for("square_reconcile_payments")
+            )
+
+        (
+            square_payment_record_id,
+            square_connection_id,
+            square_location_id,
+            merchant_id,
+            raw_payment,
+            raw_order,
+            income_id,
+            appointment_id,
+            reconciliation_status,
+        ) = parent
+
+        current_status = str(
+            reconciliation_status or ""
+        ).strip().lower()
+
+        if (
+            income_id is not None
+            or current_status == "reconciled"
+        ):
+            flash(
+                "This Square payment is already reconciled.",
+                "info",
+            )
+            return redirect(
+                url_for("square_reconcile_payments")
+            )
+
+        if appointment_id is not None:
+            flash(
+                "This Square payment is already reserved "
+                "for an appointment.",
+                "warning",
+            )
+            return redirect(
+                url_for("square_reconcile_payments")
+            )
+
+        if current_status != "review":
+            flash(
+                "This Square payment is no longer waiting "
+                "for item resolution.",
+                "warning",
+            )
+            return redirect(
+                url_for("square_reconcile_payments")
+            )
+
+        if not isinstance(raw_payment, dict):
+            raw_payment = {}
+
+        if not isinstance(raw_order, dict):
+            raw_order = {}
+
+        if request.method == "POST":
+            try:
+                line_item_id = int(
+                    request.form.get("line_item_id")
+                    or 0
+                )
+                target_id = int(
+                    request.form.get("target_id")
+                    or 0
+                )
+            except (TypeError, ValueError):
+                line_item_id = 0
+                target_id = 0
+
+            mapping_type = str(
+                request.form.get("mapping_type")
+                or ""
+            ).strip()
+
+            if (
+                not line_item_id
+                or not target_id
+                or mapping_type not in {
+                    "inventory_product",
+                    "service_type",
+                }
+            ):
+                flash(
+                    "Choose a valid PSP item to map.",
+                    "error",
+                )
+                conn.rollback()
+                return redirect(
+                    url_for(
+                        "square_reconcile_resolve_items",
+                        payment_id=square_payment_id,
+                    )
+                )
+
+            cur.execute("""
+                SELECT
+                    square_payment_line_item_id,
+                    square_catalog_object_id,
+                    square_item_id,
+                    item_name,
+                    sku,
+                    reconciliation_status,
+                    square_catalog_mapping_id
+                FROM square_payment_line_items
+                WHERE square_payment_line_item_id = %s
+                  AND square_payment_record_id = %s
+                  AND spa_id = %s
+                  AND business_unit_id = %s
+                FOR UPDATE
+            """, (
+                line_item_id,
+                square_payment_record_id,
+                spa_id,
+                business_unit_id,
+            ))
+
+            line_row = cur.fetchone()
+
+            if not line_row:
+                conn.rollback()
+                abort(404)
+
+            (
+                _,
+                square_catalog_object_id,
+                square_item_id,
+                square_item_name,
+                square_sku,
+                line_status,
+                existing_mapping_id,
+            ) = line_row
+
+            square_catalog_object_id = str(
+                square_catalog_object_id or ""
+            ).strip()
+
+            if not square_catalog_object_id:
+                conn.rollback()
+                flash(
+                    "This Square line does not have a "
+                    "catalog variation ID, so it cannot "
+                    "be mapped to a PSP catalog item yet.",
+                    "warning",
+                )
+                return redirect(
+                    url_for(
+                        "square_reconcile_resolve_items",
+                        payment_id=square_payment_id,
+                    )
+                )
+
+            try:
+                if mapping_type == "inventory_product":
+                    persist_square_catalog_mapping(
+                        cur,
+                        square_connection_id=(
+                            square_connection_id
+                        ),
+                        spa_id=spa_id,
+                        business_unit_id=(
+                            business_unit_id
+                        ),
+                        environment=(
+                            square_environment
+                        ),
+                        square_catalog_object_id=(
+                            square_catalog_object_id
+                        ),
+                        square_item_id=(
+                            square_item_id
+                        ),
+                        square_name=(
+                            square_item_name
+                            or "Square Retail Item"
+                        ),
+                        square_sku=square_sku,
+                        mapping_type=(
+                            "inventory_product"
+                        ),
+                        inventory_product_id=target_id,
+                        actor_user_id=session.get("user_id"),
+                    )
+
+                else:
+                    persist_square_catalog_mapping(
+                        cur,
+                        square_connection_id=(
+                            square_connection_id
+                        ),
+                        spa_id=spa_id,
+                        business_unit_id=(
+                            business_unit_id
+                        ),
+                        environment=(
+                            square_environment
+                        ),
+                        square_catalog_object_id=(
+                            square_catalog_object_id
+                        ),
+                        square_item_id=(
+                            square_item_id
+                        ),
+                        square_name=(
+                            square_item_name
+                            or "Square Service"
+                        ),
+                        square_sku=None,
+                        mapping_type="service_type",
+                        service_type_id=target_id,
+                        actor_user_id=session.get("user_id"),
+                    )
+
+            except SquareCatalogContextError as exc:
+                conn.rollback()
+                flash(str(exc), "error")
+                return redirect(
+                    url_for(
+                        "square_reconcile_resolve_items",
+                        payment_id=square_payment_id,
+                    )
+                )
+
+            except IntegrityError:
+                conn.rollback()
+                flash(
+                    "That Square item or PSP catalog target "
+                    "was mapped by another action. Reload "
+                    "the payment and try again.",
+                    "warning",
+                )
+                return redirect(
+                    url_for(
+                        "square_reconcile_resolve_items",
+                        payment_id=square_payment_id,
+                    )
+                )
+
+            # Reload the exact active catalog mappings after
+            # the user's explicit mapping choice.
+            cur.execute("""
+                SELECT
+                    square_catalog_mapping_id,
+                    square_catalog_object_id,
+                    square_item_id,
+                    square_name,
+                    square_sku,
+                    mapping_type,
+                    inventory_product_id,
+                    service_type_id
+                FROM square_catalog_mappings
+                WHERE square_connection_id = %s
+                  AND spa_id = %s
+                  AND business_unit_id = %s
+                  AND environment = %s
+                  AND is_active = TRUE
+            """, (
+                square_connection_id,
+                spa_id,
+                business_unit_id,
+                square_environment,
+            ))
+
+            catalog_mapping_details = {}
+            catalog_classifications = {}
+
+            for mapping_row in cur.fetchall():
+                (
+                    mapping_id,
+                    catalog_object_id,
+                    mapped_square_item_id,
+                    mapped_square_name,
+                    mapped_square_sku,
+                    mapped_type,
+                    inventory_product_id,
+                    service_type_id,
+                ) = mapping_row
+
+                catalog_mapping_details[
+                    catalog_object_id
+                ] = {
+                    "square_catalog_mapping_id":
+                        mapping_id,
+                    "square_catalog_object_id":
+                        catalog_object_id,
+                    "square_item_id":
+                        mapped_square_item_id,
+                    "square_name":
+                        mapped_square_name,
+                    "square_sku":
+                        mapped_square_sku,
+                    "mapping_type":
+                        mapped_type,
+                    "inventory_product_id":
+                        inventory_product_id,
+                    "service_type_id":
+                        service_type_id,
+                }
+
+                if mapped_type == "inventory_product":
+                    catalog_classifications[
+                        catalog_object_id
+                    ] = "retail"
+
+                elif mapped_type == "service_type":
+                    catalog_classifications[
+                        catalog_object_id
+                    ] = "service"
+
+            try:
+                preview = (
+                    square_service.build_income_preview(
+                        raw_payment,
+                        raw_order,
+                        catalog_classifications=(
+                            catalog_classifications
+                        ),
+                    )
+                )
+
+                # Restage every authoritative order line so
+                # the workbench immediately reflects the new
+                # mapping.
+                stage_square_payment_line_items(
+                    cur,
+                    spa_id=spa_id,
+                    business_unit_id=(
+                        business_unit_id
+                    ),
+                    square_payment_record_id=(
+                        square_payment_record_id
+                    ),
+                    preview=preview,
+                    catalog_mapping_details=(
+                        catalog_mapping_details
+                    ),
+                )
+
+                is_safe_pure_retail = (
+                    preview.get("income_type") == "Retail"
+                    and preview.get(
+                        "ready_for_income"
+                    ) is True
+                    and not preview.get(
+                        "requires_review"
+                    )
+                    and int(
+                        preview.get(
+                            "service_amount_cents"
+                        )
+                        or 0
+                    ) == 0
+                    and int(
+                        preview.get(
+                            "retail_amount_cents"
+                        )
+                        or 0
+                    ) > 0
+                    and int(
+                        preview.get(
+                            "difference_cents"
+                        )
+                        or 0
+                    ) == 0
+                    and int(
+                        preview.get(
+                            "refunded_amount_cents"
+                        )
+                        or 0
+                    ) == 0
+                )
+
+                if is_safe_pure_retail:
+                    context = {
+                        "spa_id": spa_id,
+                        "business_unit_id":
+                            business_unit_id,
+                        "square_connection_id":
+                            square_connection_id,
+                        "environment":
+                            square_environment,
+                        "square_location_id":
+                            square_location_id,
+                        "merchant_id":
+                            merchant_id,
+                    }
+
+                    result = (
+                        process_standalone_square_retail(
+                            cur,
+                            context=context,
+                            payment=raw_payment,
+                            order=raw_order,
+                            preview=preview,
+                            catalog_mapping_details=(
+                                catalog_mapping_details
+                            ),
+                        )
+                    )
+
+                    conn.commit()
+
+                    result_status = str(
+                        (result or {}).get("status")
+                        or ""
+                    ).strip().lower()
+
+                    if result_status in {
+                        "already_reconciled",
+                        "reconciled",
+                        "posted",
+                    }:
+                        flash(
+                            "Square Retail payment is "
+                            "reconciled.",
+                            "success",
+                        )
+                    else:
+                        flash(
+                            "Square Retail items were "
+                            "resolved and processed.",
+                            "success",
+                        )
+
+                    return redirect(
+                        url_for(
+                            "square_reconcile_payments"
+                        )
+                    )
+
+                conn.commit()
+
+                flash(
+                    "Square item mapping saved. "
+                    "The payment remains in reconciliation "
+                    "for its next appropriate step.",
+                    "success",
+                )
+
+                return redirect(
+                    url_for(
+                        "square_reconcile_resolve_items",
+                        payment_id=square_payment_id,
+                    )
+                )
+
+            except (
+                SquareRetailProcessingError,
+                ValueError,
+            ) as exc:
+                conn.rollback()
+                flash(
+                    f"Square item could not be processed: "
+                    f"{exc}",
+                    "error",
+                )
+
+                return redirect(
+                    url_for(
+                        "square_reconcile_resolve_items",
+                        payment_id=square_payment_id,
+                    )
+                )
+
+        # -------------------------------------------------
+        # GET — read staged lines and available PSP targets.
+        # -------------------------------------------------
+
+        cur.execute("""
+            SELECT
+                spli.square_payment_line_item_id,
+                spli.line_sequence,
+                spli.square_catalog_object_id,
+                spli.item_name,
+                spli.sku,
+                spli.quantity_text,
+                spli.total_amount_cents,
+                spli.item_classification,
+                spli.reconciliation_status,
+                spli.square_catalog_mapping_id,
+                scm.mapping_type,
+                ip.product_name,
+                st.service_name
+            FROM square_payment_line_items spli
+            LEFT JOIN square_catalog_mappings scm
+              ON scm.square_catalog_mapping_id =
+                    spli.square_catalog_mapping_id
+             AND scm.spa_id = spli.spa_id
+             AND scm.business_unit_id =
+                    spli.business_unit_id
+            LEFT JOIN inventory_products ip
+              ON ip.product_id =
+                    scm.inventory_product_id
+             AND ip.spa_id = spli.spa_id
+             AND ip.business_unit_id =
+                    spli.business_unit_id
+            LEFT JOIN service_name_types st
+              ON st.service_type_id =
+                    scm.service_type_id
+             AND st.spa_id = spli.spa_id
+            WHERE spli.square_payment_record_id = %s
+              AND spli.spa_id = %s
+              AND spli.business_unit_id = %s
+            ORDER BY spli.line_sequence
+        """, (
+            square_payment_record_id,
+            spa_id,
+            business_unit_id,
+        ))
+
+        lines = []
+
+        for row in cur.fetchall():
+            mapped_target = None
+
+            if row[10] == "inventory_product":
+                mapped_target = row[11]
+
+            elif row[10] == "service_type":
+                mapped_target = row[12]
+
+            lines.append({
+                "line_item_id": row[0],
+                "sequence": row[1],
+                "catalog_object_id": row[2],
+                "item_name": row[3],
+                "sku": row[4],
+                "quantity": row[5],
+                "total_cents": int(row[6] or 0),
+                "classification": row[7],
+                "status": row[8],
+                "mapping_id": row[9],
+                "mapping_type": row[10],
+                "mapped_target": mapped_target,
+            })
+
+        cur.execute("""
+            SELECT
+                ip.product_id,
+                ip.product_name
+            FROM inventory_products ip
+            WHERE ip.spa_id = %s
+              AND ip.business_unit_id = %s
+              AND ip.active = TRUE
+              AND NOT EXISTS (
+                    SELECT 1
+                    FROM square_catalog_mappings scm
+                    WHERE scm.square_connection_id = %s
+                      AND scm.spa_id = ip.spa_id
+                      AND scm.business_unit_id =
+                            ip.business_unit_id
+                      AND scm.environment = %s
+                      AND scm.mapping_type =
+                            'inventory_product'
+                      AND scm.inventory_product_id =
+                            ip.product_id
+                      AND scm.is_active = TRUE
+              )
+            ORDER BY
+                LOWER(ip.product_name),
+                ip.product_id
+        """, (
+            spa_id,
+            business_unit_id,
+            square_connection_id,
+            square_environment,
+        ))
+
+        inventory_products = [
+            {
+                "product_id": row[0],
+                "product_name": row[1],
+            }
+            for row in cur.fetchall()
+        ]
+
+        cur.execute("""
+            SELECT
+                snt.service_type_id,
+                snt.service_name
+            FROM service_name_types snt
+            WHERE snt.spa_id = %s
+              AND snt.is_active = TRUE
+              AND NOT EXISTS (
+                    SELECT 1
+                    FROM square_catalog_mappings scm
+                    WHERE scm.square_connection_id = %s
+                      AND scm.spa_id = %s
+                      AND scm.business_unit_id = %s
+                      AND scm.environment = %s
+                      AND scm.mapping_type = 'service_type'
+                      AND scm.service_type_id =
+                            snt.service_type_id
+                      AND scm.is_active = TRUE
+              )
+            ORDER BY
+                LOWER(snt.service_name),
+                snt.service_type_id
+        """, (
+            spa_id,
+            square_connection_id,
+            spa_id,
+            business_unit_id,
+            square_environment,
+        ))
+
+        service_types = [
+            {
+                "service_type_id": row[0],
+                "service_name": row[1],
+            }
+            for row in cur.fetchall()
+        ]
+
+        return render_template(
+            "square_reconcile_resolve_items.html",
+            payment_id=square_payment_id,
+            lines=lines,
+            inventory_products=inventory_products,
+            service_types=service_types,
+            environment=square_environment,
+        )
+
+    except Exception:
+        if request.method == "POST":
+            conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
 
 
 

@@ -9,6 +9,10 @@ from psycopg2.extras import RealDictCursor
 
 from db import get_db_connection
 from services import square_service, square_sync_auth
+from services.square_catalog_context import (
+    SquareCatalogContextError,
+    persist_square_catalog_mapping,
+)
 
 
 class SquareInventorySyncError(Exception):
@@ -700,187 +704,35 @@ def _persist_mapping(
     )
 
     try:
-        cur.execute("""
-            SELECT product_id
-            FROM inventory_products
-            WHERE product_id = %s
-              AND spa_id = %s
-              AND business_unit_id = %s
-            LIMIT 1
-        """, (
-            inventory_product_id,
-            spa_id,
-            business_unit_id,
-        ))
-
-        if not cur.fetchone():
-            raise SquareInventorySyncError(
-                "PSP inventory product changed before "
-                "the Square mapping could be saved."
-            )
-
-        cur.execute("""
-            SELECT
-                square_catalog_mapping_id,
-                square_catalog_object_id,
-                square_item_id,
-                inventory_product_id,
-                is_active
-            FROM square_catalog_mappings
-            WHERE square_connection_id = %s
-              AND spa_id = %s
-              AND business_unit_id = %s
-              AND environment = %s
-              AND mapping_type = 'inventory_product'
-              AND inventory_product_id = %s
-              AND is_active = TRUE
-            LIMIT 1
-            FOR UPDATE
-        """, (
-            square_connection_id,
-            spa_id,
-            business_unit_id,
-            environment,
-            inventory_product_id,
-        ))
-
-        existing_for_product = (
-            cur.fetchone()
+        row = persist_square_catalog_mapping(
+            cur,
+            square_connection_id=square_connection_id,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            environment=environment,
+            square_catalog_object_id=(
+                square_catalog_object_id
+            ),
+            square_item_id=square_item_id,
+            square_name=square_name,
+            square_sku=square_sku,
+            mapping_type="inventory_product",
+            inventory_product_id=(
+                inventory_product_id
+            ),
+            actor_user_id=actor_user_id,
         )
 
-        if existing_for_product:
-            if (
-                existing_for_product[
-                    "square_catalog_object_id"
-                ]
-                != square_catalog_object_id
-            ):
-                raise SquareInventorySyncError(
-                    "PSP inventory product already has a "
-                    "different active Square Catalog mapping."
-                )
-
-            if (
-                existing_for_product[
-                    "square_item_id"
-                ]
-                and existing_for_product[
-                    "square_item_id"
-                ] != square_item_id
-            ):
-                raise SquareInventorySyncError(
-                    "PSP inventory mapping points to a "
-                    "different Square parent item."
-                )
-
-            cur.execute("""
-                UPDATE square_catalog_mappings
-                SET
-                    square_item_id = %s,
-                    square_name = %s,
-                    square_sku = %s,
-                    verified_by = %s,
-                    verified_at = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE square_catalog_mapping_id = %s
-                RETURNING
-                    square_catalog_mapping_id,
-                    square_catalog_object_id,
-                    square_item_id,
-                    square_name,
-                    square_sku,
-                    inventory_product_id,
-                    is_active
-            """, (
-                square_item_id,
-                square_name,
-                square_sku,
-                actor_user_id,
-                existing_for_product[
-                    "square_catalog_mapping_id"
-                ],
-            ))
-
-            row = cur.fetchone()
-            conn.commit()
-
-            return dict(row)
-
-        cur.execute("""
-            SELECT
-                square_catalog_mapping_id,
-                mapping_type,
-                inventory_product_id,
-                service_type_id,
-                is_active
-            FROM square_catalog_mappings
-            WHERE square_connection_id = %s
-              AND square_catalog_object_id = %s
-            LIMIT 1
-            FOR UPDATE
-        """, (
-            square_connection_id,
-            square_catalog_object_id,
-        ))
-
-        existing_for_square = (
-            cur.fetchone()
-        )
-
-        if existing_for_square:
-            raise SquareInventorySyncError(
-                "Square Catalog variation is already mapped "
-                "to another PSP record."
-            )
-
-        cur.execute("""
-            INSERT INTO square_catalog_mappings (
-                square_connection_id,
-                spa_id,
-                business_unit_id,
-                environment,
-                square_catalog_object_id,
-                square_item_id,
-                square_name,
-                square_sku,
-                mapping_type,
-                inventory_product_id,
-                service_type_id,
-                is_active,
-                verified_by,
-                verified_at
-            )
-            VALUES (
-                %s, %s, %s, %s, %s,
-                %s, %s, %s, 'inventory_product',
-                %s, NULL, TRUE, %s,
-                CURRENT_TIMESTAMP
-            )
-            RETURNING
-                square_catalog_mapping_id,
-                square_catalog_object_id,
-                square_item_id,
-                square_name,
-                square_sku,
-                inventory_product_id,
-                is_active
-        """, (
-            square_connection_id,
-            spa_id,
-            business_unit_id,
-            environment,
-            square_catalog_object_id,
-            square_item_id,
-            square_name,
-            square_sku,
-            inventory_product_id,
-            actor_user_id,
-        ))
-
-        row = cur.fetchone()
         conn.commit()
 
-        return dict(row)
+        return row
+
+    except SquareCatalogContextError as exc:
+        conn.rollback()
+
+        raise SquareInventorySyncError(
+            str(exc)
+        ) from exc
 
     except IntegrityError as exc:
         conn.rollback()

@@ -133,10 +133,10 @@ Reconcile Square Payments | Peach Suite Pro
 
     <p class="square-reconcile-intro">
         Review completed Square payments for the current Provider
-        Workspace and connect them to Peach Suite Pro appointments
-        and Income. This first version is read-only until you choose
-        to continue through the existing Add Income reconciliation
-        workflow.
+        Workspace and connect them to Peach Suite Pro appointments,
+        Income, and catalog items. Unknown Square items must be
+        explicitly resolved before Peach Suite Pro will treat them
+        as a Service or Retail product.
     </p>
 
     <p>
@@ -377,7 +377,20 @@ Reconcile Square Payments | Peach Suite Pro
                                 </td>
 
                                 <td>
-                                    {% if payment.existing_income_link_candidate %}
+                                    {% if payment.staged_review
+                                          and payment.staged_review.review_line_count > 0 %}
+                                        <a
+                                            href="{{
+                                                url_for(
+                                                    'square_reconcile_resolve_items',
+                                                    payment_id=payment.payment_id
+                                                )
+                                            }}"
+                                            class="tool-pill tool-pill-small"
+                                        >
+                                            Resolve Items
+                                        </a>
+                                    {% elif payment.existing_income_link_candidate %}
                                         <a
                                             href="{{
                                                 url_for(
