@@ -11513,6 +11513,7 @@ def public_website_settings():
                 allowed_color_schemes = {
                     "peach_cream",
                     "coastal_blue",
+                    "professional_blue",
                     "sage_wellness",
                     "soft_stone",
                     "lavender_calm",

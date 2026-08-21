@@ -362,6 +362,59 @@
 
                         <input
                             type="radio"
+                            id="theme_professional_blue"
+                            name="website_color_scheme"
+                            value="professional_blue"
+                            {% if
+                                settings.website_color_scheme
+                                == 'professional_blue'
+                            %}
+                                checked
+                            {% endif %}
+                        >
+
+                        <label
+                            for="theme_professional_blue"
+                            class="theme-card"
+                        >
+                            <span class="theme-card-title">
+                                Professional Blue
+                            </span>
+
+                            <span
+                                class="theme-card-description"
+                            >
+                                Bright professional blue, soft
+                                sky tones, and deep navy accents.
+                            </span>
+
+                            <span class="theme-swatches">
+                                <span
+                                    class="theme-swatch"
+                                    style="background:#57b4e6;"
+                                ></span>
+                                <span
+                                    class="theme-swatch"
+                                    style="background:#dceff8;"
+                                ></span>
+                                <span
+                                    class="theme-swatch"
+                                    style="background:#f7fbfe;"
+                                ></span>
+                                <span
+                                    class="theme-swatch"
+                                    style="background:#173b53;"
+                                ></span>
+                            </span>
+                        </label>
+
+                    </div>
+
+
+                    <div class="theme-option">
+
+                        <input
+                            type="radio"
                             id="theme_sage_wellness"
                             name="website_color_scheme"
                             value="sage_wellness"
