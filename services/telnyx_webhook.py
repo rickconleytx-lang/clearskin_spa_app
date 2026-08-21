@@ -640,11 +640,11 @@ def process_platform_booking_notification_command(
     webhook_log_id,
 ):
     """
-    Mirror Telnyx STOP/START state for Peach Suite Pro
+    Mirror Telnyx opt-out/opt-in state for Peach Suite Pro
     platform-originated PeachBook booking notifications.
 
-    Telnyx remains responsible for its provider-level
-    opt-out/opt-in enforcement and autoresponses.
+    Telnyx remains responsible for provider-level blocking,
+    unblocking, and configured autoresponses.
     """
 
     result = {
@@ -668,7 +668,12 @@ def process_platform_booking_notification_command(
 
     payload = event["data"]["payload"]
 
-    command = " ".join(
+    autoresponse_type = str(
+        payload.get("autoresponse_type")
+        or ""
+    ).strip().upper()
+
+    command_text = " ".join(
         str(
             payload.get("text")
             or ""
@@ -678,25 +683,67 @@ def process_platform_booking_notification_command(
         .split()
     )
 
-    stop_words = {
+    # Prefer Telnyx's authoritative classification. The raw-text
+    # fallback preserves safe behavior if a webhook arrives without
+    # autoresponse_type.
+    if autoresponse_type == "STOP":
+        command_name = "stop"
+
+    elif autoresponse_type == "START":
+        command_name = "start"
+
+    elif autoresponse_type == "HELP":
+        command_name = "help"
+
+    elif command_text in {
         "stop",
         "stopall",
         "stop all",
         "unsubscribe",
+        "unscribe",
         "cancel",
         "end",
         "quit",
-    }
+    }:
+        command_name = "stop"
 
-    start_words = {
+    elif command_text in {
         "start",
         "unstop",
-    }
+        "yes",
+    }:
+        command_name = "start"
 
-    if (
-        command not in stop_words
-        and command not in start_words
-    ):
+    elif command_text in {
+        "help",
+        "info",
+    }:
+        command_name = "help"
+
+    else:
+        return result
+
+    result["platform_command"] = command_name
+
+    # HELP changes no PeachBook consent state. Telnyx owns the
+    # configured HELP autoresponse; PSP records that the verified
+    # platform command was handled.
+    if command_name == "help":
+        cursor.execute("""
+            UPDATE telnyx_webhook_log
+            SET
+                is_processed = TRUE,
+                processing_status =
+                    'processed_platform_help',
+                error_message = NULL,
+                processed_at = CURRENT_TIMESTAMP
+            WHERE webhook_log_id = %s
+        """, (
+            webhook_log_id,
+        ))
+
+        result["platform_command_processed"] = True
+
         return result
 
     sender_digits = _phone_digits(
@@ -720,18 +767,15 @@ def process_platform_booking_notification_command(
             ),
         )
 
-        result["platform_command"] = (
-            "stop"
-            if command in stop_words
-            else "start"
-        )
-
         return result
 
-    if command in stop_words:
-        command_name = "stop"
+    if command_name == "stop":
         processing_status = "processed_platform_stop"
 
+        # STOP applies to every PeachBook notification setting
+        # using this recipient phone. Telnyx's provider block is
+        # messaging-profile-wide, so PSP must not leave another
+        # matching workspace internally consented.
         cursor.execute("""
             UPDATE booking_settings
             SET
@@ -739,8 +783,6 @@ def process_platform_booking_notification_command(
                 updated_at = CURRENT_TIMESTAMP,
                 updated_by = NULL
             WHERE booking_notification_phone IS NOT NULL
-              AND booking_notification_preference
-                    IN ('sms', 'both')
               AND RIGHT(
                     REGEXP_REPLACE(
                         booking_notification_phone,
@@ -758,9 +800,12 @@ def process_platform_booking_notification_command(
         ))
 
     else:
-        command_name = "start"
         processing_status = "processed_platform_start"
 
+        # START/YES may restore consent only where the workspace
+        # is already configured to use SMS. It must never turn an
+        # Email-only or Notifications-Off setting into an implicit
+        # SMS subscription.
         cursor.execute("""
             UPDATE booking_settings
             SET
@@ -793,22 +838,12 @@ def process_platform_booking_notification_command(
 
     updated_rows = cursor.fetchall()
 
-    result["platform_command"] = command_name
     result["booking_settings_updated"] = len(updated_rows)
 
-    if not updated_rows:
-        _mark_webhook_unmatched(
-            cursor,
-            webhook_log_id,
-            (
-                "Peach Suite Pro platform SMS "
-                f"{command_name.upper()} did not match an "
-                "SMS-enabled PeachBook notification destination."
-            ),
-        )
-
-        return result
-
+    # A recognized STOP/START command is considered processed
+    # even when no PeachBook setting changes. Telnyx owns the
+    # provider-level block/unblock; booking_settings_updated
+    # records whether PSP also mirrored a local consent change.
     cursor.execute("""
         UPDATE telnyx_webhook_log
         SET
@@ -825,7 +860,6 @@ def process_platform_booking_notification_command(
     result["platform_command_processed"] = True
 
     return result
-
 
 def process_telnyx_delivery_event(
     cursor,
