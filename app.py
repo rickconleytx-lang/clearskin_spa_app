@@ -7215,6 +7215,81 @@ def send_compliant_sms(
 
 
 
+
+
+def send_peach_suite_platform_sms(
+    recipient_phone,
+    message_body,
+    message_type="booking_notification"
+):
+    """
+    Send a Peach Suite Pro platform-originated SMS.
+
+    This path is for PSP system/account notifications,
+    not tenant/client messaging. It intentionally does not
+    resolve or borrow a workspace-owned SMS sender.
+    """
+
+    if not recipient_phone:
+        raise ValueError(
+            "Platform SMS requires recipient_phone."
+        )
+
+    normalized_message_type = (
+        message_type
+        or ""
+    ).strip().lower()
+
+    allowed_message_types = {
+        "booking_notification"
+    }
+
+    if normalized_message_type not in allowed_message_types:
+        raise PermissionError(
+            "This message type is not approved for the "
+            "Peach Suite Pro platform SMS sender."
+        )
+
+    if sms_contains_marketing_content(message_body):
+        raise PermissionError(
+            "Peach Suite Pro platform notification SMS "
+            "cannot contain promotional content."
+        )
+
+    from_phone = (
+        os.getenv("TELNYX_FROM_NUMBER")
+        or ""
+    ).strip()
+
+    if not from_phone:
+        raise ValueError(
+            "TELNYX_FROM_NUMBER is not configured for "
+            "Peach Suite Pro platform notifications."
+        )
+
+    result = send_sms_message(
+        from_phone=from_phone,
+        to_phone=recipient_phone,
+        message_body=message_body
+    )
+
+    if not isinstance(result, dict):
+        result = {
+            "provider_result": result
+        }
+
+    result["sms_phone_number_id"] = None
+    result["sender_phone"] = from_phone
+    result["receiving_phone"] = recipient_phone
+    result["provider"] = "telnyx"
+    result["message_type"] = normalized_message_type
+    result["final_message_body"] = message_body
+    result["is_marketing_message"] = False
+    result["platform_notification"] = True
+
+    return result
+
+
 #####################################################################
 #   >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 #
@@ -70160,6 +70235,756 @@ def _queue_public_booking_confirmation_email(
     return queued_row[0]
 
 
+def _send_public_booking_business_notifications(
+    spa_id,
+    business_unit_id,
+    appointment_id,
+    booked_by_name,
+    appointment_for_name,
+    booking_for_other,
+    service_name,
+    provider_name,
+    appointment_date,
+    appointment_time,
+    duration_minutes,
+    price_at_booking
+):
+    """
+    Send configured workspace notifications after a
+    PeachBook appointment has already been committed.
+
+    Notification failures must never undo the booking.
+    """
+
+    from html import escape
+
+    settings_conn = get_db_connection()
+    settings_cur = settings_conn.cursor()
+
+    try:
+        settings_cur.execute("""
+            SELECT
+                COALESCE(
+                    NULLIF(TRIM(bu.unit_name), ''),
+                    NULLIF(TRIM(s.spa_name), ''),
+                    'Booking Workspace'
+                ),
+                bs.booking_notification_preference,
+                bs.booking_notification_email,
+                bs.booking_notification_phone,
+                bs.booking_notification_sms_consent
+            FROM booking_settings bs
+
+            JOIN business_units bu
+              ON bu.spa_id = bs.spa_id
+             AND bu.business_unit_id =
+                    bs.business_unit_id
+
+            JOIN spas s
+              ON s.spa_id = bs.spa_id
+
+            WHERE bs.spa_id = %s
+              AND bs.business_unit_id = %s
+            LIMIT 1
+        """, (
+            spa_id,
+            business_unit_id
+        ))
+
+        settings_row = settings_cur.fetchone()
+
+    finally:
+        settings_cur.close()
+        settings_conn.close()
+
+    if not settings_row:
+        return
+
+    workspace_name = (
+        settings_row[0]
+        or "Booking Workspace"
+    )
+
+    preference = (
+        settings_row[1]
+        or "off"
+    ).strip().lower()
+
+    notification_email = (
+        settings_row[2]
+        or ""
+    ).strip()
+
+    notification_phone = (
+        settings_row[3]
+        or ""
+    ).strip()
+
+    sms_consent = bool(settings_row[4])
+
+    if preference == "off":
+        return
+
+    date_display = (
+        appointment_date
+        .strftime("%A, %B %d, %Y")
+        .replace(" 0", " ")
+    )
+
+    time_display = (
+        appointment_time
+        .strftime("%I:%M %p")
+        .lstrip("0")
+    )
+
+    price_display = (
+        f"${price_at_booking:,.2f}"
+    )
+
+    subject_line = (
+        "New PeachBook Appointment — "
+        f"{appointment_for_name}"
+    )
+
+    booked_by_text = ""
+
+    if booking_for_other:
+        booked_by_text = (
+            f"Booked By: {booked_by_name}\n"
+        )
+
+    text_body = (
+        f"New PeachBook Appointment\n\n"
+        f"Confirmation Number: {appointment_id}\n"
+        f"Client: {appointment_for_name}\n"
+        f"{booked_by_text}"
+        f"Service: {service_name}\n"
+        f"Provider: {provider_name}\n"
+        f"Date: {date_display}\n"
+        f"Time: {time_display}\n"
+        f"Duration: {duration_minutes} minutes\n"
+        f"Price: {price_display}\n\n"
+        f"This is an automated PeachBook booking "
+        f"notification for {workspace_name}."
+    )
+
+    safe_workspace_name = escape(
+        str(workspace_name or "")
+    )
+
+    safe_appointment_for_name = escape(
+        str(appointment_for_name or "")
+    )
+
+    safe_booked_by_name = escape(
+        str(booked_by_name or "")
+    )
+
+    safe_service_name = escape(
+        str(service_name or "")
+    )
+
+    safe_provider_name = escape(
+        str(provider_name or "")
+    )
+
+    safe_date_display = escape(
+        str(date_display or "")
+    )
+
+    safe_time_display = escape(
+        str(time_display or "")
+    )
+
+    safe_price_display = escape(
+        str(price_display or "")
+    )
+
+    booked_by_html = ""
+
+    if booking_for_other:
+        booked_by_html = (
+            "<tr>"
+            "<td style=\"padding:7px 0;"
+            "color:#756761;\">Booked By</td>"
+            "<td style=\"padding:7px 0;"
+            "font-weight:700;\">"
+            f"{safe_booked_by_name}"
+            "</td>"
+            "</tr>"
+        )
+
+    html_body = f"""
+<!doctype html>
+<html>
+<body style="
+    margin:0;
+    padding:24px;
+    background:#fff8f3;
+    color:#3f342f;
+    font-family:Arial,Helvetica,sans-serif;
+">
+    <div style="
+        max-width:640px;
+        margin:0 auto;
+        background:#ffffff;
+        border:1px solid #eadbd2;
+        border-radius:16px;
+        overflow:hidden;
+    ">
+        <div style="
+            padding:22px 26px;
+            background:#bd7256;
+            color:#ffffff;
+        ">
+            <div style="
+                font-size:13px;
+                font-weight:700;
+                letter-spacing:.05em;
+                text-transform:uppercase;
+                opacity:.9;
+            ">
+                PeachBook
+            </div>
+
+            <h1 style="
+                margin:6px 0 0;
+                font-size:24px;
+            ">
+                New Appointment
+            </h1>
+        </div>
+
+        <div style="padding:26px;">
+            <p style="
+                margin:0 0 18px;
+                font-size:16px;
+                line-height:1.55;
+            ">
+                A new appointment was booked online for
+                <strong>
+                    {safe_appointment_for_name}
+                </strong>.
+            </p>
+
+            <table style="
+                width:100%;
+                border-collapse:collapse;
+                font-size:15px;
+            ">
+                <tr>
+                    <td style="
+                        padding:7px 0;
+                        color:#756761;
+                    ">
+                        Confirmation Number
+                    </td>
+                    <td style="
+                        padding:7px 0;
+                        font-weight:700;
+                    ">
+                        {appointment_id}
+                    </td>
+                </tr>
+
+                <tr>
+                    <td style="
+                        padding:7px 0;
+                        color:#756761;
+                    ">
+                        Client
+                    </td>
+                    <td style="
+                        padding:7px 0;
+                        font-weight:700;
+                    ">
+                        {safe_appointment_for_name}
+                    </td>
+                </tr>
+
+                {booked_by_html}
+
+                <tr>
+                    <td style="
+                        padding:7px 0;
+                        color:#756761;
+                    ">
+                        Service
+                    </td>
+                    <td style="
+                        padding:7px 0;
+                        font-weight:700;
+                    ">
+                        {safe_service_name}
+                    </td>
+                </tr>
+
+                <tr>
+                    <td style="
+                        padding:7px 0;
+                        color:#756761;
+                    ">
+                        Provider
+                    </td>
+                    <td style="
+                        padding:7px 0;
+                        font-weight:700;
+                    ">
+                        {safe_provider_name}
+                    </td>
+                </tr>
+
+                <tr>
+                    <td style="
+                        padding:7px 0;
+                        color:#756761;
+                    ">
+                        Date
+                    </td>
+                    <td style="
+                        padding:7px 0;
+                        font-weight:700;
+                    ">
+                        {safe_date_display}
+                    </td>
+                </tr>
+
+                <tr>
+                    <td style="
+                        padding:7px 0;
+                        color:#756761;
+                    ">
+                        Time
+                    </td>
+                    <td style="
+                        padding:7px 0;
+                        font-weight:700;
+                    ">
+                        {safe_time_display}
+                    </td>
+                </tr>
+
+                <tr>
+                    <td style="
+                        padding:7px 0;
+                        color:#756761;
+                    ">
+                        Duration
+                    </td>
+                    <td style="
+                        padding:7px 0;
+                        font-weight:700;
+                    ">
+                        {duration_minutes} minutes
+                    </td>
+                </tr>
+
+                <tr>
+                    <td style="
+                        padding:7px 0;
+                        color:#756761;
+                    ">
+                        Price
+                    </td>
+                    <td style="
+                        padding:7px 0;
+                        font-weight:700;
+                    ">
+                        {safe_price_display}
+                    </td>
+                </tr>
+            </table>
+
+            <p style="
+                margin:24px 0 0;
+                padding-top:18px;
+                border-top:1px solid #eadbd2;
+                color:#756761;
+                font-size:13px;
+                line-height:1.5;
+            ">
+                This automated notification was sent by
+                Peach Suite Pro for
+                {safe_workspace_name}.
+            </p>
+        </div>
+    </div>
+</body>
+</html>
+""".strip()
+
+    # -----------------------------------------------------
+    # EMAIL
+    #
+    # Email queue insertion and delivery-guard claim happen
+    # in the same transaction. If either fails, both roll
+    # back and a later retry may safely try again.
+    # -----------------------------------------------------
+
+    if (
+        preference in {"email", "both"}
+        and notification_email
+    ):
+        email_conn = get_db_connection()
+        email_cur = email_conn.cursor()
+
+        try:
+            email_cur.execute("""
+                INSERT INTO booking_notification_deliveries (
+                    spa_id,
+                    business_unit_id,
+                    appointment_id,
+                    channel,
+                    destination,
+                    status,
+                    attempted_at
+                )
+                VALUES (
+                    %s,
+                    %s,
+                    %s,
+                    'email',
+                    %s,
+                    'pending',
+                    CURRENT_TIMESTAMP
+                )
+                ON CONFLICT DO NOTHING
+                RETURNING booking_notification_delivery_id
+            """, (
+                spa_id,
+                business_unit_id,
+                appointment_id,
+                notification_email
+            ))
+
+            delivery_row = email_cur.fetchone()
+
+            if delivery_row:
+                delivery_id = delivery_row[0]
+
+                email_cur.execute("""
+                    INSERT INTO email_queue (
+                        spa_id,
+                        business_unit_id,
+                        client_id,
+                        appointment_id,
+                        email_type,
+                        recipient_email,
+                        recipient_name,
+                        subject_line,
+                        text_body,
+                        html_body,
+                        status,
+                        scheduled_for,
+                        next_attempt_at
+                    )
+                    VALUES (
+                        %s,
+                        %s,
+                        NULL,
+                        %s,
+                        'booking_notification',
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        'pending',
+                        CURRENT_TIMESTAMP,
+                        CURRENT_TIMESTAMP
+                    )
+                    ON CONFLICT DO NOTHING
+                    RETURNING email_queue_id
+                """, (
+                    spa_id,
+                    business_unit_id,
+                    appointment_id,
+                    notification_email,
+                    workspace_name,
+                    subject_line,
+                    text_body,
+                    html_body
+                ))
+
+                queued_row = email_cur.fetchone()
+
+                email_cur.execute("""
+                    UPDATE booking_notification_deliveries
+                    SET
+                        status = 'queued',
+                        last_error = NULL,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE booking_notification_delivery_id = %s
+                      AND spa_id = %s
+                      AND business_unit_id = %s
+                """, (
+                    delivery_id,
+                    spa_id,
+                    business_unit_id
+                ))
+
+                email_conn.commit()
+
+                app.logger.info(
+                    "PeachBook business email notification "
+                    "queued. appointment_id=%s "
+                    "email_queue_id=%s",
+                    appointment_id,
+                    (
+                        queued_row[0]
+                        if queued_row
+                        else None
+                    )
+                )
+
+            else:
+                email_conn.rollback()
+
+        except Exception:
+            email_conn.rollback()
+
+            app.logger.exception(
+                "PeachBook business email notification "
+                "could not be queued. appointment_id=%s",
+                appointment_id
+            )
+
+        finally:
+            email_cur.close()
+            email_conn.close()
+
+    # -----------------------------------------------------
+    # SMS
+    #
+    # SMS uses an at-most-once claim. The delivery row is
+    # committed before contacting Telnyx. If the request is
+    # repeated, the unique delivery guard prevents another
+    # send for this appointment/channel.
+    # -----------------------------------------------------
+
+    if (
+        preference in {"sms", "both"}
+        and sms_consent
+        and notification_phone
+    ):
+        sms_delivery_id = None
+
+        claim_conn = get_db_connection()
+        claim_cur = claim_conn.cursor()
+
+        try:
+            claim_cur.execute("""
+                INSERT INTO booking_notification_deliveries (
+                    spa_id,
+                    business_unit_id,
+                    appointment_id,
+                    channel,
+                    destination,
+                    status,
+                    attempted_at
+                )
+                VALUES (
+                    %s,
+                    %s,
+                    %s,
+                    'sms',
+                    %s,
+                    'attempting',
+                    CURRENT_TIMESTAMP
+                )
+                ON CONFLICT DO NOTHING
+                RETURNING booking_notification_delivery_id
+            """, (
+                spa_id,
+                business_unit_id,
+                appointment_id,
+                notification_phone
+            ))
+
+            claim_row = claim_cur.fetchone()
+
+            if claim_row:
+                sms_delivery_id = claim_row[0]
+                claim_conn.commit()
+            else:
+                claim_conn.rollback()
+
+        except Exception:
+            claim_conn.rollback()
+
+            app.logger.exception(
+                "PeachBook business SMS notification "
+                "could not claim its delivery guard. "
+                "appointment_id=%s",
+                appointment_id
+            )
+
+        finally:
+            claim_cur.close()
+            claim_conn.close()
+
+        if sms_delivery_id:
+            sms_message = (
+                "PeachBook: New appointment — "
+                f"{appointment_for_name}, "
+                f"{service_name}, "
+                f"{date_display} at {time_display} "
+                f"with {provider_name}. "
+                "Reply STOP to opt out or HELP for help."
+            )
+
+            try:
+                result = send_peach_suite_platform_sms(
+                    recipient_phone=notification_phone,
+                    message_body=sms_message,
+                    message_type="booking_notification"
+                )
+
+            except Exception as send_error:
+                result = {
+                    "success": False,
+                    "status": "failed",
+                    "provider_message_id": None,
+                    "provider_status": None,
+                    "provider_error_code": None,
+                    "provider_error_message":
+                        str(send_error),
+                    "final_message_body":
+                        sms_message
+                }
+
+            success = bool(
+                result.get("success")
+            )
+
+            final_message_body = result.get(
+                "final_message_body",
+                sms_message
+            )
+
+            sms_log_status = (
+                result.get("status")
+                or (
+                    "sent"
+                    if success
+                    else "failed"
+                )
+            )
+
+            try:
+                log_sms_message(
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    client_id=None,
+                    recipient_phone=
+                        notification_phone,
+                    message_body=
+                        final_message_body,
+                    message_type=
+                        "booking_notification",
+                    direction="outbound",
+                    status=sms_log_status,
+                    sms_phone_number_id=result.get(
+                        "sms_phone_number_id"
+                    ),
+                    sender_phone=result.get(
+                        "sender_phone"
+                    ),
+                    receiving_phone=result.get(
+                        "receiving_phone"
+                    ),
+                    provider_message_id=result.get(
+                        "provider_message_id"
+                    ),
+                    provider_status=result.get(
+                        "provider_status"
+                    ),
+                    provider_error_code=result.get(
+                        "provider_error_code"
+                    ),
+                    provider_error_message=(
+                        result.get(
+                            "provider_error_message"
+                        )
+                        or result.get("error")
+                    )
+                )
+
+            except Exception:
+                app.logger.exception(
+                    "PeachBook business SMS result "
+                    "could not be logged. "
+                    "appointment_id=%s",
+                    appointment_id
+                )
+
+            delivery_status = (
+                "sent"
+                if success
+                else "failed"
+            )
+
+            last_error = None
+
+            if not success:
+                last_error = (
+                    result.get(
+                        "provider_error_message"
+                    )
+                    or result.get("error")
+                    or "SMS was not sent."
+                )
+
+            update_conn = get_db_connection()
+            update_cur = update_conn.cursor()
+
+            try:
+                update_cur.execute("""
+                    UPDATE booking_notification_deliveries
+                    SET
+                        status = %s,
+                        provider_message_id = %s,
+                        last_error = %s,
+                        sent_at =
+                            CASE
+                                WHEN %s
+                                THEN CURRENT_TIMESTAMP
+                                ELSE NULL
+                            END,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE booking_notification_delivery_id = %s
+                      AND spa_id = %s
+                      AND business_unit_id = %s
+                """, (
+                    delivery_status,
+                    result.get(
+                        "provider_message_id"
+                    ),
+                    last_error,
+                    success,
+                    sms_delivery_id,
+                    spa_id,
+                    business_unit_id
+                ))
+
+                update_conn.commit()
+
+            except Exception:
+                update_conn.rollback()
+
+                app.logger.exception(
+                    "PeachBook business SMS delivery "
+                    "status could not be updated. "
+                    "appointment_id=%s",
+                    appointment_id
+                )
+
+            finally:
+                update_cur.close()
+                update_conn.close()
+
+
+
 @app.route("/book/<public_booking_slug>")
 def public_booking(public_booking_slug):
     return _render_public_booking_page(
@@ -70911,6 +71736,66 @@ def public_booking_confirm(
             )
 
 
+        # -------------------------------------------------
+        # Send configured business booking notifications
+        # only after the appointment has committed.
+        #
+        # This is isolated from booking success. Any email,
+        # SMS, configuration, or delivery failure here must
+        # never undo or interrupt the confirmed appointment.
+        # -------------------------------------------------
+
+        try:
+            validation = confirmation[
+                "validation"
+            ]
+
+            _send_public_booking_business_notifications(
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                appointment_id=confirmation[
+                    "appointment_id"
+                ],
+                booked_by_name=confirmation[
+                    "booked_by_name"
+                ],
+                appointment_for_name=confirmation[
+                    "appointment_for_name"
+                ],
+                booking_for_other=confirmation[
+                    "booking_for_other"
+                ],
+                service_name=validation[
+                    "service_name"
+                ],
+                provider_name=validation[
+                    "provider_name"
+                ],
+                appointment_date=validation[
+                    "appointment_date"
+                ],
+                appointment_time=validation[
+                    "appointment_time"
+                ],
+                duration_minutes=validation[
+                    "duration_minutes"
+                ],
+                price_at_booking=validation[
+                    "price_at_booking"
+                ]
+            )
+
+        except Exception:
+            app.logger.exception(
+                "Appointment was confirmed, but "
+                "business booking notifications could "
+                "not be processed. appointment_id=%s",
+                confirmation[
+                    "appointment_id"
+                ]
+            )
+
+
         # Successful tokens are single-use.
         current_token_record = session.get(
             "_public_booking_csrf",
@@ -71515,6 +72400,13 @@ def booking_control_center():
                 bs.public_booking_enabled,
                 bs.public_booking_slug,
                 bs.updated_at,
+                bs.booking_notification_preference,
+                bs.booking_notification_email,
+                bs.booking_notification_phone,
+                bs.booking_notification_sms_consent,
+                bs.booking_notification_sms_consent_at,
+                bs.booking_notification_sms_consent_by,
+                bs.booking_notification_sms_consent_version,
 
                 COALESCE(
                     NULLIF(
@@ -71581,11 +72473,32 @@ def booking_control_center():
             "updated_at":
                 settings_row[9],
 
+            "booking_notification_preference":
+                settings_row[10] or "off",
+
+            "booking_notification_email":
+                settings_row[11] or "",
+
+            "booking_notification_phone":
+                settings_row[12] or "",
+
+            "booking_notification_sms_consent":
+                bool(settings_row[13]),
+
+            "booking_notification_sms_consent_at":
+                settings_row[14],
+
+            "booking_notification_sms_consent_by":
+                settings_row[15],
+
+            "booking_notification_sms_consent_version":
+                settings_row[16],
+
             "workspace_name":
-                settings_row[10],
+                settings_row[17],
 
             "spa_name":
-                settings_row[11]
+                settings_row[18]
         }
 
         readiness = get_booking_readiness()
@@ -71611,6 +72524,240 @@ def booking_control_center():
     finally:
         cur.close()
         conn.close()
+
+
+@app.route(
+    "/booking/control-center/notifications",
+    methods=["POST"]
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def save_booking_notification_settings():
+    import re
+
+    spa_id = current_spa_id()
+    business_unit_id = (
+        current_business_unit_id()
+    )
+    user_id = session.get("user_id")
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to manage booking notifications.",
+            "error"
+        )
+
+        return redirect(
+            url_for("booking_control_center")
+        )
+
+    preference = (
+        request.form.get(
+            "booking_notification_preference"
+        )
+        or "off"
+    ).strip().lower()
+
+    notification_email = (
+        _booking_normalize_email(
+            request.form.get(
+                "booking_notification_email"
+            )
+        )
+    )
+
+    notification_phone = (
+        _booking_normalize_phone(
+            request.form.get(
+                "booking_notification_phone"
+            )
+        )
+    )
+
+    sms_consent_accepted = (
+        "booking_notification_sms_consent"
+        in request.form
+    )
+
+    allowed_preferences = {
+        "off",
+        "email",
+        "sms",
+        "both"
+    }
+
+    errors = []
+
+    if preference not in allowed_preferences:
+        errors.append(
+            "Please select a valid booking "
+            "notification preference."
+        )
+
+    if notification_email:
+        if (
+            len(notification_email) > 320
+            or not re.fullmatch(
+                r"[^@\s]+@[^@\s]+\.[^@\s]+",
+                notification_email
+            )
+        ):
+            errors.append(
+                "Please enter a valid notification "
+                "email address."
+            )
+
+    if (
+        preference in {"email", "both"}
+        and not notification_email
+    ):
+        errors.append(
+            "A notification email address is required "
+            "for the selected preference."
+        )
+
+    if (
+        notification_phone
+        and len(notification_phone) != 10
+    ):
+        errors.append(
+            "Please enter a valid 10-digit "
+            "notification phone number."
+        )
+
+    if (
+        preference in {"sms", "both"}
+        and not notification_phone
+    ):
+        errors.append(
+            "A notification phone number is required "
+            "for the selected preference."
+        )
+
+    if (
+        preference in {"sms", "both"}
+        and not sms_consent_accepted
+    ):
+        errors.append(
+            "SMS booking notification consent is "
+            "required to enable text notifications."
+        )
+
+    if errors:
+        for error in errors:
+            flash(error, "error")
+
+        return redirect(
+            url_for("booking_control_center")
+        )
+
+    sms_enabled = (
+        preference in {"sms", "both"}
+    )
+
+    sms_consent_version = (
+        "peachbook_booking_notification_sms_v1"
+        if sms_enabled
+        else None
+    )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            UPDATE booking_settings
+            SET
+                booking_notification_preference = %s,
+                booking_notification_email = %s,
+                booking_notification_phone = %s,
+                booking_notification_sms_consent = %s,
+                booking_notification_sms_consent_at =
+                    CASE
+                        WHEN %s THEN CURRENT_TIMESTAMP
+                        ELSE booking_notification_sms_consent_at
+                    END,
+                booking_notification_sms_consent_by =
+                    CASE
+                        WHEN %s THEN %s
+                        ELSE booking_notification_sms_consent_by
+                    END,
+                booking_notification_sms_consent_version =
+                    CASE
+                        WHEN %s THEN %s
+                        ELSE booking_notification_sms_consent_version
+                    END,
+                updated_at = CURRENT_TIMESTAMP,
+                updated_by = %s
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+        """, (
+            preference,
+            notification_email or None,
+            notification_phone or None,
+            sms_enabled,
+            sms_enabled,
+            sms_enabled,
+            user_id,
+            sms_enabled,
+            sms_consent_version,
+            user_id,
+            spa_id,
+            business_unit_id
+        ))
+
+        if cur.rowcount != 1:
+            conn.rollback()
+
+            flash(
+                "Booking notification settings were "
+                "not found for this workspace.",
+                "error"
+            )
+
+            return redirect(
+                url_for("booking_control_center")
+            )
+
+        conn.commit()
+
+        flash(
+            "Booking notification settings saved.",
+            "success"
+        )
+
+        return redirect(
+            url_for("booking_control_center")
+        )
+
+    except Exception:
+        conn.rollback()
+
+        app.logger.exception(
+            "Booking notification settings could not "
+            "be saved. spa_id=%s business_unit_id=%s",
+            spa_id,
+            business_unit_id
+        )
+
+        flash(
+            "Booking notification settings could not "
+            "be saved.",
+            "error"
+        )
+
+        return redirect(
+            url_for("booking_control_center")
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
 
 
 @app.route("/booking/public-preview")
@@ -73296,6 +74443,29 @@ def process_email_automation_queue(
                     selected_queue_id
                 ))
 
+                if (
+                    email_type == "booking_notification"
+                    and appointment_id
+                ):
+                    cur.execute("""
+                        UPDATE booking_notification_deliveries
+                        SET
+                            status = 'sent',
+                            provider_message_id = %s,
+                            last_error = NULL,
+                            sent_at = CURRENT_TIMESTAMP,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE spa_id = %s
+                          AND business_unit_id = %s
+                          AND appointment_id = %s
+                          AND channel = 'email'
+                    """, (
+                        provider_message_id,
+                        spa_id,
+                        business_unit_id,
+                        appointment_id
+                    ))
+
                 cur.execute("""
                     INSERT INTO email_send_log (
                         spa_id,
@@ -73386,6 +74556,29 @@ def process_email_automation_queue(
                         error_message,
                         selected_queue_id
                     ))
+
+                    if (
+                        email_type == "booking_notification"
+                        and appointment_id
+                    ):
+                        cur.execute("""
+                            UPDATE booking_notification_deliveries
+                            SET
+                                status = 'failed',
+                                provider_message_id = NULL,
+                                last_error = %s,
+                                sent_at = NULL,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE spa_id = %s
+                              AND business_unit_id = %s
+                              AND appointment_id = %s
+                              AND channel = 'email'
+                        """, (
+                            error_message,
+                            spa_id,
+                            business_unit_id,
+                            appointment_id
+                        ))
 
                     summary["failed_count"] += 1
 

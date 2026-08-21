@@ -170,6 +170,17 @@
         font-weight: 700;
     }
 
+    .booking-notification-card {
+        margin-bottom: 20px;
+    }
+
+    .booking-notification-intro {
+        margin: -4px 0 18px;
+        color: #756761;
+        line-height: 1.5;
+    }
+
+
     .booking-main-grid {
         display: grid;
         grid-template-columns:
@@ -502,6 +513,210 @@
         </section>
 
     </div>
+
+
+    <section
+        class="
+            booking-card
+            booking-notification-card
+        "
+    >
+        <h2>Booking Notifications</h2>
+
+        <div class="booking-notification-intro">
+            Choose how this workspace should be notified
+            when a client books an appointment through
+            PeachBook.
+        </div>
+
+        <form
+            method="POST"
+            action="{{
+                url_for(
+                    'save_booking_notification_settings'
+                )
+            }}"
+        >
+            <div class="booking-settings-grid">
+
+                <div class="booking-field">
+                    <label
+                        for="booking_notification_preference"
+                    >
+                        Notification Preference
+                    </label>
+
+                    <select
+                        id="booking_notification_preference"
+                        name="booking_notification_preference"
+                        required
+                    >
+                        <option
+                            value="both"
+                            {% if
+                                settings
+                                .booking_notification_preference
+                                == 'both'
+                            %}
+                                selected
+                            {% endif %}
+                        >
+                            Send notification to both
+                            Email and Text
+                        </option>
+
+                        <option
+                            value="email"
+                            {% if
+                                settings
+                                .booking_notification_preference
+                                == 'email'
+                            %}
+                                selected
+                            {% endif %}
+                        >
+                            Send notification to Email only
+                        </option>
+
+                        <option
+                            value="sms"
+                            {% if
+                                settings
+                                .booking_notification_preference
+                                == 'sms'
+                            %}
+                                selected
+                            {% endif %}
+                        >
+                            Send notification by Text only
+                        </option>
+
+                        <option
+                            value="off"
+                            {% if
+                                settings
+                                .booking_notification_preference
+                                == 'off'
+                            %}
+                                selected
+                            {% endif %}
+                        >
+                            Notifications Off
+                        </option>
+                    </select>
+
+                    <div class="booking-field-help">
+                        Notification settings apply only to
+                        this Provider Workspace.
+                    </div>
+                </div>
+
+
+                <div class="booking-field">
+                    <label for="booking_notification_email">
+                        Email Notification
+                    </label>
+
+                    <input
+                        type="email"
+                        id="booking_notification_email"
+                        name="booking_notification_email"
+                        maxlength="320"
+                        autocomplete="email"
+                        value="{{
+                            settings
+                            .booking_notification_email
+                        }}"
+                        placeholder="name@example.com"
+                    >
+
+                    <div class="booking-field-help">
+                        Required when Email notifications are
+                        selected.
+                    </div>
+                </div>
+
+
+                <div class="booking-field">
+                    <label for="booking_notification_phone">
+                        SMS Notification
+                    </label>
+
+                    <input
+                        type="tel"
+                        id="booking_notification_phone"
+                        name="booking_notification_phone"
+                        maxlength="32"
+                        autocomplete="tel"
+                        value="{{
+                            settings
+                            .booking_notification_phone
+                        }}"
+                        placeholder="8177055735"
+                    >
+
+                    <div class="booking-field-help">
+                        Enter a 10-digit mobile number.
+                        Required when Text notifications are
+                        selected.
+                    </div>
+                </div>
+
+            </div>
+
+
+            <div class="booking-toggle-list">
+
+                <label class="booking-toggle">
+                    <input
+                        type="checkbox"
+                        name="booking_notification_sms_consent"
+                        {% if
+                            settings
+                            .booking_notification_sms_consent
+                        %}
+                            checked
+                        {% endif %}
+                    >
+
+                    <span>
+                        <strong>
+                            SMS Booking Notification Consent
+                        </strong>
+
+                        <span
+                            class="
+                                booking-toggle-description
+                            "
+                        >
+                            I agree to receive automated
+                            PeachBook booking notification
+                            text messages from Peach Suite Pro
+                            at the mobile number provided.
+                            Message frequency varies. Message
+                            and data rates may apply. Reply
+                            STOP to opt out and HELP for help.
+                            This consent applies to booking
+                            notifications only and does not
+                            authorize marketing messages.
+                        </span>
+                    </span>
+                </label>
+
+            </div>
+
+
+            <div class="booking-save-row">
+                <button
+                    type="submit"
+                    class="booking-save-button"
+                >
+                    Save Notification Settings
+                </button>
+            </div>
+
+        </form>
+    </section>
 
 
     <div class="booking-main-grid">
@@ -849,6 +1064,41 @@
 
 <script>
 document.addEventListener("DOMContentLoaded", function () {
+    const notificationPreference = document.getElementById(
+        "booking_notification_preference"
+    );
+
+    const smsConsent = document.querySelector(
+        'input[name="booking_notification_sms_consent"]'
+    );
+
+    function syncSmsConsentState() {
+        if (!notificationPreference || !smsConsent) {
+            return;
+        }
+
+        const smsEnabled = (
+            notificationPreference.value === "sms"
+            || notificationPreference.value === "both"
+        );
+
+        smsConsent.disabled = !smsEnabled;
+
+        if (!smsEnabled) {
+            smsConsent.checked = false;
+        }
+    }
+
+    if (notificationPreference && smsConsent) {
+        syncSmsConsentState();
+
+        notificationPreference.addEventListener(
+            "change",
+            syncSmsConsentState
+        );
+    }
+
+
     const copyButton = document.getElementById(
         "copyBookingUrlButton"
     );
