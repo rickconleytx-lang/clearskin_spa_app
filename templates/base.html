@@ -18,6 +18,91 @@
     <meta name="apple-mobile-web-app-title" content="PeachSuite Pro">
 
 
+    <script>
+    (function () {
+        const storageKey = "peachSuiteProColorScheme";
+
+        const allowedThemes = [
+            "peach_cream",
+            "coastal_blue",
+            "professional_blue",
+            "sage_wellness",
+            "soft_stone",
+            "lavender_calm"
+        ];
+
+        function normalizeTheme(value) {
+            return allowedThemes.includes(value)
+                ? value
+                : "peach_cream";
+        }
+
+        function applyTheme(value, persist) {
+            const theme = normalizeTheme(value);
+
+            document.documentElement.setAttribute(
+                "data-psp-theme",
+                theme
+            );
+
+            if (persist) {
+                try {
+                    localStorage.setItem(
+                        storageKey,
+                        theme
+                    );
+                } catch (error) {
+                    // Browser storage is optional.
+                }
+            }
+
+            const selector = document.getElementById(
+                "pspColorSchemeSelect"
+            );
+
+            if (selector) {
+                selector.value = theme;
+            }
+
+            return theme;
+        }
+
+        let savedTheme = "peach_cream";
+
+        try {
+            savedTheme =
+                localStorage.getItem(storageKey)
+                || "peach_cream";
+        } catch (error) {
+            savedTheme = "peach_cream";
+        }
+
+        const initialTheme = applyTheme(
+            savedTheme,
+            false
+        );
+
+        window.setPeachSuiteColorScheme =
+            function (value) {
+                applyTheme(value, true);
+            };
+
+        document.addEventListener(
+            "DOMContentLoaded",
+            function () {
+                const selector =
+                    document.getElementById(
+                        "pspColorSchemeSelect"
+                    );
+
+                if (selector) {
+                    selector.value = initialTheme;
+                }
+            }
+        );
+    })();
+    </script>
+
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/q_launch.css') }}">
 </head>

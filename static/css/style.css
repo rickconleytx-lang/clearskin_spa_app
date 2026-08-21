@@ -5953,3 +5953,433 @@ inside the existing category panel.
 .app-menu-trigger {
     padding: 7px 14px;
 }
+
+
+/* =========================================================
+   PSP APPLICATION COLOR THEMES
+
+   Browser-local appearance only.
+   Semantic/status colors are intentionally NOT overridden.
+========================================================= */
+
+
+/* ---------------------------------------------------------
+   PEACH & CREAM — current/default PSP appearance
+--------------------------------------------------------- */
+
+html[data-psp-theme="peach_cream"] {
+    --psp-page-bg: #f3eadf;
+    --psp-surface: #fffaf5;
+    --psp-heading: #7a5c61;
+
+    --psp-banner-bg: #e6d6c3;
+
+    --psp-header-bg: #fff7f0;
+    --psp-header-border: #f0c9a8;
+
+    --psp-menu-bg: #f8eee6;
+    --psp-menu-header-bg: #f3e2d5;
+    --psp-submenu-bg: #ffffff;
+
+    --psp-border: #e4c8b4;
+
+    --psp-active-bg: #ead2c0;
+    --psp-active-text: #5f321d;
+    --psp-hover-bg: #f0ddcf;
+
+    --psp-divider: #ddc1ad;
+
+    --psp-panel-header-bg: #fff7f0;
+    --psp-panel-title: #5d3521;
+
+    --psp-control-border: #e5c7af;
+    --psp-control-text: #6f3f28;
+    --psp-control-hover: #ffe9d6;
+
+    --psp-submenu-heading: #856957;
+    --psp-nested-bg: #fffaf6;
+
+    --psp-primary: #125e65;
+}
+
+
+/* ---------------------------------------------------------
+   COASTAL BLUE
+--------------------------------------------------------- */
+
+html[data-psp-theme="coastal_blue"] {
+    --psp-page-bg: #e7f4f8;
+    --psp-surface: #f7fbfd;
+    --psp-heading: #26343a;
+
+    --psp-banner-bg: #d5eaf1;
+
+    --psp-header-bg: #f7fbfd;
+    --psp-header-border: #b9dbe6;
+
+    --psp-menu-bg: #e7f4f8;
+    --psp-menu-header-bg: #d7ebf1;
+    --psp-submenu-bg: #ffffff;
+
+    --psp-border: #c6e1e9;
+
+    --psp-active-bg: #cfe7ef;
+    --psp-active-text: #264f60;
+    --psp-hover-bg: #dceff4;
+
+    --psp-divider: #b8d7e1;
+
+    --psp-panel-header-bg: #eef8fb;
+    --psp-panel-title: #315f70;
+
+    --psp-control-border: #b8d8e2;
+    --psp-control-text: #315f70;
+    --psp-control-hover: #dceff4;
+
+    --psp-submenu-heading: #52717d;
+    --psp-nested-bg: #f1f9fb;
+
+    --psp-primary: #3f7f96;
+}
+
+
+/* ---------------------------------------------------------
+   PROFESSIONAL BLUE
+--------------------------------------------------------- */
+
+html[data-psp-theme="professional_blue"] {
+    --psp-page-bg: #dceff8;
+    --psp-surface: #f7fbfe;
+    --psp-heading: #173b53;
+
+    --psp-banner-bg: #cde7f4;
+
+    --psp-header-bg: #f5fbfe;
+    --psp-header-border: #9bcde7;
+
+    --psp-menu-bg: #e3f3fb;
+    --psp-menu-header-bg: #cfe8f5;
+    --psp-submenu-bg: #ffffff;
+
+    --psp-border: #b9dceb;
+
+    --psp-active-bg: #bfe1f2;
+    --psp-active-text: #173b53;
+    --psp-hover-bg: #d2ebf7;
+
+    --psp-divider: #a9d4e9;
+
+    --psp-panel-header-bg: #eef8fd;
+    --psp-panel-title: #173b53;
+
+    --psp-control-border: #9dcfe8;
+    --psp-control-text: #245f7f;
+    --psp-control-hover: #d7eef9;
+
+    --psp-submenu-heading: #4d6e82;
+    --psp-nested-bg: #f2f9fd;
+
+    --psp-primary: #2b739a;
+}
+
+
+/* ---------------------------------------------------------
+   SAGE WELLNESS
+--------------------------------------------------------- */
+
+html[data-psp-theme="sage_wellness"] {
+    --psp-page-bg: #e9f1e8;
+    --psp-surface: #fafcf8;
+    --psp-heading: #29352d;
+
+    --psp-banner-bg: #dce8da;
+
+    --psp-header-bg: #f8fbf6;
+    --psp-header-border: #c7d9c5;
+
+    --psp-menu-bg: #edf4eb;
+    --psp-menu-header-bg: #dce8da;
+    --psp-submenu-bg: #ffffff;
+
+    --psp-border: #d0dfce;
+
+    --psp-active-bg: #d3e2d1;
+    --psp-active-text: #36523b;
+    --psp-hover-bg: #e2ece0;
+
+    --psp-divider: #c0d3be;
+
+    --psp-panel-header-bg: #f3f8f1;
+    --psp-panel-title: #405d45;
+
+    --psp-control-border: #bfd2bd;
+    --psp-control-text: #49694f;
+    --psp-control-hover: #e2ece0;
+
+    --psp-submenu-heading: #617565;
+    --psp-nested-bg: #f5f9f3;
+
+    --psp-primary: #5f7e63;
+}
+
+
+/* ---------------------------------------------------------
+   SOFT STONE
+--------------------------------------------------------- */
+
+html[data-psp-theme="soft_stone"] {
+    --psp-page-bg: #eceff1;
+    --psp-surface: #fafafa;
+    --psp-heading: #2f3335;
+
+    --psp-banner-bg: #e1e5e7;
+
+    --psp-header-bg: #fafafa;
+    --psp-header-border: #d1d6d9;
+
+    --psp-menu-bg: #f0f2f3;
+    --psp-menu-header-bg: #e3e7e9;
+    --psp-submenu-bg: #ffffff;
+
+    --psp-border: #d9dddf;
+
+    --psp-active-bg: #dce1e3;
+    --psp-active-text: #3f474b;
+    --psp-hover-bg: #e7eaec;
+
+    --psp-divider: #ccd2d5;
+
+    --psp-panel-header-bg: #f5f6f7;
+    --psp-panel-title: #464e52;
+
+    --psp-control-border: #cbd1d4;
+    --psp-control-text: #555e63;
+    --psp-control-hover: #e7eaec;
+
+    --psp-submenu-heading: #687176;
+    --psp-nested-bg: #f7f8f8;
+
+    --psp-primary: #687177;
+}
+
+
+/* ---------------------------------------------------------
+   LAVENDER CALM
+--------------------------------------------------------- */
+
+html[data-psp-theme="lavender_calm"] {
+    --psp-page-bg: #eee8f5;
+    --psp-surface: #fbf9fd;
+    --psp-heading: #332e3a;
+
+    --psp-banner-bg: #e4dcef;
+
+    --psp-header-bg: #faf8fc;
+    --psp-header-border: #d8cce6;
+
+    --psp-menu-bg: #f1ecf6;
+    --psp-menu-header-bg: #e3daed;
+    --psp-submenu-bg: #ffffff;
+
+    --psp-border: #ddd3e8;
+
+    --psp-active-bg: #ddd2e8;
+    --psp-active-text: #4d405c;
+    --psp-hover-bg: #e9e1f1;
+
+    --psp-divider: #cec1dd;
+
+    --psp-panel-header-bg: #f6f2f9;
+    --psp-panel-title: #594969;
+
+    --psp-control-border: #d0c3df;
+    --psp-control-text: #665575;
+    --psp-control-hover: #e9e1f1;
+
+    --psp-submenu-heading: #74677e;
+    --psp-nested-bg: #f8f5fa;
+
+    --psp-primary: #7a669b;
+}
+
+
+/* ---------------------------------------------------------
+   SHARED APPLICATION SURFACES
+--------------------------------------------------------- */
+
+html[data-psp-theme] body {
+    background-color: var(--psp-page-bg);
+}
+
+html[data-psp-theme] .container {
+    background: var(--psp-surface);
+}
+
+html[data-psp-theme] h1,
+html[data-psp-theme] h2 {
+    color: var(--psp-heading);
+}
+
+html[data-psp-theme] .banner {
+    background-color: var(--psp-banner-bg);
+}
+
+html[data-psp-theme] .header-bar {
+    background: var(--psp-header-bg);
+    border-bottom-color: var(--psp-header-border);
+}
+
+html[data-psp-theme] th {
+    background-color: var(--psp-primary);
+}
+
+
+/* ---------------------------------------------------------
+   PRIMARY APPLICATION MENU
+--------------------------------------------------------- */
+
+html[data-psp-theme] .app-side-panel,
+html[data-psp-theme] .app-side-panel-navigation {
+    background: var(--psp-menu-bg);
+}
+
+html[data-psp-theme] .app-side-panel-header {
+    background: var(--psp-menu-header-bg);
+}
+
+html[data-psp-theme]
+.app-side-panel .user-menu-dropdown,
+html[data-psp-theme]
+.app-side-panel .app-menu-submenu {
+    background: var(--psp-submenu-bg);
+    border-color: var(--psp-border);
+}
+
+html[data-psp-theme]
+.app-side-panel .user-menu.is-open
+> .user-menu-button,
+html[data-psp-theme]
+.app-side-panel .app-menu-category.is-open
+> .app-menu-category-button {
+    background: var(--psp-active-bg);
+    color: var(--psp-active-text);
+}
+
+html[data-psp-theme]
+.app-side-panel .user-menu-button:hover,
+html[data-psp-theme]
+.app-side-panel-link:hover,
+html[data-psp-theme]
+.app-nested-menu-button:hover,
+html[data-psp-theme]
+.app-nested-menu.is-open
+> .app-nested-menu-button {
+    background: var(--psp-hover-bg);
+}
+
+html[data-psp-theme] .app-side-panel-divider {
+    background: var(--psp-divider);
+}
+
+html[data-psp-theme] .app-menu-category-chevron,
+html[data-psp-theme] .app-nested-menu-chevron {
+    color: var(--psp-control-text);
+}
+
+html[data-psp-theme] .app-menu-submenu-heading {
+    color: var(--psp-submenu-heading);
+}
+
+
+/* ---------------------------------------------------------
+   SECONDARY / TERTIARY MENU PANELS
+--------------------------------------------------------- */
+
+html[data-psp-theme]
+.app-side-panel .app-menu-submenu,
+html[data-psp-theme]
+.app-side-panel .app-nested-menu-pane {
+    background: var(--psp-submenu-bg);
+    border-color: var(--psp-border);
+}
+
+html[data-psp-theme]
+.app-desktop-submenu-header,
+html[data-psp-theme]
+.app-nested-menu-header {
+    background: var(--psp-panel-header-bg);
+    border-bottom-color: var(--psp-border);
+}
+
+html[data-psp-theme]
+.app-desktop-submenu-title,
+html[data-psp-theme]
+.app-nested-menu-title {
+    color: var(--psp-panel-title);
+}
+
+html[data-psp-theme]
+.app-desktop-submenu-close,
+html[data-psp-theme]
+.app-nested-menu-close {
+    border-color: var(--psp-control-border);
+    color: var(--psp-control-text);
+}
+
+html[data-psp-theme]
+.app-desktop-submenu-close:hover,
+html[data-psp-theme]
+.app-nested-menu-close:hover {
+    background: var(--psp-control-hover);
+}
+
+html[data-psp-theme] .app-nested-menu-pane {
+    background: var(--psp-nested-bg);
+}
+
+
+/* ---------------------------------------------------------
+   APPEARANCE PICKER
+--------------------------------------------------------- */
+
+.psp-theme-picker {
+    padding: 7px 10px 10px;
+}
+
+.psp-theme-picker-label {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--psp-submenu-heading);
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
+.psp-theme-picker-select {
+    display: block;
+    width: 100%;
+    min-height: 40px;
+    box-sizing: border-box;
+
+    padding: 8px 10px;
+
+    border: 1px solid var(--psp-control-border);
+    border-radius: 8px;
+
+    background: var(--psp-submenu-bg);
+    color: var(--psp-active-text);
+
+    font: inherit;
+    cursor: pointer;
+}
+
+.psp-theme-picker-select:focus {
+    outline: 3px solid var(--psp-active-bg);
+    outline-offset: 1px;
+}
+
+.psp-theme-picker-note {
+    margin-top: 6px;
+    color: var(--psp-submenu-heading);
+    font-size: 0.75rem;
+    line-height: 1.35;
+}
