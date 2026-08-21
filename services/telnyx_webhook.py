@@ -632,6 +632,201 @@ def _mark_webhook_unmatched(
     ))
 
 
+
+def process_platform_booking_notification_command(
+    cursor,
+    event,
+    metadata,
+    webhook_log_id,
+):
+    """
+    Mirror Telnyx STOP/START state for Peach Suite Pro
+    platform-originated PeachBook booking notifications.
+
+    Telnyx remains responsible for its provider-level
+    opt-out/opt-in enforcement and autoresponses.
+    """
+
+    result = {
+        "platform_command_processed": False,
+        "platform_command": None,
+        "booking_settings_updated": 0,
+    }
+
+    if metadata["event_type"] != "message.received":
+        return result
+
+    platform_phone = _normalize_phone_number(
+        os.getenv("TELNYX_FROM_NUMBER")
+    )
+
+    if (
+        not platform_phone
+        or metadata["receiving_phone"] != platform_phone
+    ):
+        return result
+
+    payload = event["data"]["payload"]
+
+    command = " ".join(
+        str(
+            payload.get("text")
+            or ""
+        )
+        .strip()
+        .lower()
+        .split()
+    )
+
+    stop_words = {
+        "stop",
+        "stopall",
+        "stop all",
+        "unsubscribe",
+        "cancel",
+        "end",
+        "quit",
+    }
+
+    start_words = {
+        "start",
+        "unstop",
+    }
+
+    if (
+        command not in stop_words
+        and command not in start_words
+    ):
+        return result
+
+    sender_digits = _phone_digits(
+        metadata["sender_phone"]
+    )
+
+    if (
+        sender_digits
+        and len(sender_digits) == 11
+        and sender_digits.startswith("1")
+    ):
+        sender_digits = sender_digits[1:]
+
+    if not sender_digits or len(sender_digits) != 10:
+        _mark_webhook_unmatched(
+            cursor,
+            webhook_log_id,
+            (
+                "Peach Suite Pro platform SMS command "
+                "did not contain a valid US sender phone."
+            ),
+        )
+
+        result["platform_command"] = (
+            "stop"
+            if command in stop_words
+            else "start"
+        )
+
+        return result
+
+    if command in stop_words:
+        command_name = "stop"
+        processing_status = "processed_platform_stop"
+
+        cursor.execute("""
+            UPDATE booking_settings
+            SET
+                booking_notification_sms_consent = FALSE,
+                updated_at = CURRENT_TIMESTAMP,
+                updated_by = NULL
+            WHERE booking_notification_phone IS NOT NULL
+              AND booking_notification_preference
+                    IN ('sms', 'both')
+              AND RIGHT(
+                    REGEXP_REPLACE(
+                        booking_notification_phone,
+                        '[^0-9]',
+                        '',
+                        'g'
+                    ),
+                    10
+                  ) = %s
+            RETURNING
+                spa_id,
+                business_unit_id
+        """, (
+            sender_digits,
+        ))
+
+    else:
+        command_name = "start"
+        processing_status = "processed_platform_start"
+
+        cursor.execute("""
+            UPDATE booking_settings
+            SET
+                booking_notification_sms_consent = TRUE,
+                booking_notification_sms_consent_at =
+                    CURRENT_TIMESTAMP,
+                booking_notification_sms_consent_by = NULL,
+                booking_notification_sms_consent_version =
+                    'peachbook_booking_notification_sms_keyword_v1',
+                updated_at = CURRENT_TIMESTAMP,
+                updated_by = NULL
+            WHERE booking_notification_phone IS NOT NULL
+              AND booking_notification_preference
+                    IN ('sms', 'both')
+              AND RIGHT(
+                    REGEXP_REPLACE(
+                        booking_notification_phone,
+                        '[^0-9]',
+                        '',
+                        'g'
+                    ),
+                    10
+                  ) = %s
+            RETURNING
+                spa_id,
+                business_unit_id
+        """, (
+            sender_digits,
+        ))
+
+    updated_rows = cursor.fetchall()
+
+    result["platform_command"] = command_name
+    result["booking_settings_updated"] = len(updated_rows)
+
+    if not updated_rows:
+        _mark_webhook_unmatched(
+            cursor,
+            webhook_log_id,
+            (
+                "Peach Suite Pro platform SMS "
+                f"{command_name.upper()} did not match an "
+                "SMS-enabled PeachBook notification destination."
+            ),
+        )
+
+        return result
+
+    cursor.execute("""
+        UPDATE telnyx_webhook_log
+        SET
+            is_processed = TRUE,
+            processing_status = %s,
+            error_message = NULL,
+            processed_at = CURRENT_TIMESTAMP
+        WHERE webhook_log_id = %s
+    """, (
+        processing_status,
+        webhook_log_id,
+    ))
+
+    result["platform_command_processed"] = True
+
+    return result
+
+
 def process_telnyx_delivery_event(
     cursor,
     event,
@@ -954,6 +1149,34 @@ def record_verified_telnyx_event(
             "sms_message_id": None,
             "status_changed": False,
         }
+
+        if (
+            not receipt["duplicate"]
+            and metadata["event_type"] == "message.received"
+        ):
+            command_result = (
+                process_platform_booking_notification_command(
+                    cursor=cursor,
+                    event=event,
+                    metadata=metadata,
+                    webhook_log_id=row[0],
+                )
+            )
+
+            receipt.update(command_result)
+
+            if receipt["platform_command_processed"]:
+                cursor.execute("""
+                    SELECT processing_status
+                    FROM telnyx_webhook_log
+                    WHERE webhook_log_id = %s
+                """, (
+                    row[0],
+                ))
+
+                receipt["processing_status"] = (
+                    cursor.fetchone()[0]
+                )
 
         if (
             not receipt["duplicate"]
