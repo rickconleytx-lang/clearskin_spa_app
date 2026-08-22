@@ -566,13 +566,174 @@ def process_square_pos_payment(
             ).strip().lower()
                 == "reconciled"
         ):
+            income_id = existing_row[3]
+
+            if income_id is None:
+                return {
+                    "status": "already_reconciled",
+                    "square_payment_record_id":
+                        existing_row[0],
+                    "income_id": income_id,
+                    "square_payment_id":
+                        square_payment_id,
+                }
+
+            # Square can attach its final processing fee after
+            # the payment first reaches COMPLETED. For an
+            # already-posted PeachPOS payment, safely refresh
+            # settlement-only fields without creating another
+            # Income row.
+            cursor.execute("""
+                SELECT
+                    income_type,
+                    pos_amount,
+                    tax_amount,
+                    tip_amount,
+                    total_amount,
+                    processor_payment_id
+                FROM income
+                WHERE income_id = %s
+                  AND spa_id = %s
+                  AND business_unit_id = %s
+                FOR UPDATE
+            """, (
+                income_id,
+                spa_id,
+                business_unit_id,
+            ))
+
+            income_row = cursor.fetchone()
+
+            if not income_row:
+                raise SquarePosProcessingError(
+                    "Linked PeachPOS Income could not be found "
+                    "in this Provider Workspace."
+                )
+
+            if str(
+                income_row[0] or ""
+            ).strip() != "PeachPOS":
+                raise SquarePosProcessingError(
+                    "Linked Income is not a PeachPOS posting."
+                )
+
+            if str(
+                income_row[5] or ""
+            ).strip() != square_payment_id:
+                raise SquarePosProcessingError(
+                    "Linked PeachPOS Income has a different "
+                    "Square payment ID."
+                )
+
+            existing_pos_cents = int(
+                round(float(income_row[1] or 0) * 100)
+            )
+            existing_tax_cents = int(
+                round(float(income_row[2] or 0) * 100)
+            )
+            existing_tip_cents = int(
+                round(float(income_row[3] or 0) * 100)
+            )
+            existing_total_cents = int(
+                round(float(income_row[4] or 0) * 100)
+            )
+
+            if (
+                existing_pos_cents != pos_amount_cents
+                or existing_tax_cents != tax_amount_cents
+                or existing_tip_cents != tip_amount_cents
+                or existing_total_cents != total_amount_cents
+            ):
+                raise SquarePosProcessingError(
+                    "Authoritative Square sale amounts changed "
+                    "after PeachPOS posting; settlement refresh "
+                    "was not applied."
+                )
+
+            processing_fee_cents = int(
+                preview.get("processing_fee_cents") or 0
+            )
+            net_received_cents = int(
+                preview.get("net_received_cents") or 0
+            )
+
+            cursor.execute("""
+                UPDATE square_payments
+                SET
+                    processing_fee_cents = %s,
+                    net_received_cents = %s,
+                    square_updated_at = %s,
+                    retrieved_at = CURRENT_TIMESTAMP,
+                    last_synced_at = CURRENT_TIMESTAMP,
+                    raw_payment = %s,
+                    raw_order = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE square_payment_record_id = %s
+                  AND spa_id = %s
+                  AND business_unit_id = %s
+                  AND income_id = %s
+            """, (
+                processing_fee_cents,
+                net_received_cents,
+                payment.get("updated_at"),
+                Json(payment),
+                Json(order),
+                existing_row[0],
+                spa_id,
+                business_unit_id,
+                income_id,
+            ))
+
+            if cursor.rowcount != 1:
+                raise SquarePosProcessingError(
+                    "PeachPOS Square settlement could not "
+                    "be refreshed safely."
+                )
+
+            processing_fee_amount = round(
+                processing_fee_cents / 100,
+                2,
+            )
+            net_received = round(
+                net_received_cents / 100,
+                2,
+            )
+
+            cursor.execute("""
+                UPDATE income
+                SET
+                    processing_fee_amount = %s,
+                    net_received = %s
+                WHERE income_id = %s
+                  AND spa_id = %s
+                  AND business_unit_id = %s
+                  AND income_type = 'PeachPOS'
+                  AND processor_payment_id = %s
+            """, (
+                processing_fee_amount,
+                net_received,
+                income_id,
+                spa_id,
+                business_unit_id,
+                square_payment_id,
+            ))
+
+            if cursor.rowcount != 1:
+                raise SquarePosProcessingError(
+                    "PeachPOS Income settlement could not "
+                    "be refreshed safely."
+                )
+
             return {
-                "status": "already_reconciled",
+                "status": "settlement_refreshed",
                 "square_payment_record_id":
                     existing_row[0],
-                "income_id": existing_row[3],
+                "income_id": income_id,
                 "square_payment_id":
                     square_payment_id,
+                "processing_fee_amount":
+                    processing_fee_amount,
+                "net_received": net_received,
             }
 
         if existing_row[4] is not None:

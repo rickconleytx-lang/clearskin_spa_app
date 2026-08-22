@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+
+{% block title %}PeachPOS Income{% endblock %}
+
+{% block content %}
+<div class="report-page">
+
+    <a
+        href="{{ url_for('income_home') }}"
+        class="tool-pill tool-pill-small"
+    >
+        Income Home
+    </a>
+
+    <div class="report-header">
+        <div>
+            <h1>PeachPOS Income</h1>
+            <p class="report-subtitle">
+                Square-generated PeachPOS sales and settlement detail
+            </p>
+        </div>
+
+        <div class="report-actions no-print">
+            <button
+                class="btn btn-print"
+                onclick="window.print()"
+            >
+                🖨️ Print Report
+            </button>
+        </div>
+    </div>
+
+    <div class="report-filter-card no-print">
+        <form
+            method="GET"
+            action="{{ url_for('peachpos_income_report') }}"
+            class="report-filter-form"
+        >
+
+            <div class="filter-group">
+                <label for="start_date">Start Date</label>
+                <input
+                    type="date"
+                    id="start_date"
+                    name="start_date"
+                    value="{{ start_date }}"
+                >
+            </div>
+
+            <div class="filter-group">
+                <label for="end_date">End Date</label>
+                <input
+                    type="date"
+                    id="end_date"
+                    name="end_date"
+                    value="{{ end_date }}"
+                >
+            </div>
+
+            <div
+                class="page-tool-pills"
+                style="margin-top: 15px; gap: 6px; flex-wrap: wrap;"
+            >
+                <button
+                    type="submit"
+                    class="tool-pill tool-pill-small"
+                >
+                    Run Report
+                </button>
+
+                <a
+                    href="{{ url_for(
+                        'peachpos_income_report',
+                        start_date=today,
+                        end_date=today
+                    ) }}"
+                    class="tool-pill tool-pill-small"
+                >
+                    Today
+                </a>
+
+                <a
+                    href="{{ url_for('peachpos_income_report') }}"
+                    class="tool-pill tool-pill-small"
+                >
+                    Reset
+                </a>
+
+                <a
+                    href="{{ url_for(
+                        'peachpos_income_csv',
+                        start_date=start_date,
+                        end_date=end_date
+                    ) }}"
+                    class="tool-pill tool-pill-small"
+                >
+                    Export to CSV
+                </a>
+
+                <a
+                    href="{{ url_for(
+                        'peachpos_income_excel',
+                        start_date=start_date,
+                        end_date=end_date
+                    ) }}"
+                    class="tool-pill tool-pill-small"
+                >
+                    Export to Excel
+                </a>
+            </div>
+
+        </form>
+    </div>
+
+    <div class="report-period">
+        <strong>Reporting Period:</strong>
+        {{ start_date }} through {{ end_date }}
+    </div>
+
+    <div class="summary-cards">
+
+        <div class="summary-card">
+            <h3>Transactions</h3>
+            <p>{{ summary[0] }}</p>
+        </div>
+
+        <div class="summary-card">
+            <h3>Sales</h3>
+            <p>{{ summary[1]|currency }}</p>
+        </div>
+
+        <div class="summary-card">
+            <h3>Tax</h3>
+            <p>{{ summary[2]|currency }}</p>
+        </div>
+
+        <div class="summary-card">
+            <h3>Tips</h3>
+            <p>{{ summary[3]|currency }}</p>
+        </div>
+
+        <div class="summary-card">
+            <h3>Square Fees</h3>
+            <p>{{ summary[4]|currency }}</p>
+        </div>
+
+        <div class="summary-card">
+            <h3>Net Received</h3>
+            <p>{{ summary[5]|currency }}</p>
+        </div>
+
+    </div>
+
+    <div class="report-table-wrapper">
+        <table class="report-table">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Time</th>
+                    <th>Square Transaction ID</th>
+                    <th>Sales</th>
+                    <th>Tax</th>
+                    <th>Tip</th>
+                    <th>Fee</th>
+                    <th>Net Received</th>
+                </tr>
+            </thead>
+
+            <tbody>
+                {% for row in income_rows %}
+                    <tr>
+                        <td>{{ row.income_date }}</td>
+                        <td>{{ row.sale_time_display }}</td>
+                        <td>{{ row.square_payment_id or '—' }}</td>
+                        <td>{{ row.sales|currency }}</td>
+                        <td>{{ row.tax|currency }}</td>
+                        <td>{{ row.tip|currency }}</td>
+                        <td>{{ row.fee|currency }}</td>
+                        <td>{{ row.net_received|currency }}</td>
+                    </tr>
+                {% else %}
+                    <tr>
+                        <td colspan="8">
+                            No PeachPOS income was found for this period.
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+</div>
+{% endblock %}

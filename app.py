@@ -51505,6 +51505,560 @@ def income_report():
 
 
 
+
+###############################################
+#
+#   PEACHPOS INCOME REPORT
+#
+#   Read-only Square-derived PeachPOS income.
+#   Always available to the current workspace.
+#
+###############################################
+
+
+@app.route("/peachpos/income")
+@login_required
+@spa_required
+def peachpos_income_report():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to view PeachPOS Income.",
+            "error",
+        )
+        return redirect(url_for("income_report"))
+
+    spa_zone = ZoneInfo(
+        get_current_spa_timezone(spa_id)
+    )
+    local_today = datetime.now(spa_zone).date()
+
+    start_raw = str(
+        request.args.get("start_date") or ""
+    ).strip()
+    end_raw = str(
+        request.args.get("end_date") or ""
+    ).strip()
+
+    try:
+        start_date_obj = (
+            date.fromisoformat(start_raw)
+            if start_raw
+            else local_today
+        )
+        end_date_obj = (
+            date.fromisoformat(end_raw)
+            if end_raw
+            else local_today
+        )
+    except ValueError:
+        flash(
+            "Choose valid PeachPOS report dates.",
+            "warning",
+        )
+        start_date_obj = local_today
+        end_date_obj = local_today
+
+    if start_date_obj > end_date_obj:
+        flash(
+            "PeachPOS report start date cannot be "
+            "after the end date.",
+            "warning",
+        )
+        start_date_obj = end_date_obj
+
+    start_date = start_date_obj.isoformat()
+    end_date = end_date_obj.isoformat()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                i.income_id,
+                i.income_date,
+                sp.square_created_at,
+                COALESCE(
+                    sp.square_payment_id,
+                    i.processor_payment_id,
+                    ''
+                ) AS square_payment_id,
+                COALESCE(i.pos_amount, 0.00),
+                COALESCE(i.tax_amount, 0.00),
+                COALESCE(i.tip_amount, 0.00),
+                COALESCE(
+                    i.processing_fee_amount,
+                    0.00
+                ),
+                COALESCE(i.net_received, 0.00)
+            FROM income i
+            LEFT JOIN LATERAL (
+                SELECT
+                    sq.square_created_at,
+                    sq.square_payment_id
+                FROM square_payments sq
+                WHERE sq.income_id = i.income_id
+                  AND sq.spa_id = i.spa_id
+                  AND sq.business_unit_id =
+                        i.business_unit_id
+                ORDER BY
+                    sq.square_payment_record_id DESC
+                LIMIT 1
+            ) sp ON TRUE
+            WHERE i.spa_id = %s
+              AND i.business_unit_id = %s
+              AND i.income_type = 'PeachPOS'
+              AND i.income_date BETWEEN %s AND %s
+            ORDER BY
+                COALESCE(
+                    sp.square_created_at,
+                    i.created_at
+                ) DESC,
+                i.income_id DESC
+        """, (
+            spa_id,
+            business_unit_id,
+            start_date,
+            end_date,
+        ))
+
+        rows = cur.fetchall()
+
+        cur.execute("""
+            SELECT
+                COUNT(*),
+                COALESCE(SUM(pos_amount), 0.00),
+                COALESCE(SUM(tax_amount), 0.00),
+                COALESCE(SUM(tip_amount), 0.00),
+                COALESCE(
+                    SUM(processing_fee_amount),
+                    0.00
+                ),
+                COALESCE(SUM(net_received), 0.00)
+            FROM income
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND income_type = 'PeachPOS'
+              AND income_date BETWEEN %s AND %s
+        """, (
+            spa_id,
+            business_unit_id,
+            start_date,
+            end_date,
+        ))
+
+        summary = cur.fetchone()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    income_rows = []
+
+    for row in rows:
+        square_created_at = row[2]
+        sale_time_display = "—"
+
+        if square_created_at:
+            if square_created_at.tzinfo is None:
+                square_created_at = (
+                    square_created_at.replace(
+                        tzinfo=ZoneInfo("UTC")
+                    )
+                )
+
+            sale_time_display = (
+                square_created_at.astimezone(
+                    spa_zone
+                ).strftime("%I:%M %p").lstrip("0")
+            )
+
+        income_rows.append({
+            "income_id": row[0],
+            "income_date": row[1],
+            "sale_time_display": sale_time_display,
+            "square_payment_id": row[3],
+            "sales": row[4],
+            "tax": row[5],
+            "tip": row[6],
+            "fee": row[7],
+            "net_received": row[8],
+        })
+
+    return render_template(
+        "peachpos_income_report.html",
+        start_date=start_date,
+        end_date=end_date,
+        today=local_today.isoformat(),
+        summary=summary,
+        income_rows=income_rows,
+    )
+
+
+
+###############################################
+#
+#   PEACHPOS INCOME EXPORTS
+#
+###############################################
+
+
+@app.route("/peachpos/income/csv")
+@login_required
+@spa_required
+def peachpos_income_csv():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to export PeachPOS Income.",
+            "error",
+        )
+        return redirect(
+            url_for("peachpos_income_report")
+        )
+
+    spa_zone = ZoneInfo(
+        get_current_spa_timezone(spa_id)
+    )
+    local_today = datetime.now(spa_zone).date()
+
+    try:
+        start_date = date.fromisoformat(
+            request.args.get("start_date")
+            or local_today.isoformat()
+        )
+        end_date = date.fromisoformat(
+            request.args.get("end_date")
+            or local_today.isoformat()
+        )
+    except ValueError:
+        flash(
+            "Choose valid PeachPOS export dates.",
+            "warning",
+        )
+        return redirect(
+            url_for("peachpos_income_report")
+        )
+
+    if start_date > end_date:
+        flash(
+            "PeachPOS export start date cannot be "
+            "after the end date.",
+            "warning",
+        )
+        return redirect(
+            url_for(
+                "peachpos_income_report",
+                start_date=start_date.isoformat(),
+                end_date=end_date.isoformat(),
+            )
+        )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                i.income_date,
+                sp.square_created_at,
+                COALESCE(
+                    sp.square_payment_id,
+                    i.processor_payment_id,
+                    ''
+                ),
+                COALESCE(i.pos_amount, 0.00),
+                COALESCE(i.tax_amount, 0.00),
+                COALESCE(i.tip_amount, 0.00),
+                COALESCE(
+                    i.processing_fee_amount,
+                    0.00
+                ),
+                COALESCE(i.net_received, 0.00)
+            FROM income i
+            LEFT JOIN LATERAL (
+                SELECT
+                    sq.square_created_at,
+                    sq.square_payment_id
+                FROM square_payments sq
+                WHERE sq.income_id = i.income_id
+                  AND sq.spa_id = i.spa_id
+                  AND sq.business_unit_id =
+                        i.business_unit_id
+                ORDER BY
+                    sq.square_payment_record_id DESC
+                LIMIT 1
+            ) sp ON TRUE
+            WHERE i.spa_id = %s
+              AND i.business_unit_id = %s
+              AND i.income_type = 'PeachPOS'
+              AND i.income_date BETWEEN %s AND %s
+            ORDER BY
+                COALESCE(
+                    sp.square_created_at,
+                    i.created_at
+                ) DESC,
+                i.income_id DESC
+        """, (
+            spa_id,
+            business_unit_id,
+            start_date.isoformat(),
+            end_date.isoformat(),
+        ))
+
+        rows = cur.fetchall()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    writer.writerow([
+        "Date",
+        "Time",
+        "Square Transaction ID",
+        "Sales",
+        "Tax",
+        "Tip",
+        "Square Fee",
+        "Net Received",
+    ])
+
+    for row in rows:
+        square_created_at = row[1]
+        sale_time = ""
+
+        if square_created_at:
+            if square_created_at.tzinfo is None:
+                square_created_at = (
+                    square_created_at.replace(
+                        tzinfo=ZoneInfo("UTC")
+                    )
+                )
+
+            sale_time = (
+                square_created_at.astimezone(
+                    spa_zone
+                ).strftime("%I:%M %p").lstrip("0")
+            )
+
+        writer.writerow([
+            row[0].isoformat()
+            if hasattr(row[0], "isoformat")
+            else row[0],
+            sale_time,
+            row[2],
+            row[3],
+            row[4],
+            row[5],
+            row[6],
+            row[7],
+        ])
+
+    output.seek(0)
+
+    filename = (
+        "peachpos_income_"
+        f"{start_date.isoformat()}_to_"
+        f"{end_date.isoformat()}.csv"
+    )
+
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={
+            "Content-Disposition":
+                f'attachment; filename="{filename}"'
+        },
+    )
+
+
+@app.route("/peachpos/income/excel")
+@login_required
+@spa_required
+def peachpos_income_excel():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to export PeachPOS Income.",
+            "error",
+        )
+        return redirect(
+            url_for("peachpos_income_report")
+        )
+
+    spa_zone = ZoneInfo(
+        get_current_spa_timezone(spa_id)
+    )
+    local_today = datetime.now(spa_zone).date()
+
+    try:
+        start_date = date.fromisoformat(
+            request.args.get("start_date")
+            or local_today.isoformat()
+        )
+        end_date = date.fromisoformat(
+            request.args.get("end_date")
+            or local_today.isoformat()
+        )
+    except ValueError:
+        flash(
+            "Choose valid PeachPOS export dates.",
+            "warning",
+        )
+        return redirect(
+            url_for("peachpos_income_report")
+        )
+
+    if start_date > end_date:
+        flash(
+            "PeachPOS export start date cannot be "
+            "after the end date.",
+            "warning",
+        )
+        return redirect(
+            url_for(
+                "peachpos_income_report",
+                start_date=start_date.isoformat(),
+                end_date=end_date.isoformat(),
+            )
+        )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                i.income_date,
+                sp.square_created_at,
+                COALESCE(
+                    sp.square_payment_id,
+                    i.processor_payment_id,
+                    ''
+                ),
+                COALESCE(i.pos_amount, 0.00),
+                COALESCE(i.tax_amount, 0.00),
+                COALESCE(i.tip_amount, 0.00),
+                COALESCE(
+                    i.processing_fee_amount,
+                    0.00
+                ),
+                COALESCE(i.net_received, 0.00)
+            FROM income i
+            LEFT JOIN LATERAL (
+                SELECT
+                    sq.square_created_at,
+                    sq.square_payment_id
+                FROM square_payments sq
+                WHERE sq.income_id = i.income_id
+                  AND sq.spa_id = i.spa_id
+                  AND sq.business_unit_id =
+                        i.business_unit_id
+                ORDER BY
+                    sq.square_payment_record_id DESC
+                LIMIT 1
+            ) sp ON TRUE
+            WHERE i.spa_id = %s
+              AND i.business_unit_id = %s
+              AND i.income_type = 'PeachPOS'
+              AND i.income_date BETWEEN %s AND %s
+            ORDER BY
+                COALESCE(
+                    sp.square_created_at,
+                    i.created_at
+                ) DESC,
+                i.income_id DESC
+        """, (
+            spa_id,
+            business_unit_id,
+            start_date.isoformat(),
+            end_date.isoformat(),
+        ))
+
+        rows = cur.fetchall()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "PeachPOS Income"
+
+    ws.append([
+        "Date",
+        "Time",
+        "Square Transaction ID",
+        "Sales",
+        "Tax",
+        "Tip",
+        "Square Fee",
+        "Net Received",
+    ])
+
+    for row in rows:
+        square_created_at = row[1]
+        sale_time = ""
+
+        if square_created_at:
+            if square_created_at.tzinfo is None:
+                square_created_at = (
+                    square_created_at.replace(
+                        tzinfo=ZoneInfo("UTC")
+                    )
+                )
+
+            sale_time = (
+                square_created_at.astimezone(
+                    spa_zone
+                ).strftime("%I:%M %p").lstrip("0")
+            )
+
+        ws.append([
+            row[0],
+            sale_time,
+            row[2],
+            row[3],
+            row[4],
+            row[5],
+            row[6],
+            row[7],
+        ])
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    filename = (
+        "peachpos_income_"
+        f"{start_date.isoformat()}_to_"
+        f"{end_date.isoformat()}.xlsx"
+    )
+
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name=filename,
+        mimetype=(
+            "application/vnd.openxmlformats-"
+            "officedocument.spreadsheetml.sheet"
+        ),
+    )
+
+
 #  -----------------------------
 #     ADD GENERAL INCOME
 #    4/28
