@@ -1,0 +1,873 @@
+{% extends "base.html" %}
+
+{% block title %}Square Sync All Progress{% endblock %}
+
+{% block content %}
+
+<div class="square-sync-progress-page">
+    <div class="square-sync-progress-header">
+        <div>
+            <h1>Square Sync All</h1>
+
+            <p class="square-sync-progress-subtitle">
+                {{ square_sync_all_environment_label }}
+                synchronization for the current workspace
+            </p>
+        </div>
+
+        <div class="square-sync-progress-actions">
+            <a
+                href="{{ url_for('square_control_center') }}"
+                class="square-sync-progress-link"
+            >
+                Square Control Center
+            </a>
+
+            <a
+                href="{{ url_for('square_sync_activity') }}"
+                class="square-sync-progress-link"
+            >
+                Sync Activity
+            </a>
+        </div>
+    </div>
+
+    <div
+        id="square-sync-progress-root"
+        class="square-sync-progress-card"
+        data-run-id="{{ sync_run.square_sync_run_id }}"
+        data-run-status="{{ sync_run.run_status }}"
+        data-packet-url="{{
+            url_for(
+                'square_sync_all_packet',
+                run_id=sync_run.square_sync_run_id
+            )
+        }}"
+    >
+        <div class="square-sync-progress-status-row">
+            <div>
+                <div class="square-sync-progress-label">
+                    Status
+                </div>
+
+                <div
+                    id="square-sync-status"
+                    class="square-sync-progress-status"
+                >
+                    {% if sync_run.run_status == "completed" %}
+                        Completed
+                    {% elif sync_run.run_status == "failed" %}
+                        Failed
+                    {% elif sync_run.run_status == "stale" %}
+                        Stale
+                    {% else %}
+                        Syncing with Square…
+                    {% endif %}
+                </div>
+            </div>
+
+            <div>
+                <div class="square-sync-progress-label">
+                    Environment
+                </div>
+
+                <div class="square-sync-progress-value">
+                    {{ square_sync_all_environment_label }}
+                </div>
+            </div>
+
+            <div>
+                <div class="square-sync-progress-label">
+                    Packet Size
+                </div>
+
+                <div class="square-sync-progress-value">
+                    {{ sync_run.packet_size }}
+                </div>
+            </div>
+        </div>
+
+        <div class="square-sync-progress-meter-wrap">
+            <div class="square-sync-progress-meter">
+                <div
+                    id="square-sync-progress-bar"
+                    class="square-sync-progress-bar"
+                    style="width:0%;"
+                ></div>
+            </div>
+
+            <div
+                id="square-sync-progress-count"
+                class="square-sync-progress-count"
+            >
+                Preparing progress…
+            </div>
+        </div>
+
+        <div
+            id="square-sync-phase"
+            class="square-sync-progress-phase"
+        >
+            Current phase:
+            <strong>
+                {{ sync_run.current_phase | replace("_", " ") | title }}
+            </strong>
+        </div>
+
+        <div class="square-sync-progress-grid">
+            <div class="square-sync-progress-section">
+                <h2>Clients</h2>
+
+                <div class="square-sync-progress-total">
+                    Total:
+                    <strong>{{ sync_run.client_total }}</strong>
+                </div>
+
+                <div
+                    id="square-sync-client-counts"
+                    class="square-sync-progress-details"
+                >
+                    Synced {{ sync_run.client_synced }}
+                    · Needs Attention
+                    {{ sync_run.client_needs_attention }}
+                    · Failed {{ sync_run.client_error }}
+                    · Skipped {{ sync_run.client_skipped }}
+                </div>
+            </div>
+
+            <div class="square-sync-progress-section">
+                <h2>Services</h2>
+
+                <div class="square-sync-progress-total">
+                    Total:
+                    <strong>{{ sync_run.service_total }}</strong>
+                </div>
+
+                <div
+                    id="square-sync-service-counts"
+                    class="square-sync-progress-details"
+                >
+                    Synced {{ sync_run.service_synced }}
+                    · Needs Attention
+                    {{ sync_run.service_needs_attention }}
+                    · Failed {{ sync_run.service_error }}
+                    · Skipped {{ sync_run.service_skipped }}
+                </div>
+            </div>
+
+            <div class="square-sync-progress-section">
+                <h2>Products</h2>
+
+                <div class="square-sync-progress-total">
+                    Total:
+                    <strong>
+                        {{ sync_run.inventory_product_total }}
+                    </strong>
+                </div>
+
+                <div
+                    id="square-sync-inventory-product-counts"
+                    class="square-sync-progress-details"
+                >
+                    Synced
+                    {{ sync_run.inventory_product_synced }}
+                    · Needs Attention
+                    {{ sync_run.inventory_product_needs_attention }}
+                    · Failed
+                    {{ sync_run.inventory_product_error }}
+                    · Skipped
+                    {{ sync_run.inventory_product_skipped }}
+                </div>
+            </div>
+        </div>
+
+        <div
+            id="square-sync-message"
+            class="square-sync-progress-message"
+            role="status"
+            aria-live="polite"
+        >
+            {% if sync_run.run_status == "running" %}
+                Sync All will continue in small packets.
+                You may leave this page and return to resume.
+            {% elif sync_run.run_status == "completed" %}
+                Square Sync All is complete.
+            {% elif sync_run.run_status == "failed" %}
+                Square Sync All stopped because a packet
+                could not complete safely.
+            {% else %}
+                This Sync All run is no longer active.
+            {% endif %}
+        </div>
+
+        <div
+            id="square-sync-warning"
+            class="square-sync-progress-warning"
+            {% if not sync_run.activity_log_failures %}
+                style="display:none;"
+            {% endif %}
+        >
+            Sync Activity logging warnings:
+            <strong id="square-sync-warning-count">
+                {{ sync_run.activity_log_failures }}
+            </strong>
+        </div>
+
+        <div
+            id="square-sync-error"
+            class="square-sync-progress-error"
+            {% if sync_run.run_status not in ("failed", "stale") %}
+                style="display:none;"
+            {% endif %}
+        >
+            {% if sync_run.run_status == "failed" %}
+                Square Sync All stopped because a packet could not
+                complete safely. Review Sync Activity before trying again.
+            {% elif sync_run.run_status == "stale" %}
+                This Square Sync All run expired after 30 minutes without
+                activity. Start Sync All again to continue.
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<style>
+    .square-sync-progress-page {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 24px 16px 48px;
+    }
+
+    .square-sync-progress-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 20px;
+        margin-bottom: 20px;
+    }
+
+    .square-sync-progress-header h1 {
+        margin: 0 0 6px;
+    }
+
+    .square-sync-progress-subtitle {
+        margin: 0;
+        opacity: 0.75;
+    }
+
+    .square-sync-progress-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+
+    .square-sync-progress-link {
+        display: inline-block;
+        padding: 9px 13px;
+        border: 1px solid rgba(0, 0, 0, 0.15);
+        border-radius: 8px;
+        text-decoration: none;
+    }
+
+    .square-sync-progress-card {
+        border: 1px solid rgba(0, 0, 0, 0.12);
+        border-radius: 14px;
+        padding: 22px;
+        background: rgba(255, 255, 255, 0.7);
+    }
+
+    .square-sync-progress-status-row {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 18px;
+        margin-bottom: 24px;
+    }
+
+    .square-sync-progress-label {
+        font-size: 0.82rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        opacity: 0.65;
+        margin-bottom: 4px;
+    }
+
+    .square-sync-progress-status,
+    .square-sync-progress-value {
+        font-size: 1.05rem;
+        font-weight: 700;
+    }
+
+    .square-sync-progress-meter-wrap {
+        margin-bottom: 18px;
+    }
+
+    .square-sync-progress-meter {
+        height: 18px;
+        border-radius: 999px;
+        overflow: hidden;
+        background: rgba(0, 0, 0, 0.10);
+    }
+
+    .square-sync-progress-bar {
+        height: 100%;
+        border-radius: 999px;
+        background: currentColor;
+        transition: width 0.25s ease;
+    }
+
+    .square-sync-progress-count {
+        margin-top: 8px;
+        font-weight: 700;
+    }
+
+    .square-sync-progress-phase {
+        margin-bottom: 20px;
+    }
+
+    .square-sync-progress-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+    }
+
+    .square-sync-progress-section {
+        border: 1px solid rgba(0, 0, 0, 0.10);
+        border-radius: 10px;
+        padding: 16px;
+        transition:
+            border-color 0.2s ease,
+            background-color 0.2s ease;
+    }
+
+    .square-sync-progress-section.has-attention {
+        border-color: rgba(180, 120, 0, 0.65);
+        background: rgba(245, 185, 66, 0.12);
+    }
+
+    .square-sync-progress-section.has-failure {
+        border-color: rgba(185, 28, 28, 0.70);
+        background: rgba(185, 28, 28, 0.08);
+    }
+
+    .square-sync-progress-section h2 {
+        margin: 0 0 8px;
+        font-size: 1.05rem;
+    }
+
+    .square-sync-progress-total {
+        margin-bottom: 8px;
+    }
+
+    .square-sync-progress-details {
+        line-height: 1.6;
+        font-size: 0.93rem;
+    }
+
+    .square-sync-progress-message,
+    .square-sync-progress-warning,
+    .square-sync-progress-error {
+        margin-top: 18px;
+        border-radius: 9px;
+        padding: 12px 14px;
+    }
+
+    .square-sync-progress-message {
+        background: rgba(0, 0, 0, 0.05);
+    }
+
+    .square-sync-progress-warning {
+        background: rgba(245, 185, 66, 0.18);
+    }
+
+    .square-sync-progress-error {
+        background: rgba(185, 28, 28, 0.10);
+    }
+
+    @media (max-width: 760px) {
+        .square-sync-progress-header {
+            display: block;
+        }
+
+        .square-sync-progress-actions {
+            margin-top: 14px;
+        }
+
+        .square-sync-progress-status-row,
+        .square-sync-progress-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        const root = document.getElementById(
+            "square-sync-progress-root"
+        );
+
+        if (!root) {
+            return;
+        }
+
+        const packetUrl = root.dataset.packetUrl;
+        const initialStatus = root.dataset.runStatus;
+
+        const token = {{ square_sync_all_token | tojson }};
+
+        const statusElement = document.getElementById(
+            "square-sync-status"
+        );
+
+        const progressBar = document.getElementById(
+            "square-sync-progress-bar"
+        );
+
+        const progressCount = document.getElementById(
+            "square-sync-progress-count"
+        );
+
+        const phaseElement = document.getElementById(
+            "square-sync-phase"
+        );
+
+        const messageElement = document.getElementById(
+            "square-sync-message"
+        );
+
+        const warningElement = document.getElementById(
+            "square-sync-warning"
+        );
+
+        const warningCount = document.getElementById(
+            "square-sync-warning-count"
+        );
+
+        const errorElement = document.getElementById(
+            "square-sync-error"
+        );
+
+        const countElements = {
+            client: document.getElementById(
+                "square-sync-client-counts"
+            ),
+            service: document.getElementById(
+                "square-sync-service-counts"
+            ),
+            inventory_product: document.getElementById(
+                "square-sync-inventory-product-counts"
+            )
+        };
+
+        let stopped = false;
+
+        function titlePhase(value) {
+            if (!value) {
+                return "";
+            }
+
+            return value
+                .replaceAll("_", " ")
+                .replace(
+                    /\b\w/g,
+                    function (letter) {
+                        return letter.toUpperCase();
+                    }
+                );
+        }
+
+        function updateCounts(type, values) {
+            const element = countElements[type];
+
+            if (!element || !values) {
+                return;
+            }
+
+            element.textContent = (
+                "Synced " + values.synced +
+                " · Needs Attention " +
+                values.needs_attention +
+                " · Failed " + values.error +
+                " · Skipped " + values.skipped
+            );
+
+            const section = element.closest(
+                ".square-sync-progress-section"
+            );
+
+            if (section) {
+                const failureCount = Number(
+                    values.error || 0
+                );
+
+                const attentionCount = Number(
+                    values.needs_attention || 0
+                );
+
+                section.classList.remove(
+                    "has-attention",
+                    "has-failure"
+                );
+
+                if (failureCount > 0) {
+                    section.classList.add(
+                        "has-failure"
+                    );
+                } else if (attentionCount > 0) {
+                    section.classList.add(
+                        "has-attention"
+                    );
+                }
+            }
+        }
+
+        function updateProgress(data) {
+            const total = Number(data.total || 0);
+            const processed = Number(data.processed || 0);
+
+            const percent = (
+                total > 0
+                    ? Math.min(
+                        100,
+                        Math.round(
+                            (processed / total) * 100
+                        )
+                    )
+                    : 100
+            );
+
+            if (progressBar) {
+                progressBar.style.width = percent + "%";
+            }
+
+            if (progressCount) {
+                progressCount.textContent = (
+                    processed + " of " + total +
+                    " records processed (" +
+                    percent + "%)"
+                );
+            }
+
+            if (phaseElement) {
+                phaseElement.innerHTML = (
+                    "Current phase: <strong>" +
+                    titlePhase(data.phase) +
+                    "</strong>"
+                );
+            }
+
+            if (data.counts) {
+                updateCounts(
+                    "client",
+                    data.counts.client
+                );
+
+                updateCounts(
+                    "service",
+                    data.counts.service
+                );
+
+                updateCounts(
+                    "inventory_product",
+                    data.counts.inventory_product
+                );
+            }
+
+            const loggingWarnings = Number(
+                data.activity_log_failures || 0
+            );
+
+            if (warningElement && warningCount) {
+                warningCount.textContent =
+                    loggingWarnings;
+
+                warningElement.style.display = (
+                    loggingWarnings > 0
+                        ? "block"
+                        : "none"
+                );
+            }
+
+            if (data.status === "completed") {
+                stopped = true;
+
+                if (statusElement) {
+                    statusElement.textContent = "Completed";
+                }
+
+                if (phaseElement) {
+                    phaseElement.innerHTML = (
+                        "Current phase: <strong>Completed</strong>"
+                    );
+                }
+
+                if (messageElement) {
+                    const hasElapsedSeconds = (
+                        data.elapsed_seconds !== null
+                        && data.elapsed_seconds !== undefined
+                    );
+
+                    const elapsedSeconds = (
+                        hasElapsedSeconds
+                            ? Number(data.elapsed_seconds)
+                            : null
+                    );
+
+                    const durationMessage = (
+                        elapsedSeconds !== null
+                        && Number.isFinite(elapsedSeconds)
+                        && elapsedSeconds >= 0
+                            ? "Sync completed in " +
+                              elapsedSeconds.toFixed(1) +
+                              " seconds. "
+                            : "Square Sync All completed. "
+                    );
+
+                    messageElement.textContent = (
+                        durationMessage +
+                        "Review Sync Activity for any records " +
+                        "that need attention."
+                    );
+                }
+
+                return;
+            }
+
+            if (
+                data.status === "failed"
+                || data.status === "stale"
+            ) {
+                stopped = true;
+
+                if (statusElement) {
+                    statusElement.textContent = (
+                        data.status === "failed"
+                            ? "Failed"
+                            : "Stale"
+                    );
+                }
+
+                if (messageElement) {
+                    messageElement.textContent = (
+                        data.message ||
+                        "Square Sync All is no longer running."
+                    );
+                }
+
+                if (
+                    errorElement
+                    && (
+                        data.status === "failed"
+                        || data.status === "stale"
+                    )
+                ) {
+                    errorElement.textContent = (
+                        data.message
+                        || (
+                            data.status === "failed"
+                                ? "Square Sync All stopped because a packet "
+                                  + "could not complete safely. Review Sync "
+                                  + "Activity before trying again."
+                                : "This Square Sync All run expired after "
+                                  + "30 minutes without activity. Start Sync "
+                                  + "All again to continue."
+                        )
+                    );
+
+                    errorElement.style.display = "block";
+                }
+
+                return;
+            }
+
+            if (statusElement) {
+                statusElement.textContent =
+                    "Syncing with Square…";
+            }
+
+            if (messageElement) {
+                messageElement.textContent = (
+                    "Sync All is continuing in small packets. " +
+                    "You may leave this page and return to resume."
+                );
+            }
+        }
+
+        async function runPacket() {
+            if (stopped) {
+                return;
+            }
+
+            const body = new URLSearchParams();
+
+            body.set(
+                "square_sync_all_token",
+                token
+            );
+
+            try {
+                const response = await fetch(
+                    packetUrl,
+                    {
+                        method: "POST",
+                        credentials: "same-origin",
+                        headers: {
+                            "Content-Type":
+                                "application/x-www-form-urlencoded"
+                        },
+                        body: body.toString()
+                    }
+                );
+
+                const data = await response.json();
+
+                if (
+                    response.status === 409
+                    && data.status === "busy"
+                ) {
+                    if (messageElement) {
+                        messageElement.textContent = (
+                            data.message +
+                            " Retrying automatically…"
+                        );
+                    }
+
+                    window.setTimeout(
+                        runPacket,
+                        750
+                    );
+
+                    return;
+                }
+
+                updateProgress(data);
+
+                if (!stopped && response.ok) {
+                    window.setTimeout(
+                        runPacket,
+                        150
+                    );
+                }
+
+            } catch (error) {
+                stopped = true;
+
+                if (statusElement) {
+                    statusElement.textContent =
+                        "Connection Interrupted";
+                }
+
+                if (messageElement) {
+                    messageElement.textContent = (
+                        "The browser could not continue the " +
+                        "next Sync All packet. Refresh this " +
+                        "page to resume safely."
+                    );
+                }
+
+                if (errorElement) {
+                    errorElement.textContent =
+                        String(error);
+
+                    errorElement.style.display = "block";
+                }
+            }
+        }
+
+        if (initialStatus === "running") {
+            runPacket();
+        } else {
+            const initialProcessed = (
+                Number(
+                    {{ sync_run.client_synced }}
+                )
+                + Number(
+                    {{ sync_run.client_needs_attention }}
+                )
+                + Number(
+                    {{ sync_run.client_error }}
+                )
+                + Number(
+                    {{ sync_run.client_skipped }}
+                )
+                + Number(
+                    {{ sync_run.service_synced }}
+                )
+                + Number(
+                    {{ sync_run.service_needs_attention }}
+                )
+                + Number(
+                    {{ sync_run.service_error }}
+                )
+                + Number(
+                    {{ sync_run.service_skipped }}
+                )
+                + Number(
+                    {{ sync_run.inventory_product_synced }}
+                )
+                + Number(
+                    {{ sync_run.inventory_product_needs_attention }}
+                )
+                + Number(
+                    {{ sync_run.inventory_product_error }}
+                )
+                + Number(
+                    {{ sync_run.inventory_product_skipped }}
+                )
+            );
+
+            const initialTotal = (
+                Number({{ sync_run.client_total }})
+                + Number({{ sync_run.service_total }})
+                + Number(
+                    {{ sync_run.inventory_product_total }}
+                )
+            );
+
+            updateProgress({
+                status: initialStatus,
+                phase: {{ sync_run.current_phase | tojson }},
+                processed: initialProcessed,
+                total: initialTotal,
+                elapsed_seconds:
+                    {{ sync_run.elapsed_seconds | tojson }},
+                activity_log_failures:
+                    {{ sync_run.activity_log_failures }},
+                counts: {
+                    client: {
+                        synced:
+                            {{ sync_run.client_synced }},
+                        needs_attention:
+                            {{ sync_run.client_needs_attention }},
+                        error:
+                            {{ sync_run.client_error }},
+                        skipped:
+                            {{ sync_run.client_skipped }}
+                    },
+                    service: {
+                        synced:
+                            {{ sync_run.service_synced }},
+                        needs_attention:
+                            {{ sync_run.service_needs_attention }},
+                        error:
+                            {{ sync_run.service_error }},
+                        skipped:
+                            {{ sync_run.service_skipped }}
+                    },
+                    inventory_product: {
+                        synced:
+                            {{ sync_run.inventory_product_synced }},
+                        needs_attention:
+                            {{ sync_run.inventory_product_needs_attention }},
+                        error:
+                            {{ sync_run.inventory_product_error }},
+                        skipped:
+                            {{ sync_run.inventory_product_skipped }}
+                    }
+                }
+            });
+        }
+    });
+</script>
+
+{% endblock %}

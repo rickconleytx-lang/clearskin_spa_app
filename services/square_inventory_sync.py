@@ -859,26 +859,119 @@ def sync_inventory_product_to_square(
             ) or ""
         ).strip()
 
-        if not square_item_id:
-            raise SquareInventorySyncError(
-                "Mapped PSP inventory product is missing "
-                "its Square parent item ID."
-            )
-
         if not square_variation_id:
             raise SquareInventorySyncError(
                 "Mapped PSP inventory product is missing "
                 "its Square variation ID."
             )
 
-        parent_item = (
-            square_service
-            .retrieve_catalog_object(
-                square_item_id,
-                access_token=access_token,
-                environment=environment,
+        parent_item = None
+
+        if not square_item_id:
+            mapped_variation = (
+                square_service
+                .retrieve_catalog_object(
+                    square_variation_id,
+                    access_token=access_token,
+                    environment=environment,
+                )
             )
-        )
+
+            if (
+                mapped_variation.get("type")
+                != "ITEM_VARIATION"
+                or str(
+                    mapped_variation.get("id") or ""
+                ).strip() != square_variation_id
+            ):
+                raise SquareInventorySyncError(
+                    "Mapped Square Catalog object is not the "
+                    "expected item variation."
+                )
+
+            variation_data = (
+                mapped_variation.get(
+                    "item_variation_data"
+                )
+                or {}
+            )
+
+            recovered_item_id = str(
+                variation_data.get("item_id") or ""
+            ).strip()
+
+            if not recovered_item_id:
+                raise SquareInventorySyncError(
+                    "Mapped Square variation does not identify "
+                    "its parent item."
+                )
+
+            recovered_parent = (
+                square_service
+                .retrieve_catalog_object(
+                    recovered_item_id,
+                    access_token=access_token,
+                    environment=environment,
+                )
+            )
+
+            if (
+                recovered_parent.get("type") != "ITEM"
+                or str(
+                    recovered_parent.get("id") or ""
+                ).strip() != recovered_item_id
+            ):
+                raise SquareInventorySyncError(
+                    "Recovered Square parent item is invalid."
+                )
+
+            matching_variations = [
+                variation
+                for variation in (
+                    recovered_parent
+                    .get("item_data", {})
+                    .get("variations", [])
+                )
+                if str(
+                    variation.get("id") or ""
+                ).strip() == square_variation_id
+            ]
+
+            if len(matching_variations) != 1:
+                raise SquareInventorySyncError(
+                    "Recovered Square parent item does not "
+                    "contain the mapped variation exactly once."
+                )
+
+            matching_variation_data = (
+                matching_variations[0].get(
+                    "item_variation_data"
+                )
+                or {}
+            )
+
+            if str(
+                matching_variation_data.get(
+                    "item_id"
+                ) or ""
+            ).strip() != recovered_item_id:
+                raise SquareInventorySyncError(
+                    "Recovered Square variation does not point "
+                    "back to the recovered parent item."
+                )
+
+            square_item_id = recovered_item_id
+            parent_item = recovered_parent
+
+        if parent_item is None:
+            parent_item = (
+                square_service
+                .retrieve_catalog_object(
+                    square_item_id,
+                    access_token=access_token,
+                    environment=environment,
+                )
+            )
 
         parent_version = (
             parent_item.get("version")

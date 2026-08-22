@@ -23351,21 +23351,11 @@ def square_disable_live_sync():
 )
 def square_sync_all():
     """
-    Manually synchronize the current PSP workspace to Square.
+    Start or resume a packetized PSP -> Square Sync All run.
 
-    Current rollout:
-    - Local development -> Square Sandbox
-    - Render production -> Square Production only when the
-      workspace Live Sync safety gate is enabled
-
-    Eligible records:
-    - Active clients in the current workspace
-    - Active services assigned to at least one active
-      provider in the current workspace
-    - Active inventory products in the current workspace
-
-    Each Square attempt is independent and is recorded in
-    square_sync_activity with source='sync_all'.
+    The browser is redirected to a persistent progress page.
+    That page requests one bounded packet at a time so large
+    workspaces do not depend on one long-running HTTP request.
     """
 
     import hmac
@@ -23388,10 +23378,6 @@ def square_sync_all():
         else "Sandbox"
     )
 
-    # -------------------------------------------------
-    # REQUEST TOKEN
-    # -------------------------------------------------
-
     submitted_token = request.form.get(
         "square_sync_all_token",
         "",
@@ -23411,10 +23397,6 @@ def square_sync_all():
         )
     ):
         abort(400)
-
-    # -------------------------------------------------
-    # ENVIRONMENT AUTH PREFLIGHT
-    # -------------------------------------------------
 
     if environment == "sandbox":
         if not os.environ.get(
@@ -23440,60 +23422,17 @@ def square_sync_all():
             )
 
         except square_sync_auth.SquareSyncAuthError as exc:
-            flash(
-                str(exc),
-                "warning",
-            )
+            flash(str(exc), "warning")
 
             return redirect(
                 url_for("square_control_center")
             )
 
-    lock_conn = get_db_connection()
-    lock_cur = lock_conn.cursor()
-
-    lock_acquired = False
-
-    lock_name = (
-        "square_sync_all:"
-        f"{spa_id}:"
-        f"{business_unit_id}:"
-        f"{environment}"
-    )
+    conn = get_db_connection()
+    cur = conn.cursor()
 
     try:
-        # ---------------------------------------------
-        # ONE SYNC ALL PER WORKSPACE AT A TIME
-        # ---------------------------------------------
-
-        lock_cur.execute("""
-            SELECT pg_try_advisory_lock(
-                hashtextextended(%s, 0)
-            )
-        """, (
-            lock_name,
-        ))
-
-        lock_acquired = bool(
-            lock_cur.fetchone()[0]
-        )
-
-        if not lock_acquired:
-            flash(
-                "Square Sync All is already running for "
-                "this workspace.",
-                "warning",
-            )
-
-            return redirect(
-                url_for("square_control_center")
-            )
-
-        # ---------------------------------------------
-        # CONNECTION PREFLIGHT
-        # ---------------------------------------------
-
-        lock_cur.execute("""
+        cur.execute("""
             SELECT square_connection_id
             FROM square_connections
             WHERE spa_id = %s
@@ -23513,9 +23452,7 @@ def square_sync_all():
             environment,
         ))
 
-        matching_connections = (
-            lock_cur.fetchall()
-        )
+        matching_connections = cur.fetchall()
 
         if len(matching_connections) != 1:
             flash(
@@ -23530,40 +23467,142 @@ def square_sync_all():
                 url_for("square_control_center")
             )
 
-        # ---------------------------------------------
-        # ACTIVE CLIENTS
-        # ---------------------------------------------
+        square_connection_id = matching_connections[0][0]
 
-        lock_cur.execute("""
-            SELECT client_id
+        # Serialize Sync All start/resume decisions with packet
+        # processing for this exact workspace/environment.
+        # A transaction-scoped advisory lock conflicts with the
+        # packet route's session-level advisory lock and releases
+        # automatically when this transaction ends.
+        lock_name = (
+            "square_sync_all:"
+            f"{spa_id}:"
+            f"{business_unit_id}:"
+            f"{environment}"
+        )
+
+        cur.execute("""
+            SELECT pg_try_advisory_xact_lock(
+                hashtextextended(%s, 0)
+            )
+        """, (
+            lock_name,
+        ))
+
+        start_lock_acquired = bool(
+            cur.fetchone()[0]
+        )
+
+        if not start_lock_acquired:
+            cur.execute("""
+                SELECT square_sync_run_id
+                FROM square_sync_runs
+                WHERE spa_id = %s
+                  AND business_unit_id = %s
+                  AND environment = %s
+                  AND run_status = 'running'
+                ORDER BY square_sync_run_id DESC
+                LIMIT 1
+            """, (
+                spa_id,
+                business_unit_id,
+                environment,
+            ))
+
+            active_run = cur.fetchone()
+
+            if active_run:
+                return redirect(
+                    url_for(
+                        "square_sync_all_progress",
+                        run_id=active_run[0],
+                    )
+                )
+
+            flash(
+                "Square Sync All is currently finishing "
+                "another packet. Please try again.",
+                "warning",
+            )
+
+            return redirect(
+                url_for("square_control_center")
+            )
+
+        # A run with no heartbeat for 30 minutes is considered
+        # abandoned. The advisory lock above guarantees that no
+        # packet for this workspace/environment is active while
+        # this recovery decision is made.
+        cur.execute("""
+            UPDATE square_sync_runs
+            SET
+                run_status = 'stale',
+                failure_message = COALESCE(
+                    failure_message,
+                    'Square Sync All expired after 30 minutes '
+                    'without activity.'
+                ),
+                completed_at = COALESCE(
+                    completed_at,
+                    CURRENT_TIMESTAMP
+                ),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND environment = %s
+              AND run_status = 'running'
+              AND last_activity_at
+                    < CURRENT_TIMESTAMP - INTERVAL '30 minutes'
+        """, (
+            spa_id,
+            business_unit_id,
+            environment,
+        ))
+
+        cur.execute("""
+            SELECT square_sync_run_id
+            FROM square_sync_runs
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND environment = %s
+              AND run_status = 'running'
+            ORDER BY square_sync_run_id DESC
+            LIMIT 1
+        """, (
+            spa_id,
+            business_unit_id,
+            environment,
+        ))
+
+        existing_run = cur.fetchone()
+
+        if existing_run:
+            return redirect(
+                url_for(
+                    "square_sync_all_progress",
+                    run_id=existing_run[0],
+                )
+            )
+
+        cur.execute("""
+            SELECT
+                COUNT(*),
+                COALESCE(MAX(client_id), 0)
             FROM clients
             WHERE spa_id = %s
               AND business_unit_id = %s
               AND active_client = TRUE
-            ORDER BY client_id
         """, (
             spa_id,
             business_unit_id,
         ))
 
-        client_ids = [
-            row[0]
-            for row in lock_cur.fetchall()
-        ]
+        client_total, client_max_id = cur.fetchone()
 
-        # ---------------------------------------------
-        # WORKSPACE SERVICES
-        #
-        # Deliberately does NOT require
-        # is_publicly_bookable = TRUE.
-        #
-        # Square POS may need a service even when the
-        # service is hidden from online booking.
-        # ---------------------------------------------
-
-        lock_cur.execute("""
-            SELECT DISTINCT
-                snt.service_type_id
+        cur.execute("""
+            SELECT
+                COUNT(DISTINCT snt.service_type_id),
+                COALESCE(MAX(snt.service_type_id), 0)
             FROM service_name_types snt
 
             JOIN provider_service_types pst
@@ -23581,50 +23620,42 @@ def square_sync_all():
               AND pst.business_unit_id = %s
               AND pst.is_active = TRUE
               AND e.is_active = TRUE
-
-            ORDER BY snt.service_type_id
         """, (
             spa_id,
             business_unit_id,
         ))
 
-        service_type_ids = [
-            row[0]
-            for row in lock_cur.fetchall()
-        ]
+        service_total, service_max_id = cur.fetchone()
 
-        # ---------------------------------------------
-        # ACTIVE INVENTORY PRODUCTS
-        # ---------------------------------------------
-
-        lock_cur.execute("""
-            SELECT product_id
+        cur.execute("""
+            SELECT
+                COUNT(*),
+                COALESCE(MAX(product_id), 0)
             FROM inventory_products
             WHERE spa_id = %s
               AND business_unit_id = %s
               AND active = TRUE
-            ORDER BY product_id
         """, (
             spa_id,
             business_unit_id,
         ))
 
-        product_ids = [
-            row[0]
-            for row in lock_cur.fetchall()
-        ]
-
-        # End the SELECT transaction while keeping the
-        # session-level advisory lock.
-        lock_conn.commit()
+        (
+            inventory_product_total,
+            inventory_product_max_id,
+        ) = cur.fetchone()
 
         total_eligible = (
-            len(client_ids)
-            + len(service_type_ids)
-            + len(product_ids)
+            int(client_total or 0)
+            + int(service_total or 0)
+            + int(inventory_product_total or 0)
         )
 
         if total_eligible == 0:
+            # Preserve any stale-run recovery performed above
+            # before returning without creating a new run.
+            conn.commit()
+
             flash(
                 "There are no active clients, assigned "
                 "services, or active inventory products "
@@ -23636,219 +23667,96 @@ def square_sync_all():
                 url_for("square_control_center")
             )
 
+        if client_total:
+            current_phase = "client"
+        elif service_total:
+            current_phase = "service"
+        else:
+            current_phase = "inventory_product"
+
         actor_user_id = session.get("user_id")
 
-        stats = {
-            "client": {
-                "synced": 0,
-                "needs_attention": 0,
-                "error": 0,
-                "skipped": 0,
-            },
-            "service": {
-                "synced": 0,
-                "needs_attention": 0,
-                "error": 0,
-                "skipped": 0,
-            },
-            "inventory_product": {
-                "synced": 0,
-                "needs_attention": 0,
-                "error": 0,
-                "skipped": 0,
-            },
-        }
-
-        activity_log_failures = 0
-
-        def record_result(
-            entity_type,
-            entity_id,
-            result,
-        ):
-            nonlocal activity_log_failures
-
-            result = result or {}
-
-            status = str(
-                result.get("status") or "error"
-            ).strip().lower()
-
-            if status not in (
-                "synced",
-                "needs_attention",
-                "error",
-                "skipped",
-            ):
-                status = "error"
-
-            stats[
-                entity_type
-            ][status] += 1
-
-            activity_id = (
-                _record_square_sync_activity(
-                    spa_id=spa_id,
-                    business_unit_id=(
-                        business_unit_id
-                    ),
-                    environment=environment,
-                    entity_type=entity_type,
-                    entity_id=entity_id,
-                    trigger_action="sync_all",
-                    result=result,
-                    source="sync_all",
+        try:
+            cur.execute("""
+                INSERT INTO square_sync_runs (
+                    spa_id,
+                    business_unit_id,
+                    square_connection_id,
+                    environment,
+                    run_status,
+                    current_phase,
+                    packet_size,
+                    client_max_id,
+                    service_max_id,
+                    inventory_product_max_id,
+                    client_total,
+                    service_total,
+                    inventory_product_total,
+                    requested_by
                 )
-            )
-
-            if not activity_id:
-                activity_log_failures += 1
-
-        # ---------------------------------------------
-        # CLIENTS
-        # ---------------------------------------------
-
-        for client_id in client_ids:
-            result = try_sync_client_to_square(
-                spa_id=spa_id,
-                business_unit_id=(
-                    business_unit_id
-                ),
-                client_id=client_id,
-                actor_user_id=actor_user_id,
-                environment=environment,
-            )
-
-            record_result(
-                "client",
-                client_id,
-                result,
-            )
-
-        # ---------------------------------------------
-        # SERVICES
-        # ---------------------------------------------
-
-        for service_type_id in service_type_ids:
-            result = try_sync_service_to_square(
-                spa_id=spa_id,
-                business_unit_id=(
-                    business_unit_id
-                ),
-                service_type_id=(
-                    service_type_id
-                ),
-                actor_user_id=actor_user_id,
-                environment=environment,
-            )
-
-            record_result(
-                "service",
-                service_type_id,
-                result,
-            )
-
-        # ---------------------------------------------
-        # INVENTORY PRODUCTS
-        # ---------------------------------------------
-
-        for product_id in product_ids:
-            result = (
-                try_sync_inventory_product_to_square(
-                    spa_id=spa_id,
-                    business_unit_id=(
-                        business_unit_id
-                    ),
-                    inventory_product_id=(
-                        product_id
-                    ),
-                    actor_user_id=actor_user_id,
-                    environment=environment,
+                VALUES (
+                    %s, %s, %s, %s,
+                    'running', %s, 10,
+                    %s, %s, %s,
+                    %s, %s, %s,
+                    %s
                 )
-            )
+                RETURNING square_sync_run_id
+            """, (
+                spa_id,
+                business_unit_id,
+                square_connection_id,
+                environment,
+                current_phase,
+                int(client_max_id or 0),
+                int(service_max_id or 0),
+                int(inventory_product_max_id or 0),
+                int(client_total or 0),
+                int(service_total or 0),
+                int(inventory_product_total or 0),
+                actor_user_id,
+            ))
 
-            record_result(
-                "inventory_product",
-                product_id,
-                result,
-            )
+            run_id = cur.fetchone()[0]
+            conn.commit()
 
-        def summary_part(
-            label,
-            entity_type,
-        ):
-            values = stats[entity_type]
+        except IntegrityError:
+            conn.rollback()
 
-            return (
-                f"{label}: "
-                f"{values['synced']} synced, "
-                f"{values['needs_attention']} "
-                "needs attention, "
-                f"{values['error']} failed, "
-                f"{values['skipped']} skipped"
-            )
+            cur.execute("""
+                SELECT square_sync_run_id
+                FROM square_sync_runs
+                WHERE spa_id = %s
+                  AND business_unit_id = %s
+                  AND environment = %s
+                  AND run_status = 'running'
+                ORDER BY square_sync_run_id DESC
+                LIMIT 1
+            """, (
+                spa_id,
+                business_unit_id,
+                environment,
+            ))
 
-        summary = (
-            f"Square {environment_label} Sync All completed. "
-            + summary_part(
-                "Clients",
-                "client",
-            )
-            + " | "
-            + summary_part(
-                "Services",
-                "service",
-            )
-            + " | "
-            + summary_part(
-                "Products",
-                "inventory_product",
-            )
-        )
+            existing_run = cur.fetchone()
 
-        issue_count = (
-            stats["client"]["needs_attention"]
-            + stats["client"]["error"]
-            + stats["client"]["skipped"]
-            + stats["service"]["needs_attention"]
-            + stats["service"]["error"]
-            + stats["service"]["skipped"]
-            + stats[
-                "inventory_product"
-            ]["needs_attention"]
-            + stats[
-                "inventory_product"
-            ]["error"]
-            + stats[
-                "inventory_product"
-            ]["skipped"]
-        )
-
-        if activity_log_failures:
-            summary += (
-                " | Activity logging warnings: "
-                f"{activity_log_failures}"
-            )
-
-        flash(
-            summary,
-            (
-                "success"
-                if (
-                    issue_count == 0
-                    and activity_log_failures == 0
-                )
-                else "warning"
-            ),
-        )
+            if existing_run:
+                run_id = existing_run[0]
+            else:
+                raise
 
         return redirect(
-            url_for("square_control_center")
+            url_for(
+                "square_sync_all_progress",
+                run_id=run_id,
+            )
         )
 
     except Exception as exc:
+        conn.rollback()
+
         app.logger.exception(
-            "Square Sync All failed unexpectedly. "
+            "Square Sync All could not start. "
             "spa_id=%s business_unit_id=%s error=%s",
             spa_id,
             business_unit_id,
@@ -23856,17 +23764,770 @@ def square_sync_all():
         )
 
         flash(
-            "Square Sync All could not complete safely. "
-            "Peach Suite Pro business records were not "
-            "rolled back. Some Square attempts may have "
-            "completed before the error; review Sync "
-            "Activity before trying again.",
+            "Square Sync All could not start safely. "
+            "No synchronization packet was started.",
             "error",
         )
 
         return redirect(
             url_for("square_control_center")
         )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route(
+    "/payment-integrations/square/sync-all/<int:run_id>",
+    methods=["GET"],
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_view_business_management"
+)
+def square_sync_all_progress(run_id):
+    import secrets
+
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
+
+    environment = (
+        "production"
+        if os.environ.get("RENDER")
+        else "sandbox"
+    )
+
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    try:
+        cur.execute("""
+            SELECT *
+            FROM square_sync_runs
+            WHERE square_sync_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND environment = %s
+            LIMIT 1
+        """, (
+            run_id,
+            spa_id,
+            business_unit_id,
+            environment,
+        ))
+
+        sync_run = cur.fetchone()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if not sync_run:
+        abort(404)
+
+    sync_run = dict(sync_run)
+
+    started_at = sync_run.get("started_at")
+    completed_at = sync_run.get("completed_at")
+
+    sync_run["elapsed_seconds"] = (
+        max(
+            0.0,
+            round(
+                (
+                    completed_at
+                    - started_at
+                ).total_seconds(),
+                1,
+            ),
+        )
+        if started_at and completed_at
+        else None
+    )
+
+    square_sync_all_token = session.get(
+        "square_sync_all_token"
+    )
+
+    if not square_sync_all_token:
+        square_sync_all_token = secrets.token_urlsafe(32)
+        session["square_sync_all_token"] = (
+            square_sync_all_token
+        )
+
+    return render_template(
+        "square_sync_all_progress.html",
+        sync_run=sync_run,
+        square_sync_all_token=square_sync_all_token,
+        square_sync_all_environment_label=(
+            "Production"
+            if environment == "production"
+            else "Sandbox"
+        ),
+    )
+
+
+@app.route(
+    "/payment-integrations/square/sync-all/"
+    "<int:run_id>/packet",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_view_business_management"
+)
+def square_sync_all_packet(run_id):
+    import hmac
+
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
+
+    environment = (
+        "production"
+        if os.environ.get("RENDER")
+        else "sandbox"
+    )
+
+    submitted_token = request.form.get(
+        "square_sync_all_token",
+        "",
+    )
+
+    session_token = session.get(
+        "square_sync_all_token",
+        "",
+    )
+
+    if (
+        not submitted_token
+        or not session_token
+        or not hmac.compare_digest(
+            submitted_token,
+            session_token,
+        )
+    ):
+        abort(400)
+
+    lock_conn = get_db_connection()
+    lock_cur = lock_conn.cursor(
+        cursor_factory=RealDictCursor
+    )
+
+    lock_acquired = False
+
+    lock_name = (
+        "square_sync_all:"
+        f"{spa_id}:"
+        f"{business_unit_id}:"
+        f"{environment}"
+    )
+
+    def run_payload(row):
+        row = dict(row or {})
+
+        processed = (
+            int(row.get("client_synced") or 0)
+            + int(row.get("client_needs_attention") or 0)
+            + int(row.get("client_error") or 0)
+            + int(row.get("client_skipped") or 0)
+            + int(row.get("service_synced") or 0)
+            + int(row.get("service_needs_attention") or 0)
+            + int(row.get("service_error") or 0)
+            + int(row.get("service_skipped") or 0)
+            + int(row.get("inventory_product_synced") or 0)
+            + int(
+                row.get(
+                    "inventory_product_needs_attention"
+                ) or 0
+            )
+            + int(row.get("inventory_product_error") or 0)
+            + int(row.get("inventory_product_skipped") or 0)
+        )
+
+        total = (
+            int(row.get("client_total") or 0)
+            + int(row.get("service_total") or 0)
+            + int(row.get("inventory_product_total") or 0)
+        )
+
+        started_at = row.get("started_at")
+        completed_at = row.get("completed_at")
+
+        elapsed_seconds = (
+            max(
+                0.0,
+                round(
+                    (
+                        completed_at
+                        - started_at
+                    ).total_seconds(),
+                    1,
+                ),
+            )
+            if started_at and completed_at
+            else None
+        )
+
+        return {
+            "run_id": row.get("square_sync_run_id"),
+            "status": row.get("run_status"),
+            "phase": row.get("current_phase"),
+            "packet_size": row.get("packet_size"),
+            "processed": processed,
+            "total": total,
+            "elapsed_seconds": elapsed_seconds,
+            "activity_log_failures": int(
+                row.get("activity_log_failures") or 0
+            ),
+            "totals": {
+                "client": int(row.get("client_total") or 0),
+                "service": int(row.get("service_total") or 0),
+                "inventory_product": int(
+                    row.get("inventory_product_total") or 0
+                ),
+            },
+            "counts": {
+                "client": {
+                    "synced": int(row.get("client_synced") or 0),
+                    "needs_attention": int(
+                        row.get("client_needs_attention") or 0
+                    ),
+                    "error": int(row.get("client_error") or 0),
+                    "skipped": int(row.get("client_skipped") or 0),
+                },
+                "service": {
+                    "synced": int(row.get("service_synced") or 0),
+                    "needs_attention": int(
+                        row.get("service_needs_attention") or 0
+                    ),
+                    "error": int(row.get("service_error") or 0),
+                    "skipped": int(row.get("service_skipped") or 0),
+                },
+                "inventory_product": {
+                    "synced": int(
+                        row.get("inventory_product_synced") or 0
+                    ),
+                    "needs_attention": int(
+                        row.get(
+                            "inventory_product_needs_attention"
+                        ) or 0
+                    ),
+                    "error": int(
+                        row.get("inventory_product_error") or 0
+                    ),
+                    "skipped": int(
+                        row.get("inventory_product_skipped") or 0
+                    ),
+                },
+            },
+        }
+
+    def load_run():
+        lock_cur.execute("""
+            SELECT *
+            FROM square_sync_runs
+            WHERE square_sync_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND environment = %s
+            LIMIT 1
+        """, (
+            run_id,
+            spa_id,
+            business_unit_id,
+            environment,
+        ))
+
+        return lock_cur.fetchone()
+
+    def advance_phase(row, phase):
+        if phase == "client":
+            next_phase = "service"
+            cursor_column = "client_cursor"
+            max_value = int(row["client_max_id"] or 0)
+
+        elif phase == "service":
+            next_phase = "inventory_product"
+            cursor_column = "service_cursor"
+            max_value = int(row["service_max_id"] or 0)
+
+        else:
+            next_phase = "completed"
+            cursor_column = "inventory_product_cursor"
+            max_value = int(
+                row["inventory_product_max_id"] or 0
+            )
+
+        if next_phase == "completed":
+            lock_cur.execute(
+                sql.SQL("""
+                    UPDATE square_sync_runs
+                    SET {cursor_column} = %s,
+                        current_phase = 'completed',
+                        run_status = 'completed',
+                        last_activity_at = CURRENT_TIMESTAMP,
+                        completed_at = CURRENT_TIMESTAMP,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE square_sync_run_id = %s
+                      AND spa_id = %s
+                      AND business_unit_id = %s
+                      AND environment = %s
+                      AND run_status = 'running'
+                    RETURNING *
+                """).format(
+                    cursor_column=sql.Identifier(cursor_column)
+                ),
+                (
+                    max_value,
+                    run_id,
+                    spa_id,
+                    business_unit_id,
+                    environment,
+                ),
+            )
+
+        else:
+            lock_cur.execute(
+                sql.SQL("""
+                    UPDATE square_sync_runs
+                    SET {cursor_column} = %s,
+                        current_phase = %s,
+                        last_activity_at = CURRENT_TIMESTAMP,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE square_sync_run_id = %s
+                      AND spa_id = %s
+                      AND business_unit_id = %s
+                      AND environment = %s
+                      AND run_status = 'running'
+                    RETURNING *
+                """).format(
+                    cursor_column=sql.Identifier(cursor_column)
+                ),
+                (
+                    max_value,
+                    next_phase,
+                    run_id,
+                    spa_id,
+                    business_unit_id,
+                    environment,
+                ),
+            )
+
+        updated = lock_cur.fetchone()
+        lock_conn.commit()
+        return updated
+
+    try:
+        lock_cur.execute("""
+            SELECT pg_try_advisory_lock(
+                hashtextextended(%s, 0)
+            ) AS acquired
+        """, (
+            lock_name,
+        ))
+
+        lock_acquired = bool(
+            lock_cur.fetchone()["acquired"]
+        )
+
+        if not lock_acquired:
+            return jsonify({
+                "status": "busy",
+                "message": (
+                    "Another Square Sync All packet is "
+                    "currently finishing for this workspace."
+                ),
+            }), 409
+
+        sync_run = load_run()
+
+        if not sync_run:
+            return jsonify({
+                "status": "not_found",
+                "message": (
+                    "This Square Sync All run could not "
+                    "be found for the current workspace."
+                ),
+            }), 404
+
+        if sync_run["run_status"] != "running":
+            return jsonify(run_payload(sync_run))
+
+        if environment == "sandbox":
+            if not os.environ.get(
+                "SQUARE_SANDBOX_ACCESS_TOKEN",
+                "",
+            ).strip():
+                raise RuntimeError(
+                    "Square Sandbox is not configured "
+                    "on this development environment."
+                )
+        else:
+            square_sync_auth.resolve_square_sync_access_token(
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                environment="production",
+            )
+
+        lock_cur.execute("""
+            SELECT square_connection_id
+            FROM square_connections
+            WHERE square_connection_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND environment = %s
+              AND connection_status = 'connected'
+              AND (
+                    %s <> 'production'
+                    OR live_sync_enabled = TRUE
+              )
+            LIMIT 1
+        """, (
+            sync_run["square_connection_id"],
+            spa_id,
+            business_unit_id,
+            environment,
+            environment,
+        ))
+
+        if not lock_cur.fetchone():
+            raise RuntimeError(
+                "The Square connection for this Sync All "
+                "run is no longer connected or authorized."
+            )
+
+        packet_size = max(
+            1,
+            min(int(sync_run["packet_size"] or 10), 50),
+        )
+
+        processed_this_packet = 0
+
+        while (
+            processed_this_packet < packet_size
+            and sync_run["run_status"] == "running"
+        ):
+            phase = sync_run["current_phase"]
+            remaining = packet_size - processed_this_packet
+
+            if phase == "client":
+                lock_cur.execute("""
+                    SELECT client_id
+                    FROM clients
+                    WHERE spa_id = %s
+                      AND business_unit_id = %s
+                      AND active_client = TRUE
+                      AND client_id > %s
+                      AND client_id <= %s
+                    ORDER BY client_id
+                    LIMIT %s
+                """, (
+                    spa_id,
+                    business_unit_id,
+                    int(sync_run["client_cursor"] or 0),
+                    int(sync_run["client_max_id"] or 0),
+                    remaining,
+                ))
+
+                entity_ids = [
+                    row["client_id"]
+                    for row in lock_cur.fetchall()
+                ]
+
+                entity_type = "client"
+                cursor_column = "client_cursor"
+
+            elif phase == "service":
+                lock_cur.execute("""
+                    SELECT DISTINCT
+                        snt.service_type_id
+                    FROM service_name_types snt
+
+                    JOIN provider_service_types pst
+                      ON pst.spa_id = snt.spa_id
+                     AND pst.service_type_id =
+                            snt.service_type_id
+
+                    JOIN employees e
+                      ON e.employee_id =
+                            pst.provider_employee_id
+                     AND e.spa_id = pst.spa_id
+
+                    WHERE snt.spa_id = %s
+                      AND snt.is_active = TRUE
+                      AND pst.business_unit_id = %s
+                      AND pst.is_active = TRUE
+                      AND e.is_active = TRUE
+                      AND snt.service_type_id > %s
+                      AND snt.service_type_id <= %s
+
+                    ORDER BY snt.service_type_id
+                    LIMIT %s
+                """, (
+                    spa_id,
+                    business_unit_id,
+                    int(sync_run["service_cursor"] or 0),
+                    int(sync_run["service_max_id"] or 0),
+                    remaining,
+                ))
+
+                entity_ids = [
+                    row["service_type_id"]
+                    for row in lock_cur.fetchall()
+                ]
+
+                entity_type = "service"
+                cursor_column = "service_cursor"
+
+            elif phase == "inventory_product":
+                lock_cur.execute("""
+                    SELECT product_id
+                    FROM inventory_products
+                    WHERE spa_id = %s
+                      AND business_unit_id = %s
+                      AND active = TRUE
+                      AND product_id > %s
+                      AND product_id <= %s
+                    ORDER BY product_id
+                    LIMIT %s
+                """, (
+                    spa_id,
+                    business_unit_id,
+                    int(
+                        sync_run[
+                            "inventory_product_cursor"
+                        ] or 0
+                    ),
+                    int(
+                        sync_run[
+                            "inventory_product_max_id"
+                        ] or 0
+                    ),
+                    remaining,
+                ))
+
+                entity_ids = [
+                    row["product_id"]
+                    for row in lock_cur.fetchall()
+                ]
+
+                entity_type = "inventory_product"
+                cursor_column = "inventory_product_cursor"
+
+            else:
+                sync_run = advance_phase(
+                    sync_run,
+                    "inventory_product",
+                )
+                break
+
+            if not entity_ids:
+                sync_run = advance_phase(sync_run, phase)
+
+                if (
+                    not sync_run
+                    or sync_run["run_status"] != "running"
+                ):
+                    break
+
+                continue
+
+            for entity_id in entity_ids:
+                actor_user_id = (
+                    sync_run["requested_by"]
+                    or session.get("user_id")
+                )
+
+                if entity_type == "client":
+                    result = try_sync_client_to_square(
+                        spa_id=spa_id,
+                        business_unit_id=business_unit_id,
+                        client_id=entity_id,
+                        actor_user_id=actor_user_id,
+                        environment=environment,
+                    )
+
+                elif entity_type == "service":
+                    result = try_sync_service_to_square(
+                        spa_id=spa_id,
+                        business_unit_id=business_unit_id,
+                        service_type_id=entity_id,
+                        actor_user_id=actor_user_id,
+                        environment=environment,
+                    )
+
+                else:
+                    result = (
+                        try_sync_inventory_product_to_square(
+                            spa_id=spa_id,
+                            business_unit_id=business_unit_id,
+                            inventory_product_id=entity_id,
+                            actor_user_id=actor_user_id,
+                            environment=environment,
+                        )
+                    )
+
+                result = result or {}
+
+                result_status = str(
+                    result.get("status") or "error"
+                ).strip().lower()
+
+                if result_status not in (
+                    "synced",
+                    "needs_attention",
+                    "error",
+                    "skipped",
+                ):
+                    result_status = "error"
+
+                activity_id = _record_square_sync_activity(
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    environment=environment,
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    trigger_action="sync_all",
+                    result=result,
+                    source="sync_all",
+                )
+
+                activity_failure = 0 if activity_id else 1
+
+                counter_column = (
+                    f"{entity_type}_{result_status}"
+                )
+
+                lock_cur.execute(
+                    sql.SQL("""
+                        UPDATE square_sync_runs
+                        SET {cursor_column} = %s,
+                            {counter_column} =
+                                {counter_column} + 1,
+                            activity_log_failures =
+                                activity_log_failures + %s,
+                            last_activity_at =
+                                CURRENT_TIMESTAMP,
+                            updated_at =
+                                CURRENT_TIMESTAMP
+                        WHERE square_sync_run_id = %s
+                          AND spa_id = %s
+                          AND business_unit_id = %s
+                          AND environment = %s
+                          AND run_status = 'running'
+                        RETURNING *
+                    """).format(
+                        cursor_column=sql.Identifier(
+                            cursor_column
+                        ),
+                        counter_column=sql.Identifier(
+                            counter_column
+                        ),
+                    ),
+                    (
+                        entity_id,
+                        activity_failure,
+                        run_id,
+                        spa_id,
+                        business_unit_id,
+                        environment,
+                    ),
+                )
+
+                sync_run = lock_cur.fetchone()
+                lock_conn.commit()
+
+                if not sync_run:
+                    raise RuntimeError(
+                        "Square Sync All run state "
+                        "could not be updated safely."
+                    )
+
+                processed_this_packet += 1
+
+                if processed_this_packet >= packet_size:
+                    break
+
+            if processed_this_packet >= packet_size:
+                break
+
+            if len(entity_ids) < remaining:
+                sync_run = advance_phase(sync_run, phase)
+
+                if (
+                    not sync_run
+                    or sync_run["run_status"] != "running"
+                ):
+                    break
+
+        sync_run = load_run()
+
+        return jsonify(run_payload(sync_run))
+
+    except Exception as exc:
+        app.logger.exception(
+            "Square Sync All packet failed unexpectedly. "
+            "run_id=%s spa_id=%s business_unit_id=%s "
+            "error=%s",
+            run_id,
+            spa_id,
+            business_unit_id,
+            exc,
+        )
+
+        try:
+            lock_conn.rollback()
+
+            lock_cur.execute("""
+                UPDATE square_sync_runs
+                SET run_status = 'failed',
+                    failure_message = %s,
+                    last_activity_at = CURRENT_TIMESTAMP,
+                    completed_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE square_sync_run_id = %s
+                  AND spa_id = %s
+                  AND business_unit_id = %s
+                  AND environment = %s
+                  AND run_status = 'running'
+                RETURNING *
+            """, (
+                str(exc)[:2000],
+                run_id,
+                spa_id,
+                business_unit_id,
+                environment,
+            ))
+
+            failed_run = lock_cur.fetchone()
+            lock_conn.commit()
+
+        except Exception:
+            lock_conn.rollback()
+            failed_run = None
+
+        response = {
+            "status": "failed",
+            "message": (
+                "Square Sync All could not complete this "
+                "packet safely. Completed object-level "
+                "attempts remain recorded in Sync Activity."
+            ),
+        }
+
+        if failed_run:
+            response.update(run_payload(failed_run))
+
+        return jsonify(response), 500
 
     finally:
         if lock_acquired:
@@ -23878,8 +24539,11 @@ def square_sync_all():
                 """, (
                     lock_name,
                 ))
+
+                lock_conn.commit()
+
             except Exception:
-                pass
+                lock_conn.rollback()
 
         lock_cur.close()
         lock_conn.close()
