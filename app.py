@@ -398,7 +398,8 @@ def inject_global_context():
         "current_year": datetime.now().year,
         "godaddy_unreviewed_count": 0,
         "public_website_url": "",
-        "public_booking_url": ""
+        "public_booking_url": "",
+        "square_sync_user_state": None
     }
 
     context["q_launch_items"] = build_q_launch_items()
@@ -425,6 +426,15 @@ def inject_global_context():
     cur = conn.cursor()
 
     if business_unit_id:
+        context["square_sync_user_state"] = (
+            _load_square_sync_user_state(
+                cur=cur,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                user_id=session.get("user_id"),
+            )
+        )
+
         cur.execute("""
             SELECT public_booking_slug
             FROM booking_settings
@@ -23338,6 +23348,166 @@ def square_disable_live_sync():
 #   SQUARE SYNC ALL
 #
 ###############################################
+
+
+def _load_square_sync_user_state(
+    *,
+    cur,
+    spa_id,
+    business_unit_id,
+    user_id,
+):
+    """
+    Read-only Square Sync All state for the latest run in the
+    current workspace/environment.
+
+    Return the run only when it was started by the current user.
+    This helper never changes run status or synchronization state.
+    """
+
+    if not spa_id or not business_unit_id or not user_id:
+        return None
+
+    environment = (
+        "production"
+        if os.environ.get("RENDER")
+        else "sandbox"
+    )
+
+    cur.execute("""
+        SELECT
+            square_sync_run_id,
+            requested_by,
+            run_status,
+            current_phase,
+            client_total,
+            service_total,
+            inventory_product_total,
+            client_synced,
+            client_needs_attention,
+            client_error,
+            client_skipped,
+            service_synced,
+            service_needs_attention,
+            service_error,
+            service_skipped,
+            inventory_product_synced,
+            inventory_product_needs_attention,
+            inventory_product_error,
+            inventory_product_skipped,
+            requested_at,
+            started_at,
+            last_activity_at,
+            completed_at
+        FROM square_sync_runs
+        WHERE spa_id = %s
+          AND business_unit_id = %s
+          AND environment = %s
+          AND requested_by = %s
+        ORDER BY square_sync_run_id DESC
+        LIMIT 1
+    """, (
+        spa_id,
+        business_unit_id,
+        environment,
+        user_id,
+    ))
+
+    row = cur.fetchone()
+
+    if not row:
+        return None
+
+    requested_by = row[1]
+
+    total = (
+        int(row[4] or 0)
+        + int(row[5] or 0)
+        + int(row[6] or 0)
+    )
+
+    processed = sum(
+        int(value or 0)
+        for value in row[7:19]
+    )
+
+    percent = (
+        min(
+            100,
+            round((processed / total) * 100),
+        )
+        if total > 0
+        else 100
+    )
+
+    return {
+        "run_id": row[0],
+        "requested_by": requested_by,
+        "status": row[2],
+        "phase": row[3],
+        "environment": environment,
+        "total": total,
+        "processed": processed,
+        "percent": percent,
+        "requested_at": row[19],
+        "started_at": row[20],
+        "last_activity_at": row[21],
+        "completed_at": row[22],
+    }
+
+
+@app.route(
+    "/payment-integrations/square/sync-all/status",
+    methods=["GET"],
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_view_business_management"
+)
+def square_sync_all_status():
+    """
+    Read-only status for the current user's latest Square Sync All run.
+
+    This endpoint never advances, resumes, or changes synchronization
+    state. It exists so other PSP tabs can stop navigation protection
+    promptly after Square Sync finishes.
+    """
+
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        state = _load_square_sync_user_state(
+            cur=cur,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            user_id=session.get("user_id"),
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if not state:
+        return jsonify({
+            "status": "not_found",
+        }), 404
+
+    return jsonify({
+        "run_id": state["run_id"],
+        "status": state["status"],
+        "phase": state["phase"],
+        "processed": state["processed"],
+        "total": state["total"],
+        "percent": state["percent"],
+    })
 
 
 @app.route(

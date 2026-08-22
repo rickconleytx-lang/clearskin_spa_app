@@ -590,6 +590,7 @@
 
             if (data.status === "completed") {
                 stopped = true;
+                window.pspSquareSyncRunning = false;
 
                 if (statusElement) {
                     statusElement.textContent = "Completed";
@@ -638,6 +639,7 @@
                 || data.status === "stale"
             ) {
                 stopped = true;
+                window.pspSquareSyncRunning = false;
 
                 if (statusElement) {
                     statusElement.textContent = (
@@ -688,7 +690,9 @@
             if (messageElement) {
                 messageElement.textContent = (
                     "Sync All is continuing in small packets. " +
-                    "You may leave this page and return to resume."
+                    "Keep this tab open while Square Sync runs. " +
+                    "You can continue working in another " +
+                    "Peach Suite Pro tab."
                 );
             }
         }
@@ -774,98 +778,118 @@
             }
         }
 
-        if (initialStatus === "running") {
-            runPacket();
-        } else {
-            const initialProcessed = (
-                Number(
-                    {{ sync_run.client_synced }}
-                )
-                + Number(
-                    {{ sync_run.client_needs_attention }}
-                )
-                + Number(
-                    {{ sync_run.client_error }}
-                )
-                + Number(
-                    {{ sync_run.client_skipped }}
-                )
-                + Number(
-                    {{ sync_run.service_synced }}
-                )
-                + Number(
-                    {{ sync_run.service_needs_attention }}
-                )
-                + Number(
-                    {{ sync_run.service_error }}
-                )
-                + Number(
-                    {{ sync_run.service_skipped }}
-                )
-                + Number(
-                    {{ sync_run.inventory_product_synced }}
-                )
-                + Number(
-                    {{ sync_run.inventory_product_needs_attention }}
-                )
-                + Number(
-                    {{ sync_run.inventory_product_error }}
-                )
-                + Number(
-                    {{ sync_run.inventory_product_skipped }}
-                )
-            );
+        const initialProcessed = (
+            Number(
+                {{ sync_run.client_synced }}
+            )
+            + Number(
+                {{ sync_run.client_needs_attention }}
+            )
+            + Number(
+                {{ sync_run.client_error }}
+            )
+            + Number(
+                {{ sync_run.client_skipped }}
+            )
+            + Number(
+                {{ sync_run.service_synced }}
+            )
+            + Number(
+                {{ sync_run.service_needs_attention }}
+            )
+            + Number(
+                {{ sync_run.service_error }}
+            )
+            + Number(
+                {{ sync_run.service_skipped }}
+            )
+            + Number(
+                {{ sync_run.inventory_product_synced }}
+            )
+            + Number(
+                {{ sync_run.inventory_product_needs_attention }}
+            )
+            + Number(
+                {{ sync_run.inventory_product_error }}
+            )
+            + Number(
+                {{ sync_run.inventory_product_skipped }}
+            )
+        );
 
-            const initialTotal = (
-                Number({{ sync_run.client_total }})
-                + Number({{ sync_run.service_total }})
-                + Number(
-                    {{ sync_run.inventory_product_total }}
-                )
-            );
+        const initialTotal = (
+            Number({{ sync_run.client_total }})
+            + Number({{ sync_run.service_total }})
+            + Number(
+                {{ sync_run.inventory_product_total }}
+            )
+        );
 
-            updateProgress({
-                status: initialStatus,
-                phase: {{ sync_run.current_phase | tojson }},
-                processed: initialProcessed,
-                total: initialTotal,
-                elapsed_seconds:
-                    {{ sync_run.elapsed_seconds | tojson }},
-                activity_log_failures:
-                    {{ sync_run.activity_log_failures }},
-                counts: {
-                    client: {
-                        synced:
-                            {{ sync_run.client_synced }},
-                        needs_attention:
-                            {{ sync_run.client_needs_attention }},
-                        error:
-                            {{ sync_run.client_error }},
-                        skipped:
-                            {{ sync_run.client_skipped }}
-                    },
-                    service: {
-                        synced:
-                            {{ sync_run.service_synced }},
-                        needs_attention:
-                            {{ sync_run.service_needs_attention }},
-                        error:
-                            {{ sync_run.service_error }},
-                        skipped:
-                            {{ sync_run.service_skipped }}
-                    },
-                    inventory_product: {
-                        synced:
-                            {{ sync_run.inventory_product_synced }},
-                        needs_attention:
-                            {{ sync_run.inventory_product_needs_attention }},
-                        error:
-                            {{ sync_run.inventory_product_error }},
-                        skipped:
-                            {{ sync_run.inventory_product_skipped }}
-                    }
+        updateProgress({
+            status: initialStatus,
+            phase: {{ sync_run.current_phase | tojson }},
+            processed: initialProcessed,
+            total: initialTotal,
+            elapsed_seconds:
+                {{ sync_run.elapsed_seconds | tojson }},
+            activity_log_failures:
+                {{ sync_run.activity_log_failures }},
+            counts: {
+                client: {
+                    synced:
+                        {{ sync_run.client_synced }},
+                    needs_attention:
+                        {{ sync_run.client_needs_attention }},
+                    error:
+                        {{ sync_run.client_error }},
+                    skipped:
+                        {{ sync_run.client_skipped }}
+                },
+                service: {
+                    synced:
+                        {{ sync_run.service_synced }},
+                    needs_attention:
+                        {{ sync_run.service_needs_attention }},
+                    error:
+                        {{ sync_run.service_error }},
+                    skipped:
+                        {{ sync_run.service_skipped }}
+                },
+                inventory_product: {
+                    synced:
+                        {{ sync_run.inventory_product_synced }},
+                    needs_attention:
+                        {{ sync_run.inventory_product_needs_attention }},
+                    error:
+                        {{ sync_run.inventory_product_error }},
+                    skipped:
+                        {{ sync_run.inventory_product_skipped }}
                 }
-            });
+            }
+        });
+
+        if (initialStatus === "running") {
+            if (statusElement) {
+                statusElement.textContent = (
+                    initialProcessed > 0
+                        ? "Resuming Square Sync…"
+                        : "Syncing with Square…"
+                );
+            }
+
+            if (messageElement) {
+                messageElement.textContent = (
+                    initialProcessed > 0
+                        ? initialProcessed + " of " +
+                          initialTotal +
+                          " records already processed. " +
+                          "Processing the next packet…"
+                        : "Starting Square Sync… " +
+                          "Processing the first packet…"
+                );
+            }
+
+            runPacket();
         }
     });
 </script>

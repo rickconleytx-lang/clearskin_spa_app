@@ -3135,6 +3135,39 @@ td:nth-child(3) {
     font-weight: 600;
 }
 
+.square-sync-coach-notice {
+    margin: 18px 0 22px;
+    padding: 18px 20px;
+
+    background: #fff7f0;
+    border: 1px solid #f0c9a8;
+    border-radius: 16px;
+}
+
+.square-sync-coach-notice-title {
+    margin-bottom: 8px;
+
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: #444;
+}
+
+.square-sync-coach-notice p {
+    margin: 0;
+
+    color: #555;
+    line-height: 1.55;
+}
+
+.square-sync-coach-notice-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+
+    margin-top: 14px;
+}
+
+
 .business-coach-card {
     padding: 20px;
 }
@@ -6048,7 +6081,7 @@ html[data-psp-theme="coastal_blue"] {
 --------------------------------------------------------- */
 
 html[data-psp-theme="professional_blue"] {
-    --psp-page-bg: #dceff8;
+    --psp-page-bg: #91a0ed;
     --psp-surface: #f7fbfe;
     --psp-heading: #173b53;
 

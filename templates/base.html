@@ -365,6 +365,39 @@
             {% endif %}
         {% endwith %}
 
+        {% if (
+            square_sync_user_state
+            and square_sync_user_state.status == "running"
+            and request.endpoint != "square_sync_all_progress"
+        ) %}
+            <section
+                id="square-sync-coach-notice"
+                class="square-sync-coach-notice"
+                aria-label="Coach Square Sync reminder"
+            >
+                <div class="square-sync-coach-notice-title">
+                    🍑 Coach
+                </div>
+
+                <p>
+                    <strong>Square Sync is still in progress.</strong>
+                    Your sync is continuing in the original
+                    Peach Suite Pro tab. Please return to that tab
+                    to confirm completion.
+                </p>
+
+                <div class="square-sync-coach-notice-actions">
+                    <button
+                        type="button"
+                        class="tool-pill tool-pill-small"
+                        onclick="returnToSquareSyncTab()"
+                    >
+                        Return to Square Sync
+                    </button>
+                </div>
+            </section>
+        {% endif %}
+
         {% block content %}{% endblock %}
 
     </div>
@@ -534,6 +567,122 @@ document.addEventListener("DOMContentLoaded", function () {
         "appMenuCloseButton"
     );
 
+
+    window.pspSquareSyncRunning = (
+        {% if (
+            square_sync_user_state
+            and square_sync_user_state.status == "running"
+        ) %}
+            true
+        {% else %}
+            false
+        {% endif %}
+    );
+
+    window.pspSquareSyncProgressUrl = (
+        {% if (
+            square_sync_user_state
+            and square_sync_user_state.run_id
+        ) %}
+            {{
+                url_for(
+                    "square_sync_all_progress",
+                    run_id=square_sync_user_state.run_id
+                ) | tojson
+            }}
+        {% else %}
+            null
+        {% endif %}
+    );
+
+    window.pspSquareSyncStatusUrl = (
+        {% if (
+            square_sync_user_state
+            and square_sync_user_state.run_id
+        ) %}
+            {{
+                url_for(
+                    "square_sync_all_status"
+                ) | tojson
+            }}
+        {% else %}
+            null
+        {% endif %}
+    );
+
+    let squareSyncNavigationLocked = false;
+
+    function stopSquareSyncNavigationProtection() {
+
+        window.pspSquareSyncRunning = false;
+        squareSyncNavigationLocked = false;
+
+        const coachNotice = document.getElementById(
+            "square-sync-coach-notice"
+        );
+
+        if (coachNotice) {
+            coachNotice.remove();
+        }
+    }
+
+    async function refreshSquareSyncNavigationState() {
+
+        if (
+            !window.pspSquareSyncRunning
+            || !window.pspSquareSyncStatusUrl
+        ) {
+            return;
+        }
+
+        try {
+            const response = await fetch(
+                window.pspSquareSyncStatusUrl,
+                {
+                    method: "GET",
+                    credentials: "same-origin",
+                    cache: "no-store",
+                    headers: {
+                        "Accept": "application/json"
+                    }
+                }
+            );
+
+            if (response.ok) {
+                const data = await response.json();
+
+                if (data.status !== "running") {
+                    stopSquareSyncNavigationProtection();
+                    return;
+                }
+            }
+
+        } catch (error) {
+            /*
+            Keep protection enabled when status cannot be verified.
+            The next read-only poll will try again.
+            */
+        }
+
+        window.setTimeout(
+            refreshSquareSyncNavigationState,
+            5000
+        );
+    }
+
+    if (
+        window.pspSquareSyncRunning
+        && window.pspSquareSyncStatusUrl
+        {% if request.endpoint == "square_sync_all_progress" %}
+        && false
+        {% endif %}
+    ) {
+        window.setTimeout(
+            refreshSquareSyncNavigationState,
+            5000
+        );
+    }
+
     if (
         !menuButton
         || !menuPanel
@@ -678,6 +827,151 @@ document.addEventListener("DOMContentLoaded", function () {
                 closeAppMenu();
             }
         }
+    );
+
+
+    window.returnToSquareSyncTab = function () {
+
+        window.close();
+
+        window.setTimeout(
+            function () {
+                if (!window.closed) {
+                    showSquareSyncNavigationNotice(
+                        "Square Sync is still running in the " +
+                        "original Peach Suite Pro tab. Please " +
+                        "select that tab to return to your sync."
+                    );
+                }
+            },
+            250
+        );
+    };
+
+
+    function showSquareSyncNavigationNotice(message) {
+
+        const container = document.querySelector(
+            ".container"
+        );
+
+        if (!container) {
+            return;
+        }
+
+        let notice = document.getElementById(
+            "square-sync-navigation-notice"
+        );
+
+        if (!notice) {
+            notice = document.createElement("div");
+            notice.id = "square-sync-navigation-notice";
+            notice.className = "flash warning";
+            container.prepend(notice);
+        }
+
+        notice.textContent = message;
+
+        notice.scrollIntoView({
+            behavior: "smooth",
+            block: "start"
+        });
+    }
+
+
+    menuPanel.addEventListener(
+        "click",
+        function (event) {
+
+            const selectedLink = event.target.closest("a");
+
+            if (
+                !selectedLink
+                || !window.pspSquareSyncRunning
+            ) {
+                return;
+            }
+
+            const href = (
+                selectedLink.getAttribute("href") || ""
+            ).trim();
+
+            if (
+                !href
+                || href === "#"
+                || href.toLowerCase().startsWith(
+                    "javascript:"
+                )
+            ) {
+                return;
+            }
+
+            if (
+                selectedLink.classList.contains(
+                    "app-menu-logout-link"
+                )
+            ) {
+                event.preventDefault();
+                event.stopPropagation();
+
+                showSquareSyncNavigationNotice(
+                    "Square Sync is in progress. " +
+                    "Please wait for Square Sync to complete " +
+                    "before logging out of Peach Suite Pro."
+                );
+
+                closeAppMenu({
+                    returnFocus: false
+                });
+
+                return;
+            }
+
+            if (selectedLink.target === "_blank") {
+                return;
+            }
+
+            const destination = new URL(
+                selectedLink.href,
+                window.location.href
+            );
+
+            if (
+                destination.origin
+                !== window.location.origin
+            ) {
+                return;
+            }
+
+            if (squareSyncNavigationLocked) {
+                event.preventDefault();
+                event.stopPropagation();
+                return;
+            }
+
+            squareSyncNavigationLocked = true;
+
+            window.setTimeout(
+                function () {
+                    squareSyncNavigationLocked = false;
+                },
+                1500
+            );
+
+            event.preventDefault();
+            event.stopPropagation();
+
+            window.open(
+                destination.href,
+                "_blank",
+                "noopener"
+            );
+
+            closeAppMenu({
+                returnFocus: false
+            });
+        },
+        true
     );
 
 
