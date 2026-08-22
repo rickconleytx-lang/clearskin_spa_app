@@ -292,6 +292,81 @@ def stage_square_payment_line_items(
     return staged_lines
 
 
+def finalize_square_payment_income_link(
+    cursor,
+    *,
+    spa_id,
+    business_unit_id,
+    income_id,
+    square_payment_record_id,
+):
+    """
+    Link one reserved Square payment to PSP Income and mark
+    its financial reconciliation complete.
+
+    The caller owns transaction control.
+    """
+
+    cursor.execute("""
+        UPDATE square_payments
+        SET
+            income_id = %s,
+            reconciliation_status = 'reconciled',
+            reconciled_at = CURRENT_TIMESTAMP,
+            last_synced_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE square_payment_record_id = %s
+          AND spa_id = %s
+          AND business_unit_id = %s
+          AND income_id IS NULL
+    """, (
+        income_id,
+        square_payment_record_id,
+        spa_id,
+        business_unit_id,
+    ))
+
+    if cursor.rowcount != 1:
+        raise SquarePaymentLinkError(
+            "Square payment reconciliation could not "
+            "be linked to Income."
+        )
+
+
+def ignore_square_payment_line_items(
+    cursor,
+    *,
+    spa_id,
+    business_unit_id,
+    square_payment_record_id,
+):
+    """
+    Mark previously staged Square item detail as intentionally
+    not tracked when item-level PSP Inventory tracking is off.
+
+    Existing posted inventory movements are never changed.
+    The caller owns transaction control.
+    """
+
+    cursor.execute("""
+        UPDATE square_payment_line_items
+        SET
+            reconciliation_status = 'ignored',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE square_payment_record_id = %s
+          AND spa_id = %s
+          AND business_unit_id = %s
+          AND inventory_movement_id IS NULL
+          AND reconciliation_status <> 'posted'
+    """, (
+        square_payment_record_id,
+        spa_id,
+        business_unit_id,
+    ))
+
+    return cursor.rowcount
+
+
 def post_square_income_lines_and_inventory(
     cursor,
     *,
@@ -443,27 +518,12 @@ def post_square_income_lines_and_inventory(
 
     # Financial reconciliation is complete even when one or
     # more catalog/inventory lines still require review.
-    cursor.execute("""
-        UPDATE square_payments
-        SET
-            income_id = %s,
-            reconciliation_status = 'reconciled',
-            reconciled_at = CURRENT_TIMESTAMP,
-            last_synced_at = CURRENT_TIMESTAMP,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE square_payment_record_id = %s
-          AND spa_id = %s
-          AND business_unit_id = %s
-          AND income_id IS NULL
-    """, (
-        income_id,
-        square_payment_record_id,
-        spa_id,
-        business_unit_id,
-    ))
-
-    if cursor.rowcount != 1:
-        raise SquarePaymentLinkError(
-            "Square payment reconciliation could not "
-            "be linked to Income."
-        )
+    finalize_square_payment_income_link(
+        cursor,
+        spa_id=spa_id,
+        business_unit_id=business_unit_id,
+        income_id=income_id,
+        square_payment_record_id=(
+            square_payment_record_id
+        ),
+    )

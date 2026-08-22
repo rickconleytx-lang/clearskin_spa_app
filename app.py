@@ -64,6 +64,7 @@ from services.sms_service import send_sms_telnyx
 from services import square_oauth
 from services import square_service
 from services import square_sync_auth
+from services import square_workspace_settings
 from services.square_income_posting import (
     SquarePaymentLinkError,
     post_square_income_lines_and_inventory,
@@ -16325,6 +16326,14 @@ def square_control_center():
     if not business_unit_id:
         abort(403)
 
+    square_workspace_config = (
+        square_workspace_settings
+        .get_square_workspace_settings(
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+        )
+    )
+
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -16656,6 +16665,19 @@ def square_control_center():
 
     import secrets
 
+    square_workspace_settings_token = session.get(
+        "square_workspace_settings_token"
+    )
+
+    if not square_workspace_settings_token:
+        square_workspace_settings_token = (
+            secrets.token_urlsafe(32)
+        )
+
+        session[
+            "square_workspace_settings_token"
+        ] = square_workspace_settings_token
+
     square_sync_all_token = None
 
     if square_sync_all_enabled:
@@ -16724,6 +16746,10 @@ def square_control_center():
         "square_control_center.html",
         square_environments=environments,
         recent_payments=recent_payments,
+        square_workspace_config=square_workspace_config,
+        square_workspace_settings_token=(
+            square_workspace_settings_token
+        ),
         production_square_enabled=False,
         production_square_connection=(
             production_square_connection
@@ -16751,6 +16777,101 @@ def square_control_center():
         ),
     )
 
+
+
+##############################################
+#
+#   SAVE SQUARE WORKSPACE SETTINGS
+#
+###############################################
+
+
+@app.route(
+    "/payment-integrations/square/workspace-settings",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_view_business_management"
+)
+def square_save_workspace_settings():
+    import hmac
+
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if not business_unit_id:
+        abort(403)
+
+    submitted_token = request.form.get(
+        "square_workspace_settings_token",
+        "",
+    )
+
+    session_token = session.get(
+        "square_workspace_settings_token",
+        "",
+    )
+
+    if (
+        not submitted_token
+        or not session_token
+        or not hmac.compare_digest(
+            submitted_token,
+            session_token,
+        )
+    ):
+        abort(400)
+
+    processing_mode = str(
+        request.form.get(
+            "processing_mode",
+            "",
+        )
+        or ""
+    ).strip().lower()
+
+    track_inventory_sales = (
+        "track_inventory_sales"
+        in request.form
+    )
+
+    try:
+        square_workspace_settings.save_square_workspace_settings(
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            processing_mode=processing_mode,
+            track_inventory_sales=track_inventory_sales,
+            actor_user_id=session.get("user_id"),
+        )
+
+    except (
+        square_workspace_settings
+        .SquareWorkspaceSettingsError
+    ) as exc:
+        flash(
+            str(exc),
+            "warning",
+        )
+
+        return redirect(
+            url_for("square_control_center")
+        )
+
+    session.pop(
+        "square_workspace_settings_token",
+        None,
+    )
+
+    flash(
+        "Square operating settings updated.",
+        "success",
+    )
+
+    return redirect(
+        url_for("square_control_center")
+    )
 
 
 ##############################################
@@ -50576,10 +50697,18 @@ def edit_income(income_id):
 
         service_amount = float(request.form.get("service_amount") or 0)
         retail_amount = float(request.form.get("retail_amount") or 0)
+        pos_amount = float(request.form.get("pos_amount") or 0)
         tax_amount = float(request.form.get("tax_amount") or 0)
         tip_amount = float(request.form.get("tip_amount") or 0)
 
-        total_amount = round(service_amount + retail_amount + tax_amount + tip_amount, 2)
+        total_amount = round(
+            service_amount
+            + retail_amount
+            + pos_amount
+            + tax_amount
+            + tip_amount,
+            2,
+        )
 
         payment_method = request.form.get("payment_method", "").strip()
         credit_processor_id = request.form.get("credit_processor_id") or None
@@ -50689,6 +50818,7 @@ def edit_income(income_id):
                 description = %s,
                 service_amount = %s,
                 retail_amount = %s,
+                pos_amount = %s,
                 tax_amount = %s,
                 tip_amount = %s,
                 total_amount = %s,
@@ -50712,6 +50842,7 @@ def edit_income(income_id):
             description,
             service_amount,
             retail_amount,
+            pos_amount,
             tax_amount,
             tip_amount,
             total_amount,
@@ -50749,39 +50880,49 @@ def edit_income(income_id):
         flash("Income record updated successfully.", "success")
         return redirect(url_for("income_report"))
 
-    cur.execute("""
-        SELECT
-            i.income_id,
-            i.income_date,
-            i.income_type,
-            i.description,
-            i.service_amount,
-            i.retail_amount,
-            i.tax_amount,
-            i.tip_amount,
-            i.total_amount,
-            i.payment_method,
-            i.processor_payment_id,
-            i.notes,
-            i.client_id,
-            i.employee_id,
-            i.credit_processor_id,
-            c.first_name,
-            c.last_name
-        FROM income i
-        LEFT JOIN clients c
-          ON i.client_id = c.client_id
-         AND c.spa_id = i.spa_id
-         AND c.business_unit_id = i.business_unit_id
-        WHERE i.income_id = %s
-          AND i.spa_id = %s
-          AND i.business_unit_id = %s
-    """, (
-        income_id,
-        spa_id,
-        business_unit_id
-    ))
-    income_record = cur.fetchone()
+    income_cur = conn.cursor(
+        cursor_factory=RealDictCursor
+    )
+
+    try:
+        income_cur.execute("""
+            SELECT
+                i.income_id,
+                i.income_date,
+                i.income_type,
+                i.description,
+                i.service_amount,
+                i.retail_amount,
+                i.pos_amount,
+                i.tax_amount,
+                i.tip_amount,
+                i.total_amount,
+                i.payment_method,
+                i.processor_payment_id,
+                i.notes,
+                i.client_id,
+                i.employee_id,
+                i.credit_processor_id,
+                c.first_name,
+                c.last_name
+            FROM income i
+            LEFT JOIN clients c
+              ON i.client_id = c.client_id
+             AND c.spa_id = i.spa_id
+             AND c.business_unit_id = i.business_unit_id
+            WHERE i.income_id = %s
+              AND i.spa_id = %s
+              AND i.business_unit_id = %s
+        """, (
+            income_id,
+            spa_id,
+            business_unit_id
+        ))
+
+        income_record = income_cur.fetchone()
+
+    finally:
+        income_cur.close()
 
     cur.execute("""
         SELECT client_id, first_name, last_name
@@ -50888,6 +51029,7 @@ def income_report_csv():
             COALESCE(i.service_amount, 0.00) AS service_amount,
             COALESCE(i.tip_amount, 0.00) AS tip_amount,
             COALESCE(i.retail_amount, 0.00) AS retail_amount,
+            COALESCE(i.pos_amount, 0.00) AS pos_amount,
             COALESCE(i.tax_amount, 0.00) AS tax_amount,
             COALESCE(i.total_amount, 0.00) AS total_amount,
             COALESCE(i.notes, '') AS notes
@@ -50922,6 +51064,7 @@ def income_report_csv():
         "Service Amount",
         "Tip Amount",
         "Retail Amount",
+        "PeachPOS Amount",
         "Tax Amount",
         "Total Amount",
         "Notes"
@@ -51004,6 +51147,7 @@ def income_report_excel():
             COALESCE(i.service_amount, 0.00) AS service_amount,
             COALESCE(i.tip_amount, 0.00) AS tip_amount,
             COALESCE(i.retail_amount, 0.00) AS retail_amount,
+            COALESCE(i.pos_amount, 0.00) AS pos_amount,
             COALESCE(i.tax_amount, 0.00) AS tax_amount,
             COALESCE(i.total_amount, 0.00) AS total_amount,
             COALESCE(i.notes, '') AS notes
@@ -51039,6 +51183,7 @@ def income_report_excel():
         "Service Amount",
         "Tip Amount",
         "Retail Amount",
+        "PeachPOS Amount",
         "Tax Amount",
         "Total Amount",
         "Notes"
@@ -51236,12 +51381,13 @@ def income_report():
             COUNT(*) AS total_entries,
             COALESCE(SUM(service_amount), 0.00) AS total_services,
             COALESCE(SUM(retail_amount), 0.00) AS total_retail,
+            COALESCE(SUM(pos_amount), 0.00) AS total_pos,
             COALESCE(SUM(tip_amount), 0.00) AS total_tips,
             COALESCE(SUM(tax_amount), 0.00) AS total_tax,
             COALESCE(SUM(total_amount), 0.00) AS gross_collected,
             COALESCE(SUM(processing_fee_amount), 0.00) AS total_processing_fees,
             COALESCE(SUM(net_received), 0.00) AS total_net_received,
-            COALESCE(SUM(service_amount + retail_amount), 0.00) AS spa_income
+            COALESCE(SUM(service_amount + retail_amount + pos_amount), 0.00) AS spa_income
         FROM income
         {filter_sql}
     """, params)
@@ -51252,7 +51398,7 @@ def income_report():
         SELECT
             COALESCE(income_type, 'Unspecified') AS income_type,
             COUNT(*) AS entry_count,
-            COALESCE(SUM(service_amount + retail_amount), 0.00) AS spa_income,
+            COALESCE(SUM(service_amount + retail_amount + pos_amount), 0.00) AS spa_income,
             COALESCE(SUM(tip_amount), 0.00) AS total_tips,
             COALESCE(SUM(total_amount), 0.00) AS gross_collected,
             COALESCE(SUM(processing_fee_amount), 0.00) AS total_processing_fees,
@@ -51269,7 +51415,7 @@ def income_report():
         SELECT
             COALESCE(payment_method, 'Unspecified') AS payment_method,
             COUNT(*) AS entry_count,
-            COALESCE(SUM(service_amount + retail_amount), 0.00) AS spa_income,
+            COALESCE(SUM(service_amount + retail_amount + pos_amount), 0.00) AS spa_income,
             COALESCE(SUM(tip_amount), 0.00) AS total_tips,
             COALESCE(SUM(total_amount), 0.00) AS gross_collected,
             COALESCE(SUM(processing_fee_amount), 0.00) AS total_processing_fees,
@@ -51314,6 +51460,7 @@ def income_report():
             COALESCE(i.service_amount, 0.00) AS service_amount,
             COALESCE(i.tip_amount, 0.00) AS tip_amount,
             COALESCE(i.retail_amount, 0.00) AS retail_amount,
+            COALESCE(i.pos_amount, 0.00) AS pos_amount,
             COALESCE(i.tax_amount, 0.00) AS tax_amount,
             COALESCE(i.total_amount, 0.00) AS total_amount,
             COALESCE(i.processing_fee_amount, 0.00) AS processing_fee_amount,
@@ -56527,6 +56674,137 @@ def reports():
     ytd_revenue = cur.fetchone()[0] or 0
 
 
+    # -------------------------------------------------
+    # PeachPOS sales summary
+    #
+    # This is intentionally separate from the existing
+    # appointment/service Revenue metrics above. It is
+    # shown only for workspaces using PeachPOS.
+    # -------------------------------------------------
+
+    peachpos_summary_enabled = False
+    peachpos_sales_today = 0
+    peachpos_sales_week = 0
+    peachpos_sales_month = 0
+    peachpos_sales_ytd = 0
+
+    peachpos_today = spa_now.date()
+    peachpos_week_start = (
+        peachpos_today
+        - timedelta(days=peachpos_today.weekday())
+    )
+    peachpos_week_end = (
+        peachpos_week_start + timedelta(days=6)
+    )
+    peachpos_month_start = (
+        peachpos_today.replace(day=1)
+    )
+    peachpos_year_start = date(
+        peachpos_today.year,
+        1,
+        1,
+    )
+
+    if peachpos_today.month == 12:
+        peachpos_next_month_start = date(
+            peachpos_today.year + 1,
+            1,
+            1,
+        )
+    else:
+        peachpos_next_month_start = date(
+            peachpos_today.year,
+            peachpos_today.month + 1,
+            1,
+        )
+
+    if business_unit_id:
+        peachpos_workspace_settings = (
+            square_workspace_settings
+            .load_square_workspace_settings(
+                cur,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+            )
+        )
+
+        peachpos_summary_enabled = (
+            peachpos_workspace_settings[
+                "processing_mode"
+            ]
+            == square_workspace_settings
+            .PROCESSING_MODE_POS_DAILY_SALES
+        )
+
+        if peachpos_summary_enabled:
+            cur.execute("""
+                SELECT
+                    COALESCE(
+                        SUM(pos_amount)
+                        FILTER (
+                            WHERE income_date = %s
+                        ),
+                        0.00
+                    ) AS sales_today,
+                    COALESCE(
+                        SUM(pos_amount)
+                        FILTER (
+                            WHERE income_date
+                                BETWEEN %s AND %s
+                        ),
+                        0.00
+                    ) AS sales_week,
+                    COALESCE(
+                        SUM(pos_amount)
+                        FILTER (
+                            WHERE income_date >= %s
+                              AND income_date < %s
+                        ),
+                        0.00
+                    ) AS sales_month,
+                    COALESCE(
+                        SUM(pos_amount)
+                        FILTER (
+                            WHERE income_date >= %s
+                              AND income_date <= %s
+                        ),
+                        0.00
+                    ) AS sales_ytd
+                FROM income
+                WHERE spa_id = %s
+                  AND business_unit_id = %s
+                  AND income_type = 'PeachPOS'
+            """, (
+                peachpos_today,
+                peachpos_week_start,
+                peachpos_week_end,
+                peachpos_month_start,
+                peachpos_next_month_start,
+                peachpos_year_start,
+                peachpos_today,
+                spa_id,
+                business_unit_id,
+            ))
+
+            peachpos_sales = (
+                cur.fetchone()
+                or (0, 0, 0, 0)
+            )
+
+            peachpos_sales_today = (
+                peachpos_sales[0] or 0
+            )
+            peachpos_sales_week = (
+                peachpos_sales[1] or 0
+            )
+            peachpos_sales_month = (
+                peachpos_sales[2] or 0
+            )
+            peachpos_sales_ytd = (
+                peachpos_sales[3] or 0
+            )
+
+
     # Upcoming appointments - next 7 days
     next_7_days = today + timedelta(days=7)
 
@@ -56827,6 +57105,13 @@ def reports():
         new_clients_month=new_clients_month,
         returning_clients=returning_clients,
         ytd_revenue=ytd_revenue,
+        peachpos_summary_enabled=(
+            peachpos_summary_enabled
+        ),
+        peachpos_sales_today=peachpos_sales_today,
+        peachpos_sales_week=peachpos_sales_week,
+        peachpos_sales_month=peachpos_sales_month,
+        peachpos_sales_ytd=peachpos_sales_ytd,
         revenue_by_service=revenue_by_service,
         upcoming_appointments_7_days=upcoming_appointments_7_days,
         no_shows_month=no_shows_month,

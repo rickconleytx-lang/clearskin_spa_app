@@ -305,6 +305,62 @@
 
 <br>
 
+{% if peachpos_summary_enabled %}
+    <h3>PeachPOS</h3>
+
+    <div
+        style="
+            display:grid;
+            grid-template-columns:
+                repeat(auto-fit, minmax(160px, 1fr));
+            gap:12px;
+            margin-bottom:20px;
+        "
+    >
+        <div
+            class="dashboard-card"
+            style="padding:12px 16px;"
+        >
+            <h3>Sales Today</h3>
+            <p style="margin:6px 0;">
+                ${{ '%.2f'|format(peachpos_sales_today) }}
+            </p>
+        </div>
+
+        <div
+            class="dashboard-card"
+            style="padding:12px 16px;"
+        >
+            <h3>Weekly Sales</h3>
+            <p style="margin:6px 0;">
+                ${{ '%.2f'|format(peachpos_sales_week) }}
+            </p>
+        </div>
+
+        <div
+            class="dashboard-card"
+            style="padding:12px 16px;"
+        >
+            <h3>Monthly Sales</h3>
+            <p style="margin:6px 0;">
+                ${{ '%.2f'|format(peachpos_sales_month) }}
+            </p>
+        </div>
+
+        <div
+            class="dashboard-card"
+            style="padding:12px 16px;"
+        >
+            <h3>YTD Sales</h3>
+            <p style="margin:6px 0;">
+                ${{ '%.2f'|format(peachpos_sales_ytd) }}
+            </p>
+        </div>
+    </div>
+
+    <br>
+{% endif %}
+
 
 <h3>Operational Metrics</h3>
 

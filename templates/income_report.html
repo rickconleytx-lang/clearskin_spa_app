@@ -121,33 +121,38 @@
         </div>
 
         <div class="summary-card">
-            <h3>Tips Collected</h3>
+            <h3>PeachPOS Sales</h3>
             <p>{{ summary[3]|currency }}</p>
         </div>
 
         <div class="summary-card">
-            <h3>Tax Collected</h3>
+            <h3>Tips Collected</h3>
             <p>{{ summary[4]|currency }}</p>
         </div>
 
         <div class="summary-card">
-            <h3>Gross Collected</h3>
+            <h3>Tax Collected</h3>
             <p>{{ summary[5]|currency }}</p>
         </div>
 
         <div class="summary-card">
-            <h3>Processor Fees</h3>
+            <h3>Gross Collected</h3>
             <p>{{ summary[6]|currency }}</p>
         </div>
 
         <div class="summary-card">
-            <h3>Net Received</h3>
+            <h3>Processor Fees</h3>
             <p>{{ summary[7]|currency }}</p>
         </div>
 
         <div class="summary-card">
-            <h3>Spa Income</h3>
+            <h3>Net Received</h3>
             <p>{{ summary[8]|currency }}</p>
+        </div>
+
+        <div class="summary-card">
+            <h3>Spa Income</h3>
+            <p>{{ summary[9]|currency }}</p>
         </div>
     </div>
 
@@ -282,6 +287,7 @@
                         <th>Service</th>
                         <th>Tip</th>
                         <th>Retail</th>
+                        <th>PeachPOS</th>
                         <th>Tax</th>
                         <th>Total</th>
                         <th>Processor Fee</th>
@@ -312,12 +318,13 @@
                             <td class="amount-cell">{{ row[10]|currency }}</td>
                             <td class="amount-cell">{{ row[11]|currency }}</td>
                             <td class="amount-cell">{{ row[12]|currency }}</td>
-                            <td class="amount-cell total-highlight">{{ row[13]|currency }}</td>
-                            <td class="amount-cell">{{ row[14]|currency }}</td>
+                            <td class="amount-cell">{{ row[13]|currency }}</td>
+                            <td class="amount-cell total-highlight">{{ row[14]|currency }}</td>
                             <td class="amount-cell">{{ row[15]|currency }}</td>
+                            <td class="amount-cell">{{ row[16]|currency }}</td>
                             <td>
-                                {% if row[16] %}
-                                    {{ row[16] }}
+                                {% if row[17] %}
+                                    {{ row[17] }}
                                 {% else %}
                                     <span class="muted-text">—</span>
                                 {% endif %}
@@ -341,7 +348,7 @@
                         {% endfor %}
                     {% else %}
                         <tr>
-                            <td colspan="17" class="no-data">No income records found for the selected date range.</td>
+                            <td colspan="18" class="no-data">No income records found for the selected date range.</td>
                         </tr>
                     {% endif %}
                 </tbody>

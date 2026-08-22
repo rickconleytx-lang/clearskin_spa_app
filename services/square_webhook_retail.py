@@ -10,6 +10,13 @@ from services.square_retail_processing import (
     process_standalone_square_retail,
     stage_square_payment_for_review,
 )
+from services.square_pos_processing import (
+    process_square_pos_payment,
+)
+from services.square_workspace_settings import (
+    PROCESSING_MODE_POS_DAILY_SALES,
+    load_square_workspace_settings,
+)
 
 
 class SquareWebhookRetailError(Exception):
@@ -306,9 +313,147 @@ def process_recorded_square_retail_event(
             line_classifications={},
         )
 
+        square_workspace_settings = (
+            load_square_workspace_settings(
+                cur,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+            )
+        )
+
+        if (
+            square_workspace_settings[
+                "processing_mode"
+            ]
+            == PROCESSING_MODE_POS_DAILY_SALES
+        ):
+            # Normal Square payment states that are not eligible
+            # for automatic PeachPOS posting are terminal for this
+            # webhook event, not processor/system failures. A later
+            # Square update is recorded as its own event and can be
+            # evaluated again.
+            pos_payment_status = str(
+                preview.get("status") or ""
+            ).strip().upper()
+
+            pos_difference_cents = int(
+                preview.get("difference_cents") or 0
+            )
+
+            pos_refunded_amount_cents = int(
+                preview.get("refunded_amount_cents") or 0
+            )
+
+            pos_sales_amount_cents = sum(
+                int(preview.get(field) or 0)
+                for field in (
+                    "service_amount_cents",
+                    "retail_amount_cents",
+                    "other_amount_cents",
+                    "unknown_amount_cents",
+                )
+            )
+
+            pos_total_amount_cents = int(
+                preview.get("total_amount_cents") or 0
+            )
+
+            pos_skip_reason = None
+
+            if pos_payment_status != "COMPLETED":
+                pos_skip_reason = (
+                    "Automatic PeachPOS posting skipped: "
+                    "Square payment is not completed."
+                )
+
+            elif pos_refunded_amount_cents != 0:
+                pos_skip_reason = (
+                    "Automatic PeachPOS posting skipped: "
+                    "refunded Square payments require "
+                    "separate review."
+                )
+
+            elif pos_difference_cents != 0:
+                pos_skip_reason = (
+                    "Automatic PeachPOS posting skipped: "
+                    "authoritative Square payment totals "
+                    "do not balance."
+                )
+
+            elif pos_sales_amount_cents <= 0:
+                pos_skip_reason = (
+                    "Automatic PeachPOS posting skipped: "
+                    "PeachPOS sales amount is not positive."
+                )
+
+            elif pos_total_amount_cents <= 0:
+                pos_skip_reason = (
+                    "Automatic PeachPOS posting skipped: "
+                    "Square payment total is not positive."
+                )
+
+            if pos_skip_reason:
+                _set_event_status(
+                    cur,
+                    square_webhook_event_id=(
+                        square_webhook_event_id
+                    ),
+                    processing_status="ignored",
+                    error_message=pos_skip_reason,
+                )
+
+                if owns_connection:
+                    conn.commit()
+
+                return {
+                    "status": "ignored",
+                    "square_webhook_event_id":
+                        square_webhook_event_id,
+                    "reason": pos_skip_reason,
+                    "processing_mode":
+                        PROCESSING_MODE_POS_DAILY_SALES,
+                }
+
+            pos_result = process_square_pos_payment(
+                cur,
+                context=context,
+                payment=payment,
+                order=order,
+                preview=preview,
+                catalog_mapping_details=(
+                    mappings[
+                        "catalog_mapping_details"
+                    ]
+                ),
+                track_inventory_sales=bool(
+                    square_workspace_settings[
+                        "track_inventory_sales"
+                    ]
+                ),
+            )
+
+            _set_event_status(
+                cur,
+                square_webhook_event_id=(
+                    square_webhook_event_id
+                ),
+                processing_status="processed",
+                error_message=None,
+            )
+
+            if owns_connection:
+                conn.commit()
+
+            return {
+                "status": "processed",
+                "square_webhook_event_id":
+                    square_webhook_event_id,
+                "pos_result": pos_result,
+            }
+
         # -------------------------------------------------
-        # Automatic posting is intentionally limited to
-        # fully mapped, balanced, pure Retail.
+        # Appointment / Service mode retains the established
+        # automatic standalone Retail behavior below.
         #
         # Service, mixed, unknown, refunded, and other
         # review-required payments remain outside automatic

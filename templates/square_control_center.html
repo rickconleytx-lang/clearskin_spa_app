@@ -110,6 +110,48 @@ Square Control Center | Peach Suite Pro
 .square-coming-actions {
     margin: 22px 0;
 }
+
+.square-mode-grid {
+    display: grid;
+    grid-template-columns:
+        repeat(auto-fit, minmax(260px, 1fr));
+    gap: 14px;
+    margin: 16px 0;
+}
+
+.square-mode-option {
+    display: block;
+    border: 1px solid #ddd;
+    border-radius: 12px;
+    padding: 16px;
+    cursor: pointer;
+}
+
+.square-mode-option input {
+    margin-right: 8px;
+}
+
+.square-mode-title {
+    font-weight: 700;
+}
+
+.square-mode-description {
+    display: block;
+    margin: 8px 0 0 25px;
+    line-height: 1.5;
+}
+
+.square-inventory-setting {
+    border-top: 1px solid #ddd;
+    margin-top: 18px;
+    padding-top: 18px;
+    line-height: 1.5;
+}
+
+.square-settings-note {
+    margin-top: 12px;
+    line-height: 1.5;
+}
 </style>
 
 <div class="square-control-page">
@@ -160,6 +202,123 @@ Square Control Center | Peach Suite Pro
             has not been connected for this workspace yet.
         {% endif %}
     </div>
+
+    <section class="square-environment-section">
+        <div class="square-environment-heading">
+            <h2>Square Operating Mode</h2>
+
+            <span class="square-status">
+                {% if
+                    square_workspace_config.processing_mode
+                        == 'pos_daily_sales'
+                %}
+                    PeachPOS
+                {% else %}
+                    Appointment / Service
+                {% endif %}
+            </span>
+        </div>
+
+        <p>
+            Choose how Peach Suite Pro should handle Square
+            transactions for this workspace.
+        </p>
+
+        <form
+            method="POST"
+            action="{{ url_for('square_save_workspace_settings') }}"
+        >
+            <input
+                type="hidden"
+                name="square_workspace_settings_token"
+                value="{{ square_workspace_settings_token }}"
+            >
+
+            <div class="square-mode-grid">
+                <label class="square-mode-option">
+                    <input
+                        type="radio"
+                        name="processing_mode"
+                        value="appointment_service"
+                        {% if
+                            square_workspace_config.processing_mode
+                                == 'appointment_service'
+                        %}checked{% endif %}
+                    >
+
+                    <span class="square-mode-title">
+                        Appointment / Service Business
+                    </span>
+
+                    <span class="square-mode-description">
+                        Best for spas, salons, service providers,
+                        and other appointment-based businesses.
+                        Square payments can be reconciled to
+                        appointments, clients, services, and
+                        retail products.
+                    </span>
+                </label>
+
+                <label class="square-mode-option">
+                    <input
+                        type="radio"
+                        name="processing_mode"
+                        value="pos_daily_sales"
+                        {% if
+                            square_workspace_config.processing_mode
+                                == 'pos_daily_sales'
+                        %}checked{% endif %}
+                    >
+
+                    <span class="square-mode-title">
+                        PeachPOS — Daily Sales Mode
+                    </span>
+
+                    <span class="square-mode-description">
+                        Best for food trucks, cafés, boutiques,
+                        counter-service businesses, and other
+                        high-volume POS operations. Completed
+                        Square transactions can be posted to PSP
+                        Income automatically and summarized by day.
+                    </span>
+                </label>
+            </div>
+
+            <div class="square-inventory-setting">
+                <label>
+                    <input
+                        type="checkbox"
+                        name="track_inventory_sales"
+                        {% if
+                            square_workspace_config.track_inventory_sales
+                        %}checked{% endif %}
+                    >
+
+                    <strong>
+                        Track item-level Square sales in PSP Inventory
+                    </strong>
+                </label>
+
+                <div class="square-settings-note">
+                    Turn this off when PSP should record the financial
+                    transaction without requiring item-level inventory
+                    tracking. Individual Square payments remain available
+                    for audit, duplicate protection, refunds, fees, and
+                    reconciliation.
+                </div>
+            </div>
+
+            <div class="page-tool-pills" style="margin-top:18px;">
+                <button
+                    type="submit"
+                    class="tool-pill tool-pill-small"
+                    style="font:inherit; cursor:pointer;"
+                >
+                    Save Square Operating Mode
+                </button>
+            </div>
+        </form>
+    </section>
 
     {% for item in square_environments %}
 
