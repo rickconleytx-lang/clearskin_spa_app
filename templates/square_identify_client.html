@@ -114,8 +114,9 @@ Identify Square Client | Peach Suite Pro
     <p class="square-identify-intro">
         Compare the customer attached to this completed Square
         payment with clients in the current Peach Suite Pro
-        workspace. Peach Suite Pro will only save a client mapping
-        after you explicitly confirm a strong verified match.
+        workspace. Peach Suite Pro only saves a client mapping
+        after you explicitly confirm the correct PSP client, either
+        from a strong verified match or a manual review.
     </p>
 
     <div class="square-identify-card">
@@ -192,6 +193,288 @@ Identify Square Client | Peach Suite Pro
             {{ square_customer_id }}
         </p>
     </div>
+
+
+
+    {% macro manual_client_lookup() %}
+
+        <div class="square-identify-card">
+            <h2>Choose a PSP Client Manually</h2>
+
+            <p>
+                Search the current Provider Workspace by client name,
+                email, or phone. Active and archived clients are both
+                included. Selecting a client here does not save a
+                mapping yet.
+            </p>
+
+            <form
+                method="get"
+                action="{{
+                    url_for(
+                        'square_reconcile_identify_client'
+                    )
+                }}"
+            >
+                <input
+                    type="hidden"
+                    name="payment_id"
+                    value="{{ payment_id }}"
+                >
+
+                <label
+                    for="client_search"
+                    class="square-identify-label"
+                >
+                    Search PSP Clients
+                </label>
+
+                <input
+                    type="text"
+                    id="client_search"
+                    name="client_search"
+                    value="{{ client_search or '' }}"
+                    placeholder="Name, email, or phone"
+                    autocomplete="off"
+                >
+
+                <button
+                    type="submit"
+                    class="tool-pill tool-pill-small"
+                >
+                    Search
+                </button>
+            </form>
+
+            {% if client_search %}
+
+                {% if manual_client_results %}
+
+                    <div class="square-identify-table-wrap">
+                        <table class="square-identify-table">
+                            <thead>
+                                <tr>
+                                    <th>PSP Client</th>
+                                    <th>Email</th>
+                                    <th>Phone</th>
+                                    <th>Status</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+
+                            <tbody>
+                                {% for client in manual_client_results %}
+                                    <tr>
+                                        <td>{{ client.client_name }}</td>
+                                        <td>{{ client.email or '—' }}</td>
+                                        <td>{{ client.phone or '—' }}</td>
+                                        <td>{{ client.status_label }}</td>
+                                        <td>
+                                            <a
+                                                href="{{
+                                                    url_for(
+                                                        'square_reconcile_identify_client',
+                                                        payment_id=payment_id,
+                                                        client_search=client_search,
+                                                        selected_client_id=client.client_id
+                                                    )
+                                                }}"
+                                                class="tool-pill tool-pill-small"
+                                            >
+                                                Review &amp; Confirm
+                                            </a>
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+
+                {% else %}
+
+                    <p>
+                        No PSP clients in this Provider Workspace matched
+                        that search.
+                    </p>
+
+                {% endif %}
+
+            {% endif %}
+
+            {% if manual_selected_client %}
+
+                <div class="square-name-mismatch">
+                    <h3>Manual Match Review</h3>
+
+                    <p>
+                        Compare the Square customer above with the PSP
+                        client below. No mapping has been saved yet.
+                    </p>
+
+                    <div class="square-identify-grid">
+                        <div>
+                            <span class="square-identify-label">
+                                PSP Client
+                            </span>
+                            {{ manual_selected_client.client_name }}
+                        </div>
+
+                        <div>
+                            <span class="square-identify-label">
+                                Email
+                            </span>
+                            {{ manual_selected_client.email or '—' }}
+                        </div>
+
+                        <div>
+                            <span class="square-identify-label">
+                                Phone
+                            </span>
+                            {{ manual_selected_client.phone or '—' }}
+                        </div>
+
+                        <div>
+                            <span class="square-identify-label">
+                                Status
+                            </span>
+                            {{ manual_selected_client.status_label }}
+                        </div>
+                    </div>
+
+                    <form
+                        method="post"
+                        action="{{
+                            url_for(
+                                'square_reconcile_confirm_client_manual'
+                            )
+                        }}"
+                    >
+                        <input
+                            type="hidden"
+                            name="square_client_match_token"
+                            value="{{ square_client_match_token }}"
+                        >
+
+                        <input
+                            type="hidden"
+                            name="payment_id"
+                            value="{{ payment_id }}"
+                        >
+
+                        <input
+                            type="hidden"
+                            name="client_id"
+                            value="{{ manual_selected_client.client_id }}"
+                        >
+
+                        {% if manual_selected_name_mismatch %}
+
+                            <p>
+                                You are manually confirming that these are
+                                the same person even though the names differ.
+                                Choose which name Peach Suite Pro should keep.
+                            </p>
+
+                            <div class="square-identify-grid">
+                                <div>
+                                    <span class="square-identify-label">
+                                        Square Name
+                                    </span>
+                                    {{ square_customer_name }}
+                                </div>
+
+                                <div>
+                                    <span class="square-identify-label">
+                                        PSP Name
+                                    </span>
+                                    {{ manual_selected_client.client_name }}
+                                </div>
+                            </div>
+
+                            <div class="square-name-actions">
+                                <button
+                                    type="submit"
+                                    name="name_action"
+                                    value="keep_psp"
+                                    class="tool-pill tool-pill-small"
+                                    onclick='return confirm({{
+                                        (
+                                            "Manually confirm that this Square customer and PSP client are the same person and keep the PSP name: "
+                                            ~ manual_selected_client.client_name
+                                            ~ "?"
+                                        )|tojson
+                                    }});'
+                                >
+                                    Keep PSP Name —
+                                    {{ manual_selected_client.client_name }}
+                                </button>
+
+                                {% if square_name_update_available %}
+                                    <button
+                                        type="submit"
+                                        name="name_action"
+                                        value="use_square"
+                                        class="tool-pill tool-pill-small"
+                                        onclick='return confirm({{
+                                            (
+                                                "Manually confirm that this Square customer and PSP client are the same person and update the PSP name to: "
+                                                ~ square_customer_name
+                                                ~ "?"
+                                            )|tojson
+                                        }});'
+                                    >
+                                        Update PSP Name to Square —
+                                        {{ square_customer_name }}
+                                    </button>
+                                {% endif %}
+                            </div>
+
+                            {% if not square_name_update_available %}
+                                <p>
+                                    Square does not currently provide both
+                                    a first and last name, so Peach Suite Pro
+                                    will not offer an automatic name update.
+                                </p>
+                            {% endif %}
+
+                        {% else %}
+
+                            <input
+                                type="hidden"
+                                name="name_action"
+                                value="keep_psp"
+                            >
+
+                            <button
+                                type="submit"
+                                class="tool-pill tool-pill-small"
+                                onclick='return confirm({{
+                                    (
+                                        "Manually confirm that this Square customer and PSP client are the same person: "
+                                        ~ manual_selected_client.client_name
+                                        ~ "?"
+                                    )|tojson
+                                }});'
+                            >
+                                Confirm Manual Match
+                            </button>
+
+                        {% endif %}
+                    </form>
+
+                    <p>
+                        Confirming saves the Square-to-PSP identity mapping.
+                        If you choose the Square spelling, only the Peach
+                        Suite Pro client name is updated. This action does
+                        not change the customer record in Square.
+                    </p>
+                </div>
+
+            {% endif %}
+        </div>
+
+    {% endmacro %}
+
 
     {% if existing_mapping %}
 
@@ -392,6 +675,8 @@ Identify Square Client | Peach Suite Pro
             </p>
         </div>
 
+
+
     {% elif match_status == 'multiple_strong_matches' %}
 
         <div class="square-identify-card">
@@ -430,6 +715,8 @@ Identify Square Client | Peach Suite Pro
                 </table>
             </div>
         </div>
+
+        {{ manual_client_lookup() }}
 
     {% elif match_status == 'possible_name_match' %}
 
@@ -470,6 +757,8 @@ Identify Square Client | Peach Suite Pro
             </div>
         </div>
 
+        {{ manual_client_lookup() }}
+
     {% else %}
 
         <div class="square-identify-card">
@@ -478,11 +767,12 @@ Identify Square Client | Peach Suite Pro
             <p>
                 No existing PSP client matched this Square
                 customer's normalized email, phone, or full name.
-                A future manual client-selection step will allow
-                the user to choose the correct PSP client without
-                guessing.
+                Use the manual PSP client search below to review
+                the correct client without guessing.
             </p>
         </div>
+
+        {{ manual_client_lookup() }}
 
     {% endif %}
 
