@@ -170,7 +170,7 @@ Square Control Center | Peach Suite Pro
     </div>
 
     <div class="square-banner">
-        <strong>Square V2 Status</strong>
+        <strong>Square Connection Status</strong>
 
         {% if
             production_square_connection
@@ -185,14 +185,14 @@ Square Control Center | Peach Suite Pro
             %}
                 Live outbound synchronization is enabled.
             {% else %}
-                Live outbound synchronization remains disabled
-                while production validation is completed.
+                Live outbound synchronization is currently
+                disabled for this workspace.
             {% endif %}
 
         {% else %}
             Peach Suite Pro is currently using the Square
-            Sandbox for integration testing. Production Square
-            has not been connected for this workspace yet.
+            Sandbox. Production Square has not been connected for
+            this workspace yet.
         {% endif %}
     </div>
 
