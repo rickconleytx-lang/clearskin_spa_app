@@ -110,7 +110,19 @@
         >
             Current phase:
             <strong>
-                {{ sync_run.current_phase | replace("_", " ") | title }}
+                {{
+                    {
+                        "client": "Clients",
+                        "service": "Services",
+                        "inventory_product": "Inventory Products",
+                        "completed": "Completed"
+                    }.get(
+                        sync_run.current_phase,
+                        sync_run.current_phase
+                            | replace("_", " ")
+                            | title
+                    )
+                }}
             </strong>
         </div>
 
@@ -188,8 +200,12 @@
             aria-live="polite"
         >
             {% if sync_run.run_status == "running" %}
-                Sync All will continue in small packets.
-                You may leave this page and return to resume.
+                Square Sync All is continuing in small packets.
+                Keep this Sync tab open until completion.
+                You can continue working in Peach Suite Pro while
+                Square Sync runs. For safety, pages you open from
+                the Peach Suite Pro menu during the sync will open
+                in a new browser tab. This is expected behavior.
             {% elif sync_run.run_status == "completed" %}
                 Square Sync All is complete.
             {% elif sync_run.run_status == "failed" %}
@@ -462,8 +478,20 @@
         let stopped = false;
 
         function titlePhase(value) {
+
+            const labels = {
+                client: "Clients",
+                service: "Services",
+                inventory_product: "Inventory Products",
+                completed: "Completed"
+            };
+
             if (!value) {
                 return "";
+            }
+
+            if (labels[value]) {
+                return labels[value];
             }
 
             return value
@@ -475,6 +503,7 @@
                     }
                 );
         }
+
 
         function updateCounts(type, values) {
             const element = countElements[type];
@@ -689,10 +718,13 @@
 
             if (messageElement) {
                 messageElement.textContent = (
-                    "Sync All is continuing in small packets. " +
-                    "Keep this tab open while Square Sync runs. " +
-                    "You can continue working in another " +
-                    "Peach Suite Pro tab."
+                    "Square Sync All is continuing in small packets. " +
+                    "Keep this Sync tab open until completion. " +
+                    "You can continue working in Peach Suite Pro " +
+                    "while Square Sync runs. For safety, pages you " +
+                    "open from the Peach Suite Pro menu during the " +
+                    "sync will open in a new browser tab. This is " +
+                    "expected behavior."
                 );
             }
         }

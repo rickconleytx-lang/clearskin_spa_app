@@ -386,7 +386,10 @@
         {% if (
             square_sync_user_state
             and square_sync_user_state.status == "running"
-            and request.endpoint != "square_sync_all_progress"
+            and request.endpoint not in (
+                "square_sync_all_progress",
+                "morning_briefing"
+            )
         ) %}
             <section
                 id="square-sync-coach-notice"
@@ -630,6 +633,196 @@ document.addEventListener("DOMContentLoaded", function () {
 
     let squareSyncNavigationLocked = false;
 
+    function squareSyncPhaseLabel(value) {
+
+        const labels = {
+            client: "Clients",
+            service: "Services",
+            inventory_product: "Inventory Products",
+            completed: "Completed"
+        };
+
+        return labels[value] || value || "";
+    }
+
+
+    function updateSquareSyncBriefingCard(data) {
+
+        const card = document.getElementById(
+            "square-sync-briefing-card"
+        );
+
+        if (!card || !data) {
+            return;
+        }
+
+        const progress = document.getElementById(
+            "square-sync-briefing-progress"
+        );
+
+        const phase = document.getElementById(
+            "square-sync-briefing-phase"
+        );
+
+        if (progress) {
+            progress.textContent = (
+                Number(data.processed || 0) +
+                " of " +
+                Number(data.total || 0) +
+                " records · " +
+                Number(data.percent || 0) +
+                "%"
+            );
+        }
+
+        if (phase) {
+            phase.textContent = (
+                "Current phase: " +
+                squareSyncPhaseLabel(data.phase)
+            );
+        }
+    }
+
+
+    function removeSquareSyncBriefingCard() {
+
+        const card = document.getElementById(
+            "square-sync-briefing-card"
+        );
+
+        if (card) {
+            card.remove();
+        }
+    }
+
+
+    function showSquareSyncCompletionNotice(data) {
+
+        const container = document.body;
+
+        if (!container || !data) {
+            return;
+        }
+
+        const existing = document.getElementById(
+            "square-sync-completion-popup"
+        );
+
+        if (existing) {
+            existing.remove();
+        }
+
+        const popup = document.createElement("section");
+        popup.id = "square-sync-completion-popup";
+        popup.className = "square-sync-completion-popup";
+        popup.setAttribute("role", "status");
+        popup.setAttribute("aria-live", "polite");
+
+        const status = String(data.status || "");
+        const attention = Number(data.attention_total || 0);
+        const errors = Number(data.error_total || 0);
+        const skipped = Number(data.skipped_total || 0);
+        const processed = Number(data.processed || 0);
+        const total = Number(data.total || 0);
+
+        let title = "Square Sync Completed";
+        let message = (
+            processed + " of " + total +
+            " records were processed."
+        );
+        let stateClass = "is-success";
+
+        if (
+            status === "completed"
+            && !attention
+            && !errors
+            && !skipped
+        ) {
+            title = "✓ Square Sync Completed";
+            message = (
+                processed +
+                " records synchronized successfully."
+            );
+
+        } else if (status === "completed") {
+            title = "Square Sync Completed — Review Needed";
+            stateClass = "is-warning";
+            message = (
+                processed + " of " + total +
+                " records were processed."
+            );
+
+            if (attention) {
+                message += (
+                    " " + attention + " need attention."
+                );
+            }
+
+            if (errors) {
+                message += (
+                    " " + errors + " failed."
+                );
+            }
+
+            if (skipped) {
+                message += (
+                    " " + skipped + " skipped."
+                );
+            }
+
+        } else {
+            title = "Square Sync Did Not Complete";
+            stateClass = "is-error";
+            message = (
+                "The Square Sync run stopped before completing. " +
+                "Open the sync results for details."
+            );
+        }
+
+        popup.classList.add(stateClass);
+
+        const heading = document.createElement("strong");
+        heading.className = "square-sync-completion-title";
+        heading.textContent = title;
+
+        const body = document.createElement("p");
+        body.textContent = message;
+
+        const actions = document.createElement("div");
+        actions.className = "square-sync-completion-actions";
+
+        const okButton = document.createElement("button");
+        okButton.type = "button";
+        okButton.className = "tool-pill tool-pill-small";
+        okButton.textContent = "OK";
+        okButton.addEventListener(
+            "click",
+            function () {
+                popup.remove();
+            }
+        );
+
+        const resultsButton = document.createElement("button");
+        resultsButton.type = "button";
+        resultsButton.className = "tool-pill tool-pill-small";
+        resultsButton.textContent = "View Sync Results";
+        resultsButton.addEventListener(
+            "click",
+            function () {
+                if (window.pspSquareSyncProgressUrl) {
+                    window.location.assign(
+                        window.pspSquareSyncProgressUrl
+                    );
+                }
+            }
+        );
+
+        actions.append(okButton, resultsButton);
+        popup.append(heading, body, actions);
+        container.append(popup);
+    }
+
+
     function stopSquareSyncNavigationProtection() {
 
         window.pspSquareSyncRunning = false;
@@ -642,6 +835,8 @@ document.addEventListener("DOMContentLoaded", function () {
         if (coachNotice) {
             coachNotice.remove();
         }
+
+        removeSquareSyncBriefingCard();
     }
 
     async function refreshSquareSyncNavigationState() {
@@ -669,8 +864,11 @@ document.addEventListener("DOMContentLoaded", function () {
             if (response.ok) {
                 const data = await response.json();
 
+                updateSquareSyncBriefingCard(data);
+
                 if (data.status !== "running") {
                     stopSquareSyncNavigationProtection();
+                    showSquareSyncCompletionNotice(data);
                     return;
                 }
             }
@@ -850,19 +1048,15 @@ document.addEventListener("DOMContentLoaded", function () {
 
     window.returnToSquareSyncTab = function () {
 
-        window.close();
+        if (window.pspSquareSyncProgressUrl) {
+            window.location.assign(
+                window.pspSquareSyncProgressUrl
+            );
+            return;
+        }
 
-        window.setTimeout(
-            function () {
-                if (!window.closed) {
-                    showSquareSyncNavigationNotice(
-                        "Square Sync is still running in the " +
-                        "original Peach Suite Pro tab. Please " +
-                        "select that tab to return to your sync."
-                    );
-                }
-            },
-            250
+        showSquareSyncNavigationNotice(
+            "Square Sync progress is not available right now."
         );
     };
 

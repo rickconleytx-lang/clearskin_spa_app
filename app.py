@@ -24124,6 +24124,24 @@ def _load_square_sync_user_state(
         else 100
     )
 
+    attention_total = (
+        int(row[8] or 0)
+        + int(row[12] or 0)
+        + int(row[16] or 0)
+    )
+
+    error_total = (
+        int(row[9] or 0)
+        + int(row[13] or 0)
+        + int(row[17] or 0)
+    )
+
+    skipped_total = (
+        int(row[10] or 0)
+        + int(row[14] or 0)
+        + int(row[18] or 0)
+    )
+
     return {
         "run_id": row[0],
         "requested_by": requested_by,
@@ -24133,6 +24151,34 @@ def _load_square_sync_user_state(
         "total": total,
         "processed": processed,
         "percent": percent,
+        "attention_total": attention_total,
+        "error_total": error_total,
+        "skipped_total": skipped_total,
+        "totals": {
+            "client": int(row[4] or 0),
+            "service": int(row[5] or 0),
+            "inventory_product": int(row[6] or 0),
+        },
+        "counts": {
+            "client": {
+                "synced": int(row[7] or 0),
+                "needs_attention": int(row[8] or 0),
+                "error": int(row[9] or 0),
+                "skipped": int(row[10] or 0),
+            },
+            "service": {
+                "synced": int(row[11] or 0),
+                "needs_attention": int(row[12] or 0),
+                "error": int(row[13] or 0),
+                "skipped": int(row[14] or 0),
+            },
+            "inventory_product": {
+                "synced": int(row[15] or 0),
+                "needs_attention": int(row[16] or 0),
+                "error": int(row[17] or 0),
+                "skipped": int(row[18] or 0),
+            },
+        },
         "requested_at": row[19],
         "started_at": row[20],
         "last_activity_at": row[21],
@@ -24191,6 +24237,11 @@ def square_sync_all_status():
         "processed": state["processed"],
         "total": state["total"],
         "percent": state["percent"],
+        "attention_total": state["attention_total"],
+        "error_total": state["error_total"],
+        "skipped_total": state["skipped_total"],
+        "totals": state["totals"],
+        "counts": state["counts"],
     })
 
 

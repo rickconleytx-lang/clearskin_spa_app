@@ -359,6 +359,77 @@
     </div>
 
 
+    {% if (
+        square_sync_user_state
+        and square_sync_user_state.status == "running"
+    ) %}
+        <!-- Square Sync in Progress -->
+        <div
+            id="square-sync-briefing-card"
+            class="briefing-summary-card"
+        >
+            <div class="briefing-card-title">
+                💳 Square Sync in Progress
+            </div>
+
+            <div
+                id="square-sync-briefing-progress"
+                class="briefing-card-value"
+            >
+                {{ square_sync_user_state.processed }}
+                of
+                {{ square_sync_user_state.total }}
+                records ·
+                {{ square_sync_user_state.percent }}%
+            </div>
+
+            <div
+                id="square-sync-briefing-phase"
+                class="briefing-card-detail"
+            >
+                Current phase:
+                {{
+                    {
+                        "client": "Clients",
+                        "service": "Services",
+                        "inventory_product": "Inventory Products",
+                        "completed": "Completed"
+                    }.get(
+                        square_sync_user_state.phase,
+                        square_sync_user_state.phase
+                    )
+                }}
+            </div>
+
+            <div class="briefing-card-detail">
+                {{ square_sync_user_state.totals.client }}
+                Clients ·
+                {{ square_sync_user_state.totals.service }}
+                Services ·
+                {{
+                    square_sync_user_state
+                    .totals.inventory_product
+                }}
+                Products
+            </div>
+
+            <div style="margin-top:12px;">
+                <a
+                    href="{{
+                        url_for(
+                            'square_sync_all_progress',
+                            run_id=square_sync_user_state.run_id
+                        )
+                    }}"
+                    class="tool-pill tool-pill-small"
+                >
+                    Return to Square Sync
+                </a>
+            </div>
+        </div>
+    {% endif %}
+
+
     <!-- Needs Attention -->
     <div class="briefing-summary-card">
 

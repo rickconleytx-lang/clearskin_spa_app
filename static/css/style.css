@@ -3168,6 +3168,71 @@ td:nth-child(3) {
 }
 
 
+.square-sync-completion-popup {
+    position: fixed;
+    right: 24px;
+    bottom: 24px;
+    z-index: 1400;
+
+    width: min(390px, calc(100vw - 32px));
+    padding: 18px 20px;
+
+    background: #ffffff;
+    border: 1px solid #c9d8ca;
+    border-radius: 16px;
+    box-shadow: 0 12px 34px rgba(0, 0, 0, 0.16);
+}
+
+.square-sync-completion-popup.is-success {
+    background: #f3fbf4;
+    border-color: #a8d5ad;
+}
+
+.square-sync-completion-popup.is-warning {
+    background: #fff9ed;
+    border-color: #e3c887;
+}
+
+.square-sync-completion-popup.is-error {
+    background: #fff3f3;
+    border-color: #dda3a3;
+}
+
+.square-sync-completion-title {
+    display: block;
+    margin-bottom: 8px;
+
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: #333;
+}
+
+.square-sync-completion-popup p {
+    margin: 0;
+
+    color: #555;
+    line-height: 1.5;
+}
+
+.square-sync-completion-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+
+    margin-top: 14px;
+}
+
+@media (max-width: 640px) {
+    .square-sync-completion-popup {
+        right: 16px;
+        bottom: 16px;
+        left: 16px;
+
+        width: auto;
+    }
+}
+
+
 .business-coach-card {
     padding: 20px;
 }
