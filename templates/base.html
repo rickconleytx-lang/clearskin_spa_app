@@ -281,6 +281,24 @@
         {% endif %}
 
 
+        {% if nav_access.can_view_business_management %}
+            {% include "partials/square_menu.html" %}
+        {% endif %}
+
+
+        {% if nav_access.can_view_financials %}
+
+            <a href="{{ url_for('peachpos_income_report') }}"
+               class="app-side-panel-link">
+
+                <span aria-hidden="true">🍑</span>
+                <span>PeachPOS</span>
+
+            </a>
+
+        {% endif %}
+
+
         {% if nav_access.can_view_communications %}
             {% include "partials/communication_menu.html" %}
         {% endif %}
@@ -1430,6 +1448,11 @@ function toggleCalendarMenu() {
 
 function toggleOnlineBookingMenu() {
     toggleAppSubmenu("onlineBookingMenuDropdown");
+}
+
+
+function toggleSquareMenu() {
+    toggleAppSubmenu("squareMenuDropdown");
 }
 
 

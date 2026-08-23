@@ -1,0 +1,58 @@
+<div class="user-menu app-menu-category">
+
+    <button type="button"
+            class="user-menu-button app-menu-category-button"
+            onclick="toggleSquareMenu()">
+
+        <span class="app-menu-category-main">
+
+            <span class="app-menu-category-icon"
+                  aria-hidden="true">
+                💳
+            </span>
+
+            <span class="app-menu-category-label">
+                Square
+            </span>
+
+        </span>
+
+        <span class="app-menu-category-chevron"
+              aria-hidden="true">
+            ›
+        </span>
+
+    </button>
+
+
+    <div id="squareMenuDropdown"
+         class="user-menu-dropdown app-menu-submenu"
+         style="display:none;">
+
+
+        <div class="app-menu-submenu-section">
+
+            <div class="app-menu-submenu-heading">
+                💳 Square
+            </div>
+
+            <a href="{{ url_for('square_control_center') }}">
+                <span aria-hidden="true">🏠</span>
+                <span>Square Control Center</span>
+            </a>
+
+            <a href="{{ url_for('square_reconcile_payments') }}">
+                <span aria-hidden="true">🔄</span>
+                <span>Reconcile Square Payments</span>
+            </a>
+
+            <a href="{{ url_for('square_sync_activity') }}">
+                <span aria-hidden="true">📋</span>
+                <span>Sync Activity</span>
+            </a>
+
+        </div>
+
+    </div>
+
+</div>
