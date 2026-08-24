@@ -9019,6 +9019,9 @@ def build_navigation_access(role_code):
         "can_view_financials": False,
         "can_view_business_management": False,
 
+        # Workspace security administration
+        "can_manage_security_settings": False,
+
         # Booking and appointment operations
         "can_manage_booking_imports": False,
         "can_manage_online_booking": False,
@@ -9065,6 +9068,8 @@ def build_navigation_access(role_code):
             "can_view_employees": True,
             "can_view_financials": True,
             "can_view_business_management": True,
+
+            "can_manage_security_settings": True,
 
             "can_manage_booking_imports": True,
             "can_manage_online_booking": True,
