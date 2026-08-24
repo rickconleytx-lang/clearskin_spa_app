@@ -9,7 +9,9 @@ BEGIN;
 --
 -- Missing rows use application defaults:
 --   inactivity timeout: 60 minutes
---   absolute session lifetime: 10 hours
+--
+-- Absolute business-login lifetime is fixed in the
+-- application at 10 hours and is not workspace-configurable.
 -- =========================================================
 
 
@@ -22,10 +24,6 @@ CREATE TABLE IF NOT EXISTS security_workspace_settings (
 
     inactivity_timeout_minutes INTEGER
         NOT NULL DEFAULT 60,
-
-    absolute_session_hours INTEGER
-        NOT NULL DEFAULT 10,
-
     created_by INTEGER,
     updated_by INTEGER,
 
@@ -40,21 +38,9 @@ CREATE TABLE IF NOT EXISTS security_workspace_settings (
             inactivity_timeout_minutes IN (
                 30,
                 45,
-                60,
-                90
+                60
             )
         ),
-
-    CONSTRAINT chk_security_workspace_absolute_session
-        CHECK (
-            absolute_session_hours IN (
-                4,
-                6,
-                8,
-                10
-            )
-        ),
-
     CONSTRAINT fk_security_workspace_settings_workspace
         FOREIGN KEY (
             business_unit_id,
@@ -89,15 +75,7 @@ COMMENT ON COLUMN
 IS
     'Maximum period without actual Peach Suite Pro user '
     'interaction before the authenticated business session '
-    'expires. Allowed values: 30, 45, 60, or 90 minutes.';
-
-
-COMMENT ON COLUMN
-    security_workspace_settings.absolute_session_hours
-IS
-    'Maximum authenticated business session lifetime before '
-    'reauthentication is required. Allowed values: '
-    '4, 6, 8, or 10 hours.';
+    'expires. Allowed values: 30, 45, or 60 minutes.';
 
 
 COMMIT;
