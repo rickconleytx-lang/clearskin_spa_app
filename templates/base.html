@@ -105,9 +105,96 @@
 
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/q_launch.css') }}">
+
+    <style>
+        .psp-stale-session-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 100000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            background: rgba(255, 255, 255, 0.97);
+        }
+
+        .psp-stale-session-overlay[hidden] {
+            display: none;
+        }
+
+        .psp-stale-session-card {
+            width: min(460px, 100%);
+            padding: 30px 26px;
+            text-align: center;
+            background: #ffffff;
+            border: 1px solid #ddd7d0;
+            border-radius: 16px;
+            box-shadow:
+                0 18px 50px rgba(0, 0, 0, 0.14);
+        }
+
+        .psp-stale-session-card h2 {
+            margin: 0 0 12px;
+            font-size: 21px;
+        }
+
+        .psp-stale-session-card p {
+            margin: 0 0 20px;
+            line-height: 1.5;
+            color: #555555;
+        }
+
+        .psp-stale-session-button {
+            width: 100%;
+            min-height: 46px;
+            border: 0;
+            border-radius: 10px;
+            background: #2d2d2d;
+            color: #ffffff;
+            font: inherit;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .psp-stale-session-button:disabled {
+            opacity: 0.65;
+            cursor: wait;
+        }
+    </style>
 </head>
 
 <body>
+
+    <div
+        id="pspStaleSessionOverlay"
+        class="psp-stale-session-overlay"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="pspStaleSessionTitle"
+        aria-describedby="pspStaleSessionMessage"
+        hidden
+    >
+        <div class="psp-stale-session-card">
+
+            <h2 id="pspStaleSessionTitle">
+                Peach Suite Pro session changed
+            </h2>
+
+            <p id="pspStaleSessionMessage">
+                Checking your current Peach Suite Pro session...
+            </p>
+
+            <button
+                type="button"
+                id="pspStaleSessionButton"
+                class="psp-stale-session-button"
+                disabled
+            >
+                Continue
+            </button>
+
+        </div>
+    </div>
     
     <!-- Banner -->
     <div class="banner">
@@ -3654,6 +3741,279 @@ document.addEventListener(
         }
     }
 );
+</script>
+
+<script>
+(function () {
+
+    const pspBrowserSessionStorageKey =
+        "peachSuiteProBrowserSessionMarker";
+
+    const pageSessionMarker =
+        {{ session.get("_browser_session_marker", "") | tojson }};
+
+    const sessionStateUrl =
+        {{ url_for("browser_session_state") | tojson }};
+
+    const loginUrl =
+        {{ url_for("login") | tojson }};
+
+    if (!pageSessionMarker) {
+        return;
+    }
+
+    const overlay = document.getElementById(
+        "pspStaleSessionOverlay"
+    );
+
+    const messageElement = document.getElementById(
+        "pspStaleSessionMessage"
+    );
+
+    const continueButton = document.getElementById(
+        "pspStaleSessionButton"
+    );
+
+    if (
+        !overlay
+        || !messageElement
+        || !continueButton
+    ) {
+        return;
+    }
+
+    let staleSessionShown = false;
+    let sessionCheckInFlight = false;
+
+
+    function readStoredSessionMarker() {
+
+        try {
+            return localStorage.getItem(
+                pspBrowserSessionStorageKey
+            );
+        } catch (error) {
+            return null;
+        }
+    }
+
+
+    function publishCurrentSessionMarker() {
+
+        try {
+            localStorage.setItem(
+                pspBrowserSessionStorageKey,
+                pageSessionMarker
+            );
+        } catch (error) {
+            // Browser storage is optional.
+        }
+    }
+
+
+    function showStaleSessionOverlay(
+        message,
+        buttonLabel,
+        targetUrl
+    ) {
+
+        if (staleSessionShown) {
+            return;
+        }
+
+        staleSessionShown = true;
+
+        messageElement.textContent = message;
+
+        continueButton.textContent = buttonLabel;
+        continueButton.disabled = false;
+
+        continueButton.onclick = function () {
+
+            continueButton.disabled = true;
+
+            window.location.assign(
+                targetUrl || loginUrl
+            );
+        };
+
+        overlay.hidden = false;
+
+        document.body.style.overflow = "hidden";
+
+        window.setTimeout(
+            function () {
+                continueButton.focus();
+            },
+            0
+        );
+    }
+
+
+    async function checkCurrentBrowserSession(
+        publishMarkerIfCurrent = false
+    ) {
+
+        if (
+            staleSessionShown
+            || sessionCheckInFlight
+        ) {
+            return;
+        }
+
+        sessionCheckInFlight = true;
+
+        try {
+
+            const response = await fetch(
+                sessionStateUrl,
+                {
+                    method: "GET",
+                    credentials: "same-origin",
+                    cache: "no-store",
+                    headers: {
+                        "Accept": "application/json"
+                    }
+                }
+            );
+
+            if (!response.ok) {
+                return;
+            }
+
+            const data = await response.json();
+
+            if (!data.success) {
+                return;
+            }
+
+            if (!data.authenticated) {
+
+                showStaleSessionOverlay(
+                    "Your Peach Suite Pro session ended "
+                    + "in another window.",
+                    "Go to Login",
+                    loginUrl
+                );
+
+                return;
+            }
+
+            const currentMarker = String(
+                data.marker || ""
+            );
+
+            if (
+                !currentMarker
+                || currentMarker !== pageSessionMarker
+            ) {
+
+                const businessName = String(
+                    data.business_name
+                    || "another business"
+                );
+
+                showStaleSessionOverlay(
+                    "Your Peach Suite Pro session changed "
+                    + "in another window. The active business "
+                    + "is now "
+                    + businessName
+                    + ". To protect your data, this older "
+                    + "window has been locked.",
+                    "Continue to Current Session",
+                    data.continue_url || loginUrl
+                );
+
+                return;
+            }
+
+            if (publishMarkerIfCurrent) {
+                publishCurrentSessionMarker();
+            }
+
+        } catch (error) {
+
+            /*
+             * A temporary network failure must not lock an
+             * otherwise valid Peach Suite Pro window.
+             */
+
+        } finally {
+
+            sessionCheckInFlight = false;
+        }
+    }
+
+
+    const storedSessionMarker =
+        readStoredSessionMarker();
+
+    if (
+        !storedSessionMarker
+        || storedSessionMarker === pageSessionMarker
+    ) {
+
+        publishCurrentSessionMarker();
+
+    } else {
+
+        /*
+         * A different stored marker may mean this page is
+         * stale, or it may mean this is the newly active
+         * business page. Confirm with the server before
+         * publishing or locking anything.
+         */
+        checkCurrentBrowserSession(true);
+    }
+
+
+    window.addEventListener(
+        "storage",
+        function (event) {
+
+            if (
+                event.key
+                !== pspBrowserSessionStorageKey
+            ) {
+                return;
+            }
+
+            if (event.newValue === pageSessionMarker) {
+                return;
+            }
+
+            checkCurrentBrowserSession(true);
+        }
+    );
+
+
+    window.addEventListener(
+        "focus",
+        function () {
+            checkCurrentBrowserSession(true);
+        }
+    );
+
+
+    window.addEventListener(
+        "pageshow",
+        function () {
+            checkCurrentBrowserSession(true);
+        }
+    );
+
+
+    document.addEventListener(
+        "visibilitychange",
+        function () {
+
+            if (!document.hidden) {
+                checkCurrentBrowserSession(true);
+            }
+        }
+    );
+
+})();
 </script>
 
 </body>

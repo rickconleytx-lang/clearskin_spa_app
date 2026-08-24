@@ -486,6 +486,21 @@
     </div>
 
 
+    {% if request.args.get("session_ended") == "1" %}
+    <script>
+    (function () {
+        try {
+            localStorage.removeItem(
+                "peachSuiteProBrowserSessionMarker"
+            );
+        } catch (error) {
+            // Browser storage is optional.
+        }
+    })();
+    </script>
+    {% endif %}
+
+
     <script>
     document.addEventListener(
         "DOMContentLoaded",

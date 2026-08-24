@@ -9305,6 +9305,7 @@ def load_spa():
     if request.endpoint in (
         "login",
         "logout",
+        "browser_session_state",
         "static",
         "telnyx_sms_webhook",
         "square_production_webhook",
@@ -9319,6 +9320,11 @@ def load_spa():
 
     if "user_id" not in session:
         return redirect(url_for("login"))
+
+    if not session.get("_browser_session_marker"):
+        session["_browser_session_marker"] = (
+            secrets.token_urlsafe(32)
+        )
 
     if is_master_admin():
         g.spa_id = None
@@ -26976,6 +26982,22 @@ def birthday_offers1_home():
 def _complete_business_login(user):
     role = user[6]
 
+    existing_marker = str(
+        session.get("_browser_session_marker")
+        or ""
+    )
+
+    same_identity = (
+        session.get("user_id") == user[0]
+        and session.get("spa_id") == user[1]
+    )
+
+    browser_session_marker = (
+        existing_marker
+        if same_identity and existing_marker
+        else secrets.token_urlsafe(32)
+    )
+
     session.clear()
     session["user_id"] = user[0]
     session["spa_id"] = user[1]
@@ -26983,6 +27005,9 @@ def _complete_business_login(user):
     session["last_name"] = user[3]
     session["email"] = user[4]
     session["role"] = role
+    session["_browser_session_marker"] = (
+        browser_session_marker
+    )
     session["show_login_splash"] = True
 
     flash("Logged in successfully.", "success")
@@ -27217,11 +27242,54 @@ def cancel_login_business_switch():
 
 
 
+@app.route("/session/browser-state")
+def browser_session_state():
+    user_id = session.get("user_id")
+
+    if not user_id:
+        return jsonify(
+            success=True,
+            authenticated=False
+        )
+
+    marker = str(
+        session.get("_browser_session_marker")
+        or ""
+    )
+
+    if not marker:
+        marker = secrets.token_urlsafe(32)
+        session["_browser_session_marker"] = marker
+
+    role = session.get("role")
+
+    if role == "master_admin":
+        continue_url = url_for("master_admin_home")
+    else:
+        continue_url = url_for("morning_briefing")
+
+    return jsonify(
+        success=True,
+        authenticated=True,
+        marker=marker,
+        business_name=_login_business_label(
+            session.get("spa_id"),
+            role
+        ),
+        continue_url=continue_url
+    )
+
+
 @app.route("/logout")
 def logout():
     session.clear()
     flash("You have been logged out.", "success")
-    return redirect(url_for("login"))
+    return redirect(
+        url_for(
+            "login",
+            session_ended="1"
+        )
+    )
 
 
 
