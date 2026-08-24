@@ -1076,7 +1076,7 @@
                                                 'booking_public_preview',
                                                 service_type_id=
                                                     service.service_type_id
-                                            ) }}"
+                                            ) }}#booking-options"
                                             class="service-select-button"
                                         >
                                             {% if
@@ -1096,7 +1096,7 @@
                                                     public_booking_slug,
                                                 service_type_id=
                                                     service.service_type_id
-                                            ) }}"
+                                            ) }}#booking-options"
                                             class="service-select-button"
                                         >
                                             {% if
@@ -1197,7 +1197,10 @@
 
                     {% if selected_service %}
 
-                        <section class="booking-step-card">
+                        <section
+                            id="booking-options"
+                            class="booking-step-card"
+                        >
 
                             <div class="selected-service-summary">
                                 <div>
@@ -1264,7 +1267,7 @@
                                         public_booking_slug=
                                             public_booking_slug
                                     )
-                                }}{% endif %}"
+                                }}{% endif %}#available-times"
                             >
                                 {% if preview_mode %}
                                     <input
@@ -1370,6 +1373,7 @@
                     {% if availability_searched %}
 
                         <section
+                            id="available-times"
                             class="
                                 booking-step-card
                                 availability-section
