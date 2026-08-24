@@ -26973,6 +26973,40 @@ def birthday_offers1_home():
 #
 #   ---------------------------------------------
 
+def _complete_business_login(user):
+    role = user[6]
+
+    session.clear()
+    session["user_id"] = user[0]
+    session["spa_id"] = user[1]
+    session["first_name"] = user[2]
+    session["last_name"] = user[3]
+    session["email"] = user[4]
+    session["role"] = role
+    session["show_login_splash"] = True
+
+    flash("Logged in successfully.", "success")
+
+    if role == "master_admin":
+        return redirect(
+            url_for("master_admin_home")
+        )
+
+    return redirect(
+        url_for("morning_briefing")
+    )
+
+
+def _login_business_label(spa_id, role):
+    if role == "master_admin":
+        return "Peach Suite Pro Master Admin"
+
+    if spa_id:
+        return get_spa_name(spa_id)
+
+    return "Peach Suite Pro"
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
@@ -27006,32 +27040,162 @@ def login():
             flash("Invalid email or password.", "error")
             return render_template("login.html")
 
-        role = user[6]
+        current_user_id = session.get("user_id")
+        target_user_id = user[0]
 
-        session.clear()
-        session["user_id"] = user[0]
-        session["spa_id"] = user[1]
-        session["first_name"] = user[2]
-        session["last_name"] = user[3]
-        session["email"] = user[4]
-        session["role"] = role
+        if (
+            current_user_id is not None
+            and current_user_id != target_user_id
+        ):
+            switch_token = secrets.token_urlsafe(32)
 
+            session["_pending_login_switch"] = {
+                "source_user_id": current_user_id,
+                "source_spa_id": session.get("spa_id"),
+                "target_user_id": target_user_id,
+                "created_at": int(time.time()),
+                "token": switch_token,
+            }
 
-        session["show_login_splash"] = True
-
-        flash("Logged in successfully.", "success")
-
-
-        if role == "master_admin":
-            return redirect(
-                url_for("master_admin_home")
+            return render_template(
+                "login.html",
+                switch_warning={
+                    "current_business": _login_business_label(
+                        session.get("spa_id"),
+                        session.get("role")
+                    ),
+                    "target_business": _login_business_label(
+                        user[1],
+                        user[6]
+                    ),
+                },
+                switch_csrf_token=switch_token,
             )
 
+        return _complete_business_login(user)
+
+    session.pop("_pending_login_switch", None)
+    return render_template("login.html")
+
+
+@app.route("/login/confirm-switch", methods=["POST"])
+def confirm_login_business_switch():
+    import hmac
+
+    pending = session.get("_pending_login_switch")
+    submitted_token = (
+        request.form.get("switch_csrf_token")
+        or ""
+    ).strip()
+
+    if not isinstance(pending, dict):
+        flash(
+            "The business switch request expired. Please sign in again.",
+            "error"
+        )
+        return redirect(url_for("login"))
+
+    expected_token = str(
+        pending.get("token")
+        or ""
+    )
+
+    created_at = int(
+        pending.get("created_at")
+        or 0
+    )
+
+    source_user_id = pending.get("source_user_id")
+    source_spa_id = pending.get("source_spa_id")
+
+    if (
+        not submitted_token
+        or not expected_token
+        or not hmac.compare_digest(
+            submitted_token,
+            expected_token
+        )
+        or source_user_id != session.get("user_id")
+        or source_spa_id != session.get("spa_id")
+        or int(time.time()) - created_at > 300
+    ):
+        session.pop("_pending_login_switch", None)
+        flash(
+            "The business switch request expired or could not "
+            "be verified. Please sign in again.",
+            "error"
+        )
+        return redirect(url_for("login"))
+
+    target_user_id = pending.get("target_user_id")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT user_id, spa_id, first_name, last_name, email, password_hash, role
+            FROM users
+            WHERE user_id = %s
+              AND active = TRUE
+        """, (target_user_id,))
+
+        user = cur.fetchone()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if not user:
+        session.pop("_pending_login_switch", None)
+        flash(
+            "The account is no longer available. Please sign in again.",
+            "error"
+        )
+        return redirect(url_for("login"))
+
+    return _complete_business_login(user)
+
+
+@app.route("/login/cancel-switch", methods=["POST"])
+def cancel_login_business_switch():
+    import hmac
+
+    pending = session.get("_pending_login_switch")
+    submitted_token = (
+        request.form.get("switch_csrf_token")
+        or ""
+    ).strip()
+
+    if isinstance(pending, dict):
+        expected_token = str(
+            pending.get("token")
+            or ""
+        )
+
+        if (
+            submitted_token
+            and expected_token
+            and hmac.compare_digest(
+                submitted_token,
+                expected_token
+            )
+        ):
+            session.pop("_pending_login_switch", None)
+
+    role = session.get("role")
+
+    if role == "master_admin":
+        return redirect(
+            url_for("master_admin_home")
+        )
+
+    if session.get("user_id"):
         return redirect(
             url_for("morning_briefing")
         )
 
-    return render_template("login.html")
+    return redirect(url_for("login"))
 
 
 
