@@ -284,14 +284,28 @@ file_data = io.BytesIO()
 app = Flask(__name__)
 
 
-app.secret_key = os.environ.get("SECRET_KEY", "local-dev-key")
+if os.environ.get("RENDER"):
+    app.secret_key = os.environ.get("SECRET_KEY")
 
+    if not app.secret_key:
+        raise RuntimeError(
+            "SECRET_KEY is not configured."
+        )
 
-
-if not app.secret_key:
-    raise RuntimeError(
-        "FLASK_SECRET_KEY is not configured."
+else:
+    app.secret_key = os.environ.get(
+        "SECRET_KEY",
+        "local-dev-key",
     )
+
+
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=bool(
+        os.environ.get("RENDER")
+    ),
+)
 
 
 # --------------------------------------------------
