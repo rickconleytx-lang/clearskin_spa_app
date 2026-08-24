@@ -1,150 +1,426 @@
-{% extends "base.html" %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
 
-{% block title %}Login{% endblock %}
-
-{% block content %}
-
-<style>
-    .login-loading-overlay {
-        position: fixed;
-        inset: 0;
-        z-index: 99999;
-        display: none;
-        align-items: center;
-        justify-content: center;
-        background: rgba(255, 255, 255, 0.96);
-    }
-
-    .login-loading-overlay.is-visible {
-        display: flex;
-    }
-
-    .login-loading-card {
-        width: min(420px, calc(100% - 40px));
-        padding: 36px 28px;
-        text-align: center;
-        background: #ffffff;
-        border-radius: 16px;
-        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.14);
-    }
-
-    .login-loading-card img {
-        max-width: 250px;
-        width: 100%;
-        height: auto;
-        margin-bottom: 22px;
-    }
-
-    .login-loading-spinner {
-        width: 42px;
-        height: 42px;
-        margin: 0 auto 18px;
-        border: 4px solid #e5e5e5;
-        border-top-color: #333333;
-        border-radius: 50%;
-        animation: loginSpinner 0.8s linear infinite;
-    }
-
-    .login-loading-message {
-        margin: 0;
-        font-size: 17px;
-        font-weight: 600;
-    }
-
-    @keyframes loginSpinner {
-        to {
-            transform: rotate(360deg);
-        }
-    }
-</style>
-
-
-<h2>Login</h2>
-
-<form method="POST" id="loginForm">
-    <label>Email</label><br>
-    <input
-        type="email"
-        name="email"
-        required
-    ><br><br>
-
-    <label>Password</label><br>
-    <input
-        type="password"
-        name="password"
-        required
-    ><br><br>
-
-    <button
-        type="submit"
-        class="btn"
-        id="loginButton"
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
     >
-        Login
-    </button>
-</form>
 
+    <meta
+        name="robots"
+        content="noindex, nofollow"
+    >
 
-<div
-    id="loginLoadingOverlay"
-    class="login-loading-overlay"
-    role="status"
-    aria-live="polite"
-    aria-hidden="true"
->
-    <div class="login-loading-card">
+    <title>Sign In | Peach Suite Pro</title>
 
-        <img
-            src="{{ url_for('static', filename='images/smallbanner.png') }}"
-            alt="Peach Suite Pro"
+    <link
+        rel="icon"
+        type="image/png"
+        href="{{ url_for(
+            'static',
+            filename='peachsuite-icon.png'
+        ) }}?v=20260618"
+    >
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            margin: 0;
+            min-height: 100%;
+        }
+
+        body {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            font-family:
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                sans-serif;
+            background: #f8f6f2;
+            color: #2d2d2d;
+        }
+
+        .login-shell {
+            width: min(440px, 100%);
+        }
+
+        .login-card {
+            padding: 36px 32px;
+            background: #ffffff;
+            border: 1px solid #e7e2dc;
+            border-radius: 18px;
+            box-shadow:
+                0 18px 50px rgba(0, 0, 0, 0.08);
+        }
+
+        .login-brand {
+            margin-bottom: 28px;
+            text-align: center;
+        }
+
+        .login-brand img {
+            display: block;
+            width: min(280px, 100%);
+            height: auto;
+            margin: 0 auto 18px;
+        }
+
+        .login-brand h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 700;
+        }
+
+        .login-brand p {
+            margin: 8px 0 0;
+            color: #666666;
+            font-size: 14px;
+        }
+
+        .login-flash {
+            margin-bottom: 18px;
+            padding: 12px 14px;
+            border-radius: 10px;
+            font-size: 14px;
+        }
+
+        .login-flash.error {
+            background: #fff0f0;
+            border: 1px solid #e5b5b5;
+            color: #7a2020;
+        }
+
+        .login-flash.success {
+            background: #eef8ef;
+            border: 1px solid #b9d9bc;
+            color: #275c2d;
+        }
+
+        .login-field {
+            margin-bottom: 18px;
+        }
+
+        .login-field label {
+            display: block;
+            margin-bottom: 7px;
+            font-size: 14px;
+            font-weight: 650;
+        }
+
+        .login-field input {
+            width: 100%;
+            min-height: 46px;
+            padding: 10px 12px;
+            border: 1px solid #cfc9c2;
+            border-radius: 9px;
+            background: #ffffff;
+            color: #222222;
+            font: inherit;
+        }
+
+        .login-field input:focus {
+            outline: 3px solid rgba(210, 141, 94, 0.18);
+            border-color: #b87345;
+        }
+
+        .login-button {
+            width: 100%;
+            min-height: 48px;
+            margin-top: 4px;
+            border: 0;
+            border-radius: 10px;
+            background: #2d2d2d;
+            color: #ffffff;
+            font: inherit;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .login-button:hover {
+            background: #171717;
+        }
+
+        .login-button:disabled {
+            opacity: 0.7;
+            cursor: wait;
+        }
+
+        .login-footer {
+            margin-top: 22px;
+            text-align: center;
+            color: #777777;
+            font-size: 12px;
+        }
+
+        .login-loading-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 99999;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            background: rgba(255, 255, 255, 0.97);
+        }
+
+        .login-loading-overlay.is-visible {
+            display: flex;
+        }
+
+        .login-loading-card {
+            width: min(380px, 100%);
+            padding: 32px 26px;
+            text-align: center;
+            background: #ffffff;
+            border: 1px solid #e7e2dc;
+            border-radius: 16px;
+            box-shadow:
+                0 14px 42px rgba(0, 0, 0, 0.12);
+        }
+
+        .login-loading-card img {
+            width: min(240px, 100%);
+            height: auto;
+            margin-bottom: 20px;
+        }
+
+        .login-loading-spinner {
+            width: 40px;
+            height: 40px;
+            margin: 0 auto 16px;
+            border: 4px solid #e5e5e5;
+            border-top-color: #333333;
+            border-radius: 50%;
+            animation: loginSpinner 0.8s linear infinite;
+        }
+
+        .login-loading-message {
+            margin: 0;
+            font-size: 16px;
+            font-weight: 650;
+        }
+
+        @keyframes loginSpinner {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <main class="login-shell">
+
+        <section
+            class="login-card"
+            aria-labelledby="loginTitle"
         >
 
-        <div class="login-loading-spinner"></div>
+            <div class="login-brand">
 
-        <p class="login-loading-message">
-            Signing you in...
-        </p>
+                <img
+                    src="{{ url_for(
+                        'static',
+                        filename='images/smallbanner.png'
+                    ) }}"
+                    alt="Peach Suite Pro"
+                >
+
+                <h1 id="loginTitle">
+                    Sign In
+                </h1>
+
+                <p>
+                    Secure access to Peach Suite Pro
+                </p>
+
+            </div>
+
+
+            {% with messages =
+                get_flashed_messages(
+                    with_categories=true
+                )
+            %}
+
+                {% if messages %}
+
+                    {% for category, message in messages %}
+
+                        <div
+                            class="login-flash {{ category }}"
+                            role="alert"
+                        >
+                            {{ message }}
+                        </div>
+
+                    {% endfor %}
+
+                {% endif %}
+
+            {% endwith %}
+
+
+            <form
+                method="POST"
+                id="loginForm"
+            >
+
+                <div class="login-field">
+
+                    <label for="loginEmail">
+                        Email
+                    </label>
+
+                    <input
+                        type="email"
+                        id="loginEmail"
+                        name="email"
+                        autocomplete="username"
+                        autocapitalize="none"
+                        spellcheck="false"
+                        required
+                        autofocus
+                    >
+
+                </div>
+
+
+                <div class="login-field">
+
+                    <label for="loginPassword">
+                        Password
+                    </label>
+
+                    <input
+                        type="password"
+                        id="loginPassword"
+                        name="password"
+                        autocomplete="current-password"
+                        required
+                    >
+
+                </div>
+
+
+                <button
+                    type="submit"
+                    class="login-button"
+                    id="loginButton"
+                >
+                    Sign In
+                </button>
+
+            </form>
+
+        </section>
+
+
+        <div class="login-footer">
+            Peach Suite Pro
+        </div>
+
+    </main>
+
+
+    <div
+        id="loginLoadingOverlay"
+        class="login-loading-overlay"
+        role="status"
+        aria-live="polite"
+        aria-hidden="true"
+    >
+
+        <div class="login-loading-card">
+
+            <img
+                src="{{ url_for(
+                    'static',
+                    filename='images/smallbanner.png'
+                ) }}"
+                alt="Peach Suite Pro"
+            >
+
+            <div
+                class="login-loading-spinner"
+                aria-hidden="true"
+            ></div>
+
+            <p class="login-loading-message">
+                Signing you in...
+            </p>
+
+        </div>
 
     </div>
-</div>
 
 
-<script>
-document.addEventListener("DOMContentLoaded", function () {
-    const loginForm = document.getElementById(
-        "loginForm"
+    <script>
+    document.addEventListener(
+        "DOMContentLoaded",
+        function () {
+
+            const loginForm =
+                document.getElementById("loginForm");
+
+            const loginButton =
+                document.getElementById("loginButton");
+
+            const loadingOverlay =
+                document.getElementById(
+                    "loginLoadingOverlay"
+                );
+
+            if (
+                !loginForm
+                || !loginButton
+                || !loadingOverlay
+            ) {
+                return;
+            }
+
+            loginForm.addEventListener(
+                "submit",
+                function (event) {
+
+                    event.preventDefault();
+
+                    loadingOverlay.classList.add(
+                        "is-visible"
+                    );
+
+                    loadingOverlay.setAttribute(
+                        "aria-hidden",
+                        "false"
+                    );
+
+                    loginButton.disabled = true;
+
+                    loginButton.textContent =
+                        "Signing In...";
+
+                    window.setTimeout(
+                        function () {
+                            loginForm.submit();
+                        },
+                        75
+                    );
+                }
+            );
+        }
     );
+    </script>
 
-    const loginButton = document.getElementById(
-        "loginButton"
-    );
-
-    const loadingOverlay = document.getElementById(
-        "loginLoadingOverlay"
-    );
-
-    loginForm.addEventListener("submit", function (event) {
-        event.preventDefault();
-
-        loadingOverlay.classList.add("is-visible");
-        loadingOverlay.setAttribute(
-            "aria-hidden",
-            "false"
-        );
-
-        loginButton.disabled = true;
-        loginButton.textContent = "Signing In...";
-
-        /*
-         * Give the browser a moment to display the overlay
-         * before submitting the login request.
-         */
-        window.setTimeout(function () {
-            loginForm.submit();
-        }, 75);
-    });
-});
-</script>
-
-{% endblock %}
+</body>
+</html>
