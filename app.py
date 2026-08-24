@@ -77233,13 +77233,33 @@ def start_scheduler():
     )
 
 
-    scheduler.add_job(
-        lambda: poll_gmail_for_godaddy_bookings(1),
-        "interval",
-        minutes=5,
-        id="poll_gmail_godaddy_bookings",
-        replace_existing=True
+    godaddy_gmail_poller_enabled = (
+        str(
+            os.environ.get(
+                "ENABLE_GODADDY_GMAIL_POLLER",
+                ""
+            )
+        ).strip().lower()
+        in {"1", "true", "yes", "on"}
     )
+
+    if godaddy_gmail_poller_enabled:
+        scheduler.add_job(
+            lambda: poll_gmail_for_godaddy_bookings(1),
+            "interval",
+            minutes=5,
+            id="poll_gmail_godaddy_bookings",
+            replace_existing=True
+        )
+        print(
+            "[GODADDY] Gmail booking poller enabled.",
+            flush=True
+        )
+    else:
+        print(
+            "[GODADDY] Gmail booking poller disabled.",
+            flush=True
+        )
 
 
     scheduler.start()
@@ -77269,9 +77289,9 @@ def start_scheduler():
 #   -------------------
 
 
-# Legacy GoDaddy HTTP booking intake retired.
-# Clear Skin Esthetics currently imports GoDaddy bookings through
-# the Gmail poller until migration to Peach Suite Pro native booking.
+# Legacy GoDaddy booking intake is retired by default.
+# The Gmail poller is preserved for future use and runs only when
+# ENABLE_GODADDY_GMAIL_POLLER is explicitly enabled.
 
 
 if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or os.environ.get("RENDER"):
