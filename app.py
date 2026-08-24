@@ -410,7 +410,6 @@ def inject_global_context():
         "app_version": app.config.get("APP_VERSION"),
         "tagline": app.config.get("TAGLINE"),
         "current_year": datetime.now().year,
-        "godaddy_unreviewed_count": 0,
         "public_website_url": "",
         "public_booking_url": "",
         "square_sync_user_state": None
@@ -470,16 +469,6 @@ def inject_global_context():
                 ).strip(),
                 _external=True
             )
-
-    cur.execute("""
-        SELECT COUNT(*)
-        FROM appointments
-        WHERE spa_id = %s
-          AND external_source = 'godaddy'
-          AND COALESCE(import_reviewed, FALSE) = FALSE
-    """, (spa_id,))
-
-    context["godaddy_unreviewed_count"] = cur.fetchone()[0]
 
     cur.close()
     conn.close()
@@ -8487,38 +8476,6 @@ def inject_spa_name():
 
 
 
-#   --------------------------
-#
-#  GODADDY IMPORT ALERT
-#
-#   --------------------------
-
-@app.context_processor
-def inject_godaddy_import_alert():
-    if "user_id" not in session or "spa_id" not in session:
-        return {}
-
-    spa_id = current_spa_id()
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    cur.execute("""
-        SELECT COUNT(*)
-        FROM appointments
-        WHERE spa_id = %s
-          AND external_source = 'godaddy'
-          AND COALESCE(import_reviewed, FALSE) = FALSE
-    """, (spa_id,))
-
-    godaddy_unreviewed_count = cur.fetchone()[0]
-
-    cur.close()
-    conn.close()
-
-    return {
-        "godaddy_unreviewed_count": godaddy_unreviewed_count
-    }
 
 
 
@@ -56272,8 +56229,7 @@ def dashboard():
 
 def calculate_business_health(
     dashboard,
-    business_schedule_due=None,
-    godaddy_unreviewed_count=0
+    business_schedule_due=None
 ):
     business_schedule_due = (
         business_schedule_due or []
@@ -56404,27 +56360,6 @@ def calculate_business_health(
             f"{overdue_appointments} "
             f"{'appointment needs' if overdue_appointments == 1 else 'appointments need'} "
             "closeout."
-        )
-    )
-
-    # ---------------------------------------------------------
-    # Unreviewed GoDaddy imports
-    # ---------------------------------------------------------
-    godaddy_unreviewed_count = int(
-        godaddy_unreviewed_count or 0
-    )
-
-    add_deduction(
-        category="GoDaddy Imports",
-        count=godaddy_unreviewed_count,
-        points=min(
-            godaddy_unreviewed_count * 5,
-            20
-        ),
-        message=(
-            f"{godaddy_unreviewed_count} imported "
-            f"{'appointment needs' if godaddy_unreviewed_count == 1 else 'appointments need'} "
-            "review."
         )
     )
 
@@ -56667,30 +56602,6 @@ def morning_briefing():
         })
 
     # ---------------------------------------------------------
-    # GoDaddy imports awaiting review
-    # ---------------------------------------------------------
-    cur.execute("""
-        SELECT COUNT(*)
-        FROM appointments
-        WHERE spa_id = %s
-          AND external_source = 'godaddy'
-          AND COALESCE(import_reviewed, FALSE) = FALSE
-    """, (spa_id,))
-
-    godaddy_unreviewed_count = cur.fetchone()[0] or 0
-
-    if godaddy_unreviewed_count > 0:
-        priority_actions.append({
-            "icon": "📨",
-            "label": "GoDaddy imports need review",
-            "value": godaddy_unreviewed_count,
-            "url": url_for("godaddy_imports"),
-            "category": "Appointments",
-            "priority": 90
-        })
-
-
-    # ---------------------------------------------------------
     # Overdue appointments awaiting closeout
     # ---------------------------------------------------------
     cur.execute("""
@@ -56921,10 +56832,7 @@ def morning_briefing():
     # ---------------------------------------------------------
     business_health = calculate_business_health(
         dashboard=dashboard,
-        business_schedule_due=business_schedule_due,
-        godaddy_unreviewed_count=(
-            godaddy_unreviewed_count
-        )
+        business_schedule_due=business_schedule_due
     )
 
 
@@ -57028,7 +56936,6 @@ def morning_briefing():
         business_schedule_due=business_schedule_due,
         business_schedule_upcoming=business_schedule_upcoming,
         priority_actions=priority_actions,
-        godaddy_unreviewed_count=godaddy_unreviewed_count,
         coach=coach,
         coach_session=coach_session,
         spa_now=spa_now,

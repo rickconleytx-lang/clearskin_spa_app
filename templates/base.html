@@ -137,26 +137,6 @@
     </div>
 
 
-    {% if godaddy_unreviewed_count|default(0) > 0 %}
-    <div class="alert alert-warning">
-        {{ godaddy_unreviewed_count }} appointment(s) from PeachBook need review.
-
-        {% if request.endpoint == "calendar_view" %}
-            <form method="POST"
-                  action="{{ url_for('dismiss_godaddy_import_review') }}"
-                  style="display:inline;">
-                <button type="submit"
-                        style="background:none; border:none; color:#0066cc; text-decoration:underline; cursor:pointer; padding:0;">
-                    Dismiss
-                </button>
-            </form>
-        {% else %}
-            <a href="{{ url_for('calendar_view') }}">
-                Go to Calendar
-            </a>
-        {% endif %}
-    </div>
-{% endif %}
 
 
 
