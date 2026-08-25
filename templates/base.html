@@ -4198,6 +4198,12 @@ document.addEventListener(
                 "Your Peach Suite Pro session ended "
                 + "because it was inactive too long.";
 
+        } else if (reason === "password_changed") {
+
+            message =
+                "Your Peach Suite Pro password was changed "
+                + "in another session. Please sign in again.";
+
         } else if (
             reason === "absolute_extension_expired"
         ) {

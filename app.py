@@ -3984,6 +3984,83 @@ def current_business_unit_id():
 PASSWORD_MIN_LENGTH = 15
 PASSWORD_MAX_LENGTH = 128
 
+SECURITY_FORM_CSRF_MAX_AGE_SECONDS = 30 * 60
+
+
+def _security_form_csrf_token():
+
+    now = int(time.time())
+    user_id = session.get("user_id")
+
+    if user_id is None:
+        return None
+
+    record = session.get("_security_form_csrf")
+
+    if isinstance(record, dict):
+        token = str(record.get("token") or "")
+        record_user_id = record.get("user_id")
+
+        try:
+            issued_at = int(record.get("issued_at") or 0)
+        except (TypeError, ValueError):
+            issued_at = 0
+
+        if (
+            token
+            and record_user_id == user_id
+            and issued_at > 0
+            and now - issued_at
+                <= SECURITY_FORM_CSRF_MAX_AGE_SECONDS
+        ):
+            return token
+
+    token = secrets.token_urlsafe(32)
+
+    session["_security_form_csrf"] = {
+        "token": token,
+        "user_id": user_id,
+        "issued_at": now,
+    }
+
+    return token
+
+
+def _security_form_csrf_valid(submitted_token):
+
+    import hmac
+
+    user_id = session.get("user_id")
+    record = session.get("_security_form_csrf")
+
+    if user_id is None or not isinstance(record, dict):
+        return False
+
+    expected_token = str(record.get("token") or "")
+    submitted_token = str(submitted_token or "")
+
+    try:
+        issued_at = int(record.get("issued_at") or 0)
+    except (TypeError, ValueError):
+        return False
+
+    if (
+        not expected_token
+        or not submitted_token
+        or record.get("user_id") != user_id
+        or issued_at <= 0
+        or int(time.time()) - issued_at
+            > SECURITY_FORM_CSRF_MAX_AGE_SECONDS
+    ):
+        return False
+
+    return hmac.compare_digest(
+        submitted_token,
+        expected_token,
+    )
+
+
+
 
 _PASSWORD_BLOCKLIST = frozenset({
     "123456789012345",
@@ -9989,6 +10066,34 @@ def add_consent_record(
 
 
 
+def _business_login_lifecycle_state(user_id):
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                spa_id,
+                role,
+                active,
+                password_changed_at,
+                must_change_password
+            FROM users
+            WHERE user_id = %s
+            LIMIT 1
+            """,
+            (user_id,),
+        )
+
+        return cur.fetchone()
+
+    finally:
+        cur.close()
+        conn.close()
+
+
 @app.before_request
 def load_spa():
 
@@ -10014,6 +10119,66 @@ def load_spa():
 
     if "user_id" not in session:
         return redirect(url_for("login"))
+
+    user_id = session.get("user_id")
+
+    lifecycle_state = (
+        _business_login_lifecycle_state(user_id)
+    )
+
+    session_spa_id = session.get("spa_id")
+    session_role = session.get("role")
+
+    account_matches_session = bool(
+        lifecycle_state
+        and lifecycle_state[2]
+        and lifecycle_state[0] == session_spa_id
+        and lifecycle_state[1] == session_role
+    )
+
+    if not account_matches_session:
+        session.clear()
+
+        return redirect(
+            url_for(
+                "login",
+                session_ended="1",
+            )
+        )
+
+    password_changed_at = lifecycle_state[3]
+
+    current_password_marker = (
+        password_changed_at.isoformat()
+        if password_changed_at
+        else None
+    )
+
+    session_password_marker = session.get(
+        "_password_changed_at"
+    )
+
+    if session_password_marker != current_password_marker:
+        session.clear()
+
+        return redirect(
+            url_for(
+                "login",
+                password_changed="1",
+            )
+        )
+
+    session["_must_change_password"] = bool(
+        lifecycle_state[4]
+    )
+
+    if (
+        session["_must_change_password"]
+        and request.endpoint != "change_password"
+    ):
+        return redirect(
+            url_for("change_password")
+        )
 
     if not session.get("_browser_session_marker"):
         session["_browser_session_marker"] = (
@@ -27776,6 +27941,8 @@ def birthday_offers1_home():
 
 def _complete_business_login(user):
     role = user[6]
+    password_changed_at = user[7]
+    must_change_password = bool(user[8])
 
     existing_marker = str(
         session.get("_browser_session_marker")
@@ -27800,6 +27967,14 @@ def _complete_business_login(user):
     session["last_name"] = user[3]
     session["email"] = user[4]
     session["role"] = role
+    session["_password_changed_at"] = (
+        password_changed_at.isoformat()
+        if password_changed_at
+        else None
+    )
+    session["_must_change_password"] = (
+        must_change_password
+    )
     session["_browser_session_marker"] = (
         browser_session_marker
     )
@@ -27807,6 +27982,19 @@ def _complete_business_login(user):
     _start_business_session_security()
 
     _cleanup_browser_session_tabs()
+
+    if must_change_password:
+        session.pop("show_login_splash", None)
+
+        flash(
+            "You must change your password before "
+            "continuing.",
+            "warning",
+        )
+
+        return redirect(
+            url_for("change_password")
+        )
 
     session["show_login_splash"] = True
 
@@ -27842,7 +28030,16 @@ def login():
         cur = conn.cursor()
 
         cur.execute("""
-            SELECT user_id, spa_id, first_name, last_name, email, password_hash, role
+            SELECT
+                user_id,
+                spa_id,
+                first_name,
+                last_name,
+                email,
+                password_hash,
+                role,
+                password_changed_at,
+                must_change_password
             FROM users
             WHERE LOWER(email) = %s
               AND active = TRUE
@@ -27959,7 +28156,16 @@ def confirm_login_business_switch():
 
     try:
         cur.execute("""
-            SELECT user_id, spa_id, first_name, last_name, email, password_hash, role
+            SELECT
+                user_id,
+                spa_id,
+                first_name,
+                last_name,
+                email,
+                password_hash,
+                role,
+                password_changed_at,
+                must_change_password
             FROM users
             WHERE user_id = %s
               AND active = TRUE
@@ -27980,6 +28186,247 @@ def confirm_login_business_switch():
         return redirect(url_for("login"))
 
     return _complete_business_login(user)
+
+
+@app.route(
+    "/account/change-password",
+    methods=["GET", "POST"],
+)
+@login_required
+def change_password():
+
+    user_id = session.get("user_id")
+    spa_id = session.get("spa_id")
+    session_role = session.get("role")
+
+    if not user_id:
+        return redirect(url_for("login"))
+
+    must_change_password = bool(
+        session.get("_must_change_password")
+    )
+
+    if request.method == "POST":
+
+        submitted_token = request.form.get(
+            "security_csrf_token",
+            "",
+        )
+
+        if not _security_form_csrf_valid(
+            submitted_token
+        ):
+            abort(400)
+
+        current_password = request.form.get(
+            "current_password",
+            "",
+        )
+
+        new_password = request.form.get(
+            "new_password",
+            "",
+        )
+
+        confirm_password = request.form.get(
+            "confirm_password",
+            "",
+        )
+
+        if not current_password:
+            flash(
+                "Please enter your current password.",
+                "error",
+            )
+            return redirect(
+                url_for("change_password")
+            )
+
+        password_policy_error = (
+            _password_policy_error(
+                new_password
+            )
+        )
+
+        if password_policy_error:
+            flash(
+                password_policy_error,
+                "error",
+            )
+            return redirect(
+                url_for("change_password")
+            )
+
+        if new_password != confirm_password:
+            flash(
+                "The new passwords do not match.",
+                "error",
+            )
+            return redirect(
+                url_for("change_password")
+            )
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        try:
+            cur.execute(
+                """
+                SELECT
+                    spa_id,
+                    password_hash,
+                    role
+                FROM users
+                WHERE user_id = %s
+                  AND active = TRUE
+                FOR UPDATE
+                """,
+                (user_id,),
+            )
+
+            user = cur.fetchone()
+
+            account_matches_session = bool(
+                user
+                and user[0] == spa_id
+                and user[2] == session_role
+            )
+
+            if (
+                not account_matches_session
+                or not check_password_hash(
+                    user[1],
+                    current_password,
+                )
+            ):
+                if account_matches_session:
+                    log_audit(
+                        cur,
+                        spa_id=spa_id,
+                        user_id=user_id,
+                        action_type=(
+                            "password_change_failed"
+                        ),
+                        table_name="users",
+                        record_id=user_id,
+                        notes=(
+                            "Current password verification "
+                            "failed during password change."
+                        ),
+                    )
+
+                    conn.commit()
+                else:
+                    conn.rollback()
+
+                flash(
+                    "Current password is incorrect.",
+                    "error",
+                )
+
+                return redirect(
+                    url_for("change_password")
+                )
+
+            if check_password_hash(
+                user[1],
+                new_password,
+            ):
+                conn.rollback()
+
+                flash(
+                    "Your new password must be different "
+                    "from your current password.",
+                    "error",
+                )
+
+                return redirect(
+                    url_for("change_password")
+                )
+
+            new_password_hash = (
+                generate_password_hash(
+                    new_password
+                )
+            )
+
+            cur.execute(
+                """
+                UPDATE users
+                SET
+                    password_hash = %s,
+                    password_changed_at = NOW(),
+                    must_change_password = FALSE
+                WHERE user_id = %s
+                RETURNING password_changed_at
+                """,
+                (
+                    new_password_hash,
+                    user_id,
+                ),
+            )
+
+            password_changed_at = (
+                cur.fetchone()[0]
+            )
+
+            log_audit(
+                cur,
+                spa_id=spa_id,
+                user_id=user_id,
+                action_type="password_changed",
+                table_name="users",
+                record_id=user_id,
+                notes=(
+                    "Business-login password changed "
+                    "successfully."
+                ),
+            )
+
+            conn.commit()
+
+        except Exception:
+            conn.rollback()
+            raise
+
+        finally:
+            cur.close()
+            conn.close()
+
+        session["_password_changed_at"] = (
+            password_changed_at.isoformat()
+        )
+
+        session["_must_change_password"] = False
+
+        session.pop(
+            "_security_form_csrf",
+            None,
+        )
+
+        flash(
+            "Your password was changed successfully.",
+            "success",
+        )
+
+        if session_role == "master_admin":
+            return redirect(
+                url_for("master_admin_home")
+            )
+
+        return redirect(
+            url_for("morning_briefing")
+        )
+
+    security_csrf_token = (
+        _security_form_csrf_token()
+    )
+
+    return render_template(
+        "change_password.html",
+        security_csrf_token=security_csrf_token,
+        must_change_password=must_change_password,
+    )
 
 
 @app.route("/login/cancel-switch", methods=["POST"])
@@ -28975,6 +29422,54 @@ def browser_session_state():
             success=True,
             authenticated=False,
         )
+
+    lifecycle_state = (
+        _business_login_lifecycle_state(user_id)
+    )
+
+    session_spa_id = session.get("spa_id")
+    session_role = session.get("role")
+
+    account_matches_session = bool(
+        lifecycle_state
+        and lifecycle_state[2]
+        and lifecycle_state[0] == session_spa_id
+        and lifecycle_state[1] == session_role
+    )
+
+    if not account_matches_session:
+        session.clear()
+
+        return jsonify(
+            success=True,
+            authenticated=False,
+            expiration_reason="invalid_context",
+        )
+
+    password_changed_at = lifecycle_state[3]
+
+    current_password_marker = (
+        password_changed_at.isoformat()
+        if password_changed_at
+        else None
+    )
+
+    session_password_marker = session.get(
+        "_password_changed_at"
+    )
+
+    if session_password_marker != current_password_marker:
+        session.clear()
+
+        return jsonify(
+            success=True,
+            authenticated=False,
+            expiration_reason="password_changed",
+        )
+
+    session["_must_change_password"] = bool(
+        lifecycle_state[4]
+    )
 
     marker = str(
         session.get("_browser_session_marker")
