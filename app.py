@@ -3977,6 +3977,51 @@ def current_business_unit_id():
 
 
 # --------------------------------------------------
+# Business login password policy helpers
+# --------------------------------------------------
+
+
+PASSWORD_MIN_LENGTH = 15
+PASSWORD_MAX_LENGTH = 128
+
+
+_PASSWORD_BLOCKLIST = frozenset({
+    "123456789012345",
+    "aaaaaaaaaaaaaaa",
+    "adminadminadminadmin",
+    "letmeinletmeinletmein",
+    "passwordpassword",
+    "qwertyqwertyqwerty",
+    "welcome123456789",
+})
+
+
+def _password_policy_error(password):
+
+    if not isinstance(password, str) or not password:
+        return "Password is required."
+
+    if len(password) < PASSWORD_MIN_LENGTH:
+        return (
+            f"Password must contain at least "
+            f"{PASSWORD_MIN_LENGTH} characters."
+        )
+
+    if len(password) > PASSWORD_MAX_LENGTH:
+        return (
+            f"Password must contain no more than "
+            f"{PASSWORD_MAX_LENGTH} characters."
+        )
+
+    if password.casefold() in _PASSWORD_BLOCKLIST:
+        return (
+            "Please choose a less common password or passphrase."
+        )
+
+    return None
+
+
+# --------------------------------------------------
 # Business login session lifetime helpers
 # --------------------------------------------------
 
@@ -27385,14 +27430,15 @@ def master_admin_add_business():
             error_message="Administrator email is required."
         )
 
-    if len(temporary_password) < 10:
+    password_policy_error = _password_policy_error(
+        temporary_password
+    )
+
+    if password_policy_error:
         return render_template(
             "master_admin/businesses/add_business.html",
             form_data=form_data,
-            error_message=(
-                "Temporary password must contain at least "
-                "10 characters."
-            )
+            error_message=password_policy_error
         )
 
     if temporary_password != confirm_password:
@@ -30529,6 +30575,12 @@ def add_user():
 
         if not email or not username or not password:
             flash("Email, username, and password are required.", "error")
+            return redirect(url_for("add_user"))
+
+        password_policy_error = _password_policy_error(password)
+
+        if password_policy_error:
+            flash(password_policy_error, "error")
             return redirect(url_for("add_user"))
 
         password_hash = generate_password_hash(password)

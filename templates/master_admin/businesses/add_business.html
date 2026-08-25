@@ -226,9 +226,15 @@ Add Business | Peach Suite Pro
                 <input type="password"
                        id="temporary_password"
                        name="temporary_password"
-                       minlength="10"
+                       minlength="15"
+                       maxlength="128"
                        autocomplete="new-password"
                        required>
+
+                <small>
+                    Use 15–128 characters. Passphrases and spaces
+                    are allowed.
+                </small>
             </div>
 
             <div class="form-group">
@@ -240,7 +246,8 @@ Add Business | Peach Suite Pro
                 <input type="password"
                        id="confirm_password"
                        name="confirm_password"
-                       minlength="10"
+                       minlength="15"
+                       maxlength="128"
                        autocomplete="new-password"
                        required>
             </div>

@@ -21,7 +21,15 @@
     <input type="text" name="username" required><br><br>
 
     <label>Password</label><br>
-    <input type="password" name="password" required><br><br>
+    <input type="password"
+           name="password"
+           minlength="15"
+           maxlength="128"
+           autocomplete="new-password"
+           required><br>
+    <small>
+        Use 15–128 characters. Passphrases and spaces are allowed.
+    </small><br><br>
 
     <label>Role</label><br>
     <select name="role">
