@@ -68038,6 +68038,308 @@ def deactivate_provider_time_off(
     )
 
 
+###############################################
+#
+#       LOGIN SECURITY SETTINGS
+#
+###############################################
+
+
+@app.route(
+    "/business-management/login-security",
+    methods=["GET", "POST"],
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_security_settings"
+)
+def login_security_settings():
+    import hmac
+
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if (
+        not spa_id
+        or not business_unit_id
+        or not user_id
+    ):
+        abort(403)
+
+    if request.method == "POST":
+
+        submitted_token = request.form.get(
+            "login_security_settings_token",
+            "",
+        )
+
+        session_token = session.get(
+            "login_security_settings_token",
+            "",
+        )
+
+        if (
+            not submitted_token
+            or not session_token
+            or not hmac.compare_digest(
+                submitted_token,
+                session_token,
+            )
+        ):
+            abort(400)
+
+        try:
+            inactivity_timeout_minutes = int(
+                request.form.get(
+                    "inactivity_timeout_minutes",
+                    "",
+                )
+            )
+
+            absolute_session_hours = int(
+                request.form.get(
+                    "absolute_session_hours",
+                    "",
+                )
+            )
+
+        except (TypeError, ValueError):
+            flash(
+                "Please select valid Login Security settings.",
+                "warning",
+            )
+
+            return redirect(
+                url_for("login_security_settings")
+            )
+
+        if (
+            inactivity_timeout_minutes
+            not in BUSINESS_SESSION_ALLOWED_INACTIVITY_MINUTES
+        ):
+            flash(
+                "Please select a valid inactivity timeout.",
+                "warning",
+            )
+
+            return redirect(
+                url_for("login_security_settings")
+            )
+
+        if (
+            absolute_session_hours
+            not in BUSINESS_SESSION_ALLOWED_ABSOLUTE_HOURS
+        ):
+            flash(
+                "Please select a valid business login time limit.",
+                "warning",
+            )
+
+            return redirect(
+                url_for("login_security_settings")
+            )
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        try:
+            cur.execute(
+                """
+                SELECT
+                    security_workspace_setting_id,
+                    inactivity_timeout_minutes,
+                    absolute_session_hours
+                FROM security_workspace_settings
+                WHERE spa_id = %s
+                  AND business_unit_id = %s
+                LIMIT 1
+                """,
+                (
+                    spa_id,
+                    business_unit_id,
+                ),
+            )
+
+            existing = cur.fetchone()
+
+            old_inactivity = (
+                existing[1]
+                if existing
+                else BUSINESS_SESSION_DEFAULT_INACTIVITY_MINUTES
+            )
+
+            old_absolute = (
+                existing[2]
+                if existing
+                else BUSINESS_SESSION_DEFAULT_ABSOLUTE_HOURS
+            )
+
+            if (
+                existing
+                and old_inactivity == inactivity_timeout_minutes
+                and old_absolute == absolute_session_hours
+            ):
+                conn.rollback()
+
+                session.pop(
+                    "login_security_settings_token",
+                    None,
+                )
+
+                flash(
+                    "No Login Security changes to save.",
+                    "info",
+                )
+
+                return redirect(
+                    url_for("login_security_settings")
+                )
+
+            cur.execute(
+                """
+                INSERT INTO security_workspace_settings (
+                    spa_id,
+                    business_unit_id,
+                    inactivity_timeout_minutes,
+                    absolute_session_hours,
+                    created_by,
+                    updated_by
+                )
+                VALUES (%s, %s, %s, %s, %s, %s)
+
+                ON CONFLICT (
+                    spa_id,
+                    business_unit_id
+                )
+                DO UPDATE SET
+                    inactivity_timeout_minutes =
+                        EXCLUDED.inactivity_timeout_minutes,
+                    absolute_session_hours =
+                        EXCLUDED.absolute_session_hours,
+                    updated_by = EXCLUDED.updated_by,
+                    updated_at = NOW()
+
+                RETURNING
+                    security_workspace_setting_id
+                """,
+                (
+                    spa_id,
+                    business_unit_id,
+                    inactivity_timeout_minutes,
+                    absolute_session_hours,
+                    user_id,
+                    user_id,
+                ),
+            )
+
+            setting_id = cur.fetchone()[0]
+
+            log_audit(
+                cur,
+                spa_id=spa_id,
+                user_id=user_id,
+                action_type=(
+                    "security_workspace_settings_updated"
+                ),
+                table_name=(
+                    "security_workspace_settings"
+                ),
+                record_id=setting_id,
+                old_value=(
+                    "inactivity_timeout_minutes="
+                    f"{old_inactivity}; "
+                    "absolute_session_hours="
+                    f"{old_absolute}"
+                ),
+                new_value=(
+                    "inactivity_timeout_minutes="
+                    f"{inactivity_timeout_minutes}; "
+                    "absolute_session_hours="
+                    f"{absolute_session_hours}"
+                ),
+                notes=(
+                    "Login Security settings updated "
+                    f"for business_unit_id={business_unit_id}."
+                ),
+            )
+
+            conn.commit()
+
+        except Exception:
+            conn.rollback()
+            raise
+
+        finally:
+            cur.close()
+            conn.close()
+
+        _clear_business_security_policy_cache()
+
+        session.pop(
+            "login_security_settings_token",
+            None,
+        )
+
+        flash(
+            "Login Security settings updated.",
+            "success",
+        )
+
+        return redirect(
+            url_for("login_security_settings")
+        )
+
+    (
+        inactivity_timeout_minutes,
+        absolute_session_hours,
+    ) = _business_session_policy(
+        spa_id,
+        business_unit_id,
+    )
+
+    login_security_settings_token = (
+        session.get(
+            "login_security_settings_token"
+        )
+    )
+
+    if not login_security_settings_token:
+        login_security_settings_token = (
+            secrets.token_urlsafe(32)
+        )
+
+        session[
+            "login_security_settings_token"
+        ] = login_security_settings_token
+
+    return render_template(
+        "login_security_settings.html",
+        inactivity_timeout_minutes=(
+            inactivity_timeout_minutes
+        ),
+        absolute_session_hours=(
+            absolute_session_hours
+        ),
+        inactivity_options=(
+            BUSINESS_SESSION_ALLOWED_INACTIVITY_MINUTES
+        ),
+        absolute_options=(
+            BUSINESS_SESSION_ALLOWED_ABSOLUTE_HOURS
+        ),
+        absolute_extension_hours=(
+            BUSINESS_SESSION_ABSOLUTE_EXTENSION_HOURS
+        ),
+        warning_minutes=(
+            BUSINESS_SESSION_ABSOLUTE_WARNING_MINUTES
+        ),
+        login_security_settings_token=(
+            login_security_settings_token
+        ),
+    )
+
+
 @app.route("/admin")
 @login_required
 @spa_required

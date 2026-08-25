@@ -47,7 +47,7 @@
 
             <a href="{{ url_for('business_schedule') }}">
                 <span aria-hidden="true">🗓️</span>
-                <span>Business Schedule</span>
+                <span>Business Schedule & Reminders</span>
             </a>
 
         </div>
@@ -72,6 +72,13 @@
                 <span aria-hidden="true">🛠️</span>
                 <span>Admin Settings</span>
             </a>
+
+{% if nav_access.can_manage_security_settings %}
+<a href="{{ url_for('login_security_settings') }}">
+    <span aria-hidden="true">🔐</span>
+    <span>Login Security</span>
+</a>
+{% endif %}
 
         <a href="{{ url_for('help_center') }}">
             <span aria-hidden="true">❓</span>

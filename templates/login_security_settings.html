@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+
+{% block title %}
+Login Security | Peach Suite Pro
+{% endblock %}
+
+{% block content %}
+
+<style>
+.login-security-page {
+    max-width: 920px;
+    margin: 0 auto;
+}
+
+.login-security-header {
+    margin-bottom: 24px;
+}
+
+.login-security-header h1 {
+    margin-bottom: 8px;
+}
+
+.login-security-header p {
+    max-width: 760px;
+    margin: 0;
+    line-height: 1.55;
+    color: #555;
+}
+
+.login-security-card {
+    margin-bottom: 18px;
+    padding: 22px;
+    border: 1px solid #dddddd;
+    border-radius: 14px;
+    background: #ffffff;
+}
+
+.login-security-card h2 {
+    margin-top: 0;
+    margin-bottom: 8px;
+    font-size: 20px;
+}
+
+.login-security-card p {
+    margin-top: 0;
+    line-height: 1.55;
+    color: #555;
+}
+
+.login-security-field {
+    max-width: 420px;
+    margin-top: 18px;
+}
+
+.login-security-field label {
+    display: block;
+    margin-bottom: 7px;
+    font-weight: 700;
+}
+
+.login-security-field select {
+    width: 100%;
+    min-height: 44px;
+    padding: 9px 11px;
+    border: 1px solid #cccccc;
+    border-radius: 9px;
+    background: #ffffff;
+    font: inherit;
+}
+
+.login-security-note {
+    margin-top: 12px;
+    padding: 14px 16px;
+    border-radius: 10px;
+    background: #f7f7f7;
+    line-height: 1.5;
+    color: #444;
+}
+
+.login-security-actions {
+    margin-top: 24px;
+}
+
+.login-security-save {
+    min-height: 44px;
+    padding: 10px 18px;
+    border: 0;
+    border-radius: 9px;
+    background: #2d2d2d;
+    color: #ffffff;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+}
+</style>
+
+
+<div class="login-security-page">
+
+    <div class="page-tool-pills">
+        <a
+            href="{{ url_for('spa_management') }}"
+            class="tool-pill tool-pill-small"
+        >
+            Business Management
+        </a>
+    </div>
+
+
+    <div class="login-security-header">
+
+        <h1>Login Security</h1>
+
+        <p>
+            Set the login-session rules for this business workspace.
+            These settings help protect Peach Suite Pro when a device
+            is left unattended or remains signed in for an extended
+            period.
+        </p>
+
+    </div>
+
+
+    <form
+        method="POST"
+        action="{{ url_for('login_security_settings') }}"
+    >
+
+        <input
+            type="hidden"
+            name="login_security_settings_token"
+            value="{{ login_security_settings_token }}"
+        >
+
+
+        <section class="login-security-card">
+
+            <h2>Inactivity Timeout</h2>
+
+            <p>
+                Choose how long Peach Suite Pro can remain open
+                without actual user activity before a new login is
+                required. Normal use of Peach Suite Pro resets this
+                inactivity timer.
+            </p>
+
+            <div class="login-security-field">
+
+                <label for="inactivity_timeout_minutes">
+                    Sign out after no activity for
+                </label>
+
+                <select
+                    id="inactivity_timeout_minutes"
+                    name="inactivity_timeout_minutes"
+                    required
+                >
+
+                    {% for minutes in inactivity_options %}
+
+                        <option
+                            value="{{ minutes }}"
+                            {% if
+                                minutes
+                                == inactivity_timeout_minutes
+                            %}
+                                selected
+                            {% endif %}
+                        >
+                            {{ minutes }} minutes
+                        </option>
+
+                    {% endfor %}
+
+                </select>
+
+            </div>
+
+        </section>
+
+
+        <section class="login-security-card">
+
+            <h2>Business Login Time Limit</h2>
+
+            <p>
+                Choose the maximum length of a normal authenticated
+                business login. User activity does not restart this
+                clock.
+            </p>
+
+            <div class="login-security-field">
+
+                <label for="absolute_session_hours">
+                    Require reauthentication after
+                </label>
+
+                <select
+                    id="absolute_session_hours"
+                    name="absolute_session_hours"
+                    required
+                >
+
+                    {% for hours in absolute_options %}
+
+                        <option
+                            value="{{ hours }}"
+                            {% if
+                                hours
+                                == absolute_session_hours
+                            %}
+                                selected
+                            {% endif %}
+                        >
+                            {{ hours }} hours
+                        </option>
+
+                    {% endfor %}
+
+                </select>
+
+            </div>
+
+
+            <div class="login-security-note">
+
+                Peach Suite Pro provides a warning
+                {{ warning_minutes }} minutes before this limit.
+
+                At the limit, the current password can be entered once
+                to continue for one final
+                {{ absolute_extension_hours }}-hour period.
+
+                When that final period ends, a full new login is
+                required.
+
+            </div>
+
+        </section>
+
+
+        <div class="login-security-note">
+
+            <strong>Current workspace:</strong>
+            Changes saved here apply only to the business workspace
+            you are currently using.
+
+            Changes take effect immediately for this browser session.
+            Other active sessions may take up to 5 minutes to receive
+            the updated policy. If the current session has already
+            exceeded a newly selected limit, Peach Suite Pro may
+            require reauthentication or a new login.
+
+        </div>
+
+
+        <div class="login-security-actions">
+
+            <button
+                type="submit"
+                class="login-security-save"
+            >
+                Save Login Security Settings
+            </button>
+
+        </div>
+
+    </form>
+
+</div>
+
+{% endblock %}
