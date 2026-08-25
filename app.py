@@ -10001,7 +10001,11 @@ def load_spa():
         )
     )
 
-    if tab_presence_initialized:
+    bootstrap_active = (
+        _business_session_tab_bootstrap_active()
+    )
+
+    if not bootstrap_active:
 
         tab_presence = (
             _business_session_tab_presence()
@@ -10019,16 +10023,10 @@ def load_spa():
                 )
             )
 
-    elif not _business_session_tab_bootstrap_active():
-
-        session.clear()
-
-        return redirect(
-            url_for(
-                "login",
-                session_ended="1",
-            )
-        )
+        if not tab_presence_initialized:
+            session[
+                "_business_tab_presence_initialized"
+            ] = True
 
     expiration_reason = (
         _business_session_expiration_reason(
