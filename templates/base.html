@@ -160,6 +160,123 @@
             opacity: 0.65;
             cursor: wait;
         }
+
+        .psp-absolute-session-notice {
+            position: fixed;
+            right: 24px;
+            bottom: 24px;
+            z-index: 99990;
+            width: min(390px, calc(100% - 48px));
+            padding: 18px 20px;
+            background: #ffffff;
+            border: 1px solid #ddd7d0;
+            border-radius: 14px;
+            box-shadow:
+                0 14px 36px rgba(0, 0, 0, 0.14);
+        }
+
+        .psp-absolute-session-notice[hidden] {
+            display: none;
+        }
+
+        .psp-absolute-session-notice strong {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 17px;
+        }
+
+        .psp-absolute-session-notice p {
+            margin: 0;
+            line-height: 1.45;
+            color: #555555;
+        }
+
+        .psp-absolute-session-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 99999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            background: rgba(255, 255, 255, 0.97);
+        }
+
+        .psp-absolute-session-overlay[hidden] {
+            display: none;
+        }
+
+        .psp-absolute-session-card {
+            width: min(460px, 100%);
+            padding: 30px 26px;
+            text-align: center;
+            background: #ffffff;
+            border: 1px solid #ddd7d0;
+            border-radius: 16px;
+            box-shadow:
+                0 18px 50px rgba(0, 0, 0, 0.14);
+        }
+
+        .psp-absolute-session-card h2 {
+            margin: 0 0 12px;
+            font-size: 21px;
+        }
+
+        .psp-absolute-session-card p {
+            margin: 0 0 20px;
+            line-height: 1.5;
+            color: #555555;
+        }
+
+        .psp-absolute-session-password {
+            width: 100%;
+            box-sizing: border-box;
+            min-height: 46px;
+            margin-bottom: 12px;
+            padding: 10px 12px;
+            border: 1px solid #cfc8c1;
+            border-radius: 10px;
+            font: inherit;
+        }
+
+        .psp-absolute-session-error {
+            margin: 0 0 12px;
+            color: #a12622;
+            font-size: 14px;
+        }
+
+        .psp-absolute-session-actions {
+            display: grid;
+            gap: 10px;
+        }
+
+        .psp-absolute-session-primary,
+        .psp-absolute-session-secondary {
+            width: 100%;
+            min-height: 46px;
+            border-radius: 10px;
+            font: inherit;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .psp-absolute-session-primary {
+            border: 0;
+            background: #2d2d2d;
+            color: #ffffff;
+        }
+
+        .psp-absolute-session-secondary {
+            border: 1px solid #cfc8c1;
+            background: #ffffff;
+            color: #2d2d2d;
+        }
+
+        .psp-absolute-session-primary:disabled,
+        .psp-absolute-session-secondary:disabled {
+            opacity: 0.65;
+            cursor: wait;
+        }
     </style>
 </head>
 
@@ -192,6 +309,87 @@
             >
                 Continue
             </button>
+
+        </div>
+    </div>
+
+    <aside
+        id="pspAbsoluteSessionNotice"
+        class="psp-absolute-session-notice"
+        role="status"
+        aria-live="polite"
+        hidden
+    >
+        <strong id="pspAbsoluteSessionNoticeTitle">
+            Session time reminder
+        </strong>
+
+        <p id="pspAbsoluteSessionNoticeMessage">
+            Your Peach Suite Pro session is nearing its time limit.
+        </p>
+    </aside>
+
+    <div
+        id="pspAbsoluteSessionOverlay"
+        class="psp-absolute-session-overlay"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="pspAbsoluteSessionTitle"
+        aria-describedby="pspAbsoluteSessionMessage"
+        hidden
+    >
+        <div class="psp-absolute-session-card">
+
+            <h2 id="pspAbsoluteSessionTitle">
+                Continue your Peach Suite Pro session
+            </h2>
+
+            <p id="pspAbsoluteSessionMessage">
+                Your business login has reached its time limit.
+                Enter your current password to continue for
+                one final two-hour extension.
+            </p>
+
+            <form id="pspAbsoluteSessionForm">
+
+                <input
+                    type="password"
+                    id="pspAbsoluteSessionPassword"
+                    class="psp-absolute-session-password"
+                    name="password"
+                    autocomplete="current-password"
+                    placeholder="Current password"
+                    required
+                >
+
+                <p
+                    id="pspAbsoluteSessionError"
+                    class="psp-absolute-session-error"
+                    role="alert"
+                    hidden
+                ></p>
+
+                <div class="psp-absolute-session-actions">
+
+                    <button
+                        type="submit"
+                        id="pspAbsoluteSessionContinue"
+                        class="psp-absolute-session-primary"
+                    >
+                        Continue for 2 Hours
+                    </button>
+
+                    <button
+                        type="button"
+                        id="pspAbsoluteSessionSignOut"
+                        class="psp-absolute-session-secondary"
+                    >
+                        Sign Out Instead
+                    </button>
+
+                </div>
+
+            </form>
 
         </div>
     </div>
@@ -3755,8 +3953,20 @@ document.addEventListener(
     const sessionStateUrl =
         {{ url_for("browser_session_state") | tojson }};
 
+    const sessionActivityUrl =
+        {{ url_for("browser_session_activity") | tojson }};
+
+    const sessionReauthenticateUrl =
+        {{ url_for("browser_session_reauthenticate") | tojson }};
+
+    const sessionReauthenticationRequiredUrl =
+        {{ url_for("browser_session_reauthentication_required") | tojson }};
+
     const loginUrl =
         {{ url_for("login") | tojson }};
+
+    const logoutUrl =
+        {{ url_for("logout") | tojson }};
 
     if (!pageSessionMarker) {
         return;
@@ -3774,16 +3984,341 @@ document.addEventListener(
         "pspStaleSessionButton"
     );
 
+    const absoluteNotice = document.getElementById(
+        "pspAbsoluteSessionNotice"
+    );
+
+    const absoluteNoticeTitle = document.getElementById(
+        "pspAbsoluteSessionNoticeTitle"
+    );
+
+    const absoluteNoticeMessage = document.getElementById(
+        "pspAbsoluteSessionNoticeMessage"
+    );
+
+    const absoluteOverlay = document.getElementById(
+        "pspAbsoluteSessionOverlay"
+    );
+
+    const absoluteForm = document.getElementById(
+        "pspAbsoluteSessionForm"
+    );
+
+    const absolutePassword = document.getElementById(
+        "pspAbsoluteSessionPassword"
+    );
+
+    const absoluteError = document.getElementById(
+        "pspAbsoluteSessionError"
+    );
+
+    const absoluteContinue = document.getElementById(
+        "pspAbsoluteSessionContinue"
+    );
+
+    const absoluteSignOut = document.getElementById(
+        "pspAbsoluteSessionSignOut"
+    );
+
     if (
         !overlay
         || !messageElement
         || !continueButton
+        || !absoluteNotice
+        || !absoluteNoticeTitle
+        || !absoluteNoticeMessage
+        || !absoluteOverlay
+        || !absoluteForm
+        || !absolutePassword
+        || !absoluteError
+        || !absoluteContinue
+        || !absoluteSignOut
     ) {
         return;
     }
 
     let staleSessionShown = false;
     let sessionCheckInFlight = false;
+    let activityReportInFlight = false;
+    let lastActivityReportAt = 0;
+    let absoluteReauthenticationRequired = false;
+
+    const activityReportIntervalMs = 60 * 1000;
+
+
+    function absoluteRemainingLabel(
+        remainingSeconds
+    ) {
+
+        const totalMinutes = Math.max(
+            1,
+            Math.ceil(
+                Number(remainingSeconds || 0) / 60
+            )
+        );
+
+        if (totalMinutes < 60) {
+            return (
+                totalMinutes
+                + (
+                    totalMinutes === 1
+                        ? " minute"
+                        : " minutes"
+                )
+            );
+        }
+
+        const hours = Math.floor(
+            totalMinutes / 60
+        );
+
+        const minutes = totalMinutes % 60;
+
+        if (!minutes) {
+            return (
+                hours
+                + (
+                    hours === 1
+                        ? " hour"
+                        : " hours"
+                )
+            );
+        }
+
+        return (
+            hours
+            + (
+                hours === 1
+                    ? " hour "
+                    : " hours "
+            )
+            + minutes
+            + (
+                minutes === 1
+                    ? " minute"
+                    : " minutes"
+            )
+        );
+    }
+
+
+    function hideAbsoluteSessionOverlay() {
+
+        absoluteOverlay.hidden = true;
+        absolutePassword.value = "";
+        absoluteError.hidden = true;
+        absoluteError.textContent = "";
+
+        if (!staleSessionShown) {
+            document.body.style.overflow = "";
+        }
+    }
+
+
+    function showAbsoluteSessionOverlay() {
+
+        absoluteReauthenticationRequired = true;
+        absoluteNotice.hidden = true;
+        absoluteOverlay.hidden = false;
+        absoluteError.hidden = true;
+        absoluteError.textContent = "";
+        document.body.style.overflow = "hidden";
+
+        window.setTimeout(
+            function () {
+                absolutePassword.focus();
+            },
+            0
+        );
+    }
+
+
+    function showEndedSessionOverlay(data) {
+
+        const reason = String(
+            (data && data.expiration_reason) || ""
+        );
+
+        let message =
+            "Your Peach Suite Pro session ended "
+            + "in another window.";
+
+        if (reason === "inactivity") {
+
+            message =
+                "Your Peach Suite Pro session ended "
+                + "because it was inactive too long.";
+
+        } else if (
+            reason === "absolute_extension_expired"
+        ) {
+
+            message =
+                "Your final two-hour Peach Suite Pro "
+                + "session period has ended. "
+                + "Please sign in again.";
+
+        } else if (reason === "invalid_context") {
+
+            message =
+                "Your Peach Suite Pro session is "
+                + "no longer active.";
+        }
+
+        showStaleSessionOverlay(
+            message,
+            "Go to Login",
+            loginUrl
+        );
+    }
+
+
+    function applyAbsoluteSessionStatus(data) {
+
+        const status = (
+            data
+            && data.absolute_status
+        );
+
+        if (!status) {
+            return;
+        }
+
+        if (
+            data.reauthentication_required
+            || status.can_reauthenticate
+        ) {
+            showAbsoluteSessionOverlay();
+            return;
+        }
+
+        absoluteReauthenticationRequired = false;
+
+        if (!absoluteOverlay.hidden) {
+            hideAbsoluteSessionOverlay();
+        }
+
+        if (!status.warning) {
+            absoluteNotice.hidden = true;
+            return;
+        }
+
+        const remainingLabel = absoluteRemainingLabel(
+            status.remaining_seconds
+        );
+
+        if (status.extension_used) {
+
+            absoluteNoticeTitle.textContent =
+                "Final session time reminder";
+
+            absoluteNoticeMessage.textContent =
+                "Your final Peach Suite Pro session "
+                + "period ends in "
+                + remainingLabel
+                + ". Finish and save your work. "
+                + "After that, you will need to sign in again.";
+
+        } else {
+
+            absoluteNoticeTitle.textContent =
+                "Session time reminder";
+
+            absoluteNoticeMessage.textContent =
+                "Your Peach Suite Pro business login "
+                + "reaches its time limit in "
+                + remainingLabel
+                + ". When it expires, enter your "
+                + "current password once to continue "
+                + "for two more hours.";
+        }
+
+        absoluteNotice.hidden = false;
+    }
+
+
+    async function reportBrowserActivity() {
+
+        if (
+            staleSessionShown
+            || activityReportInFlight
+            || absoluteReauthenticationRequired
+        ) {
+            return;
+        }
+
+        const now = Date.now();
+
+        if (
+            lastActivityReportAt
+            && (
+                now - lastActivityReportAt
+                < activityReportIntervalMs
+            )
+        ) {
+            return;
+        }
+
+        /*
+         * Mark the attempt before sending so rapid user events
+         * cannot create a burst of activity requests.
+         */
+        lastActivityReportAt = now;
+        activityReportInFlight = true;
+
+        try {
+
+            const response = await fetch(
+                sessionActivityUrl,
+                {
+                    method: "POST",
+                    credentials: "same-origin",
+                    cache: "no-store",
+                    keepalive: true,
+                    headers: {
+                        "Accept": "application/json",
+                        "X-Peach-Suite-Activity": "1",
+                        "X-Peach-Suite-Session-Marker":
+                            pageSessionMarker
+                    }
+                }
+            );
+
+            if (!response.ok) {
+                return;
+            }
+
+            const data = await response.json();
+
+            if (!data.success) {
+                return;
+            }
+
+            if (data.stale_session) {
+
+                checkCurrentBrowserSession(true);
+                return;
+            }
+
+            if (!data.authenticated) {
+
+                showEndedSessionOverlay(data);
+                return;
+            }
+
+            applyAbsoluteSessionStatus(data);
+
+        } catch (error) {
+
+            /*
+             * Network trouble must not lock the user's session.
+             */
+
+        } finally {
+
+            activityReportInFlight = false;
+        }
+    }
 
 
     function readStoredSessionMarker() {
@@ -3889,13 +4424,7 @@ document.addEventListener(
 
             if (!data.authenticated) {
 
-                showStaleSessionOverlay(
-                    "Your Peach Suite Pro session ended "
-                    + "in another window.",
-                    "Go to Login",
-                    loginUrl
-                );
-
+                showEndedSessionOverlay(data);
                 return;
             }
 
@@ -3926,6 +4455,8 @@ document.addEventListener(
 
                 return;
             }
+
+            applyAbsoluteSessionStatus(data);
 
             if (publishMarkerIfCurrent) {
                 publishCurrentSessionMarker();
@@ -3965,6 +4496,181 @@ document.addEventListener(
          */
         checkCurrentBrowserSession(true);
     }
+
+
+    [
+        "pointerdown",
+        "keydown",
+        "wheel",
+        "touchstart"
+    ].forEach(
+        function (eventName) {
+
+            window.addEventListener(
+                eventName,
+                reportBrowserActivity,
+                {
+                    passive: true
+                }
+            );
+        }
+    );
+
+
+    absoluteForm.addEventListener(
+        "submit",
+        async function (event) {
+
+            event.preventDefault();
+
+            if (
+                staleSessionShown
+                || !absoluteReauthenticationRequired
+            ) {
+                return;
+            }
+
+            absoluteError.hidden = true;
+            absoluteError.textContent = "";
+
+            absoluteContinue.disabled = true;
+            absoluteSignOut.disabled = true;
+
+            try {
+
+                const formData = new FormData(
+                    absoluteForm
+                );
+
+                const response = await fetch(
+                    sessionReauthenticateUrl,
+                    {
+                        method: "POST",
+                        credentials: "same-origin",
+                        cache: "no-store",
+                        headers: {
+                            "Accept": "application/json",
+                            "X-Peach-Suite-Activity": "1",
+                            "X-Peach-Suite-Session-Marker":
+                                pageSessionMarker
+                        },
+                        body: formData
+                    }
+                );
+
+                let data = null;
+
+                try {
+                    data = await response.json();
+                } catch (error) {
+                    data = null;
+                }
+
+                if (!data) {
+
+                    absoluteError.textContent =
+                        "Peach Suite Pro could not "
+                        + "verify your password. "
+                        + "Please try again.";
+
+                    absoluteError.hidden = false;
+                    return;
+                }
+
+                if (data.stale_session) {
+
+                    checkCurrentBrowserSession(true);
+                    return;
+                }
+
+                if (!data.authenticated) {
+
+                    hideAbsoluteSessionOverlay();
+                    showEndedSessionOverlay(data);
+                    return;
+                }
+
+                if (data.success) {
+
+                    absoluteReauthenticationRequired = false;
+                    lastActivityReportAt = Date.now();
+
+                    hideAbsoluteSessionOverlay();
+
+                    if (
+                        window.location.pathname
+                        === sessionReauthenticationRequiredUrl
+                    ) {
+                        window.location.reload();
+                        return;
+                    }
+
+                    await checkCurrentBrowserSession(true);
+
+                    return;
+                }
+
+                if (
+                    response.status === 409
+                    && !data.reauthentication_required
+                ) {
+
+                    absoluteReauthenticationRequired = false;
+                    hideAbsoluteSessionOverlay();
+
+                    if (
+                        window.location.pathname
+                        === sessionReauthenticationRequiredUrl
+                    ) {
+                        window.location.reload();
+                        return;
+                    }
+
+                    await checkCurrentBrowserSession(true);
+
+                    return;
+                }
+
+                absoluteError.textContent = String(
+                    data.message
+                    || "Invalid password."
+                );
+
+                absoluteError.hidden = false;
+
+                absolutePassword.focus();
+                absolutePassword.select();
+
+            } catch (error) {
+
+                absoluteError.textContent =
+                    "Peach Suite Pro could not "
+                    + "verify your password. "
+                    + "Check your connection and try again.";
+
+                absoluteError.hidden = false;
+
+            } finally {
+
+                absoluteContinue.disabled = false;
+                absoluteSignOut.disabled = false;
+            }
+        }
+    );
+
+
+    absoluteSignOut.addEventListener(
+        "click",
+        function () {
+
+            absoluteContinue.disabled = true;
+            absoluteSignOut.disabled = true;
+
+            window.location.assign(
+                logoutUrl
+            );
+        }
+    );
 
 
     window.addEventListener(

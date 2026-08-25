@@ -309,6 +309,35 @@ app.config.update(
 
 
 # --------------------------------------------------
+# Business login session security
+# --------------------------------------------------
+
+BUSINESS_SESSION_DEFAULT_INACTIVITY_MINUTES = 60
+
+BUSINESS_SESSION_ALLOWED_INACTIVITY_MINUTES = (
+    30,
+    45,
+    60,
+)
+
+BUSINESS_SESSION_DEFAULT_ABSOLUTE_HOURS = 10
+
+BUSINESS_SESSION_ALLOWED_ABSOLUTE_HOURS = (
+    4,
+    6,
+    8,
+    10,
+)
+
+BUSINESS_SESSION_ABSOLUTE_EXTENSION_HOURS = 2
+BUSINESS_SESSION_ABSOLUTE_WARNING_MINUTES = 30
+
+BUSINESS_SESSION_ACTIVITY_REPORT_SECONDS = 60
+
+BUSINESS_SESSION_POLICY_CACHE_SECONDS = 300
+
+
+# --------------------------------------------------
 # Application Branding
 # --------------------------------------------------
 
@@ -3934,6 +3963,433 @@ def current_business_unit_id():
 
 
 
+
+
+
+
+# --------------------------------------------------
+# Business login session lifetime helpers
+# --------------------------------------------------
+
+
+def _business_session_epoch(value):
+
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _business_session_context():
+
+    if "user_id" not in session:
+        return None, None
+
+    if is_master_admin():
+        g.spa_id = None
+        return None, None
+
+    spa_id = session.get("spa_id")
+
+    if not spa_id:
+        return None, None
+
+    g.spa_id = spa_id
+
+    business_unit_id = current_business_unit_id()
+
+    return spa_id, business_unit_id
+
+
+def _clear_business_security_policy_cache():
+
+    session.pop(
+        "_business_security_policy_spa_id",
+        None,
+    )
+
+    session.pop(
+        "_business_security_policy_business_unit_id",
+        None,
+    )
+
+    session.pop(
+        "_business_security_inactivity_minutes",
+        None,
+    )
+
+    session.pop(
+        "_business_security_absolute_hours",
+        None,
+    )
+
+    session.pop(
+        "_business_security_policy_loaded_at",
+        None,
+    )
+
+
+def _business_session_policy(
+    spa_id,
+    business_unit_id,
+):
+
+    default_inactivity = (
+        BUSINESS_SESSION_DEFAULT_INACTIVITY_MINUTES
+    )
+
+    default_absolute = (
+        BUSINESS_SESSION_DEFAULT_ABSOLUTE_HOURS
+    )
+
+    if (
+        is_master_admin()
+        or spa_id is None
+        or business_unit_id is None
+    ):
+        return (
+            default_inactivity,
+            default_absolute,
+        )
+
+    now = int(time.time())
+
+    cached_spa_id = session.get(
+        "_business_security_policy_spa_id"
+    )
+
+    cached_business_unit_id = session.get(
+        "_business_security_policy_business_unit_id"
+    )
+
+    cached_inactivity = _business_session_epoch(
+        session.get(
+            "_business_security_inactivity_minutes"
+        )
+    )
+
+    cached_absolute = _business_session_epoch(
+        session.get(
+            "_business_security_absolute_hours"
+        )
+    )
+
+    cached_loaded_at = _business_session_epoch(
+        session.get(
+            "_business_security_policy_loaded_at"
+        )
+    )
+
+    if (
+        cached_spa_id == spa_id
+        and cached_business_unit_id == business_unit_id
+        and cached_inactivity
+            in BUSINESS_SESSION_ALLOWED_INACTIVITY_MINUTES
+        and cached_absolute
+            in BUSINESS_SESSION_ALLOWED_ABSOLUTE_HOURS
+        and cached_loaded_at is not None
+        and (
+            now - cached_loaded_at
+            < BUSINESS_SESSION_POLICY_CACHE_SECONDS
+        )
+    ):
+        return (
+            cached_inactivity,
+            cached_absolute,
+        )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                inactivity_timeout_minutes,
+                absolute_session_hours
+            FROM security_workspace_settings
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+            LIMIT 1
+        """, (
+            spa_id,
+            business_unit_id,
+        ))
+
+        row = cur.fetchone()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if row:
+        inactivity_timeout = _business_session_epoch(
+            row[0]
+        )
+
+        absolute_hours = _business_session_epoch(
+            row[1]
+        )
+
+    else:
+        inactivity_timeout = default_inactivity
+        absolute_hours = default_absolute
+
+    if (
+        inactivity_timeout
+        not in BUSINESS_SESSION_ALLOWED_INACTIVITY_MINUTES
+    ):
+        inactivity_timeout = default_inactivity
+
+    if (
+        absolute_hours
+        not in BUSINESS_SESSION_ALLOWED_ABSOLUTE_HOURS
+    ):
+        absolute_hours = default_absolute
+
+    session["_business_security_policy_spa_id"] = spa_id
+
+    session[
+        "_business_security_policy_business_unit_id"
+    ] = business_unit_id
+
+    session[
+        "_business_security_inactivity_minutes"
+    ] = inactivity_timeout
+
+    session[
+        "_business_security_absolute_hours"
+    ] = absolute_hours
+
+    session[
+        "_business_security_policy_loaded_at"
+    ] = now
+
+    return (
+        inactivity_timeout,
+        absolute_hours,
+    )
+
+
+def _business_session_inactivity_timeout_minutes(
+    spa_id,
+    business_unit_id,
+):
+
+    inactivity_timeout, _ = _business_session_policy(
+        spa_id,
+        business_unit_id,
+    )
+
+    return inactivity_timeout
+
+
+def _business_session_absolute_hours(
+    spa_id,
+    business_unit_id,
+):
+
+    _, absolute_hours = _business_session_policy(
+        spa_id,
+        business_unit_id,
+    )
+
+    return absolute_hours
+
+def _start_business_session_security():
+
+    now = int(time.time())
+
+    session["_business_login_started_at"] = now
+    session["_business_last_activity_at"] = now
+
+    session.pop(
+        "_business_absolute_extension_used",
+        None,
+    )
+
+    session.pop(
+        "_business_absolute_extension_expires_at",
+        None,
+    )
+
+    _clear_business_security_policy_cache()
+
+
+def _business_session_absolute_status(
+    spa_id=None,
+    business_unit_id=None,
+):
+
+    if "user_id" not in session:
+        return None
+
+    now = int(time.time())
+
+    login_started_at = _business_session_epoch(
+        session.get("_business_login_started_at")
+    )
+
+    if login_started_at is None:
+        login_started_at = now
+        session["_business_login_started_at"] = now
+
+    extension_used = bool(
+        session.get(
+            "_business_absolute_extension_used"
+        )
+    )
+
+    extension_expires_at = _business_session_epoch(
+        session.get(
+            "_business_absolute_extension_expires_at"
+        )
+    )
+
+    if extension_used:
+
+        expires_at = extension_expires_at
+
+        if expires_at is None:
+            remaining_seconds = 0
+        else:
+            remaining_seconds = max(
+                0,
+                expires_at - now,
+            )
+
+        return {
+            "extension_used": True,
+            "can_reauthenticate": False,
+            "expires_at": expires_at,
+            "remaining_seconds": remaining_seconds,
+            "warning": (
+                remaining_seconds
+                <= BUSINESS_SESSION_ABSOLUTE_WARNING_MINUTES
+                * 60
+            ),
+        }
+
+    absolute_session_hours = (
+        _business_session_absolute_hours(
+            spa_id,
+            business_unit_id,
+        )
+    )
+
+    expires_at = (
+        login_started_at
+        + absolute_session_hours
+        * 60
+        * 60
+    )
+
+    remaining_seconds = max(
+        0,
+        expires_at - now,
+    )
+
+    return {
+        "extension_used": False,
+        "can_reauthenticate": (
+            remaining_seconds == 0
+        ),
+        "expires_at": expires_at,
+        "remaining_seconds": remaining_seconds,
+        "warning": (
+            remaining_seconds
+            <= BUSINESS_SESSION_ABSOLUTE_WARNING_MINUTES
+            * 60
+        ),
+    }
+
+
+def _business_session_expiration_reason(
+    spa_id=None,
+    business_unit_id=None,
+):
+
+    if "user_id" not in session:
+        return None
+
+    now = int(time.time())
+
+    login_started_at = _business_session_epoch(
+        session.get("_business_login_started_at")
+    )
+
+    last_activity_at = _business_session_epoch(
+        session.get("_business_last_activity_at")
+    )
+
+    if login_started_at is None:
+        login_started_at = now
+        session["_business_login_started_at"] = now
+
+    if last_activity_at is None:
+        last_activity_at = now
+        session["_business_last_activity_at"] = now
+
+    (
+        inactivity_timeout_minutes,
+        absolute_session_hours,
+    ) = _business_session_policy(
+        spa_id,
+        business_unit_id,
+    )
+
+    extension_used = bool(
+        session.get(
+            "_business_absolute_extension_used"
+        )
+    )
+
+    extension_expires_at = _business_session_epoch(
+        session.get(
+            "_business_absolute_extension_expires_at"
+        )
+    )
+
+    if extension_used:
+
+        if (
+            extension_expires_at is None
+            or now >= extension_expires_at
+        ):
+            return "absolute_extension_expired"
+
+        if (
+            now - last_activity_at
+            >= inactivity_timeout_minutes * 60
+        ):
+            return "inactivity"
+
+        return None
+
+    if (
+        now - last_activity_at
+        >= inactivity_timeout_minutes * 60
+    ):
+        return "inactivity"
+
+    if (
+        now - login_started_at
+        >= absolute_session_hours * 60 * 60
+    ):
+        return "absolute"
+
+    return None
+
+
+def _record_business_session_activity():
+
+    if "user_id" not in session:
+        return False
+
+    session["_business_last_activity_at"] = int(
+        time.time()
+    )
+
+    return True
 
 
 
@@ -9306,6 +9762,9 @@ def load_spa():
         "login",
         "logout",
         "browser_session_state",
+        "browser_session_activity",
+        "browser_session_reauthenticate",
+        "browser_session_reauthentication_required",
         "static",
         "telnyx_sms_webhook",
         "square_production_webhook",
@@ -9326,17 +9785,84 @@ def load_spa():
             secrets.token_urlsafe(32)
         )
 
-    if is_master_admin():
-        g.spa_id = None
-        return
+    spa_id, business_unit_id = (
+        _business_session_context()
+    )
 
-    spa_id = session.get("spa_id")
-
-    if not spa_id:
+    if (
+        not is_master_admin()
+        and (
+            spa_id is None
+            or business_unit_id is None
+        )
+    ):
         session.clear()
-        return redirect(url_for("login"))
 
-    g.spa_id = spa_id
+        return redirect(
+            url_for(
+                "login",
+                session_ended="1",
+            )
+        )
+
+    expiration_reason = (
+        _business_session_expiration_reason(
+            spa_id,
+            business_unit_id,
+        )
+    )
+
+    if expiration_reason in (
+        "inactivity",
+        "absolute_extension_expired",
+    ):
+        session.clear()
+
+        return redirect(
+            url_for(
+                "login",
+                session_ended="1",
+            )
+        )
+
+    if expiration_reason == "absolute":
+
+        if request.method in (
+            "GET",
+            "HEAD",
+        ):
+            return_path = request.full_path
+
+            if return_path.endswith("?"):
+                return_path = return_path[:-1]
+
+            if (
+                return_path.startswith("/")
+                and not return_path.startswith("//")
+                and len(return_path) <= 2000
+            ):
+                session[
+                    "_business_reauthentication_return_path"
+                ] = return_path
+            else:
+                session.pop(
+                    "_business_reauthentication_return_path",
+                    None,
+                )
+
+        else:
+            session.pop(
+                "_business_reauthentication_return_path",
+                None,
+            )
+
+        return redirect(
+            url_for(
+                "browser_session_reauthentication_required"
+            )
+        )
+
+    return
 
 
 
@@ -27008,6 +27534,9 @@ def _complete_business_login(user):
     session["_browser_session_marker"] = (
         browser_session_marker
     )
+
+    _start_business_session_security()
+
     session["show_login_splash"] = True
 
     flash("Logged in successfully.", "success")
@@ -27242,14 +27771,459 @@ def cancel_login_business_switch():
 
 
 
+@app.route(
+    "/session/reauthentication-required"
+)
+def browser_session_reauthentication_required():
+
+    if "user_id" not in session:
+        return redirect(
+            url_for("login")
+        )
+
+    spa_id, business_unit_id = (
+        _business_session_context()
+    )
+
+    if (
+        not is_master_admin()
+        and (
+            spa_id is None
+            or business_unit_id is None
+        )
+    ):
+        session.clear()
+
+        return redirect(
+            url_for("login")
+        )
+
+    expiration_reason = (
+        _business_session_expiration_reason(
+            spa_id,
+            business_unit_id,
+        )
+    )
+
+    if expiration_reason == "inactivity":
+        session.clear()
+
+        return redirect(
+            url_for(
+                "login",
+                session_ended="1",
+            )
+        )
+
+    if expiration_reason == "absolute_extension_expired":
+        session.clear()
+
+        return redirect(
+            url_for(
+                "login",
+                session_ended="1",
+            )
+        )
+
+    if expiration_reason != "absolute":
+        return_path = session.pop(
+            "_business_reauthentication_return_path",
+            None,
+        )
+
+        if (
+            return_path
+            and isinstance(
+                return_path,
+                str,
+            )
+            and return_path.startswith("/")
+            and not return_path.startswith("//")
+        ):
+            return redirect(
+                return_path
+            )
+
+        session.pop(
+            "_business_reauthentication_return_path",
+            None,
+        )
+
+        if is_master_admin():
+            return redirect(
+                url_for("master_admin_home")
+            )
+
+        return redirect(
+            url_for("morning_briefing")
+        )
+
+    return render_template(
+        "session_reauthentication_required.html"
+    )
+
+
+@app.route(
+    "/session/reauthenticate",
+    methods=["POST"],
+)
+def browser_session_reauthenticate():
+
+    if (
+        request.headers.get(
+            "X-Peach-Suite-Activity"
+        )
+        != "1"
+    ):
+        return jsonify(
+            success=False,
+            message="Invalid reauthentication request.",
+        ), 403
+
+    if "user_id" not in session:
+        return jsonify(
+            success=True,
+            authenticated=False,
+        )
+
+    page_session_marker = str(
+        request.headers.get(
+            "X-Peach-Suite-Session-Marker"
+        )
+        or ""
+    )
+
+    current_session_marker = str(
+        session.get("_browser_session_marker")
+        or ""
+    )
+
+    if (
+        not page_session_marker
+        or not current_session_marker
+        or page_session_marker
+        != current_session_marker
+    ):
+        return jsonify(
+            success=True,
+            authenticated=True,
+            stale_session=True,
+        )
+
+    spa_id, business_unit_id = (
+        _business_session_context()
+    )
+
+    if (
+        not is_master_admin()
+        and (
+            spa_id is None
+            or business_unit_id is None
+        )
+    ):
+        session.clear()
+
+        return jsonify(
+            success=True,
+            authenticated=False,
+            expiration_reason="invalid_context",
+        )
+
+    expiration_reason = (
+        _business_session_expiration_reason(
+            spa_id,
+            business_unit_id,
+        )
+    )
+
+    if expiration_reason == "inactivity":
+        session.clear()
+
+        return jsonify(
+            success=True,
+            authenticated=False,
+            expiration_reason="inactivity",
+        )
+
+    if expiration_reason == "absolute_extension_expired":
+        session.clear()
+
+        return jsonify(
+            success=True,
+            authenticated=False,
+            expiration_reason=(
+                "absolute_extension_expired"
+            ),
+        )
+
+    if expiration_reason != "absolute":
+        return jsonify(
+            success=False,
+            authenticated=True,
+            reauthentication_required=False,
+            message=(
+                "Absolute-session reauthentication "
+                "is not required."
+            ),
+        ), 409
+
+    password = request.form.get(
+        "password",
+        "",
+    )
+
+    if not password:
+        return jsonify(
+            success=False,
+            authenticated=True,
+            reauthentication_required=True,
+            message="Password is required.",
+        ), 400
+
+    user_id = session.get("user_id")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                user_id,
+                spa_id,
+                password_hash,
+                role
+            FROM users
+            WHERE user_id = %s
+              AND active = TRUE
+            LIMIT 1
+        """, (user_id,))
+
+        user = cur.fetchone()
+
+        account_matches_session = bool(
+            user
+            and (
+                is_master_admin()
+                or user[1] == spa_id
+            )
+            and user[3] == session.get("role")
+        )
+
+        password_match = bool(
+            account_matches_session
+            and check_password_hash(
+                user[2],
+                password,
+            )
+        )
+
+        if not password_match:
+            log_audit(
+                cur,
+                spa_id=spa_id,
+                user_id=user_id,
+                action_type=(
+                    "session_absolute_reauthentication_failed"
+                ),
+                table_name="users",
+                record_id=user_id,
+                notes=(
+                    "Absolute-session password "
+                    "reauthentication failed."
+                ),
+            )
+
+            conn.commit()
+
+            return jsonify(
+                success=False,
+                authenticated=True,
+                reauthentication_required=True,
+                message="Invalid password.",
+            ), 401
+
+        now = int(time.time())
+
+        extension_expires_at = (
+            now
+            + BUSINESS_SESSION_ABSOLUTE_EXTENSION_HOURS
+            * 60
+            * 60
+        )
+
+        log_audit(
+            cur,
+            spa_id=spa_id,
+            user_id=user_id,
+            action_type=(
+                "session_absolute_reauthentication_succeeded"
+            ),
+            table_name="users",
+            record_id=user_id,
+            notes=(
+                "One-time two-hour absolute-session "
+                "extension granted."
+            ),
+        )
+
+        conn.commit()
+
+        session[
+            "_business_absolute_extension_used"
+        ] = True
+
+        session[
+            "_business_absolute_extension_expires_at"
+        ] = extension_expires_at
+
+        session[
+            "_business_last_activity_at"
+        ] = now
+
+        return jsonify(
+            success=True,
+            authenticated=True,
+            reauthentication_required=False,
+            extension_expires_at=extension_expires_at,
+        )
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route(
+    "/session/activity",
+    methods=["POST"],
+)
+def browser_session_activity():
+
+    if (
+        request.headers.get(
+            "X-Peach-Suite-Activity"
+        )
+        != "1"
+    ):
+        return jsonify(
+            success=False,
+            message="Invalid activity request.",
+        ), 403
+
+    if "user_id" not in session:
+        return jsonify(
+            success=True,
+            authenticated=False,
+        )
+
+    page_session_marker = str(
+        request.headers.get(
+            "X-Peach-Suite-Session-Marker"
+        )
+        or ""
+    )
+
+    current_session_marker = str(
+        session.get("_browser_session_marker")
+        or ""
+    )
+
+    if (
+        not page_session_marker
+        or not current_session_marker
+        or page_session_marker
+        != current_session_marker
+    ):
+        return jsonify(
+            success=True,
+            authenticated=True,
+            stale_session=True,
+        )
+
+    spa_id, business_unit_id = (
+        _business_session_context()
+    )
+
+    if (
+        not is_master_admin()
+        and (
+            spa_id is None
+            or business_unit_id is None
+        )
+    ):
+        session.clear()
+
+        return jsonify(
+            success=True,
+            authenticated=False,
+            expiration_reason="invalid_context",
+        )
+
+    expiration_reason = (
+        _business_session_expiration_reason(
+            spa_id,
+            business_unit_id,
+        )
+    )
+
+    if expiration_reason == "inactivity":
+        session.clear()
+
+        return jsonify(
+            success=True,
+            authenticated=False,
+            expiration_reason="inactivity",
+        )
+
+    if expiration_reason == "absolute_extension_expired":
+        session.clear()
+
+        return jsonify(
+            success=True,
+            authenticated=False,
+            expiration_reason=(
+                "absolute_extension_expired"
+            ),
+        )
+
+    absolute_status = (
+        _business_session_absolute_status(
+            spa_id,
+            business_unit_id,
+        )
+    )
+
+    if expiration_reason == "absolute":
+        return jsonify(
+            success=True,
+            authenticated=True,
+            reauthentication_required=True,
+            expiration_reason="absolute",
+            absolute_status=absolute_status,
+        )
+
+    _record_business_session_activity()
+
+    return jsonify(
+        success=True,
+        authenticated=True,
+        reauthentication_required=False,
+        absolute_status=absolute_status,
+    )
+
+
 @app.route("/session/browser-state")
 def browser_session_state():
+
     user_id = session.get("user_id")
 
     if not user_id:
         return jsonify(
             success=True,
-            authenticated=False
+            authenticated=False,
         )
 
     marker = str(
@@ -27261,12 +28235,69 @@ def browser_session_state():
         marker = secrets.token_urlsafe(32)
         session["_browser_session_marker"] = marker
 
+    spa_id, business_unit_id = (
+        _business_session_context()
+    )
+
+    if (
+        not is_master_admin()
+        and (
+            spa_id is None
+            or business_unit_id is None
+        )
+    ):
+        session.clear()
+
+        return jsonify(
+            success=True,
+            authenticated=False,
+            expiration_reason="invalid_context",
+        )
+
+    expiration_reason = (
+        _business_session_expiration_reason(
+            spa_id,
+            business_unit_id,
+        )
+    )
+
+    if expiration_reason == "inactivity":
+        session.clear()
+
+        return jsonify(
+            success=True,
+            authenticated=False,
+            expiration_reason="inactivity",
+        )
+
+    if expiration_reason == "absolute_extension_expired":
+        session.clear()
+
+        return jsonify(
+            success=True,
+            authenticated=False,
+            expiration_reason=(
+                "absolute_extension_expired"
+            ),
+        )
+
+    absolute_status = (
+        _business_session_absolute_status(
+            spa_id,
+            business_unit_id,
+        )
+    )
+
     role = session.get("role")
 
     if role == "master_admin":
-        continue_url = url_for("master_admin_home")
+        continue_url = url_for(
+            "master_admin_home"
+        )
     else:
-        continue_url = url_for("morning_briefing")
+        continue_url = url_for(
+            "morning_briefing"
+        )
 
     return jsonify(
         success=True,
@@ -27274,9 +28305,14 @@ def browser_session_state():
         marker=marker,
         business_name=_login_business_label(
             session.get("spa_id"),
-            role
+            role,
         ),
-        continue_url=continue_url
+        continue_url=continue_url,
+        reauthentication_required=(
+            expiration_reason == "absolute"
+        ),
+        expiration_reason=expiration_reason,
+        absolute_status=absolute_status,
     )
 
 
