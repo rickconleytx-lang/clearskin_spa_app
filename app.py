@@ -7,6 +7,7 @@ import email
 import calendar
 import click
 import secrets
+import hashlib
 import cloudinary
 import cloudinary.uploader
 
@@ -333,6 +334,14 @@ BUSINESS_SESSION_ABSOLUTE_EXTENSION_HOURS = 2
 BUSINESS_SESSION_ABSOLUTE_WARNING_MINUTES = 30
 
 BUSINESS_SESSION_ACTIVITY_REPORT_SECONDS = 60
+
+BUSINESS_SESSION_TAB_HEARTBEAT_SECONDS = 15
+BUSINESS_SESSION_TAB_CLOSE_GRACE_SECONDS = 15
+BUSINESS_SESSION_TAB_BOOTSTRAP_SECONDS = 30
+BUSINESS_SESSION_TAB_STALE_SECONDS = (
+    max(BUSINESS_SESSION_ALLOWED_INACTIVITY_MINUTES)
+    + 5
+) * 60
 
 BUSINESS_SESSION_POLICY_CACHE_SECONDS = 300
 
@@ -4001,6 +4010,183 @@ def _business_session_context():
     return spa_id, business_unit_id
 
 
+def _business_session_presence_hash(value):
+
+    value = str(value or "")
+
+    if not value:
+        return None
+
+    return hashlib.sha256(
+        value.encode("utf-8")
+    ).hexdigest()
+
+
+def _business_session_tab_bootstrap_active():
+
+    if session.get(
+        "_business_tab_presence_initialized"
+    ):
+        return False
+
+    started_at = _business_session_epoch(
+        session.get(
+            "_business_tab_presence_started_at"
+        )
+    )
+
+    if started_at is None:
+        return False
+
+    age_seconds = max(
+        0,
+        int(time.time()) - started_at,
+    )
+
+    return (
+        age_seconds
+        <= BUSINESS_SESSION_TAB_BOOTSTRAP_SECONDS
+    )
+
+
+def _business_session_tab_presence():
+
+    marker = str(
+        session.get("_browser_session_marker")
+        or ""
+    )
+
+    marker_hash = _business_session_presence_hash(
+        marker
+    )
+
+    if not marker_hash:
+        return {
+            "has_presence": False,
+            "active_count": 0,
+            "grace_count": 0,
+        }
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                COUNT(*) FILTER (
+                    WHERE closing_at IS NULL
+                      AND last_seen_at >= (
+                          NOW()
+                          - (
+                              %s
+                              * INTERVAL '1 second'
+                          )
+                      )
+                ),
+                COUNT(*) FILTER (
+                    WHERE closing_at IS NOT NULL
+                      AND closing_at >= (
+                          NOW()
+                          - (
+                              %s
+                              * INTERVAL '1 second'
+                          )
+                      )
+                )
+            FROM browser_session_tabs
+            WHERE session_marker_hash = %s
+            """,
+            (
+                BUSINESS_SESSION_TAB_STALE_SECONDS,
+                BUSINESS_SESSION_TAB_CLOSE_GRACE_SECONDS,
+                marker_hash,
+            ),
+        )
+
+        row = cur.fetchone()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    active_count = int(
+        row[0]
+        if row and row[0] is not None
+        else 0
+    )
+
+    grace_count = int(
+        row[1]
+        if row and row[1] is not None
+        else 0
+    )
+
+    return {
+        "has_presence": bool(
+            active_count or grace_count
+        ),
+        "active_count": active_count,
+        "grace_count": grace_count,
+    }
+
+
+def _cleanup_browser_session_tabs():
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            DELETE FROM browser_session_tabs
+            WHERE (
+                closing_at IS NOT NULL
+                AND closing_at < (
+                    NOW()
+                    - (
+                        %s
+                        * INTERVAL '1 second'
+                    )
+                )
+            )
+            OR (
+                closing_at IS NULL
+                AND last_seen_at < (
+                    NOW()
+                    - (
+                        %s
+                        * INTERVAL '1 second'
+                    )
+                )
+            )
+            """,
+            (
+                BUSINESS_SESSION_TAB_CLOSE_GRACE_SECONDS,
+                BUSINESS_SESSION_TAB_STALE_SECONDS,
+            ),
+        )
+
+        deleted_count = cur.rowcount
+
+        conn.commit()
+
+        return deleted_count
+
+    except Exception:
+        conn.rollback()
+
+        app.logger.exception(
+            "Browser session tab presence cleanup failed."
+        )
+
+        return 0
+
+    finally:
+        cur.close()
+        conn.close()
+
+
 def _clear_business_security_policy_cache():
 
     session.pop(
@@ -4201,6 +4387,9 @@ def _start_business_session_security():
 
     session["_business_login_started_at"] = now
     session["_business_last_activity_at"] = now
+
+    session["_business_tab_presence_started_at"] = now
+    session["_business_tab_presence_initialized"] = False
 
     session.pop(
         "_business_absolute_extension_used",
@@ -9763,6 +9952,7 @@ def load_spa():
         "logout",
         "browser_session_state",
         "browser_session_activity",
+        "browser_session_tab_presence",
         "browser_session_reauthenticate",
         "browser_session_reauthentication_required",
         "static",
@@ -9796,6 +9986,41 @@ def load_spa():
             or business_unit_id is None
         )
     ):
+        session.clear()
+
+        return redirect(
+            url_for(
+                "login",
+                session_ended="1",
+            )
+        )
+
+    tab_presence_initialized = bool(
+        session.get(
+            "_business_tab_presence_initialized"
+        )
+    )
+
+    if tab_presence_initialized:
+
+        tab_presence = (
+            _business_session_tab_presence()
+        )
+
+        if not tab_presence.get(
+            "has_presence"
+        ):
+            session.clear()
+
+            return redirect(
+                url_for(
+                    "login",
+                    session_ended="1",
+                )
+            )
+
+    elif not _business_session_tab_bootstrap_active():
+
         session.clear()
 
         return redirect(
@@ -27537,6 +27762,8 @@ def _complete_business_login(user):
 
     _start_business_session_security()
 
+    _cleanup_browser_session_tabs()
+
     session["show_login_splash"] = True
 
     flash("Logged in successfully.", "success")
@@ -27769,6 +27996,485 @@ def cancel_login_business_switch():
 #
 #   -------------------------
 
+
+
+@app.route(
+    "/session/tab-presence",
+    methods=["POST"],
+)
+def browser_session_tab_presence():
+    import hmac
+
+    if "user_id" not in session:
+        return jsonify(
+            success=True,
+            authenticated=False,
+        )
+
+    action = str(
+        request.form.get("action")
+        or ""
+    ).strip().lower()
+
+    page_session_marker = str(
+        request.form.get("session_marker")
+        or ""
+    )
+
+    tab_token = str(
+        request.form.get("tab_token")
+        or ""
+    )
+
+    if action not in (
+        "register",
+        "heartbeat",
+        "close",
+    ):
+        return jsonify(
+            success=False,
+            message="Invalid tab-presence action.",
+        ), 400
+
+    if (
+        not page_session_marker
+        or not tab_token
+        or len(tab_token) > 200
+    ):
+        return jsonify(
+            success=False,
+            message="Invalid tab-presence request.",
+        ), 400
+
+    current_session_marker = str(
+        session.get("_browser_session_marker")
+        or ""
+    )
+
+    if (
+        not current_session_marker
+        or not hmac.compare_digest(
+            page_session_marker,
+            current_session_marker,
+        )
+    ):
+        return jsonify(
+            success=True,
+            authenticated=True,
+            stale_session=True,
+        ), 409
+
+    spa_id, business_unit_id = (
+        _business_session_context()
+    )
+
+    if (
+        not is_master_admin()
+        and (
+            spa_id is None
+            or business_unit_id is None
+        )
+    ):
+        session.clear()
+
+        return jsonify(
+            success=True,
+            authenticated=False,
+            expiration_reason="invalid_context",
+        )
+
+    expiration_reason = (
+        _business_session_expiration_reason(
+            spa_id,
+            business_unit_id,
+        )
+    )
+
+    if expiration_reason in (
+        "inactivity",
+        "absolute_extension_expired",
+    ):
+        session.clear()
+
+        return jsonify(
+            success=True,
+            authenticated=False,
+            expiration_reason=expiration_reason,
+        )
+
+    marker_hash = _business_session_presence_hash(
+        current_session_marker
+    )
+
+    tab_token_hash = _business_session_presence_hash(
+        tab_token
+    )
+
+    if not marker_hash or not tab_token_hash:
+        return jsonify(
+            success=False,
+            message="Invalid tab-presence identity.",
+        ), 400
+
+    user_id = session.get("user_id")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                browser_session_tab_id,
+                (
+                    closing_at IS NULL
+                    AND last_seen_at >= (
+                        NOW()
+                        - (
+                            %s
+                            * INTERVAL '1 second'
+                        )
+                    )
+                ) AS recently_active,
+                (
+                    closing_at IS NOT NULL
+                    AND closing_at >= (
+                        NOW()
+                        - (
+                            %s
+                            * INTERVAL '1 second'
+                        )
+                    )
+                ) AS closing_grace,
+                (
+                    closing_at IS NOT NULL
+                ) AS is_closing
+            FROM browser_session_tabs
+            WHERE session_marker_hash = %s
+              AND tab_token_hash = %s
+            LIMIT 1
+            """,
+            (
+                BUSINESS_SESSION_TAB_STALE_SECONDS,
+                BUSINESS_SESSION_TAB_CLOSE_GRACE_SECONDS,
+                marker_hash,
+                tab_token_hash,
+            ),
+        )
+
+        existing_tab = cur.fetchone()
+
+        cur.execute(
+            """
+            SELECT
+                COUNT(*) FILTER (
+                    WHERE closing_at IS NULL
+                      AND last_seen_at >= (
+                          NOW()
+                          - (
+                              %s
+                              * INTERVAL '1 second'
+                          )
+                      )
+                ),
+                COUNT(*) FILTER (
+                    WHERE closing_at IS NOT NULL
+                      AND closing_at >= (
+                          NOW()
+                          - (
+                              %s
+                              * INTERVAL '1 second'
+                          )
+                      )
+                )
+            FROM browser_session_tabs
+            WHERE session_marker_hash = %s
+            """,
+            (
+                BUSINESS_SESSION_TAB_STALE_SECONDS,
+                BUSINESS_SESSION_TAB_CLOSE_GRACE_SECONDS,
+                marker_hash,
+            ),
+        )
+
+        presence_row = cur.fetchone()
+
+        active_count = int(
+            presence_row[0]
+            if presence_row
+            and presence_row[0] is not None
+            else 0
+        )
+
+        grace_count = int(
+            presence_row[1]
+            if presence_row
+            and presence_row[1] is not None
+            else 0
+        )
+
+        current_presence = bool(
+            active_count or grace_count
+        )
+
+        existing_recoverable = bool(
+            existing_tab
+            and (
+                existing_tab[1]
+                or existing_tab[2]
+            )
+        )
+
+        existing_closing = bool(
+            existing_tab
+            and existing_tab[3]
+        )
+
+        if action == "register":
+
+            registration_allowed = bool(
+                not existing_closing
+                and (
+                    _business_session_tab_bootstrap_active()
+                    or current_presence
+                    or (
+                        existing_tab
+                        and existing_tab[1]
+                    )
+                )
+            )
+
+            if not registration_allowed:
+                conn.rollback()
+
+                if existing_closing:
+                    return jsonify(
+                        success=False,
+                        authenticated=True,
+                        tab_closed=True,
+                    ), 409
+
+                session.clear()
+
+                return jsonify(
+                    success=True,
+                    authenticated=False,
+                    expiration_reason="browser_closed",
+                ), 401
+
+            cur.execute(
+                """
+                INSERT INTO browser_session_tabs (
+                    session_marker_hash,
+                    tab_token_hash,
+                    user_id,
+                    spa_id,
+                    business_unit_id,
+                    opened_at,
+                    last_seen_at,
+                    closing_at,
+                    updated_at
+                )
+                VALUES (
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    NOW(),
+                    NOW(),
+                    NULL,
+                    NOW()
+                )
+
+                ON CONFLICT (
+                    session_marker_hash,
+                    tab_token_hash
+                )
+                DO UPDATE SET
+                    user_id = EXCLUDED.user_id,
+                    spa_id = EXCLUDED.spa_id,
+                    business_unit_id =
+                        EXCLUDED.business_unit_id,
+                    last_seen_at = NOW(),
+                    closing_at = NULL,
+                    updated_at = NOW()
+                WHERE browser_session_tabs.closing_at IS NULL
+                """,
+                (
+                    marker_hash,
+                    tab_token_hash,
+                    user_id,
+                    spa_id,
+                    business_unit_id,
+                ),
+            )
+
+            if cur.rowcount != 1:
+                conn.rollback()
+
+                return jsonify(
+                    success=False,
+                    authenticated=True,
+                    tab_closed=True,
+                ), 409
+
+            session[
+                "_business_tab_presence_initialized"
+            ] = True
+
+            cur.execute(
+                """
+                DELETE FROM browser_session_tabs
+                WHERE session_marker_hash = %s
+                  AND (
+                    (
+                        closing_at IS NOT NULL
+                        AND closing_at < (
+                            NOW()
+                            - (
+                                %s
+                                * INTERVAL '1 second'
+                            )
+                        )
+                    )
+                    OR (
+                        closing_at IS NULL
+                        AND last_seen_at < (
+                            NOW()
+                            - (
+                                %s
+                                * INTERVAL '1 second'
+                            )
+                        )
+                    )
+                  )
+                """,
+                (
+                    marker_hash,
+                    BUSINESS_SESSION_TAB_CLOSE_GRACE_SECONDS,
+                    BUSINESS_SESSION_TAB_STALE_SECONDS,
+                ),
+            )
+
+            conn.commit()
+
+            return jsonify(
+                success=True,
+                authenticated=True,
+                registered=True,
+            )
+
+        if action == "heartbeat":
+
+            heartbeat_allowed = bool(
+                current_presence
+                or existing_recoverable
+            )
+
+            if (
+                not existing_tab
+                or not heartbeat_allowed
+            ):
+                conn.rollback()
+                session.clear()
+
+                return jsonify(
+                    success=True,
+                    authenticated=False,
+                    expiration_reason="browser_closed",
+                ), 401
+
+            cur.execute(
+                """
+                UPDATE browser_session_tabs
+                SET
+                    last_seen_at = NOW(),
+                    closing_at = NULL,
+                    updated_at = NOW()
+                WHERE session_marker_hash = %s
+                  AND tab_token_hash = %s
+                  AND closing_at IS NULL
+                """,
+                (
+                    marker_hash,
+                    tab_token_hash,
+                ),
+            )
+
+            if cur.rowcount != 1:
+                conn.rollback()
+
+                return jsonify(
+                    success=False,
+                    authenticated=True,
+                    tab_closed=True,
+                ), 409
+
+            conn.commit()
+
+            return jsonify(
+                success=True,
+                authenticated=True,
+                registered=True,
+            )
+
+        cur.execute(
+            """
+            INSERT INTO browser_session_tabs (
+                session_marker_hash,
+                tab_token_hash,
+                user_id,
+                spa_id,
+                business_unit_id,
+                opened_at,
+                last_seen_at,
+                closing_at,
+                updated_at
+            )
+            VALUES (
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                NOW(),
+                NOW(),
+                NOW(),
+                NOW()
+            )
+            ON CONFLICT (
+                session_marker_hash,
+                tab_token_hash
+            )
+            DO UPDATE SET
+                closing_at = NOW(),
+                updated_at = NOW()
+            """,
+            (
+                marker_hash,
+                tab_token_hash,
+                user_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        conn.commit()
+
+        return jsonify(
+            success=True,
+            authenticated=True,
+            closing=True,
+        )
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
 
 
 @app.route(

@@ -3956,6 +3956,9 @@ document.addEventListener(
     const sessionActivityUrl =
         {{ url_for("browser_session_activity") | tojson }};
 
+    const sessionTabPresenceUrl =
+        {{ url_for("browser_session_tab_presence") | tojson }};
+
     const sessionReauthenticateUrl =
         {{ url_for("browser_session_reauthenticate") | tojson }};
 
@@ -3971,6 +3974,52 @@ document.addEventListener(
     if (!pageSessionMarker) {
         return;
     }
+
+    const tabPresenceHeartbeatIntervalMs = 15000;
+
+    let tabPresenceRegistered = false;
+    let tabPresenceRequestInFlight = false;
+
+    function createTabPresenceToken() {
+
+        if (
+            window.crypto
+            && typeof window.crypto.randomUUID === "function"
+        ) {
+            return window.crypto.randomUUID();
+        }
+
+        if (
+            window.crypto
+            && typeof window.crypto.getRandomValues === "function"
+        ) {
+            const bytes = new Uint8Array(32);
+
+            window.crypto.getRandomValues(bytes);
+
+            return Array.from(
+                bytes,
+                function (value) {
+                    return value
+                        .toString(16)
+                        .padStart(2, "0");
+                }
+            ).join("");
+        }
+
+        return (
+            String(Date.now())
+            + "-"
+            + Math.random().toString(36).slice(2)
+            + "-"
+            + Math.random().toString(36).slice(2)
+        );
+    }
+
+    let tabPresenceToken =
+        createTabPresenceToken();
+
+    let tabPresenceClosed = false;
 
     const overlay = document.getElementById(
         "pspStaleSessionOverlay"
@@ -4321,6 +4370,184 @@ document.addEventListener(
     }
 
 
+    async function sendTabPresence(action) {
+
+        if (
+            staleSessionShown
+            || tabPresenceRequestInFlight
+        ) {
+            return false;
+        }
+
+        tabPresenceRequestInFlight = true;
+
+        const formData = new FormData();
+
+        formData.append(
+            "action",
+            action
+        );
+
+        formData.append(
+            "session_marker",
+            pageSessionMarker
+        );
+
+        formData.append(
+            "tab_token",
+            tabPresenceToken
+        );
+
+        try {
+
+            const response = await fetch(
+                sessionTabPresenceUrl,
+                {
+                    method: "POST",
+                    credentials: "same-origin",
+                    cache: "no-store",
+                    headers: {
+                        "Accept": "application/json"
+                    },
+                    body: formData
+                }
+            );
+
+            let data = null;
+
+            try {
+                data = await response.json();
+            } catch (error) {
+                data = null;
+            }
+
+            if (!data) {
+                return false;
+            }
+
+            if (data.stale_session) {
+
+                checkCurrentBrowserSession(true);
+                return false;
+            }
+
+            if (data.tab_closed) {
+
+                tabPresenceRegistered = false;
+                return false;
+            }
+
+            if (!data.authenticated) {
+
+                tabPresenceRegistered = false;
+                showEndedSessionOverlay(data);
+                return false;
+            }
+
+            if (
+                data.success
+                && (
+                    action === "register"
+                    || action === "heartbeat"
+                )
+            ) {
+                tabPresenceRegistered = true;
+            }
+
+            return Boolean(data.success);
+
+        } catch (error) {
+
+            /*
+             * A temporary network failure must not immediately
+             * end an otherwise valid PSP browser session.
+             * Registration/heartbeat will retry.
+             */
+            return false;
+
+        } finally {
+
+            tabPresenceRequestInFlight = false;
+        }
+    }
+
+
+    function ensureTabPresence() {
+
+        if (staleSessionShown) {
+            return;
+        }
+
+        if (tabPresenceRegistered) {
+            sendTabPresence("heartbeat");
+            return;
+        }
+
+        sendTabPresence("register");
+    }
+
+
+    function sendTabPresenceClose() {
+
+        tabPresenceClosed = true;
+        tabPresenceRegistered = false;
+
+        const formData = new FormData();
+
+        formData.append(
+            "action",
+            "close"
+        );
+
+        formData.append(
+            "session_marker",
+            pageSessionMarker
+        );
+
+        formData.append(
+            "tab_token",
+            tabPresenceToken
+        );
+
+        try {
+
+            if (
+                navigator.sendBeacon
+                && navigator.sendBeacon(
+                    sessionTabPresenceUrl,
+                    formData
+                )
+            ) {
+                return;
+            }
+
+        } catch (error) {
+            // Fall through to keepalive fetch.
+        }
+
+        try {
+
+            fetch(
+                sessionTabPresenceUrl,
+                {
+                    method: "POST",
+                    credentials: "same-origin",
+                    cache: "no-store",
+                    keepalive: true,
+                    body: formData
+                }
+            ).catch(
+                function () {
+                    // The heartbeat timeout is the fallback.
+                }
+            );
+
+        } catch (error) {
+            // The heartbeat timeout is the fallback.
+        }
+    }
+
+
     function readStoredSessionMarker() {
 
         try {
@@ -4474,6 +4701,14 @@ document.addEventListener(
             sessionCheckInFlight = false;
         }
     }
+
+
+    ensureTabPresence();
+
+    window.setInterval(
+        ensureTabPresence,
+        tabPresenceHeartbeatIntervalMs
+    );
 
 
     const storedSessionMarker =
@@ -4696,6 +4931,7 @@ document.addEventListener(
     window.addEventListener(
         "focus",
         function () {
+            ensureTabPresence();
             checkCurrentBrowserSession(true);
         }
     );
@@ -4704,7 +4940,26 @@ document.addEventListener(
     window.addEventListener(
         "pageshow",
         function () {
+
+            if (tabPresenceClosed) {
+
+                tabPresenceToken =
+                    createTabPresenceToken();
+
+                tabPresenceClosed = false;
+                tabPresenceRegistered = false;
+            }
+
+            ensureTabPresence();
             checkCurrentBrowserSession(true);
+        }
+    );
+
+
+    window.addEventListener(
+        "pagehide",
+        function () {
+            sendTabPresenceClose();
         }
     );
 
@@ -4714,6 +4969,7 @@ document.addEventListener(
         function () {
 
             if (!document.hidden) {
+                ensureTabPresence();
                 checkCurrentBrowserSession(true);
             }
         }
