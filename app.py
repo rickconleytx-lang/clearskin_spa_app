@@ -3984,6 +3984,134 @@ def current_business_unit_id():
 PASSWORD_MIN_LENGTH = 15
 PASSWORD_MAX_LENGTH = 128
 
+LOGIN_FAILURE_MAX_ATTEMPTS = 5
+LOGIN_FAILURE_WINDOW_MINUTES = 15
+LOGIN_FAILURE_LOCK_MINUTES = 15
+
+
+def _record_failed_business_login(
+    cur,
+    user_id,
+    spa_id,
+):
+    cur.execute(
+        """
+        SELECT
+            failed_login_count,
+            failed_login_window_started_at,
+            login_locked_until,
+            NOW()
+        FROM users
+        WHERE user_id = %s
+        FOR UPDATE
+        """,
+        (user_id,),
+    )
+
+    state = cur.fetchone()
+
+    if not state:
+        return False
+
+    (
+        failed_count,
+        window_started_at,
+        locked_until,
+        now,
+    ) = state
+
+    if (
+        locked_until is not None
+        and locked_until > now
+    ):
+        return True
+
+    window_expired = bool(
+        window_started_at is None
+        or window_started_at
+            < now - timedelta(
+                minutes=LOGIN_FAILURE_WINDOW_MINUTES
+            )
+    )
+
+    if window_expired:
+        failed_count = 1
+        window_started_at = now
+    else:
+        failed_count = int(failed_count or 0) + 1
+
+    new_lock = (
+        failed_count >= LOGIN_FAILURE_MAX_ATTEMPTS
+    )
+
+    if new_lock:
+        locked_until = now + timedelta(
+            minutes=LOGIN_FAILURE_LOCK_MINUTES
+        )
+    else:
+        locked_until = None
+
+    cur.execute(
+        """
+        UPDATE users
+        SET
+            failed_login_count = %s,
+            failed_login_window_started_at = %s,
+            last_failed_login_at = %s,
+            login_locked_until = %s
+        WHERE user_id = %s
+        """,
+        (
+            failed_count,
+            window_started_at,
+            now,
+            locked_until,
+            user_id,
+        ),
+    )
+
+    if new_lock:
+        log_audit(
+            cur,
+            spa_id=spa_id,
+            user_id=user_id,
+            action_type="login_temporarily_locked",
+            table_name="users",
+            record_id=user_id,
+            notes=(
+                "Business login temporarily locked "
+                f"after {LOGIN_FAILURE_MAX_ATTEMPTS} "
+                "failed password attempts."
+            ),
+        )
+
+    return new_lock
+
+
+def _clear_failed_business_login_state(
+    cur,
+    user_id,
+):
+    cur.execute(
+        """
+        UPDATE users
+        SET
+            failed_login_count = 0,
+            failed_login_window_started_at = NULL,
+            last_failed_login_at = NULL,
+            login_locked_until = NULL
+        WHERE user_id = %s
+          AND (
+              failed_login_count <> 0
+              OR failed_login_window_started_at IS NOT NULL
+              OR last_failed_login_at IS NOT NULL
+              OR login_locked_until IS NOT NULL
+          )
+        """,
+        (user_id,),
+    )
+
+
 SECURITY_FORM_CSRF_MAX_AGE_SECONDS = 30 * 60
 
 
@@ -10215,7 +10343,13 @@ def load_spa():
         _business_session_tab_bootstrap_active()
     )
 
-    if not bootstrap_active:
+    if (
+        not bootstrap_active
+        and request.endpoint not in (
+            "confirm_login_business_switch",
+            "cancel_login_business_switch",
+        )
+    ):
 
         tab_presence = (
             _business_session_tab_presence()
@@ -28039,7 +28173,9 @@ def login():
                 password_hash,
                 role,
                 password_changed_at,
-                must_change_password
+                must_change_password,
+                login_locked_until,
+                NOW()
             FROM users
             WHERE LOWER(email) = %s
               AND active = TRUE
@@ -28047,20 +28183,116 @@ def login():
 
         user = cur.fetchone()
 
-        cur.close()
-        conn.close()
-
         if not user:
-            log_scheduler("Login failed: user account not found.")
-            flash("Invalid email or password.", "error")
+            cur.close()
+            conn.close()
+
+            log_scheduler(
+                "Login failed: user account not found."
+            )
+
+            flash(
+                "Invalid email or password.",
+                "error",
+            )
+
             return render_template("login.html")
 
-        password_match = check_password_hash(user[5], password)
+        login_locked_until = user[9]
+        login_now = user[10]
+
+        if (
+            login_locked_until is not None
+            and login_locked_until > login_now
+        ):
+            remaining_seconds = max(
+                1,
+                int(
+                    (
+                        login_locked_until
+                        - login_now
+                    ).total_seconds()
+                ),
+            )
+
+            remaining_minutes = max(
+                1,
+                (
+                    remaining_seconds + 59
+                ) // 60,
+            )
+
+            cur.close()
+            conn.close()
+
+            log_scheduler(
+                "Login blocked: account temporarily locked."
+            )
+
+            flash(
+                "Too many unsuccessful sign-in attempts. "
+                "This account is temporarily locked for "
+                "security. Even the correct password cannot "
+                "be used until the lock expires. "
+                f"Please try again in "
+                f"{remaining_minutes} "
+                f"{'minute' if remaining_minutes == 1 else 'minutes'}.",
+                "error",
+            )
+
+            return render_template("login.html")
+
+        password_match = check_password_hash(
+            user[5],
+            password,
+        )
 
         if not password_match:
-            log_scheduler("Login failed: invalid password.")
-            flash("Invalid email or password.", "error")
+            newly_locked = _record_failed_business_login(
+                cur,
+                user[0],
+                user[1],
+            )
+
+            conn.commit()
+            cur.close()
+            conn.close()
+
+            if newly_locked:
+                log_scheduler(
+                    "Login temporarily locked after "
+                    "repeated invalid passwords."
+                )
+
+                flash(
+                    "Too many unsuccessful sign-in attempts. "
+                    "This account is temporarily locked for "
+                    "security. Even the correct password cannot "
+                    "be used until the lock expires. "
+                    f"Please try again in "
+                    f"{LOGIN_FAILURE_LOCK_MINUTES} minutes.",
+                    "error",
+                )
+            else:
+                log_scheduler(
+                    "Login failed: invalid password."
+                )
+
+                flash(
+                    "Invalid email or password.",
+                    "error",
+                )
+
             return render_template("login.html")
+
+        _clear_failed_business_login_state(
+            cur,
+            user[0],
+        )
+
+        conn.commit()
+        cur.close()
+        conn.close()
 
         current_user_id = session.get("user_id")
         target_user_id = user[0]
@@ -28165,7 +28397,9 @@ def confirm_login_business_switch():
                 password_hash,
                 role,
                 password_changed_at,
-                must_change_password
+                must_change_password,
+                login_locked_until,
+                NOW()
             FROM users
             WHERE user_id = %s
               AND active = TRUE
@@ -28183,6 +28417,48 @@ def confirm_login_business_switch():
             "The account is no longer available. Please sign in again.",
             "error"
         )
+        return redirect(url_for("login"))
+
+    login_locked_until = user[9]
+    login_now = user[10]
+
+    if (
+        login_locked_until is not None
+        and login_locked_until > login_now
+    ):
+        remaining_seconds = max(
+            1,
+            int(
+                (
+                    login_locked_until
+                    - login_now
+                ).total_seconds()
+            ),
+        )
+
+        remaining_minutes = max(
+            1,
+            (remaining_seconds + 59) // 60,
+        )
+
+        session.pop("_pending_login_switch", None)
+
+        log_scheduler(
+            "Business switch blocked: target account "
+            "temporarily locked."
+        )
+
+        flash(
+            "Too many unsuccessful sign-in attempts. "
+            "This account is temporarily locked for "
+            "security. Even the correct password cannot "
+            "be used until the lock expires. "
+            f"Please try again in "
+            f"{remaining_minutes} "
+            f"{'minute' if remaining_minutes == 1 else 'minutes'}.",
+            "error",
+        )
+
         return redirect(url_for("login"))
 
     return _complete_business_login(user)
