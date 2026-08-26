@@ -8,6 +8,8 @@ import calendar
 import click
 import secrets
 import hashlib
+import hmac
+import ipaddress
 import cloudinary
 import cloudinary.uploader
 
@@ -3987,6 +3989,858 @@ PASSWORD_MAX_LENGTH = 128
 LOGIN_FAILURE_MAX_ATTEMPTS = 5
 LOGIN_FAILURE_WINDOW_MINUTES = 15
 LOGIN_FAILURE_LOCK_MINUTES = 15
+
+PASSWORD_RESET_TOKEN_MINUTES = 10
+PASSWORD_RESET_RESEND_COOLDOWN_SECONDS = 60
+PASSWORD_RESET_MAX_EMAILS_PER_HOUR = 3
+PASSWORD_RESET_SOURCE_MAX_REQUESTS = 5
+PASSWORD_RESET_SOURCE_WINDOW_MINUTES = 10
+PASSWORD_RESET_RESPONSE_FLOOR_SECONDS = 1.5
+
+PASSWORD_RESET_PRODUCTION_BASE_URL = (
+    "https://app.peachsuitepro.com"
+)
+
+PUBLIC_SECURITY_CSRF_MAX_AGE_SECONDS = 30 * 60
+
+
+def _password_reset_response_floor(started_at):
+    try:
+        started_at = float(started_at)
+    except (TypeError, ValueError):
+        return
+
+    elapsed = time.monotonic() - started_at
+
+    remaining = (
+        PASSWORD_RESET_RESPONSE_FLOOR_SECONDS
+        - elapsed
+    )
+
+    if remaining > 0:
+        time.sleep(remaining)
+
+
+def _password_reset_source_hash():
+    candidate = ""
+
+    if os.environ.get("RENDER"):
+        forwarded_for = str(
+            request.headers.get(
+                "X-Forwarded-For",
+                "",
+            )
+            or ""
+        ).strip()
+
+        if forwarded_for:
+            candidate = (
+                forwarded_for
+                .split(",", 1)[0]
+                .strip()
+            )
+
+    if not candidate:
+        candidate = str(
+            request.remote_addr
+            or ""
+        ).strip()
+
+    try:
+        source_address = str(
+            ipaddress.ip_address(
+                candidate
+            )
+        )
+
+    except ValueError:
+        source_address = "unknown"
+
+    secret = app.secret_key
+
+    if isinstance(secret, str):
+        secret = secret.encode("utf-8")
+
+    if not secret:
+        raise RuntimeError(
+            "Application secret key is unavailable."
+        )
+
+    message = (
+        "password-reset-source:"
+        + source_address
+    ).encode("utf-8")
+
+    return hmac.new(
+        secret,
+        message,
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _reserve_password_reset_source_request(
+    cur,
+    source_hash,
+):
+    source_hash = str(
+        source_hash
+        or ""
+    ).strip().lower()
+
+    if (
+        len(source_hash) != 64
+        or any(
+            ch not in "0123456789abcdef"
+            for ch in source_hash
+        )
+    ):
+        raise ValueError(
+            "Invalid password reset source fingerprint."
+        )
+
+    # Serialize reservations for the same source even when
+    # no prior request row exists yet.
+    advisory_key = int(
+        source_hash[:16],
+        16,
+    )
+
+    if advisory_key >= 2**63:
+        advisory_key -= 2**64
+
+    cur.execute(
+        """
+        SELECT pg_advisory_xact_lock(%s)
+        """,
+        (advisory_key,),
+    )
+
+    # Keep the throttle table bounded without storing
+    # long-term source history.
+    cur.execute(
+        """
+        DELETE FROM password_reset_source_requests
+        WHERE created_at
+            < NOW() - INTERVAL '24 hours'
+        """
+    )
+
+    cur.execute(
+        """
+        SELECT COUNT(*)
+        FROM password_reset_source_requests
+        WHERE source_hash = %s
+          AND created_at
+              > NOW()
+                - (
+                    %s
+                    * INTERVAL '1 minute'
+                )
+        """,
+        (
+            source_hash,
+            PASSWORD_RESET_SOURCE_WINDOW_MINUTES,
+        ),
+    )
+
+    recent_count = int(
+        cur.fetchone()[0]
+        or 0
+    )
+
+    if (
+        recent_count
+        >= PASSWORD_RESET_SOURCE_MAX_REQUESTS
+    ):
+        return {
+            "allowed": False,
+            "recent_count": recent_count,
+        }
+
+    cur.execute(
+        """
+        INSERT INTO password_reset_source_requests (
+            source_hash
+        )
+        VALUES (%s)
+        RETURNING password_reset_source_request_id
+        """,
+        (source_hash,),
+    )
+
+    return {
+        "allowed": True,
+        "request_id": cur.fetchone()[0],
+        "recent_count": recent_count + 1,
+    }
+
+
+def _password_reset_base_url():
+    configured = str(
+        os.environ.get(
+            "PEACH_SUITE_APP_BASE_URL",
+            "",
+        )
+        or ""
+    ).strip().rstrip("/")
+
+    if configured:
+        return configured
+
+    host = str(request.host or "").lower()
+
+    if (
+        host.startswith("127.0.0.1:")
+        or host == "127.0.0.1"
+        or host.startswith("localhost:")
+        or host == "localhost"
+    ):
+        return request.host_url.rstrip("/")
+
+    return PASSWORD_RESET_PRODUCTION_BASE_URL
+
+
+def _password_reset_token_hash(raw_token):
+    return hashlib.sha256(
+        str(raw_token or "").encode("utf-8")
+    ).hexdigest()
+
+
+def _password_reset_request_limit_state(
+    cur,
+    user_id,
+):
+    # Serialize reset-request reservations for this account
+    # so simultaneous devices cannot race past the limits.
+    cur.execute(
+        """
+        SELECT user_id
+        FROM users
+        WHERE user_id = %s
+          AND active = TRUE
+        FOR UPDATE
+        """,
+        (user_id,),
+    )
+
+    if not cur.fetchone():
+        return False, "unavailable", 0
+
+    cur.execute(
+        """
+        SELECT
+            MAX(created_at),
+            COUNT(*) FILTER (
+                WHERE email_sent_at IS NOT NULL
+                  AND email_sent_at
+                      >= NOW() - INTERVAL '1 hour'
+            ),
+            MIN(email_sent_at) FILTER (
+                WHERE email_sent_at IS NOT NULL
+                  AND email_sent_at
+                      >= NOW() - INTERVAL '1 hour'
+            ),
+            NOW()
+        FROM password_reset_tokens
+        WHERE user_id = %s
+        """,
+        (user_id,),
+    )
+
+    (
+        last_request_at,
+        successful_emails_last_hour,
+        oldest_recent_email_at,
+        now,
+    ) = cur.fetchone()
+
+    if last_request_at is not None:
+        cooldown_ends_at = (
+            last_request_at
+            + timedelta(
+                seconds=PASSWORD_RESET_RESEND_COOLDOWN_SECONDS
+            )
+        )
+
+        if cooldown_ends_at > now:
+            remaining_seconds = max(
+                1,
+                int(
+                    (
+                        cooldown_ends_at
+                        - now
+                    ).total_seconds()
+                ) + 1,
+            )
+
+            return (
+                False,
+                "cooldown",
+                remaining_seconds,
+            )
+
+    successful_emails_last_hour = int(
+        successful_emails_last_hour or 0
+    )
+
+    if (
+        successful_emails_last_hour
+        >= PASSWORD_RESET_MAX_EMAILS_PER_HOUR
+    ):
+        retry_at = (
+            oldest_recent_email_at
+            + timedelta(hours=1)
+        )
+
+        remaining_seconds = max(
+            1,
+            int(
+                (
+                    retry_at
+                    - now
+                ).total_seconds()
+            ) + 1,
+        )
+
+        return (
+            False,
+            "hourly_limit",
+            remaining_seconds,
+        )
+
+    return True, None, 0
+
+
+def _reserve_password_reset_token(
+    cur,
+    user_id,
+):
+    allowed, limit_reason, retry_seconds = (
+        _password_reset_request_limit_state(
+            cur,
+            user_id,
+        )
+    )
+
+    if not allowed:
+        return {
+            "allowed": False,
+            "reason": limit_reason,
+            "retry_seconds": retry_seconds,
+        }
+
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = _password_reset_token_hash(
+        raw_token
+    )
+
+    cur.execute(
+        """
+        INSERT INTO password_reset_tokens (
+            user_id,
+            token_hash,
+            expires_at
+        )
+        VALUES (
+            %s,
+            %s,
+            NOW() + (
+                %s * INTERVAL '1 minute'
+            )
+        )
+        RETURNING
+            password_reset_token_id,
+            expires_at
+        """,
+        (
+            user_id,
+            token_hash,
+            PASSWORD_RESET_TOKEN_MINUTES,
+        ),
+    )
+
+    token_row = cur.fetchone()
+
+    if not token_row:
+        raise RuntimeError(
+            "Password reset token reservation failed."
+        )
+
+    return {
+        "allowed": True,
+        "password_reset_token_id": token_row[0],
+        "raw_token": raw_token,
+        "expires_at": token_row[1],
+    }
+
+
+def _finalize_password_reset_email(
+    cur,
+    user_id,
+    spa_id,
+    password_reset_token_id,
+):
+    # Serialize finalization for this account.
+    cur.execute(
+        """
+        SELECT user_id
+        FROM users
+        WHERE user_id = %s
+          AND active = TRUE
+        FOR UPDATE
+        """,
+        (user_id,),
+    )
+
+    if not cur.fetchone():
+        raise RuntimeError(
+            "Password reset account is no longer available."
+        )
+
+    # If a newer reset email has already been accepted,
+    # this older out-of-order delivery must never become
+    # the active reset link.
+    cur.execute(
+        """
+        SELECT EXISTS (
+            SELECT 1
+            FROM password_reset_tokens
+            WHERE user_id = %s
+              AND password_reset_token_id > %s
+              AND email_sent_at IS NOT NULL
+        )
+        """,
+        (
+            user_id,
+            password_reset_token_id,
+        ),
+    )
+
+    newer_email_already_sent = bool(
+        cur.fetchone()[0]
+    )
+
+    if newer_email_already_sent:
+        cur.execute(
+            """
+            UPDATE password_reset_tokens
+            SET
+                email_sent_at = NOW(),
+                invalidated_at = NOW()
+            WHERE password_reset_token_id = %s
+              AND user_id = %s
+              AND email_sent_at IS NULL
+              AND used_at IS NULL
+              AND invalidated_at IS NULL
+            RETURNING password_reset_token_id
+            """,
+            (
+                password_reset_token_id,
+                user_id,
+            ),
+        )
+
+        if not cur.fetchone():
+            raise RuntimeError(
+                "Superseded password reset token "
+                "could not be finalized."
+            )
+
+        log_audit(
+            cur,
+            spa_id=spa_id,
+            user_id=user_id,
+            action_type="password_reset_requested",
+            table_name="users",
+            record_id=user_id,
+            notes=(
+                "Password reset email accepted for delivery, "
+                "but a newer reset email was already active. "
+                "This older link was invalidated."
+            ),
+        )
+
+        return False
+
+    cur.execute(
+        """
+        UPDATE password_reset_tokens
+        SET email_sent_at = NOW()
+        WHERE password_reset_token_id = %s
+          AND user_id = %s
+          AND email_sent_at IS NULL
+          AND used_at IS NULL
+          AND invalidated_at IS NULL
+          AND expires_at > NOW()
+        RETURNING password_reset_token_id
+        """,
+        (
+            password_reset_token_id,
+            user_id,
+        ),
+    )
+
+    finalized = cur.fetchone()
+
+    if not finalized:
+        raise RuntimeError(
+            "Password reset token could not be finalized."
+        )
+
+    # Only older tokens may be superseded. A delayed
+    # Mailgun response must never invalidate a newer one.
+    cur.execute(
+        """
+        UPDATE password_reset_tokens
+        SET invalidated_at = NOW()
+        WHERE user_id = %s
+          AND password_reset_token_id < %s
+          AND used_at IS NULL
+          AND invalidated_at IS NULL
+        """,
+        (
+            user_id,
+            password_reset_token_id,
+        ),
+    )
+
+    log_audit(
+        cur,
+        spa_id=spa_id,
+        user_id=user_id,
+        action_type="password_reset_requested",
+        table_name="users",
+        record_id=user_id,
+        notes=(
+            "Password reset email accepted for delivery. "
+            "Older unused reset links invalidated."
+        ),
+    )
+
+    return True
+
+
+def _invalidate_unsent_password_reset_token(
+    cur,
+    user_id,
+    password_reset_token_id,
+):
+    cur.execute(
+        """
+        UPDATE password_reset_tokens
+        SET invalidated_at = NOW()
+        WHERE password_reset_token_id = %s
+          AND user_id = %s
+          AND email_sent_at IS NULL
+          AND used_at IS NULL
+          AND invalidated_at IS NULL
+        RETURNING password_reset_token_id
+        """,
+        (
+            password_reset_token_id,
+            user_id,
+        ),
+    )
+
+    return cur.fetchone() is not None
+
+
+def _password_reset_token_record(
+    cur,
+    raw_token,
+    for_update=False,
+):
+    token_hash = _password_reset_token_hash(
+        raw_token
+    )
+
+    lock_clause = (
+        " FOR UPDATE OF prt, u"
+        if for_update
+        else ""
+    )
+
+    cur.execute(
+        f"""
+        SELECT
+            prt.password_reset_token_id,
+            prt.user_id,
+            u.spa_id,
+            u.password_hash,
+            prt.email_sent_at,
+            prt.used_at,
+            prt.invalidated_at,
+            prt.expires_at,
+            NOW()
+        FROM password_reset_tokens prt
+        JOIN users u
+          ON u.user_id = prt.user_id
+        WHERE prt.token_hash = %s
+          AND u.active = TRUE
+        {lock_clause}
+        """,
+        (token_hash,),
+    )
+
+    return cur.fetchone()
+
+
+def _password_reset_token_usable(record):
+    if not record:
+        return False
+
+    email_sent_at = record[4]
+    used_at = record[5]
+    invalidated_at = record[6]
+    expires_at = record[7]
+    now = record[8]
+
+    return bool(
+        email_sent_at is not None
+        and used_at is None
+        and invalidated_at is None
+        and expires_at > now
+    )
+
+
+def _complete_password_reset(
+    raw_token,
+    new_password,
+):
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        token_record = (
+            _password_reset_token_record(
+                cur,
+                raw_token,
+                for_update=True,
+            )
+        )
+
+        if not _password_reset_token_usable(
+            token_record
+        ):
+            conn.rollback()
+            return {
+                "status": "invalid",
+            }
+
+        password_reset_token_id = (
+            token_record[0]
+        )
+        user_id = token_record[1]
+        spa_id = token_record[2]
+        current_password_hash = (
+            token_record[3]
+        )
+
+        if check_password_hash(
+            current_password_hash,
+            new_password,
+        ):
+            conn.rollback()
+            return {
+                "status": "reuse",
+                "user_id": user_id,
+            }
+
+        new_password_hash = (
+            generate_password_hash(
+                new_password
+            )
+        )
+
+        cur.execute(
+            """
+            UPDATE users
+            SET
+                password_hash = %s,
+                password_changed_at = NOW(),
+                must_change_password = FALSE
+            WHERE user_id = %s
+              AND active = TRUE
+            RETURNING password_changed_at
+            """,
+            (
+                new_password_hash,
+                user_id,
+            ),
+        )
+
+        if not cur.fetchone():
+            raise RuntimeError(
+                "Password reset account update failed."
+            )
+
+        _clear_failed_business_login_state(
+            cur,
+            user_id,
+        )
+
+        cur.execute(
+            """
+            UPDATE password_reset_tokens
+            SET used_at = NOW()
+            WHERE password_reset_token_id = %s
+              AND user_id = %s
+              AND email_sent_at IS NOT NULL
+              AND used_at IS NULL
+              AND invalidated_at IS NULL
+              AND expires_at > NOW()
+            RETURNING password_reset_token_id
+            """,
+            (
+                password_reset_token_id,
+                user_id,
+            ),
+        )
+
+        if not cur.fetchone():
+            raise RuntimeError(
+                "Password reset token could not be consumed."
+            )
+
+        cur.execute(
+            """
+            UPDATE password_reset_tokens
+            SET invalidated_at = NOW()
+            WHERE user_id = %s
+              AND password_reset_token_id <> %s
+              AND used_at IS NULL
+              AND invalidated_at IS NULL
+            """,
+            (
+                user_id,
+                password_reset_token_id,
+            ),
+        )
+
+        log_audit(
+            cur,
+            spa_id=spa_id,
+            user_id=user_id,
+            action_type="password_reset_completed",
+            table_name="users",
+            record_id=user_id,
+            notes=(
+                "Business-login password reset "
+                "completed using a valid one-time "
+                "reset link."
+            ),
+        )
+
+        conn.commit()
+
+        return {
+            "status": "success",
+            "user_id": user_id,
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _public_security_csrf_token(purpose):
+    purpose = str(purpose or "").strip()
+
+    if not purpose:
+        raise ValueError(
+            "Public security CSRF purpose is required."
+        )
+
+    now = int(time.time())
+
+    record = session.get("_public_security_csrf")
+
+    if isinstance(record, dict):
+        token = str(record.get("token") or "")
+        record_purpose = str(
+            record.get("purpose") or ""
+        )
+
+        try:
+            issued_at = int(
+                record.get("issued_at") or 0
+            )
+        except (TypeError, ValueError):
+            issued_at = 0
+
+        if (
+            token
+            and record_purpose == purpose
+            and issued_at > 0
+            and now - issued_at
+                <= PUBLIC_SECURITY_CSRF_MAX_AGE_SECONDS
+        ):
+            return token
+
+    token = secrets.token_urlsafe(32)
+
+    session["_public_security_csrf"] = {
+        "token": token,
+        "purpose": purpose,
+        "issued_at": now,
+    }
+
+    return token
+
+
+def _public_security_csrf_valid(
+    submitted_token,
+    purpose,
+):
+    submitted_token = str(
+        submitted_token or ""
+    )
+
+    purpose = str(purpose or "").strip()
+
+    record = session.get("_public_security_csrf")
+
+    if not submitted_token or not purpose:
+        return False
+
+    if not isinstance(record, dict):
+        return False
+
+    expected_token = str(
+        record.get("token") or ""
+    )
+
+    expected_purpose = str(
+        record.get("purpose") or ""
+    )
+
+    try:
+        issued_at = int(
+            record.get("issued_at") or 0
+        )
+    except (TypeError, ValueError):
+        issued_at = 0
+
+    now = int(time.time())
+
+    if (
+        not expected_token
+        or expected_purpose != purpose
+        or issued_at <= 0
+        or now - issued_at
+            > PUBLIC_SECURITY_CSRF_MAX_AGE_SECONDS
+    ):
+        return False
+
+    return secrets.compare_digest(
+        submitted_token,
+        expected_token,
+    )
 
 
 def _record_failed_business_login(
@@ -10227,6 +11081,8 @@ def load_spa():
 
     if request.endpoint in (
         "login",
+        "forgot_password",
+        "reset_password",
         "logout",
         "browser_session_state",
         "browser_session_activity",
@@ -28152,6 +29008,432 @@ def _login_business_label(spa_id, role):
         return get_spa_name(spa_id)
 
     return "Peach Suite Pro"
+
+
+@app.route(
+    "/forgot-password",
+    methods=["GET", "POST"],
+)
+def forgot_password():
+    csrf_purpose = "forgot_password"
+
+    if request.method == "POST":
+        submitted_token = request.form.get(
+            "security_csrf_token",
+            "",
+        )
+
+        if not _public_security_csrf_valid(
+            submitted_token,
+            csrf_purpose,
+        ):
+            abort(400)
+
+        response_started_at = time.monotonic()
+
+        email = (
+            request.form.get("email", "")
+            .strip()
+            .lower()
+        )
+
+        # Rotate after each submission.
+        session.pop("_public_security_csrf", None)
+
+        source_allowed = False
+
+        try:
+            source_hash = (
+                _password_reset_source_hash()
+            )
+
+            conn = get_db_connection()
+            conn.autocommit = False
+            cur = conn.cursor()
+
+            try:
+                source_reservation = (
+                    _reserve_password_reset_source_request(
+                        cur,
+                        source_hash,
+                    )
+                )
+
+                source_allowed = bool(
+                    source_reservation.get(
+                        "allowed"
+                    )
+                )
+
+                conn.commit()
+
+            except Exception:
+                conn.rollback()
+
+                log_scheduler(
+                    "Password reset source throttle "
+                    "reservation failed."
+                )
+
+            finally:
+                cur.close()
+                conn.close()
+
+        except Exception:
+            log_scheduler(
+                "Password reset source fingerprint "
+                "failed."
+            )
+
+        reset_user = None
+
+        if source_allowed:
+            conn = get_db_connection()
+            cur = conn.cursor()
+
+            try:
+                cur.execute(
+                    """
+                    SELECT
+                        user_id,
+                        spa_id,
+                        email,
+                        first_name
+                    FROM users
+                    WHERE LOWER(email) = %s
+                      AND active = TRUE
+                    LIMIT 1
+                    """,
+                    (email,),
+                )
+
+                reset_user = cur.fetchone()
+
+            finally:
+                cur.close()
+                conn.close()
+
+        reset_reservation = None
+
+        if reset_user:
+            reset_user_id = reset_user[0]
+
+            conn = get_db_connection()
+            conn.autocommit = False
+            cur = conn.cursor()
+
+            try:
+                reset_reservation = (
+                    _reserve_password_reset_token(
+                        cur,
+                        reset_user_id,
+                    )
+                )
+
+                conn.commit()
+
+            except Exception:
+                conn.rollback()
+
+                log_scheduler(
+                    "Password reset token reservation failed."
+                )
+
+                reset_reservation = None
+
+            finally:
+                cur.close()
+                conn.close()
+
+        if (
+            reset_user
+            and reset_reservation
+            and reset_reservation.get("allowed")
+        ):
+            reset_user_id = reset_user[0]
+            reset_spa_id = reset_user[1]
+            reset_email = reset_user[2]
+            reset_first_name = str(
+                reset_user[3] or ""
+            ).strip()
+
+            password_reset_token_id = (
+                reset_reservation[
+                    "password_reset_token_id"
+                ]
+            )
+
+            raw_token = reset_reservation[
+                "raw_token"
+            ]
+
+            reset_url = (
+                f"{_password_reset_base_url()}"
+                f"/reset-password/{raw_token}"
+            )
+
+            greeting = (
+                f"Hi {reset_first_name},"
+                if reset_first_name
+                else "Hello,"
+            )
+
+            email_body = (
+                f"{greeting}\n\n"
+                "A password reset was requested for your "
+                "Peach Suite Pro account.\n\n"
+                "Use this secure link to choose a new "
+                "password:\n\n"
+                f"{reset_url}\n\n"
+                "This link expires in "
+                f"{PASSWORD_RESET_TOKEN_MINUTES} minutes "
+                "and can be used only once.\n\n"
+                "If you did not request this reset, "
+                "you can ignore this email. Your existing "
+                "password has not been changed."
+            )
+
+            mailgun_accepted = False
+
+            try:
+                response = send_email(
+                    to=reset_email,
+                    subject=(
+                        "Reset your Peach Suite Pro password"
+                    ),
+                    body=email_body,
+                    add_footer=False,
+                )
+
+                mailgun_accepted = bool(
+                    response is not None
+                    and 200
+                    <= int(response.status_code)
+                    < 300
+                )
+
+            except Exception:
+                log_scheduler(
+                    "Password reset email send failed."
+                )
+
+            conn = get_db_connection()
+            conn.autocommit = False
+            cur = conn.cursor()
+
+            try:
+                if mailgun_accepted:
+                    _finalize_password_reset_email(
+                        cur,
+                        user_id=reset_user_id,
+                        spa_id=reset_spa_id,
+                        password_reset_token_id=(
+                            password_reset_token_id
+                        ),
+                    )
+                else:
+                    _invalidate_unsent_password_reset_token(
+                        cur,
+                        user_id=reset_user_id,
+                        password_reset_token_id=(
+                            password_reset_token_id
+                        ),
+                    )
+
+                conn.commit()
+
+            except Exception:
+                conn.rollback()
+
+                log_scheduler(
+                    "Password reset token finalization failed."
+                )
+
+            finally:
+                cur.close()
+                conn.close()
+
+        # Unknown, throttled, and delivery-failure requests
+        # intentionally follow the same browser response.
+        _password_reset_response_floor(
+            response_started_at
+        )
+
+        flash(
+            "If an active Peach Suite Pro account matches "
+            "that email, a password reset link will be sent "
+            "if allowed. Please check your inbox.",
+            "success",
+        )
+
+        return redirect(
+            url_for("forgot_password")
+        )
+
+    security_csrf_token = (
+        _public_security_csrf_token(
+            csrf_purpose
+        )
+    )
+
+    return render_template(
+        "forgot_password.html",
+        security_csrf_token=security_csrf_token,
+    )
+
+
+@app.route(
+    "/reset-password/<token>",
+    methods=["GET", "POST"],
+)
+def reset_password(token):
+    token = str(token or "").strip()
+
+    if not token:
+        abort(404)
+
+    csrf_purpose = (
+        "reset_password:"
+        + _password_reset_token_hash(token)
+    )
+
+    if request.method == "POST":
+        submitted_token = request.form.get(
+            "security_csrf_token",
+            "",
+        )
+
+        if not _public_security_csrf_valid(
+            submitted_token,
+            csrf_purpose,
+        ):
+            abort(400)
+
+        new_password = request.form.get(
+            "new_password",
+            "",
+        )
+
+        confirm_password = request.form.get(
+            "confirm_password",
+            "",
+        )
+
+        password_policy_error = (
+            _password_policy_error(
+                new_password
+            )
+        )
+
+        if password_policy_error:
+            flash(
+                password_policy_error,
+                "error",
+            )
+            return redirect(
+                url_for(
+                    "reset_password",
+                    token=token,
+                )
+            )
+
+        if new_password != confirm_password:
+            flash(
+                "The new passwords do not match.",
+                "error",
+            )
+            return redirect(
+                url_for(
+                    "reset_password",
+                    token=token,
+                )
+            )
+
+        result = _complete_password_reset(
+            token,
+            new_password,
+        )
+
+        if result["status"] == "invalid":
+            session.pop(
+                "_public_security_csrf",
+                None,
+            )
+
+            return render_template(
+                "reset_password.html",
+                reset_available=False,
+            )
+
+        if result["status"] == "reuse":
+            flash(
+                "Your new password must be different "
+                "from your current password.",
+                "error",
+            )
+
+            return redirect(
+                url_for(
+                    "reset_password",
+                    token=token,
+                )
+            )
+
+        reset_user_id = result["user_id"]
+
+        if session.get("user_id") == reset_user_id:
+            session.clear()
+        else:
+            session.pop(
+                "_public_security_csrf",
+                None,
+            )
+
+        flash(
+            "Your password was reset successfully. "
+            "Please sign in with your new password.",
+            "success",
+        )
+
+        return redirect(
+            url_for("login")
+        )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        token_record = (
+            _password_reset_token_record(
+                cur,
+                token,
+                for_update=False,
+            )
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if not _password_reset_token_usable(
+        token_record
+    ):
+        return render_template(
+            "reset_password.html",
+            reset_available=False,
+        )
+
+    security_csrf_token = (
+        _public_security_csrf_token(
+            csrf_purpose
+        )
+    )
+
+    return render_template(
+        "reset_password.html",
+        reset_available=True,
+        security_csrf_token=security_csrf_token,
+    )
 
 
 @app.route("/login", methods=["GET", "POST"])

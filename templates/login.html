@@ -196,6 +196,20 @@
             cursor: wait;
         }
 
+        .login-forgot {
+            display: block;
+            margin-top: 16px;
+            text-align: center;
+            color: #555555;
+            font-size: 14px;
+            font-weight: 650;
+            text-decoration: none;
+        }
+
+        .login-forgot:hover {
+            text-decoration: underline;
+        }
+
         .login-footer {
             margin-top: 22px;
             text-align: center;
@@ -441,6 +455,13 @@
                     </button>
 
                 </form>
+
+                <a
+                    href="{{ url_for('forgot_password') }}"
+                    class="login-forgot"
+                >
+                    Forgot Password?
+                </a>
 
             {% endif %}
 
