@@ -8,25 +8,33 @@
 
 
 <div class="page-tool-pills" style="margin-top:5px;">
-    <a href="{{ url_for('add_employee') }}" class="tool-pill tool-pill-small">
-        Add Employee
-    </a>
+    {% if nav_access.can_manage_employees %}
+        <a href="{{ url_for('add_employee') }}" class="tool-pill tool-pill-small">
+            Add Employee
+        </a>
+    {% endif %}
 
-    <a href="{{ url_for('add_employee_compensation') }}" class="tool-pill tool-pill-small">
-        Add Employee Compensation
-    </a>
+    {% if nav_access.can_manage_employee_compensation %}
+        <a href="{{ url_for('add_employee_compensation') }}" class="tool-pill tool-pill-small">
+            Add Employee Compensation
+        </a>
+    {% endif %}
 
-    <a href="{{ url_for('employee_pay_summary') }}" class="tool-pill tool-pill-small">
-        Employee Pay Summary
-    </a>
+    {% if nav_access.can_view_employee_compensation %}
+        <a href="{{ url_for('employee_pay_summary') }}" class="tool-pill tool-pill-small">
+            Employee Pay Summary
+        </a>
 
-    <a href="{{ url_for('employee_compensation_report') }}" class="tool-pill tool-pill-small">
-        Compensation Report
-    </a>
+        <a href="{{ url_for('employee_compensation_report') }}" class="tool-pill tool-pill-small">
+            Compensation Report
+        </a>
+    {% endif %}
 
-    <a href="{{ url_for('employee_admin') }}" class="tool-pill tool-pill-small">
-        Employee Admin Page
-    </a>
+    {% if nav_access.can_manage_employees %}
+        <a href="{{ url_for('employee_admin') }}" class="tool-pill tool-pill-small">
+            Employee Admin Page
+        </a>
+    {% endif %}
 
 </div>
 <br>
@@ -40,8 +48,8 @@
         </div>
 
         <div class="summary-card">
-            <h3>Total Employees</h3>
-            <p>{{ total_employees }}</p>
+            <h3>Active Employees</h3>
+            <p>{{ active_employees }}</p>
         </div>
 </div>
 <br>

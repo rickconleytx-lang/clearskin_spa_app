@@ -42,6 +42,8 @@ from werkzeug.security import (
     check_password_hash
 )
 
+from werkzeug.exceptions import HTTPException
+
 import json
 import decimal
 
@@ -64,6 +66,29 @@ from services.coach import (
     build_action_cards
 )
 from services.sms_service import send_sms_telnyx
+from services.mfa_security import (
+    MFAError,
+    build_totp_qr_png,
+    build_totp_uri,
+    decrypt_totp_secret,
+    encrypt_totp_secret,
+    generate_recovery_codes,
+    generate_totp_secret,
+    generate_verification_code,
+    hash_recovery_code,
+    hash_verification_code,
+    verify_recovery_code,
+    verify_totp_code,
+    verify_verification_code,
+)
+from services.employee_access_security import (
+    EmployeeAccessSecurityError,
+    generate_access_code,
+    hash_access_code,
+    normalize_access_code,
+    normalize_access_code_format,
+    verify_access_code,
+)
 from services import square_oauth
 from services import square_service
 from services import square_sync_auth
@@ -621,6 +646,25 @@ def log_email(message, severity="INFO", spa_id=None, related_type=None, related_
     log_event("EMAIL", message, severity, spa_id, related_type, related_id, created_by)
 
 
+def log_security(
+    message,
+    severity="INFO",
+    spa_id=None,
+    related_type=None,
+    related_id=None,
+    created_by=None
+):
+    log_event(
+        "SECURITY",
+        message,
+        severity,
+        spa_id,
+        related_type,
+        related_id,
+        created_by
+    )
+
+
 def log_godaddy(message, severity="INFO", spa_id=None, related_type=None, related_id=None, created_by=None):
     log_event("GODADDY", message, severity, spa_id, related_type, related_id, created_by)
 
@@ -1165,7 +1209,9 @@ def help_topics_api():
                 FROM help_pages
 
                 WHERE is_active = TRUE
+                  AND spa_id IS NULL
                   AND language_code IN (%s, 'EN')
+                  AND page_key <> 'sms_email_terms'
             )
 
             SELECT
@@ -1295,6 +1341,8 @@ def help_page_api(page_key):
                 language_code
             FROM help_pages
             WHERE page_key = %s
+              AND spa_id IS NULL
+              AND page_key <> 'sms_email_terms'
               AND is_active = TRUE
               AND language_code IN (%s, 'EN')
             ORDER BY
@@ -1302,7 +1350,8 @@ def help_page_api(page_key):
                     WHEN language_code = %s THEN 0
                     WHEN language_code = 'EN' THEN 1
                     ELSE 2
-                END
+                END,
+                help_page_id DESC
             LIMIT 1
             """,
             (
@@ -3990,6 +4039,12 @@ LOGIN_FAILURE_MAX_ATTEMPTS = 5
 LOGIN_FAILURE_WINDOW_MINUTES = 15
 LOGIN_FAILURE_LOCK_MINUTES = 15
 
+# Employee Access Code failures are intentionally tracked
+# separately from business-login password/MFA failures.
+EMPLOYEE_ACCESS_FAILURE_MAX_ATTEMPTS = 5
+EMPLOYEE_ACCESS_FAILURE_WINDOW_MINUTES = 15
+EMPLOYEE_ACCESS_FAILURE_LOCK_MINUTES = 15
+
 PASSWORD_RESET_TOKEN_MINUTES = 10
 PASSWORD_RESET_RESEND_COOLDOWN_SECONDS = 60
 PASSWORD_RESET_MAX_EMAILS_PER_HOUR = 3
@@ -4002,6 +4057,4523 @@ PASSWORD_RESET_PRODUCTION_BASE_URL = (
 )
 
 PUBLIC_SECURITY_CSRF_MAX_AGE_SECONDS = 30 * 60
+
+MFA_REQUIRED_ROLES = frozenset({
+    "admin",
+    "manager",
+    "master_admin",
+})
+
+MFA_PENDING_LOGIN_MAX_AGE_SECONDS = 10 * 60
+
+MFA_VERIFICATION_CODE_MINUTES = 10
+MFA_VERIFICATION_RESEND_COOLDOWN_SECONDS = 60
+MFA_VERIFICATION_MAX_SECURITY_DELIVERIES_PER_HOUR = 3
+MFA_LOGIN_RESEND_SECURITY_ALERT_WINDOW_MINUTES = 60
+
+
+def _mfa_required_for_role(role):
+    return (
+        str(role or "").strip()
+        in MFA_REQUIRED_ROLES
+    )
+
+
+def _mfa_no_store(response):
+    response = app.make_response(response)
+
+    response.headers["Cache-Control"] = (
+        "no-store, no-cache, must-revalidate, "
+        "max-age=0"
+    )
+
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+
+    return response
+
+
+def _clear_pending_mfa_login():
+    session.pop("_pending_mfa_login", None)
+    session.pop("_public_security_csrf", None)
+
+
+def _start_pending_mfa_login(user):
+    user_id = int(user[0])
+    spa_id = user[1]
+    role = str(user[6] or "").strip()
+
+    if not _mfa_required_for_role(role):
+        raise ValueError(
+            "Pending MFA login requires an MFA role."
+        )
+
+    pending = {
+        "target_user_id": user_id,
+        "target_spa_id": spa_id,
+        "target_role": role,
+        "source_user_id": session.get("user_id"),
+        "source_spa_id": session.get("spa_id"),
+        "issued_at": int(time.time()),
+        "challenge_id": secrets.token_urlsafe(32),
+        "enrollment_authenticator_id": None,
+        "enrollment_verified_authenticator_id": None,
+        "mfa_method": None,
+        "mfa_verification_challenge_id": None,
+        "verification_resend_count": 0,
+        "mfa_setup_choice": None,
+    }
+
+    session["_pending_mfa_login"] = pending
+    session.pop("_public_security_csrf", None)
+
+    return pending
+
+
+def _pending_mfa_login():
+    pending = session.get("_pending_mfa_login")
+
+    if not isinstance(pending, dict):
+        return None
+
+    try:
+        target_user_id = int(
+            pending.get("target_user_id")
+        )
+
+        issued_at = int(
+            pending.get("issued_at")
+        )
+
+    except (TypeError, ValueError):
+        _clear_pending_mfa_login()
+        return None
+
+    target_role = str(
+        pending.get("target_role")
+        or ""
+    ).strip()
+
+    challenge_id = str(
+        pending.get("challenge_id")
+        or ""
+    ).strip()
+
+    age_seconds = (
+        int(time.time()) - issued_at
+    )
+
+    enrollment_authenticator_id = (
+        pending.get(
+            "enrollment_authenticator_id"
+        )
+    )
+
+    enrollment_verified_authenticator_id = (
+        pending.get(
+            "enrollment_verified_authenticator_id"
+        )
+    )
+
+    mfa_method = str(
+        pending.get("mfa_method")
+        or ""
+    ).strip().lower()
+
+    if mfa_method not in {
+        "",
+        "authenticator",
+        "sms",
+        "email",
+    }:
+        _clear_pending_mfa_login()
+        return None
+
+    mfa_verification_challenge_id = (
+        pending.get("mfa_verification_challenge_id")
+    )
+
+    try:
+        if mfa_verification_challenge_id is not None:
+            mfa_verification_challenge_id = int(
+                mfa_verification_challenge_id
+            )
+
+    except (TypeError, ValueError):
+        _clear_pending_mfa_login()
+        return None
+
+    if (
+        mfa_verification_challenge_id is not None
+        and mfa_verification_challenge_id <= 0
+    ):
+        _clear_pending_mfa_login()
+        return None
+
+    try:
+        verification_resend_count = int(
+            pending.get("verification_resend_count")
+            or 0
+        )
+
+    except (TypeError, ValueError):
+        _clear_pending_mfa_login()
+        return None
+
+    if verification_resend_count < 0:
+        _clear_pending_mfa_login()
+        return None
+
+    mfa_setup_choice = str(
+        pending.get("mfa_setup_choice")
+        or ""
+    ).strip().lower()
+
+    if mfa_setup_choice not in {
+        "",
+        "guided",
+        "familiar",
+    }:
+        _clear_pending_mfa_login()
+        return None
+
+    try:
+        if enrollment_authenticator_id is not None:
+            enrollment_authenticator_id = int(
+                enrollment_authenticator_id
+            )
+
+        if (
+            enrollment_verified_authenticator_id
+            is not None
+        ):
+            enrollment_verified_authenticator_id = int(
+                enrollment_verified_authenticator_id
+            )
+
+    except (TypeError, ValueError):
+        _clear_pending_mfa_login()
+        return None
+
+    enrollment_ids_valid = bool(
+        (
+            enrollment_authenticator_id is None
+            or enrollment_authenticator_id > 0
+        )
+        and (
+            enrollment_verified_authenticator_id
+            is None
+            or (
+                enrollment_verified_authenticator_id > 0
+                and enrollment_authenticator_id
+                    == enrollment_verified_authenticator_id
+            )
+        )
+    )
+
+    pending_valid = bool(
+        target_user_id > 0
+        and _mfa_required_for_role(
+            target_role
+        )
+        and challenge_id
+        and enrollment_ids_valid
+        and age_seconds >= 0
+        and age_seconds
+            <= MFA_PENDING_LOGIN_MAX_AGE_SECONDS
+        and pending.get("source_user_id")
+            == session.get("user_id")
+        and pending.get("source_spa_id")
+            == session.get("spa_id")
+    )
+
+    if not pending_valid:
+        _clear_pending_mfa_login()
+        return None
+
+    return {
+        "target_user_id": target_user_id,
+        "target_spa_id": pending.get(
+            "target_spa_id"
+        ),
+        "target_role": target_role,
+        "source_user_id": pending.get(
+            "source_user_id"
+        ),
+        "source_spa_id": pending.get(
+            "source_spa_id"
+        ),
+        "issued_at": issued_at,
+        "challenge_id": challenge_id,
+        "enrollment_authenticator_id": (
+            enrollment_authenticator_id
+        ),
+        "enrollment_verified_authenticator_id": (
+            enrollment_verified_authenticator_id
+        ),
+        "mfa_method": (
+            mfa_method
+        ),
+        "mfa_verification_challenge_id": (
+            mfa_verification_challenge_id
+        ),
+        "verification_resend_count": (
+            verification_resend_count
+        ),
+        "mfa_setup_choice": (
+            mfa_setup_choice
+        ),
+    }
+
+
+def _mfa_user_setting_record(
+    cur,
+    user_id,
+    *,
+    for_update=False,
+):
+    lock_clause = (
+        " FOR UPDATE"
+        if for_update
+        else ""
+    )
+
+    cur.execute(
+        f"""
+        SELECT
+            mfa_user_setting_id,
+            user_id,
+            active_method,
+            enabled_at,
+            last_recommended_at,
+            reminder_snoozed_until,
+            created_at,
+            updated_at
+        FROM mfa_user_settings
+        WHERE user_id = %s
+        LIMIT 1
+        {lock_clause}
+        """,
+        (user_id,),
+    )
+
+    return cur.fetchone()
+
+
+def _mfa_verification_challenge_record(
+    cur,
+    user_id,
+    method,
+    purpose,
+    *,
+    for_update=False,
+):
+    normalized_method = str(
+        method or ""
+    ).strip().lower()
+
+    normalized_purpose = str(
+        purpose or ""
+    ).strip().lower()
+
+    if normalized_method not in {
+        "sms",
+        "email",
+    }:
+        raise ValueError(
+            "MFA verification challenge method is invalid."
+        )
+
+    if normalized_purpose not in {
+        "enrollment",
+        "login",
+        "method_change",
+    }:
+        raise ValueError(
+            "MFA verification challenge purpose is invalid."
+        )
+
+    lock_clause = (
+        " FOR UPDATE"
+        if for_update
+        else ""
+    )
+
+    cur.execute(
+        f"""
+        SELECT
+            mfa_verification_challenge_id,
+            user_id,
+            method,
+            purpose,
+            code_hash,
+            created_at,
+            expires_at,
+            delivery_sent_at,
+            used_at,
+            invalidated_at
+        FROM mfa_verification_challenges
+        WHERE user_id = %s
+          AND method = %s
+          AND purpose = %s
+          AND delivery_sent_at IS NOT NULL
+          AND used_at IS NULL
+          AND invalidated_at IS NULL
+          AND expires_at > NOW()
+        ORDER BY
+            mfa_verification_challenge_id DESC
+        LIMIT 1
+        {lock_clause}
+        """,
+        (
+            user_id,
+            normalized_method,
+            normalized_purpose,
+        ),
+    )
+
+    return cur.fetchone()
+
+
+def _mfa_verification_delivery_limit_state(
+    cur,
+    user_id,
+    purpose,
+):
+    normalized_purpose = str(
+        purpose or ""
+    ).strip().lower()
+
+    if normalized_purpose not in {
+        "enrollment",
+        "login",
+        "method_change",
+    }:
+        raise ValueError(
+            "MFA verification challenge purpose is invalid."
+        )
+
+    # Normal sign-in must remain friendly to legitimate users.
+    #
+    # There is no small hourly cap for login verification codes.
+    # A successfully used prior login code also does not impose a
+    # resend cooldown on a fresh login. If the most recent usable
+    # login code is still unused, however, retain the short cooldown
+    # to prevent rapid verification-message bombing.
+    if normalized_purpose == "login":
+        cur.execute(
+            """
+            SELECT
+                delivery_sent_at,
+                used_at,
+                NOW()
+            FROM mfa_verification_challenges
+            WHERE user_id = %s
+              AND purpose = 'login'
+              AND delivery_sent_at IS NOT NULL
+              AND invalidated_at IS NULL
+            ORDER BY
+                delivery_sent_at DESC,
+                mfa_verification_challenge_id DESC
+            LIMIT 1
+            """,
+            (user_id,),
+        )
+
+        row = cur.fetchone()
+
+        if row and row[0] is not None and row[1] is None:
+            latest_delivery_at = row[0]
+            now_at = row[2]
+
+            cooldown_elapsed = (
+                now_at - latest_delivery_at
+            ).total_seconds()
+
+            if (
+                cooldown_elapsed
+                < MFA_VERIFICATION_RESEND_COOLDOWN_SECONDS
+            ):
+                retry_seconds = max(
+                    1,
+                    int(
+                        MFA_VERIFICATION_RESEND_COOLDOWN_SECONDS
+                        - cooldown_elapsed
+                    )
+                    + 1,
+                )
+
+                return {
+                    "allowed": False,
+                    "reason": "cooldown",
+                    "retry_seconds": retry_seconds,
+                }
+
+        return {
+            "allowed": True,
+            "reason": None,
+            "retry_seconds": 0,
+        }
+
+    # Enrollment and verification-method changes are uncommon
+    # security-administration actions. Keep the tighter shared
+    # hourly delivery limit and resend cooldown for those flows.
+    cur.execute(
+        """
+        SELECT
+            COUNT(*) FILTER (
+                WHERE delivery_sent_at >= (
+                    NOW() - INTERVAL '1 hour'
+                )
+            ),
+            MAX(delivery_sent_at),
+            MIN(delivery_sent_at) FILTER (
+                WHERE delivery_sent_at >= (
+                    NOW() - INTERVAL '1 hour'
+                )
+            ),
+            NOW()
+        FROM mfa_verification_challenges
+        WHERE user_id = %s
+          AND purpose IN (
+              'enrollment',
+              'method_change'
+          )
+          AND delivery_sent_at IS NOT NULL
+        """,
+        (user_id,),
+    )
+
+    row = cur.fetchone()
+
+    if not row:
+        raise RuntimeError(
+            "MFA verification delivery limit state "
+            "could not be determined."
+        )
+
+    successful_deliveries = int(row[0] or 0)
+    latest_delivery_at = row[1]
+    oldest_hour_delivery_at = row[2]
+    now_at = row[3]
+
+    if latest_delivery_at is not None:
+        cooldown_elapsed = (
+            now_at - latest_delivery_at
+        ).total_seconds()
+
+        if (
+            cooldown_elapsed
+            < MFA_VERIFICATION_RESEND_COOLDOWN_SECONDS
+        ):
+            retry_seconds = max(
+                1,
+                int(
+                    MFA_VERIFICATION_RESEND_COOLDOWN_SECONDS
+                    - cooldown_elapsed
+                )
+                + 1,
+            )
+
+            return {
+                "allowed": False,
+                "reason": "cooldown",
+                "retry_seconds": retry_seconds,
+            }
+
+    if (
+        successful_deliveries
+        >= MFA_VERIFICATION_MAX_SECURITY_DELIVERIES_PER_HOUR
+    ):
+        if oldest_hour_delivery_at is None:
+            raise RuntimeError(
+                "MFA verification hourly limit state "
+                "is inconsistent."
+            )
+
+        hourly_elapsed = (
+            now_at - oldest_hour_delivery_at
+        ).total_seconds()
+
+        retry_seconds = max(
+            1,
+            int(
+                (60 * 60) - hourly_elapsed
+            )
+            + 1,
+        )
+
+        return {
+            "allowed": False,
+            "reason": "hourly_limit",
+            "retry_seconds": retry_seconds,
+        }
+
+    return {
+        "allowed": True,
+        "reason": None,
+        "retry_seconds": 0,
+    }
+
+
+def _reserve_mfa_verification_challenge(
+    cur,
+    user_id,
+    method,
+    purpose,
+):
+    normalized_method = str(
+        method or ""
+    ).strip().lower()
+
+    normalized_purpose = str(
+        purpose or ""
+    ).strip().lower()
+
+    if normalized_method not in {
+        "sms",
+        "email",
+    }:
+        raise ValueError(
+            "MFA verification challenge method is invalid."
+        )
+
+    if normalized_purpose not in {
+        "enrollment",
+        "login",
+        "method_change",
+    }:
+        raise ValueError(
+            "MFA verification challenge purpose is invalid."
+        )
+
+    # Serialize challenge reservation for this account.
+    cur.execute(
+        """
+        SELECT user_id
+        FROM users
+        WHERE user_id = %s
+          AND active = TRUE
+        FOR UPDATE
+        """,
+        (user_id,),
+    )
+
+    if not cur.fetchone():
+        return {
+            "allowed": False,
+            "reason": "invalid_user",
+            "retry_seconds": 0,
+        }
+
+    limit_state = (
+        _mfa_verification_delivery_limit_state(
+            cur,
+            user_id,
+            normalized_purpose,
+        )
+    )
+
+    if not limit_state["allowed"]:
+        return limit_state
+
+    raw_code = generate_verification_code()
+
+    code_hash = hash_verification_code(
+        raw_code,
+        user_id=user_id,
+        method=normalized_method,
+        purpose=normalized_purpose,
+    )
+
+    cur.execute(
+        """
+        INSERT INTO mfa_verification_challenges (
+            user_id,
+            method,
+            purpose,
+            code_hash,
+            expires_at
+        )
+        VALUES (
+            %s,
+            %s,
+            %s,
+            %s,
+            NOW() + (
+                %s * INTERVAL '1 minute'
+            )
+        )
+        RETURNING
+            mfa_verification_challenge_id,
+            expires_at
+        """,
+        (
+            user_id,
+            normalized_method,
+            normalized_purpose,
+            code_hash,
+            MFA_VERIFICATION_CODE_MINUTES,
+        ),
+    )
+
+    challenge = cur.fetchone()
+
+    if not challenge:
+        raise RuntimeError(
+            "MFA verification challenge reservation failed."
+        )
+
+    return {
+        "allowed": True,
+        "reason": None,
+        "retry_seconds": 0,
+        "mfa_verification_challenge_id": challenge[0],
+        "raw_code": raw_code,
+        "expires_at": challenge[1],
+        "method": normalized_method,
+        "purpose": normalized_purpose,
+    }
+
+
+def _finalize_mfa_verification_delivery(
+    cur,
+    *,
+    user_id,
+    method,
+    purpose,
+    mfa_verification_challenge_id,
+):
+    normalized_method = str(
+        method or ""
+    ).strip().lower()
+
+    normalized_purpose = str(
+        purpose or ""
+    ).strip().lower()
+
+    if normalized_method not in {
+        "sms",
+        "email",
+    }:
+        raise ValueError(
+            "MFA verification challenge method is invalid."
+        )
+
+    if normalized_purpose not in {
+        "enrollment",
+        "login",
+        "method_change",
+    }:
+        raise ValueError(
+            "MFA verification challenge purpose is invalid."
+        )
+
+    # Serialize delivery finalization for this account.
+    cur.execute(
+        """
+        SELECT
+            user_id,
+            spa_id
+        FROM users
+        WHERE user_id = %s
+          AND active = TRUE
+        FOR UPDATE
+        """,
+        (user_id,),
+    )
+
+    user = cur.fetchone()
+
+    if not user:
+        raise RuntimeError(
+            "MFA verification account is no longer available."
+        )
+
+    cur.execute(
+        """
+        SELECT
+            mfa_verification_challenge_id,
+            expires_at,
+            delivery_sent_at,
+            used_at,
+            invalidated_at,
+            NOW()
+        FROM mfa_verification_challenges
+        WHERE mfa_verification_challenge_id = %s
+          AND user_id = %s
+          AND method = %s
+          AND purpose = %s
+        FOR UPDATE
+        """,
+        (
+            mfa_verification_challenge_id,
+            user_id,
+            normalized_method,
+            normalized_purpose,
+        ),
+    )
+
+    challenge = cur.fetchone()
+
+    if (
+        not challenge
+        or challenge[2] is not None
+        or challenge[3] is not None
+        or challenge[4] is not None
+    ):
+        raise RuntimeError(
+            "MFA verification challenge could not be finalized."
+        )
+
+    expires_at = challenge[1]
+    invalidated_at = challenge[4]
+    now_at = challenge[5]
+
+    # A provider response that arrives after expiration must
+    # never make the challenge usable.
+    if expires_at <= now_at:
+        if invalidated_at is None:
+            cur.execute(
+                """
+                UPDATE mfa_verification_challenges
+                SET invalidated_at = NOW()
+                WHERE mfa_verification_challenge_id = %s
+                  AND user_id = %s
+                  AND delivery_sent_at IS NULL
+                  AND used_at IS NULL
+                  AND invalidated_at IS NULL
+                """,
+                (
+                    mfa_verification_challenge_id,
+                    user_id,
+                ),
+            )
+
+        return False
+
+    # If a newer code for the same MFA purpose was already
+    # accepted for delivery, this older out-of-order delivery
+    # must never become the active challenge.
+    cur.execute(
+        """
+        SELECT EXISTS (
+            SELECT 1
+            FROM mfa_verification_challenges
+            WHERE user_id = %s
+              AND purpose = %s
+              AND mfa_verification_challenge_id > %s
+              AND delivery_sent_at IS NOT NULL
+        )
+        """,
+        (
+            user_id,
+            normalized_purpose,
+            mfa_verification_challenge_id,
+        ),
+    )
+
+    newer_delivery_exists = bool(
+        cur.fetchone()[0]
+    )
+
+    if newer_delivery_exists:
+        cur.execute(
+            """
+            UPDATE mfa_verification_challenges
+            SET
+                delivery_sent_at = NOW(),
+                invalidated_at = COALESCE(
+                    invalidated_at,
+                    NOW()
+                )
+            WHERE mfa_verification_challenge_id = %s
+              AND user_id = %s
+              AND delivery_sent_at IS NULL
+              AND used_at IS NULL
+              AND expires_at > NOW()
+            RETURNING mfa_verification_challenge_id
+            """,
+            (
+                mfa_verification_challenge_id,
+                user_id,
+            ),
+        )
+
+        if not cur.fetchone():
+            raise RuntimeError(
+                "Superseded MFA verification challenge "
+                "could not be finalized."
+            )
+
+        log_audit(
+            cur,
+            spa_id=user[1],
+            user_id=user_id,
+            action_type="mfa_verification_code_sent",
+            table_name="mfa_verification_challenges",
+            record_id=mfa_verification_challenge_id,
+            notes=(
+                f"{normalized_method.upper()} MFA verification "
+                f"code accepted for {normalized_purpose}, but a "
+                "newer delivered code was already active. "
+                "This older challenge was invalidated."
+            ),
+        )
+
+        return False
+
+    cur.execute(
+        """
+        UPDATE mfa_verification_challenges
+        SET delivery_sent_at = NOW()
+        WHERE mfa_verification_challenge_id = %s
+          AND user_id = %s
+          AND method = %s
+          AND purpose = %s
+          AND delivery_sent_at IS NULL
+          AND used_at IS NULL
+          AND invalidated_at IS NULL
+          AND expires_at > NOW()
+        RETURNING mfa_verification_challenge_id
+        """,
+        (
+            mfa_verification_challenge_id,
+            user_id,
+            normalized_method,
+            normalized_purpose,
+        ),
+    )
+
+    if not cur.fetchone():
+        raise RuntimeError(
+            "MFA verification challenge could not be "
+            "activated after delivery."
+        )
+
+    # The newest successfully delivered code wins for this
+    # MFA purpose. Older unused challenges may no longer be used.
+    cur.execute(
+        """
+        UPDATE mfa_verification_challenges
+        SET invalidated_at = NOW()
+        WHERE user_id = %s
+          AND purpose = %s
+          AND mfa_verification_challenge_id < %s
+          AND used_at IS NULL
+          AND invalidated_at IS NULL
+        """,
+        (
+            user_id,
+            normalized_purpose,
+            mfa_verification_challenge_id,
+        ),
+    )
+
+    log_audit(
+        cur,
+        spa_id=user[1],
+        user_id=user_id,
+        action_type="mfa_verification_code_sent",
+        table_name="mfa_verification_challenges",
+        record_id=mfa_verification_challenge_id,
+        notes=(
+            f"{normalized_method.upper()} MFA verification "
+            f"code accepted for {normalized_purpose}. "
+            "Older unused challenges for this purpose "
+            "were invalidated."
+        ),
+    )
+
+    return True
+
+
+def _invalidate_unsent_mfa_verification_challenge(
+    cur,
+    *,
+    user_id,
+    method,
+    purpose,
+    mfa_verification_challenge_id,
+):
+    normalized_method = str(
+        method or ""
+    ).strip().lower()
+
+    normalized_purpose = str(
+        purpose or ""
+    ).strip().lower()
+
+    if normalized_method not in {
+        "sms",
+        "email",
+    }:
+        raise ValueError(
+            "MFA verification challenge method is invalid."
+        )
+
+    if normalized_purpose not in {
+        "enrollment",
+        "login",
+        "method_change",
+    }:
+        raise ValueError(
+            "MFA verification challenge purpose is invalid."
+        )
+
+    cur.execute(
+        """
+        UPDATE mfa_verification_challenges
+        SET invalidated_at = NOW()
+        WHERE mfa_verification_challenge_id = %s
+          AND user_id = %s
+          AND method = %s
+          AND purpose = %s
+          AND delivery_sent_at IS NULL
+          AND used_at IS NULL
+          AND invalidated_at IS NULL
+        RETURNING mfa_verification_challenge_id
+        """,
+        (
+            mfa_verification_challenge_id,
+            user_id,
+            normalized_method,
+            normalized_purpose,
+        ),
+    )
+
+    return cur.fetchone() is not None
+
+
+def _send_mfa_verification_code(
+    *,
+    user_id,
+    method,
+    purpose,
+):
+    normalized_method = str(
+        method or ""
+    ).strip().lower()
+
+    normalized_purpose = str(
+        purpose or ""
+    ).strip().lower()
+
+    if normalized_method not in {
+        "sms",
+        "email",
+    }:
+        raise ValueError(
+            "MFA verification challenge method is invalid."
+        )
+
+    if normalized_purpose not in {
+        "enrollment",
+        "login",
+        "method_change",
+    }:
+        raise ValueError(
+            "MFA verification challenge purpose is invalid."
+        )
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                spa_id,
+                email,
+                sms_phone
+            FROM users
+            WHERE user_id = %s
+              AND active = TRUE
+            LIMIT 1
+            """,
+            (user_id,),
+        )
+
+        user_contact = cur.fetchone()
+
+        if not user_contact:
+            conn.rollback()
+
+            return {
+                "status": "invalid_user",
+                "retry_seconds": 0,
+            }
+
+        target_spa_id = user_contact[0]
+
+        destination_value = (
+            user_contact[2]
+            if normalized_method == "sms"
+            else user_contact[1]
+        )
+
+        destination = str(
+            destination_value or ""
+        ).strip()
+
+        if not destination:
+            conn.rollback()
+
+            return {
+                "status": "missing_destination",
+                "retry_seconds": 0,
+            }
+
+        reservation = (
+            _reserve_mfa_verification_challenge(
+                cur,
+                user_id,
+                normalized_method,
+                normalized_purpose,
+            )
+        )
+
+        if not reservation["allowed"]:
+            conn.rollback()
+
+            return {
+                "status": reservation["reason"],
+                "retry_seconds": reservation.get(
+                    "retry_seconds",
+                    0,
+                ),
+            }
+
+        challenge_id = reservation[
+            "mfa_verification_challenge_id"
+        ]
+
+        raw_code = reservation["raw_code"]
+        expires_at = reservation["expires_at"]
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    delivery_accepted = False
+
+    if normalized_method == "sms":
+        message_body = (
+            "Your Peach Suite Pro verification code is "
+            f"{raw_code}. It expires in "
+            f"{MFA_VERIFICATION_CODE_MINUTES} minutes. "
+            "Do not share this code."
+        )
+
+        try:
+            sms_result = send_peach_suite_platform_sms(
+                recipient_phone=destination,
+                message_body=message_body,
+                message_type="security_verification",
+            )
+
+            delivery_accepted = bool(
+                isinstance(sms_result, dict)
+                and sms_result.get("success")
+            )
+
+            if isinstance(sms_result, dict):
+                sms_result.pop(
+                    "final_message_body",
+                    None,
+                )
+
+        except Exception:
+            log_security(
+                "MFA security verification SMS send failed.",
+                severity="ERROR",
+                spa_id=target_spa_id,
+                related_type="mfa_verification_sms",
+                related_id=user_id
+            )
+
+    else:
+        email_body = (
+            "Your Peach Suite Pro verification code is "
+            f"{raw_code}.\n\n"
+            f"This code expires in "
+            f"{MFA_VERIFICATION_CODE_MINUTES} minutes "
+            "and can be used only once.\n\n"
+            "Do not share this code with anyone. "
+            "Peach Suite Pro will never ask you to send "
+            "this code by email or text."
+        )
+
+        try:
+            response = send_email(
+                to=destination,
+                subject=(
+                    "Your Peach Suite Pro verification code"
+                ),
+                body=email_body,
+                add_footer=False,
+            )
+
+            delivery_accepted = bool(
+                response is not None
+                and 200
+                <= int(response.status_code)
+                < 300
+            )
+
+        except Exception:
+            log_security(
+                "MFA security verification email send failed.",
+                severity="ERROR",
+                spa_id=target_spa_id,
+                related_type="mfa_verification_email",
+                related_id=user_id
+            )
+
+    # The raw code is no longer needed after the provider call.
+    raw_code = None
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        if delivery_accepted:
+            usable = _finalize_mfa_verification_delivery(
+                cur,
+                user_id=user_id,
+                method=normalized_method,
+                purpose=normalized_purpose,
+                mfa_verification_challenge_id=challenge_id,
+            )
+
+            conn.commit()
+
+            return {
+                "status": (
+                    "sent"
+                    if usable
+                    else "superseded"
+                ),
+                "retry_seconds": 0,
+                "expires_at": expires_at,
+                "method": normalized_method,
+                "mfa_verification_challenge_id": (
+                    challenge_id
+                    if usable
+                    else None
+                ),
+            }
+
+        _invalidate_unsent_mfa_verification_challenge(
+            cur,
+            user_id=user_id,
+            method=normalized_method,
+            purpose=normalized_purpose,
+            mfa_verification_challenge_id=challenge_id,
+        )
+
+        conn.commit()
+
+        return {
+            "status": "delivery_failed",
+            "retry_seconds": 0,
+            "method": normalized_method,
+        }
+
+    except Exception:
+        conn.rollback()
+
+        log_security(
+            "MFA verification challenge finalization failed.",
+            severity="ERROR",
+            spa_id=target_spa_id,
+            related_type="mfa_verification_challenge",
+            related_id=user_id
+        )
+
+        return {
+            "status": "delivery_failed",
+            "retry_seconds": 0,
+            "method": normalized_method,
+        }
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _send_mfa_login_resend_security_alert(
+    *,
+    user_id,
+):
+    """
+    Best-effort warning after repeated login-code resends.
+
+    This alert must never prevent the user from receiving or
+    verifying a login code. A reservation audit entry prevents
+    the warning mechanism itself from becoming message spam.
+    """
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        # Serialize alert reservation for this account so two
+        # concurrent resend requests cannot both send warnings.
+        cur.execute(
+            """
+            SELECT
+                spa_id,
+                email,
+                sms_phone
+            FROM users
+            WHERE user_id = %s
+              AND active = TRUE
+            FOR UPDATE
+            """,
+            (user_id,),
+        )
+
+        user = cur.fetchone()
+
+        if not user:
+            conn.rollback()
+
+            return {
+                "status": "invalid_user",
+            }
+
+        spa_id = user[0]
+        email = str(user[1] or "").strip()
+        sms_phone = str(user[2] or "").strip()
+
+        cur.execute(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM audit_log
+                WHERE user_id = %s
+                  AND action_type = (
+                      'mfa_login_resend_security_alert_reserved'
+                  )
+                  AND created_at >= (
+                      CURRENT_TIMESTAMP
+                      - (
+                          %s * INTERVAL '1 minute'
+                      )
+                  )
+            )
+            """,
+            (
+                user_id,
+                MFA_LOGIN_RESEND_SECURITY_ALERT_WINDOW_MINUTES,
+            ),
+        )
+
+        alert_recently_reserved = bool(
+            cur.fetchone()[0]
+        )
+
+        if alert_recently_reserved:
+            conn.rollback()
+
+            return {
+                "status": "suppressed",
+            }
+
+        log_audit(
+            cur,
+            spa_id=spa_id,
+            user_id=user_id,
+            action_type=(
+                "mfa_login_resend_security_alert_reserved"
+            ),
+            table_name="users",
+            record_id=user_id,
+            notes=(
+                "Security warning reserved after repeated "
+                "login verification-code resends. Warning "
+                "attempts are limited to once per alert window."
+            ),
+        )
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    sms_status = (
+        "missing_destination"
+        if not sms_phone
+        else "failed"
+    )
+
+    email_status = (
+        "missing_destination"
+        if not email
+        else "failed"
+    )
+
+    sms_body = (
+        "Peach Suite Pro Security Alert: Multiple login "
+        "verification codes were recently requested for your "
+        "account. If this was you, no action is needed. If not, "
+        "change your Peach Suite Pro password as soon as possible "
+        "and never share a verification code."
+    )
+
+    email_body = (
+        "We noticed multiple login verification codes were "
+        "recently requested for your Peach Suite Pro account.\n\n"
+        "If these requests were yours, no action is needed. "
+        "You can continue signing in normally.\n\n"
+        "If you did not request these codes, someone may know "
+        "your account password. Please change your Peach Suite "
+        "Pro password as soon as possible.\n\n"
+        "For your security, never share a Peach Suite Pro "
+        "verification code with anyone."
+    )
+
+    if sms_phone:
+        try:
+            sms_result = send_peach_suite_platform_sms(
+                recipient_phone=sms_phone,
+                message_body=sms_body,
+                message_type="security_alert",
+            )
+
+            sms_status = (
+                "sent"
+                if (
+                    isinstance(sms_result, dict)
+                    and sms_result.get("success")
+                )
+                else "failed"
+            )
+
+            if isinstance(sms_result, dict):
+                sms_result.pop(
+                    "final_message_body",
+                    None,
+                )
+
+        except Exception:
+            sms_status = "failed"
+
+            log_security(
+                "MFA login resend security-alert SMS send failed.",
+                severity="ERROR",
+                spa_id=spa_id,
+                related_type="mfa_resend_security_alert_sms",
+                related_id=user_id
+            )
+
+    if email:
+        try:
+            response = send_email(
+                to=email,
+                subject=(
+                    "Peach Suite Pro Security Alert — "
+                    "Multiple Verification Code Requests"
+                ),
+                body=email_body,
+                add_footer=False,
+            )
+
+            email_status = (
+                "sent"
+                if (
+                    response is not None
+                    and 200
+                    <= int(response.status_code)
+                    < 300
+                )
+                else "failed"
+            )
+
+        except Exception:
+            email_status = "failed"
+
+            log_security(
+                "MFA login resend security-alert email send failed.",
+                severity="ERROR",
+                spa_id=spa_id,
+                related_type="mfa_resend_security_alert_email",
+                related_id=user_id
+            )
+
+    # Record only delivery statuses. Never record codes or
+    # message bodies in the audit log.
+    audit_conn = None
+    audit_cur = None
+
+    try:
+        audit_conn = get_db_connection()
+        audit_conn.autocommit = False
+        audit_cur = audit_conn.cursor()
+
+        log_audit(
+            audit_cur,
+            spa_id=spa_id,
+            user_id=user_id,
+            action_type="mfa_login_resend_security_alert",
+            table_name="users",
+            record_id=user_id,
+            notes=(
+                "Repeated login verification-code resend "
+                "security warning attempted. "
+                f"SMS status: {sms_status}. "
+                f"Email status: {email_status}."
+            ),
+        )
+
+        audit_conn.commit()
+
+    except Exception:
+        if audit_conn is not None:
+            try:
+                audit_conn.rollback()
+            except Exception:
+                pass
+
+        log_security(
+            "MFA login resend security-alert audit failed.",
+            severity="ERROR",
+            spa_id=spa_id,
+            related_type="mfa_resend_security_alert_audit",
+            related_id=user_id
+        )
+
+    finally:
+        if audit_cur is not None:
+            try:
+                audit_cur.close()
+            except Exception:
+                pass
+
+        if audit_conn is not None:
+            try:
+                audit_conn.close()
+            except Exception:
+                pass
+
+    return {
+        "status": "attempted",
+        "sms_status": sms_status,
+        "email_status": email_status,
+    }
+
+
+def _mfa_authenticator_record(
+    cur,
+    user_id,
+    *,
+    for_update=False,
+):
+    lock_clause = (
+        " FOR UPDATE"
+        if for_update
+        else ""
+    )
+
+    cur.execute(
+        f"""
+        SELECT
+            mfa_authenticator_id,
+            user_id,
+            totp_secret_encrypted,
+            created_at,
+            verified_at,
+            revoked_at,
+            last_accepted_totp_counter
+        FROM mfa_authenticators
+        WHERE user_id = %s
+          AND revoked_at IS NULL
+        LIMIT 1
+        {lock_clause}
+        """,
+        (user_id,),
+    )
+
+    return cur.fetchone()
+
+
+def _regenerate_mfa_recovery_codes(
+    *,
+    user_id,
+    spa_id,
+    session_role,
+    current_password,
+):
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                spa_id,
+                password_hash,
+                role
+            FROM users
+            WHERE user_id = %s
+              AND active = TRUE
+            FOR UPDATE
+            """,
+            (user_id,),
+        )
+
+        user = cur.fetchone()
+
+        account_matches_session = bool(
+            user
+            and user[0] == spa_id
+            and user[2] == session_role
+        )
+
+        if not account_matches_session:
+            conn.rollback()
+            return {
+                "status": "invalid_state",
+            }
+
+        if not check_password_hash(
+            user[1],
+            current_password,
+        ):
+            log_audit(
+                cur,
+                spa_id=spa_id,
+                user_id=user_id,
+                action_type=(
+                    "mfa_recovery_codes_regeneration_failed"
+                ),
+                table_name="users",
+                record_id=user_id,
+                notes=(
+                    "Current password verification failed "
+                    "during MFA recovery-code regeneration."
+                ),
+            )
+
+            conn.commit()
+
+            return {
+                "status": "invalid_password",
+            }
+
+        authenticator = _mfa_authenticator_record(
+            cur,
+            user_id,
+            for_update=True,
+        )
+
+        if (
+            not authenticator
+            or authenticator[4] is None
+        ):
+            conn.rollback()
+            return {
+                "status": "invalid_state",
+            }
+
+        recovery_codes = generate_recovery_codes()
+
+        recovery_hashes = [
+            hash_recovery_code(
+                recovery_code,
+                user_id=user_id,
+            )
+            for recovery_code
+            in recovery_codes
+        ]
+
+        cur.execute(
+            """
+            UPDATE mfa_recovery_codes
+            SET invalidated_at = NOW()
+            WHERE mfa_authenticator_id = %s
+              AND used_at IS NULL
+              AND invalidated_at IS NULL
+            RETURNING mfa_recovery_code_id
+            """,
+            (authenticator[0],),
+        )
+
+        invalidated_count = len(
+            cur.fetchall()
+        )
+
+        for recovery_hash in recovery_hashes:
+            cur.execute(
+                """
+                INSERT INTO mfa_recovery_codes (
+                    mfa_authenticator_id,
+                    code_hash
+                )
+                VALUES (%s, %s)
+                """,
+                (
+                    authenticator[0],
+                    recovery_hash,
+                ),
+            )
+
+        log_audit(
+            cur,
+            spa_id=spa_id,
+            user_id=user_id,
+            action_type="mfa_recovery_codes_regenerated",
+            table_name="mfa_authenticators",
+            record_id=authenticator[0],
+            notes=(
+                "Fresh MFA recovery codes created. "
+                f"{invalidated_count} unused prior "
+                "recovery code(s) invalidated. "
+                "Previously used recovery-code "
+                "history preserved."
+            ),
+        )
+
+        conn.commit()
+
+        return {
+            "status": "success",
+            "authenticator_id": authenticator[0],
+            "recovery_codes": recovery_codes,
+            "invalidated_count": invalidated_count,
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _mfa_pending_user_record(
+    cur,
+    pending,
+    *,
+    for_update=False,
+):
+    lock_clause = (
+        " FOR UPDATE"
+        if for_update
+        else ""
+    )
+
+    cur.execute(
+        f"""
+        SELECT
+            user_id,
+            spa_id,
+            first_name,
+            last_name,
+            email,
+            password_hash,
+            role,
+            password_changed_at,
+            must_change_password,
+            login_locked_until,
+            NOW(),
+            sms_phone
+        FROM users
+        WHERE user_id = %s
+          AND active = TRUE
+        {lock_clause}
+        """,
+        (
+            pending["target_user_id"],
+        ),
+    )
+
+    user = cur.fetchone()
+
+    if not user:
+        return None
+
+    if (
+        user[1]
+            != pending["target_spa_id"]
+        or str(user[6] or "").strip()
+            != pending["target_role"]
+        or not _mfa_required_for_role(
+            user[6]
+        )
+    ):
+        return None
+
+    return user
+
+
+def _prepare_mfa_enrollment_for_login(user):
+    user_id = int(user[0])
+    spa_id = user[1]
+    role = str(user[6] or "").strip()
+
+    if not _mfa_required_for_role(role):
+        raise ValueError(
+            "MFA enrollment preparation requires "
+            "an MFA role."
+        )
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        # Lock the user row so concurrent password-authenticated
+        # enrollment starts for the same account are serialized.
+        cur.execute(
+            """
+            SELECT
+                spa_id,
+                role
+            FROM users
+            WHERE user_id = %s
+              AND active = TRUE
+            FOR UPDATE
+            """,
+            (user_id,),
+        )
+
+        account = cur.fetchone()
+
+        if (
+            not account
+            or account[0] != spa_id
+            or str(account[1] or "").strip()
+                != role
+        ):
+            raise RuntimeError(
+                "MFA enrollment account changed "
+                "during sign-in."
+            )
+
+        authenticator = _mfa_authenticator_record(
+            cur,
+            user_id,
+            for_update=True,
+        )
+
+        if (
+            authenticator
+            and authenticator[4] is not None
+        ):
+            conn.commit()
+            return None
+
+        if authenticator:
+            enrollment_id = authenticator[0]
+
+            conn.commit()
+
+            return enrollment_id
+
+        secret = generate_totp_secret()
+
+        encrypted_secret = encrypt_totp_secret(
+            secret,
+            user_id=user_id,
+        )
+
+        cur.execute(
+            """
+            INSERT INTO mfa_authenticators (
+                user_id,
+                totp_secret_encrypted
+            )
+            VALUES (%s, %s)
+            RETURNING mfa_authenticator_id
+            """,
+            (
+                user_id,
+                encrypted_secret,
+            ),
+        )
+
+        enrollment_id = cur.fetchone()[0]
+
+        log_audit(
+            cur,
+            spa_id=spa_id,
+            user_id=user_id,
+            action_type="mfa_enrollment_started",
+            table_name="mfa_authenticators",
+            record_id=enrollment_id,
+            notes=(
+                "Authenticator-app MFA enrollment "
+                "started after successful password "
+                "verification."
+            ),
+        )
+
+        conn.commit()
+
+        return enrollment_id
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+def _clear_pending_mfa_method_change():
+    session.pop(
+        "_pending_mfa_method_change",
+        None,
+    )
+
+
+def _revoke_pending_mfa_authenticator_method_change(
+    pending,
+):
+    if not isinstance(pending, dict):
+        return {
+            "status": "not_applicable",
+        }
+
+    target_method = str(
+        pending.get("target_method")
+        or ""
+    ).strip().lower()
+
+    if target_method != "authenticator":
+        return {
+            "status": "not_applicable",
+        }
+
+    enrollment_id = pending.get(
+        "enrollment_authenticator_id"
+    )
+
+    if enrollment_id is None:
+        return {
+            "status": "not_applicable",
+        }
+
+    try:
+        enrollment_id = int(
+            enrollment_id
+        )
+    except (TypeError, ValueError):
+        return {
+            "status": "invalid_state",
+        }
+
+    if enrollment_id <= 0:
+        return {
+            "status": "invalid_state",
+        }
+
+    current_method = str(
+        pending.get("current_method")
+        or ""
+    ).strip().lower()
+
+    if current_method not in {
+        "sms",
+        "email",
+    }:
+        return {
+            "status": "invalid_state",
+        }
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                user_id,
+                spa_id,
+                role
+            FROM users
+            WHERE user_id = %s
+              AND active = TRUE
+            FOR UPDATE
+            """,
+            (
+                pending.get("user_id"),
+            ),
+        )
+
+        user = cur.fetchone()
+
+        account_matches_session = bool(
+            user
+            and user[0]
+                == session.get("user_id")
+            and user[1]
+                == session.get("spa_id")
+            and user[1]
+                == pending.get("spa_id")
+            and str(
+                user[2] or ""
+            ).strip()
+                == str(
+                    session.get("role")
+                    or ""
+                ).strip()
+            and str(
+                user[2] or ""
+            ).strip()
+                == str(
+                    pending.get("role")
+                    or ""
+                ).strip()
+            and str(
+                user[2] or ""
+            ).strip()
+                in {
+                    "admin",
+                    "manager",
+                }
+        )
+
+        if not account_matches_session:
+            conn.rollback()
+            return {
+                "status": "invalid_state",
+            }
+
+        setting = _mfa_user_setting_record(
+            cur,
+            user[0],
+            for_update=True,
+        )
+
+        active_method = (
+            str(
+                setting[2] or ""
+            ).strip().lower()
+            if (
+                setting
+                and setting[3] is not None
+            )
+            else ""
+        )
+
+        if active_method != current_method:
+            conn.rollback()
+            return {
+                "status": "invalid_state",
+            }
+
+        cur.execute(
+            """
+            UPDATE mfa_authenticators
+            SET revoked_at = NOW()
+            WHERE mfa_authenticator_id = %s
+              AND user_id = %s
+              AND verified_at IS NULL
+              AND revoked_at IS NULL
+            RETURNING mfa_authenticator_id
+            """,
+            (
+                enrollment_id,
+                user[0],
+            ),
+        )
+
+        revoked = cur.fetchone()
+
+        if not revoked:
+            conn.rollback()
+            return {
+                "status": "invalid_state",
+            }
+
+        log_audit(
+            cur,
+            spa_id=user[1],
+            user_id=user[0],
+            action_type=(
+                "mfa_method_change_authenticator_cancelled"
+            ),
+            table_name="mfa_authenticators",
+            record_id=enrollment_id,
+            notes=(
+                "Unfinished Authenticator App setup was "
+                "revoked after the two-step verification "
+                "method change was cancelled."
+            ),
+        )
+
+        conn.commit()
+
+        return {
+            "status": "success",
+            "authenticator_id": enrollment_id,
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _clear_mfa_method_change_completion():
+    session.pop(
+        "_mfa_method_change_completion",
+        None,
+    )
+
+
+def _start_mfa_method_change_completion(
+    *,
+    user_id,
+    spa_id,
+    role,
+    authenticator_id,
+):
+    completion = {
+        "user_id": int(user_id),
+        "spa_id": spa_id,
+        "role": str(role or "").strip(),
+        "authenticator_id": int(
+            authenticator_id
+        ),
+        "issued_at": int(time.time()),
+        "token": secrets.token_urlsafe(32),
+    }
+
+    session[
+        "_mfa_method_change_completion"
+    ] = completion
+
+    return completion
+
+
+def _mfa_method_change_completion():
+    completion = session.get(
+        "_mfa_method_change_completion"
+    )
+
+    if not isinstance(completion, dict):
+        return None
+
+    try:
+        user_id = int(
+            completion.get("user_id")
+        )
+        authenticator_id = int(
+            completion.get(
+                "authenticator_id"
+            )
+        )
+        issued_at = int(
+            completion.get("issued_at")
+        )
+    except (TypeError, ValueError):
+        _clear_mfa_method_change_completion()
+        return None
+
+    role = str(
+        completion.get("role")
+        or ""
+    ).strip()
+
+    token = str(
+        completion.get("token")
+        or ""
+    ).strip()
+
+    age_seconds = (
+        int(time.time()) - issued_at
+    )
+
+    valid = bool(
+        user_id > 0
+        and authenticator_id > 0
+        and role in {
+            "admin",
+            "manager",
+        }
+        and token
+        and age_seconds >= 0
+        and age_seconds
+            <= SECURITY_FORM_CSRF_MAX_AGE_SECONDS
+        and user_id
+            == session.get("user_id")
+        and completion.get("spa_id")
+            == session.get("spa_id")
+        and role
+            == str(
+                session.get("role")
+                or ""
+            ).strip()
+    )
+
+    if not valid:
+        _clear_mfa_method_change_completion()
+        return None
+
+    completion["user_id"] = user_id
+    completion[
+        "authenticator_id"
+    ] = authenticator_id
+    completion["issued_at"] = issued_at
+    completion["role"] = role
+    completion["token"] = token
+
+    return completion
+
+
+def _start_pending_mfa_method_change(
+    *,
+    user_id,
+    spa_id,
+    role,
+    current_method,
+    target_method,
+):
+    normalized_current = str(
+        current_method or ""
+    ).strip().lower()
+
+    normalized_target = str(
+        target_method or ""
+    ).strip().lower()
+
+    if normalized_current not in {
+        "authenticator",
+        "sms",
+        "email",
+    }:
+        raise ValueError(
+            "Current MFA method is invalid."
+        )
+
+    if normalized_target not in {
+        "authenticator",
+        "sms",
+        "email",
+    }:
+        raise ValueError(
+            "Replacement MFA method is invalid."
+        )
+
+    if normalized_target == normalized_current:
+        raise ValueError(
+            "Replacement MFA method must be different."
+        )
+
+    pending = {
+        "user_id": int(user_id),
+        "spa_id": spa_id,
+        "role": str(role or "").strip(),
+        "current_method": normalized_current,
+        "target_method": normalized_target,
+        "issued_at": int(time.time()),
+        "flow_id": secrets.token_urlsafe(32),
+        "mfa_verification_challenge_id": None,
+        "enrollment_authenticator_id": None,
+    }
+
+    session[
+        "_pending_mfa_method_change"
+    ] = pending
+
+    return pending
+
+
+def _pending_mfa_method_change():
+    pending = session.get(
+        "_pending_mfa_method_change"
+    )
+
+    if not isinstance(pending, dict):
+        return None
+
+    try:
+        user_id = int(
+            pending.get("user_id")
+        )
+        issued_at = int(
+            pending.get("issued_at")
+        )
+    except (TypeError, ValueError):
+        _clear_pending_mfa_method_change()
+        return None
+
+    current_method = str(
+        pending.get("current_method")
+        or ""
+    ).strip().lower()
+
+    target_method = str(
+        pending.get("target_method")
+        or ""
+    ).strip().lower()
+
+    role = str(
+        pending.get("role")
+        or ""
+    ).strip()
+
+    flow_id = str(
+        pending.get("flow_id")
+        or ""
+    ).strip()
+
+    challenge_id = pending.get(
+        "mfa_verification_challenge_id"
+    )
+
+    enrollment_authenticator_id = pending.get(
+        "enrollment_authenticator_id"
+    )
+
+    try:
+        if challenge_id is not None:
+            challenge_id = int(
+                challenge_id
+            )
+
+        if enrollment_authenticator_id is not None:
+            enrollment_authenticator_id = int(
+                enrollment_authenticator_id
+            )
+
+    except (TypeError, ValueError):
+        _clear_pending_mfa_method_change()
+        return None
+
+    age_seconds = (
+        int(time.time()) - issued_at
+    )
+
+    valid = bool(
+        user_id > 0
+        and current_method in {
+            "authenticator",
+            "sms",
+            "email",
+        }
+        and target_method in {
+            "authenticator",
+            "sms",
+            "email",
+        }
+        and current_method != target_method
+        and role in {
+            "admin",
+            "manager",
+        }
+        and flow_id
+        and age_seconds >= 0
+        and age_seconds
+            <= MFA_PENDING_LOGIN_MAX_AGE_SECONDS
+        and pending.get("user_id")
+            == session.get("user_id")
+        and pending.get("spa_id")
+            == session.get("spa_id")
+        and role
+            == str(
+                session.get("role")
+                or ""
+            ).strip()
+        and (
+            challenge_id is None
+            or challenge_id > 0
+        )
+        and (
+            enrollment_authenticator_id is None
+            or enrollment_authenticator_id > 0
+        )
+        and (
+            (
+                target_method == "authenticator"
+                and challenge_id is None
+            )
+            or (
+                target_method in {
+                    "sms",
+                    "email",
+                }
+                and enrollment_authenticator_id is None
+            )
+        )
+    )
+
+    if not valid:
+        _clear_pending_mfa_method_change()
+        return None
+
+    pending[
+        "mfa_verification_challenge_id"
+    ] = challenge_id
+
+    pending[
+        "enrollment_authenticator_id"
+    ] = enrollment_authenticator_id
+
+    return pending
+
+
+def _prepare_mfa_authenticator_method_change(
+    pending,
+):
+    target_method = str(
+        pending.get("target_method")
+        or ""
+    ).strip().lower()
+
+    current_method = str(
+        pending.get("current_method")
+        or ""
+    ).strip().lower()
+
+    if (
+        target_method != "authenticator"
+        or current_method not in {
+            "sms",
+            "email",
+        }
+    ):
+        return {
+            "status": "invalid_state",
+        }
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                user_id,
+                spa_id,
+                first_name,
+                last_name,
+                email,
+                password_hash,
+                role,
+                password_changed_at,
+                must_change_password,
+                login_locked_until,
+                NOW(),
+                sms_phone
+            FROM users
+            WHERE user_id = %s
+              AND active = TRUE
+            FOR UPDATE
+            """,
+            (
+                pending["user_id"],
+            ),
+        )
+
+        user = cur.fetchone()
+
+        account_matches_session = bool(
+            user
+            and user[0]
+                == session.get("user_id")
+            and user[1]
+                == session.get("spa_id")
+            and str(
+                user[6] or ""
+            ).strip()
+                == str(
+                    session.get("role")
+                    or ""
+                ).strip()
+            and user[1]
+                == pending.get("spa_id")
+            and str(
+                user[6] or ""
+            ).strip()
+                == str(
+                    pending.get("role")
+                    or ""
+                ).strip()
+        )
+
+        if not account_matches_session:
+            conn.rollback()
+            return {
+                "status": "invalid_state",
+            }
+
+        if str(user[6] or "").strip() not in {
+            "admin",
+            "manager",
+        }:
+            conn.rollback()
+            return {
+                "status": "invalid_state",
+            }
+
+        remaining_minutes = (
+            _mfa_login_lock_remaining_minutes(
+                user
+            )
+        )
+
+        if remaining_minutes is not None:
+            conn.rollback()
+            return {
+                "status": "locked",
+                "remaining_minutes": (
+                    remaining_minutes
+                ),
+            }
+
+        setting = _mfa_user_setting_record(
+            cur,
+            user[0],
+            for_update=True,
+        )
+
+        active_method = (
+            str(
+                setting[2] or ""
+            ).strip().lower()
+            if setting
+            else ""
+        )
+
+        enabled_at = (
+            setting[3]
+            if setting
+            else None
+        )
+
+        if (
+            active_method != current_method
+            or enabled_at is None
+        ):
+            conn.rollback()
+            return {
+                "status": "invalid_state",
+            }
+
+        authenticator = _mfa_authenticator_record(
+            cur,
+            user[0],
+            for_update=True,
+        )
+
+        if authenticator:
+            if (
+                authenticator[4] is not None
+                or authenticator[5] is not None
+            ):
+                conn.rollback()
+                return {
+                    "status": "invalid_state",
+                }
+
+            enrollment_id = int(
+                authenticator[0]
+            )
+
+            conn.commit()
+
+            return {
+                "status": "success",
+                "authenticator_id": enrollment_id,
+            }
+
+        secret = generate_totp_secret()
+
+        encrypted_secret = encrypt_totp_secret(
+            secret,
+            user_id=user[0],
+        )
+
+        cur.execute(
+            """
+            INSERT INTO mfa_authenticators (
+                user_id,
+                totp_secret_encrypted
+            )
+            VALUES (%s, %s)
+            RETURNING mfa_authenticator_id
+            """,
+            (
+                user[0],
+                encrypted_secret,
+            ),
+        )
+
+        enrollment_id = int(
+            cur.fetchone()[0]
+        )
+
+        log_audit(
+            cur,
+            spa_id=user[1],
+            user_id=user[0],
+            action_type=(
+                "mfa_method_change_authenticator_started"
+            ),
+            table_name="mfa_authenticators",
+            record_id=enrollment_id,
+            notes=(
+                "Authenticator App setup started for "
+                "two-step verification method change. "
+                "The current verification method remains "
+                "active until setup is verified."
+            ),
+        )
+
+        conn.commit()
+
+        return {
+            "status": "success",
+            "authenticator_id": enrollment_id,
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _verify_mfa_authenticator_method_change(
+    pending,
+    submitted_code,
+):
+    target_method = str(
+        pending.get("target_method")
+        or ""
+    ).strip().lower()
+
+    current_method = str(
+        pending.get("current_method")
+        or ""
+    ).strip().lower()
+
+    enrollment_id = pending.get(
+        "enrollment_authenticator_id"
+    )
+
+    if (
+        target_method != "authenticator"
+        or current_method not in {
+            "sms",
+            "email",
+        }
+    ):
+        return {
+            "status": "invalid_state",
+        }
+
+    try:
+        enrollment_id = int(
+            enrollment_id
+        )
+    except (TypeError, ValueError):
+        return {
+            "status": "invalid_state",
+        }
+
+    if enrollment_id <= 0:
+        return {
+            "status": "invalid_state",
+        }
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                user_id,
+                spa_id,
+                first_name,
+                last_name,
+                email,
+                password_hash,
+                role,
+                password_changed_at,
+                must_change_password,
+                login_locked_until,
+                NOW(),
+                sms_phone
+            FROM users
+            WHERE user_id = %s
+              AND active = TRUE
+            FOR UPDATE
+            """,
+            (
+                pending["user_id"],
+            ),
+        )
+
+        user = cur.fetchone()
+
+        account_matches_session = bool(
+            user
+            and user[0]
+                == session.get("user_id")
+            and user[1]
+                == session.get("spa_id")
+            and str(
+                user[6] or ""
+            ).strip()
+                == str(
+                    session.get("role")
+                    or ""
+                ).strip()
+            and user[1]
+                == pending.get("spa_id")
+            and str(
+                user[6] or ""
+            ).strip()
+                == str(
+                    pending.get("role")
+                    or ""
+                ).strip()
+        )
+
+        if not account_matches_session:
+            conn.rollback()
+            return {
+                "status": "invalid_state",
+            }
+
+        if str(user[6] or "").strip() not in {
+            "admin",
+            "manager",
+        }:
+            conn.rollback()
+            return {
+                "status": "invalid_state",
+            }
+
+        remaining_minutes = (
+            _mfa_login_lock_remaining_minutes(
+                user
+            )
+        )
+
+        if remaining_minutes is not None:
+            conn.rollback()
+            return {
+                "status": "locked",
+                "remaining_minutes": (
+                    remaining_minutes
+                ),
+            }
+
+        setting = _mfa_user_setting_record(
+            cur,
+            user[0],
+            for_update=True,
+        )
+
+        active_method = (
+            str(
+                setting[2] or ""
+            ).strip().lower()
+            if setting
+            else ""
+        )
+
+        enabled_at = (
+            setting[3]
+            if setting
+            else None
+        )
+
+        if (
+            active_method != current_method
+            or enabled_at is None
+        ):
+            conn.rollback()
+            return {
+                "status": "invalid_state",
+            }
+
+        authenticator = _mfa_authenticator_record(
+            cur,
+            user[0],
+            for_update=True,
+        )
+
+        if (
+            not authenticator
+            or authenticator[0]
+                != enrollment_id
+            or authenticator[4] is not None
+            or authenticator[5] is not None
+        ):
+            conn.rollback()
+            return {
+                "status": "invalid_state",
+            }
+
+        secret = decrypt_totp_secret(
+            authenticator[2],
+            user_id=user[0],
+        )
+
+        accepted_counter = verify_totp_code(
+            secret,
+            submitted_code,
+            last_accepted_counter=(
+                authenticator[6]
+            ),
+        )
+
+        if accepted_counter is None:
+            newly_locked = (
+                _record_failed_mfa_verification(
+                    cur,
+                    user,
+                    action_type=(
+                        "mfa_method_change_verification_failed"
+                    ),
+                    notes=(
+                        "Authenticator App MFA "
+                        "method-change verification failed."
+                    ),
+                )
+            )
+
+            conn.commit()
+
+            return {
+                "status": (
+                    "locked"
+                    if newly_locked
+                    else "invalid"
+                ),
+                "remaining_minutes": (
+                    LOGIN_FAILURE_LOCK_MINUTES
+                    if newly_locked
+                    else None
+                ),
+            }
+
+        recovery_codes = (
+            generate_recovery_codes()
+        )
+
+        recovery_hashes = [
+            hash_recovery_code(
+                recovery_code,
+                user_id=user[0],
+            )
+            for recovery_code
+            in recovery_codes
+        ]
+
+        cur.execute(
+            """
+            UPDATE mfa_authenticators
+            SET
+                verified_at = NOW(),
+                last_accepted_totp_counter = %s
+            WHERE mfa_authenticator_id = %s
+              AND user_id = %s
+              AND verified_at IS NULL
+              AND revoked_at IS NULL
+            RETURNING mfa_authenticator_id
+            """,
+            (
+                accepted_counter,
+                enrollment_id,
+                user[0],
+            ),
+        )
+
+        if not cur.fetchone():
+            raise RuntimeError(
+                "Authenticator method-change setup "
+                "could not be verified safely."
+            )
+
+        for recovery_hash in recovery_hashes:
+            cur.execute(
+                """
+                INSERT INTO mfa_recovery_codes (
+                    mfa_authenticator_id,
+                    code_hash
+                )
+                VALUES (%s, %s)
+                """,
+                (
+                    enrollment_id,
+                    recovery_hash,
+                ),
+            )
+
+        cur.execute(
+            """
+            UPDATE mfa_user_settings
+            SET
+                active_method = 'authenticator',
+                enabled_at = NOW(),
+                updated_at = NOW()
+            WHERE user_id = %s
+              AND active_method = %s
+              AND enabled_at IS NOT NULL
+            RETURNING mfa_user_setting_id
+            """,
+            (
+                user[0],
+                current_method,
+            ),
+        )
+
+        updated_setting = cur.fetchone()
+
+        if not updated_setting:
+            raise RuntimeError(
+                "Authenticator MFA method could "
+                "not be activated safely."
+            )
+
+        _clear_failed_business_login_state(
+            cur,
+            user[0],
+        )
+
+        old_label = {
+            "sms": "Text Message",
+            "email": "Email",
+        }[current_method]
+
+        log_audit(
+            cur,
+            spa_id=user[1],
+            user_id=user[0],
+            action_type="mfa_method_changed",
+            table_name="mfa_user_settings",
+            record_id=updated_setting[0],
+            notes=(
+                "Two-step verification method changed "
+                f"from {old_label} to Authenticator App "
+                "after successful replacement-method "
+                "verification. Recovery codes were created."
+            ),
+        )
+
+        conn.commit()
+
+        return {
+            "status": "success",
+            "old_method": current_method,
+            "new_method": "authenticator",
+            "authenticator_id": enrollment_id,
+            "recovery_codes": recovery_codes,
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _verify_mfa_method_change_code(
+    pending,
+    submitted_code,
+):
+    target_method = str(
+        pending.get("target_method")
+        or ""
+    ).strip().lower()
+
+    current_method = str(
+        pending.get("current_method")
+        or ""
+    ).strip().lower()
+
+    challenge_id = pending.get(
+        "mfa_verification_challenge_id"
+    )
+
+    if (
+        target_method not in {
+            "sms",
+            "email",
+        }
+        or current_method not in {
+            "authenticator",
+            "sms",
+            "email",
+        }
+        or current_method == target_method
+    ):
+        return {
+            "status": "invalid_state",
+        }
+
+    try:
+        challenge_id = int(
+            challenge_id
+        )
+    except (TypeError, ValueError):
+        return {
+            "status": "invalid_state",
+        }
+
+    if challenge_id <= 0:
+        return {
+            "status": "invalid_state",
+        }
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                user_id,
+                spa_id,
+                first_name,
+                last_name,
+                email,
+                password_hash,
+                role,
+                password_changed_at,
+                must_change_password,
+                login_locked_until,
+                NOW(),
+                sms_phone
+            FROM users
+            WHERE user_id = %s
+              AND active = TRUE
+            FOR UPDATE
+            """,
+            (
+                pending["user_id"],
+            ),
+        )
+
+        user = cur.fetchone()
+
+        account_matches_session = bool(
+            user
+            and user[0]
+                == session.get("user_id")
+            and user[1]
+                == session.get("spa_id")
+            and str(
+                user[6] or ""
+            ).strip()
+                == str(
+                    session.get("role")
+                    or ""
+                ).strip()
+            and user[1]
+                == pending.get("spa_id")
+            and str(
+                user[6] or ""
+            ).strip()
+                == str(
+                    pending.get("role")
+                    or ""
+                ).strip()
+        )
+
+        if not account_matches_session:
+            conn.rollback()
+            return {
+                "status": "invalid_state",
+            }
+
+        if str(user[6] or "").strip() not in {
+            "admin",
+            "manager",
+        }:
+            conn.rollback()
+            return {
+                "status": "invalid_state",
+            }
+
+        remaining_minutes = (
+            _mfa_login_lock_remaining_minutes(
+                user
+            )
+        )
+
+        if remaining_minutes is not None:
+            conn.rollback()
+            return {
+                "status": "locked",
+                "remaining_minutes": (
+                    remaining_minutes
+                ),
+            }
+
+        setting = _mfa_user_setting_record(
+            cur,
+            user[0],
+            for_update=True,
+        )
+
+        active_method = (
+            str(
+                setting[2] or ""
+            ).strip().lower()
+            if setting
+            else ""
+        )
+
+        enabled_at = (
+            setting[3]
+            if setting
+            else None
+        )
+
+        if (
+            active_method != current_method
+            or enabled_at is None
+        ):
+            conn.rollback()
+            return {
+                "status": "invalid_state",
+            }
+
+        cur.execute(
+            """
+            SELECT
+                mfa_verification_challenge_id,
+                code_hash
+            FROM mfa_verification_challenges
+            WHERE mfa_verification_challenge_id = %s
+              AND user_id = %s
+              AND method = %s
+              AND purpose = 'method_change'
+              AND delivery_sent_at IS NOT NULL
+              AND used_at IS NULL
+              AND invalidated_at IS NULL
+              AND expires_at > NOW()
+            FOR UPDATE
+            """,
+            (
+                challenge_id,
+                user[0],
+                target_method,
+            ),
+        )
+
+        challenge = cur.fetchone()
+
+        if not challenge:
+            conn.rollback()
+            return {
+                "status": "missing_challenge",
+            }
+
+        verified = verify_verification_code(
+            submitted_code,
+            challenge[1],
+            user_id=user[0],
+            method=target_method,
+            purpose="method_change",
+        )
+
+        if not verified:
+            method_label = (
+                "Text-message"
+                if target_method == "sms"
+                else "Email"
+            )
+
+            newly_locked = (
+                _record_failed_mfa_verification(
+                    cur,
+                    user,
+                    action_type=(
+                        "mfa_method_change_verification_failed"
+                    ),
+                    notes=(
+                        f"{method_label} MFA method-change "
+                        "verification failed."
+                    ),
+                )
+            )
+
+            conn.commit()
+
+            return {
+                "status": (
+                    "locked"
+                    if newly_locked
+                    else "invalid"
+                ),
+                "remaining_minutes": (
+                    LOGIN_FAILURE_LOCK_MINUTES
+                    if newly_locked
+                    else None
+                ),
+            }
+
+        cur.execute(
+            """
+            UPDATE mfa_verification_challenges
+            SET used_at = NOW()
+            WHERE mfa_verification_challenge_id = %s
+              AND user_id = %s
+              AND method = %s
+              AND purpose = 'method_change'
+              AND delivery_sent_at IS NOT NULL
+              AND used_at IS NULL
+              AND invalidated_at IS NULL
+              AND expires_at > NOW()
+            RETURNING mfa_verification_challenge_id
+            """,
+            (
+                challenge[0],
+                user[0],
+                target_method,
+            ),
+        )
+
+        if not cur.fetchone():
+            raise RuntimeError(
+                "MFA method-change challenge could "
+                "not be consumed safely."
+            )
+
+        old_authenticator_id = None
+        invalidated_recovery_count = 0
+
+        if current_method == "authenticator":
+            authenticator = (
+                _mfa_authenticator_record(
+                    cur,
+                    user[0],
+                    for_update=True,
+                )
+            )
+
+            if (
+                not authenticator
+                or authenticator[4] is None
+                or authenticator[5]
+                    is not None
+            ):
+                raise RuntimeError(
+                    "Active authenticator changed "
+                    "during MFA method replacement."
+                )
+
+            old_authenticator_id = (
+                authenticator[0]
+            )
+
+        cur.execute(
+            """
+            UPDATE mfa_user_settings
+            SET
+                active_method = %s,
+                enabled_at = NOW(),
+                updated_at = NOW()
+            WHERE user_id = %s
+              AND active_method = %s
+              AND enabled_at IS NOT NULL
+            RETURNING mfa_user_setting_id
+            """,
+            (
+                target_method,
+                user[0],
+                current_method,
+            ),
+        )
+
+        updated_setting = cur.fetchone()
+
+        if not updated_setting:
+            raise RuntimeError(
+                "MFA method could not be replaced safely."
+            )
+
+        if old_authenticator_id is not None:
+            cur.execute(
+                """
+                UPDATE mfa_authenticators
+                SET revoked_at = NOW()
+                WHERE mfa_authenticator_id = %s
+                  AND user_id = %s
+                  AND verified_at IS NOT NULL
+                  AND revoked_at IS NULL
+                RETURNING mfa_authenticator_id
+                """,
+                (
+                    old_authenticator_id,
+                    user[0],
+                ),
+            )
+
+            if not cur.fetchone():
+                raise RuntimeError(
+                    "Prior authenticator could not "
+                    "be revoked safely."
+                )
+
+            cur.execute(
+                """
+                UPDATE mfa_recovery_codes
+                SET invalidated_at = NOW()
+                WHERE mfa_authenticator_id = %s
+                  AND used_at IS NULL
+                  AND invalidated_at IS NULL
+                RETURNING mfa_recovery_code_id
+                """,
+                (
+                    old_authenticator_id,
+                ),
+            )
+
+            invalidated_recovery_count = len(
+                cur.fetchall()
+            )
+
+        _clear_failed_business_login_state(
+            cur,
+            user[0],
+        )
+
+        old_label = {
+            "authenticator": "Authenticator App",
+            "sms": "Text Message",
+            "email": "Email",
+        }[current_method]
+
+        new_label = {
+            "sms": "Text Message",
+            "email": "Email",
+        }[target_method]
+
+        notes = (
+            f"Two-step verification method changed "
+            f"from {old_label} to {new_label} "
+            "after successful replacement-method "
+            "verification."
+        )
+
+        if old_authenticator_id is not None:
+            notes += (
+                f" {invalidated_recovery_count} "
+                "unused recovery code(s) were "
+                "invalidated."
+            )
+
+        log_audit(
+            cur,
+            spa_id=user[1],
+            user_id=user[0],
+            action_type="mfa_method_changed",
+            table_name="mfa_user_settings",
+            record_id=updated_setting[0],
+            notes=notes,
+        )
+
+        conn.commit()
+
+        return {
+            "status": "success",
+            "old_method": current_method,
+            "new_method": target_method,
+            "invalidated_recovery_count": (
+                invalidated_recovery_count
+            ),
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _mfa_pending_csrf_purpose(
+    pending,
+    action,
+):
+    action = str(action or "").strip()
+
+    if action not in {
+        "method",
+        "code_verify",
+        "resend_code",
+        "intro",
+        "enroll",
+        "verify",
+        "recovery",
+        "complete",
+    }:
+        raise ValueError(
+            "MFA CSRF action is invalid."
+        )
+
+    return (
+        f"mfa:{action}:"
+        f"{pending['challenge_id']}"
+    )
+
+
+
+def _mfa_login_lock_remaining_minutes(user):
+    locked_until = user[9]
+    now = user[10]
+
+    if (
+        locked_until is None
+        or locked_until <= now
+    ):
+        return None
+
+    remaining_seconds = max(
+        1,
+        int(
+            (
+                locked_until
+                - now
+            ).total_seconds()
+        ),
+    )
+
+    return max(
+        1,
+        (remaining_seconds + 59) // 60,
+    )
+
+
+def _record_failed_mfa_verification(
+    cur,
+    user,
+    *,
+    action_type,
+    notes,
+):
+    newly_locked = _record_failed_business_login(
+        cur,
+        user[0],
+        user[1],
+        factor="mfa",
+    )
+
+    log_audit(
+        cur,
+        spa_id=user[1],
+        user_id=user[0],
+        action_type=action_type,
+        table_name="users",
+        record_id=user[0],
+        notes=notes,
+    )
+
+    return newly_locked
+
+
+def _verify_mfa_code_for_login(
+    pending,
+    submitted_code,
+    *,
+    purpose,
+):
+    method = str(
+        pending.get("mfa_method")
+        or ""
+    ).strip().lower()
+
+    normalized_purpose = str(
+        purpose or ""
+    ).strip().lower()
+
+    if method not in {
+        "sms",
+        "email",
+    }:
+        return {
+            "status": "invalid_state",
+        }
+
+    if normalized_purpose not in {
+        "enrollment",
+        "login",
+    }:
+        return {
+            "status": "invalid_state",
+        }
+
+    pending_challenge_id = pending.get(
+        "mfa_verification_challenge_id"
+    )
+
+    try:
+        pending_challenge_id = int(
+            pending_challenge_id
+        )
+
+    except (TypeError, ValueError):
+        return {
+            "status": "invalid_state",
+        }
+
+    if pending_challenge_id <= 0:
+        return {
+            "status": "invalid_state",
+        }
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        user = _mfa_pending_user_record(
+            cur,
+            pending,
+            for_update=True,
+        )
+
+        if not user:
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        remaining_minutes = (
+            _mfa_login_lock_remaining_minutes(
+                user
+            )
+        )
+
+        if remaining_minutes is not None:
+            conn.rollback()
+
+            return {
+                "status": "locked",
+                "remaining_minutes": remaining_minutes,
+            }
+
+        setting = _mfa_user_setting_record(
+            cur,
+            user[0],
+            for_update=True,
+        )
+
+        active_method = (
+            str(setting[2] or "").strip().lower()
+            if setting
+            else ""
+        )
+
+        enabled_at = (
+            setting[3]
+            if setting
+            else None
+        )
+
+        if normalized_purpose == "login":
+            if (
+                active_method != method
+                or enabled_at is None
+            ):
+                conn.rollback()
+
+                return {
+                    "status": "invalid_state",
+                }
+
+        else:
+            # Enrollment may activate only an account that
+            # does not already have an active MFA method.
+            if active_method or enabled_at is not None:
+                conn.rollback()
+
+                return {
+                    "status": "invalid_state",
+                }
+
+        cur.execute(
+            """
+            SELECT
+                mfa_verification_challenge_id,
+                code_hash
+            FROM mfa_verification_challenges
+            WHERE mfa_verification_challenge_id = %s
+              AND user_id = %s
+              AND method = %s
+              AND purpose = %s
+              AND delivery_sent_at IS NOT NULL
+              AND used_at IS NULL
+              AND invalidated_at IS NULL
+              AND expires_at > NOW()
+            FOR UPDATE
+            """,
+            (
+                pending_challenge_id,
+                user[0],
+                method,
+                normalized_purpose,
+            ),
+        )
+
+        challenge = cur.fetchone()
+
+        if not challenge:
+            conn.rollback()
+
+            return {
+                "status": "missing_challenge",
+            }
+
+        verified = verify_verification_code(
+            submitted_code,
+            challenge[1],
+            user_id=user[0],
+            method=method,
+            purpose=normalized_purpose,
+        )
+
+        if not verified:
+            action_type = (
+                "mfa_enrollment_verification_failed"
+                if normalized_purpose == "enrollment"
+                else "mfa_login_verification_failed"
+            )
+
+            method_label = (
+                "Text-message"
+                if method == "sms"
+                else "Email"
+            )
+
+            newly_locked = (
+                _record_failed_mfa_verification(
+                    cur,
+                    user,
+                    action_type=action_type,
+                    notes=(
+                        f"{method_label} MFA "
+                        f"{normalized_purpose} verification "
+                        "failed."
+                    ),
+                )
+            )
+
+            conn.commit()
+
+            return {
+                "status": (
+                    "locked"
+                    if newly_locked
+                    else "invalid"
+                ),
+                "remaining_minutes": (
+                    LOGIN_FAILURE_LOCK_MINUTES
+                    if newly_locked
+                    else None
+                ),
+            }
+
+        cur.execute(
+            """
+            UPDATE mfa_verification_challenges
+            SET used_at = NOW()
+            WHERE mfa_verification_challenge_id = %s
+              AND user_id = %s
+              AND method = %s
+              AND purpose = %s
+              AND delivery_sent_at IS NOT NULL
+              AND used_at IS NULL
+              AND invalidated_at IS NULL
+              AND expires_at > NOW()
+            RETURNING mfa_verification_challenge_id
+            """,
+            (
+                challenge[0],
+                user[0],
+                method,
+                normalized_purpose,
+            ),
+        )
+
+        if not cur.fetchone():
+            raise RuntimeError(
+                "MFA verification challenge could not "
+                "be consumed safely."
+            )
+
+        setting_id = (
+            setting[0]
+            if setting
+            else None
+        )
+
+        if normalized_purpose == "enrollment":
+            cur.execute(
+                """
+                INSERT INTO mfa_user_settings (
+                    user_id,
+                    active_method,
+                    enabled_at,
+                    created_at,
+                    updated_at
+                )
+                VALUES (
+                    %s,
+                    %s,
+                    NOW(),
+                    NOW(),
+                    NOW()
+                )
+                ON CONFLICT (user_id)
+                DO UPDATE SET
+                    active_method = EXCLUDED.active_method,
+                    enabled_at = EXCLUDED.enabled_at,
+                    updated_at = NOW()
+                WHERE
+                    mfa_user_settings.active_method IS NULL
+                    AND mfa_user_settings.enabled_at IS NULL
+                RETURNING mfa_user_setting_id
+                """,
+                (
+                    user[0],
+                    method,
+                ),
+            )
+
+            activated_setting = cur.fetchone()
+
+            if not activated_setting:
+                raise RuntimeError(
+                    "MFA method could not be activated safely."
+                )
+
+            setting_id = activated_setting[0]
+
+            # A previous unfinished Authenticator setup must
+            # not remain current after SMS/email enrollment.
+            cur.execute(
+                """
+                UPDATE mfa_authenticators
+                SET revoked_at = NOW()
+                WHERE user_id = %s
+                  AND verified_at IS NULL
+                  AND revoked_at IS NULL
+                """,
+                (user[0],),
+            )
+
+        _clear_failed_business_login_state(
+            cur,
+            user[0],
+        )
+
+        method_label = (
+            "Text-message"
+            if method == "sms"
+            else "Email"
+        )
+
+        if normalized_purpose == "enrollment":
+            log_audit(
+                cur,
+                spa_id=user[1],
+                user_id=user[0],
+                action_type="mfa_enrollment_completed",
+                table_name="mfa_user_settings",
+                record_id=setting_id,
+                notes=(
+                    f"{method_label} MFA enrollment "
+                    "verified and activated."
+                ),
+            )
+
+        else:
+            log_audit(
+                cur,
+                spa_id=user[1],
+                user_id=user[0],
+                action_type="mfa_login_succeeded",
+                table_name="mfa_verification_challenges",
+                record_id=challenge[0],
+                notes=(
+                    f"Business login MFA verified "
+                    f"with {method_label.lower()}."
+                ),
+            )
+
+        conn.commit()
+
+        return {
+            "status": "success",
+            "user": user,
+            "method": method,
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _verify_mfa_enrollment_for_login(
+    pending,
+    submitted_code,
+):
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        user = _mfa_pending_user_record(
+            cur,
+            pending,
+            for_update=True,
+        )
+
+        if not user:
+            conn.rollback()
+            return {
+                "status": "invalid_state",
+            }
+
+        remaining_minutes = (
+            _mfa_login_lock_remaining_minutes(
+                user
+            )
+        )
+
+        if remaining_minutes is not None:
+            conn.rollback()
+            return {
+                "status": "locked",
+                "remaining_minutes": (
+                    remaining_minutes
+                ),
+            }
+
+        enrollment_id = pending.get(
+            "enrollment_authenticator_id"
+        )
+
+        if not enrollment_id:
+            conn.rollback()
+            return {
+                "status": "invalid_state",
+            }
+
+        authenticator = _mfa_authenticator_record(
+            cur,
+            user[0],
+            for_update=True,
+        )
+
+        if (
+            not authenticator
+            or authenticator[0] != enrollment_id
+            or authenticator[4] is not None
+            or authenticator[5] is not None
+        ):
+            conn.rollback()
+            return {
+                "status": "invalid_state",
+            }
+
+        secret = decrypt_totp_secret(
+            authenticator[2],
+            user_id=user[0],
+        )
+
+        accepted_counter = verify_totp_code(
+            secret,
+            submitted_code,
+            last_accepted_counter=(
+                authenticator[6]
+            ),
+        )
+
+        if accepted_counter is None:
+            newly_locked = (
+                _record_failed_mfa_verification(
+                    cur,
+                    user,
+                    action_type=(
+                        "mfa_enrollment_verification_failed"
+                    ),
+                    notes=(
+                        "Authenticator-app MFA enrollment "
+                        "verification failed."
+                    ),
+                )
+            )
+
+            conn.commit()
+
+            return {
+                "status": (
+                    "locked"
+                    if newly_locked
+                    else "invalid"
+                ),
+                "remaining_minutes": (
+                    LOGIN_FAILURE_LOCK_MINUTES
+                    if newly_locked
+                    else None
+                ),
+            }
+
+        recovery_codes = (
+            generate_recovery_codes()
+        )
+
+        recovery_hashes = [
+            hash_recovery_code(
+                recovery_code,
+                user_id=user[0],
+            )
+            for recovery_code
+            in recovery_codes
+        ]
+
+        cur.execute(
+            """
+            UPDATE mfa_authenticators
+            SET
+                verified_at = NOW(),
+                last_accepted_totp_counter = %s
+            WHERE mfa_authenticator_id = %s
+              AND user_id = %s
+              AND verified_at IS NULL
+              AND revoked_at IS NULL
+            RETURNING mfa_authenticator_id
+            """,
+            (
+                accepted_counter,
+                enrollment_id,
+                user[0],
+            ),
+        )
+
+        if not cur.fetchone():
+            raise RuntimeError(
+                "MFA enrollment could not be "
+                "verified safely."
+            )
+
+        for recovery_hash in recovery_hashes:
+            cur.execute(
+                """
+                INSERT INTO mfa_recovery_codes (
+                    mfa_authenticator_id,
+                    code_hash
+                )
+                VALUES (%s, %s)
+                """,
+                (
+                    enrollment_id,
+                    recovery_hash,
+                ),
+            )
+
+        cur.execute(
+            """
+            INSERT INTO mfa_user_settings (
+                user_id,
+                active_method,
+                enabled_at,
+                created_at,
+                updated_at
+            )
+            VALUES (
+                %s,
+                'authenticator',
+                NOW(),
+                NOW(),
+                NOW()
+            )
+            ON CONFLICT (user_id)
+            DO UPDATE SET
+                active_method = EXCLUDED.active_method,
+                enabled_at = EXCLUDED.enabled_at,
+                updated_at = NOW()
+            WHERE
+                mfa_user_settings.active_method IS NULL
+                AND mfa_user_settings.enabled_at IS NULL
+            RETURNING mfa_user_setting_id
+            """,
+            (user[0],),
+        )
+
+        if not cur.fetchone():
+            raise RuntimeError(
+                "Authenticator MFA method could not "
+                "be activated safely."
+            )
+
+        log_audit(
+            cur,
+            spa_id=user[1],
+            user_id=user[0],
+            action_type="mfa_enrollment_completed",
+            table_name="mfa_authenticators",
+            record_id=enrollment_id,
+            notes=(
+                "Authenticator-app MFA enrollment "
+                "verified and recovery codes created."
+            ),
+        )
+
+        conn.commit()
+
+        return {
+            "status": "success",
+            "user": user,
+            "authenticator_id": enrollment_id,
+            "recovery_codes": recovery_codes,
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _verify_mfa_totp_for_login(
+    pending,
+    submitted_code,
+):
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        user = _mfa_pending_user_record(
+            cur,
+            pending,
+            for_update=True,
+        )
+
+        if not user:
+            conn.rollback()
+            return {
+                "status": "invalid_state",
+            }
+
+        remaining_minutes = (
+            _mfa_login_lock_remaining_minutes(
+                user
+            )
+        )
+
+        if remaining_minutes is not None:
+            conn.rollback()
+            return {
+                "status": "locked",
+                "remaining_minutes": (
+                    remaining_minutes
+                ),
+            }
+
+        authenticator = _mfa_authenticator_record(
+            cur,
+            user[0],
+            for_update=True,
+        )
+
+        if (
+            not authenticator
+            or authenticator[4] is None
+            or authenticator[5] is not None
+        ):
+            conn.rollback()
+            return {
+                "status": "invalid_state",
+            }
+
+        secret = decrypt_totp_secret(
+            authenticator[2],
+            user_id=user[0],
+        )
+
+        accepted_counter = verify_totp_code(
+            secret,
+            submitted_code,
+            last_accepted_counter=(
+                authenticator[6]
+            ),
+        )
+
+        if accepted_counter is None:
+            newly_locked = (
+                _record_failed_mfa_verification(
+                    cur,
+                    user,
+                    action_type=(
+                        "mfa_login_verification_failed"
+                    ),
+                    notes=(
+                        "Authenticator-app MFA sign-in "
+                        "verification failed."
+                    ),
+                )
+            )
+
+            conn.commit()
+
+            return {
+                "status": (
+                    "locked"
+                    if newly_locked
+                    else "invalid"
+                ),
+                "remaining_minutes": (
+                    LOGIN_FAILURE_LOCK_MINUTES
+                    if newly_locked
+                    else None
+                ),
+            }
+
+        cur.execute(
+            """
+            UPDATE mfa_authenticators
+            SET last_accepted_totp_counter = %s
+            WHERE mfa_authenticator_id = %s
+              AND user_id = %s
+              AND verified_at IS NOT NULL
+              AND revoked_at IS NULL
+              AND (
+                  last_accepted_totp_counter IS NULL
+                  OR last_accepted_totp_counter < %s
+              )
+            RETURNING mfa_authenticator_id
+            """,
+            (
+                accepted_counter,
+                authenticator[0],
+                user[0],
+                accepted_counter,
+            ),
+        )
+
+        if not cur.fetchone():
+            raise RuntimeError(
+                "MFA TOTP replay protection "
+                "prevented sign-in completion."
+            )
+
+        _clear_failed_business_login_state(
+            cur,
+            user[0],
+        )
+
+        log_audit(
+            cur,
+            spa_id=user[1],
+            user_id=user[0],
+            action_type="mfa_login_succeeded",
+            table_name="mfa_authenticators",
+            record_id=authenticator[0],
+            notes=(
+                "Business login MFA verified with "
+                "the enrolled authenticator."
+            ),
+        )
+
+        conn.commit()
+
+        return {
+            "status": "success",
+            "user": user,
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _verify_mfa_recovery_for_login(
+    pending,
+    submitted_code,
+):
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        user = _mfa_pending_user_record(
+            cur,
+            pending,
+            for_update=True,
+        )
+
+        if not user:
+            conn.rollback()
+            return {
+                "status": "invalid_state",
+            }
+
+        remaining_minutes = (
+            _mfa_login_lock_remaining_minutes(
+                user
+            )
+        )
+
+        if remaining_minutes is not None:
+            conn.rollback()
+            return {
+                "status": "locked",
+                "remaining_minutes": (
+                    remaining_minutes
+                ),
+            }
+
+        authenticator = _mfa_authenticator_record(
+            cur,
+            user[0],
+            for_update=True,
+        )
+
+        if (
+            not authenticator
+            or authenticator[4] is None
+            or authenticator[5] is not None
+        ):
+            conn.rollback()
+            return {
+                "status": "invalid_state",
+            }
+
+        cur.execute(
+            """
+            SELECT
+                mfa_recovery_code_id,
+                code_hash
+            FROM mfa_recovery_codes
+            WHERE mfa_authenticator_id = %s
+              AND used_at IS NULL
+              AND invalidated_at IS NULL
+            ORDER BY mfa_recovery_code_id
+            FOR UPDATE
+            """,
+            (authenticator[0],),
+        )
+
+        recovery_records = cur.fetchall()
+
+        matched_recovery_id = None
+
+        for recovery_id, stored_hash in recovery_records:
+            if verify_recovery_code(
+                submitted_code,
+                stored_hash,
+                user_id=user[0],
+            ):
+                matched_recovery_id = recovery_id
+                break
+
+        if matched_recovery_id is None:
+            newly_locked = (
+                _record_failed_mfa_verification(
+                    cur,
+                    user,
+                    action_type=(
+                        "mfa_recovery_verification_failed"
+                    ),
+                    notes=(
+                        "MFA recovery-code sign-in "
+                        "verification failed."
+                    ),
+                )
+            )
+
+            conn.commit()
+
+            return {
+                "status": (
+                    "locked"
+                    if newly_locked
+                    else "invalid"
+                ),
+                "remaining_minutes": (
+                    LOGIN_FAILURE_LOCK_MINUTES
+                    if newly_locked
+                    else None
+                ),
+            }
+
+        cur.execute(
+            """
+            UPDATE mfa_recovery_codes
+            SET used_at = NOW()
+            WHERE mfa_recovery_code_id = %s
+              AND mfa_authenticator_id = %s
+              AND used_at IS NULL
+              AND invalidated_at IS NULL
+            RETURNING mfa_recovery_code_id
+            """,
+            (
+                matched_recovery_id,
+                authenticator[0],
+            ),
+        )
+
+        if not cur.fetchone():
+            raise RuntimeError(
+                "MFA recovery code could not "
+                "be consumed safely."
+            )
+
+        _clear_failed_business_login_state(
+            cur,
+            user[0],
+        )
+
+        log_audit(
+            cur,
+            spa_id=user[1],
+            user_id=user[0],
+            action_type="mfa_recovery_code_used",
+            table_name="mfa_recovery_codes",
+            record_id=matched_recovery_id,
+            notes=(
+                "One-time MFA recovery code used "
+                "for business login."
+            ),
+        )
+
+        log_audit(
+            cur,
+            spa_id=user[1],
+            user_id=user[0],
+            action_type="mfa_login_succeeded",
+            table_name="mfa_authenticators",
+            record_id=authenticator[0],
+            notes=(
+                "Business login MFA verified with "
+                "a one-time recovery code."
+            ),
+        )
+
+        conn.commit()
+
+        return {
+            "status": "success",
+            "user": user,
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _complete_verified_mfa_enrollment_login(
+    pending,
+):
+    pending_method = str(
+        pending.get("mfa_method")
+        or ""
+    ).strip().lower()
+
+    if pending_method != "authenticator":
+        return {
+            "status": "invalid_state",
+        }
+
+    enrollment_id = pending.get(
+        "enrollment_verified_authenticator_id"
+    )
+
+    if (
+        not enrollment_id
+        or enrollment_id
+            != pending.get(
+                "enrollment_authenticator_id"
+            )
+    ):
+        return {
+            "status": "invalid_state",
+        }
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        user = _mfa_pending_user_record(
+            cur,
+            pending,
+            for_update=True,
+        )
+
+        if not user:
+            conn.rollback()
+            return {
+                "status": "invalid_state",
+            }
+
+        remaining_minutes = (
+            _mfa_login_lock_remaining_minutes(
+                user
+            )
+        )
+
+        if remaining_minutes is not None:
+            conn.rollback()
+            return {
+                "status": "locked",
+                "remaining_minutes": (
+                    remaining_minutes
+                ),
+            }
+
+        setting = _mfa_user_setting_record(
+            cur,
+            user[0],
+            for_update=True,
+        )
+
+        active_method = (
+            str(
+                setting[2]
+                or ""
+            ).strip().lower()
+            if setting
+            else ""
+        )
+
+        enabled_at = (
+            setting[3]
+            if setting
+            else None
+        )
+
+        if (
+            active_method != "authenticator"
+            or enabled_at is None
+        ):
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        authenticator = _mfa_authenticator_record(
+            cur,
+            user[0],
+            for_update=True,
+        )
+
+        if (
+            not authenticator
+            or authenticator[0] != enrollment_id
+            or authenticator[4] is None
+            or authenticator[5] is not None
+        ):
+            conn.rollback()
+            return {
+                "status": "invalid_state",
+            }
+
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM mfa_recovery_codes
+            WHERE mfa_authenticator_id = %s
+            """,
+            (enrollment_id,),
+        )
+
+        recovery_code_count = int(
+            cur.fetchone()[0] or 0
+        )
+
+        if recovery_code_count < 1:
+            conn.rollback()
+            return {
+                "status": "invalid_state",
+            }
+
+        _clear_failed_business_login_state(
+            cur,
+            user[0],
+        )
+
+        log_audit(
+            cur,
+            spa_id=user[1],
+            user_id=user[0],
+            action_type="mfa_login_succeeded",
+            table_name="mfa_authenticators",
+            record_id=enrollment_id,
+            notes=(
+                "Business login completed after "
+                "initial authenticator-app MFA "
+                "enrollment."
+            ),
+        )
+
+        conn.commit()
+
+        return {
+            "status": "success",
+            "user": user,
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
 
 
 def _password_reset_response_floor(started_at):
@@ -4076,6 +8648,1684 @@ def _password_reset_source_hash():
         message,
         hashlib.sha256,
     ).hexdigest()
+
+
+
+def _employee_access_source_hash():
+    """
+    Return a privacy-safe fingerprint of the request source.
+
+    The raw IP address is never stored. Render's left-most
+    X-Forwarded-For value is trusted only when running on Render,
+    matching the password-reset source policy.
+    """
+    candidate = ""
+
+    if os.environ.get("RENDER"):
+        forwarded_for = str(
+            request.headers.get(
+                "X-Forwarded-For",
+                "",
+            )
+            or ""
+        ).strip()
+
+        if forwarded_for:
+            candidate = (
+                forwarded_for
+                .split(",", 1)[0]
+                .strip()
+            )
+
+    if not candidate:
+        candidate = str(
+            request.remote_addr
+            or ""
+        ).strip()
+
+    try:
+        source_address = str(
+            ipaddress.ip_address(candidate)
+        )
+
+    except ValueError:
+        source_address = "unknown"
+
+    secret = app.secret_key
+
+    if isinstance(secret, str):
+        secret = secret.encode("utf-8")
+
+    if not secret:
+        raise RuntimeError(
+            "Application secret key is unavailable."
+        )
+
+    message = (
+        "employee-access-source:"
+        + source_address
+    ).encode("utf-8")
+
+    return hmac.new(
+        secret,
+        message,
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _employee_access_security_session_hash(
+    *,
+    spa_id,
+    business_unit_id,
+    user_id,
+):
+    """
+    Return the fingerprint for this business-login security session.
+
+    The random nonce remains only in the signed Flask session.
+    The database receives only its SHA-256 fingerprint.
+
+    If the tenant, workspace, or business-login user changes, a new
+    nonce is issued rather than carrying Employee Access state across
+    identities or workspaces.
+    """
+    try:
+        spa_id = int(spa_id)
+        business_unit_id = int(business_unit_id)
+        user_id = int(user_id)
+
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "Employee Access security session context is invalid."
+        ) from exc
+
+    if (
+        spa_id <= 0
+        or business_unit_id <= 0
+        or user_id <= 0
+    ):
+        raise ValueError(
+            "Employee Access security session context is invalid."
+        )
+
+    session_key = "_employee_access_security_session"
+    record = session.get(session_key)
+
+    nonce = ""
+
+    if isinstance(record, dict):
+        if (
+            record.get("spa_id") == spa_id
+            and record.get("business_unit_id")
+                == business_unit_id
+            and record.get("user_id") == user_id
+        ):
+            nonce = str(
+                record.get("nonce")
+                or ""
+            )
+
+    if not nonce:
+        nonce = secrets.token_urlsafe(32)
+
+        session[session_key] = {
+            "nonce": nonce,
+            "spa_id": spa_id,
+            "business_unit_id": business_unit_id,
+            "user_id": user_id,
+        }
+
+        session.modified = True
+
+    return hashlib.sha256(
+        nonce.encode("utf-8")
+    ).hexdigest()
+
+
+
+
+def _employee_access_rate_lock_key(value):
+    """
+    Build one signed PostgreSQL advisory-lock key for an
+    Employee Access rate-limit dimension.
+    """
+    value = str(value or "").strip()
+
+    if not value:
+        raise ValueError(
+            "Employee Access rate-lock value is required."
+        )
+
+    digest = hashlib.sha256(
+        (
+            "peach-suite-pro|employee-access-rate-lock|"
+            + value
+        ).encode("utf-8")
+    ).digest()
+
+    advisory_key = int.from_bytes(
+        digest[:8],
+        "big",
+        signed=False,
+    )
+
+    if advisory_key >= 2**63:
+        advisory_key -= 2**64
+
+    return advisory_key
+
+
+def _validate_employee_access_fingerprint(
+    value,
+    field_name,
+):
+    value = str(value or "").strip().lower()
+
+    if (
+        len(value) != 64
+        or any(
+            character not in "0123456789abcdef"
+            for character in value
+        )
+    ):
+        raise ValueError(
+            f"{field_name} fingerprint is invalid."
+        )
+
+    return value
+
+
+def _lock_employee_access_rate_dimensions(
+    cur,
+    *,
+    spa_id,
+    business_unit_id,
+    user_id,
+    source_hash,
+    security_session_hash,
+):
+    """
+    Serialize Employee Access checks for both the current
+    business-login security session and request source.
+
+    Sorted lock acquisition prevents opposite-order deadlocks.
+    """
+    try:
+        spa_id = int(spa_id)
+        business_unit_id = int(business_unit_id)
+        user_id = int(user_id)
+
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "Employee Access rate-limit context is invalid."
+        ) from exc
+
+    if (
+        spa_id <= 0
+        or business_unit_id <= 0
+        or user_id <= 0
+    ):
+        raise ValueError(
+            "Employee Access rate-limit context is invalid."
+        )
+
+    source_hash = _validate_employee_access_fingerprint(
+        source_hash,
+        "Employee Access source",
+    )
+
+    security_session_hash = (
+        _validate_employee_access_fingerprint(
+            security_session_hash,
+            "Employee Access security session",
+        )
+    )
+
+    lock_keys = {
+        _employee_access_rate_lock_key(
+            "session|"
+            f"spa:{spa_id}|"
+            f"business-unit:{business_unit_id}|"
+            f"user:{user_id}|"
+            f"security-session:{security_session_hash}"
+        ),
+        _employee_access_rate_lock_key(
+            "source|"
+            f"spa:{spa_id}|"
+            f"business-unit:{business_unit_id}|"
+            f"source:{source_hash}"
+        ),
+    }
+
+    for advisory_key in sorted(lock_keys):
+        cur.execute(
+            """
+            SELECT pg_advisory_xact_lock(%s)
+            """,
+            (advisory_key,),
+        )
+
+    return (
+        spa_id,
+        business_unit_id,
+        user_id,
+        source_hash,
+        security_session_hash,
+    )
+
+
+def _employee_access_rate_limit_state(
+    cur,
+    *,
+    spa_id,
+    business_unit_id,
+    user_id,
+    source_hash,
+    security_session_hash,
+):
+    """
+    Lock both Employee Access rate-limit dimensions and return
+    their current rolling-window failure and lock state.
+
+    This table is independent of users.failed_login_* state.
+    """
+    (
+        spa_id,
+        business_unit_id,
+        user_id,
+        source_hash,
+        security_session_hash,
+    ) = _lock_employee_access_rate_dimensions(
+        cur,
+        spa_id=spa_id,
+        business_unit_id=business_unit_id,
+        user_id=user_id,
+        source_hash=source_hash,
+        security_session_hash=security_session_hash,
+    )
+
+    cur.execute(
+        """
+        SELECT
+            NOW() AS now,
+            COUNT(*) FILTER (
+                WHERE user_id = %s
+                  AND security_session_hash = %s
+            ) AS session_failure_count,
+            COUNT(*) FILTER (
+                WHERE source_hash = %s
+            ) AS source_failure_count,
+            MAX(locked_until) FILTER (
+                WHERE user_id = %s
+                  AND security_session_hash = %s
+                  AND locked_until > NOW()
+            ) AS session_locked_until,
+            MAX(locked_until) FILTER (
+                WHERE source_hash = %s
+                  AND locked_until > NOW()
+            ) AS source_locked_until
+        FROM employee_access_code_attempts
+        WHERE spa_id = %s
+          AND business_unit_id = %s
+          AND was_successful = FALSE
+          AND created_at >= (
+              NOW()
+              - (
+                  %s
+                  * INTERVAL '1 minute'
+              )
+          )
+          AND (
+              (
+                  user_id = %s
+                  AND security_session_hash = %s
+              )
+              OR source_hash = %s
+          )
+        """,
+        (
+            user_id,
+            security_session_hash,
+            source_hash,
+            user_id,
+            security_session_hash,
+            source_hash,
+            spa_id,
+            business_unit_id,
+            EMPLOYEE_ACCESS_FAILURE_WINDOW_MINUTES,
+            user_id,
+            security_session_hash,
+            source_hash,
+        ),
+    )
+
+    row = cur.fetchone()
+
+    now = row["now"]
+
+    session_locked_until = row[
+        "session_locked_until"
+    ]
+    source_locked_until = row[
+        "source_locked_until"
+    ]
+
+    active_lock_candidates = [
+        value
+        for value in (
+            session_locked_until,
+            source_locked_until,
+        )
+        if value is not None and value > now
+    ]
+
+    locked_until = (
+        max(active_lock_candidates)
+        if active_lock_candidates
+        else None
+    )
+
+    return {
+        "now": now,
+        "session_failure_count": int(
+            row["session_failure_count"] or 0
+        ),
+        "source_failure_count": int(
+            row["source_failure_count"] or 0
+        ),
+        "session_locked_until": session_locked_until,
+        "source_locked_until": source_locked_until,
+        "locked_until": locked_until,
+        "is_locked": locked_until is not None,
+    }
+
+
+def _record_employee_access_failure(
+    cur,
+    *,
+    spa_id,
+    business_unit_id,
+    user_id,
+    source_hash,
+    security_session_hash,
+    page_scope,
+    rate_state,
+):
+    """
+    Record one completed unsuccessful Employee Access
+    verification. The caller must already hold both advisory
+    locks through _employee_access_rate_limit_state().
+    """
+    page_scope = str(page_scope or "").strip()
+
+    if not page_scope or len(page_scope) > 160:
+        raise ValueError(
+            "Employee Access page scope is invalid."
+        )
+
+    if rate_state.get("is_locked"):
+        raise RuntimeError(
+            "A locked Employee Access request must not be verified."
+        )
+
+    new_session_failure_count = (
+        int(
+            rate_state.get(
+                "session_failure_count",
+                0,
+            )
+            or 0
+        )
+        + 1
+    )
+
+    new_source_failure_count = (
+        int(
+            rate_state.get(
+                "source_failure_count",
+                0,
+            )
+            or 0
+        )
+        + 1
+    )
+
+    creates_lock = bool(
+        new_session_failure_count
+            >= EMPLOYEE_ACCESS_FAILURE_MAX_ATTEMPTS
+        or new_source_failure_count
+            >= EMPLOYEE_ACCESS_FAILURE_MAX_ATTEMPTS
+    )
+
+    locked_until = None
+
+    if creates_lock:
+        locked_until = (
+            rate_state["now"]
+            + timedelta(
+                minutes=EMPLOYEE_ACCESS_FAILURE_LOCK_MINUTES
+            )
+        )
+
+    cur.execute(
+        """
+        INSERT INTO employee_access_code_attempts (
+            spa_id,
+            business_unit_id,
+            user_id,
+            source_hash,
+            security_session_hash,
+            page_scope,
+            was_successful,
+            verified_employee_id,
+            locked_until
+        )
+        VALUES (
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            FALSE,
+            NULL,
+            %s
+        )
+        RETURNING employee_access_code_attempt_id
+        """,
+        (
+            spa_id,
+            business_unit_id,
+            user_id,
+            source_hash,
+            security_session_hash,
+            page_scope,
+            locked_until,
+        ),
+    )
+
+    attempt_id = cur.fetchone()[
+        "employee_access_code_attempt_id"
+    ]
+
+    return {
+        "attempt_id": attempt_id,
+        "creates_lock": creates_lock,
+        "locked_until": locked_until,
+        "session_failure_count": new_session_failure_count,
+        "source_failure_count": new_source_failure_count,
+    }
+
+
+def _record_employee_access_success(
+    cur,
+    *,
+    spa_id,
+    business_unit_id,
+    user_id,
+    source_hash,
+    security_session_hash,
+    page_scope,
+    verified_employee_id,
+):
+    """
+    Record one successful Employee Access verification.
+    """
+    page_scope = str(page_scope or "").strip()
+
+    if not page_scope or len(page_scope) > 160:
+        raise ValueError(
+            "Employee Access page scope is invalid."
+        )
+
+    try:
+        verified_employee_id = int(
+            verified_employee_id
+        )
+
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "Verified employee ID is invalid."
+        ) from exc
+
+    if verified_employee_id <= 0:
+        raise ValueError(
+            "Verified employee ID is invalid."
+        )
+
+    cur.execute(
+        """
+        INSERT INTO employee_access_code_attempts (
+            spa_id,
+            business_unit_id,
+            user_id,
+            source_hash,
+            security_session_hash,
+            page_scope,
+            was_successful,
+            verified_employee_id,
+            locked_until
+        )
+        VALUES (
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            TRUE,
+            %s,
+            NULL
+        )
+        RETURNING employee_access_code_attempt_id
+        """,
+        (
+            spa_id,
+            business_unit_id,
+            user_id,
+            source_hash,
+            security_session_hash,
+            page_scope,
+            verified_employee_id,
+        ),
+    )
+
+    return cur.fetchone()[
+        "employee_access_code_attempt_id"
+    ]
+
+
+
+
+def _verify_employee_access_submission(
+    *,
+    spa_id,
+    business_unit_id,
+    user_id,
+    page_scope,
+    submitted_code,
+):
+    """
+    Verify one Employee Access Code submission.
+
+    Business login identifies the tenant/session. The submitted
+    Employee Access Code identifies the individual employee.
+
+    Raw codes are never stored or logged. Rate limiting is durable
+    and independent of normal business-login failure state.
+    """
+    page_scope = str(page_scope or "").strip()
+
+    if not page_scope or len(page_scope) > 160:
+        raise ValueError(
+            "Employee Access page scope is invalid."
+        )
+
+    source_hash = _employee_access_source_hash()
+
+    security_session_hash = (
+        _employee_access_security_session_hash(
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            user_id=user_id,
+        )
+    )
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor(
+        cursor_factory=RealDictCursor
+    )
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                employee_access_code_setting_id,
+                is_enabled,
+                code_length,
+                code_character_set
+            FROM employee_access_code_settings
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+            FOR SHARE
+            """,
+            (
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        settings = cur.fetchone()
+
+        if (
+            not settings
+            or not settings["is_enabled"]
+        ):
+            conn.rollback()
+
+            return {
+                "status": "unavailable",
+                "verified_employee": None,
+                "locked_until": None,
+            }
+
+        try:
+            normalized_code = normalize_access_code(
+                submitted_code,
+                code_length=settings["code_length"],
+                code_character_set=(
+                    settings["code_character_set"]
+                ),
+            )
+
+        except EmployeeAccessSecurityError:
+            normalized_code = None
+
+        rate_state = _employee_access_rate_limit_state(
+            cur,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            user_id=user_id,
+            source_hash=source_hash,
+            security_session_hash=security_session_hash,
+        )
+
+        if rate_state["is_locked"]:
+            conn.rollback()
+
+            return {
+                "status": "locked",
+                "verified_employee": None,
+                "locked_until": rate_state[
+                    "locked_until"
+                ],
+            }
+
+        credential = None
+
+        if normalized_code is not None:
+            candidate_hash = hash_access_code(
+                normalized_code,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                code_length=settings["code_length"],
+                code_character_set=(
+                    settings["code_character_set"]
+                ),
+            )
+
+            cur.execute(
+                """
+                SELECT
+                    eacc.employee_access_code_credential_id,
+                    eacc.employee_id,
+                    eacc.code_hash,
+                    e.first_name,
+                    e.last_name,
+                    e.employee_nickname
+                FROM employee_access_code_credentials eacc
+                JOIN employee_business_unit_memberships ebum
+                  ON ebum.spa_id = eacc.spa_id
+                 AND ebum.business_unit_id
+                     = eacc.business_unit_id
+                 AND ebum.employee_id = eacc.employee_id
+                JOIN employees e
+                  ON e.spa_id = eacc.spa_id
+                 AND e.employee_id = eacc.employee_id
+                WHERE eacc.spa_id = %s
+                  AND eacc.business_unit_id = %s
+                  AND eacc.code_hash = %s
+                  AND eacc.is_active = TRUE
+                  AND ebum.is_active = TRUE
+                  AND e.is_active = TRUE
+                FOR UPDATE OF eacc
+                """,
+                (
+                    spa_id,
+                    business_unit_id,
+                    candidate_hash,
+                ),
+            )
+
+            credential = cur.fetchone()
+
+            if (
+                credential
+                and not verify_access_code(
+                    normalized_code,
+                    credential["code_hash"],
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    code_length=settings["code_length"],
+                    code_character_set=(
+                        settings["code_character_set"]
+                    ),
+                )
+            ):
+                credential = None
+
+        if not credential:
+            failure = _record_employee_access_failure(
+                cur,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                user_id=user_id,
+                source_hash=source_hash,
+                security_session_hash=(
+                    security_session_hash
+                ),
+                page_scope=page_scope,
+                rate_state=rate_state,
+            )
+
+            if failure["creates_lock"]:
+                log_audit(
+                    cur,
+                    spa_id=spa_id,
+                    user_id=user_id,
+                    action_type=(
+                        "employee_access_temporarily_locked"
+                    ),
+                    table_name=(
+                        "employee_access_code_attempts"
+                    ),
+                    record_id=failure["attempt_id"],
+                    notes=(
+                        "Employee Access temporarily locked "
+                        f"after "
+                        f"{EMPLOYEE_ACCESS_FAILURE_MAX_ATTEMPTS} "
+                        "unsuccessful verification attempts "
+                        f"for page scope {page_scope}."
+                    ),
+                    business_unit_id=business_unit_id,
+                )
+
+            conn.commit()
+
+            return {
+                "status": (
+                    "locked"
+                    if failure["creates_lock"]
+                    else "invalid"
+                ),
+                "verified_employee": None,
+                "locked_until": failure[
+                    "locked_until"
+                ],
+            }
+
+        employee_id = int(
+            credential["employee_id"]
+        )
+
+        cur.execute(
+            """
+            UPDATE employee_access_code_credentials
+            SET last_used_at = NOW()
+            WHERE employee_access_code_credential_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND employee_id = %s
+              AND is_active = TRUE
+            """,
+            (
+                credential[
+                    "employee_access_code_credential_id"
+                ],
+                spa_id,
+                business_unit_id,
+                employee_id,
+            ),
+        )
+
+        if cur.rowcount != 1:
+            raise RuntimeError(
+                "Employee Access credential changed "
+                "during verification."
+            )
+
+        attempt_id = _record_employee_access_success(
+            cur,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            user_id=user_id,
+            source_hash=source_hash,
+            security_session_hash=security_session_hash,
+            page_scope=page_scope,
+            verified_employee_id=employee_id,
+        )
+
+        log_audit(
+            cur,
+            spa_id=spa_id,
+            user_id=user_id,
+            action_type="employee_access_verified",
+            table_name="employee_access_code_attempts",
+            record_id=attempt_id,
+            notes=(
+                "Employee Access Code verified "
+                f"for page scope {page_scope}."
+            ),
+            business_unit_id=business_unit_id,
+            verified_employee_id=employee_id,
+        )
+
+        conn.commit()
+
+        display_name = str(
+            credential["employee_nickname"]
+            or ""
+        ).strip()
+
+        if not display_name:
+            display_name = " ".join(
+                part
+                for part in (
+                    str(
+                        credential["first_name"]
+                        or ""
+                    ).strip(),
+                    str(
+                        credential["last_name"]
+                        or ""
+                    ).strip(),
+                )
+                if part
+            )
+
+        return {
+            "status": "success",
+            "verified_employee": {
+                "employee_id": employee_id,
+                "display_name": display_name,
+            },
+            "locked_until": None,
+            "security_session_hash": (
+                security_session_hash
+            ),
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
+def _clear_employee_access_page_state():
+    """
+    Clear only page-bound Employee Access identity state.
+
+    The longer-lived Employee Access security-session nonce is
+    intentionally preserved so leaving a page cannot reset the
+    durable verification-attempt throttle.
+    """
+    changed = False
+
+    for key in (
+        "_employee_access_page_challenge",
+        "_employee_access_page_verification",
+    ):
+        if key in session:
+            session.pop(key, None)
+            changed = True
+
+    if changed:
+        session.modified = True
+
+
+
+
+def _validate_employee_access_page_context(
+    *,
+    spa_id,
+    business_unit_id,
+    user_id,
+    page_scope,
+):
+    try:
+        spa_id = int(spa_id)
+        business_unit_id = int(business_unit_id)
+        user_id = int(user_id)
+
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "Employee Access page context is invalid."
+        ) from exc
+
+    page_scope = str(page_scope or "").strip()
+
+    if (
+        spa_id <= 0
+        or business_unit_id <= 0
+        or user_id <= 0
+        or not page_scope
+        or len(page_scope) > 160
+    ):
+        raise ValueError(
+            "Employee Access page context is invalid."
+        )
+
+    return (
+        spa_id,
+        business_unit_id,
+        user_id,
+        page_scope,
+    )
+
+
+def _new_employee_access_page_challenge(
+    *,
+    spa_id,
+    business_unit_id,
+    user_id,
+    page_scope,
+):
+    """
+    Create a single-use Employee Access challenge for one new
+    sensitive-page instance.
+
+    Starting a new page challenge invalidates any prior page-bound
+    Employee Access identity but preserves the durable security-
+    session nonce used by rate limiting.
+    """
+    (
+        spa_id,
+        business_unit_id,
+        user_id,
+        page_scope,
+    ) = _validate_employee_access_page_context(
+        spa_id=spa_id,
+        business_unit_id=business_unit_id,
+        user_id=user_id,
+        page_scope=page_scope,
+    )
+
+    _clear_employee_access_page_state()
+
+    challenge_token = secrets.token_urlsafe(32)
+    page_instance_id = secrets.token_urlsafe(24)
+
+    session["_employee_access_page_challenge"] = {
+        "challenge_token": challenge_token,
+        "page_instance_id": page_instance_id,
+        "spa_id": spa_id,
+        "business_unit_id": business_unit_id,
+        "user_id": user_id,
+        "page_scope": page_scope,
+        "issued_at": int(time.time()),
+    }
+
+    session.modified = True
+
+    return {
+        "challenge_token": challenge_token,
+        "page_instance_id": page_instance_id,
+    }
+
+
+def _consume_employee_access_page_challenge(
+    *,
+    spa_id,
+    business_unit_id,
+    user_id,
+    page_scope,
+    challenge_token,
+    page_instance_id,
+):
+    """
+    Consume and validate one Employee Access page challenge.
+
+    The challenge is removed before validation so replay is not
+    possible after either success or failure.
+    """
+    (
+        spa_id,
+        business_unit_id,
+        user_id,
+        page_scope,
+    ) = _validate_employee_access_page_context(
+        spa_id=spa_id,
+        business_unit_id=business_unit_id,
+        user_id=user_id,
+        page_scope=page_scope,
+    )
+
+    challenge_token = str(
+        challenge_token or ""
+    ).strip()
+
+    page_instance_id = str(
+        page_instance_id or ""
+    ).strip()
+
+    record = session.pop(
+        "_employee_access_page_challenge",
+        None,
+    )
+
+    session.modified = True
+
+    if not isinstance(record, dict):
+        return False
+
+    expected_challenge = str(
+        record.get("challenge_token")
+        or ""
+    )
+
+    expected_page_instance = str(
+        record.get("page_instance_id")
+        or ""
+    )
+
+    try:
+        issued_at = int(
+            record.get("issued_at")
+            or 0
+        )
+
+    except (TypeError, ValueError):
+        issued_at = 0
+
+    now = int(time.time())
+
+    return bool(
+        challenge_token
+        and page_instance_id
+        and expected_challenge
+        and expected_page_instance
+        and record.get("spa_id") == spa_id
+        and record.get("business_unit_id")
+            == business_unit_id
+        and record.get("user_id") == user_id
+        and record.get("page_scope") == page_scope
+        and issued_at > 0
+        and now - issued_at
+            <= SECURITY_FORM_CSRF_MAX_AGE_SECONDS
+        and secrets.compare_digest(
+            challenge_token,
+            expected_challenge,
+        )
+        and secrets.compare_digest(
+            page_instance_id,
+            expected_page_instance,
+        )
+    )
+
+
+EMPLOYEE_ACCESS_SECURE_GRACE_SECONDS = 15
+
+
+def _employee_access_secure_presence(
+    *,
+    spa_id,
+    business_unit_id,
+    user_id,
+):
+    """
+    Return whether this PSP browser session currently has a
+    protected Employee Access page present or still within the
+    15-second protected-area grace period.
+
+    This never ends or clears the PSP business login.
+    """
+    try:
+        spa_id = int(spa_id)
+        business_unit_id = int(business_unit_id)
+        user_id = int(user_id)
+    except (TypeError, ValueError):
+        return False
+
+    marker = str(
+        session.get("_browser_session_marker")
+        or ""
+    )
+
+    marker_hash = _business_session_presence_hash(
+        marker
+    )
+
+    if not marker_hash:
+        return False
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                COUNT(*) FILTER (
+                    WHERE closing_at IS NULL
+                      AND last_seen_at >= (
+                          NOW()
+                          - (
+                              %s
+                              * INTERVAL '1 second'
+                          )
+                      )
+                ),
+                COUNT(*) FILTER (
+                    WHERE closing_at IS NOT NULL
+                      AND closing_at >= (
+                          NOW()
+                          - (
+                              %s
+                              * INTERVAL '1 second'
+                          )
+                      )
+                )
+            FROM browser_session_tabs
+            WHERE session_marker_hash = %s
+              AND user_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND employee_access_secure = TRUE
+            """,
+            (
+                BUSINESS_SESSION_TAB_STALE_SECONDS,
+                EMPLOYEE_ACCESS_SECURE_GRACE_SECONDS,
+                marker_hash,
+                user_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        row = cur.fetchone()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    active_count = int(
+        row[0]
+        if row and row[0] is not None
+        else 0
+    )
+
+    grace_count = int(
+        row[1]
+        if row and row[1] is not None
+        else 0
+    )
+
+    return bool(
+        active_count
+        or grace_count
+    )
+
+
+def _employee_access_required_for_business(spa_id):
+    """
+    Return whether this business requires the Employee Access
+    individual-identity layer on protected pages.
+
+    Solo Owner businesses use the authenticated PSP business
+    login as the individual actor and do not require a second
+    Employee Access Code.
+
+    All other or unknown business structures fail closed and
+    require Employee Access on protected pages.
+    """
+    try:
+        spa_id = int(spa_id)
+    except (TypeError, ValueError):
+        return True
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT ot.type_code
+            FROM spas s
+            LEFT JOIN organization_types ot
+              ON ot.organization_type_id =
+                    s.organization_type_id
+            WHERE s.spa_id = %s
+            LIMIT 1
+            """,
+            (spa_id,),
+        )
+
+        row = cur.fetchone()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    organization_type_code = (
+        str(row[0] or "").strip().lower()
+        if row
+        else ""
+    )
+
+    return organization_type_code != "solo_owner"
+
+
+def _employee_access_employee_still_authorized(
+    *,
+    spa_id,
+    business_unit_id,
+    employee_id,
+):
+    """
+    Reconfirm that Employee Access is enabled and the verified
+    employee still has an active credential, workspace
+    membership, and employee record.
+    """
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM employee_access_code_settings eacs
+                JOIN employee_access_code_credentials eacc
+                  ON eacc.spa_id = eacs.spa_id
+                 AND eacc.business_unit_id =
+                        eacs.business_unit_id
+                JOIN employee_business_unit_memberships ebum
+                  ON ebum.spa_id = eacc.spa_id
+                 AND ebum.business_unit_id =
+                        eacc.business_unit_id
+                 AND ebum.employee_id = eacc.employee_id
+                JOIN employees e
+                  ON e.employee_id = eacc.employee_id
+                 AND e.spa_id = eacc.spa_id
+                WHERE eacs.spa_id = %s
+                  AND eacs.business_unit_id = %s
+                  AND eacs.is_enabled = TRUE
+                  AND eacc.employee_id = %s
+                  AND eacc.is_active = TRUE
+                  AND ebum.is_active = TRUE
+                  AND e.is_active = TRUE
+            )
+            """,
+            (
+                spa_id,
+                business_unit_id,
+                employee_id,
+            ),
+        )
+
+        row = cur.fetchone()
+
+        return bool(
+            row
+            and row[0]
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _set_employee_access_page_verification(
+    *,
+    spa_id,
+    business_unit_id,
+    user_id,
+    page_scope,
+    page_instance_id,
+    security_session_hash,
+    verified_employee,
+):
+    """
+    Start the shared Employee Access Secure Session.
+
+    The challenge remains page-bound, but after successful code
+    verification the verified individual may move among qualified
+    protected pages without entering the code again.
+    """
+    (
+        spa_id,
+        business_unit_id,
+        user_id,
+        page_scope,
+    ) = _validate_employee_access_page_context(
+        spa_id=spa_id,
+        business_unit_id=business_unit_id,
+        user_id=user_id,
+        page_scope=page_scope,
+    )
+
+    page_instance_id = str(
+        page_instance_id or ""
+    ).strip()
+
+    security_session_hash = (
+        _validate_employee_access_fingerprint(
+            security_session_hash,
+            "Employee Access security session",
+        )
+    )
+
+    if not isinstance(
+        verified_employee,
+        dict,
+    ):
+        raise ValueError(
+            "Verified Employee Access identity is invalid."
+        )
+
+    try:
+        employee_id = int(
+            verified_employee.get("employee_id")
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "Verified employee ID is invalid."
+        ) from exc
+
+    if employee_id <= 0:
+        raise ValueError(
+            "Verified employee ID is invalid."
+        )
+
+    display_name = str(
+        verified_employee.get("display_name")
+        or ""
+    ).strip()
+
+    if not display_name:
+        display_name = (
+            f"Employee {employee_id}"
+        )
+
+    session[
+        "_employee_access_page_verification"
+    ] = {
+        "spa_id": spa_id,
+        "business_unit_id": business_unit_id,
+        "user_id": user_id,
+        "verified_from_page_scope": page_scope,
+        "verified_from_page_instance_id": (
+            page_instance_id
+        ),
+        "security_session_hash": (
+            security_session_hash
+        ),
+        "employee_id": employee_id,
+        "display_name": display_name,
+        "verified_at": int(time.time()),
+    }
+
+    session.modified = True
+
+
+def _employee_access_page_verification(
+    *,
+    spa_id,
+    business_unit_id,
+    user_id,
+    page_scope,
+    page_instance_id,
+):
+    """
+    Return the shared verified Employee Access identity while the
+    protected-area Secure Session remains valid.
+
+    Expiration clears Employee Access identity only. It never
+    clears or ends the Peach Suite Pro business login.
+    """
+    (
+        spa_id,
+        business_unit_id,
+        user_id,
+        page_scope,
+    ) = _validate_employee_access_page_context(
+        spa_id=spa_id,
+        business_unit_id=business_unit_id,
+        user_id=user_id,
+        page_scope=page_scope,
+    )
+
+    page_instance_id = str(
+        page_instance_id or ""
+    ).strip()
+
+    record = session.get(
+        "_employee_access_page_verification"
+    )
+
+    if not isinstance(record, dict):
+        return None
+
+    current_security_session_hash = (
+        _employee_access_security_session_hash(
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            user_id=user_id,
+        )
+    )
+
+    expected_security_session_hash = str(
+        record.get("security_session_hash")
+        or ""
+    )
+
+    identity_matches = bool(
+        record.get("spa_id") == spa_id
+        and record.get("business_unit_id")
+            == business_unit_id
+        and record.get("user_id") == user_id
+        and expected_security_session_hash
+        and secrets.compare_digest(
+            current_security_session_hash,
+            expected_security_session_hash,
+        )
+    )
+
+    if not identity_matches:
+        _clear_employee_access_page_state()
+        return None
+
+    try:
+        employee_id = int(
+            record.get("employee_id")
+        )
+
+        verified_at = int(
+            record.get("verified_at")
+            or 0
+        )
+
+    except (TypeError, ValueError):
+        _clear_employee_access_page_state()
+        return None
+
+    if (
+        employee_id <= 0
+        or verified_at <= 0
+    ):
+        _clear_employee_access_page_state()
+        return None
+
+    if not _employee_access_employee_still_authorized(
+        spa_id=spa_id,
+        business_unit_id=business_unit_id,
+        employee_id=employee_id,
+    ):
+        _clear_employee_access_page_state()
+        return None
+
+    verification_age = (
+        int(time.time())
+        - verified_at
+    )
+
+    just_verified = bool(
+        0 <= verification_age
+        <= EMPLOYEE_ACCESS_SECURE_GRACE_SECONDS
+    )
+
+    secure_presence = (
+        _employee_access_secure_presence(
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            user_id=user_id,
+        )
+    )
+
+    if (
+        not just_verified
+        and not secure_presence
+    ):
+        _clear_employee_access_page_state()
+        return None
+
+    stored_page_instance_id = str(
+        record.get(
+            "verified_from_page_instance_id"
+        )
+        or ""
+    ).strip()
+
+    return {
+        "employee_id": employee_id,
+        "display_name": str(
+            record.get("display_name")
+            or f"Employee {employee_id}"
+        ).strip(),
+        "page_instance_id": (
+            page_instance_id
+            or stored_page_instance_id
+        ),
+    }
+
+
+def _end_employee_access_secure_session(
+    *,
+    spa_id,
+    business_unit_id,
+    user_id,
+):
+    """
+    End only the verified Employee Access Secure Session.
+
+    Preserve the Peach Suite Pro business login and the durable
+    Employee Access rate-limit security-session nonce.
+    """
+    try:
+        spa_id = int(spa_id)
+        business_unit_id = int(business_unit_id)
+        user_id = int(user_id)
+    except (TypeError, ValueError):
+        return
+
+    _clear_employee_access_page_state()
+
+    marker = str(
+        session.get("_browser_session_marker")
+        or ""
+    )
+
+    marker_hash = _business_session_presence_hash(
+        marker
+    )
+
+    if not marker_hash:
+        return
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            UPDATE browser_session_tabs
+            SET
+                employee_access_secure = FALSE,
+                updated_at = NOW()
+            WHERE session_marker_hash = %s
+              AND user_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND employee_access_secure = TRUE
+            """,
+            (
+                marker_hash,
+                user_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+EMPLOYEE_ACCESS_SENSITIVE_PAGE_SCOPES = frozenset({
+    "employee_compensation_report",
+    "employee_compensation_history",
+    "add_employee_compensation",
+})
+
+
+def _employee_access_sensitive_page_scope_allowed(page_scope):
+    page_scope = str(page_scope or "").strip()
+
+    if page_scope in EMPLOYEE_ACCESS_SENSITIVE_PAGE_SCOPES:
+        return True
+
+    edit_prefix = "edit_employee_compensation:"
+
+    if not page_scope.startswith(edit_prefix):
+        return False
+
+    record_id = page_scope[len(edit_prefix):]
+
+    try:
+        record_id = int(record_id)
+    except (TypeError, ValueError):
+        return False
+
+    return record_id > 0
+
+
+def _employee_access_safe_return_path(
+    value,
+    *,
+    fallback,
+):
+    """
+    Accept only a local PSP path for an Employee Access redirect.
+    The page-instance query parameter is server-controlled.
+    """
+    value = str(value or "").strip()
+
+    if (
+        not value
+        or not value.startswith("/")
+        or value.startswith("//")
+        or len(value) > 2000
+        or "\r" in value
+        or "\n" in value
+        or "#" in value
+        or "employee_access_page_instance=" in value
+    ):
+        return fallback
+
+    return value
+
 
 
 def _reserve_password_reset_source_request(
@@ -4748,6 +10998,92 @@ def _complete_password_reset(
         conn.close()
 
 
+def _public_security_csrf_records(now):
+    stored = session.get("_public_security_csrf")
+    records = {}
+
+    if not isinstance(stored, dict):
+        return records
+
+    # Backward compatibility with the original single-token
+    # session structure:
+    #
+    # {
+    #     "token": "...",
+    #     "purpose": "...",
+    #     "issued_at": ...
+    # }
+    if (
+        "token" in stored
+        and "purpose" in stored
+        and "issued_at" in stored
+    ):
+        token = str(stored.get("token") or "")
+        purpose = str(
+            stored.get("purpose") or ""
+        ).strip()
+
+        try:
+            issued_at = int(
+                stored.get("issued_at") or 0
+            )
+        except (TypeError, ValueError):
+            issued_at = 0
+
+        if (
+            token
+            and purpose
+            and issued_at > 0
+            and now - issued_at
+                <= PUBLIC_SECURITY_CSRF_MAX_AGE_SECONDS
+        ):
+            records[purpose] = {
+                "token": token,
+                "issued_at": issued_at,
+            }
+
+        return records
+
+    # Current structure: one independently valid token
+    # per security action/purpose.
+    for stored_purpose, stored_record in stored.items():
+        purpose = str(
+            stored_purpose or ""
+        ).strip()
+
+        if (
+            not purpose
+            or not isinstance(stored_record, dict)
+        ):
+            continue
+
+        token = str(
+            stored_record.get("token") or ""
+        )
+
+        try:
+            issued_at = int(
+                stored_record.get("issued_at") or 0
+            )
+        except (TypeError, ValueError):
+            issued_at = 0
+
+        if (
+            not token
+            or issued_at <= 0
+            or now - issued_at
+                > PUBLIC_SECURITY_CSRF_MAX_AGE_SECONDS
+        ):
+            continue
+
+        records[purpose] = {
+            "token": token,
+            "issued_at": issued_at,
+        }
+
+    return records
+
+
 def _public_security_csrf_token(purpose):
     purpose = str(purpose or "").strip()
 
@@ -4758,37 +11094,31 @@ def _public_security_csrf_token(purpose):
 
     now = int(time.time())
 
-    record = session.get("_public_security_csrf")
+    records = _public_security_csrf_records(
+        now
+    )
+
+    record = records.get(purpose)
 
     if isinstance(record, dict):
-        token = str(record.get("token") or "")
-        record_purpose = str(
-            record.get("purpose") or ""
+        token = str(
+            record.get("token") or ""
         )
 
-        try:
-            issued_at = int(
-                record.get("issued_at") or 0
-            )
-        except (TypeError, ValueError):
-            issued_at = 0
-
-        if (
-            token
-            and record_purpose == purpose
-            and issued_at > 0
-            and now - issued_at
-                <= PUBLIC_SECURITY_CSRF_MAX_AGE_SECONDS
-        ):
+        if token:
+            # Reassign so any stale records removed by
+            # normalization are also removed from session.
+            session["_public_security_csrf"] = records
             return token
 
     token = secrets.token_urlsafe(32)
 
-    session["_public_security_csrf"] = {
+    records[purpose] = {
         "token": token,
-        "purpose": purpose,
         "issued_at": now,
     }
+
+    session["_public_security_csrf"] = records
 
     return token
 
@@ -4803,20 +11133,22 @@ def _public_security_csrf_valid(
 
     purpose = str(purpose or "").strip()
 
-    record = session.get("_public_security_csrf")
-
     if not submitted_token or not purpose:
         return False
+
+    now = int(time.time())
+
+    records = _public_security_csrf_records(
+        now
+    )
+
+    record = records.get(purpose)
 
     if not isinstance(record, dict):
         return False
 
     expected_token = str(
         record.get("token") or ""
-    )
-
-    expected_purpose = str(
-        record.get("purpose") or ""
     )
 
     try:
@@ -4826,11 +11158,8 @@ def _public_security_csrf_valid(
     except (TypeError, ValueError):
         issued_at = 0
 
-    now = int(time.time())
-
     if (
         not expected_token
-        or expected_purpose != purpose
         or issued_at <= 0
         or now - issued_at
             > PUBLIC_SECURITY_CSRF_MAX_AGE_SECONDS
@@ -4847,7 +11176,27 @@ def _record_failed_business_login(
     cur,
     user_id,
     spa_id,
+    *,
+    factor="password",
 ):
+    factor = str(
+        factor or ""
+    ).strip().lower()
+
+    if factor not in {
+        "password",
+        "mfa",
+    }:
+        raise ValueError(
+            "Business login failure factor is invalid."
+        )
+
+    failure_label = (
+        "MFA verification"
+        if factor == "mfa"
+        else "password"
+    )
+
     cur.execute(
         """
         SELECT
@@ -4935,7 +11284,9 @@ def _record_failed_business_login(
             notes=(
                 "Business login temporarily locked "
                 f"after {LOGIN_FAILURE_MAX_ATTEMPTS} "
-                "failed password attempts."
+                "unsuccessful sign-in verification "
+                f"attempts. Latest factor: "
+                f"{failure_label}."
             ),
         )
 
@@ -5078,6 +11429,80 @@ def _password_policy_error(password):
         )
 
     return None
+
+
+def _normalize_user_mobile_phone(value):
+
+    raw_value = str(value or "").strip()
+
+    if not raw_value:
+        return ""
+
+    allowed_format_characters = {
+        " ",
+        "+",
+        "(",
+        ")",
+        "-",
+        ".",
+    }
+
+    if any(
+        not character.isdigit()
+        and character not in allowed_format_characters
+        for character in raw_value
+    ):
+        raise ValueError(
+            "Please enter a valid U.S. mobile number."
+        )
+
+    digits = "".join(
+        character
+        for character in raw_value
+        if character.isdigit()
+    )
+
+    if (
+        len(digits) == 11
+        and digits.startswith("1")
+    ):
+        digits = digits[1:]
+
+    if len(digits) != 10:
+        raise ValueError(
+            "Please enter a valid 10-digit U.S. mobile number."
+        )
+
+    return "+1" + digits
+
+
+def _format_user_mobile_phone_for_display(value):
+
+    raw_value = str(value or "").strip()
+
+    if not raw_value:
+        return ""
+
+    digits = "".join(
+        character
+        for character in raw_value
+        if character.isdigit()
+    )
+
+    if (
+        len(digits) == 11
+        and digits.startswith("1")
+    ):
+        digits = digits[1:]
+
+    if len(digits) != 10:
+        return raw_value
+
+    return (
+        f"({digits[:3]}) "
+        f"{digits[3:6]}-"
+        f"{digits[6:]}"
+    )
 
 
 # --------------------------------------------------
@@ -9004,7 +15429,9 @@ def send_peach_suite_platform_sms(
     ).strip().lower()
 
     allowed_message_types = {
-        "booking_notification"
+        "booking_notification",
+        "security_verification",
+        "security_alert",
     }
 
     if normalized_message_type not in allowed_message_types:
@@ -9081,41 +15508,83 @@ def send_peach_suite_platform_sms(
 
 
 def get_system_setting(key, default=None):
-    ...
+    conn = get_db_connection()
+    cur = conn.cursor()
 
+    try:
+        cur.execute(
+            """
+            SELECT setting_value
+            FROM system_settings
+            WHERE setting_key = %s
+            LIMIT 1
+            """,
+            (key,),
+        )
 
+        row = cur.fetchone()
 
+        if not row:
+            return default
 
+        return row[0]
 
-
+    finally:
+        cur.close()
+        conn.close()
 
 
 #####################################
 #
-#   GET SET SYSTEM  SETTING
-#
+#   SET SYSTEM SETTING
 #
 ###################################
 
 
-
-def set_system_setting(key, value):
-    ...
-
-
-
-
-
-
+def set_system_setting(
+    cur,
+    key,
+    value,
+    setting_label=None,
+    setting_group=None
+):
+    cur.execute(
+        """
+        INSERT INTO system_settings (
+            setting_key,
+            setting_value,
+            setting_label,
+            setting_group,
+            updated_at
+        )
+        VALUES (%s, %s, %s, %s, NOW())
+        ON CONFLICT (setting_key)
+        DO UPDATE SET
+            setting_value = EXCLUDED.setting_value,
+            setting_label = COALESCE(
+                EXCLUDED.setting_label,
+                system_settings.setting_label
+            ),
+            setting_group = COALESCE(
+                EXCLUDED.setting_group,
+                system_settings.setting_group
+            ),
+            updated_at = NOW()
+        """,
+        (
+            key,
+            str(value),
+            setting_label,
+            setting_group,
+        ),
+    )
 
 
 #####################################
 #
 #   GET PLATFORM SETTING
 #
-#
 ###################################
-
 
 
 def get_system_setting_int(setting_key, default_value):
@@ -10450,7 +16919,9 @@ def log_audit(
     record_id=None,
     old_value=None,
     new_value=None,
-    notes=None
+    notes=None,
+    business_unit_id=None,
+    verified_employee_id=None
 ):
     cur.execute("""
         INSERT INTO audit_log (
@@ -10461,9 +16932,14 @@ def log_audit(
             record_id,
             old_value,
             new_value,
-            notes
+            notes,
+            business_unit_id,
+            verified_employee_id
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (
+            %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s
+        )
     """, (
         spa_id,
         user_id,
@@ -10472,7 +16948,9 @@ def log_audit(
         record_id,
         old_value,
         new_value,
-        notes
+        notes,
+        business_unit_id,
+        verified_employee_id
     ))
 
 
@@ -10605,6 +17083,183 @@ def clean_user_role(role):
     return role
 
 
+# Business-user roles are intentionally separate from the
+# platform-level Master Admin identity.
+#
+# These role codes are used for business workspace membership
+# and must never include or map to master_admin.
+BUSINESS_MEMBERSHIP_ROLE_CODES = (
+    "organization_admin",
+    "management",
+    "staff",
+    "provider",
+    "front_desk",
+)
+
+BUSINESS_MEMBERSHIP_ROLE_LABELS = {
+    "organization_admin": "Business Administrator",
+    "management": "Management",
+    "staff": "Staff",
+    "provider": "Provider",
+    "front_desk": "Front Desk",
+}
+
+BUSINESS_MEMBERSHIP_TO_USER_ROLE = {
+    "organization_admin": "admin",
+    "management": "manager",
+    "staff": "staff",
+    "provider": "staff",
+    "front_desk": "staff",
+}
+
+BUSINESS_MANAGEABLE_ROLE_CODES = {
+    "organization_admin": BUSINESS_MEMBERSHIP_ROLE_CODES,
+    "management": (
+        "staff",
+        "provider",
+        "front_desk",
+    ),
+}
+
+
+def normalize_business_membership_role_code(value):
+    role_code = str(value or "").strip().lower()
+
+    if role_code not in BUSINESS_MEMBERSHIP_ROLE_CODES:
+        return None
+
+    return role_code
+
+
+def business_user_role_for_membership(role_code):
+    role_code = normalize_business_membership_role_code(
+        role_code
+    )
+
+    if role_code is None:
+        return None
+
+    return BUSINESS_MEMBERSHIP_TO_USER_ROLE.get(
+        role_code
+    )
+
+
+def business_role_codes_actor_can_manage(
+    actor_role_code
+):
+    actor_role_code = (
+        normalize_business_membership_role_code(
+            actor_role_code
+        )
+    )
+
+    if actor_role_code is None:
+        return ()
+
+    return BUSINESS_MANAGEABLE_ROLE_CODES.get(
+        actor_role_code,
+        (),
+    )
+
+
+def can_manage_business_user_role(
+    actor_role_code,
+    target_role_code
+):
+    target_role_code = (
+        normalize_business_membership_role_code(
+            target_role_code
+        )
+    )
+
+    if target_role_code is None:
+        return False
+
+    return (
+        target_role_code
+        in business_role_codes_actor_can_manage(
+            actor_role_code
+        )
+    )
+
+
+def business_account_role_for_active_memberships(
+    cur,
+    spa_id,
+    user_id,
+):
+    """
+    Derive the legacy account-wide users.role from the
+    highest security level required by all active workspace
+    memberships.
+
+    Detailed authorization remains workspace-specific.
+    """
+    cur.execute(
+        """
+        SELECT membership_role_code
+        FROM business_unit_memberships
+        WHERE spa_id = %s
+          AND user_id = %s
+          AND is_active = TRUE
+        """,
+        (
+            spa_id,
+            user_id,
+        ),
+    )
+
+    active_role_codes = {
+        str(row[0] or "").strip()
+        for row in cur.fetchall()
+        if row and row[0]
+    }
+
+    if not active_role_codes:
+        return None
+
+    if active_role_codes.intersection({
+        "organization_owner",
+        "organization_admin",
+    }):
+        return "admin"
+
+    if "management" in active_role_codes:
+        return "manager"
+
+    return "staff"
+
+
+def active_business_administrator_count(
+    cur,
+    spa_id,
+    business_unit_id,
+):
+    cur.execute(
+        """
+        SELECT COUNT(*)
+        FROM business_unit_memberships bum
+
+        JOIN users u
+          ON u.user_id = bum.user_id
+         AND u.spa_id = bum.spa_id
+
+        WHERE bum.spa_id = %s
+          AND bum.business_unit_id = %s
+          AND bum.is_active = TRUE
+          AND u.active = TRUE
+          AND bum.membership_role_code = 'organization_admin'
+          AND u.role = 'admin'
+        """,
+        (
+            spa_id,
+            business_unit_id,
+        ),
+    )
+
+    return int(cur.fetchone()[0] or 0)
+
+
 def require_master_admin():
     if session.get("role") != "master_admin":
         abort(403)
@@ -10725,7 +17380,14 @@ def build_navigation_access(role_code):
         "can_view_financials": False,
         "can_view_business_management": False,
 
-        # Workspace security administration
+        # Employee administration and compensation
+        "can_manage_employees": False,
+        "can_view_employee_compensation": False,
+        "can_manage_employee_compensation": False,
+        "can_manage_employee_access_codes": False,
+
+        # Workspace user/security administration
+        "can_manage_users": False,
         "can_manage_security_settings": False,
 
         # Booking and appointment operations
@@ -10775,6 +17437,12 @@ def build_navigation_access(role_code):
             "can_view_financials": True,
             "can_view_business_management": True,
 
+            "can_manage_employees": True,
+            "can_view_employee_compensation": True,
+            "can_manage_employee_compensation": True,
+            "can_manage_employee_access_codes": True,
+
+            "can_manage_users": True,
             "can_manage_security_settings": True,
 
             "can_manage_booking_imports": True,
@@ -10795,6 +17463,11 @@ def build_navigation_access(role_code):
             "can_view_communications_home": True,
             "can_manage_contact_preferences": True,
         })
+
+    elif role_code == "management":
+        # Management may administer lower-level business users.
+        # Broader Management permissions are assigned separately.
+        access["can_manage_users"] = True
 
     # Show Communications only when at least one authorized
     # Communications feature is available.
@@ -11081,6 +17754,10 @@ def load_spa():
 
     if request.endpoint in (
         "login",
+        "mfa_login",
+        "mfa_login_qr",
+        "mfa_login_recovery",
+        "mfa_login_complete",
         "forgot_password",
         "reset_password",
         "logout",
@@ -11295,23 +17972,53 @@ def load_spa():
 #
 #   ---------------------
 
+SMS_EMAIL_TERMS_SETTING_KEY = "sms_email_terms_version"
+SMS_EMAIL_TERMS_DEFAULT_VERSION = "v1.0"
+
+
+def current_sms_email_terms_version():
+    version = get_system_setting(
+        SMS_EMAIL_TERMS_SETTING_KEY,
+        SMS_EMAIL_TERMS_DEFAULT_VERSION
+    )
+
+    version = str(version or "").strip()
+
+    return version or SMS_EMAIL_TERMS_DEFAULT_VERSION
+
+
 def sms_email_terms_accepted(spa_id):
+
+    current_version = current_sms_email_terms_version()
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute("""
-        SELECT owner_agreed_sms_email_terms
-        FROM spas
-        WHERE spa_id = %s
-    """, (spa_id,))
+    try:
+        cur.execute("""
+            SELECT
+                owner_agreed_sms_email_terms,
+                owner_agreed_sms_email_terms_version
+            FROM spas
+            WHERE spa_id = %s
+        """, (spa_id,))
 
-    row = cur.fetchone()
+        row = cur.fetchone()
 
-    cur.close()
-    conn.close()
+        if not row:
+            return False
 
-    return bool(row and row[0])
+        accepted = bool(row[0])
+        accepted_version = str(row[1] or "").strip()
+
+        return (
+            accepted
+            and accepted_version == current_version
+        )
+
+    finally:
+        cur.close()
+        conn.close()
 
 
 
@@ -11544,7 +18251,7 @@ def get_spa_timezone(spa_id):
 
 @app.route("/admin/system-activity")
 @login_required
-@spa_required
+@master_admin_required
 def system_activity():
     page = request.args.get("page", 1, type=int)
     per_page = 100
@@ -11624,6 +18331,264 @@ def system_activity():
     """)
     categories = [row["category"] for row in cur.fetchall()]
 
+    # -----------------------------------------------------
+    # Master Admin at-a-glance operational status
+    # -----------------------------------------------------
+
+    cur.execute(
+        """
+        SELECT
+            category,
+            severity,
+            message,
+            related_type,
+            created_at
+        FROM system_logs
+        WHERE created_at >= NOW() - INTERVAL '7 days'
+        ORDER BY created_at DESC
+        """
+    )
+
+    recent_health_logs = cur.fetchall()
+
+    def build_system_health_card(
+        key,
+        label,
+        matching_logs,
+        positive_log=None,
+        stale_after=None,
+        latest_event_drives=False,
+        event_max_age=None,
+    ):
+        if latest_event_drives and matching_logs:
+            latest_event = matching_logs[0]
+            latest_time = latest_event["created_at"]
+
+            if (
+                event_max_age is not None
+                and latest_time is not None
+                and datetime.now() - latest_time > event_max_age
+            ):
+                return {
+                    "key": key,
+                    "label": label,
+                    "status": "gray",
+                    "status_text": "No Recent Activity",
+                    "detail": (
+                        "No provider activity has been recorded "
+                        "within the current health window."
+                    ),
+                }
+
+            latest_severity = str(
+                latest_event["severity"] or ""
+            ).upper()
+
+            if latest_severity in {"ALERT", "ERROR"}:
+                return {
+                    "key": key,
+                    "label": label,
+                    "status": "red",
+                    "status_text": "Needs Attention",
+                    "detail": latest_event["message"],
+                }
+
+            if latest_severity == "WARNING":
+                return {
+                    "key": key,
+                    "label": label,
+                    "status": "yellow",
+                    "status_text": "Watch",
+                    "detail": latest_event["message"],
+                }
+
+            if latest_severity == "INFO":
+                return {
+                    "key": key,
+                    "label": label,
+                    "status": "green",
+                    "status_text": "Healthy",
+                    "detail": latest_event["message"],
+                }
+
+        alert_logs = [
+            row
+            for row in matching_logs
+            if str(row["severity"] or "").upper()
+            in {"ALERT", "ERROR"}
+        ]
+
+        warning_logs = [
+            row
+            for row in matching_logs
+            if str(row["severity"] or "").upper()
+            == "WARNING"
+        ]
+
+        if alert_logs:
+            return {
+                "key": key,
+                "label": label,
+                "status": "red",
+                "status_text": "Needs Attention",
+                "detail": alert_logs[0]["message"],
+            }
+
+        if warning_logs:
+            return {
+                "key": key,
+                "label": label,
+                "status": "yellow",
+                "status_text": "Watch",
+                "detail": warning_logs[0]["message"],
+            }
+
+        if positive_log is not None:
+            positive_time = positive_log["created_at"]
+
+            if (
+                stale_after is not None
+                and positive_time is not None
+                and datetime.now() - positive_time > stale_after
+            ):
+                return {
+                    "key": key,
+                    "label": label,
+                    "status": "yellow",
+                    "status_text": "Heartbeat Late",
+                    "detail": (
+                        "No recent scheduler heartbeat "
+                        "within the expected window."
+                    ),
+                }
+
+            return {
+                "key": key,
+                "label": label,
+                "status": "green",
+                "status_text": "Healthy",
+                "detail": (
+                    positive_log["message"]
+                    or "Recent healthy activity recorded."
+                ),
+            }
+
+        return {
+            "key": key,
+            "label": label,
+            "status": "gray",
+            "status_text": "No Recent Evidence",
+            "detail": "No recent health evidence has been recorded.",
+        }
+
+    scheduler_logs = [
+        row
+        for row in recent_health_logs
+        if str(row["category"] or "").upper()
+        == "SCHEDULER"
+    ]
+
+    scheduler_heartbeat = next(
+        (
+            row
+            for row in scheduler_logs
+            if row["related_type"] == "scheduler_heartbeat"
+        ),
+        None,
+    )
+
+    security_logs = [
+        row
+        for row in recent_health_logs
+        if str(row["category"] or "").upper()
+        == "SECURITY"
+    ]
+
+    mfa_logs = [
+        row
+        for row in security_logs
+        if (
+            str(row["related_type"] or "").startswith("mfa_")
+            or "MFA" in str(row["message"] or "")
+        )
+    ]
+
+    password_reset_logs = [
+        row
+        for row in security_logs
+        if str(row["related_type"] or "").startswith(
+            "password_reset"
+        )
+    ]
+
+    login_security_logs = [
+        row
+        for row in security_logs
+        if (
+            str(row["related_type"] or "").startswith(
+                "business_login"
+            )
+            or str(row["related_type"] or "").startswith(
+                "business_switch"
+            )
+            or str(row["message"] or "").startswith("Login ")
+            or str(row["message"] or "").startswith(
+                "Business switch "
+            )
+        )
+    ]
+
+    sms_logs = [
+        row
+        for row in recent_health_logs
+        if str(row["category"] or "").upper() == "SMS"
+    ]
+
+    email_logs = [
+        row
+        for row in recent_health_logs
+        if str(row["category"] or "").upper() == "EMAIL"
+    ]
+
+    system_health_cards = [
+        build_system_health_card(
+            "scheduler",
+            "Scheduler",
+            scheduler_logs,
+            positive_log=scheduler_heartbeat,
+            stale_after=timedelta(minutes=90),
+        ),
+        build_system_health_card(
+            "mfa",
+            "MFA",
+            mfa_logs,
+        ),
+        build_system_health_card(
+            "login_security",
+            "Login Security",
+            login_security_logs,
+        ),
+        build_system_health_card(
+            "password_reset",
+            "Password Reset",
+            password_reset_logs,
+        ),
+        build_system_health_card(
+            "sms",
+            "SMS",
+            sms_logs,
+            latest_event_drives=True,
+            event_max_age=timedelta(hours=24),
+        ),
+        build_system_health_card(
+            "email",
+            "Email",
+            email_logs,
+            latest_event_drives=True,
+            event_max_age=timedelta(hours=24),
+        ),
+    ]
+
     cur.close()
     conn.close()
 
@@ -11637,7 +18602,8 @@ def system_activity():
         category=category,
         severity=severity,
         date_filter=date_filter,
-        search=search
+        search=search,
+        system_health_cards=system_health_cards
     )
 
 
@@ -11764,18 +18730,43 @@ def send_email(
             final_html_body
         )
 
-    response = requests.post(
-        (
-            "https://api.mailgun.net/v3/"
-            f"{mailgun_domain}/messages"
-        ),
-        auth=(
-            "api",
-            mailgun_api_key
-        ),
-        data=mailgun_payload,
-        timeout=20
-    )
+    try:
+        response = requests.post(
+            (
+                "https://api.mailgun.net/v3/"
+                f"{mailgun_domain}/messages"
+            ),
+            auth=(
+                "api",
+                mailgun_api_key
+            ),
+            data=mailgun_payload,
+            timeout=20
+        )
+
+    except Exception:
+        log_email(
+            "Mailgun email send request failed.",
+            severity="ERROR",
+            related_type="mailgun_send",
+        )
+        raise
+
+    if 200 <= int(response.status_code) < 300:
+        log_email(
+            "Mailgun accepted email send.",
+            severity="INFO",
+            related_type="mailgun_send",
+        )
+    else:
+        log_email(
+            (
+                "Mailgun rejected email send with HTTP "
+                f"{response.status_code}."
+            ),
+            severity="ERROR",
+            related_type="mailgun_send",
+        )
 
     return response
 
@@ -11945,10 +18936,16 @@ def tenant_sms_terms():
 
 @app.route("/")
 @login_required
-@spa_required
-
 def home():
-    return render_template("home.html")
+
+    if session.get("role") == "master_admin":
+        return redirect(
+            url_for("master_admin_home")
+        )
+
+    return redirect(
+        url_for("morning_briefing")
+    )
 
 
 
@@ -17317,10 +24314,23 @@ def spa_management():
     cur.close()
     conn.close()
 
+    current_terms_version = (
+        current_sms_email_terms_version()
+    )
+
+    terms_current = bool(
+        terms_status
+        and terms_status[0]
+        and str(terms_status[2] or "").strip()
+            == current_terms_version
+    )
+
     return render_template(
         "spa_management.html",
         spa=spa,
-        terms_status=terms_status
+        terms_status=terms_status,
+        terms_current=terms_current,
+        current_terms_version=current_terms_version
     )
 
 
@@ -28451,7 +35461,7 @@ def financial_reports_home():
 @login_required
 @spa_required
 
-def eports_all():
+def reports_all():
     return render_template("reports_all.html")
 
 
@@ -28461,7 +35471,7 @@ def eports_all():
 #   MASTER ADMIN HOME
 #########################################
 
-@app.route("/master_admin_home")
+@app.route("/master-admin")
 @login_required
 @master_admin_required
 def master_admin_home():
@@ -28474,27 +35484,161 @@ def master_admin_home():
 #   MASTER ADMIN SETTINGS
 #########################################
 
-@app.route("/master-admin/settings")
+@app.route(
+    "/master-admin/settings",
+    methods=["GET", "POST"]
+)
 @login_required
 @master_admin_required
 def master_admin_settings():
+
+    security_csrf_token = _security_form_csrf_token()
+
+    current_terms_version = (
+        current_sms_email_terms_version()
+    )
+
+    if request.method == "POST":
+
+        submitted_token = request.form.get(
+            "security_csrf_token",
+            ""
+        )
+
+        if not _security_form_csrf_valid(
+            submitted_token
+        ):
+            abort(400)
+
+        settings_action = str(
+            request.form.get(
+                "settings_action",
+                ""
+            )
+            or ""
+        ).strip()
+
+        if settings_action != "sms_email_terms_version":
+            abort(400)
+
+        new_terms_version = str(
+            request.form.get(
+                "sms_email_terms_version",
+                ""
+            )
+            or ""
+        ).strip().lower()
+
+        if not re.fullmatch(
+            r"v\d+\.\d+",
+            new_terms_version
+        ):
+            flash(
+                "Terms version must use a format such as "
+                "v1.0, v1.1, or v2.0.",
+                "error"
+            )
+
+            return redirect(
+                url_for("master_admin_settings")
+            )
+
+        conn = get_db_connection()
+        conn.autocommit = False
+        cur = conn.cursor()
+
+        try:
+            cur.execute(
+                """
+                SELECT setting_value
+                FROM system_settings
+                WHERE setting_key = %s
+                FOR UPDATE
+                """,
+                (SMS_EMAIL_TERMS_SETTING_KEY,)
+            )
+
+            row = cur.fetchone()
+
+            old_terms_version = (
+                str(row[0] or "").strip()
+                if row
+                else SMS_EMAIL_TERMS_DEFAULT_VERSION
+            )
+
+            set_system_setting(
+                cur,
+                SMS_EMAIL_TERMS_SETTING_KEY,
+                new_terms_version,
+                setting_label=(
+                    "Current SMS & Email Terms Version"
+                ),
+                setting_group="messaging"
+            )
+
+            if (
+                new_terms_version
+                != old_terms_version
+            ):
+                log_audit(
+                    cur,
+                    spa_id=None,
+                    user_id=session.get("user_id"),
+                    action_type=(
+                        "sms_email_terms_version_changed"
+                    ),
+                    table_name="system_settings",
+                    old_value=old_terms_version,
+                    new_value=new_terms_version,
+                    notes=(
+                        "Master Admin changed the required "
+                        "SMS & Email Terms version. Businesses "
+                        "with an older accepted version must "
+                        "accept the current version before "
+                        "messaging access is considered current."
+                    )
+                )
+
+            conn.commit()
+
+        except Exception:
+            conn.rollback()
+            raise
+
+        finally:
+            cur.close()
+            conn.close()
+
+        if (
+            new_terms_version
+            == old_terms_version
+        ):
+            flash(
+                "SMS & Email Terms version saved. "
+                "The required version did not change.",
+                "success"
+            )
+        else:
+            flash(
+                "SMS & Email Terms version updated to "
+                f"{new_terms_version}.",
+                "success"
+            )
+
+        return redirect(
+            url_for("master_admin_settings")
+        )
+
     supported_languages = get_supported_languages(
         active_only=False
     )
 
     return render_template(
         "master_admin_settings.html",
-        supported_languages=supported_languages
+        supported_languages=supported_languages,
+        sms_email_terms_version=current_terms_version,
+        security_csrf_token=security_csrf_token
     )
-
-
-
-################################
-#
-#   MASTER ADMIN ADD
-#
-#
-############################################
 
 
 @app.route(
@@ -28505,12 +35649,27 @@ def master_admin_settings():
 @master_admin_required
 def master_admin_add_business():
 
+    security_csrf_token = (
+        _security_form_csrf_token()
+    )
+
     if request.method == "GET":
         return render_template(
             "master_admin/businesses/add_business.html",
+            security_csrf_token=security_csrf_token,
             form_data={},
             error_message=None
         )
+
+    submitted_token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_token
+    ):
+        abort(400)
 
     # -----------------------------------------
     # Read submitted form
@@ -28565,6 +35724,7 @@ def master_admin_add_business():
     if not spa_name:
         return render_template(
             "master_admin/businesses/add_business.html",
+            security_csrf_token=security_csrf_token,
             form_data=form_data,
             error_message="Business name is required."
         )
@@ -28572,6 +35732,7 @@ def master_admin_add_business():
     if not owner_first_name or not owner_last_name:
         return render_template(
             "master_admin/businesses/add_business.html",
+            security_csrf_token=security_csrf_token,
             form_data=form_data,
             error_message=(
                 "Administrator first and last name are required."
@@ -28581,6 +35742,7 @@ def master_admin_add_business():
     if not owner_email:
         return render_template(
             "master_admin/businesses/add_business.html",
+            security_csrf_token=security_csrf_token,
             form_data=form_data,
             error_message="Administrator email is required."
         )
@@ -28592,6 +35754,7 @@ def master_admin_add_business():
     if password_policy_error:
         return render_template(
             "master_admin/businesses/add_business.html",
+            security_csrf_token=security_csrf_token,
             form_data=form_data,
             error_message=password_policy_error
         )
@@ -28599,6 +35762,7 @@ def master_admin_add_business():
     if temporary_password != confirm_password:
         return render_template(
             "master_admin/businesses/add_business.html",
+            security_csrf_token=security_csrf_token,
             form_data=form_data,
             error_message="The temporary passwords do not match."
         )
@@ -28626,6 +35790,7 @@ def master_admin_add_business():
         if cur.fetchone():
             return render_template(
                 "master_admin/businesses/add_business.html",
+            security_csrf_token=security_csrf_token,
                 form_data=form_data,
                 error_message=(
                     "A business with this name already exists."
@@ -28649,6 +35814,7 @@ def master_admin_add_business():
         if cur.fetchone():
             return render_template(
                 "master_admin/businesses/add_business.html",
+            security_csrf_token=security_csrf_token,
                 form_data=form_data,
                 error_message=(
                     "A user with this email address already exists."
@@ -28778,11 +35944,12 @@ def master_admin_add_business():
                 password_hash,
                 role,
                 active,
-                preferred_language
+                preferred_language,
+                must_change_password
             )
             VALUES (
                 %s, %s, %s, %s, %s, %s,
-                'admin', TRUE, 'EN'
+                'admin', TRUE, 'EN', TRUE
             )
             RETURNING user_id
             """,
@@ -28844,6 +36011,7 @@ def master_admin_add_business():
 
         return render_template(
             "master_admin/businesses/add_business.html",
+            security_csrf_token=security_csrf_token,
             form_data=form_data,
             error_message=(
                 "The business could not be created. "
@@ -28929,6 +36097,163 @@ def birthday_offers1_home():
 #
 #   ---------------------------------------------
 
+def _continue_business_login_after_password(user):
+    role = str(user[6] or "").strip()
+
+    if not _mfa_required_for_role(role):
+        return _complete_business_login(user)
+
+    pending = _start_pending_mfa_login(user)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        setting = _mfa_user_setting_record(
+            cur,
+            user[0],
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    active_method = (
+        str(setting[2] or "").strip().lower()
+        if setting
+        else ""
+    )
+
+    if active_method not in {
+        "",
+        "authenticator",
+        "sms",
+        "email",
+    }:
+        _clear_pending_mfa_login()
+        raise RuntimeError(
+            "Stored MFA method is not valid."
+        )
+
+    # Master Admin remains Authenticator-only. Business
+    # administrators and managers with no active method
+    # choose Authenticator, Text, or Email on the next screen.
+    if role == "master_admin":
+        active_method = "authenticator"
+
+    if active_method:
+        pending["mfa_method"] = active_method
+
+    if active_method == "authenticator":
+        try:
+            enrollment_id = (
+                _prepare_mfa_enrollment_for_login(
+                    user
+                )
+            )
+
+        except Exception:
+            _clear_pending_mfa_login()
+            raise
+
+        if enrollment_id is not None:
+            pending[
+                "enrollment_authenticator_id"
+            ] = int(enrollment_id)
+
+    elif active_method in {
+        "sms",
+        "email",
+    }:
+        delivery = _send_mfa_verification_code(
+            user_id=user[0],
+            method=active_method,
+            purpose="login",
+        )
+
+        delivery_status = str(
+            delivery.get("status")
+            or ""
+        ).strip().lower()
+
+        if delivery_status == "sent":
+            delivered_challenge_id = delivery.get(
+                "mfa_verification_challenge_id"
+            )
+
+            try:
+                delivered_challenge_id = int(
+                    delivered_challenge_id
+                )
+
+            except (TypeError, ValueError):
+                _clear_pending_mfa_login()
+                raise RuntimeError(
+                    "Delivered MFA challenge ID is invalid."
+                )
+
+            if delivered_challenge_id <= 0:
+                _clear_pending_mfa_login()
+                raise RuntimeError(
+                    "Delivered MFA challenge ID is invalid."
+                )
+
+            pending[
+                "mfa_verification_challenge_id"
+            ] = delivered_challenge_id
+
+        elif delivery_status == "superseded":
+            _clear_pending_mfa_login()
+            return _mfa_login_restart_response()
+
+        elif delivery_status == "missing_destination":
+            flash(
+                (
+                    "The personal mobile number for this account "
+                    "is unavailable. Use Send Verification Code "
+                    "to try again after the number is corrected."
+                    if active_method == "sms"
+                    else
+                    "The login email for this account is "
+                    "unavailable. Use Send Verification Code "
+                    "to try again after the email is corrected."
+                ),
+                "error",
+            )
+
+        elif delivery_status == "cooldown":
+            flash(
+                "A verification code was requested recently. "
+                "Please wait before requesting another.",
+                "error",
+            )
+
+        elif delivery_status == "hourly_limit":
+            flash(
+                "The verification-code delivery limit has "
+                "been reached. Please try again later.",
+                "error",
+            )
+
+        else:
+            flash(
+                "Peach Suite Pro could not send your "
+                "verification code right now. You can try "
+                "again from the next screen.",
+                "error",
+            )
+
+    session["_pending_mfa_login"] = pending
+
+    # A confirmed business-switch request is consumed once
+    # the target account enters its MFA challenge.
+    session.pop("_pending_login_switch", None)
+
+    return redirect(
+        url_for("mfa_login")
+    )
+
+
 def _complete_business_login(user):
     role = user[6]
     password_changed_at = user[7]
@@ -28998,6 +36323,1416 @@ def _complete_business_login(user):
     return redirect(
         url_for("morning_briefing")
     )
+
+
+
+def _mfa_pending_login_context(pending):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        user = _mfa_pending_user_record(
+            cur,
+            pending,
+        )
+
+        if not user:
+            return {
+                "status": "invalid_state",
+            }
+
+        remaining_minutes = (
+            _mfa_login_lock_remaining_minutes(
+                user
+            )
+        )
+
+        if remaining_minutes is not None:
+            return {
+                "status": "locked",
+                "remaining_minutes": (
+                    remaining_minutes
+                ),
+            }
+
+        setting = _mfa_user_setting_record(
+            cur,
+            user[0],
+        )
+
+        authenticator = _mfa_authenticator_record(
+            cur,
+            user[0],
+        )
+
+        return {
+            "status": "success",
+            "user": user,
+            "setting": setting,
+            "authenticator": authenticator,
+        }
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _mfa_login_restart_response():
+    _clear_pending_mfa_login()
+
+    flash(
+        "Your sign-in verification expired or could not "
+        "be verified. Please sign in again.",
+        "error",
+    )
+
+    return _mfa_no_store(
+        redirect(
+            url_for("login")
+        )
+    )
+
+
+def _mfa_login_locked_response(
+    remaining_minutes,
+):
+    try:
+        remaining_minutes = max(
+            1,
+            int(remaining_minutes),
+        )
+    except (TypeError, ValueError):
+        remaining_minutes = (
+            LOGIN_FAILURE_LOCK_MINUTES
+        )
+
+    _clear_pending_mfa_login()
+
+    flash(
+        "Too many unsuccessful sign-in attempts. "
+        "This account is temporarily locked for "
+        "security. Please try again in "
+        f"{remaining_minutes} "
+        f"{'minute' if remaining_minutes == 1 else 'minutes'}.",
+        "error",
+    )
+
+    return _mfa_no_store(
+        redirect(
+            url_for("login")
+        )
+    )
+
+
+@app.route(
+    "/login/mfa",
+    methods=["GET", "POST"],
+)
+def mfa_login():
+    pending = _pending_mfa_login()
+
+    if not pending:
+        return _mfa_login_restart_response()
+
+    if request.method == "POST":
+        submitted_action = str(
+            request.form.get(
+                "mfa_action",
+                "",
+            )
+            or ""
+        ).strip()
+
+        enrollment_id = pending.get(
+            "enrollment_authenticator_id"
+        )
+
+        enrollment_verified_id = pending.get(
+            "enrollment_verified_authenticator_id"
+        )
+
+        pending_method = str(
+            pending.get("mfa_method")
+            or ""
+        ).strip().lower()
+
+        if submitted_action == "method":
+            if (
+                pending_method
+                or enrollment_id
+                or enrollment_verified_id
+            ):
+                abort(400)
+
+            csrf_purpose = (
+                _mfa_pending_csrf_purpose(
+                    pending,
+                    "method",
+                )
+            )
+
+            submitted_token = request.form.get(
+                "security_csrf_token",
+                "",
+            )
+
+            if not _public_security_csrf_valid(
+                submitted_token,
+                csrf_purpose,
+            ):
+                abort(400)
+
+            selected_method = str(
+                request.form.get(
+                    "mfa_method",
+                    "",
+                )
+                or ""
+            ).strip().lower()
+
+            if selected_method not in {
+                "authenticator",
+                "sms",
+                "email",
+            }:
+                abort(400)
+
+            context = _mfa_pending_login_context(
+                pending
+            )
+
+            if context["status"] == "locked":
+                return _mfa_login_locked_response(
+                    context.get(
+                        "remaining_minutes"
+                    )
+                )
+
+            if context["status"] != "success":
+                return _mfa_login_restart_response()
+
+            setting = context["setting"]
+
+            active_method = (
+                str(
+                    setting[2]
+                    or ""
+                ).strip().lower()
+                if setting
+                else ""
+            )
+
+            enabled_at = (
+                setting[3]
+                if setting
+                else None
+            )
+
+            if active_method or enabled_at is not None:
+                return _mfa_login_restart_response()
+
+            user = context["user"]
+
+            if selected_method == "authenticator":
+                try:
+                    new_enrollment_id = (
+                        _prepare_mfa_enrollment_for_login(
+                            user
+                        )
+                    )
+
+                except Exception:
+                    _clear_pending_mfa_login()
+                    raise
+
+                if new_enrollment_id is None:
+                    return _mfa_login_restart_response()
+
+                pending["mfa_method"] = (
+                    "authenticator"
+                )
+
+                pending[
+                    "enrollment_authenticator_id"
+                ] = int(new_enrollment_id)
+
+                pending[
+                    "enrollment_verified_authenticator_id"
+                ] = None
+
+                pending["mfa_setup_choice"] = None
+                pending[
+                    "mfa_verification_challenge_id"
+                ] = None
+
+                session[
+                    "_pending_mfa_login"
+                ] = pending
+
+                return _mfa_no_store(
+                    redirect(
+                        url_for("mfa_login")
+                    )
+                )
+
+            delivery = _send_mfa_verification_code(
+                user_id=user[0],
+                method=selected_method,
+                purpose="enrollment",
+            )
+
+            delivery_status = str(
+                delivery.get("status")
+                or ""
+            ).strip().lower()
+
+            if delivery_status == "sent":
+                delivered_challenge_id = delivery.get(
+                    "mfa_verification_challenge_id"
+                )
+
+                try:
+                    delivered_challenge_id = int(
+                        delivered_challenge_id
+                    )
+
+                except (TypeError, ValueError):
+                    return _mfa_login_restart_response()
+
+                if delivered_challenge_id <= 0:
+                    return _mfa_login_restart_response()
+
+                pending["mfa_method"] = (
+                    selected_method
+                )
+
+                pending[
+                    "enrollment_authenticator_id"
+                ] = None
+
+                pending[
+                    "enrollment_verified_authenticator_id"
+                ] = None
+
+                pending["mfa_setup_choice"] = None
+
+                pending[
+                    "mfa_verification_challenge_id"
+                ] = delivered_challenge_id
+
+                session[
+                    "_pending_mfa_login"
+                ] = pending
+
+                return _mfa_no_store(
+                    redirect(
+                        url_for("mfa_login")
+                    )
+                )
+
+            if delivery_status == "superseded":
+                return _mfa_login_restart_response()
+
+            if delivery_status == "missing_destination":
+                flash(
+                    (
+                        "A personal mobile number is required "
+                        "before Text Message verification can "
+                        "be used."
+                        if selected_method == "sms"
+                        else
+                        "A login email is required before Email "
+                        "verification can be used."
+                    ),
+                    "error",
+                )
+
+            elif delivery_status == "cooldown":
+                flash(
+                    "A verification code was sent recently. "
+                    "Please wait before requesting another.",
+                    "error",
+                )
+
+            elif delivery_status == "hourly_limit":
+                flash(
+                    "The verification-code delivery limit has "
+                    "been reached. Please try again later.",
+                    "error",
+                )
+
+            else:
+                flash(
+                    "Peach Suite Pro could not send a "
+                    "verification code right now. Please choose "
+                    "another method or try again.",
+                    "error",
+                )
+
+            return _mfa_no_store(
+                redirect(
+                    url_for("mfa_login")
+                )
+            )
+
+        if submitted_action in {
+            "code_verify",
+            "resend_code",
+        }:
+            if (
+                pending_method not in {
+                    "sms",
+                    "email",
+                }
+                or enrollment_id
+                or enrollment_verified_id
+            ):
+                abort(400)
+
+            csrf_purpose = (
+                _mfa_pending_csrf_purpose(
+                    pending,
+                    submitted_action,
+                )
+            )
+
+            submitted_token = request.form.get(
+                "security_csrf_token",
+                "",
+            )
+
+            if not _public_security_csrf_valid(
+                submitted_token,
+                csrf_purpose,
+            ):
+                abort(400)
+
+            context = _mfa_pending_login_context(
+                pending
+            )
+
+            if context["status"] == "locked":
+                return _mfa_login_locked_response(
+                    context.get(
+                        "remaining_minutes"
+                    )
+                )
+
+            if context["status"] != "success":
+                return _mfa_login_restart_response()
+
+            setting = context["setting"]
+
+            active_method = (
+                str(
+                    setting[2]
+                    or ""
+                ).strip().lower()
+                if setting
+                else ""
+            )
+
+            enabled_at = (
+                setting[3]
+                if setting
+                else None
+            )
+
+            if (
+                active_method == pending_method
+                and enabled_at is not None
+            ):
+                code_purpose = "login"
+
+            elif (
+                not active_method
+                and enabled_at is None
+            ):
+                code_purpose = "enrollment"
+
+            else:
+                return _mfa_login_restart_response()
+
+            if submitted_action == "resend_code":
+                delivery = _send_mfa_verification_code(
+                    user_id=context["user"][0],
+                    method=pending_method,
+                    purpose=code_purpose,
+                )
+
+                delivery_status = str(
+                    delivery.get("status")
+                    or ""
+                ).strip().lower()
+
+                if delivery_status == "sent":
+                    delivered_challenge_id = delivery.get(
+                        "mfa_verification_challenge_id"
+                    )
+
+                    try:
+                        delivered_challenge_id = int(
+                            delivered_challenge_id
+                        )
+
+                    except (TypeError, ValueError):
+                        return _mfa_login_restart_response()
+
+                    if delivered_challenge_id <= 0:
+                        return _mfa_login_restart_response()
+
+                    pending[
+                        "mfa_verification_challenge_id"
+                    ] = delivered_challenge_id
+
+                    if code_purpose == "login":
+                        pending[
+                            "verification_resend_count"
+                        ] = (
+                            int(
+                                pending.get(
+                                    "verification_resend_count"
+                                )
+                                or 0
+                            )
+                            + 1
+                        )
+
+                    session[
+                        "_pending_mfa_login"
+                    ] = pending
+
+                    if (
+                        code_purpose == "login"
+                        and pending.get(
+                            "verification_resend_count",
+                            0,
+                        ) >= 2
+                    ):
+                        try:
+                            _send_mfa_login_resend_security_alert(
+                                user_id=context["user"][0],
+                            )
+
+                        except Exception:
+                            # The warning is best-effort and must
+                            # never prevent legitimate login.
+                            log_security(
+                                "MFA login resend security-alert "
+                                "processing failed.",
+                                severity="ERROR",
+                                spa_id=context["user"][1],
+                                related_type=(
+                                    "mfa_resend_security_alert_processing"
+                                ),
+                                related_id=context["user"][0]
+                            )
+
+                    flash(
+                        "A new verification code was sent.",
+                        "success",
+                    )
+
+                elif delivery_status == "superseded":
+                    return _mfa_login_restart_response()
+
+                elif delivery_status == "cooldown":
+                    flash(
+                        "A verification code was sent recently. "
+                        "Please wait before requesting another.",
+                        "error",
+                    )
+
+                elif delivery_status == "hourly_limit":
+                    flash(
+                        "The verification-code delivery limit "
+                        "has been reached. Please try again later.",
+                        "error",
+                    )
+
+                else:
+                    flash(
+                        "Peach Suite Pro could not send a new "
+                        "verification code right now.",
+                        "error",
+                    )
+
+                return _mfa_no_store(
+                    redirect(
+                        url_for("mfa_login")
+                    )
+                )
+
+            result = _verify_mfa_code_for_login(
+                pending,
+                request.form.get(
+                    "mfa_code",
+                    "",
+                ),
+                purpose=code_purpose,
+            )
+
+            if result["status"] == "success":
+                _clear_pending_mfa_login()
+
+                return _mfa_no_store(
+                    _complete_business_login(
+                        result["user"]
+                    )
+                )
+
+            if result["status"] == "locked":
+                return _mfa_login_locked_response(
+                    result.get(
+                        "remaining_minutes"
+                    )
+                )
+
+            if result["status"] == "invalid_state":
+                return _mfa_login_restart_response()
+
+            if result["status"] == "missing_challenge":
+                flash(
+                    "That verification code expired or is no "
+                    "longer active. Please send a new code.",
+                    "error",
+                )
+
+            else:
+                flash(
+                    "That verification code could not be "
+                    "verified. Please try again.",
+                    "error",
+                )
+
+            return _mfa_no_store(
+                redirect(
+                    url_for("mfa_login")
+                )
+            )
+
+        if (
+            submitted_action in {
+                "intro",
+                "enroll",
+                "verify",
+            }
+            and pending_method != "authenticator"
+        ):
+            abort(400)
+
+        setup_choice = str(
+            request.form.get(
+                "mfa_setup_choice",
+                "",
+            )
+            or ""
+        ).strip().lower()
+
+        setup_started = bool(
+            pending.get("mfa_setup_choice")
+        )
+
+        if (
+            enrollment_id
+            and not enrollment_verified_id
+            and submitted_action == "intro"
+        ):
+            csrf_purpose = (
+                _mfa_pending_csrf_purpose(
+                    pending,
+                    "intro",
+                )
+            )
+
+            submitted_token = request.form.get(
+                "security_csrf_token",
+                "",
+            )
+
+            if not _public_security_csrf_valid(
+                submitted_token,
+                csrf_purpose,
+            ):
+                abort(400)
+
+            if setup_choice not in {
+                "guided",
+                "familiar",
+            }:
+                abort(400)
+
+            pending["mfa_setup_choice"] = (
+                setup_choice
+            )
+
+            session[
+                "_pending_mfa_login"
+            ] = pending
+
+            return _mfa_no_store(
+                redirect(
+                    url_for("mfa_login")
+                )
+            )
+
+        expected_action = (
+            "enroll"
+            if (
+                enrollment_id
+                and not enrollment_verified_id
+            )
+            else (
+                "verify"
+                if not enrollment_id
+                else None
+            )
+        )
+
+        if (
+            not expected_action
+            or submitted_action
+                != expected_action
+        ):
+            abort(400)
+
+        csrf_purpose = (
+            _mfa_pending_csrf_purpose(
+                pending,
+                expected_action,
+            )
+        )
+
+        submitted_token = request.form.get(
+            "security_csrf_token",
+            "",
+        )
+
+        if not _public_security_csrf_valid(
+            submitted_token,
+            csrf_purpose,
+        ):
+            abort(400)
+
+        submitted_code = request.form.get(
+            "mfa_code",
+            "",
+        )
+
+        if expected_action == "enroll":
+            result = (
+                _verify_mfa_enrollment_for_login(
+                    pending,
+                    submitted_code,
+                )
+            )
+
+            if result["status"] == "success":
+                pending[
+                    "enrollment_verified_authenticator_id"
+                ] = int(
+                    result["authenticator_id"]
+                )
+
+                session[
+                    "_pending_mfa_login"
+                ] = pending
+
+                complete_purpose = (
+                    _mfa_pending_csrf_purpose(
+                        pending,
+                        "complete",
+                    )
+                )
+
+                security_csrf_token = (
+                    _public_security_csrf_token(
+                        complete_purpose
+                    )
+                )
+
+                return _mfa_no_store(
+                    render_template(
+                        "mfa_login.html",
+                        mode="recovery_codes",
+                        recovery_codes=(
+                            result[
+                                "recovery_codes"
+                            ]
+                        ),
+                        security_csrf_token=(
+                            security_csrf_token
+                        ),
+                    )
+                )
+
+        else:
+            result = _verify_mfa_totp_for_login(
+                pending,
+                submitted_code,
+            )
+
+            if result["status"] == "success":
+                _clear_pending_mfa_login()
+
+                return _mfa_no_store(
+                    _complete_business_login(
+                        result["user"]
+                    )
+                )
+
+        if result["status"] == "locked":
+            return _mfa_login_locked_response(
+                result.get(
+                    "remaining_minutes"
+                )
+            )
+
+        if result["status"] == "invalid_state":
+            return _mfa_login_restart_response()
+
+        flash(
+            "That verification code could not be "
+            "verified. Please try again.",
+            "error",
+        )
+
+        return _mfa_no_store(
+            redirect(
+                url_for("mfa_login")
+            )
+        )
+
+    context = _mfa_pending_login_context(
+        pending
+    )
+
+    if context["status"] == "locked":
+        return _mfa_login_locked_response(
+            context.get(
+                "remaining_minutes"
+            )
+        )
+
+    if context["status"] != "success":
+        return _mfa_login_restart_response()
+
+    user = context["user"]
+    setting = context["setting"]
+
+    active_method = (
+        str(
+            setting[2]
+            or ""
+        ).strip().lower()
+        if setting
+        else ""
+    )
+
+    enabled_at = (
+        setting[3]
+        if setting
+        else None
+    )
+
+    pending_method = str(
+        pending.get("mfa_method")
+        or ""
+    ).strip().lower()
+
+    pending_challenge_id = pending.get(
+        "mfa_verification_challenge_id"
+    )
+
+    if active_method not in {
+        "",
+        "authenticator",
+        "sms",
+        "email",
+    }:
+        return _mfa_login_restart_response()
+
+    settings_state_valid = bool(
+        (
+            not active_method
+            and enabled_at is None
+        )
+        or (
+            active_method
+            and enabled_at is not None
+        )
+    )
+
+    if not settings_state_valid:
+        return _mfa_login_restart_response()
+
+    if (
+        active_method
+        and pending_method != active_method
+    ):
+        return _mfa_login_restart_response()
+
+    if (
+        pending["target_role"] == "master_admin"
+        and pending_method != "authenticator"
+    ):
+        return _mfa_login_restart_response()
+
+    enrollment_id = pending.get(
+        "enrollment_authenticator_id"
+    )
+
+    enrollment_verified_id = pending.get(
+        "enrollment_verified_authenticator_id"
+    )
+
+    if (
+        not active_method
+        and not pending_method
+    ):
+        if (
+            pending["target_role"]
+            not in {
+                "admin",
+                "manager",
+            }
+            or enrollment_id
+            or enrollment_verified_id
+            or pending_challenge_id
+        ):
+            return _mfa_login_restart_response()
+
+        csrf_purpose = (
+            _mfa_pending_csrf_purpose(
+                pending,
+                "method",
+            )
+        )
+
+        security_csrf_token = (
+            _public_security_csrf_token(
+                csrf_purpose
+            )
+        )
+
+        return _mfa_no_store(
+            render_template(
+                "mfa_login.html",
+                mode="method_selection",
+                security_csrf_token=(
+                    security_csrf_token
+                ),
+            )
+        )
+
+    if pending_method in {
+        "sms",
+        "email",
+    }:
+        if (
+            enrollment_id
+            or enrollment_verified_id
+        ):
+            return _mfa_login_restart_response()
+
+        if active_method:
+            code_purpose = "login"
+
+        else:
+            code_purpose = "enrollment"
+
+        if (
+            code_purpose == "enrollment"
+            and pending_challenge_id is None
+        ):
+            return _mfa_login_restart_response()
+
+        verify_purpose = (
+            _mfa_pending_csrf_purpose(
+                pending,
+                "code_verify",
+            )
+        )
+
+        resend_purpose = (
+            _mfa_pending_csrf_purpose(
+                pending,
+                "resend_code",
+            )
+        )
+
+        security_csrf_token = (
+            _public_security_csrf_token(
+                verify_purpose
+            )
+        )
+
+        resend_csrf_token = (
+            _public_security_csrf_token(
+                resend_purpose
+            )
+        )
+
+        return _mfa_no_store(
+            render_template(
+                "mfa_login.html",
+                mode="code_verify",
+                mfa_method=pending_method,
+                code_sent=(
+                    pending_challenge_id
+                    is not None
+                ),
+                security_csrf_token=(
+                    security_csrf_token
+                ),
+                resend_csrf_token=(
+                    resend_csrf_token
+                ),
+            )
+        )
+
+    if pending_method != "authenticator":
+        return _mfa_login_restart_response()
+
+    authenticator = context["authenticator"]
+
+    enrollment_id = pending.get(
+        "enrollment_authenticator_id"
+    )
+
+    if enrollment_verified_id:
+        if (
+            not authenticator
+            or authenticator[0]
+                != enrollment_verified_id
+            or authenticator[4] is None
+            or authenticator[5] is not None
+        ):
+            return _mfa_login_restart_response()
+
+        csrf_purpose = (
+            _mfa_pending_csrf_purpose(
+                pending,
+                "complete",
+            )
+        )
+
+        security_csrf_token = (
+            _public_security_csrf_token(
+                csrf_purpose
+            )
+        )
+
+        return _mfa_no_store(
+            render_template(
+                "mfa_login.html",
+                mode="enrollment_complete",
+                security_csrf_token=(
+                    security_csrf_token
+                ),
+            )
+        )
+
+    if enrollment_id:
+        if (
+            not authenticator
+            or authenticator[0] != enrollment_id
+            or authenticator[4] is not None
+            or authenticator[5] is not None
+        ):
+            return _mfa_login_restart_response()
+
+        setup_choice = str(
+            pending.get("mfa_setup_choice")
+            or ""
+        ).strip().lower()
+
+        if setup_choice not in {
+            "guided",
+            "familiar",
+        }:
+            csrf_purpose = (
+                _mfa_pending_csrf_purpose(
+                    pending,
+                    "intro",
+                )
+            )
+
+            security_csrf_token = (
+                _public_security_csrf_token(
+                    csrf_purpose
+                )
+            )
+
+            return _mfa_no_store(
+                render_template(
+                    "mfa_login.html",
+                    mode="intro",
+                    security_csrf_token=(
+                        security_csrf_token
+                    ),
+                )
+            )
+
+        csrf_purpose = (
+            _mfa_pending_csrf_purpose(
+                pending,
+                "enroll",
+            )
+        )
+
+        security_csrf_token = (
+            _public_security_csrf_token(
+                csrf_purpose
+            )
+        )
+
+        return _mfa_no_store(
+            render_template(
+                "mfa_login.html",
+                mode="enrollment",
+                guided_setup=(
+                    setup_choice == "guided"
+                ),
+                security_csrf_token=(
+                    security_csrf_token
+                ),
+            )
+        )
+
+    if (
+        not authenticator
+        or authenticator[4] is None
+        or authenticator[5] is not None
+    ):
+        return _mfa_login_restart_response()
+
+    csrf_purpose = (
+        _mfa_pending_csrf_purpose(
+            pending,
+            "verify",
+        )
+    )
+
+    security_csrf_token = (
+        _public_security_csrf_token(
+            csrf_purpose
+        )
+    )
+
+    return _mfa_no_store(
+        render_template(
+            "mfa_login.html",
+            mode="verify",
+            security_csrf_token=(
+                security_csrf_token
+            ),
+        )
+    )
+
+
+@app.route("/login/mfa/qr")
+def mfa_login_qr():
+    pending = _pending_mfa_login()
+
+    if not pending:
+        abort(404)
+
+    if (
+        str(
+            pending.get("mfa_method")
+            or ""
+        ).strip().lower()
+        != "authenticator"
+    ):
+        abort(404)
+
+    enrollment_id = pending.get(
+        "enrollment_authenticator_id"
+    )
+
+    if (
+        not enrollment_id
+        or pending.get(
+            "enrollment_verified_authenticator_id"
+        )
+    ):
+        abort(404)
+
+    context = _mfa_pending_login_context(
+        pending
+    )
+
+    if context["status"] != "success":
+        abort(404)
+
+    user = context["user"]
+    authenticator = context["authenticator"]
+
+    if (
+        not authenticator
+        or authenticator[0] != enrollment_id
+        or authenticator[4] is not None
+        or authenticator[5] is not None
+    ):
+        abort(404)
+
+    try:
+        secret = decrypt_totp_secret(
+            authenticator[2],
+            user_id=user[0],
+        )
+
+        provisioning_uri = build_totp_uri(
+            secret,
+            account_name=user[4],
+        )
+
+        png_data = build_totp_qr_png(
+            provisioning_uri
+        )
+
+    except MFAError:
+        log_security(
+            "MFA authenticator QR generation failed.",
+            severity="ERROR",
+            spa_id=user[1],
+            related_type="mfa_authenticator_qr",
+            related_id=user[0]
+        )
+
+        return _mfa_no_store(
+            (
+                "Authenticator setup image is "
+                "temporarily unavailable.",
+                503,
+            )
+        )
+
+    response = Response(
+        png_data,
+        mimetype="image/png",
+    )
+
+    response.headers[
+        "X-Content-Type-Options"
+    ] = "nosniff"
+
+    return _mfa_no_store(response)
+
+
+@app.route(
+    "/login/mfa/recovery",
+    methods=["GET", "POST"],
+)
+def mfa_login_recovery():
+    pending = _pending_mfa_login()
+
+    if not pending:
+        return _mfa_login_restart_response()
+
+    if (
+        str(
+            pending.get("mfa_method")
+            or ""
+        ).strip().lower()
+        != "authenticator"
+    ):
+        return _mfa_login_restart_response()
+
+    if (
+        pending.get(
+            "enrollment_authenticator_id"
+        )
+        or pending.get(
+            "enrollment_verified_authenticator_id"
+        )
+    ):
+        return _mfa_login_restart_response()
+
+    context = _mfa_pending_login_context(
+        pending
+    )
+
+    if context["status"] == "locked":
+        return _mfa_login_locked_response(
+            context.get(
+                "remaining_minutes"
+            )
+        )
+
+    if context["status"] != "success":
+        return _mfa_login_restart_response()
+
+    setting = context["setting"]
+
+    active_method = (
+        str(
+            setting[2]
+            or ""
+        ).strip().lower()
+        if setting
+        else ""
+    )
+
+    enabled_at = (
+        setting[3]
+        if setting
+        else None
+    )
+
+    if (
+        active_method != "authenticator"
+        or enabled_at is None
+    ):
+        return _mfa_login_restart_response()
+
+    authenticator = context["authenticator"]
+
+    if (
+        not authenticator
+        or authenticator[4] is None
+        or authenticator[5] is not None
+    ):
+        return _mfa_login_restart_response()
+
+    csrf_purpose = (
+        _mfa_pending_csrf_purpose(
+            pending,
+            "recovery",
+        )
+    )
+
+    if request.method == "POST":
+        submitted_token = request.form.get(
+            "security_csrf_token",
+            "",
+        )
+
+        if not _public_security_csrf_valid(
+            submitted_token,
+            csrf_purpose,
+        ):
+            abort(400)
+
+        result = _verify_mfa_recovery_for_login(
+            pending,
+            request.form.get(
+                "recovery_code",
+                "",
+            ),
+        )
+
+        if result["status"] == "success":
+            _clear_pending_mfa_login()
+
+            return _mfa_no_store(
+                _complete_business_login(
+                    result["user"]
+                )
+            )
+
+        if result["status"] == "locked":
+            return _mfa_login_locked_response(
+                result.get(
+                    "remaining_minutes"
+                )
+            )
+
+        if result["status"] == "invalid_state":
+            return _mfa_login_restart_response()
+
+        flash(
+            "That recovery code could not be "
+            "verified. Please try again.",
+            "error",
+        )
+
+        return _mfa_no_store(
+            redirect(
+                url_for(
+                    "mfa_login_recovery"
+                )
+            )
+        )
+
+    security_csrf_token = (
+        _public_security_csrf_token(
+            csrf_purpose
+        )
+    )
+
+    return _mfa_no_store(
+        render_template(
+            "mfa_login.html",
+            mode="recovery",
+            security_csrf_token=(
+                security_csrf_token
+            ),
+        )
+    )
+
+
+@app.route(
+    "/login/mfa/complete",
+    methods=["POST"],
+)
+def mfa_login_complete():
+    pending = _pending_mfa_login()
+
+    if not pending:
+        return _mfa_login_restart_response()
+
+    if (
+        str(
+            pending.get("mfa_method")
+            or ""
+        ).strip().lower()
+        != "authenticator"
+    ):
+        return _mfa_login_restart_response()
+
+    csrf_purpose = (
+        _mfa_pending_csrf_purpose(
+            pending,
+            "complete",
+        )
+    )
+
+    submitted_token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _public_security_csrf_valid(
+        submitted_token,
+        csrf_purpose,
+    ):
+        abort(400)
+
+    result = (
+        _complete_verified_mfa_enrollment_login(
+            pending
+        )
+    )
+
+    if result["status"] == "success":
+        _clear_pending_mfa_login()
+
+        return _mfa_no_store(
+            _complete_business_login(
+                result["user"]
+            )
+        )
+
+    if result["status"] == "locked":
+        return _mfa_login_locked_response(
+            result.get(
+                "remaining_minutes"
+            )
+        )
+
+    return _mfa_login_restart_response()
 
 
 def _login_business_label(spa_id, role):
@@ -29070,9 +37805,11 @@ def forgot_password():
             except Exception:
                 conn.rollback()
 
-                log_scheduler(
+                log_security(
                     "Password reset source throttle "
-                    "reservation failed."
+                    "reservation failed.",
+                    severity="ERROR",
+                    related_type="password_reset_source_throttle"
                 )
 
             finally:
@@ -29080,9 +37817,11 @@ def forgot_password():
                 conn.close()
 
         except Exception:
-            log_scheduler(
+            log_security(
                 "Password reset source fingerprint "
-                "failed."
+                "failed.",
+                severity="ERROR",
+                related_type="password_reset_source_fingerprint"
             )
 
         reset_user = None
@@ -29135,8 +37874,12 @@ def forgot_password():
             except Exception:
                 conn.rollback()
 
-                log_scheduler(
-                    "Password reset token reservation failed."
+                log_security(
+                    "Password reset token reservation failed.",
+                    severity="ERROR",
+                    spa_id=reset_user[1],
+                    related_type="password_reset_token_reservation",
+                    related_id=reset_user[0]
                 )
 
                 reset_reservation = None
@@ -29213,8 +37956,12 @@ def forgot_password():
                 )
 
             except Exception:
-                log_scheduler(
-                    "Password reset email send failed."
+                log_security(
+                    "Password reset email send failed.",
+                    severity="ERROR",
+                    spa_id=reset_spa_id,
+                    related_type="password_reset_email",
+                    related_id=reset_user_id
                 )
 
             conn = get_db_connection()
@@ -29245,8 +37992,12 @@ def forgot_password():
             except Exception:
                 conn.rollback()
 
-                log_scheduler(
-                    "Password reset token finalization failed."
+                log_security(
+                    "Password reset token finalization failed.",
+                    severity="ERROR",
+                    spa_id=reset_spa_id,
+                    related_type="password_reset_token_finalization",
+                    related_id=reset_user_id
                 )
 
             finally:
@@ -29469,8 +38220,10 @@ def login():
             cur.close()
             conn.close()
 
-            log_scheduler(
-                "Login failed: user account not found."
+            log_security(
+                "Login failed: user account not found.",
+                severity="WARNING",
+                related_type="business_login"
             )
 
             flash(
@@ -29507,8 +38260,12 @@ def login():
             cur.close()
             conn.close()
 
-            log_scheduler(
-                "Login blocked: account temporarily locked."
+            log_security(
+                "Login blocked: account temporarily locked.",
+                severity="ALERT",
+                spa_id=user[1],
+                related_type="business_login_user",
+                related_id=user[0]
             )
 
             flash(
@@ -29541,9 +38298,13 @@ def login():
             conn.close()
 
             if newly_locked:
-                log_scheduler(
+                log_security(
                     "Login temporarily locked after "
-                    "repeated invalid passwords."
+                    "repeated invalid passwords.",
+                    severity="ALERT",
+                    spa_id=user[1],
+                    related_type="business_login_user",
+                    related_id=user[0]
                 )
 
                 flash(
@@ -29556,8 +38317,12 @@ def login():
                     "error",
                 )
             else:
-                log_scheduler(
-                    "Login failed: invalid password."
+                log_security(
+                    "Login failed: invalid password.",
+                    severity="WARNING",
+                    spa_id=user[1],
+                    related_type="business_login_user",
+                    related_id=user[0]
                 )
 
                 flash(
@@ -29567,10 +38332,13 @@ def login():
 
             return render_template("login.html")
 
-        _clear_failed_business_login_state(
-            cur,
-            user[0],
-        )
+        if not _mfa_required_for_role(
+            user[6]
+        ):
+            _clear_failed_business_login_state(
+                cur,
+                user[0],
+            )
 
         conn.commit()
         cur.close()
@@ -29608,7 +38376,9 @@ def login():
                 switch_csrf_token=switch_token,
             )
 
-        return _complete_business_login(user)
+        return _continue_business_login_after_password(
+            user
+        )
 
     session.pop("_pending_login_switch", None)
     return render_template("login.html")
@@ -29725,9 +38495,14 @@ def confirm_login_business_switch():
 
         session.pop("_pending_login_switch", None)
 
-        log_scheduler(
+        log_security(
             "Business switch blocked: target account "
-            "temporarily locked."
+            "temporarily locked.",
+            severity="ALERT",
+            spa_id=user[1],
+            related_type="business_switch_target",
+            related_id=user[0],
+            created_by=source_user_id
         )
 
         flash(
@@ -29743,7 +38518,1973 @@ def confirm_login_business_switch():
 
         return redirect(url_for("login"))
 
-    return _complete_business_login(user)
+    return _continue_business_login_after_password(
+        user
+    )
+
+
+@app.route(
+    "/account/profile",
+    methods=["GET", "POST"],
+)
+@login_required
+def my_profile():
+
+    user_id = session.get("user_id")
+    spa_id = session.get("spa_id")
+    session_role = session.get("role")
+
+    if not user_id:
+        return redirect(url_for("login"))
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                spa_id,
+                first_name,
+                last_name,
+                email,
+                username,
+                sms_phone,
+                role,
+                password_hash
+            FROM users
+            WHERE user_id = %s
+              AND active = TRUE
+            """
+            + (
+                " FOR UPDATE"
+                if request.method == "POST"
+                else ""
+            ),
+            (user_id,),
+        )
+
+        user = cur.fetchone()
+
+        account_matches_session = bool(
+            user
+            and user[0] == spa_id
+            and user[6] == session_role
+        )
+
+        if not account_matches_session:
+            conn.rollback()
+            session.clear()
+
+            return redirect(
+                url_for(
+                    "login",
+                    session_ended="1",
+                )
+            )
+
+        if request.method == "POST":
+
+            submitted_token = request.form.get(
+                "security_csrf_token",
+                "",
+            )
+
+            if not _security_form_csrf_valid(
+                submitted_token
+            ):
+                conn.rollback()
+                abort(400)
+
+            first_name = request.form.get(
+                "first_name",
+                "",
+            ).strip()
+
+            last_name = request.form.get(
+                "last_name",
+                "",
+            ).strip()
+
+            if not first_name or not last_name:
+                conn.rollback()
+
+                flash(
+                    "First name and last name are required.",
+                    "error",
+                )
+
+                return redirect(
+                    url_for("my_profile")
+                )
+
+            if len(first_name) > 100:
+                conn.rollback()
+
+                flash(
+                    "First name cannot exceed 100 characters.",
+                    "error",
+                )
+
+                return redirect(
+                    url_for("my_profile")
+                )
+
+            if len(last_name) > 100:
+                conn.rollback()
+
+                flash(
+                    "Last name cannot exceed 100 characters.",
+                    "error",
+                )
+
+                return redirect(
+                    url_for("my_profile")
+                )
+
+            try:
+                mobile_phone = (
+                    _normalize_user_mobile_phone(
+                        request.form.get(
+                            "mobile_phone",
+                            "",
+                        )
+                    )
+                )
+            except ValueError as exc:
+                conn.rollback()
+
+                flash(
+                    str(exc),
+                    "error",
+                )
+
+                return redirect(
+                    url_for("my_profile")
+                )
+
+            existing_mobile_phone = str(
+                user[5] or ""
+            ).strip()
+
+            mobile_phone_changed = (
+                mobile_phone
+                != existing_mobile_phone
+            )
+
+            if mobile_phone_changed:
+
+                current_password = request.form.get(
+                    "current_password",
+                    "",
+                )
+
+                if (
+                    not current_password
+                    or not check_password_hash(
+                        user[7],
+                        current_password,
+                    )
+                ):
+                    log_audit(
+                        cur,
+                        spa_id=spa_id,
+                        user_id=user_id,
+                        action_type=(
+                            "user_profile_mobile_change_failed"
+                        ),
+                        table_name="users",
+                        record_id=user_id,
+                        notes=(
+                            "Current password verification "
+                            "failed during personal mobile "
+                            "number change."
+                        ),
+                    )
+
+                    conn.commit()
+
+                    flash(
+                        "Current password is incorrect.",
+                        "error",
+                    )
+
+                    return redirect(
+                        url_for("my_profile")
+                    )
+
+            cur.execute(
+                """
+                UPDATE users
+                SET
+                    first_name = %s,
+                    last_name = %s,
+                    sms_phone = %s
+                WHERE user_id = %s
+                  AND active = TRUE
+                """,
+                (
+                    first_name,
+                    last_name,
+                    mobile_phone or None,
+                    user_id,
+                ),
+            )
+
+            log_audit(
+                cur,
+                spa_id=spa_id,
+                user_id=user_id,
+                action_type="user_profile_updated",
+                table_name="users",
+                record_id=user_id,
+                notes=(
+                    "Personal profile updated."
+                    + (
+                        " Mobile number changed after "
+                        "current-password verification."
+                        if mobile_phone_changed
+                        else ""
+                    )
+                ),
+            )
+
+            conn.commit()
+
+            session["first_name"] = first_name
+            session["last_name"] = last_name
+
+            session.pop(
+                "_security_form_csrf",
+                None,
+            )
+
+            flash(
+                "Your profile was updated successfully.",
+                "success",
+            )
+
+            return redirect(
+                url_for("my_profile")
+            )
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    security_csrf_token = (
+        _security_form_csrf_token()
+    )
+
+    return _mfa_no_store(
+        render_template(
+            "my_profile.html",
+            first_name=user[1] or "",
+            last_name=user[2] or "",
+            email=user[3] or "",
+            username=user[4] or "",
+            mobile_phone=user[5] or "",
+            role=user[6] or "",
+            security_csrf_token=(
+                security_csrf_token
+            ),
+        )
+    )
+
+
+@app.route("/account/security")
+@login_required
+def my_login_security():
+
+    user_id = session.get("user_id")
+    spa_id = session.get("spa_id")
+    session_role = session.get("role")
+
+    if not user_id:
+        return redirect(url_for("login"))
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                spa_id,
+                role,
+                password_changed_at
+            FROM users
+            WHERE user_id = %s
+              AND active = TRUE
+            """,
+            (user_id,),
+        )
+
+        user = cur.fetchone()
+
+        account_matches_session = bool(
+            user
+            and user[0] == spa_id
+            and user[1] == session_role
+        )
+
+        setting = (
+            _mfa_user_setting_record(
+                cur,
+                user_id,
+            )
+            if account_matches_session
+            else None
+        )
+
+        active_mfa_method = (
+            str(setting[2] or "").strip().lower()
+            if (
+                setting
+                and setting[3] is not None
+            )
+            else ""
+        )
+
+        authenticator = (
+            _mfa_authenticator_record(
+                cur,
+                user_id,
+            )
+            if account_matches_session
+            else None
+        )
+
+        authenticator_active = bool(
+            active_mfa_method == "authenticator"
+            and authenticator
+            and authenticator[4] is not None
+            and authenticator[5] is None
+        )
+
+        active_recovery_code_count = 0
+
+        if authenticator_active:
+            cur.execute(
+                """
+                SELECT COUNT(*)
+                FROM mfa_recovery_codes
+                WHERE mfa_authenticator_id = %s
+                  AND used_at IS NULL
+                  AND invalidated_at IS NULL
+                """,
+                (authenticator[0],),
+            )
+
+            active_recovery_code_count = int(
+                cur.fetchone()[0] or 0
+            )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if not account_matches_session:
+        session.clear()
+
+        return redirect(
+            url_for(
+                "login",
+                session_ended="1",
+            )
+        )
+
+    return _mfa_no_store(
+        render_template(
+            "my_login_security.html",
+            password_changed_at=user[2],
+            active_mfa_method=active_mfa_method,
+            active_mfa_method_label={
+                "authenticator": "Authenticator App",
+                "sms": "Text Message",
+                "email": "Email",
+            }.get(
+                active_mfa_method,
+                "Not Configured",
+            ),
+            can_change_mfa_method=bool(
+                session_role in {
+                    "admin",
+                    "manager",
+                }
+                and active_mfa_method in {
+                    "authenticator",
+                    "sms",
+                    "email",
+                }
+            ),
+            authenticator_active=(
+                authenticator_active
+            ),
+            active_recovery_code_count=(
+                active_recovery_code_count
+            ),
+        )
+    )
+
+
+
+@app.route(
+    "/account/security/two-step/change",
+    methods=["GET", "POST"],
+)
+@login_required
+def mfa_method_change():
+
+    user_id = session.get("user_id")
+    spa_id = session.get("spa_id")
+    session_role = str(
+        session.get("role") or ""
+    ).strip()
+
+    if not user_id:
+        return redirect(url_for("login"))
+
+    def load_security_state():
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        try:
+            cur.execute(
+                """
+                SELECT
+                    user_id,
+                    spa_id,
+                    role,
+                    email,
+                    sms_phone,
+                    password_hash
+                FROM users
+                WHERE user_id = %s
+                  AND active = TRUE
+                LIMIT 1
+                """,
+                (user_id,),
+            )
+
+            user = cur.fetchone()
+
+            account_matches = bool(
+                user
+                and user[1] == spa_id
+                and str(
+                    user[2] or ""
+                ).strip() == session_role
+            )
+
+            if not account_matches:
+                return None
+
+            setting = _mfa_user_setting_record(
+                cur,
+                user_id,
+            )
+
+            active_method = (
+                str(
+                    setting[2] or ""
+                ).strip().lower()
+                if (
+                    setting
+                    and setting[3] is not None
+                )
+                else ""
+            )
+
+            return {
+                "user": user,
+                "setting": setting,
+                "active_method": active_method,
+            }
+
+        finally:
+            cur.close()
+            conn.close()
+
+    state = load_security_state()
+
+    if not state:
+        session.clear()
+
+        return redirect(
+            url_for(
+                "login",
+                session_ended="1",
+            )
+        )
+
+    if session_role == "master_admin":
+        _clear_pending_mfa_method_change()
+
+        flash(
+            "Master Admin accounts use Authenticator "
+            "App verification and cannot change to "
+            "Text Message or Email.",
+            "error",
+        )
+
+        return _mfa_no_store(
+            redirect(
+                url_for("my_login_security")
+            )
+        )
+
+    if session_role not in {
+        "admin",
+        "manager",
+    }:
+        _clear_pending_mfa_method_change()
+
+        flash(
+            "Two-step verification method changes "
+            "are not available for this account.",
+            "error",
+        )
+
+        return _mfa_no_store(
+            redirect(
+                url_for("my_login_security")
+            )
+        )
+
+    current_method = state["active_method"]
+
+    if current_method not in {
+        "authenticator",
+        "sms",
+        "email",
+    }:
+        _clear_pending_mfa_method_change()
+
+        flash(
+            "Peach Suite Pro could not verify the "
+            "current two-step verification method.",
+            "error",
+        )
+
+        return _mfa_no_store(
+            redirect(
+                url_for("my_login_security")
+            )
+        )
+
+    pending = _pending_mfa_method_change()
+
+    if pending and (
+        pending.get("current_method")
+        != current_method
+    ):
+        _clear_pending_mfa_method_change()
+        pending = None
+
+        flash(
+            "Your two-step verification settings "
+            "changed. Please start again.",
+            "error",
+        )
+
+    if request.method == "POST":
+
+        submitted_token = request.form.get(
+            "security_csrf_token",
+            "",
+        )
+
+        if not _security_form_csrf_valid(
+            submitted_token
+        ):
+            abort(400)
+
+        action = str(
+            request.form.get(
+                "mfa_action",
+                "",
+            )
+            or ""
+        ).strip().lower()
+
+        if action == "cancel":
+            if pending:
+                cleanup = (
+                    _revoke_pending_mfa_authenticator_method_change(
+                        pending
+                    )
+                )
+
+                if cleanup.get("status") == "invalid_state":
+                    _clear_pending_mfa_method_change()
+
+                    flash(
+                        "Peach Suite Pro could not safely cancel "
+                        "the pending Authenticator setup. Your "
+                        "current verification method was not changed.",
+                        "error",
+                    )
+
+                    return _mfa_no_store(
+                        redirect(
+                            url_for(
+                                "my_login_security"
+                            )
+                        )
+                    )
+
+            _clear_pending_mfa_method_change()
+            _clear_mfa_method_change_completion()
+
+            session.pop(
+                "_security_form_csrf",
+                None,
+            )
+
+            return _mfa_no_store(
+                redirect(
+                    url_for("my_login_security")
+                )
+            )
+
+        if action == "complete_authenticator":
+            completion = (
+                _mfa_method_change_completion()
+            )
+
+            if not completion:
+                abort(400)
+
+            submitted_completion_token = str(
+                request.form.get(
+                    "completion_token",
+                    "",
+                )
+                or ""
+            ).strip()
+
+            if (
+                not submitted_completion_token
+                or not hmac.compare_digest(
+                    submitted_completion_token,
+                    completion["token"],
+                )
+            ):
+                abort(400)
+
+            conn = get_db_connection()
+            cur = conn.cursor()
+
+            try:
+                setting = _mfa_user_setting_record(
+                    cur,
+                    user_id,
+                )
+
+                authenticator = (
+                    _mfa_authenticator_record(
+                        cur,
+                        user_id,
+                    )
+                )
+
+                completion_valid = bool(
+                    setting
+                    and str(
+                        setting[2] or ""
+                    ).strip().lower()
+                        == "authenticator"
+                    and setting[3] is not None
+                    and authenticator
+                    and authenticator[0]
+                        == completion[
+                            "authenticator_id"
+                        ]
+                    and authenticator[4]
+                        is not None
+                    and authenticator[5]
+                        is None
+                )
+
+            finally:
+                cur.close()
+                conn.close()
+
+            if not completion_valid:
+                _clear_mfa_method_change_completion()
+
+                flash(
+                    "Peach Suite Pro could not verify "
+                    "the completed Authenticator setup.",
+                    "error",
+                )
+
+                return _mfa_no_store(
+                    redirect(
+                        url_for(
+                            "my_login_security"
+                        )
+                    )
+                )
+
+            _clear_mfa_method_change_completion()
+            session.pop(
+                "_security_form_csrf",
+                None,
+            )
+
+            flash(
+                "Two-step verification now uses "
+                "Authenticator App.",
+                "success",
+            )
+
+            return _mfa_no_store(
+                redirect(
+                    url_for(
+                        "my_login_security"
+                    )
+                )
+            )
+
+        if action == "verify_authenticator":
+            if not pending:
+                completion = (
+                    _mfa_method_change_completion()
+                )
+
+                if (
+                    completion
+                    and current_method
+                        == "authenticator"
+                ):
+                    return _mfa_no_store(
+                        render_template(
+                            "mfa_method_change.html",
+                            mode=(
+                                "authenticator_complete"
+                            ),
+                            completion_token=(
+                                completion["token"]
+                            ),
+                            security_csrf_token=(
+                                _security_form_csrf_token()
+                            ),
+                        )
+                    )
+
+                abort(400)
+
+            if (
+                str(
+                    pending.get("target_method")
+                    or ""
+                ).strip().lower()
+                != "authenticator"
+            ):
+                abort(400)
+
+            result = (
+                _verify_mfa_authenticator_method_change(
+                    pending,
+                    request.form.get(
+                        "mfa_code",
+                        "",
+                    ),
+                )
+            )
+
+            if result["status"] == "success":
+                completion = (
+                    _start_mfa_method_change_completion(
+                        user_id=user_id,
+                        spa_id=spa_id,
+                        role=session_role,
+                        authenticator_id=(
+                            result[
+                                "authenticator_id"
+                            ]
+                        ),
+                    )
+                )
+
+                _clear_pending_mfa_method_change()
+
+                # Keep the current logged-in security-form
+                # CSRF token valid for the one-time recovery
+                # screen. If the browser resubmits the
+                # verification POST on refresh, the completion
+                # state below safely prevents recovery codes
+                # from being displayed a second time.
+                security_csrf_token = (
+                    _security_form_csrf_token()
+                )
+
+                return _mfa_no_store(
+                    render_template(
+                        "mfa_method_change.html",
+                        mode=(
+                            "authenticator_recovery_codes"
+                        ),
+                        recovery_codes=(
+                            result[
+                                "recovery_codes"
+                            ]
+                        ),
+                        completion_token=(
+                            completion["token"]
+                        ),
+                        security_csrf_token=(
+                            security_csrf_token
+                        ),
+                    )
+                )
+
+            if result["status"] == "locked":
+                _clear_pending_mfa_method_change()
+                _clear_mfa_method_change_completion()
+
+                session.clear()
+
+                flash(
+                    "Too many unsuccessful security "
+                    "verification attempts. Please "
+                    "sign in again later.",
+                    "error",
+                )
+
+                return redirect(
+                    url_for("login")
+                )
+
+            if result["status"] == "invalid_state":
+                cleanup = (
+                    _revoke_pending_mfa_authenticator_method_change(
+                        pending
+                    )
+                )
+
+                _clear_pending_mfa_method_change()
+
+                flash(
+                    "Your two-step verification "
+                    "settings changed or the "
+                    "Authenticator setup is no longer "
+                    "valid. Your current verification "
+                    "method was not changed.",
+                    "error",
+                )
+
+                return _mfa_no_store(
+                    redirect(
+                        url_for(
+                            "my_login_security"
+                        )
+                    )
+                )
+
+            flash(
+                "That Authenticator code could not "
+                "be verified. Please try again.",
+                "error",
+            )
+
+            return _mfa_no_store(
+                redirect(
+                    url_for(
+                        "mfa_method_change"
+                    )
+                )
+            )
+
+        if action == "start":
+
+            if pending:
+                abort(400)
+
+            target_method = str(
+                request.form.get(
+                    "mfa_method",
+                    "",
+                )
+                or ""
+            ).strip().lower()
+
+            if (
+                target_method not in {
+                    "authenticator",
+                    "sms",
+                    "email",
+                }
+                or target_method
+                    == current_method
+            ):
+                abort(400)
+
+            current_password = request.form.get(
+                "current_password",
+                "",
+            )
+
+            if not current_password:
+                flash(
+                    "Please enter your current "
+                    "password.",
+                    "error",
+                )
+
+                return _mfa_no_store(
+                    redirect(
+                        url_for(
+                            "mfa_method_change"
+                        )
+                    )
+                )
+
+            if not check_password_hash(
+                state["user"][5],
+                current_password,
+            ):
+                audit_conn = get_db_connection()
+                audit_conn.autocommit = False
+                audit_cur = audit_conn.cursor()
+
+                try:
+                    log_audit(
+                        audit_cur,
+                        spa_id=spa_id,
+                        user_id=user_id,
+                        action_type=(
+                            "mfa_method_change_password_failed"
+                        ),
+                        table_name="users",
+                        record_id=user_id,
+                        notes=(
+                            "Current password verification failed "
+                            "during two-step verification "
+                            "method change."
+                        ),
+                    )
+
+                    audit_conn.commit()
+
+                except Exception:
+                    audit_conn.rollback()
+                    raise
+
+                finally:
+                    audit_cur.close()
+                    audit_conn.close()
+
+                flash(
+                    "Current password is incorrect. "
+                    "No security settings were changed.",
+                    "error",
+                )
+
+                return _mfa_no_store(
+                    redirect(
+                        url_for(
+                            "mfa_method_change"
+                        )
+                    )
+                )
+
+            pending = (
+                _start_pending_mfa_method_change(
+                    user_id=user_id,
+                    spa_id=spa_id,
+                    role=session_role,
+                    current_method=current_method,
+                    target_method=target_method,
+                )
+            )
+
+            if target_method == "authenticator":
+                preparation = (
+                    _prepare_mfa_authenticator_method_change(
+                        pending
+                    )
+                )
+
+                if preparation["status"] == "success":
+                    enrollment_id = int(
+                        preparation[
+                            "authenticator_id"
+                        ]
+                    )
+
+                    pending[
+                        "enrollment_authenticator_id"
+                    ] = enrollment_id
+
+                    session[
+                        "_pending_mfa_method_change"
+                    ] = pending
+
+                    return _mfa_no_store(
+                        redirect(
+                            url_for(
+                                "mfa_method_change"
+                            )
+                        )
+                    )
+
+                _clear_pending_mfa_method_change()
+
+                if preparation["status"] == "locked":
+                    session.clear()
+
+                    flash(
+                        "Too many unsuccessful security "
+                        "verification attempts. Please "
+                        "sign in again later.",
+                        "error",
+                    )
+
+                    return redirect(
+                        url_for("login")
+                    )
+
+                flash(
+                    "Peach Suite Pro could not safely "
+                    "start Authenticator App setup. "
+                    "Your current verification method "
+                    "was not changed.",
+                    "error",
+                )
+
+                return _mfa_no_store(
+                    redirect(
+                        url_for(
+                            "my_login_security"
+                        )
+                    )
+                )
+
+            delivery = (
+                _send_mfa_verification_code(
+                    user_id=user_id,
+                    method=target_method,
+                    purpose="method_change",
+                )
+            )
+
+            delivery_status = str(
+                delivery.get("status")
+                or ""
+            ).strip().lower()
+
+            if delivery_status == "sent":
+                delivered_challenge_id = (
+                    delivery.get(
+                        "mfa_verification_challenge_id"
+                    )
+                )
+
+                try:
+                    delivered_challenge_id = int(
+                        delivered_challenge_id
+                    )
+                except (
+                    TypeError,
+                    ValueError,
+                ):
+                    _clear_pending_mfa_method_change()
+
+                    raise RuntimeError(
+                        "MFA method-change delivery "
+                        "returned an invalid challenge."
+                    )
+
+                if delivered_challenge_id <= 0:
+                    _clear_pending_mfa_method_change()
+
+                    raise RuntimeError(
+                        "MFA method-change delivery "
+                        "returned an invalid challenge."
+                    )
+
+                pending[
+                    "mfa_verification_challenge_id"
+                ] = delivered_challenge_id
+
+                session[
+                    "_pending_mfa_method_change"
+                ] = pending
+
+                flash(
+                    "A verification code was sent.",
+                    "success",
+                )
+
+                return _mfa_no_store(
+                    redirect(
+                        url_for(
+                            "mfa_method_change"
+                        )
+                    )
+                )
+
+            _clear_pending_mfa_method_change()
+
+            if delivery_status == (
+                "missing_destination"
+            ):
+                flash(
+                    (
+                        "A personal mobile number is "
+                        "required before Text Message "
+                        "verification can be used."
+                        if target_method == "sms"
+                        else
+                        "A login email is required "
+                        "before Email verification "
+                        "can be used."
+                    ),
+                    "error",
+                )
+
+            elif delivery_status == "cooldown":
+                flash(
+                    "A verification code was sent "
+                    "recently. Please wait before "
+                    "requesting another.",
+                    "error",
+                )
+
+            elif delivery_status == "hourly_limit":
+                flash(
+                    "The verification-code delivery "
+                    "limit has been reached. Please "
+                    "try again later.",
+                    "error",
+                )
+
+            else:
+                flash(
+                    "Peach Suite Pro could not send "
+                    "a verification code right now. "
+                    "Please try again.",
+                    "error",
+                )
+
+            return _mfa_no_store(
+                redirect(
+                    url_for(
+                        "mfa_method_change"
+                    )
+                )
+            )
+
+        if action == "resend_code":
+
+            if not pending:
+                abort(400)
+
+            target_method = str(
+                pending.get("target_method")
+                or ""
+            ).strip().lower()
+
+            if target_method not in {
+                "sms",
+                "email",
+            }:
+                abort(400)
+
+            delivery = (
+                _send_mfa_verification_code(
+                    user_id=user_id,
+                    method=target_method,
+                    purpose="method_change",
+                )
+            )
+
+            delivery_status = str(
+                delivery.get("status")
+                or ""
+            ).strip().lower()
+
+            if delivery_status == "sent":
+                delivered_challenge_id = (
+                    delivery.get(
+                        "mfa_verification_challenge_id"
+                    )
+                )
+
+                try:
+                    delivered_challenge_id = int(
+                        delivered_challenge_id
+                    )
+                except (
+                    TypeError,
+                    ValueError,
+                ):
+                    raise RuntimeError(
+                        "MFA method-change resend "
+                        "returned an invalid challenge."
+                    )
+
+                if delivered_challenge_id <= 0:
+                    raise RuntimeError(
+                        "MFA method-change resend "
+                        "returned an invalid challenge."
+                    )
+
+                pending[
+                    "mfa_verification_challenge_id"
+                ] = delivered_challenge_id
+
+                session[
+                    "_pending_mfa_method_change"
+                ] = pending
+
+                flash(
+                    "A new verification code was sent.",
+                    "success",
+                )
+
+            elif delivery_status == "cooldown":
+                flash(
+                    "A verification code was sent "
+                    "recently. Please wait before "
+                    "requesting another.",
+                    "error",
+                )
+
+            elif delivery_status == "hourly_limit":
+                flash(
+                    "The verification-code delivery "
+                    "limit has been reached. Please "
+                    "try again later.",
+                    "error",
+                )
+
+            else:
+                flash(
+                    "Peach Suite Pro could not send "
+                    "a new verification code right "
+                    "now.",
+                    "error",
+                )
+
+            return _mfa_no_store(
+                redirect(
+                    url_for(
+                        "mfa_method_change"
+                    )
+                )
+            )
+
+        if action == "verify":
+
+            if not pending:
+                abort(400)
+
+            result = (
+                _verify_mfa_method_change_code(
+                    pending,
+                    request.form.get(
+                        "mfa_code",
+                        "",
+                    ),
+                )
+            )
+
+            if result["status"] == "success":
+                new_method = result[
+                    "new_method"
+                ]
+
+                new_label = {
+                    "sms": "Text Message",
+                    "email": "Email",
+                }[new_method]
+
+                _clear_pending_mfa_method_change()
+                session.pop(
+                    "_security_form_csrf",
+                    None,
+                )
+
+                flash(
+                    "Two-step verification now uses "
+                    f"{new_label}.",
+                    "success",
+                )
+
+                return _mfa_no_store(
+                    redirect(
+                        url_for(
+                            "my_login_security"
+                        )
+                    )
+                )
+
+            if result["status"] == "locked":
+                _clear_pending_mfa_method_change()
+
+                session.clear()
+
+                flash(
+                    "Too many unsuccessful security "
+                    "verification attempts. Please "
+                    "sign in again later.",
+                    "error",
+                )
+
+                return redirect(
+                    url_for("login")
+                )
+
+            if result["status"] == (
+                "invalid_state"
+            ):
+                _clear_pending_mfa_method_change()
+
+                flash(
+                    "Your two-step verification "
+                    "settings changed. Please start "
+                    "again.",
+                    "error",
+                )
+
+                return _mfa_no_store(
+                    redirect(
+                        url_for(
+                            "my_login_security"
+                        )
+                    )
+                )
+
+            if result["status"] == (
+                "missing_challenge"
+            ):
+                flash(
+                    "That verification code expired "
+                    "or is no longer active. Please "
+                    "send a new code.",
+                    "error",
+                )
+
+            else:
+                flash(
+                    "That verification code could "
+                    "not be verified. Please try "
+                    "again.",
+                    "error",
+                )
+
+            return _mfa_no_store(
+                redirect(
+                    url_for(
+                        "mfa_method_change"
+                    )
+                )
+            )
+
+        abort(400)
+
+    # Re-read pending state after any invalid-state cleanup.
+    pending = _pending_mfa_method_change()
+
+    security_csrf_token = (
+        _security_form_csrf_token()
+    )
+
+    method_labels = {
+        "authenticator": "Authenticator App",
+        "sms": "Text Message",
+        "email": "Email",
+    }
+
+    completion = (
+        _mfa_method_change_completion()
+    )
+
+    if completion:
+        if current_method != "authenticator":
+            _clear_mfa_method_change_completion()
+
+            flash(
+                "Your two-step verification settings "
+                "changed. Please review your current "
+                "security settings.",
+                "error",
+            )
+
+            return _mfa_no_store(
+                redirect(
+                    url_for(
+                        "my_login_security"
+                    )
+                )
+            )
+
+        return _mfa_no_store(
+            render_template(
+                "mfa_method_change.html",
+                mode="authenticator_complete",
+                completion_token=(
+                    completion["token"]
+                ),
+                security_csrf_token=(
+                    security_csrf_token
+                ),
+            )
+        )
+
+    if pending:
+        target_method = str(
+            pending.get("target_method")
+            or ""
+        ).strip().lower()
+
+        if target_method == "authenticator":
+            enrollment_id = pending.get(
+                "enrollment_authenticator_id"
+            )
+
+            if not enrollment_id:
+                _clear_pending_mfa_method_change()
+
+                flash(
+                    "Authenticator App setup could not "
+                    "be verified. Please start again.",
+                    "error",
+                )
+
+                return _mfa_no_store(
+                    redirect(
+                        url_for(
+                            "my_login_security"
+                        )
+                    )
+                )
+
+            return _mfa_no_store(
+                render_template(
+                    "mfa_method_change.html",
+                    mode="authenticator_setup",
+                    current_method=current_method,
+                    current_method_label=(
+                        method_labels[
+                            current_method
+                        ]
+                    ),
+                    target_method=target_method,
+                    target_method_label=(
+                        method_labels[
+                            target_method
+                        ]
+                    ),
+                    security_csrf_token=(
+                        security_csrf_token
+                    ),
+                )
+            )
+
+        return _mfa_no_store(
+            render_template(
+                "mfa_method_change.html",
+                mode="verify",
+                current_method=current_method,
+                current_method_label=(
+                    method_labels[
+                        current_method
+                    ]
+                ),
+                target_method=target_method,
+                target_method_label=(
+                    method_labels[
+                        target_method
+                    ]
+                ),
+                security_csrf_token=(
+                    security_csrf_token
+                ),
+            )
+        )
+
+    available_methods = []
+
+    if current_method != "authenticator":
+        available_methods.append(
+            {
+                "value": "authenticator",
+                "label": (
+                    "Authenticator App — Recommended"
+                ),
+                "description": (
+                    "Use Microsoft Authenticator, Google "
+                    "Authenticator, or another compatible "
+                    "app. No text or email delivery is "
+                    "required."
+                ),
+            }
+        )
+
+    if current_method != "sms":
+        available_methods.append(
+            {
+                "value": "sms",
+                "label": "Text Message",
+                "description": (
+                    "Send a 6-digit verification "
+                    "code to the personal mobile "
+                    "number on your user profile."
+                ),
+            }
+        )
+
+    if current_method != "email":
+        available_methods.append(
+            {
+                "value": "email",
+                "label": "Email",
+                "description": (
+                    "Send a 6-digit verification "
+                    "code to your login email."
+                ),
+            }
+        )
+
+    return _mfa_no_store(
+        render_template(
+            "mfa_method_change.html",
+            mode="select",
+            current_method=current_method,
+            current_method_label=(
+                method_labels[current_method]
+            ),
+            available_methods=(
+                available_methods
+            ),
+            security_csrf_token=(
+                security_csrf_token
+            ),
+        )
+    )
+
+
+@app.route(
+    "/account/security/two-step/change/qr"
+)
+@login_required
+def mfa_method_change_qr():
+    pending = _pending_mfa_method_change()
+
+    if (
+        not pending
+        or str(
+            pending.get("target_method")
+            or ""
+        ).strip().lower()
+            != "authenticator"
+    ):
+        abort(404)
+
+    enrollment_id = pending.get(
+        "enrollment_authenticator_id"
+    )
+
+    try:
+        enrollment_id = int(
+            enrollment_id
+        )
+    except (TypeError, ValueError):
+        abort(404)
+
+    if enrollment_id <= 0:
+        abort(404)
+
+    user_id = session.get("user_id")
+    spa_id = session.get("spa_id")
+    session_role = str(
+        session.get("role") or ""
+    ).strip()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                user_id,
+                spa_id,
+                role,
+                email
+            FROM users
+            WHERE user_id = %s
+              AND active = TRUE
+            LIMIT 1
+            """,
+            (user_id,),
+        )
+
+        user = cur.fetchone()
+
+        account_matches = bool(
+            user
+            and user[0] == pending.get("user_id")
+            and user[0] == user_id
+            and user[1] == spa_id
+            and user[1] == pending.get("spa_id")
+            and str(
+                user[2] or ""
+            ).strip() == session_role
+            and str(
+                user[2] or ""
+            ).strip()
+                == str(
+                    pending.get("role")
+                    or ""
+                ).strip()
+            and session_role in {
+                "admin",
+                "manager",
+            }
+        )
+
+        if not account_matches:
+            abort(404)
+
+        setting = _mfa_user_setting_record(
+            cur,
+            user_id,
+        )
+
+        active_method = (
+            str(
+                setting[2] or ""
+            ).strip().lower()
+            if (
+                setting
+                and setting[3] is not None
+            )
+            else ""
+        )
+
+        pending_current_method = str(
+            pending.get("current_method")
+            or ""
+        ).strip().lower()
+
+        if (
+            active_method
+                != pending_current_method
+            or active_method not in {
+                "sms",
+                "email",
+            }
+        ):
+            abort(404)
+
+        authenticator = _mfa_authenticator_record(
+            cur,
+            user_id,
+        )
+
+        if (
+            not authenticator
+            or authenticator[0]
+                != enrollment_id
+            or authenticator[4] is not None
+            or authenticator[5] is not None
+        ):
+            abort(404)
+
+        encrypted_secret = authenticator[2]
+        account_name = user[3]
+
+    finally:
+        cur.close()
+        conn.close()
+
+    try:
+        secret = decrypt_totp_secret(
+            encrypted_secret,
+            user_id=user_id,
+        )
+
+        provisioning_uri = build_totp_uri(
+            secret,
+            account_name=account_name,
+        )
+
+        png_data = build_totp_qr_png(
+            provisioning_uri
+        )
+
+    except MFAError:
+        log_security(
+            "MFA method-change authenticator QR "
+            "generation failed.",
+            severity="ERROR",
+            spa_id=spa_id,
+            related_type="mfa_method_change_authenticator_qr",
+            related_id=user_id,
+            created_by=user_id
+        )
+
+        return _mfa_no_store(
+            (
+                "Authenticator setup image is "
+                "temporarily unavailable.",
+                503,
+            )
+        )
+
+    response = Response(
+        png_data,
+        mimetype="image/png",
+    )
+
+    response.headers[
+        "X-Content-Type-Options"
+    ] = "nosniff"
+
+    return _mfa_no_store(response)
+
+
+@app.route(
+    "/account/security/recovery-codes",
+    methods=["GET", "POST"],
+)
+@login_required
+def mfa_recovery_codes():
+
+    import hmac
+
+    user_id = session.get("user_id")
+    spa_id = session.get("spa_id")
+    session_role = session.get("role")
+
+    if not user_id:
+        return redirect(url_for("login"))
+
+    return_endpoint = "my_login_security"
+
+    if request.method == "POST":
+
+        submitted_token = request.form.get(
+            "security_csrf_token",
+            "",
+        )
+
+        if not _security_form_csrf_valid(
+            submitted_token
+        ):
+            abort(400)
+
+        submitted_nonce = str(
+            request.form.get(
+                "regeneration_nonce",
+                "",
+            )
+            or ""
+        )
+
+        nonce_record = session.pop(
+            "_mfa_recovery_regen_nonce",
+            None,
+        )
+
+        nonce_valid = False
+
+        if isinstance(nonce_record, dict):
+
+            expected_nonce = str(
+                nonce_record.get("token")
+                or ""
+            )
+
+            try:
+                nonce_issued_at = int(
+                    nonce_record.get("issued_at")
+                    or 0
+                )
+            except (TypeError, ValueError):
+                nonce_issued_at = 0
+
+            nonce_valid = bool(
+                submitted_nonce
+                and expected_nonce
+                and nonce_record.get("user_id")
+                    == user_id
+                and nonce_issued_at > 0
+                and int(time.time()) - nonce_issued_at
+                    <= SECURITY_FORM_CSRF_MAX_AGE_SECONDS
+                and hmac.compare_digest(
+                    submitted_nonce,
+                    expected_nonce,
+                )
+            )
+
+        if not nonce_valid:
+            abort(400)
+
+        current_password = request.form.get(
+            "current_password",
+            "",
+        )
+
+        if not current_password:
+
+            flash(
+                "Please enter your current password.",
+                "error",
+            )
+
+            return _mfa_no_store(
+                redirect(
+                    url_for("mfa_recovery_codes")
+                )
+            )
+
+        result = _regenerate_mfa_recovery_codes(
+            user_id=user_id,
+            spa_id=spa_id,
+            session_role=session_role,
+            current_password=current_password,
+        )
+
+        if result["status"] == "invalid_password":
+
+            flash(
+                "Current password is incorrect.",
+                "error",
+            )
+
+            return _mfa_no_store(
+                redirect(
+                    url_for("mfa_recovery_codes")
+                )
+            )
+
+        if result["status"] != "success":
+
+            flash(
+                "Peach Suite Pro could not verify an "
+                "active authenticator for this account. "
+                "No recovery codes were changed.",
+                "error",
+            )
+
+            return _mfa_no_store(
+                redirect(
+                    url_for(return_endpoint)
+                )
+            )
+
+        session.pop(
+            "_security_form_csrf",
+            None,
+        )
+
+        return _mfa_no_store(
+            render_template(
+                "mfa_recovery_codes.html",
+                mode="success",
+                recovery_codes=(
+                    result["recovery_codes"]
+                ),
+                invalidated_count=(
+                    result["invalidated_count"]
+                ),
+                return_endpoint=return_endpoint,
+            )
+        )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                spa_id,
+                role
+            FROM users
+            WHERE user_id = %s
+              AND active = TRUE
+            """,
+            (user_id,),
+        )
+
+        user = cur.fetchone()
+
+        account_matches_session = bool(
+            user
+            and user[0] == spa_id
+            and user[1] == session_role
+        )
+
+        authenticator = (
+            _mfa_authenticator_record(
+                cur,
+                user_id,
+            )
+            if account_matches_session
+            else None
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if (
+        not account_matches_session
+        or not authenticator
+        or authenticator[4] is None
+    ):
+
+        flash(
+            "Authenticator-app MFA is not currently "
+            "active for this account.",
+            "error",
+        )
+
+        return _mfa_no_store(
+            redirect(
+                url_for(return_endpoint)
+            )
+        )
+
+    regeneration_nonce = secrets.token_urlsafe(32)
+
+    session["_mfa_recovery_regen_nonce"] = {
+        "token": regeneration_nonce,
+        "user_id": user_id,
+        "issued_at": int(time.time()),
+    }
+
+    security_csrf_token = (
+        _security_form_csrf_token()
+    )
+
+    return _mfa_no_store(
+        render_template(
+            "mfa_recovery_codes.html",
+            mode="confirm",
+            recovery_codes=None,
+            invalidated_count=None,
+            security_csrf_token=(
+                security_csrf_token
+            ),
+            regeneration_nonce=(
+                regeneration_nonce
+            ),
+            return_endpoint=return_endpoint,
+        )
+    )
 
 
 @app.route(
@@ -30075,6 +40816,18 @@ def browser_session_tab_presence():
         or ""
     )
 
+    employee_access_secure = bool(
+        request.form.get(
+            "employee_access_secure"
+        ) == "1"
+        and isinstance(
+            session.get(
+                "_employee_access_page_verification"
+            ),
+            dict,
+        )
+    )
+
     if action not in (
         "register",
         "heartbeat",
@@ -30319,12 +41072,14 @@ def browser_session_tab_presence():
                     user_id,
                     spa_id,
                     business_unit_id,
+                    employee_access_secure,
                     opened_at,
                     last_seen_at,
                     closing_at,
                     updated_at
                 )
                 VALUES (
+                    %s,
                     %s,
                     %s,
                     %s,
@@ -30345,6 +41100,8 @@ def browser_session_tab_presence():
                     spa_id = EXCLUDED.spa_id,
                     business_unit_id =
                         EXCLUDED.business_unit_id,
+                    employee_access_secure =
+                        EXCLUDED.employee_access_secure,
                     last_seen_at = NOW(),
                     closing_at = NULL,
                     updated_at = NOW()
@@ -30356,6 +41113,7 @@ def browser_session_tab_presence():
                     user_id,
                     spa_id,
                     business_unit_id,
+                    employee_access_secure,
                 ),
             )
 
@@ -30438,6 +41196,7 @@ def browser_session_tab_presence():
                 """
                 UPDATE browser_session_tabs
                 SET
+                    employee_access_secure = %s,
                     last_seen_at = NOW(),
                     closing_at = NULL,
                     updated_at = NOW()
@@ -30446,6 +41205,7 @@ def browser_session_tab_presence():
                   AND closing_at IS NULL
                 """,
                 (
+                    employee_access_secure,
                     marker_hash,
                     tab_token_hash,
                 ),
@@ -30476,12 +41236,14 @@ def browser_session_tab_presence():
                 user_id,
                 spa_id,
                 business_unit_id,
+                employee_access_secure,
                 opened_at,
                 last_seen_at,
                 closing_at,
                 updated_at
             )
             VALUES (
+                %s,
                 %s,
                 %s,
                 %s,
@@ -30506,6 +41268,7 @@ def browser_session_tab_presence():
                 user_id,
                 spa_id,
                 business_unit_id,
+                employee_access_secure,
             ),
         )
 
@@ -30822,6 +41585,10 @@ def browser_session_reauthenticate():
         )
 
         conn.commit()
+
+        # A fresh business-session reauthentication must never
+        # silently preserve an individual Employee Access identity.
+        _clear_employee_access_page_state()
 
         session[
             "_business_absolute_extension_used"
@@ -32602,6 +43369,129 @@ def add_spa():
 #   -------------------------
 #
 #
+#    USER MANAGEMENT
+#
+#
+#   -------------------------
+
+
+@app.route("/users")
+@login_required
+@spa_required
+@require_workspace_permission("can_manage_users")
+def business_users():
+    # Business User Management is tenant/workspace-only.
+    # Master Admin is deliberately outside this workflow.
+    if is_master_admin():
+        abort(403)
+
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    actor_role_code = (
+        current_business_unit_membership_role_code()
+    )
+
+    if (
+        spa_id is None
+        or business_unit_id is None
+        or actor_role_code is None
+    ):
+        abort(403)
+
+    manageable_role_codes = (
+        business_role_codes_actor_can_manage(
+            actor_role_code
+        )
+    )
+
+    if not manageable_role_codes:
+        abort(403)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                u.user_id,
+                u.first_name,
+                u.last_name,
+                u.email,
+                u.username,
+                u.sms_phone,
+                u.active,
+                bum.membership_role_code,
+                bum.is_active
+            FROM business_unit_memberships bum
+
+            JOIN users u
+              ON u.user_id = bum.user_id
+             AND u.spa_id = bum.spa_id
+
+            WHERE bum.spa_id = %s
+              AND bum.business_unit_id = %s
+              AND u.role <> 'master_admin'
+              AND bum.membership_role_code <> 'master_admin'
+
+            ORDER BY
+                LOWER(COALESCE(u.last_name, '')),
+                LOWER(COALESCE(u.first_name, '')),
+                u.user_id
+        """, (
+            spa_id,
+            business_unit_id,
+        ))
+
+        rows = cur.fetchall()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    users = []
+
+    for row in rows:
+        membership_role_code = row[7]
+
+        role_label = (
+            BUSINESS_MEMBERSHIP_ROLE_LABELS.get(
+                membership_role_code,
+                str(
+                    membership_role_code or ""
+                ).replace("_", " ").title(),
+            )
+        )
+
+        users.append({
+            "user_id": row[0],
+            "first_name": row[1] or "",
+            "last_name": row[2] or "",
+            "email": row[3] or "",
+            "username": row[4] or "",
+            "sms_phone": row[5] or "",
+            "user_active": bool(row[6]),
+            "membership_role_code":
+                membership_role_code,
+            "membership_active": bool(row[8]),
+            "role_label": role_label,
+            "can_manage": (
+                can_manage_business_user_role(
+                    actor_role_code,
+                    membership_role_code,
+                )
+            ),
+        })
+
+    return render_template(
+        "business_users.html",
+        users=users,
+        actor_role_code=actor_role_code,
+    )
+
+
+#   -------------------------
+#
+#
 #    ADD USER
 #
 #
@@ -32612,78 +43502,1091 @@ def add_spa():
 @app.route("/users/add", methods=["GET", "POST"])
 @login_required
 @spa_required
-
+@require_workspace_permission("can_manage_users")
 def add_user():
-    require_admin_or_master()
+    # Business User Management is tenant/workspace-only.
+    # Master Admin is deliberately outside this workflow.
+    if is_master_admin():
+        abort(403)
 
-    if request.method == "POST":
-        spa_id = current_spa_id()
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    actor_user_id = session.get("user_id")
 
-        first_name = request.form.get("first_name", "").strip()
-        last_name = request.form.get("last_name", "").strip()
-        email = request.form.get("email", "").strip().lower()
-        username = request.form.get("username", "").strip().lower()
-        password = request.form.get("password", "")
-        role = clean_user_role(request.form.get("role", "staff"))
+    actor_role_code = (
+        current_business_unit_membership_role_code()
+    )
 
-        if not email or not username or not password:
-            flash("Email, username, and password are required.", "error")
-            return redirect(url_for("add_user"))
+    if (
+        spa_id is None
+        or business_unit_id is None
+        or actor_user_id is None
+        or actor_role_code is None
+    ):
+        abort(403)
 
-        password_policy_error = _password_policy_error(password)
+    manageable_role_codes = (
+        business_role_codes_actor_can_manage(
+            actor_role_code
+        )
+    )
 
-        if password_policy_error:
-            flash(password_policy_error, "error")
-            return redirect(url_for("add_user"))
+    if not manageable_role_codes:
+        abort(403)
 
-        password_hash = generate_password_hash(password)
+    role_options = [
+        {
+            "code": role_code,
+            "label": BUSINESS_MEMBERSHIP_ROLE_LABELS[
+                role_code
+            ],
+        }
+        for role_code in manageable_role_codes
+    ]
 
-        conn = get_db_connection()
-        cur = conn.cursor()
+    security_csrf_token = _security_form_csrf_token()
 
-        try:
-            cur.execute("""
-                INSERT INTO users (
-                    spa_id,
-                    first_name,
-                    last_name,
-                    email,
-                    username,
-                    password_hash,
-                    role,
-                    active
+    form_data = {
+        "first_name": "",
+        "last_name": "",
+        "email": "",
+        "username": "",
+        "sms_phone": "",
+        "membership_role_code": "staff",
+    }
+
+    def render_add_user():
+        return render_template(
+            "add_user.html",
+            security_csrf_token=security_csrf_token,
+            role_options=role_options,
+            form_data=form_data,
+        )
+
+    if request.method != "POST":
+        return render_add_user()
+
+    submitted_csrf_token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_csrf_token
+    ):
+        abort(400)
+
+    first_name = request.form.get(
+        "first_name",
+        "",
+    ).strip()
+
+    last_name = request.form.get(
+        "last_name",
+        "",
+    ).strip()
+
+    email = request.form.get(
+        "email",
+        "",
+    ).strip().lower()
+
+    username = request.form.get(
+        "username",
+        "",
+    ).strip().lower()
+
+    raw_mobile_phone = request.form.get(
+        "sms_phone",
+        "",
+    ).strip()
+
+    raw_target_role_code = request.form.get(
+        "membership_role_code",
+        "",
+    ).strip().lower()
+
+    password = request.form.get(
+        "password",
+        "",
+    )
+
+    confirm_password = request.form.get(
+        "confirm_password",
+        "",
+    )
+
+    form_data.update({
+        "first_name": first_name,
+        "last_name": last_name,
+        "email": email,
+        "username": username,
+        "sms_phone": raw_mobile_phone,
+        "membership_role_code": raw_target_role_code,
+    })
+
+    # Master Admin must never be submitted, assigned,
+    # promoted, or linked through business User Management.
+    if raw_target_role_code == "master_admin":
+        abort(403)
+
+    target_role_code = (
+        normalize_business_membership_role_code(
+            raw_target_role_code
+        )
+    )
+
+    if target_role_code is None:
+        flash(
+            "Please select a valid business user role.",
+            "error",
+        )
+        return render_add_user()
+
+    if not can_manage_business_user_role(
+        actor_role_code,
+        target_role_code,
+    ):
+        abort(403)
+
+    account_role = (
+        business_user_role_for_membership(
+            target_role_code
+        )
+    )
+
+    if account_role not in (
+        "admin",
+        "manager",
+        "staff",
+    ):
+        abort(403)
+
+    if not first_name:
+        flash("First name is required.", "error")
+        return render_add_user()
+
+    if not last_name:
+        flash("Last name is required.", "error")
+        return render_add_user()
+
+    if len(first_name) > 100:
+        flash(
+            "First name must contain no more than "
+            "100 characters.",
+            "error",
+        )
+        return render_add_user()
+
+    if len(last_name) > 100:
+        flash(
+            "Last name must contain no more than "
+            "100 characters.",
+            "error",
+        )
+        return render_add_user()
+
+    if not email:
+        flash("Login email is required.", "error")
+        return render_add_user()
+
+    if len(email) > 255:
+        flash(
+            "Login email must contain no more than "
+            "255 characters.",
+            "error",
+        )
+        return render_add_user()
+
+    if not username:
+        flash("Username is required.", "error")
+        return render_add_user()
+
+    if len(username) > 100:
+        flash(
+            "Username must contain no more than "
+            "100 characters.",
+            "error",
+        )
+        return render_add_user()
+
+    try:
+        mobile_phone = _normalize_user_mobile_phone(
+            raw_mobile_phone
+        )
+    except ValueError as error:
+        flash(str(error), "error")
+        return render_add_user()
+
+    if not password:
+        flash(
+            "Temporary password is required.",
+            "error",
+        )
+        return render_add_user()
+
+    password_policy_error = _password_policy_error(
+        password
+    )
+
+    if password_policy_error:
+        flash(password_policy_error, "error")
+        return render_add_user()
+
+    if password != confirm_password:
+        flash(
+            "Temporary passwords do not match.",
+            "error",
+        )
+        return render_add_user()
+
+    password_hash = generate_password_hash(
+        password
+    )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        # Application-level duplicate check provides a
+        # friendly message. Database constraints remain
+        # authoritative for race-condition protection.
+        cur.execute("""
+            SELECT
+                user_id,
+                email,
+                username
+            FROM users
+            WHERE LOWER(email) = LOWER(%s)
+               OR (
+                    spa_id = %s
+                    AND LOWER(username) = LOWER(%s)
+               )
+            LIMIT 1
+        """, (
+            email,
+            spa_id,
+            username,
+        ))
+
+        existing_user = cur.fetchone()
+
+        if existing_user:
+            existing_email = str(
+                existing_user[1] or ""
+            ).strip().lower()
+
+            if existing_email == email:
+                flash(
+                    "That login email is already in use.",
+                    "error",
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, TRUE)
-            """, (
+            else:
+                flash(
+                    "That username is already in use "
+                    "for this business.",
+                    "error",
+                )
+
+            return render_add_user()
+
+        cur.execute("""
+            INSERT INTO users (
                 spa_id,
                 first_name,
                 last_name,
                 email,
                 username,
                 password_hash,
-                role
+                role,
+                active,
+                sms_phone,
+                must_change_password
+            )
+            VALUES (
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                TRUE,
+                %s,
+                TRUE
+            )
+            RETURNING user_id
+        """, (
+            spa_id,
+            first_name,
+            last_name,
+            email,
+            username,
+            password_hash,
+            account_role,
+            mobile_phone or None,
+        ))
+
+        new_user_id = cur.fetchone()[0]
+
+        cur.execute("""
+            INSERT INTO business_unit_memberships (
+                spa_id,
+                business_unit_id,
+                user_id,
+                membership_role_code,
+                is_active,
+                granted_by
+            )
+            VALUES (
+                %s,
+                %s,
+                %s,
+                %s,
+                TRUE,
+                %s
+            )
+        """, (
+            spa_id,
+            business_unit_id,
+            new_user_id,
+            target_role_code,
+            actor_user_id,
+        ))
+
+        role_label = (
+            BUSINESS_MEMBERSHIP_ROLE_LABELS[
+                target_role_code
+            ]
+        )
+
+        log_audit(
+            cur,
+            spa_id,
+            actor_user_id,
+            "business_user_created",
+            table_name="users",
+            record_id=new_user_id,
+            old_value=None,
+            new_value=target_role_code,
+            notes=(
+                "Business user created with workspace "
+                f"role: {role_label}."
+            ),
+        )
+
+        conn.commit()
+
+        session.pop(
+            "_security_form_csrf",
+            None,
+        )
+
+        flash(
+            f"{first_name} {last_name} was created "
+            f"as {role_label}.",
+            "success",
+        )
+
+        return redirect(
+            url_for("add_user")
+        )
+
+    except Exception:
+        conn.rollback()
+
+        app.logger.exception(
+            "Business Add User failed for spa_id=%s, "
+            "business_unit_id=%s, actor_user_id=%s",
+            spa_id,
+            business_unit_id,
+            actor_user_id,
+        )
+
+        flash(
+            "The user could not be created. "
+            "No changes were saved.",
+            "error",
+        )
+
+        return render_add_user()
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
+#   -------------------------
+#
+#
+#    EDIT USER
+#
+#
+#   -------------------------
+
+
+@app.route(
+    "/users/<int:target_user_id>/edit",
+    methods=["GET", "POST"],
+)
+@login_required
+@spa_required
+@require_workspace_permission("can_manage_users")
+def edit_business_user(target_user_id):
+    # Business User Management is tenant/workspace-only.
+    # Master Admin is deliberately outside this workflow.
+    if is_master_admin():
+        abort(403)
+
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    actor_user_id = session.get("user_id")
+
+    actor_role_code = (
+        current_business_unit_membership_role_code()
+    )
+
+    if (
+        spa_id is None
+        or business_unit_id is None
+        or actor_user_id is None
+        or actor_role_code is None
+    ):
+        abort(403)
+
+    manageable_role_codes = (
+        business_role_codes_actor_can_manage(
+            actor_role_code
+        )
+    )
+
+    if not manageable_role_codes:
+        abort(403)
+
+    role_options = [
+        {
+            "code": role_code,
+            "label": BUSINESS_MEMBERSHIP_ROLE_LABELS[
+                role_code
+            ],
+        }
+        for role_code in manageable_role_codes
+    ]
+
+    # First load establishes the tenant/workspace-scoped target
+    # before any form processing takes place.
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                u.user_id,
+                u.first_name,
+                u.last_name,
+                u.email,
+                u.username,
+                u.sms_phone,
+                u.role,
+                u.active,
+                bum.business_unit_membership_id,
+                bum.membership_role_code,
+                bum.is_active
+            FROM business_unit_memberships bum
+
+            JOIN users u
+              ON u.user_id = bum.user_id
+             AND u.spa_id = bum.spa_id
+
+            WHERE bum.spa_id = %s
+              AND bum.business_unit_id = %s
+              AND bum.user_id = %s
+              AND bum.is_active = TRUE
+              AND u.active = TRUE
+              AND u.role <> 'master_admin'
+              AND bum.membership_role_code <> 'master_admin'
+
+            LIMIT 1
+        """, (
+            spa_id,
+            business_unit_id,
+            target_user_id,
+        ))
+
+        target_row = cur.fetchone()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if target_row is None:
+        abort(404)
+
+    current_role_code = (
+        normalize_business_membership_role_code(
+            target_row[9]
+        )
+    )
+
+    # Historical/unknown roles fail closed until they are
+    # deliberately migrated into the current business hierarchy.
+    if current_role_code is None:
+        abort(403)
+
+    # The actor must be authorized to manage the target's
+    # CURRENT role before an edit form is even displayed.
+    if not can_manage_business_user_role(
+        actor_role_code,
+        current_role_code,
+    ):
+        abort(403)
+
+    security_csrf_token = _security_form_csrf_token()
+
+    form_data = {
+        "first_name": target_row[1] or "",
+        "last_name": target_row[2] or "",
+        "email": target_row[3] or "",
+        "username": target_row[4] or "",
+        "sms_phone": (
+            _format_user_mobile_phone_for_display(
+                target_row[5]
+            )
+        ),
+        "membership_role_code": current_role_code,
+    }
+
+    def render_edit_user():
+        return render_template(
+            "edit_business_user.html",
+            target_user_id=target_user_id,
+            security_csrf_token=security_csrf_token,
+            role_options=role_options,
+            form_data=form_data,
+        )
+
+    if request.method != "POST":
+        return render_edit_user()
+
+    submitted_csrf_token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_csrf_token
+    ):
+        abort(400)
+
+    first_name = request.form.get(
+        "first_name",
+        "",
+    ).strip()
+
+    last_name = request.form.get(
+        "last_name",
+        "",
+    ).strip()
+
+    email = request.form.get(
+        "email",
+        "",
+    ).strip().lower()
+
+    username = request.form.get(
+        "username",
+        "",
+    ).strip().lower()
+
+    raw_mobile_phone = request.form.get(
+        "sms_phone",
+        "",
+    ).strip()
+
+    raw_target_role_code = request.form.get(
+        "membership_role_code",
+        "",
+    ).strip().lower()
+
+    form_data.update({
+        "first_name": first_name,
+        "last_name": last_name,
+        "email": email,
+        "username": username,
+        "sms_phone": raw_mobile_phone,
+        "membership_role_code": raw_target_role_code,
+    })
+
+    # Master Admin must never be submitted, assigned,
+    # promoted, or linked through business User Management.
+    if raw_target_role_code == "master_admin":
+        abort(403)
+
+    new_role_code = (
+        normalize_business_membership_role_code(
+            raw_target_role_code
+        )
+    )
+
+    if new_role_code is None:
+        flash(
+            "Please select a valid business user role.",
+            "error",
+        )
+        return render_edit_user()
+
+    # The actor must also be allowed to assign the NEW role.
+    if not can_manage_business_user_role(
+        actor_role_code,
+        new_role_code,
+    ):
+        abort(403)
+
+    if not first_name:
+        flash("First name is required.", "error")
+        return render_edit_user()
+
+    if not last_name:
+        flash("Last name is required.", "error")
+        return render_edit_user()
+
+    if len(first_name) > 100:
+        flash(
+            "First name must contain no more than "
+            "100 characters.",
+            "error",
+        )
+        return render_edit_user()
+
+    if len(last_name) > 100:
+        flash(
+            "Last name must contain no more than "
+            "100 characters.",
+            "error",
+        )
+        return render_edit_user()
+
+    if not email:
+        flash("Login email is required.", "error")
+        return render_edit_user()
+
+    if len(email) > 255:
+        flash(
+            "Login email must contain no more than "
+            "255 characters.",
+            "error",
+        )
+        return render_edit_user()
+
+    if not username:
+        flash("Username is required.", "error")
+        return render_edit_user()
+
+    if len(username) > 100:
+        flash(
+            "Username must contain no more than "
+            "100 characters.",
+            "error",
+        )
+        return render_edit_user()
+
+    try:
+        mobile_phone = _normalize_user_mobile_phone(
+            raw_mobile_phone
+        )
+    except ValueError as error:
+        flash(str(error), "error")
+        return render_edit_user()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        # Re-read and lock the actor's current workspace membership
+        # inside the write transaction. This prevents an edit from
+        # completing with authority that was removed after the
+        # request-level permission check.
+        cur.execute("""
+            SELECT
+                u.user_id,
+                bum.membership_role_code
+            FROM business_unit_memberships bum
+
+            JOIN users u
+              ON u.user_id = bum.user_id
+             AND u.spa_id = bum.spa_id
+
+            WHERE bum.spa_id = %s
+              AND bum.business_unit_id = %s
+              AND bum.user_id = %s
+              AND bum.is_active = TRUE
+              AND u.active = TRUE
+              AND u.role <> 'master_admin'
+              AND bum.membership_role_code <> 'master_admin'
+
+            FOR UPDATE OF u, bum
+        """, (
+            spa_id,
+            business_unit_id,
+            actor_user_id,
+        ))
+
+        locked_actor = cur.fetchone()
+
+        if locked_actor is None:
+            abort(403)
+
+        transaction_actor_role_code = (
+            normalize_business_membership_role_code(
+                locked_actor[1]
+            )
+        )
+
+        if transaction_actor_role_code is None:
+            abort(403)
+
+        # Re-read and lock the target inside the write
+        # transaction so permissions cannot be changed between
+        # the initial page load and the submitted update.
+        cur.execute("""
+            SELECT
+                u.user_id,
+                u.role,
+                u.active,
+                bum.business_unit_membership_id,
+                bum.membership_role_code,
+                bum.is_active
+            FROM business_unit_memberships bum
+
+            JOIN users u
+              ON u.user_id = bum.user_id
+             AND u.spa_id = bum.spa_id
+
+            WHERE bum.spa_id = %s
+              AND bum.business_unit_id = %s
+              AND bum.user_id = %s
+              AND bum.is_active = TRUE
+              AND u.active = TRUE
+              AND u.role <> 'master_admin'
+              AND bum.membership_role_code <> 'master_admin'
+
+            FOR UPDATE OF u, bum
+        """, (
+            spa_id,
+            business_unit_id,
+            target_user_id,
+        ))
+
+        locked_target = cur.fetchone()
+
+        if locked_target is None:
+            abort(404)
+
+        locked_current_role_code = (
+            normalize_business_membership_role_code(
+                locked_target[4]
+            )
+        )
+
+        if locked_current_role_code is None:
+            abort(403)
+
+        if not can_manage_business_user_role(
+            transaction_actor_role_code,
+            locked_current_role_code,
+        ):
+            abort(403)
+
+        if not can_manage_business_user_role(
+            transaction_actor_role_code,
+            new_role_code,
+        ):
+            abort(403)
+
+        membership_id = locked_target[3]
+
+        # Friendly duplicate checks. Database constraints remain
+        # authoritative if two requests race one another.
+        cur.execute("""
+            SELECT user_id
+            FROM users
+            WHERE user_id <> %s
+              AND LOWER(email) = LOWER(%s)
+            LIMIT 1
+        """, (
+            target_user_id,
+            email,
+        ))
+
+        if cur.fetchone():
+            flash(
+                "That login email is already in use.",
+                "error",
+            )
+            conn.rollback()
+            return render_edit_user()
+
+        cur.execute("""
+            SELECT user_id
+            FROM users
+            WHERE user_id <> %s
+              AND spa_id = %s
+              AND LOWER(username) = LOWER(%s)
+            LIMIT 1
+        """, (
+            target_user_id,
+            spa_id,
+            username,
+        ))
+
+        if cur.fetchone():
+            flash(
+                "That username is already in use "
+                "for this business.",
+                "error",
+            )
+            conn.rollback()
+            return render_edit_user()
+
+        # Never allow the final active Business Administrator
+        # to be demoted. Lock all active Administrator rows in
+        # this workspace before counting so concurrent role
+        # changes serialize safely.
+        if (
+            locked_current_role_code
+            == "organization_admin"
+            and new_role_code
+            != "organization_admin"
+        ):
+            cur.execute("""
+                SELECT
+                    bum.business_unit_membership_id
+                FROM business_unit_memberships bum
+
+                JOIN users u
+                  ON u.user_id = bum.user_id
+                 AND u.spa_id = bum.spa_id
+
+                WHERE bum.spa_id = %s
+                  AND bum.business_unit_id = %s
+                  AND bum.is_active = TRUE
+                  AND u.active = TRUE
+                  AND bum.membership_role_code =
+                      'organization_admin'
+                  AND u.role = 'admin'
+
+                ORDER BY
+                    bum.business_unit_membership_id
+
+                FOR UPDATE OF bum, u
+            """, (
+                spa_id,
+                business_unit_id,
             ))
 
-            conn.commit()
-            flash("User created successfully.", "success")
-            return redirect(url_for("home"))
+            cur.fetchall()
 
-        except Exception as e:
-            conn.rollback()
-            flash(f"Error creating user: {e}", "error")
-            return redirect(url_for("add_user"))
+            if active_business_administrator_count(
+                cur,
+                spa_id,
+                business_unit_id,
+            ) <= 1:
+                flash(
+                    "This user is the last active Business "
+                    "Administrator for this workspace. Add or "
+                    "promote another Business Administrator "
+                    "before changing this role.",
+                    "error",
+                )
+                conn.rollback()
+                return render_edit_user()
 
-        finally:
-            cur.close()
-            conn.close()
+        old_role_code = locked_current_role_code
 
-    return render_template("add_user.html")
+        cur.execute("""
+            UPDATE business_unit_memberships
+            SET membership_role_code = %s
+            WHERE business_unit_membership_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND user_id = %s
+              AND is_active = TRUE
+        """, (
+            new_role_code,
+            membership_id,
+            spa_id,
+            business_unit_id,
+            target_user_id,
+        ))
 
+        if cur.rowcount != 1:
+            raise RuntimeError(
+                "Business membership update did not affect "
+                "exactly one active row."
+            )
 
+        # users.role is account-wide security state. Derive it
+        # from ALL active workspace memberships rather than
+        # blindly copying the role from this one workspace.
+        account_role = (
+            business_account_role_for_active_memberships(
+                cur,
+                spa_id,
+                target_user_id,
+            )
+        )
 
+        if account_role not in (
+            "admin",
+            "manager",
+            "staff",
+        ):
+            raise RuntimeError(
+                "Unable to derive a valid business account role."
+            )
 
+        cur.execute("""
+            UPDATE users
+            SET first_name = %s,
+                last_name = %s,
+                email = %s,
+                username = %s,
+                sms_phone = %s,
+                role = %s
+            WHERE user_id = %s
+              AND spa_id = %s
+              AND role <> 'master_admin'
+        """, (
+            first_name,
+            last_name,
+            email,
+            username,
+            mobile_phone or None,
+            account_role,
+            target_user_id,
+            spa_id,
+        ))
 
+        if cur.rowcount != 1:
+            raise RuntimeError(
+                "Business user update did not affect "
+                "exactly one row."
+            )
 
+        old_role_label = (
+            BUSINESS_MEMBERSHIP_ROLE_LABELS.get(
+                old_role_code,
+                old_role_code,
+            )
+        )
+
+        new_role_label = (
+            BUSINESS_MEMBERSHIP_ROLE_LABELS.get(
+                new_role_code,
+                new_role_code,
+            )
+        )
+
+        if old_role_code == new_role_code:
+            audit_notes = (
+                "Business user profile updated. "
+                f"Workspace role remains {new_role_label}."
+            )
+        else:
+            audit_notes = (
+                "Business user profile updated. Workspace role "
+                f"changed from {old_role_label} to "
+                f"{new_role_label}."
+            )
+
+        log_audit(
+            cur,
+            spa_id,
+            actor_user_id,
+            "business_user_updated",
+            table_name="users",
+            record_id=target_user_id,
+            old_value=old_role_code,
+            new_value=new_role_code,
+            notes=audit_notes,
+        )
+
+        conn.commit()
+
+        # Keep harmless identity fields fresh if someone edits
+        # their own profile here. Do not overwrite session role;
+        # a true account-role change is intentionally detected by
+        # the normal business-login lifecycle on the next request.
+        if int(actor_user_id) == int(target_user_id):
+            session["first_name"] = first_name
+            session["last_name"] = last_name
+            session["email"] = email
+
+        session.pop(
+            "_security_form_csrf",
+            None,
+        )
+
+        flash(
+            f"{first_name} {last_name} was updated.",
+            "success",
+        )
+
+        return redirect(
+            url_for("business_users")
+        )
+
+    except IntegrityError:
+        conn.rollback()
+
+        app.logger.warning(
+            "Business Edit User constraint conflict for "
+            "spa_id=%s, business_unit_id=%s, "
+            "actor_user_id=%s, target_user_id=%s",
+            spa_id,
+            business_unit_id,
+            actor_user_id,
+            target_user_id,
+        )
+
+        flash(
+            "That login email or username is already in use. "
+            "No changes were saved.",
+            "error",
+        )
+
+        return render_edit_user()
+
+    except HTTPException:
+        conn.rollback()
+        raise
+
+    except Exception:
+        conn.rollback()
+
+        app.logger.exception(
+            "Business Edit User failed for spa_id=%s, "
+            "business_unit_id=%s, actor_user_id=%s, "
+            "target_user_id=%s",
+            spa_id,
+            business_unit_id,
+            actor_user_id,
+            target_user_id,
+        )
+
+        flash(
+            "The user could not be updated. "
+            "No changes were saved.",
+            "error",
+        )
+
+        return render_edit_user()
+
+    finally:
+        cur.close()
+        conn.close()
 
 
 #   -------------------------
@@ -32695,60 +44598,460 @@ def add_user():
 #
 #   -------------------------
 
+@app.route("/admin/help-pages/preview/<page_key>")
+@login_required
+@master_admin_required
+def preview_help_page(page_key):
+
+    language_code = str(
+        request.args.get("lang", "EN")
+        or "EN"
+    ).strip().upper()
+
+    if language_code not in {"EN", "ES"}:
+        abort(400)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                title,
+                content,
+                language_code,
+                is_active
+            FROM help_pages
+            WHERE page_key = %s
+              AND language_code = %s
+              AND spa_id IS NULL
+            ORDER BY help_page_id DESC
+            LIMIT 1
+        """, (
+            page_key,
+            language_code,
+        ))
+
+        page = cur.fetchone()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if not page:
+        flash(
+            f"{language_code} Help Page translation not found.",
+            "warning",
+        )
+
+        return redirect(
+            url_for("help_pages_manager")
+        )
+
+    return render_template(
+        "help_page.html",
+        page=page,
+        page_key=page_key,
+        selected_language=language_code,
+        admin_preview=True,
+        preview_is_active=bool(page[3]),
+    )
+
+
+@app.route("/admin/help-pages")
+@login_required
+@master_admin_required
+def help_pages_manager():
+
+    search = str(
+        request.args.get("search", "")
+        or ""
+    ).strip()
+
+    page_filter = str(
+        request.args.get("filter", "all")
+        or "all"
+    ).strip().lower()
+
+    allowed_filters = {
+        "all",
+        "en",
+        "es",
+        "missing_es",
+    }
+
+    if page_filter not in allowed_filters:
+        page_filter = "all"
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            WITH latest AS (
+                SELECT DISTINCT ON (
+                    page_key,
+                    language_code
+                )
+                    help_page_id,
+                    page_key,
+                    display_name,
+                    title,
+                    language_code,
+                    display_order,
+                    is_active
+                FROM help_pages
+                WHERE spa_id IS NULL
+                  AND language_code IN ('EN', 'ES')
+                ORDER BY
+                    page_key,
+                    language_code,
+                    help_page_id DESC
+            )
+            SELECT
+                page_key,
+
+                COALESCE(
+                    MAX(
+                        NULLIF(display_name, '')
+                    ) FILTER (
+                        WHERE language_code = 'EN'
+                    ),
+                    MAX(
+                        NULLIF(display_name, '')
+                    ) FILTER (
+                        WHERE language_code = 'ES'
+                    ),
+                    page_key
+                ) AS display_name,
+
+                COALESCE(
+                    MAX(display_order) FILTER (
+                        WHERE language_code = 'EN'
+                    ),
+                    MAX(display_order) FILTER (
+                        WHERE language_code = 'ES'
+                    )
+                ) AS display_order,
+
+                MAX(help_page_id) FILTER (
+                    WHERE language_code = 'EN'
+                ) AS en_id,
+
+                MAX(title) FILTER (
+                    WHERE language_code = 'EN'
+                ) AS en_title,
+
+                BOOL_OR(is_active) FILTER (
+                    WHERE language_code = 'EN'
+                ) AS en_active,
+
+                MAX(help_page_id) FILTER (
+                    WHERE language_code = 'ES'
+                ) AS es_id,
+
+                MAX(title) FILTER (
+                    WHERE language_code = 'ES'
+                ) AS es_title,
+
+                BOOL_OR(is_active) FILTER (
+                    WHERE language_code = 'ES'
+                ) AS es_active
+
+            FROM latest
+            GROUP BY page_key
+            ORDER BY
+                COALESCE(
+                    COALESCE(
+                        MAX(display_order) FILTER (
+                            WHERE language_code = 'EN'
+                        ),
+                        MAX(display_order) FILTER (
+                            WHERE language_code = 'ES'
+                        )
+                    ),
+                    999999
+                ),
+                LOWER(
+                    COALESCE(
+                        MAX(
+                            NULLIF(display_name, '')
+                        ) FILTER (
+                            WHERE language_code = 'EN'
+                        ),
+                        MAX(
+                            NULLIF(display_name, '')
+                        ) FILTER (
+                            WHERE language_code = 'ES'
+                        ),
+                        page_key
+                    )
+                ),
+                page_key
+        """)
+
+        rows = cur.fetchall()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    pages = []
+
+    for row in rows:
+        page = {
+            "page_key": row[0],
+            "display_name": row[1],
+            "display_order": row[2],
+            "en_id": row[3],
+            "en_title": row[4],
+            "en_active": row[5],
+            "es_id": row[6],
+            "es_title": row[7],
+            "es_active": row[8],
+            "is_special_terms": (
+                row[0] == "sms_email_terms"
+            ),
+        }
+
+        pages.append(page)
+
+    counts = {
+        "total": len(pages),
+        "en": sum(
+            1
+            for page in pages
+            if page["en_id"] is not None
+        ),
+        "es": sum(
+            1
+            for page in pages
+            if page["es_id"] is not None
+        ),
+        "missing_es": sum(
+            1
+            for page in pages
+            if (
+                page["en_id"] is not None
+                and page["es_id"] is None
+            )
+        ),
+    }
+
+    filtered_pages = []
+
+    search_lower = search.lower()
+
+    for page in pages:
+
+        if (
+            page_filter == "en"
+            and page["en_id"] is None
+        ):
+            continue
+
+        if (
+            page_filter == "es"
+            and page["es_id"] is None
+        ):
+            continue
+
+        if (
+            page_filter == "missing_es"
+            and not (
+                page["en_id"] is not None
+                and page["es_id"] is None
+            )
+        ):
+            continue
+
+        if search_lower:
+            searchable = " ".join([
+                str(page["page_key"] or ""),
+                str(page["display_name"] or ""),
+                str(page["en_title"] or ""),
+                str(page["es_title"] or ""),
+            ]).lower()
+
+            if search_lower not in searchable:
+                continue
+
+        filtered_pages.append(page)
+
+    return render_template(
+        "admin_help_pages.html",
+        pages=filtered_pages,
+        counts=counts,
+        search=search,
+        page_filter=page_filter,
+    )
+
+
 @app.route("/admin/help-pages/new", methods=["GET", "POST"])
 @app.route("/admin/help-pages/edit/<page_key>", methods=["GET", "POST"])
 @login_required
 @master_admin_required
 def edit_help_page(page_key=None):
 
+    security_csrf_token = _security_form_csrf_token()
+
     conn = get_db_connection()
+    conn.autocommit = False
     cur = conn.cursor()
 
     if request.method == "POST":
 
+        submitted_token = request.form.get(
+            "security_csrf_token",
+            "",
+        )
+
+        if not _security_form_csrf_valid(
+            submitted_token
+        ):
+            conn.rollback()
+            cur.close()
+            conn.close()
+            abort(400)
+
         if not page_key:
-            page_key = request.form.get("page_key", "").strip()
+            page_key = request.form.get(
+                "page_key",
+                "",
+            ).strip()
 
-        display_name = request.form.get("display_name", "").strip()
-        title = request.form.get("title", "").strip()
-        language_code = request.form.get("language_code", "EN").strip().upper()
-        display_order = request.form.get("display_order") or None
-        content = request.form.get("content", "").strip()
-        is_active = request.form.get("is_active") == "on"
+        if not page_key:
+            conn.rollback()
+            cur.close()
+            conn.close()
+            abort(400)
 
-        cur.execute("""
-            SELECT help_page_id
-            FROM help_pages
-            WHERE page_key = %s
-              AND language_code = %s
-        """, (page_key, language_code))
+        display_name = request.form.get(
+            "display_name",
+            "",
+        ).strip()
 
-        existing = cur.fetchone()
+        title = request.form.get(
+            "title",
+            "",
+        ).strip()
 
-        if existing:
-            cur.execute("""
-                UPDATE help_pages
-                SET display_name = %s,
-                    title = %s,
-                    language_code = %s,
-                    display_order = %s,
-                    content = %s,
-                    is_active = %s
+        language_code = request.form.get(
+            "language_code",
+            "EN",
+        ).strip().upper()
+
+        if language_code not in {
+            "EN",
+            "ES",
+            "FR",
+            "DE",
+        }:
+            conn.rollback()
+            cur.close()
+            conn.close()
+            abort(400)
+
+        display_order = (
+            request.form.get("display_order")
+            or None
+        )
+
+        content = request.form.get(
+            "content",
+            "",
+        ).strip()
+
+        is_active = (
+            request.form.get("is_active")
+            == "on"
+        )
+
+        try:
+            cur.execute(
+                """
+                SELECT
+                    help_page_id,
+                    display_name,
+                    title,
+                    display_order,
+                    content,
+                    is_active
+                FROM help_pages
                 WHERE page_key = %s
                   AND language_code = %s
-            """, (
-                display_name,
-                title,
-                language_code,
-                display_order,
-                content,
-                is_active,
-                page_key,
-                language_code
-            ))
-        else:
-            cur.execute("""
-                INSERT INTO help_pages
+                  AND spa_id IS NULL
+                ORDER BY help_page_id DESC
+                LIMIT 1
+                FOR UPDATE
+                """,
+                (
+                    page_key,
+                    language_code,
+                ),
+            )
+
+            existing = cur.fetchone()
+
+            if existing:
+                help_page_id = existing[0]
+
+                old_value = (
+                    f"page_key={page_key}; "
+                    f"language={language_code}; "
+                    f"display_name={existing[1] or ''}; "
+                    f"title={existing[2] or ''}; "
+                    f"order={existing[3]}; "
+                    f"active={bool(existing[5])}"
+                )
+
+                content_changed = (
+                    str(existing[4] or "")
+                    != content
+                )
+
+                cur.execute(
+                    """
+                    UPDATE help_pages
+                    SET display_name = %s,
+                        title = %s,
+                        language_code = %s,
+                        display_order = %s,
+                        content = %s,
+                        is_active = %s
+                    WHERE help_page_id = %s
+                      AND spa_id IS NULL
+                    """,
+                    (
+                        display_name,
+                        title,
+                        language_code,
+                        display_order,
+                        content,
+                        is_active,
+                        help_page_id,
+                    ),
+                )
+
+                action_type = "help_page_updated"
+                action_word = "updated"
+
+            else:
+                cur.execute(
+                    """
+                    INSERT INTO help_pages
+                        (
+                            page_key,
+                            display_name,
+                            title,
+                            language_code,
+                            display_order,
+                            content,
+                            is_active
+                        )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    RETURNING help_page_id
+                    """,
                     (
                         page_key,
                         display_name,
@@ -32756,10 +45059,83 @@ def edit_help_page(page_key=None):
                         language_code,
                         display_order,
                         content,
-                        is_active
-                    )
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """, (
+                        is_active,
+                    ),
+                )
+
+                help_page_id = cur.fetchone()[0]
+                old_value = None
+                content_changed = True
+                action_type = "help_page_created"
+                action_word = "created"
+
+            new_value = (
+                f"page_key={page_key}; "
+                f"language={language_code}; "
+                f"display_name={display_name}; "
+                f"title={title}; "
+                f"order={display_order}; "
+                f"active={is_active}"
+            )
+
+            log_audit(
+                cur,
+                spa_id=None,
+                user_id=session.get("user_id"),
+                action_type=action_type,
+                table_name="help_pages",
+                record_id=help_page_id,
+                old_value=old_value,
+                new_value=new_value,
+                notes=(
+                    "Master Admin "
+                    f"{action_word} PSP-global Help Page "
+                    f"{page_key} ({language_code}). "
+                    "Article content changed: "
+                    f"{'yes' if content_changed else 'no'}."
+                ),
+            )
+
+            conn.commit()
+
+        except Exception:
+            conn.rollback()
+            raise
+
+        finally:
+            cur.close()
+            conn.close()
+
+        flash(
+            "Help page saved.",
+            "success",
+        )
+
+        return redirect(
+            url_for(
+                "edit_help_page",
+                page_key=page_key,
+                lang=language_code,
+            )
+        )
+
+    language_code = request.args.get(
+        "lang",
+        "EN",
+    ).strip().upper()
+
+    if language_code not in {
+        "EN",
+        "ES",
+        "FR",
+        "DE",
+    }:
+        language_code = "EN"
+
+    try:
+        cur.execute(
+            """
+            SELECT
                 page_key,
                 display_name,
                 title,
@@ -32767,50 +45143,33 @@ def edit_help_page(page_key=None):
                 display_order,
                 content,
                 is_active
-            ))
-
-        conn.commit()
-        cur.close()
-        conn.close()
-
-        flash("Help page saved.", "success")
-        return redirect(
-            url_for(
-                "edit_help_page",
-                page_key=page_key,
-                lang=language_code
-            )
+            FROM help_pages
+            WHERE page_key = %s
+              AND language_code = %s
+              AND spa_id IS NULL
+            ORDER BY help_page_id DESC
+            LIMIT 1
+            """,
+            (
+                page_key,
+                language_code,
+            ),
         )
 
-    language_code = request.args.get("lang", "EN").strip().upper()
+        page = cur.fetchone()
 
-    cur.execute("""
-        SELECT
-            page_key,
-            display_name,
-            title,
-            language_code,
-            display_order,
-            content,
-            is_active
-        FROM help_pages
-        WHERE page_key = %s
-          AND language_code = %s
-    """, (page_key, language_code))
-
-    page = cur.fetchone()
-
-    cur.close()
-    conn.close()
+    finally:
+        cur.close()
+        conn.close()
 
     return render_template(
         "admin_edit_help_page.html",
         page=page,
         page_key=page_key,
         language_code=language_code,
-        mode="edit" if page else "new"
+        mode="edit" if page else "new",
+        security_csrf_token=security_csrf_token,
     )
-
 
 
 #   -------------------------
@@ -32922,6 +45281,9 @@ def get_client_language(client_id):
 def view_help_page(page_key):
 
 
+    if page_key == "sms_email_terms":
+        return redirect(url_for("sms_email_terms"))
+
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -32934,6 +45296,7 @@ def view_help_page(page_key):
         WHERE page_key = %s
         AND language_code = %s
         AND is_active = TRUE
+        AND spa_id IS NULL
         ORDER BY help_page_id DESC
         LIMIT 1
     """, (page_key, requested_language))
@@ -32948,6 +45311,7 @@ def view_help_page(page_key):
             WHERE page_key = %s
               AND language_code = 'EN'
               AND is_active = TRUE
+              AND spa_id IS NULL
             ORDER BY help_page_id DESC
             LIMIT 1
         """, (page_key,))
@@ -32989,18 +45353,6 @@ def page_help():
     return redirect(url_for("view_help_page", page_key="calendar"))
 
 
-
-
-@app.route("/admin/help-pages/new", methods=["GET"])
-@login_required
-@spa_required
-def new_help_page():
-
-    return render_template(
-        "admin_edit_help_page.html",
-        page=None,
-        page_key=""
-    )
 
 
 
@@ -33064,7 +45416,9 @@ def help_center():
                 FROM help_pages
 
                 WHERE is_active = TRUE
+                  AND spa_id IS NULL
                   AND language_code IN (%s, 'EN')
+                  AND page_key <> 'sms_email_terms'
             )
 
             SELECT
@@ -33153,95 +45507,273 @@ def help_center():
 def sms_email_terms():
 
     spa_id = current_spa_id()
+    user_id = session.get("user_id")
+    business_unit_id = current_business_unit_id()
 
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    # Load help page content
-    cur.execute("""
-        SELECT title, content
-        FROM help_pages
-        WHERE page_key = %s
-          AND spa_id = %s
-          AND is_active = TRUE
-    """, ("sms_email_terms", spa_id))
-
-    page = cur.fetchone()
-
-    if not page:
-        cur.close()
-        conn.close()
-
-        flash("Terms page not found.", "warning")
-        return redirect(url_for("home"))
-
-    if request.method == "POST":
-
-        access = current_workspace_access()
-
-        if not access.get(
-            "can_manage_messaging_compliance",
-            False
-        ):
-            cur.close()
-            conn.close()
-            abort(403)
-
-        agreed = "agree_terms" in request.form
-
-        if not agreed:
-            flash("You must agree to continue.", "warning")
-
-            cur.close()
-            conn.close()
-
-            return render_template(
-                "help_page.html",
-                page=page,
-                page_key="sms_email_terms"
-            )
-
-        cur.execute("""
-            UPDATE spas
-            SET owner_agreed_sms_email_terms = TRUE,
-                owner_agreed_sms_email_terms_at = NOW(),
-                owner_agreed_sms_email_terms_version = %s
-            WHERE spa_id = %s
-        """, ("v1.0", spa_id))
-
-        conn.commit()
-
-        cur.close()
-        conn.close()
-
-        flash("Terms accepted successfully.", "success")
-
-        return redirect(url_for("home"))
-
-    cur.close()
-    conn.close()
-
-    return render_template(
-        "help_page.html",
-        page=page,
-        page_key="sms_email_terms"
+    current_terms_version = (
+        current_sms_email_terms_version()
     )
 
+    requested_language = str(
+        get_current_language()
+        or "EN"
+    ).strip().upper()
 
+    print_mode = str(
+        request.args.get("print", "")
+        or ""
+    ).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
 
+    security_csrf_token = (
+        _security_form_csrf_token()
+    )
 
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
 
+    try:
+        # SMS & Email Terms are a Peach Suite Pro-wide
+        # agreement, not a separate copy for each business.
+        cur.execute(
+            """
+            SELECT
+                title,
+                content,
+                language_code
+            FROM help_pages
+            WHERE page_key = %s
+              AND language_code = %s
+              AND is_active = TRUE
+              AND (
+                    spa_id IS NULL
+                    OR spa_id = %s
+              )
+            ORDER BY
+                CASE
+                    WHEN spa_id IS NULL THEN 0
+                    ELSE 1
+                END,
+                help_page_id DESC
+            LIMIT 1
+            """,
+            (
+                "sms_email_terms",
+                requested_language,
+                spa_id,
+            ),
+        )
 
+        page = cur.fetchone()
 
+        # Fall back to English when the requested
+        # translation is not available.
+        if (
+            not page
+            and requested_language != "EN"
+        ):
+            cur.execute(
+                """
+                SELECT
+                    title,
+                    content,
+                    language_code
+                FROM help_pages
+                WHERE page_key = %s
+                  AND language_code = 'EN'
+                  AND is_active = TRUE
+                  AND (
+                        spa_id IS NULL
+                        OR spa_id = %s
+                  )
+                ORDER BY
+                    CASE
+                        WHEN spa_id IS NULL THEN 0
+                        ELSE 1
+                    END,
+                    help_page_id DESC
+                LIMIT 1
+                """,
+                (
+                    "sms_email_terms",
+                    spa_id,
+                ),
+            )
 
-#   -------------------------
-#
-#
-#    DAILY BUILD LOG
-#
-#
-#
-#   -------------------------
+            page = cur.fetchone()
+
+        if not page:
+            flash(
+                "Terms page not found.",
+                "warning",
+            )
+
+            return redirect(
+                url_for("morning_briefing")
+            )
+
+        if request.method == "POST":
+
+            access = current_workspace_access()
+
+            if not access.get(
+                "can_manage_messaging_compliance",
+                False,
+            ):
+                abort(403)
+
+            submitted_token = request.form.get(
+                "security_csrf_token",
+                "",
+            )
+
+            if not _security_form_csrf_valid(
+                submitted_token
+            ):
+                abort(400)
+
+            agreed = (
+                "agree_terms"
+                in request.form
+            )
+
+            if not agreed:
+                flash(
+                    "You must agree to continue.",
+                    "warning",
+                )
+
+                return render_template(
+                    "help_page.html",
+                    page=page,
+                    page_key="sms_email_terms",
+                    selected_language=page[2],
+                    current_terms_version=(
+                        current_terms_version
+                    ),
+                    security_csrf_token=(
+                        security_csrf_token
+                    ),
+                    print_mode=False,
+                )
+
+            cur.execute(
+                """
+                SELECT
+                    owner_agreed_sms_email_terms,
+                    owner_agreed_sms_email_terms_at,
+                    owner_agreed_sms_email_terms_version
+                FROM spas
+                WHERE spa_id = %s
+                FOR UPDATE
+                """,
+                (spa_id,),
+            )
+
+            prior_terms_status = cur.fetchone()
+
+            if not prior_terms_status:
+                abort(404)
+
+            prior_accepted = bool(
+                prior_terms_status[0]
+            )
+
+            prior_version = str(
+                prior_terms_status[2]
+                or ""
+            ).strip()
+
+            cur.execute(
+                """
+                UPDATE spas
+                SET owner_agreed_sms_email_terms = TRUE,
+                    owner_agreed_sms_email_terms_at = NOW(),
+                    owner_agreed_sms_email_terms_version = %s
+                WHERE spa_id = %s
+                """,
+                (
+                    current_terms_version,
+                    spa_id,
+                ),
+            )
+
+            old_value = (
+                "accepted="
+                + (
+                    "true"
+                    if prior_accepted
+                    else "false"
+                )
+                + "; version="
+                + (
+                    prior_version
+                    or "none"
+                )
+            )
+
+            new_value = (
+                "accepted=true; version="
+                + current_terms_version
+            )
+
+            log_audit(
+                cur,
+                spa_id=spa_id,
+                user_id=user_id,
+                action_type=(
+                    "sms_email_terms_accepted"
+                ),
+                table_name="spas",
+                record_id=spa_id,
+                old_value=old_value,
+                new_value=new_value,
+                notes=(
+                    "Authorized business user accepted "
+                    "the current Peach Suite Pro SMS & "
+                    "Email Terms agreement."
+                ),
+                business_unit_id=business_unit_id,
+            )
+
+            conn.commit()
+
+            session.pop(
+                "_security_form_csrf",
+                None,
+            )
+
+            flash(
+                "SMS & Email Terms accepted successfully.",
+                "success",
+            )
+
+            return redirect(
+                url_for("spa_management")
+            )
+
+        return render_template(
+            "help_page.html",
+            page=page,
+            page_key="sms_email_terms",
+            selected_language=page[2],
+            current_terms_version=current_terms_version,
+            security_csrf_token=security_csrf_token,
+            print_mode=print_mode,
+        )
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
 
 @app.route('/log-it', methods=['GET', 'POST'])
 @login_required
@@ -34595,6 +47127,12 @@ def send_sms_message(
     final_message_body = message_body
 
     if not sms_enabled:
+        log_sms(
+            "SMS send skipped because the system switch is disabled.",
+            severity="WARNING",
+            related_type="sms_send_disabled",
+        )
+
         return {
             "success": False,
             "status": "logged",
@@ -34638,6 +47176,12 @@ def send_sms_message(
             flush=True
         )
 
+        log_sms(
+            "Telnyx accepted SMS send.",
+            severity="INFO",
+            related_type="telnyx_send",
+        )
+
         return {
             "success": True,
             "status": "sent",
@@ -34656,6 +47200,12 @@ def send_sms_message(
             type(error).__name__,
             str(error),
             flush=True
+        )
+
+        log_sms(
+            "Telnyx SMS send request failed.",
+            severity="ERROR",
+            related_type="telnyx_send",
         )
 
         return {
@@ -47440,6 +59990,7 @@ def mark_birthday_offer_sent_disabled():
 @app.route("/employees")
 @login_required
 @spa_required
+@require_workspace_permission("can_view_employees")
 def employees_home():
     spa_id = current_spa_id()
 
@@ -47519,6 +60070,7 @@ from datetime import date
 @app.route("/employee_pay_summary")
 @login_required
 @spa_required
+@require_workspace_permission("can_view_employee_compensation")
 def employee_pay_summary():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -47594,19 +60146,109 @@ def employee_pay_summary():
 @app.route("/add_employee_compensation", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_employee_compensation")
 def add_employee_compensation():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if (
+        business_unit_id is None
+        or user_id is None
+    ):
+        abort(403)
+
+    page_scope = "add_employee_compensation"
+
+    page_instance_id = str(
+        request.values.get(
+            "employee_access_page_instance",
+            "",
+        )
+        or ""
+    ).strip()
+
+    return_path = url_for(
+        "add_employee_compensation"
+    )
+
+    employee_access_required = (
+        _employee_access_required_for_business(
+            spa_id
+        )
+    )
+
+    verification = None
+
+    if employee_access_required:
+        verification = (
+            _employee_access_page_verification(
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                user_id=user_id,
+                page_scope=page_scope,
+                page_instance_id=page_instance_id,
+            )
+        )
+
+        if not verification:
+            challenge = (
+                _new_employee_access_page_challenge(
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    user_id=user_id,
+                    page_scope=page_scope,
+                )
+            )
+
+            return render_template(
+                "employee_access_verify.html",
+                page_title="Add Employee Compensation",
+                page_scope=page_scope,
+                return_path=return_path,
+                challenge_token=challenge[
+                    "challenge_token"
+                ],
+                page_instance_id=challenge[
+                    "page_instance_id"
+                ],
+                security_csrf_token=(
+                    _security_form_csrf_token()
+                ),
+            )
+
+    if request.method == "POST":
+        submitted_csrf = request.form.get(
+            "security_csrf_token",
+            "",
+        )
+
+        if not _security_form_csrf_valid(
+            submitted_csrf
+        ):
+            abort(400)
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Load employees
+    # Load active employees assigned to the current workspace.
     cur.execute("""
-        SELECT employee_id, first_name || ' ' || last_name AS employee_name
-        FROM employees
-        WHERE spa_id = %s
-        ORDER BY first_name, last_name
-    """, (spa_id,))
+        SELECT
+            e.employee_id,
+            e.first_name || ' ' || e.last_name AS employee_name
+        FROM employees e
+        JOIN employee_business_unit_memberships ebum
+          ON ebum.spa_id = e.spa_id
+         AND ebum.employee_id = e.employee_id
+        WHERE e.spa_id = %s
+          AND ebum.business_unit_id = %s
+          AND e.is_active = TRUE
+          AND ebum.is_active = TRUE
+        ORDER BY e.first_name, e.last_name
+    """, (
+        spa_id,
+        business_unit_id
+    ))
     employees = cur.fetchall()
 
     # Load compensation types for all 4 dropdowns
@@ -47656,17 +60298,24 @@ def add_employee_compensation():
         else:
             # -----------------------------------------
             # Verify submitted employee belongs to
-            # the current spa.
+            # the current spa and is active.
             # -----------------------------------------
             cur.execute("""
                 SELECT 1
-                FROM employees
-                WHERE employee_id = %s
-                  AND spa_id = %s
+                FROM employees e
+                JOIN employee_business_unit_memberships ebum
+                  ON ebum.spa_id = e.spa_id
+                 AND ebum.employee_id = e.employee_id
+                WHERE e.employee_id = %s
+                  AND e.spa_id = %s
+                  AND ebum.business_unit_id = %s
+                  AND e.is_active = TRUE
+                  AND ebum.is_active = TRUE
                 LIMIT 1
             """, (
                 employee_id,
-                spa_id
+                spa_id,
+                business_unit_id
             ))
 
             employee_is_authorized = (
@@ -47724,14 +60373,16 @@ def add_employee_compensation():
                 cur.execute("""
                     INSERT INTO employee_compensation (
                         spa_id,
+                        business_unit_id,
                         employee_id,
                         compensation_date,
                         notes
                     )
-                    VALUES (%s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s)
                     RETURNING compensation_id
                 """, (
                     spa_id,
+                    business_unit_id,
                     employee_id,
                     payment_date,
                     notes
@@ -47756,7 +60407,36 @@ def add_employee_compensation():
                         amount
                     ))
 
+                log_audit(
+                    cur,
+                    spa_id=spa_id,
+                    user_id=user_id,
+                    action_type=(
+                        "employee_compensation_created"
+                    ),
+                    table_name="employee_compensation",
+                    record_id=compensation_id,
+                    notes=(
+                        (
+                            "Employee compensation created by "
+                            "verified Employee Access user."
+                        )
+                        if verification
+                        else (
+                            "Employee compensation created by "
+                            "authenticated Solo Owner."
+                        )
+                    ),
+                    business_unit_id=business_unit_id,
+                    verified_employee_id=(
+                        verification["employee_id"]
+                        if verification
+                        else None
+                    ),
+                )
+
                 conn.commit()
+
                 cur.close()
                 conn.close()
 
@@ -47777,7 +60457,12 @@ def add_employee_compensation():
     return render_template(
         "add_employee_compensation.html",
         employees=employees,
-        compensation_types=compensation_types
+        compensation_types=compensation_types,
+        employee_access_verified=verification,
+        employee_access_page_scope=page_scope,
+        employee_access_return_path=return_path,
+        employee_access_page_instance_id=page_instance_id,
+        security_csrf_token=_security_form_csrf_token(),
     )
 
 
@@ -47793,10 +60478,1015 @@ def add_employee_compensation():
 @app.route("/employee_admin")
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_employees")
 def employee_admin():
     spa_id = current_spa_id()
 
     return render_template("employee_admin.html")
+
+
+@app.route(
+    "/employee-access/verify",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+def employee_access_verify():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if (
+        business_unit_id is None
+        or user_id is None
+    ):
+        abort(403)
+
+    submitted_csrf = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_csrf
+    ):
+        abort(400)
+
+    page_scope = str(
+        request.form.get("page_scope", "")
+        or ""
+    ).strip()
+
+    if not _employee_access_sensitive_page_scope_allowed(
+        page_scope
+    ):
+        abort(400)
+
+    return_path = _employee_access_safe_return_path(
+        request.form.get("return_path", ""),
+        fallback=url_for("employee_admin"),
+    )
+
+    challenge_token = request.form.get(
+        "challenge_token",
+        "",
+    )
+    page_instance_id = request.form.get(
+        "page_instance_id",
+        "",
+    )
+
+    challenge_valid = (
+        _consume_employee_access_page_challenge(
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            user_id=user_id,
+            page_scope=page_scope,
+            challenge_token=challenge_token,
+            page_instance_id=page_instance_id,
+        )
+    )
+
+    if not challenge_valid:
+        abort(400)
+
+    result = _verify_employee_access_submission(
+        spa_id=spa_id,
+        business_unit_id=business_unit_id,
+        user_id=user_id,
+        page_scope=page_scope,
+        submitted_code=request.form.get(
+            "employee_access_code",
+            "",
+        ),
+    )
+
+    status = result.get("status")
+
+    if status == "success":
+        _set_employee_access_page_verification(
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            user_id=user_id,
+            page_scope=page_scope,
+            page_instance_id=page_instance_id,
+            security_session_hash=result[
+                "security_session_hash"
+            ],
+            verified_employee=result[
+                "verified_employee"
+            ],
+        )
+
+        return redirect(return_path)
+
+    if status == "locked":
+        flash(
+            "Employee Access is temporarily locked after "
+            "too many unsuccessful verification attempts. "
+            f"Please try again in "
+            f"{EMPLOYEE_ACCESS_FAILURE_LOCK_MINUTES} minutes.",
+            "error",
+        )
+
+    elif status == "unavailable":
+        flash(
+            "Employee Access Codes are not available for "
+            "this Provider Workspace. Please contact a "
+            "Business Administrator.",
+            "error",
+        )
+
+    else:
+        flash(
+            "Employee Access Code not recognized. "
+            "Please try again.",
+            "error",
+        )
+
+    return redirect(return_path)
+
+
+@app.route(
+    "/employee-access/end",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+def employee_access_end():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if (
+        business_unit_id is None
+        or user_id is None
+    ):
+        abort(403)
+
+    submitted_csrf = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_csrf
+    ):
+        abort(400)
+
+    page_scope = str(
+        request.form.get("page_scope", "")
+        or ""
+    ).strip()
+
+    if not _employee_access_sensitive_page_scope_allowed(
+        page_scope
+    ):
+        abort(400)
+
+    _end_employee_access_secure_session(
+        spa_id=spa_id,
+        business_unit_id=business_unit_id,
+        user_id=user_id,
+    )
+
+    return_path = _employee_access_safe_return_path(
+        request.form.get("return_path", ""),
+        fallback=url_for("employee_admin"),
+    )
+
+    return redirect(return_path)
+
+
+
+@app.route(
+    "/employee-access-codes",
+    methods=["GET", "POST"],
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_employee_access_codes"
+)
+def employee_access_codes_admin():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if (
+        business_unit_id is None
+        or user_id is None
+    ):
+        abort(403)
+
+    if request.method == "POST":
+        submitted_token = request.form.get(
+            "security_csrf_token",
+            "",
+        )
+
+        if not _security_form_csrf_valid(
+            submitted_token
+        ):
+            abort(400)
+
+        requested_is_enabled = (
+            request.form.get("is_enabled") == "1"
+        )
+
+        try:
+            (
+                requested_code_length,
+                requested_character_set,
+            ) = normalize_access_code_format(
+                request.form.get("code_length"),
+                request.form.get(
+                    "code_character_set"
+                ),
+            )
+
+        except EmployeeAccessSecurityError as exc:
+            flash(str(exc), "error")
+            return redirect(
+                url_for("employee_access_codes_admin")
+            )
+
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    try:
+        cur.execute("""
+            SELECT
+                business_unit_id,
+                unit_name
+            FROM business_units
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND is_active = TRUE
+            LIMIT 1
+        """, (
+            spa_id,
+            business_unit_id,
+        ))
+
+        workspace = cur.fetchone()
+
+        if not workspace:
+            abort(403)
+
+        if request.method == "POST":
+            cur.execute("""
+                SELECT
+                    employee_access_code_setting_id,
+                    is_enabled,
+                    code_length,
+                    code_character_set
+                FROM employee_access_code_settings
+                WHERE spa_id = %s
+                  AND business_unit_id = %s
+                FOR UPDATE
+            """, (
+                spa_id,
+                business_unit_id,
+            ))
+
+            existing_settings = cur.fetchone()
+
+            cur.execute("""
+                SELECT COUNT(*) AS active_count
+                FROM employee_access_code_credentials
+                WHERE spa_id = %s
+                  AND business_unit_id = %s
+                  AND is_active = TRUE
+            """, (
+                spa_id,
+                business_unit_id,
+            ))
+
+            active_credential_count = int(
+                cur.fetchone()["active_count"] or 0
+            )
+
+            old_code_length = (
+                existing_settings["code_length"]
+                if existing_settings
+                else None
+            )
+
+            old_character_set = (
+                existing_settings["code_character_set"]
+                if existing_settings
+                else None
+            )
+
+            format_changed = (
+                existing_settings is not None
+                and (
+                    old_code_length
+                    != requested_code_length
+                    or old_character_set
+                    != requested_character_set
+                )
+            )
+
+            if (
+                format_changed
+                and active_credential_count > 0
+            ):
+                conn.rollback()
+
+                flash(
+                    "The Employee Access Code format cannot "
+                    "be changed while active employee codes "
+                    "are assigned. Reset or revoke the active "
+                    "codes first.",
+                    "error",
+                )
+
+                return redirect(
+                    url_for(
+                        "employee_access_codes_admin"
+                    )
+                )
+
+            old_value = (
+                "is_enabled="
+                + (
+                    "true"
+                    if (
+                        existing_settings
+                        and existing_settings["is_enabled"]
+                    )
+                    else "false"
+                )
+                + "; code_length="
+                + (
+                    str(old_code_length)
+                    if old_code_length is not None
+                    else "none"
+                )
+                + "; code_character_set="
+                + (
+                    str(old_character_set)
+                    if old_character_set
+                    else "none"
+                )
+            )
+
+            cur.execute("""
+                INSERT INTO employee_access_code_settings (
+                    spa_id,
+                    business_unit_id,
+                    is_enabled,
+                    code_length,
+                    code_character_set,
+                    created_by,
+                    updated_at,
+                    updated_by
+                )
+                VALUES (
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    NOW(),
+                    %s
+                )
+                ON CONFLICT (
+                    spa_id,
+                    business_unit_id
+                )
+                DO UPDATE SET
+                    is_enabled = EXCLUDED.is_enabled,
+                    code_length = EXCLUDED.code_length,
+                    code_character_set = (
+                        EXCLUDED.code_character_set
+                    ),
+                    updated_at = NOW(),
+                    updated_by = EXCLUDED.updated_by
+                RETURNING
+                    employee_access_code_setting_id
+            """, (
+                spa_id,
+                business_unit_id,
+                requested_is_enabled,
+                requested_code_length,
+                requested_character_set,
+                user_id,
+                user_id,
+            ))
+
+            setting_id = cur.fetchone()[
+                "employee_access_code_setting_id"
+            ]
+
+            new_value = (
+                "is_enabled="
+                + (
+                    "true"
+                    if requested_is_enabled
+                    else "false"
+                )
+                + f"; code_length={requested_code_length}"
+                + "; code_character_set="
+                + requested_character_set
+            )
+
+            log_audit(
+                cur,
+                spa_id,
+                user_id,
+                "employee_access_settings_updated",
+                table_name=(
+                    "employee_access_code_settings"
+                ),
+                record_id=setting_id,
+                old_value=old_value,
+                new_value=new_value,
+                notes=(
+                    "Employee Access Code settings updated "
+                    f"for Provider Workspace "
+                    f"{workspace['unit_name']}."
+                ),
+                business_unit_id=business_unit_id,
+            )
+
+            conn.commit()
+
+            flash(
+                "Employee Access Code settings saved.",
+                "success",
+            )
+
+            return redirect(
+                url_for("employee_access_codes_admin")
+            )
+
+        cur.execute("""
+            SELECT
+                employee_access_code_setting_id,
+                is_enabled,
+                code_length,
+                code_character_set,
+                created_at,
+                updated_at
+            FROM employee_access_code_settings
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+            LIMIT 1
+        """, (
+            spa_id,
+            business_unit_id,
+        ))
+
+        settings_row = cur.fetchone()
+
+        settings = {
+            "is_enabled": False,
+            "code_length": None,
+            "code_character_set": None,
+        }
+
+        if settings_row:
+            settings.update({
+                "is_enabled": bool(
+                    settings_row["is_enabled"]
+                ),
+                "code_length": settings_row["code_length"],
+                "code_character_set": (
+                    settings_row["code_character_set"]
+                ),
+            })
+
+        cur.execute("""
+            SELECT
+                e.employee_id,
+                e.first_name,
+                e.last_name,
+                e.employee_nickname,
+                e.is_active AS employee_is_active,
+                ebum.is_active AS workspace_membership_is_active,
+                eacc.employee_access_code_credential_id,
+                eacc.created_at AS credential_created_at,
+                eacc.last_used_at
+            FROM employee_business_unit_memberships ebum
+            JOIN employees e
+              ON e.spa_id = ebum.spa_id
+             AND e.employee_id = ebum.employee_id
+            LEFT JOIN employee_access_code_credentials eacc
+              ON eacc.spa_id = ebum.spa_id
+             AND eacc.business_unit_id = ebum.business_unit_id
+             AND eacc.employee_id = ebum.employee_id
+             AND eacc.is_active = TRUE
+            WHERE ebum.spa_id = %s
+              AND ebum.business_unit_id = %s
+            ORDER BY
+                (
+                    e.is_active = TRUE
+                    AND ebum.is_active = TRUE
+                ) DESC,
+                e.last_name ASC,
+                e.first_name ASC,
+                e.employee_id ASC
+        """, (
+            spa_id,
+            business_unit_id,
+        ))
+
+        employees = cur.fetchall()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    action_nonce = secrets.token_urlsafe(32)
+
+    session["_employee_access_code_action_nonce"] = {
+        "token": action_nonce,
+        "user_id": user_id,
+        "spa_id": spa_id,
+        "business_unit_id": business_unit_id,
+        "issued_at": int(time.time()),
+    }
+
+    return render_template(
+        "employee_access_codes.html",
+        workspace=workspace,
+        settings=settings,
+        employees=employees,
+        security_csrf_token=_security_form_csrf_token(),
+        action_nonce=action_nonce,
+    )
+
+
+@app.route(
+    "/employee-access-codes/<int:employee_id>/issue",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_employee_access_codes"
+)
+def employee_access_code_issue(employee_id):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if (
+        business_unit_id is None
+        or user_id is None
+    ):
+        abort(403)
+
+    submitted_csrf = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_csrf
+    ):
+        abort(400)
+
+    submitted_nonce = str(
+        request.form.get("action_nonce", "")
+        or ""
+    )
+
+    nonce_record = session.pop(
+        "_employee_access_code_action_nonce",
+        None,
+    )
+
+    nonce_valid = False
+
+    if isinstance(nonce_record, dict):
+        expected_nonce = str(
+            nonce_record.get("token")
+            or ""
+        )
+
+        try:
+            nonce_issued_at = int(
+                nonce_record.get("issued_at")
+                or 0
+            )
+        except (TypeError, ValueError):
+            nonce_issued_at = 0
+
+        nonce_valid = bool(
+            submitted_nonce
+            and expected_nonce
+            and nonce_record.get("user_id")
+                == user_id
+            and nonce_record.get("spa_id")
+                == spa_id
+            and nonce_record.get(
+                "business_unit_id"
+            ) == business_unit_id
+            and nonce_issued_at > 0
+            and int(time.time()) - nonce_issued_at
+                <= SECURITY_FORM_CSRF_MAX_AGE_SECONDS
+            and hmac.compare_digest(
+                submitted_nonce,
+                expected_nonce,
+            )
+        )
+
+    if not nonce_valid:
+        abort(400)
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor(
+        cursor_factory=RealDictCursor
+    )
+
+    try:
+        cur.execute("""
+            SELECT
+                business_unit_id,
+                unit_name
+            FROM business_units
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND is_active = TRUE
+            FOR UPDATE
+        """, (
+            spa_id,
+            business_unit_id,
+        ))
+
+        workspace = cur.fetchone()
+
+        if not workspace:
+            conn.rollback()
+            abort(403)
+
+        cur.execute("""
+            SELECT
+                employee_access_code_setting_id,
+                is_enabled,
+                code_length,
+                code_character_set
+            FROM employee_access_code_settings
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+            FOR UPDATE
+        """, (
+            spa_id,
+            business_unit_id,
+        ))
+
+        settings = cur.fetchone()
+
+        if (
+            not settings
+            or not settings["is_enabled"]
+        ):
+            conn.rollback()
+
+            flash(
+                "Employee Access Codes must be enabled "
+                "before employee codes can be assigned.",
+                "error",
+            )
+
+            return redirect(
+                url_for(
+                    "employee_access_codes_admin"
+                )
+            )
+
+        try:
+            (
+                code_length,
+                code_character_set,
+            ) = normalize_access_code_format(
+                settings["code_length"],
+                settings["code_character_set"],
+            )
+        except EmployeeAccessSecurityError:
+            conn.rollback()
+
+            flash(
+                "The Employee Access Code settings are "
+                "not valid. No employee code was changed.",
+                "error",
+            )
+
+            return redirect(
+                url_for(
+                    "employee_access_codes_admin"
+                )
+            )
+
+        cur.execute("""
+            SELECT
+                ebum.employee_business_unit_membership_id,
+                ebum.is_active
+                    AS workspace_membership_is_active,
+                e.is_active
+                    AS employee_is_active,
+                e.first_name,
+                e.last_name,
+                e.employee_nickname
+            FROM employee_business_unit_memberships ebum
+            JOIN employees e
+              ON e.spa_id = ebum.spa_id
+             AND e.employee_id = ebum.employee_id
+            WHERE ebum.spa_id = %s
+              AND ebum.business_unit_id = %s
+              AND ebum.employee_id = %s
+            FOR UPDATE OF ebum, e
+        """, (
+            spa_id,
+            business_unit_id,
+            employee_id,
+        ))
+
+        employee = cur.fetchone()
+
+        if not employee:
+            conn.rollback()
+            abort(404)
+
+        if (
+            not employee[
+                "workspace_membership_is_active"
+            ]
+            or not employee["employee_is_active"]
+        ):
+            conn.rollback()
+
+            flash(
+                "Employee Access Codes can only be "
+                "assigned to active employees in this "
+                "Provider Workspace.",
+                "error",
+            )
+
+            return redirect(
+                url_for(
+                    "employee_access_codes_admin"
+                )
+            )
+
+        employee_name = (
+            employee["employee_nickname"]
+            or (
+                (
+                    (employee["first_name"] or "")
+                    + " "
+                    + (employee["last_name"] or "")
+                ).strip()
+            )
+            or f"Employee {employee_id}"
+        )
+
+        cur.execute("""
+            SELECT
+                employee_access_code_credential_id,
+                code_hash
+            FROM employee_access_code_credentials
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND employee_id = %s
+              AND is_active = TRUE
+            FOR UPDATE
+        """, (
+            spa_id,
+            business_unit_id,
+            employee_id,
+        ))
+
+        existing_credential = cur.fetchone()
+
+        is_reset = bool(existing_credential)
+
+        if is_reset:
+            log_audit(
+                cur,
+                spa_id,
+                user_id,
+                "employee_access_code_reset_requested",
+                table_name=(
+                    "employee_access_code_credentials"
+                ),
+                record_id=existing_credential[
+                    "employee_access_code_credential_id"
+                ],
+                notes=(
+                    "Employee Access Code reset requested "
+                    f"for employee_id={employee_id} in "
+                    f"Provider Workspace "
+                    f"{workspace['unit_name']}."
+                ),
+                business_unit_id=business_unit_id,
+            )
+
+            cur.execute("""
+                UPDATE employee_access_code_credentials
+                SET
+                    is_active = FALSE,
+                    revoked_at = NOW(),
+                    revoked_by = %s,
+                    revocation_reason = 'reset'
+                WHERE
+                    employee_access_code_credential_id = %s
+                  AND spa_id = %s
+                  AND business_unit_id = %s
+                  AND employee_id = %s
+                  AND is_active = TRUE
+            """, (
+                user_id,
+                existing_credential[
+                    "employee_access_code_credential_id"
+                ],
+                spa_id,
+                business_unit_id,
+                employee_id,
+            ))
+
+            if cur.rowcount != 1:
+                raise RuntimeError(
+                    "Employee Access Code reset lost "
+                    "its credential lock."
+                )
+
+        generated_code = None
+        new_credential_id = None
+
+        for _ in range(100):
+            candidate_code = generate_access_code(
+                code_length=code_length,
+                code_character_set=(
+                    code_character_set
+                ),
+            )
+
+            candidate_hash = hash_access_code(
+                candidate_code,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                code_length=code_length,
+                code_character_set=(
+                    code_character_set
+                ),
+            )
+
+            if (
+                existing_credential
+                and candidate_hash
+                    == existing_credential["code_hash"]
+            ):
+                continue
+
+            cur.execute("""
+                INSERT INTO
+                    employee_access_code_credentials (
+                        spa_id,
+                        business_unit_id,
+                        employee_id,
+                        code_hash,
+                        is_active,
+                        created_by
+                    )
+                VALUES (
+                    %s, %s, %s, %s, TRUE, %s
+                )
+                ON CONFLICT DO NOTHING
+                RETURNING
+                    employee_access_code_credential_id
+            """, (
+                spa_id,
+                business_unit_id,
+                employee_id,
+                candidate_hash,
+                user_id,
+            ))
+
+            inserted = cur.fetchone()
+
+            if inserted:
+                generated_code = candidate_code
+                new_credential_id = inserted[
+                    "employee_access_code_credential_id"
+                ]
+                break
+
+        if (
+            generated_code is None
+            or new_credential_id is None
+        ):
+            raise RuntimeError(
+                "Could not allocate a unique Employee "
+                "Access Code after repeated attempts."
+            )
+
+        action_type = (
+            "employee_access_code_reset_completed"
+            if is_reset
+            else "employee_access_code_assigned"
+        )
+
+        log_audit(
+            cur,
+            spa_id,
+            user_id,
+            action_type,
+            table_name=(
+                "employee_access_code_credentials"
+            ),
+            record_id=new_credential_id,
+            old_value=(
+                (
+                    "prior_credential_id="
+                    + str(
+                        existing_credential[
+                            "employee_access_code_credential_id"
+                        ]
+                    )
+                    + "; status=revoked"
+                )
+                if existing_credential
+                else None
+            ),
+            new_value=(
+                f"credential_id={new_credential_id}; "
+                "status=active"
+            ),
+            notes=(
+                (
+                    "Employee Access Code reset completed "
+                    if is_reset
+                    else "Employee Access Code assigned "
+                )
+                + f"for employee_id={employee_id} in "
+                + "Provider Workspace "
+                + f"{workspace['unit_name']}. "
+                + "Plaintext code was not logged."
+            ),
+            business_unit_id=business_unit_id,
+        )
+
+        conn.commit()
+
+        session.pop(
+            "_security_form_csrf",
+            None,
+        )
+
+        return _mfa_no_store(
+            render_template(
+                "employee_access_code_issued.html",
+                workspace=workspace,
+                employee_name=employee_name,
+                employee_id=employee_id,
+                generated_code=generated_code,
+                is_reset=is_reset,
+            )
+        )
+
+    except HTTPException:
+        conn.rollback()
+        raise
+
+    except Exception:
+        conn.rollback()
+
+        app.logger.exception(
+            "Employee Access Code issue/reset failed "
+            "for spa_id=%s, business_unit_id=%s, "
+            "user_id=%s, employee_id=%s",
+            spa_id,
+            business_unit_id,
+            user_id,
+            employee_id,
+        )
+
+        flash(
+            "Peach Suite Pro could not create the "
+            "Employee Access Code. No code was changed.",
+            "error",
+        )
+
+        return redirect(
+            url_for(
+                "employee_access_codes_admin"
+            )
+        )
+
+    finally:
+        cur.close()
+        conn.close()
 
 
 
@@ -47813,7 +61503,13 @@ def employee_admin():
 #     HELPER         HELPER        HELPER
 #   -----------------------------------------
 
-def get_employee_compensation_history_data(spa_id, employee_id="", start_date="", end_date=""):
+def get_employee_compensation_history_data(
+    spa_id,
+    business_unit_id,
+    employee_id="",
+    start_date="",
+    end_date=""
+):
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -47830,14 +61526,21 @@ def get_employee_compensation_history_data(spa_id, employee_id="", start_date=""
         FROM employee_compensation ec
         JOIN employees e
             ON ec.employee_id = e.employee_id
+           AND ec.spa_id = e.spa_id
         JOIN employee_compensation_lines ecl
             ON ec.compensation_id = ecl.compensation_id
         LEFT JOIN compensation_types ct
             ON ecl.compensation_type_id = ct.compensation_type_id
         WHERE ec.spa_id = %s
+          AND ec.business_unit_id = %s
           AND ec.compensation_date BETWEEN %s AND %s
     """
-    params = [spa_id, start_date, end_date]
+    params = [
+        spa_id,
+        business_unit_id,
+        start_date,
+        end_date
+    ]
 
     if employee_id:
         query += " AND ec.employee_id = %s"
@@ -47877,6 +61580,7 @@ def get_employee_compensation_history_data(spa_id, employee_id="", start_date=""
 @app.route("/compensation_types")
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_employee_compensation")
 def compensation_types_report():
     spa_id = current_spa_id()
     conn = get_db_connection()
@@ -47915,6 +61619,7 @@ def compensation_types_report():
 @app.route("/add_compensation_type", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_employee_compensation")
 def add_compensation_type():
     spa_id = current_spa_id()
 
@@ -47971,6 +61676,7 @@ def add_compensation_type():
 @app.route("/edit_compensation_type/<int:compensation_type_id>", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_employee_compensation")
 def edit_compensation_type(compensation_type_id):
     spa_id = current_spa_id()
     conn = get_db_connection()
@@ -48047,6 +61753,7 @@ def edit_compensation_type(compensation_type_id):
 @app.route("/toggle_compensation_type/<int:compensation_type_id>", methods=["POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_employee_compensation")
 def toggle_compensation_type(compensation_type_id):
     spa_id = current_spa_id()
     conn = get_db_connection()
@@ -48085,8 +61792,84 @@ def toggle_compensation_type(compensation_type_id):
 @app.route("/employee_compensation_report")
 @login_required
 @spa_required
+@require_workspace_permission("can_view_employee_compensation")
 def employee_compensation_report():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if (
+        business_unit_id is None
+        or user_id is None
+    ):
+        abort(403)
+
+    page_scope = "employee_compensation_report"
+
+    page_instance_id = str(
+        request.args.get(
+            "employee_access_page_instance",
+            "",
+        )
+        or ""
+    ).strip()
+
+    return_args = request.args.to_dict(flat=True)
+    return_args.pop(
+        "employee_access_page_instance",
+        None,
+    )
+
+    return_path = url_for(
+        "employee_compensation_report",
+        **return_args,
+    )
+
+    employee_access_required = (
+        _employee_access_required_for_business(
+            spa_id
+        )
+    )
+
+    verification = None
+
+    if employee_access_required:
+        verification = (
+            _employee_access_page_verification(
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                user_id=user_id,
+                page_scope=page_scope,
+                page_instance_id=page_instance_id,
+            )
+        )
+
+        if not verification:
+            challenge = (
+                _new_employee_access_page_challenge(
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    user_id=user_id,
+                    page_scope=page_scope,
+                )
+            )
+
+            return render_template(
+                "employee_access_verify.html",
+                page_title="Employee Compensation Report",
+                page_scope=page_scope,
+                return_path=return_path,
+                challenge_token=challenge[
+                    "challenge_token"
+                ],
+                page_instance_id=challenge[
+                    "page_instance_id"
+                ],
+                security_csrf_token=(
+                    _security_form_csrf_token()
+                ),
+            )
+
     today = date.today()
     first_day = today.replace(day=1)
 
@@ -48103,8 +61886,14 @@ def employee_compensation_report():
             COALESCE(SUM(tip_amount), 0.00) AS tips_earned
         FROM income
         WHERE spa_id = %s
+          AND business_unit_id = %s
           AND income_date BETWEEN %s AND %s
-    """, (spa_id, start_date, end_date))
+    """, (
+        spa_id,
+        business_unit_id,
+        start_date,
+        end_date
+    ))
 
     income_totals = cur.fetchone()
     services_billed_total = income_totals[0]
@@ -48124,8 +61913,14 @@ def employee_compensation_report():
         JOIN compensation_types ct
             ON ecl.compensation_type_id = ct.compensation_type_id
         WHERE ec.spa_id = %s
+          AND ec.business_unit_id = %s
           AND ec.compensation_date BETWEEN %s AND %s
-    """, (spa_id, start_date, end_date))
+    """, (
+        spa_id,
+        business_unit_id,
+        start_date,
+        end_date
+    ))
 
     comp_totals = cur.fetchone()
     tip_payouts_paid_total = comp_totals[0]
@@ -48162,6 +61957,9 @@ def employee_compensation_report():
             ) AS net_balance
 
         FROM employees e
+        JOIN employee_business_unit_memberships ebum
+          ON ebum.spa_id = e.spa_id
+         AND ebum.employee_id = e.employee_id
 
         LEFT JOIN (
             SELECT
@@ -48170,6 +61968,7 @@ def employee_compensation_report():
                 COALESCE(SUM(tip_amount), 0.00) AS tips_earned
             FROM income
             WHERE spa_id = %s
+              AND business_unit_id = %s
               AND income_date BETWEEN %s AND %s
             GROUP BY employee_id
         ) inc ON e.employee_id = inc.employee_id
@@ -48188,16 +61987,18 @@ def employee_compensation_report():
             JOIN compensation_types ct
                 ON ecl.compensation_type_id = ct.compensation_type_id
             WHERE ec.spa_id = %s
+              AND ec.business_unit_id = %s
               AND ec.compensation_date BETWEEN %s AND %s
             GROUP BY ec.employee_id
         ) comp ON e.employee_id = comp.employee_id
 
         WHERE e.spa_id = %s
+          AND ebum.business_unit_id = %s
         ORDER BY e.last_name, e.first_name
     """, (
-        spa_id, start_date, end_date,
-        spa_id, start_date, end_date,
-        spa_id
+        spa_id, business_unit_id, start_date, end_date,
+        spa_id, business_unit_id, start_date, end_date,
+        spa_id, business_unit_id
     ))
 
     summary_rows = cur.fetchall()
@@ -48218,10 +62019,17 @@ def employee_compensation_report():
             ON ecl.compensation_type_id = ct.compensation_type_id
         LEFT JOIN employees e
             ON ec.employee_id = e.employee_id
+           AND ec.spa_id = e.spa_id
         WHERE ec.spa_id = %s
+          AND ec.business_unit_id = %s
           AND ec.compensation_date BETWEEN %s AND %s
         ORDER BY ec.compensation_date DESC, ec.compensation_id DESC, ct.compensation_type_name
-    """, (spa_id, start_date, end_date))
+    """, (
+        spa_id,
+        business_unit_id,
+        start_date,
+        end_date
+    ))
 
     ledger_rows = cur.fetchall()
 
@@ -48241,7 +62049,12 @@ def employee_compensation_report():
         bonus_paid_total=bonus_paid_total,
         extra_pay_paid_total=extra_pay_paid_total,
         total_comp_paid=total_comp_paid,
-        outstanding_tips=outstanding_tips
+        outstanding_tips=outstanding_tips,
+        employee_access_verified=verification,
+        employee_access_page_scope=page_scope,
+        employee_access_return_path=return_path,
+        employee_access_page_instance_id=page_instance_id,
+        security_csrf_token=_security_form_csrf_token(),
     )
 
 
@@ -48261,8 +62074,83 @@ def employee_compensation_report():
 @app.route("/employee_compensation_history")
 @login_required
 @spa_required
+@require_workspace_permission("can_view_employee_compensation")
 def employee_compensation_history():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if (
+        business_unit_id is None
+        or user_id is None
+    ):
+        abort(403)
+
+    page_scope = "employee_compensation_history"
+
+    page_instance_id = str(
+        request.args.get(
+            "employee_access_page_instance",
+            "",
+        )
+        or ""
+    ).strip()
+
+    return_args = request.args.to_dict(flat=True)
+    return_args.pop(
+        "employee_access_page_instance",
+        None,
+    )
+
+    return_path = url_for(
+        "employee_compensation_history",
+        **return_args,
+    )
+
+    employee_access_required = (
+        _employee_access_required_for_business(
+            spa_id
+        )
+    )
+
+    verification = None
+
+    if employee_access_required:
+        verification = (
+            _employee_access_page_verification(
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                user_id=user_id,
+                page_scope=page_scope,
+                page_instance_id=page_instance_id,
+            )
+        )
+
+        if not verification:
+            challenge = (
+                _new_employee_access_page_challenge(
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    user_id=user_id,
+                    page_scope=page_scope,
+                )
+            )
+
+            return render_template(
+                "employee_access_verify.html",
+                page_title="Employee Compensation History",
+                page_scope=page_scope,
+                return_path=return_path,
+                challenge_token=challenge[
+                    "challenge_token"
+                ],
+                page_instance_id=challenge[
+                    "page_instance_id"
+                ],
+                security_csrf_token=(
+                    _security_form_csrf_token()
+                ),
+            )
 
     today = date.today()
     first_day = today.replace(day=1)
@@ -48275,11 +62163,21 @@ def employee_compensation_history():
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT employee_id, first_name, last_name
-        FROM employees
-        WHERE spa_id = %s
-        ORDER BY last_name, first_name
-    """, (spa_id,))
+        SELECT
+            e.employee_id,
+            e.first_name,
+            e.last_name
+        FROM employees e
+        JOIN employee_business_unit_memberships ebum
+          ON ebum.spa_id = e.spa_id
+         AND ebum.employee_id = e.employee_id
+        WHERE e.spa_id = %s
+          AND ebum.business_unit_id = %s
+        ORDER BY e.last_name, e.first_name
+    """, (
+        spa_id,
+        business_unit_id
+    ))
     employees = cur.fetchall()
 
     cur.close()
@@ -48287,6 +62185,7 @@ def employee_compensation_history():
 
     rows = get_employee_compensation_history_data(
         spa_id=spa_id,
+        business_unit_id=business_unit_id,
         employee_id=employee_id,
         start_date=start_date,
         end_date=end_date
@@ -48301,7 +62200,12 @@ def employee_compensation_history():
         employee_id=employee_id,
         start_date=start_date,
         end_date=end_date,
-        total_amount=total_amount
+        total_amount=total_amount,
+        employee_access_verified=verification,
+        employee_access_page_scope=page_scope,
+        employee_access_return_path=return_path,
+        employee_access_page_instance_id=page_instance_id,
+        security_csrf_token=_security_form_csrf_token(),
     )
 
 
@@ -48324,8 +62228,51 @@ def employee_compensation_history():
 @app.route("/delete_employee_compensation/<int:compensation_id>", methods=["POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_employee_compensation")
 def delete_employee_compensation(compensation_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if (
+        business_unit_id is None
+        or user_id is None
+    ):
+        abort(403)
+
+    submitted_csrf = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_csrf
+    ):
+        abort(400)
+
+    employee_access_required = (
+        _employee_access_required_for_business(
+            spa_id
+        )
+    )
+
+    verification = None
+
+    if employee_access_required:
+        verification = (
+            _employee_access_page_verification(
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                user_id=user_id,
+                page_scope=(
+                    "employee_compensation_history"
+                ),
+                page_instance_id="",
+            )
+        )
+
+        if not verification:
+            abort(403)
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -48335,7 +62282,12 @@ def delete_employee_compensation(compensation_id):
         FROM employee_compensation
         WHERE compensation_id = %s
           AND spa_id = %s
-    """, (compensation_id, spa_id))
+          AND business_unit_id = %s
+    """, (
+        compensation_id,
+        spa_id,
+        business_unit_id
+    ))
     record = cur.fetchone()
 
     if not record:
@@ -48353,9 +62305,41 @@ def delete_employee_compensation(compensation_id):
         DELETE FROM employee_compensation
         WHERE compensation_id = %s
           AND spa_id = %s
-    """, (compensation_id, spa_id))
+          AND business_unit_id = %s
+    """, (
+        compensation_id,
+        spa_id,
+        business_unit_id
+    ))
+
+    log_audit(
+        cur,
+        spa_id=spa_id,
+        user_id=user_id,
+        action_type="employee_compensation_deleted",
+        table_name="employee_compensation",
+        record_id=compensation_id,
+        notes=(
+            (
+                "Employee compensation deleted by "
+                "verified Employee Access user."
+            )
+            if verification
+            else (
+                "Employee compensation deleted by "
+                "authenticated Solo Owner."
+            )
+        ),
+        business_unit_id=business_unit_id,
+        verified_employee_id=(
+            verification["employee_id"]
+            if verification
+            else None
+        ),
+    )
 
     conn.commit()
+
     cur.close()
     conn.close()
 
@@ -48381,19 +62365,162 @@ def delete_employee_compensation(compensation_id):
 @app.route("/edit_employee_compensation/<int:compensation_id>", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_employee_compensation")
 def edit_employee_compensation(compensation_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if (
+        business_unit_id is None
+        or user_id is None
+    ):
+        abort(403)
+
+    page_scope = (
+        "edit_employee_compensation:"
+        f"{compensation_id}"
+    )
+
+    page_instance_id = str(
+        request.values.get(
+            "employee_access_page_instance",
+            "",
+        )
+        or ""
+    ).strip()
+
+    return_path = url_for(
+        "edit_employee_compensation",
+        compensation_id=compensation_id,
+    )
+
+    employee_access_required = (
+        _employee_access_required_for_business(
+            spa_id
+        )
+    )
+
+    verification = None
+
+    if employee_access_required:
+        verification = (
+            _employee_access_page_verification(
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                user_id=user_id,
+                page_scope=page_scope,
+                page_instance_id=page_instance_id,
+            )
+        )
+
+        if not verification:
+            challenge = (
+                _new_employee_access_page_challenge(
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    user_id=user_id,
+                    page_scope=page_scope,
+                )
+            )
+
+            return render_template(
+                "employee_access_verify.html",
+                page_title="Edit Employee Compensation",
+                page_scope=page_scope,
+                return_path=return_path,
+                challenge_token=challenge[
+                    "challenge_token"
+                ],
+                page_instance_id=challenge[
+                    "page_instance_id"
+                ],
+                security_csrf_token=(
+                    _security_form_csrf_token()
+                ),
+            )
+
+    if request.method == "POST":
+        submitted_csrf = request.form.get(
+            "security_csrf_token",
+            "",
+        )
+
+        if not _security_form_csrf_valid(
+            submitted_csrf
+        ):
+            abort(400)
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Load employees
+    # Load the historical compensation record first so an
+    # already-assigned archived employee can be preserved.
     cur.execute("""
-        SELECT employee_id, first_name || ' ' || last_name AS employee_name
-        FROM employees
-        WHERE spa_id = %s
-        ORDER BY first_name, last_name
-    """, (spa_id,))
+        SELECT
+            compensation_id,
+            employee_id,
+            compensation_date,
+            notes
+        FROM employee_compensation
+        WHERE compensation_id = %s
+          AND spa_id = %s
+          AND business_unit_id = %s
+        LIMIT 1
+    """, (
+        compensation_id,
+        spa_id,
+        business_unit_id
+    ))
+
+    compensation = cur.fetchone()
+
+    if not compensation:
+        cur.close()
+        conn.close()
+
+        flash(
+            "Compensation record not found or not authorized.",
+            "error"
+        )
+
+        return redirect(
+            url_for(
+                "employee_compensation_history"
+            )
+        )
+
+    current_compensation_employee_id = compensation[1]
+
+    # Load active employees plus only the employee already
+    # attached to this historical compensation record.
+    cur.execute("""
+        SELECT
+            e.employee_id,
+            e.first_name || ' ' || e.last_name AS employee_name,
+            e.is_active
+        FROM employees e
+        JOIN employee_business_unit_memberships ebum
+          ON ebum.spa_id = e.spa_id
+         AND ebum.employee_id = e.employee_id
+        WHERE e.spa_id = %s
+          AND ebum.business_unit_id = %s
+          AND (
+                (
+                    e.is_active = TRUE
+                    AND ebum.is_active = TRUE
+                )
+                OR e.employee_id = %s
+          )
+        ORDER BY
+            e.is_active DESC,
+            e.first_name,
+            e.last_name
+    """, (
+        spa_id,
+        business_unit_id,
+        current_compensation_employee_id
+    ))
     employees = cur.fetchall()
 
     # Load active compensation types
@@ -48434,18 +62561,32 @@ def edit_employee_compensation(compensation_id):
             flash("Enter at least one compensation line with type and amount.", "error")
         else:
             # -----------------------------------------
-            # Verify submitted employee and
-            # compensation types belong to this spa.
+            # Verify submitted employee is active or is
+            # the employee already attached to this historical
+            # record. Compensation types must belong to this spa.
             # -----------------------------------------
             cur.execute("""
                 SELECT 1
-                FROM employees
-                WHERE employee_id = %s
-                  AND spa_id = %s
+                FROM employees e
+                JOIN employee_business_unit_memberships ebum
+                  ON ebum.spa_id = e.spa_id
+                 AND ebum.employee_id = e.employee_id
+                WHERE e.employee_id = %s
+                  AND e.spa_id = %s
+                  AND ebum.business_unit_id = %s
+                  AND (
+                        (
+                            e.is_active = TRUE
+                            AND ebum.is_active = TRUE
+                        )
+                        OR e.employee_id = %s
+                  )
                 LIMIT 1
             """, (
                 employee_id,
-                spa_id
+                spa_id,
+                business_unit_id,
+                current_compensation_employee_id
             ))
 
             employee_is_authorized = (
@@ -48500,7 +62641,7 @@ def edit_employee_compensation(compensation_id):
 
             else:
                 # Update only a compensation record
-                # owned by the current spa.
+                # owned by the current workspace.
                 cur.execute("""
                     UPDATE employee_compensation
                     SET employee_id = %s,
@@ -48508,12 +62649,14 @@ def edit_employee_compensation(compensation_id):
                         notes = %s
                     WHERE compensation_id = %s
                       AND spa_id = %s
+                      AND business_unit_id = %s
                 """, (
                     employee_id,
                     payment_date,
                     notes,
                     compensation_id,
-                    spa_id
+                    spa_id,
+                    business_unit_id
                 ))
 
                 if cur.rowcount == 0:
@@ -48559,7 +62702,36 @@ def edit_employee_compensation(compensation_id):
                         amount
                     ))
 
+                log_audit(
+                    cur,
+                    spa_id=spa_id,
+                    user_id=user_id,
+                    action_type=(
+                        "employee_compensation_updated"
+                    ),
+                    table_name="employee_compensation",
+                    record_id=compensation_id,
+                    notes=(
+                        (
+                            "Employee compensation updated by "
+                            "verified Employee Access user."
+                        )
+                        if verification
+                        else (
+                            "Employee compensation updated by "
+                            "authenticated Solo Owner."
+                        )
+                    ),
+                    business_unit_id=business_unit_id,
+                    verified_employee_id=(
+                        verification["employee_id"]
+                        if verification
+                        else None
+                    ),
+                )
+
                 conn.commit()
+
                 cur.close()
                 conn.close()
 
@@ -48574,32 +62746,8 @@ def edit_employee_compensation(compensation_id):
                     )
                 )
 
-    # Load header record
-    cur.execute("""
-        SELECT compensation_id, employee_id, compensation_date, notes
-        FROM employee_compensation
-        WHERE compensation_id = %s
-          AND spa_id = %s
-    """, (compensation_id, spa_id))
-    compensation = cur.fetchone()
-
-    if not compensation:
-        cur.close()
-        conn.close()
-
-        flash(
-            "Compensation record not found or not authorized.",
-            "error"
-        )
-
-        return redirect(
-            url_for(
-                "employee_compensation_history"
-            )
-        )
-
     # Safe now: ownership of the parent record
-    # has been confirmed for the current spa.
+    # has been confirmed for the current workspace.
     cur.execute("""
         SELECT compensation_type_id, amount
         FROM employee_compensation_lines
@@ -48624,7 +62772,12 @@ def edit_employee_compensation(compensation_id):
         compensation=compensation,
         employees=employees,
         compensation_types=compensation_types,
-        detail_rows=detail_rows
+        detail_rows=detail_rows,
+        employee_access_verified=verification,
+        employee_access_page_scope=page_scope,
+        employee_access_return_path=return_path,
+        employee_access_page_instance_id=page_instance_id,
+        security_csrf_token=_security_form_csrf_token(),
     )
 
 
@@ -48653,8 +62806,17 @@ def edit_employee_compensation(compensation_id):
 @app.route("/export_employee_compensation_history_csv")
 @login_required
 @spa_required
+@require_workspace_permission("can_view_employee_compensation")
 def export_employee_compensation_history_csv():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if (
+        business_unit_id is None
+        or user_id is None
+    ):
+        abort(403)
 
     today = date.today()
     first_day = today.replace(day=1)
@@ -48663,8 +62825,40 @@ def export_employee_compensation_history_csv():
     start_date = request.args.get("start_date", first_day.strftime("%Y-%m-%d")).strip()
     end_date = request.args.get("end_date", today.strftime("%Y-%m-%d")).strip()
 
+    employee_access_required = (
+        _employee_access_required_for_business(
+            spa_id
+        )
+    )
+
+    verification = None
+
+    if employee_access_required:
+        verification = (
+            _employee_access_page_verification(
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                user_id=user_id,
+                page_scope=(
+                    "employee_compensation_history"
+                ),
+                page_instance_id="",
+            )
+        )
+
+        if not verification:
+            return redirect(
+                url_for(
+                    "employee_compensation_history",
+                    employee_id=employee_id,
+                    start_date=start_date,
+                    end_date=end_date,
+                )
+            )
+
     rows = get_employee_compensation_history_data(
         spa_id=spa_id,
+        business_unit_id=business_unit_id,
         employee_id=employee_id,
         start_date=start_date,
         end_date=end_date
@@ -48728,8 +62922,17 @@ def export_employee_compensation_history_csv():
 @app.route("/export_employee_compensation_history_excel")
 @login_required
 @spa_required
+@require_workspace_permission("can_view_employee_compensation")
 def export_employee_compensation_history_excel():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if (
+        business_unit_id is None
+        or user_id is None
+    ):
+        abort(403)
 
     today = date.today()
     first_day = today.replace(day=1)
@@ -48738,8 +62941,40 @@ def export_employee_compensation_history_excel():
     start_date = request.args.get("start_date", first_day.strftime("%Y-%m-%d")).strip()
     end_date = request.args.get("end_date", today.strftime("%Y-%m-%d")).strip()
 
+    employee_access_required = (
+        _employee_access_required_for_business(
+            spa_id
+        )
+    )
+
+    verification = None
+
+    if employee_access_required:
+        verification = (
+            _employee_access_page_verification(
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                user_id=user_id,
+                page_scope=(
+                    "employee_compensation_history"
+                ),
+                page_instance_id="",
+            )
+        )
+
+        if not verification:
+            return redirect(
+                url_for(
+                    "employee_compensation_history",
+                    employee_id=employee_id,
+                    start_date=start_date,
+                    end_date=end_date,
+                )
+            )
+
     rows = get_employee_compensation_history_data(
         spa_id=spa_id,
+        business_unit_id=business_unit_id,
         employee_id=employee_id,
         start_date=start_date,
         end_date=end_date
@@ -48804,6 +63039,7 @@ def export_employee_compensation_history_excel():
 @app.route("/employees/add", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_employees")
 def add_employee():
     spa_id = current_spa_id()
     conn = get_db_connection()
@@ -48966,18 +63202,32 @@ def add_employee():
 @app.route("/employees/edit/<int:employee_id>", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_workspace_permission("can_manage_employees")
 def edit_employee(employee_id):
     spa_id = current_spa_id()
+    security_csrf_token = _security_form_csrf_token()
+
     conn = get_db_connection()
     cur = conn.cursor()
 
     if request.method == "POST":
+        submitted_token = request.form.get(
+            "security_csrf_token",
+            "",
+        )
+
+        if not _security_form_csrf_valid(
+            submitted_token
+        ):
+            cur.close()
+            conn.close()
+            abort(400)
+
         first_name = request.form.get("first_name")
         last_name = request.form.get("last_name")
         employee_nickname = request.form.get("employee_nickname", "").strip()
         employee_role_id = request.form.get("employee_role_id")
         provider_color_code = request.form.get("provider_color_code", "").strip()
-        is_active = request.form.get("is_active") == "on"
         employee_role_id = int(employee_role_id) if employee_role_id else None
         address_line1 = request.form.get("address_line1")
         address_line2 = request.form.get("address_line2")
@@ -49008,7 +63258,6 @@ def edit_employee(employee_id):
                 employee_nickname = %s,
                 employee_role_id = %s,
                 provider_color_code = %s,
-                is_active = %s,
                 address_line1 = %s,
                 address_line2 = %s,
                 city = %s,
@@ -49037,7 +63286,6 @@ def edit_employee(employee_id):
             employee_nickname or None,
             employee_role_id,
             provider_color_code or None,
-            is_active,
             address_line1,
             address_line2,
             city,
@@ -49107,10 +63355,6 @@ def edit_employee(employee_id):
     """, (employee_id, spa_id))
     employee = cur.fetchone()
 
-    print(employee)
-    print(type(employee["provider_color_code"]))
-    print(repr(employee["provider_color_code"]))
-
     if not employee:
         cur.close()
         conn.close()
@@ -49134,7 +63378,12 @@ def edit_employee(employee_id):
 
 
 
-    cur.execute("SELECT status_name FROM employee_status ORDER BY status_name ASC")
+    cur.execute("""
+        SELECT status_name
+        FROM employee_status
+        WHERE spa_id = %s
+        ORDER BY status_name ASC
+    """, (spa_id,))
     statuses = cur.fetchall()
 
     cur.close()
@@ -49144,33 +63393,341 @@ def edit_employee(employee_id):
         "edit_employee.html",
         employee=employee,
         statuses=statuses,
-        employee_roles=employee_roles
+        employee_roles=employee_roles,
+        security_csrf_token=security_csrf_token
     )
 
 
 
 
 #  ------------------------------------------
-#            DELETE EMPLOYEE
-#  good 4/27
+#       ARCHIVE / REACTIVATE EMPLOYEE
 #  ------------------------------------------
 
-@app.route("/employees/delete/<int:employee_id>", methods=["POST"])
+@app.route("/employees/archive/<int:employee_id>", methods=["POST"])
 @login_required
 @spa_required
-def delete_employee(employee_id):
+@require_workspace_permission("can_manage_employees")
+def archive_employee(employee_id):
     spa_id = current_spa_id()
+    user_id = session.get("user_id")
+
+    submitted_token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_token
+    ):
+        abort(400)
+
     conn = get_db_connection()
-    cur = conn.cursor()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
 
-    cur.execute("DELETE FROM employees WHERE employee_id = %s", (employee_id,))
-    conn.commit()
+    try:
+        cur.execute("""
+            SELECT
+                employee_id,
+                first_name,
+                last_name,
+                is_active,
+                termination_date
+            FROM employees
+            WHERE employee_id = %s
+              AND spa_id = %s
+            FOR UPDATE
+        """, (
+            employee_id,
+            spa_id,
+        ))
 
-    cur.close()
-    conn.close()
+        employee = cur.fetchone()
 
-    flash("Employee deleted successfully.", "success")
-    return redirect(url_for("employees_home"))
+        if not employee:
+            flash("Employee not found.", "error")
+            return redirect(url_for("employees_home"))
+
+        employee_name = (
+            f"{employee['first_name'] or ''} "
+            f"{employee['last_name'] or ''}"
+        ).strip() or f"Employee {employee_id}"
+
+        if not employee["is_active"]:
+            flash(
+                f"{employee_name} is already archived.",
+                "info"
+            )
+            return redirect(
+                url_for(
+                    "employee_command_center",
+                    employee_id=employee_id
+                )
+            )
+
+        prior_termination_date = employee[
+            "termination_date"
+        ]
+
+        archive_date = (
+            prior_termination_date
+            or get_spa_now(spa_id).date()
+        )
+
+        cur.execute("""
+            UPDATE employees
+            SET
+                is_active = FALSE,
+                termination_date = %s,
+                updated_by = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE employee_id = %s
+              AND spa_id = %s
+              AND is_active = TRUE
+        """, (
+            archive_date,
+            user_id,
+            employee_id,
+            spa_id,
+        ))
+
+        if cur.rowcount != 1:
+            raise RuntimeError(
+                "Employee archive state changed unexpectedly."
+            )
+
+        cur.execute("""
+            UPDATE employee_access_code_credentials
+            SET
+                is_active = FALSE,
+                revoked_at = NOW(),
+                revoked_by = %s,
+                revocation_reason = 'employee_archived'
+            WHERE spa_id = %s
+              AND employee_id = %s
+              AND is_active = TRUE
+            RETURNING
+                employee_access_code_credential_id,
+                business_unit_id
+        """, (
+            user_id,
+            spa_id,
+            employee_id,
+        ))
+
+        revoked_credentials = cur.fetchall()
+
+        for revoked_credential in revoked_credentials:
+            log_audit(
+                cur,
+                spa_id,
+                user_id,
+                "employee_access_code_revoked_employee_archived",
+                table_name=(
+                    "employee_access_code_credentials"
+                ),
+                record_id=revoked_credential[
+                    "employee_access_code_credential_id"
+                ],
+                old_value="is_active=true",
+                new_value=(
+                    "is_active=false; "
+                    "revocation_reason=employee_archived"
+                ),
+                notes=(
+                    "Employee Access Code revoked because "
+                    f"{employee_name} was archived."
+                ),
+                business_unit_id=revoked_credential[
+                    "business_unit_id"
+                ],
+            )
+
+        old_value = (
+            "is_active=true; termination_date="
+            + (
+                prior_termination_date.isoformat()
+                if prior_termination_date
+                else "none"
+            )
+        )
+
+        new_value = (
+            "is_active=false; termination_date="
+            + archive_date.isoformat()
+        )
+
+        log_audit(
+            cur,
+            spa_id,
+            user_id,
+            "archive_employee",
+            table_name="employees",
+            record_id=employee_id,
+            old_value=old_value,
+            new_value=new_value,
+            notes=(
+                f"Archived employee {employee_name}. "
+                "Historical employee records preserved."
+            ),
+        )
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    flash(
+        f"{employee_name} archived successfully.",
+        "success"
+    )
+
+    return redirect(
+        url_for(
+            "employee_command_center",
+            employee_id=employee_id
+        )
+    )
+
+
+@app.route("/employees/reactivate/<int:employee_id>", methods=["POST"])
+@login_required
+@spa_required
+@require_workspace_permission("can_manage_employees")
+def reactivate_employee(employee_id):
+    spa_id = current_spa_id()
+    user_id = session.get("user_id")
+
+    submitted_token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_token
+    ):
+        abort(400)
+
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    try:
+        cur.execute("""
+            SELECT
+                employee_id,
+                first_name,
+                last_name,
+                is_active,
+                termination_date
+            FROM employees
+            WHERE employee_id = %s
+              AND spa_id = %s
+            FOR UPDATE
+        """, (
+            employee_id,
+            spa_id,
+        ))
+
+        employee = cur.fetchone()
+
+        if not employee:
+            flash("Employee not found.", "error")
+            return redirect(url_for("employees_home"))
+
+        employee_name = (
+            f"{employee['first_name'] or ''} "
+            f"{employee['last_name'] or ''}"
+        ).strip() or f"Employee {employee_id}"
+
+        if employee["is_active"]:
+            flash(
+                f"{employee_name} is already active.",
+                "info"
+            )
+            return redirect(
+                url_for(
+                    "employee_command_center",
+                    employee_id=employee_id
+                )
+            )
+
+        prior_termination_date = employee[
+            "termination_date"
+        ]
+
+        cur.execute("""
+            UPDATE employees
+            SET
+                is_active = TRUE,
+                termination_date = NULL,
+                updated_by = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE employee_id = %s
+              AND spa_id = %s
+              AND is_active = FALSE
+        """, (
+            user_id,
+            employee_id,
+            spa_id,
+        ))
+
+        if cur.rowcount != 1:
+            raise RuntimeError(
+                "Employee reactivation state changed unexpectedly."
+            )
+
+        old_value = (
+            "is_active=false; termination_date="
+            + (
+                prior_termination_date.isoformat()
+                if prior_termination_date
+                else "none"
+            )
+        )
+
+        log_audit(
+            cur,
+            spa_id,
+            user_id,
+            "reactivate_employee",
+            table_name="employees",
+            record_id=employee_id,
+            old_value=old_value,
+            new_value=(
+                "is_active=true; termination_date=none"
+            ),
+            notes=(
+                f"Reactivated employee {employee_name}. "
+                "Prior termination date preserved in audit history."
+            ),
+        )
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    flash(
+        f"{employee_name} reactivated successfully.",
+        "success"
+    )
+
+    return redirect(
+        url_for(
+            "employee_command_center",
+            employee_id=employee_id
+        )
+    )
 
 
 
@@ -49190,13 +63747,35 @@ def delete_employee(employee_id):
 @app.route("/employees/<int:employee_id>")
 @login_required
 @spa_required
+@require_workspace_permission("can_view_employees")
 def employee_command_center(employee_id):
     spa_id = current_spa_id()
+
+    access = current_workspace_access()
+    can_view_compensation = bool(
+        access.get(
+            "can_view_employee_compensation",
+            False
+        )
+    )
+
+    if can_view_compensation:
+        compensation_select = """
+            e.ssn_on_file,
+            e.pay_type,
+            e.pay_rate,
+        """
+    else:
+        compensation_select = """
+            NULL AS ssn_on_file,
+            NULL AS pay_type,
+            NULL AS pay_rate,
+        """
 
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
 
-    cur.execute("""
+    cur.execute(f"""
         SELECT
             e.employee_id,
             e.first_name,
@@ -49218,13 +63797,11 @@ def employee_command_center(employee_id):
             e.termination_date,
             e.status,
             e.birthday,
-            e.ssn_on_file,
+            {compensation_select}
             e.esthetician_license_number,
             e.license_expiration_date,
             e.year_graduated,
             e.certifications,
-            e.pay_type,
-            e.pay_rate,
             e.notes,
             e.created_at
         FROM employees e
@@ -49250,7 +63827,8 @@ def employee_command_center(employee_id):
     return render_template(
         "employee_command_center.html",
         employee=employee,
-        today=date.today()
+        today=date.today(),
+        security_csrf_token=_security_form_csrf_token()
     )
 
 
@@ -53631,6 +68209,7 @@ def add_income(appointment_id):
                first_name || ' ' || last_name AS employee_name
         FROM employees
         WHERE spa_id = %s
+          AND is_active = TRUE
         ORDER BY employee_name
     """, (spa_id,))
     employees = cur.fetchall()
@@ -53782,6 +68361,7 @@ def add_income(appointment_id):
                 FROM employees
                 WHERE employee_id = %s
                   AND spa_id = %s
+                  AND is_active = TRUE
             """, (employee_id, spa_id))
 
             if not cur.fetchone():
@@ -56290,7 +70870,9 @@ def edit_income(income_id):
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT income_id
+        SELECT
+            income_id,
+            employee_id
         FROM income
         WHERE income_id = %s
           AND spa_id = %s
@@ -56302,7 +70884,9 @@ def edit_income(income_id):
         business_unit_id
     ))
 
-    if not cur.fetchone():
+    existing_income = cur.fetchone()
+
+    if not existing_income:
         cur.close()
         conn.close()
         flash(
@@ -56311,6 +70895,8 @@ def edit_income(income_id):
             "error"
         )
         return redirect(url_for("income_report"))
+
+    current_income_employee_id = existing_income[1]
 
     if request.method == "POST":
         income_date = request.form.get("income_date") or None
@@ -56381,11 +70967,15 @@ def edit_income(income_id):
                 FROM employees
                 WHERE employee_id = %s
                   AND spa_id = %s
-                  AND is_active = TRUE
+                  AND (
+                        is_active = TRUE
+                        OR employee_id = %s
+                  )
                 LIMIT 1
             """, (
                 employee_id,
-                spa_id
+                spa_id,
+                current_income_employee_id
             ))
 
             if not cur.fetchone():
@@ -56559,11 +71149,25 @@ def edit_income(income_id):
     clients = cur.fetchall()
 
     cur.execute("""
-        SELECT employee_id, first_name, last_name
+        SELECT
+            employee_id,
+            first_name,
+            last_name,
+            is_active
         FROM employees
         WHERE spa_id = %s
-        ORDER BY last_name, first_name
-    """, (spa_id,))
+          AND (
+                is_active = TRUE
+                OR employee_id = %s
+          )
+        ORDER BY
+            is_active DESC,
+            last_name,
+            first_name
+    """, (
+        spa_id,
+        current_income_employee_id
+    ))
     employees = cur.fetchall()
 
     cur.execute("""
@@ -57924,7 +72528,17 @@ def calendar_view():
         days_since_sunday = (selected_date.weekday() + 1) % 7
         start_of_week = selected_date - timedelta(days=days_since_sunday)
     elif week_start_str:
-        start_of_week = datetime.strptime(week_start_str, "%Y-%m-%d").date()
+        selected_date = datetime.strptime(
+            week_start_str,
+            "%Y-%m-%d"
+        ).date()
+        days_since_sunday = (
+            selected_date.weekday() + 1
+        ) % 7
+        start_of_week = (
+            selected_date
+            - timedelta(days=days_since_sunday)
+        )
     else:
         start_of_week = current_week_start
 
@@ -58161,20 +72775,51 @@ def quick_reschedule_appointment(appointment_id):
     business_unit_id = current_business_unit_id()
     user_id = session.get("user_id")
 
+    return_view = (
+        request.form.get("return_view") or ""
+    ).strip().lower()
+
+    return_date = (
+        request.form.get("return_date") or ""
+    ).strip()
+
+    def return_to_calendar_context():
+        if return_view == "day":
+            try:
+                parsed_return_date = datetime.strptime(
+                    return_date,
+                    "%Y-%m-%d"
+                ).date()
+            except (TypeError, ValueError):
+                return redirect(
+                    url_for("calendar_day_view")
+                )
+
+            return redirect(
+                url_for(
+                    "calendar_day_view",
+                    date=parsed_return_date.strftime(
+                        "%Y-%m-%d"
+                    )
+                )
+            )
+
+        return redirect(url_for("calendar_view"))
+
     if business_unit_id is None:
         flash(
             "A valid Provider Workspace is required "
             "to reschedule an appointment.",
             "error"
         )
-        return redirect(url_for("calendar_view"))
+        return return_to_calendar_context()
 
     appointment_date = request.form.get("appointment_date")
     appointment_time = request.form.get("appointment_time")
 
     if not appointment_date or not appointment_time:
         flash("Date and time are required to reschedule.", "error")
-        return redirect(url_for("calendar_view"))
+        return return_to_calendar_context()
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -58212,7 +72857,7 @@ def quick_reschedule_appointment(appointment_id):
         cur.close()
         conn.close()
         flash("Appointment not found or not authorized.", "error")
-        return redirect(url_for("calendar_view"))
+        return return_to_calendar_context()
 
     appointment_spa_id = old_appt[0]
     client_id = old_appt[1]
@@ -58256,21 +72901,36 @@ def quick_reschedule_appointment(appointment_id):
             "error"
         )
 
-        return redirect(
-            url_for("calendar_view")
-        )
+        return return_to_calendar_context()
 
 
+
+    old_status_normalized = (
+        str(old_status or "")
+        .strip()
+        .lower()
+    )
+
+    new_status = (
+        "booked"
+        if old_status_normalized in {
+            "cancelled",
+            "canceled"
+        }
+        else old_status
+    )
 
     cur.execute(f"""
         UPDATE appointments
         SET appointment_date = %s,
             appointment_time = %s,
+            status = %s,
             updated_at = CURRENT_TIMESTAMP
         {filter_sql}
     """, (
         appointment_date,
         appointment_time,
+        new_status,
         *params
     ))
 
@@ -58279,7 +72939,7 @@ def quick_reschedule_appointment(appointment_id):
         cur.close()
         conn.close()
         flash("Appointment not found or not authorized.", "error")
-        return redirect(url_for("calendar_view"))
+        return return_to_calendar_context()
 
     action_type = "rescheduled"
 
@@ -58294,7 +72954,7 @@ def quick_reschedule_appointment(appointment_id):
         table_name="appointments",
         record_id=appointment_id,
         old_value=f"{old_date} {old_time} {old_status}",
-        new_value=f"{appointment_date} {appointment_time} {old_status}",
+        new_value=f"{appointment_date} {appointment_time} {new_status}",
         notes="Appointment quick rescheduled" if action_type == "rescheduled" else "Appointment quick updated"
     )
 
@@ -58311,7 +72971,7 @@ def quick_reschedule_appointment(appointment_id):
         new_date=appointment_date,
         new_time=appointment_time,
         old_status=old_status,
-        new_status=old_status,
+        new_status=new_status,
         notes="Appointment quick rescheduled" if action_type == "rescheduled" else "Appointment quick updated"
     )
 
@@ -58320,7 +72980,7 @@ def quick_reschedule_appointment(appointment_id):
     conn.close()
 
     flash("Appointment rescheduled successfully.", "success")
-    return redirect(url_for("calendar_view"))
+    return return_to_calendar_context()
 
 
 
@@ -60207,8 +74867,14 @@ def dashboard():
         SELECT COALESCE(SUM(amount), 0)
         FROM employee_compensation
         WHERE spa_id = %s
+          AND business_unit_id = %s
           AND compensation_date BETWEEN %s AND %s
-    """, (spa_id, year_start, today))
+    """, (
+        spa_id,
+        business_unit_id,
+        year_start,
+        today
+    ))
 
     ytd_employee_compensation = cur.fetchone()[0]
 
@@ -64703,7 +79369,7 @@ def cancel_appointment(appointment_id):
         WHERE appointment_id = %s
           AND spa_id = %s
           AND business_unit_id = %s
-          AND (appointment_date + appointment_time) > CURRENT_TIMESTAMP
+          AND status = 'booked'
     """
 
     params = [
@@ -81475,6 +96141,99 @@ def scheduled_process_email_automation_queue():
         )
 
 
+def scheduled_scheduler_heartbeat():
+    """
+    Record lightweight evidence that the background scheduler
+    is still running.
+    """
+
+    log_scheduler(
+        "Scheduler heartbeat.",
+        severity="INFO",
+        related_type="scheduler_heartbeat",
+    )
+
+
+def scheduled_purge_system_logs():
+    """
+    Apply Peach Suite Pro operational-log retention.
+
+    Retention:
+    - SCHEDULER INFO: 14 days
+    - Other INFO: 30 days
+    - WARNING: 90 days
+    - ALERT / ERROR: 365 days
+
+    audit_log is intentionally not affected.
+    """
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            DELETE FROM system_logs
+            WHERE
+                (
+                    category = 'SCHEDULER'
+                    AND severity = 'INFO'
+                    AND created_at
+                        < NOW() - INTERVAL '14 days'
+                )
+                OR
+                (
+                    category <> 'SCHEDULER'
+                    AND severity = 'INFO'
+                    AND created_at
+                        < NOW() - INTERVAL '30 days'
+                )
+                OR
+                (
+                    severity = 'WARNING'
+                    AND created_at
+                        < NOW() - INTERVAL '90 days'
+                )
+                OR
+                (
+                    severity IN ('ALERT', 'ERROR')
+                    AND created_at
+                        < NOW() - INTERVAL '365 days'
+                )
+            """
+        )
+
+        deleted_count = cur.rowcount
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+
+        app.logger.exception(
+            "Scheduled system log retention cleanup failed."
+        )
+
+        return
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if deleted_count > 0:
+        log_event(
+            "SYSTEM",
+            (
+                "System log retention cleanup removed "
+                f"{deleted_count} expired record"
+                f"{'' if deleted_count == 1 else 's'}."
+            ),
+            severity="INFO",
+            related_type="system_log_retention",
+        )
+
+
 def start_scheduler():
     scheduler = BackgroundScheduler()
 
@@ -81515,6 +96274,33 @@ def start_scheduler():
         coalesce=True,
         max_instances=1,
         misfire_grace_time=3600,
+        next_run_time=datetime.now()
+    )
+
+
+    scheduler.add_job(
+        scheduled_purge_system_logs,
+        "cron",
+        hour=3,
+        minute=15,
+        id="purge_system_logs_job",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=3600,
+        next_run_time=datetime.now()
+    )
+
+
+    scheduler.add_job(
+        scheduled_scheduler_heartbeat,
+        "interval",
+        hours=1,
+        id="scheduler_heartbeat_job",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=1800,
         next_run_time=datetime.now()
     )
 

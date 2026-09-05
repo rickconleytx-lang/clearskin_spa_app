@@ -30,4 +30,57 @@
     {% endfor %}
 </table>
 
+
+<hr>
+
+<h2>SMS &amp; Email Terms</h2>
+
+<p>
+    Control the current required version of the
+    Peach Suite Pro SMS &amp; Email Terms agreement.
+</p>
+
+<p>
+    <strong>Important:</strong>
+    Increasing the version means businesses that accepted
+    an older version will be required to review and accept
+    the current version before their messaging agreement
+    is considered current.
+</p>
+
+<form method="POST"
+      action="{{ url_for('master_admin_settings') }}">
+
+    <input type="hidden"
+           name="security_csrf_token"
+           value="{{ security_csrf_token }}">
+
+    <input type="hidden"
+           name="settings_action"
+           value="sms_email_terms_version">
+
+    <label for="sms_email_terms_version">
+        <strong>Current Terms Version</strong>
+    </label>
+
+    <br>
+
+    <input type="text"
+           id="sms_email_terms_version"
+           name="sms_email_terms_version"
+           value="{{ sms_email_terms_version }}"
+           pattern="v[0-9]+\.[0-9]+"
+           placeholder="v1.0"
+           required>
+
+    <p>
+        Use a version such as v1.0, v1.1, or v2.0.
+    </p>
+
+    <button type="submit">
+        Save Terms Version
+    </button>
+
+</form>
+
 {% endblock %}

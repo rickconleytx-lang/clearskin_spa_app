@@ -1015,7 +1015,7 @@
             style="background:#f7f7f7; padding:10px; border-radius:8px; white-space:pre-wrap;">
         </div>
 
-        <div class="todays-contact-card">
+        <div class="todays-contact-card" id="todaysContactCard">
             <h3>Today’s Contact</h3>
 
             <p class="todays-contact-help">
@@ -1090,6 +1090,64 @@
             </form>
         </div>
 
+        <div
+            id="quickRescheduleCard"
+            style="display:none;"
+        >
+            <h3>Quick Reschedule</h3>
+
+            <form method="POST" id="modalRescheduleForm">
+                <input
+                    type="hidden"
+                    name="return_view"
+                    value="day"
+                >
+                <input
+                    type="hidden"
+                    name="return_date"
+                    value="{{ display_date.strftime('%Y-%m-%d') }}"
+                >
+
+                <label>
+                    <p style="color:red;">New Date</p>
+                </label>
+                <input
+                    type="date"
+                    name="appointment_date"
+                    id="modalRescheduleDate"
+                    required
+                >
+
+                <label>
+                    <p style="color:red;">New Time</p>
+                </label>
+                <input
+                    type="time"
+                    name="appointment_time"
+                    id="modalRescheduleTime"
+                    required
+                >
+
+                <div class="form-buttons">
+                    <button
+                        type="submit"
+                        class="btn"
+                        style="background:#4a7c59; color:white;"
+                        onclick="return confirm('Reschedule this appointment?')"
+                    >
+                        Reschedule
+                    </button>
+
+                    <button
+                        type="button"
+                        class="btn"
+                        onclick="showTodaysContact()"
+                    >
+                        Back to Today’s Contact
+                    </button>
+                </div>
+            </form>
+        </div>
 
 
     <hr>
@@ -1104,6 +1162,15 @@
                 View GoDaddy Import
             </a>
 
+
+            <button
+                type="button"
+                id="modalRescheduleToggleBtn"
+                class="btn"
+                onclick="showQuickReschedule()"
+            >
+                Reschedule
+            </button>
 
             <a id="modalEditBtn" class="btn">Edit Appointment</a>
             <a id="modalPaymentBtn" class="btn">Finish Session</a>
@@ -1304,6 +1371,61 @@ function setText(id, value) {
     const el = document.getElementById(id);
     if (el) {
         el.innerText = value || "";
+    }
+}
+
+
+function showQuickReschedule() {
+    const todaysContactCard =
+        document.getElementById("todaysContactCard");
+
+    const quickRescheduleCard =
+        document.getElementById("quickRescheduleCard");
+
+    const rescheduleToggleBtn =
+        document.getElementById(
+            "modalRescheduleToggleBtn"
+        );
+
+    if (todaysContactCard) {
+        todaysContactCard.style.display = "none";
+    }
+
+    if (quickRescheduleCard) {
+        quickRescheduleCard.style.display = "block";
+    }
+
+    if (rescheduleToggleBtn) {
+        rescheduleToggleBtn.style.display = "none";
+    }
+}
+
+
+function showTodaysContact() {
+    const todaysContactCard =
+        document.getElementById("todaysContactCard");
+
+    const quickRescheduleCard =
+        document.getElementById("quickRescheduleCard");
+
+    const rescheduleToggleBtn =
+        document.getElementById(
+            "modalRescheduleToggleBtn"
+        );
+
+    if (todaysContactCard) {
+        todaysContactCard.style.display = "block";
+    }
+
+    if (quickRescheduleCard) {
+        quickRescheduleCard.style.display = "none";
+    }
+
+    if (
+        rescheduleToggleBtn
+        && rescheduleToggleBtn.dataset.available === "true"
+    ) {
+        rescheduleToggleBtn.style.display = "inline-block";
     }
 }
 
@@ -1698,6 +1820,27 @@ function openAppointmentModal(appointmentId, clickedElement) {
                     `/quick_reschedule_appointment/${appointmentId}`;
             }
 
+            const rescheduleToggleBtn =
+                document.getElementById(
+                    "modalRescheduleToggleBtn"
+                );
+
+            if (rescheduleToggleBtn) {
+                const rescheduleAvailable = [
+                    "booked",
+                    "cancelled",
+                    "canceled"
+                ].includes(status);
+
+                rescheduleToggleBtn.dataset.available =
+                    rescheduleAvailable ? "true" : "false";
+
+                rescheduleToggleBtn.style.display =
+                    rescheduleAvailable
+                        ? "inline-block"
+                        : "none";
+            }
+
             const rescheduleDate =
                 document.getElementById("modalRescheduleDate");
 
@@ -1735,6 +1878,8 @@ function openAppointmentModal(appointmentId, clickedElement) {
                     godaddyBtn.removeAttribute("href");
                 }
             }
+
+            showTodaysContact();
 
             document.getElementById(
                 "appointmentModal"
@@ -1880,6 +2025,7 @@ function saveTodaysContact(event) {
 
 
 function closeAppointmentModal() {
+    showTodaysContact();
     document.getElementById("appointmentModal").style.display = "none";
 }
 

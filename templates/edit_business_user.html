@@ -1,16 +1,16 @@
 {% extends "base.html" %}
 
-{% block title %}Add User{% endblock %}
+{% block title %}Edit User{% endblock %}
 
 {% block content %}
 
 <style>
-    .add-user-page {
+    .edit-user-page {
         max-width: 820px;
         margin: 0 auto;
     }
 
-    .add-user-card {
+    .edit-user-card {
         background: var(--surface-color, #fff);
         border: 1px solid rgba(0, 0, 0, 0.10);
         border-radius: 14px;
@@ -18,17 +18,17 @@
         margin-bottom: 20px;
     }
 
-    .add-user-card h2 {
+    .edit-user-card h2 {
         margin-top: 0;
         margin-bottom: 8px;
         font-size: 1.15rem;
     }
 
-    .add-user-intro {
+    .edit-user-intro {
         margin-bottom: 22px;
     }
 
-    .add-user-intro p,
+    .edit-user-intro p,
     .field-help,
     .role-help {
         line-height: 1.5;
@@ -91,32 +91,34 @@
             grid-template-columns: 1fr;
         }
 
-        .add-user-card {
+        .edit-user-card {
             padding: 18px;
         }
     }
 </style>
 
-<div class="add-user-page">
+<div class="edit-user-page">
 
-    <div class="add-user-intro">
-        <h1>Add User</h1>
+    <div class="edit-user-intro">
+        <h1>Edit User</h1>
 
         <p>
-            Create a Peach Suite Pro login for someone who needs
-            access to this business. Their role determines which
-            parts of the business they can use.
+            Update this person's Peach Suite Pro account information
+            and role for the current business workspace.
         </p>
     </div>
 
     <form method="POST"
-          action="{{ url_for('add_user') }}">
+          action="{{ url_for(
+              'edit_business_user',
+              target_user_id=target_user_id
+          ) }}">
 
         <input type="hidden"
                name="security_csrf_token"
                value="{{ security_csrf_token }}">
 
-        <div class="add-user-card">
+        <div class="edit-user-card">
 
             <h2>User Information</h2>
 
@@ -199,15 +201,14 @@
 
                 <span class="field-help">
                     Optional. This should be the user's personal
-                    mobile number, not the business phone. It may
-                    later be used for account-security verification
-                    after ownership of the number is confirmed.
+                    mobile number, not the business phone. Changing
+                    this number does not by itself verify ownership.
                 </span>
             </div>
 
         </div>
 
-        <div class="add-user-card">
+        <div class="edit-user-card">
 
             <h2>Role &amp; Access</h2>
 
@@ -230,86 +231,57 @@
                     {% endfor %}
 
                 </select>
-            </div>
-
-            <div class="role-help">
-                <p>
-                    <strong>Business Administrator</strong> —
-                    Full access to the business. Can add or edit
-                    Business Administrators, Management, Staff,
-                    Providers, and Front Desk users.
-                </p>
-
-                <p>
-                    <strong>Management</strong> —
-                    Broad operational access. Can add or edit
-                    Staff, Provider, and Front Desk users only.
-                </p>
-
-                <p>
-                    <strong>Staff</strong> —
-                    Day-to-day business access with restricted
-                    employee, financial, and Business Management
-                    areas.
-                </p>
-
-                <p>
-                    <strong>Provider</strong> —
-                    Provider, appointment, and client-focused access
-                    with restricted employee, financial, and
-                    Business Management areas.
-                </p>
-
-                <p>
-                    <strong>Front Desk</strong> —
-                    Scheduling and client-facing access with
-                    restricted Square, PeachPOS, employee,
-                    financial, and Business Management areas.
-                </p>
-            </div>
-
-        </div>
-
-        <div class="add-user-card">
-
-            <h2>Temporary Password</h2>
-
-            <p class="field-help">
-                The user will be required to change this temporary
-                password after signing in.
-            </p>
-
-            <div class="form-field">
-                <label for="password">
-                    Temporary Password
-                </label>
-
-                <input id="password"
-                       type="password"
-                       name="password"
-                       minlength="15"
-                       maxlength="128"
-                       autocomplete="new-password"
-                       required>
 
                 <span class="field-help">
-                    Use 15–128 characters. Passphrases and spaces
-                    are allowed.
+                    This role applies to the current business
+                    workspace. If this person has access to more
+                    than one workspace, their login security follows
+                    their highest level of access.
                 </span>
             </div>
 
-            <div class="form-field">
-                <label for="confirm_password">
-                    Confirm Temporary Password
-                </label>
+            <div class="role-help">
 
-                <input id="confirm_password"
-                       type="password"
-                       name="confirm_password"
-                       minlength="15"
-                       maxlength="128"
-                       autocomplete="new-password"
-                       required>
+                {% for role in role_options %}
+
+                    {% if role.code == "organization_admin" %}
+                        <p>
+                            <strong>Business Administrator</strong> —
+                            Full access to the business. Can add or edit
+                            Business Administrators, Management, Staff,
+                            Providers, and Front Desk users.
+                        </p>
+                    {% elif role.code == "management" %}
+                        <p>
+                            <strong>Management</strong> —
+                            Broad operational access. Can add or edit
+                            Staff, Provider, and Front Desk users only.
+                        </p>
+                    {% elif role.code == "staff" %}
+                        <p>
+                            <strong>Staff</strong> —
+                            Day-to-day business access with restricted
+                            employee, financial, and Business Management
+                            areas.
+                        </p>
+                    {% elif role.code == "provider" %}
+                        <p>
+                            <strong>Provider</strong> —
+                            Provider, appointment, and client-focused
+                            access with restricted employee, financial,
+                            and Business Management areas.
+                        </p>
+                    {% elif role.code == "front_desk" %}
+                        <p>
+                            <strong>Front Desk</strong> —
+                            Scheduling and client-facing access with
+                            restricted Square, PeachPOS, employee,
+                            financial, and Business Management areas.
+                        </p>
+                    {% endif %}
+
+                {% endfor %}
+
             </div>
 
         </div>
@@ -317,11 +289,11 @@
         <div class="form-actions">
             <button type="submit"
                     class="btn">
-                Create User
+                Save Changes
             </button>
 
             <a class="btn"
-               href="{{ url_for('dashboard') }}">
+               href="{{ url_for('business_users') }}">
                 Cancel
             </a>
         </div>

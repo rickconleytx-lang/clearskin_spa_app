@@ -12,6 +12,12 @@
 
 <form method="POST" accept-charset="UTF-8" class="styled-form">
 
+    <input
+        type="hidden"
+        name="security_csrf_token"
+        value="{{ security_csrf_token }}"
+    >
+
     <div class="form-group">
         <label for="page_key">Page Key</label>
         <input type="text"
@@ -44,10 +50,10 @@
     <div class="form-group">
         <label for="language_code">Language</label>
         <select id="language_code" name="language_code" required>
-            <option value="EN" {% if page and page[3] == 'EN' %}selected{% endif %}>🇺🇸 EN - English</option>
-            <option value="ES" {% if page and page[3] == 'ES' %}selected{% endif %}>🇪🇸 ES - Spanish</option>
-            <option value="FR" {% if page and page[3] == 'FR' %}selected{% endif %}>🇫🇷 FR - French</option>
-            <option value="DE" {% if page and page[3] == 'DE' %}selected{% endif %}>🇩🇪 DE - German</option>
+            <option value="EN" {% if (page and page[3] == 'EN') or (not page and language_code == 'EN') %}selected{% endif %}>🇺🇸 EN - English</option>
+            <option value="ES" {% if (page and page[3] == 'ES') or (not page and language_code == 'ES') %}selected{% endif %}>🇪🇸 ES - Spanish</option>
+            <option value="FR" {% if (page and page[3] == 'FR') or (not page and language_code == 'FR') %}selected{% endif %}>🇫🇷 FR - French</option>
+            <option value="DE" {% if (page and page[3] == 'DE') or (not page and language_code == 'DE') %}selected{% endif %}>🇩🇪 DE - German</option>
         </select>
     </div>
 

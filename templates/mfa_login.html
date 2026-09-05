@@ -1,0 +1,1210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <meta
+        name="robots"
+        content="noindex, nofollow"
+    >
+
+    <meta
+        name="referrer"
+        content="no-referrer"
+    >
+
+    <title>
+        Multi-Factor Authentication | Peach Suite Pro
+    </title>
+
+    <link
+        rel="icon"
+        type="image/png"
+        href="{{ url_for(
+            'static',
+            filename='peachsuite-icon.png'
+        ) }}?v=20260618"
+    >
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            margin: 0;
+            min-height: 100%;
+        }
+
+        body {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            font-family:
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                sans-serif;
+            background: #f8f6f2;
+            color: #2d2d2d;
+        }
+
+        .mfa-shell {
+            width: min(480px, 100%);
+        }
+
+        .mfa-card {
+            padding: 36px 32px;
+            background: #ffffff;
+            border: 1px solid #e7e2dc;
+            border-radius: 18px;
+            box-shadow:
+                0 18px 50px rgba(0, 0, 0, 0.08);
+        }
+
+        .mfa-brand {
+            margin-bottom: 26px;
+            text-align: center;
+        }
+
+        .mfa-brand img {
+            display: block;
+            width: min(280px, 100%);
+            height: auto;
+            margin: 0 auto 18px;
+        }
+
+        .mfa-brand h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 700;
+        }
+
+        .mfa-brand p {
+            margin: 8px 0 0;
+            color: #666666;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .mfa-flash {
+            margin-bottom: 18px;
+            padding: 12px 14px;
+            border-radius: 10px;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .mfa-flash.error {
+            background: #fff0f0;
+            border: 1px solid #e5b5b5;
+            color: #7a2020;
+        }
+
+        .mfa-flash.success {
+            background: #eef8ef;
+            border: 1px solid #b9d9bc;
+            color: #275c2d;
+        }
+
+        .mfa-note {
+            margin-bottom: 18px;
+            padding: 12px 14px;
+            border-radius: 10px;
+            background: #f7f5f2;
+            color: #555555;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        .mfa-important {
+            background: #fff8e8;
+            border: 1px solid #e0b97a;
+            color: #4b3820;
+        }
+
+        .mfa-qr-wrap {
+            margin: 20px 0;
+            text-align: center;
+        }
+
+        .mfa-qr {
+            display: block;
+            width: min(320px, 100%);
+            height: auto;
+            margin: 0 auto;
+            border: 1px solid #e7e2dc;
+            border-radius: 12px;
+            background: #ffffff;
+        }
+
+        .mfa-field {
+            margin-bottom: 18px;
+        }
+
+        .mfa-field label {
+            display: block;
+            margin-bottom: 7px;
+            font-size: 14px;
+            font-weight: 650;
+        }
+
+        .mfa-field input {
+            width: 100%;
+            min-height: 48px;
+            padding: 10px 12px;
+            border: 1px solid #cfc9c2;
+            border-radius: 9px;
+            background: #ffffff;
+            color: #222222;
+            font: inherit;
+            font-size: 20px;
+            letter-spacing: 0.08em;
+            text-align: center;
+        }
+
+        .mfa-field input:focus {
+            outline: 3px solid rgba(210, 141, 94, 0.18);
+            border-color: #b87345;
+        }
+
+        .mfa-button {
+            width: 100%;
+            min-height: 48px;
+            margin-top: 4px;
+            border: 0;
+            border-radius: 10px;
+            background: #2d2d2d;
+            color: #ffffff;
+            font: inherit;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .mfa-button:hover {
+            background: #171717;
+        }
+
+        .mfa-choice-stack {
+            display: grid;
+            gap: 12px;
+            margin-top: 20px;
+        }
+
+        .mfa-choice-button {
+            width: 100%;
+            min-height: 58px;
+            padding: 12px 16px;
+            border: 1px solid #bdb7b0;
+            border-radius: 10px;
+            background: #ffffff;
+            color: #2d2d2d;
+            font: inherit;
+            text-align: left;
+            cursor: pointer;
+        }
+
+        .mfa-choice-button.primary {
+            border-color: #2d2d2d;
+            background: #2d2d2d;
+            color: #ffffff;
+        }
+
+        .mfa-choice-button strong {
+            display: block;
+            margin-bottom: 4px;
+            font-size: 15px;
+        }
+
+        .mfa-choice-button span {
+            display: block;
+            font-size: 13px;
+            line-height: 1.45;
+            opacity: 0.9;
+        }
+
+        .mfa-intro-box {
+            margin-top: 18px;
+            padding: 14px 16px;
+            border-radius: 10px;
+            background: #f7f5f2;
+            color: #555555;
+            font-size: 13px;
+            line-height: 1.55;
+        }
+
+        .mfa-save-tools {
+            display: grid;
+            gap: 10px;
+            margin: 18px 0;
+        }
+
+        .mfa-save-button {
+            width: 100%;
+            min-height: 46px;
+            padding: 10px 14px;
+            border: 1px solid #bdb7b0;
+            border-radius: 10px;
+            background: #ffffff;
+            color: #2d2d2d;
+            font: inherit;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .mfa-save-button:hover {
+            background: #f3f1ee;
+        }
+
+        .mfa-save-status {
+            min-height: 20px;
+            margin-top: 8px;
+            color: #275c2d;
+            font-size: 13px;
+            line-height: 1.4;
+            text-align: center;
+        }
+
+        .mfa-secondary {
+            display: flex;
+            width: 100%;
+            min-height: 48px;
+            align-items: center;
+            justify-content: center;
+            margin-top: 12px;
+            border: 1px solid #bdb7b0;
+            border-radius: 10px;
+            background: #ffffff;
+            color: #2d2d2d;
+            font: inherit;
+            font-weight: 700;
+            text-decoration: none;
+            cursor: pointer;
+        }
+
+        .mfa-secondary:hover {
+            background: #f3f1ee;
+        }
+
+        .mfa-recovery-list {
+            display: grid;
+            grid-template-columns:
+                repeat(2, minmax(0, 1fr));
+            gap: 10px;
+            margin: 18px 0;
+            padding: 0;
+            list-style: none;
+        }
+
+        .mfa-recovery-code {
+            padding: 10px 8px;
+            border: 1px solid #d8d2cb;
+            border-radius: 8px;
+            background: #faf9f7;
+            font-family:
+                ui-monospace,
+                SFMono-Regular,
+                Menlo,
+                Monaco,
+                Consolas,
+                monospace;
+            font-size: 13px;
+            text-align: center;
+            user-select: all;
+        }
+
+        .mfa-footer {
+            margin-top: 22px;
+            text-align: center;
+            color: #777777;
+            font-size: 12px;
+        }
+
+        @media (max-width: 520px) {
+            .mfa-card {
+                padding: 30px 22px;
+            }
+
+            .mfa-recovery-list {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <main class="mfa-shell">
+        <section
+            class="mfa-card"
+            aria-labelledby="mfaTitle"
+        >
+            <div class="mfa-brand">
+                <img
+                    src="{{ url_for(
+                        'static',
+                        filename='images/smallbanner.png'
+                    ) }}"
+                    alt="Peach Suite Pro"
+                >
+
+                {% if mode == "method_selection" %}
+                    <h1 id="mfaTitle">
+                        Two-Step Verification Required
+                    </h1>
+
+                    <p>
+                        Choose how you would like Peach Suite Pro
+                        to verify your identity when you sign in.
+                    </p>
+
+                {% elif mode == "code_verify" %}
+                    <h1 id="mfaTitle">
+                        Enter Your Verification Code
+                    </h1>
+
+                    <p>
+                        Enter the 6-digit code Peach Suite Pro
+                        sent to you.
+                    </p>
+
+                {% elif mode == "intro" %}
+                    <h1 id="mfaTitle">
+                        Let's Secure Your Account
+                    </h1>
+
+                    <p>
+                        Multi-factor authentication, or MFA,
+                        adds another layer of protection to
+                        your Peach Suite Pro account.
+                    </p>
+
+                {% elif mode == "enrollment" %}
+                {% if guided_setup %}
+                    <div class="mfa-note">
+                        <strong>
+                            Step 1 — Get an authenticator app
+                        </strong><br>
+                        An authenticator app is a small security
+                        app on your phone that creates temporary
+                        6-digit security codes for Peach Suite Pro.
+                    </div>
+
+                    <div class="mfa-note">
+                        <strong>
+                            We recommend one of these two apps:
+                        </strong><br><br>
+
+                        <strong>Microsoft Authenticator</strong>
+                        — our recommended choice. It is free and
+                        available from the Apple App Store and
+                        Google Play Store.<br><br>
+
+                        <strong>Google Authenticator</strong>
+                        — another simple, free option available
+                        from the Apple App Store and Google Play Store.
+                    </div>
+
+                    <div class="mfa-note">
+                        <strong>
+                            Step 2 — Open your authenticator app
+                        </strong><br>
+                        Open the app on your phone and choose
+                        <strong>Add account</strong>,
+                        <strong>+</strong>, or a similar option for
+                        adding a new account.
+                    </div>
+
+                    <div class="mfa-note">
+                        <strong>
+                            Step 3 — Scan this QR code
+                        </strong><br>
+                        Keep this Peach Suite Pro page open.
+                        In your authenticator app, choose the
+                        option to scan a QR code and use your
+                        phone to scan the code below.
+                    </div>
+                {% else %}
+                    <div class="mfa-note">
+                        Open your authenticator app, add a new
+                        account, and scan this QR code. Your app
+                        will then show the temporary security code
+                        you need for Peach Suite Pro.
+                    </div>
+                {% endif %}
+
+                <div class="mfa-qr-wrap">
+                    <img
+                        class="mfa-qr"
+                        src="{{ url_for('mfa_login_qr') }}"
+                        alt="Authenticator setup QR code"
+                    >
+                </div>
+
+                {% if guided_setup %}
+                    <div class="mfa-note">
+                        <strong>
+                            Step 4 — Enter your security code
+                        </strong><br>
+                        Your authenticator app will now show a
+                        6-digit security code for Peach Suite Pro.
+                        Enter the newest code currently shown in
+                        your app. The code changes automatically
+                        about every 30 seconds.
+                    </div>
+                {% endif %}
+
+                <form
+                    method="POST"
+                    action="{{ url_for('mfa_login') }}"
+                >
+                    <input
+                        type="hidden"
+                        name="security_csrf_token"
+                        value="{{ security_csrf_token }}"
+                    >
+
+                    <input
+                        type="hidden"
+                        name="mfa_action"
+                        value="enroll"
+                    >
+
+                    <div class="mfa-field">
+                        <label for="mfaCode">
+                            6-Digit Security Code
+                        </label>
+
+                        <input
+                            type="text"
+                            id="mfaCode"
+                            name="mfa_code"
+                            inputmode="numeric"
+                            autocomplete="one-time-code"
+                            pattern="[0-9]{6}"
+                            maxlength="6"
+                            required
+                            autofocus
+                        >
+                    </div>
+
+                    <button
+                        type="submit"
+                        class="mfa-button"
+                    >
+                        Verify Authenticator
+                    </button>
+                </form>
+
+            {% elif mode == "recovery_codes" %}
+                    <h1 id="mfaTitle">
+                        Save Your Recovery Codes
+                    </h1>
+
+                    <p>
+                        These one-time codes can help you
+                        sign in if you lose access to your
+                        authenticator app.
+                    </p>
+
+                {% elif mode == "enrollment_complete" %}
+                    <h1 id="mfaTitle">
+                        Authenticator Setup Complete
+                    </h1>
+
+                    <p>
+                        Your authenticator app is now
+                        connected to Peach Suite Pro.
+                    </p>
+
+                {% elif mode == "recovery" %}
+                    <h1 id="mfaTitle">
+                        Use a Recovery Code
+                    </h1>
+
+                    <p>
+                        Enter one unused Peach Suite Pro
+                        recovery code.
+                    </p>
+
+                {% else %}
+                    <h1 id="mfaTitle">
+                        Verify Your Identity
+                    </h1>
+
+                    <p>
+                        Enter the six-digit code from your
+                        authenticator app.
+                    </p>
+                {% endif %}
+            </div>
+
+            {% with messages =
+                get_flashed_messages(
+                    with_categories=true
+                )
+            %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div
+                            class="mfa-flash {{ category }}"
+                            role="alert"
+                        >
+                            {{ message }}
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            {% if mode == "method_selection" %}
+                <div class="mfa-intro-box">
+                    For stronger account security, choose one
+                    verification method. You can change your
+                    method later from My Login Security after
+                    the replacement method is verified.
+                </div>
+
+                <form
+                    method="POST"
+                    action="{{ url_for('mfa_login') }}"
+                    class="mfa-choice-stack"
+                >
+                    <input
+                        type="hidden"
+                        name="security_csrf_token"
+                        value="{{ security_csrf_token }}"
+                    >
+
+                    <input
+                        type="hidden"
+                        name="mfa_action"
+                        value="method"
+                    >
+
+                    <button
+                        type="submit"
+                        name="mfa_method"
+                        value="authenticator"
+                        class="mfa-choice-button primary"
+                    >
+                        <strong>
+                            Authenticator App — Recommended
+                        </strong>
+                        <span>
+                            Use Microsoft Authenticator, Google
+                            Authenticator, or another compatible app.
+                            No text or email delivery is required.
+                        </span>
+                    </button>
+
+                    <button
+                        type="submit"
+                        name="mfa_method"
+                        value="sms"
+                        class="mfa-choice-button"
+                    >
+                        <strong>
+                            Text Message
+                        </strong>
+                        <span>
+                            Receive a 6-digit verification code
+                            at your personal mobile number.
+                        </span>
+                    </button>
+
+                    <button
+                        type="submit"
+                        name="mfa_method"
+                        value="email"
+                        class="mfa-choice-button"
+                    >
+                        <strong>
+                            Email
+                        </strong>
+                        <span>
+                            Receive a 6-digit verification code
+                            at your Peach Suite Pro login email.
+                        </span>
+                    </button>
+                </form>
+
+            {% elif mode == "code_verify" %}
+                <div class="mfa-note">
+                    {% if code_sent %}
+                        {% if mfa_method == "sms" %}
+                            We sent a 6-digit security code to the
+                            personal mobile number on your account.
+                        {% else %}
+                            We sent a 6-digit security code to your
+                            Peach Suite Pro login email.
+                        {% endif %}
+                        The code expires in 10 minutes.
+                    {% else %}
+                        No active verification code is currently
+                        available for this sign-in. Use the button
+                        below to request a verification code.
+                    {% endif %}
+                </div>
+
+                {% if code_sent %}
+                <form
+                    method="POST"
+                    action="{{ url_for('mfa_login') }}"
+                >
+                    <input
+                        type="hidden"
+                        name="security_csrf_token"
+                        value="{{ security_csrf_token }}"
+                    >
+
+                    <input
+                        type="hidden"
+                        name="mfa_action"
+                        value="code_verify"
+                    >
+
+                    <div class="mfa-field">
+                        <label for="mfaCode">
+                            6-Digit Verification Code
+                        </label>
+
+                        <input
+                            type="text"
+                            id="mfaCode"
+                            name="mfa_code"
+                            inputmode="numeric"
+                            autocomplete="one-time-code"
+                            pattern="[0-9]{6}"
+                            maxlength="6"
+                            required
+                            autofocus
+                        >
+                    </div>
+
+                    <button
+                        type="submit"
+                        class="mfa-button"
+                    >
+                        Verify and Continue
+                    </button>
+                </form>
+                {% endif %}
+
+                <form
+                    method="POST"
+                    action="{{ url_for('mfa_login') }}"
+                    style="margin-top: 14px;"
+                >
+                    <input
+                        type="hidden"
+                        name="security_csrf_token"
+                        value="{{ resend_csrf_token }}"
+                    >
+
+                    <input
+                        type="hidden"
+                        name="mfa_action"
+                        value="resend_code"
+                    >
+
+                    <button
+                        type="submit"
+                        class="mfa-secondary"
+                    >
+                        {% if code_sent %}
+                            Send a New Code
+                        {% else %}
+                            Send Verification Code
+                        {% endif %}
+                    </button>
+                </form>
+
+            {% elif mode == "intro" %}
+                <div class="mfa-intro-box">
+                    You do not need to know anything about MFA
+                    to continue. Peach Suite Pro can walk you
+                    through the setup step by step. You will
+                    use an authenticator app on your phone to
+                    create temporary 6-digit security codes.
+                </div>
+
+                <form
+                    method="POST"
+                    action="{{ url_for('mfa_login') }}"
+                    class="mfa-choice-stack"
+                >
+                    <input
+                        type="hidden"
+                        name="security_csrf_token"
+                        value="{{ security_csrf_token }}"
+                    >
+
+                    <input
+                        type="hidden"
+                        name="mfa_action"
+                        value="intro"
+                    >
+
+                    <button
+                        type="submit"
+                        name="mfa_setup_choice"
+                        value="guided"
+                        class="mfa-choice-button primary"
+                    >
+                        <strong>
+                            Yes — Show Me Step-by-Step Instructions
+                        </strong>
+                        <span>
+                            I'll explain what MFA is, help you
+                            choose an authenticator app, and
+                            walk you through the setup.
+                        </span>
+                    </button>
+
+                    <button
+                        type="submit"
+                        name="mfa_setup_choice"
+                        value="familiar"
+                        class="mfa-choice-button"
+                    >
+                        <strong>
+                            No — I'm Familiar With MFA
+                        </strong>
+                        <span>
+                            Take me directly to the authenticator
+                            setup and QR code.
+                        </span>
+                    </button>
+                </form>
+
+            {% elif mode == "enrollment" %}
+                <div class="mfa-note">
+                    Open your authenticator app and add a
+                    new account by scanning this QR code.
+                    Then enter the six-digit code the app
+                    generates.
+                </div>
+
+                <div class="mfa-qr-wrap">
+                    <img
+                        class="mfa-qr"
+                        src="{{ url_for('mfa_login_qr') }}"
+                        alt="Authenticator setup QR code"
+                    >
+                </div>
+
+                <form
+                    method="POST"
+                    action="{{ url_for('mfa_login') }}"
+                >
+                    <input
+                        type="hidden"
+                        name="security_csrf_token"
+                        value="{{ security_csrf_token }}"
+                    >
+
+                    <input
+                        type="hidden"
+                        name="mfa_action"
+                        value="enroll"
+                    >
+
+                    <div class="mfa-field">
+                        <label for="mfaCode">
+                            Authenticator Code
+                        </label>
+
+                        <input
+                            type="text"
+                            id="mfaCode"
+                            name="mfa_code"
+                            inputmode="numeric"
+                            autocomplete="one-time-code"
+                            pattern="[0-9]{6}"
+                            maxlength="6"
+                            required
+                            autofocus
+                        >
+                    </div>
+
+                    <button
+                        type="submit"
+                        class="mfa-button"
+                    >
+                        Verify Authenticator
+                    </button>
+                </form>
+
+            {% elif mode == "recovery_codes" %}
+                <div
+                    class="mfa-note mfa-important"
+                    role="alert"
+                >
+                    <strong>
+                        Save your backup recovery codes
+                    </strong><br><br>
+
+                    These codes are your backup way to sign
+                    in if you cannot use your authenticator app.
+                    You may need one if your phone is lost,
+                    stolen, replaced, damaged, or you cannot
+                    access your authenticator app.<br><br>
+
+                    Each recovery code can be used only once.
+                    Peach Suite Pro will not show this same
+                    set of codes again after you finish setup.
+                    Please save them somewhere secure now.
+                </div>
+
+                <div class="mfa-intro-box">
+                    <strong>Recommended:</strong>
+                    Save them in a password manager or another
+                    secure place you can access even if your
+                    phone is unavailable.
+                </div>
+
+                <ul
+                    class="mfa-recovery-list"
+                    id="mfaRecoveryCodes"
+                    aria-label="MFA recovery codes"
+                >
+                    {% for recovery_code in recovery_codes %}
+                        <li class="mfa-recovery-code">
+                            {{ recovery_code }}
+                        </li>
+                    {% endfor %}
+                </ul>
+
+                <div
+                    class="mfa-save-tools"
+                    aria-label="Recovery code save options"
+                >
+                    <button
+                        type="button"
+                        class="mfa-save-button"
+                        id="copyRecoveryCodes"
+                    >
+                        Copy All Codes
+                    </button>
+
+                    <button
+                        type="button"
+                        class="mfa-save-button"
+                        id="downloadRecoveryCodes"
+                    >
+                        Download Codes
+                    </button>
+
+                    <button
+                        type="button"
+                        class="mfa-save-button"
+                        id="printRecoveryCodes"
+                    >
+                        Print / Save as PDF
+                    </button>
+
+                    <div
+                        class="mfa-save-status"
+                        id="mfaSaveStatus"
+                        role="status"
+                        aria-live="polite"
+                    ></div>
+                </div>
+
+                <form
+                    method="POST"
+                    action="{{ url_for(
+                        'mfa_login_complete'
+                    ) }}"
+                >
+                    <input
+                        type="hidden"
+                        name="security_csrf_token"
+                        value="{{ security_csrf_token }}"
+                    >
+
+                    <button
+                        type="submit"
+                        class="mfa-button"
+                    >
+                        I Saved My Recovery Codes
+                    </button>
+                </form>
+
+            {% elif mode == "enrollment_complete" %}
+                <div
+                    class="mfa-note mfa-important"
+                    role="alert"
+                >
+                    Your recovery codes were displayed once
+                    when setup was completed. For security,
+                    Peach Suite Pro cannot display that same
+                    recovery-code set again.
+                </div>
+
+                <form
+                    method="POST"
+                    action="{{ url_for(
+                        'mfa_login_complete'
+                    ) }}"
+                >
+                    <input
+                        type="hidden"
+                        name="security_csrf_token"
+                        value="{{ security_csrf_token }}"
+                    >
+
+                    <button
+                        type="submit"
+                        class="mfa-button"
+                    >
+                        Continue to Peach Suite Pro
+                    </button>
+                </form>
+
+            {% elif mode == "recovery" %}
+                <form
+                    method="POST"
+                    action="{{ url_for(
+                        'mfa_login_recovery'
+                    ) }}"
+                >
+                    <input
+                        type="hidden"
+                        name="security_csrf_token"
+                        value="{{ security_csrf_token }}"
+                    >
+
+                    <div class="mfa-field">
+                        <label for="recoveryCode">
+                            Recovery Code
+                        </label>
+
+                        <input
+                            type="text"
+                            id="recoveryCode"
+                            name="recovery_code"
+                            autocomplete="one-time-code"
+                            autocapitalize="characters"
+                            spellcheck="false"
+                            required
+                            autofocus
+                        >
+                    </div>
+
+                    <button
+                        type="submit"
+                        class="mfa-button"
+                    >
+                        Verify Recovery Code
+                    </button>
+                </form>
+
+                <a
+                    href="{{ url_for('mfa_login') }}"
+                    class="mfa-secondary"
+                >
+                    Use Authenticator App
+                </a>
+
+            {% else %}
+                <form
+                    method="POST"
+                    action="{{ url_for('mfa_login') }}"
+                >
+                    <input
+                        type="hidden"
+                        name="security_csrf_token"
+                        value="{{ security_csrf_token }}"
+                    >
+
+                    <input
+                        type="hidden"
+                        name="mfa_action"
+                        value="verify"
+                    >
+
+                    <div class="mfa-field">
+                        <label for="mfaCode">
+                            Authenticator Code
+                        </label>
+
+                        <input
+                            type="text"
+                            id="mfaCode"
+                            name="mfa_code"
+                            inputmode="numeric"
+                            autocomplete="one-time-code"
+                            pattern="[0-9]{6}"
+                            maxlength="6"
+                            required
+                            autofocus
+                        >
+                    </div>
+
+                    <button
+                        type="submit"
+                        class="mfa-button"
+                    >
+                        Verify and Sign In
+                    </button>
+                </form>
+
+                <a
+                    href="{{ url_for(
+                        'mfa_login_recovery'
+                    ) }}"
+                    class="mfa-secondary"
+                >
+                    Use a Recovery Code
+                </a>
+            {% endif %}
+
+            <div class="mfa-footer">
+                Peach Suite Pro
+            </div>
+        </section>
+    </main>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const codesElement = document.getElementById(
+        "mfaRecoveryCodes"
+    );
+
+    const copyButton = document.getElementById(
+        "copyRecoveryCodes"
+    );
+
+    const downloadButton = document.getElementById(
+        "downloadRecoveryCodes"
+    );
+
+    const printButton = document.getElementById(
+        "printRecoveryCodes"
+    );
+
+    const statusElement = document.getElementById(
+        "mfaSaveStatus"
+    );
+
+    if (
+        !codesElement
+        || !copyButton
+        || !downloadButton
+        || !printButton
+        || !statusElement
+    ) {
+        return;
+    }
+
+    const getRecoveryCodes = function () {
+        return Array.from(
+            codesElement.querySelectorAll(
+                ".mfa-recovery-code"
+            )
+        )
+        .map(function (element) {
+            return element.textContent.trim();
+        })
+        .filter(Boolean);
+    };
+
+    const showStatus = function (message) {
+        statusElement.textContent = message;
+    };
+
+    copyButton.addEventListener(
+        "click",
+        async function () {
+            const codes = getRecoveryCodes();
+
+            if (!codes.length) {
+                showStatus(
+                    "No recovery codes are available."
+                );
+                return;
+            }
+
+            const text = codes.join("\n");
+
+            try {
+                await navigator.clipboard.writeText(
+                    text
+                );
+
+                showStatus(
+                    "Recovery codes copied. Paste them into a secure password manager or other safe location."
+                );
+            } catch (error) {
+                showStatus(
+                    "Your browser could not copy the codes automatically. You can select and copy the codes above."
+                );
+            }
+        }
+    );
+
+    downloadButton.addEventListener(
+        "click",
+        function () {
+            const codes = getRecoveryCodes();
+
+            if (!codes.length) {
+                showStatus(
+                    "No recovery codes are available."
+                );
+                return;
+            }
+
+            const content = [
+                "Peach Suite Pro MFA Recovery Codes",
+                "",
+                "Keep these codes somewhere secure.",
+                "Each code can be used only once.",
+                "",
+                ...codes,
+                "",
+            ].join("\n");
+
+            const blob = new Blob(
+                [content],
+                {
+                    type: "text/plain;charset=utf-8",
+                }
+            );
+
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+
+            link.href = url;
+            link.download = "peach-suite-pro-recovery-codes.txt";
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+
+            URL.revokeObjectURL(url);
+
+            showStatus(
+                "Recovery codes downloaded to your device."
+            );
+        }
+    );
+
+    printButton.addEventListener(
+        "click",
+        function () {
+            window.print();
+        }
+    );
+});
+</script>
+
+</body>
+</html>

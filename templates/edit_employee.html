@@ -6,6 +6,11 @@
 <h1>Edit Employee</h1>
 
 <form method="POST" action="{{ url_for('edit_employee', employee_id=employee.employee_id) }}">
+    <input
+        type="hidden"
+        name="security_csrf_token"
+        value="{{ security_csrf_token }}"
+    >
 
     <div class="form-group">
         <label for="first_name">First Name</label>
@@ -78,12 +83,16 @@
     <br>
 
     <div class="form-group">
-        <label class="checkbox-label">
-            <input type="checkbox"
-                name="is_active"
-                {% if employee.is_active %}checked{% endif %}>
-            Active Employee
-        </label>
+        <strong>Employee Status:</strong>
+        {% if employee.is_active %}
+            Active
+        {% else %}
+            Archived
+        {% endif %}
+
+        <div style="margin-top: 4px; font-size: 0.9em;">
+            Employee activation is managed from the Employee Command Center.
+        </div>
     </div>
     <br>
 

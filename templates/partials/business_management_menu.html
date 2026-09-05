@@ -30,30 +30,38 @@
          style="display:none;">
 
 
-       
-        <!-- Business Operations -->
-        <div class="app-menu-submenu-section">
+        {% if nav_access.can_view_business_management %}
 
-            <div class="app-menu-submenu-heading">
-                🍑 Business Operations
+            <!-- Business Operations -->
+            <div class="app-menu-submenu-section">
+
+                <div class="app-menu-submenu-heading">
+                    🍑 Business Operations
+                </div>
+
+                <a href="{{ url_for('spa_management') }}">
+                    <span aria-hidden="true">🏠</span>
+                    <span>Business Management Home</span>
+                </a>
+
+                <a href="{{ url_for(
+                    'business_coach_profile'
+                ) }}">
+                    <span aria-hidden="true">🏢</span>
+                    <span>Business Profile</span>
+                </a>
+
+                <a href="{{ url_for('business_schedule') }}">
+                    <span aria-hidden="true">🗓️</span>
+                    <span>Business Schedule &amp; Reminders</span>
+                </a>
+
             </div>
 
-            <a href="{{ url_for(
-                'business_coach_profile'
-            ) }}">
-                <span aria-hidden="true">🏢</span>
-                <span>Business Profile</span>
-            </a>
 
-            <a href="{{ url_for('business_schedule') }}">
-                <span aria-hidden="true">🗓️</span>
-                <span>Business Schedule & Reminders</span>
-            </a>
+            <div class="user-menu-divider"></div>
 
-        </div>
-
-
-        <div class="user-menu-divider"></div>
+        {% endif %}
 
 
         <!-- Business Settings -->
@@ -63,32 +71,54 @@
                 ⚙️ Business Settings
             </div>
 
-            <a href="{{ url_for('business_goals') }}">
-                <span aria-hidden="true">🎯</span>
-                <span>My Business Goals</span>
-            </a>
+            {% if nav_access.can_view_business_management %}
 
-            <a href="{{ url_for('admin') }}">
-                <span aria-hidden="true">🛠️</span>
-                <span>Admin Settings</span>
-            </a>
+                <a href="{{ url_for('business_goals') }}">
+                    <span aria-hidden="true">🎯</span>
+                    <span>My Business Goals</span>
+                </a>
 
-{% if nav_access.can_manage_security_settings %}
-<a href="{{ url_for('login_security_settings') }}">
-    <span aria-hidden="true">🔐</span>
-    <span>Login Security</span>
-</a>
-{% endif %}
+                <a href="{{ url_for('admin') }}">
+                    <span aria-hidden="true">🛠️</span>
+                    <span>Admin Settings</span>
+                </a>
 
-        <a href="{{ url_for('help_center') }}">
-            <span aria-hidden="true">❓</span>
-            <span>Help Center</span>
-        </a>
+            {% endif %}
+
+
+            {% if nav_access.can_manage_users %}
+
+                <a href="{{ url_for('business_users') }}">
+                    <span aria-hidden="true">👥</span>
+                    <span>Users</span>
+                </a>
+
+            {% endif %}
+
+
+            {% if nav_access.can_manage_security_settings %}
+
+                <a href="{{ url_for(
+                    'login_security_settings'
+                ) }}">
+                    <span aria-hidden="true">🔐</span>
+                    <span>Login Security</span>
+                </a>
+
+            {% endif %}
+
+
+            {% if nav_access.can_view_business_management %}
+
+                <a href="{{ url_for('help_center') }}">
+                    <span aria-hidden="true">❓</span>
+                    <span>Help Center</span>
+                </a>
+
+            {% endif %}
 
         </div>
 
-
-            
 
     </div>
 

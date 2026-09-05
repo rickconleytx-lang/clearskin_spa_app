@@ -51,7 +51,7 @@
                 value="{{ employee[0] }}"
                 {% if income_record.employee_id == employee[0] %}selected{% endif %}
             >
-                {{ employee[1] }} {{ employee[2] }}
+                {{ employee[1] }} {{ employee[2] }}{% if not employee[3] %} (Archived){% endif %}
             </option>
         {% endfor %}
     </select>

@@ -42,15 +42,24 @@
                 <span>Employee Home</span>
             </a>
 
-            <a href="{{ url_for('add_employee') }}">
-                <span aria-hidden="true">➕</span>
-                <span>Add New Employee</span>
-            </a>
+            {% if nav_access.can_manage_employees %}
+                <a href="{{ url_for('add_employee') }}">
+                    <span aria-hidden="true">➕</span>
+                    <span>Add New Employee</span>
+                </a>
 
-            <a href="{{ url_for('employee_admin') }}">
-                <span aria-hidden="true">⚙️</span>
-                <span>Employee Administration</span>
-            </a>
+                <a href="{{ url_for('employee_admin') }}">
+                    <span aria-hidden="true">⚙️</span>
+                    <span>Employee Administration</span>
+                </a>
+            {% endif %}
+
+            {% if nav_access.can_manage_employee_access_codes %}
+                <a href="{{ url_for('employee_access_codes_admin') }}">
+                    <span aria-hidden="true">🔐</span>
+                    <span>Employee Access Codes</span>
+                </a>
+            {% endif %}
 
         </div>
 
@@ -59,38 +68,47 @@
 
 
         <!-- Compensation -->
-        <div class="app-menu-submenu-section">
+        {% if nav_access.can_view_employee_compensation
+              or nav_access.can_manage_employee_compensation %}
+            <div class="app-menu-submenu-section">
 
-            <div class="app-menu-submenu-heading">
-                💵 Employee Compensation
+                <div class="app-menu-submenu-heading">
+                    💵 Employee Compensation
+                </div>
+
+                {% if nav_access.can_manage_employee_compensation %}
+                    <a href="{{ url_for('add_employee_compensation') }}">
+                        <span aria-hidden="true">➕</span>
+                        <span>Add Employee Compensation</span>
+                    </a>
+                {% endif %}
+
+                {% if nav_access.can_view_employee_compensation %}
+                    <a href="{{ url_for('employee_compensation_report') }}">
+                        <span aria-hidden="true">📊</span>
+                        <span>Compensation Report</span>
+                    </a>
+
+                    <a href="{{ url_for('employee_compensation_history') }}">
+                        <span aria-hidden="true">🕘</span>
+                        <span>Compensation History</span>
+                    </a>
+
+                    <a href="{{ url_for('employee_pay_summary') }}">
+                        <span aria-hidden="true">🧾</span>
+                        <span>Employee Pay Summary</span>
+                    </a>
+                {% endif %}
+
+                {% if nav_access.can_manage_employee_compensation %}
+                    <a href="{{ url_for('compensation_types_report') }}">
+                        <span aria-hidden="true">⚙️</span>
+                        <span>Manage Compensation Types</span>
+                    </a>
+                {% endif %}
+
             </div>
-
-            <a href="{{ url_for('add_employee_compensation') }}">
-                <span aria-hidden="true">➕</span>
-                <span>Add Employee Compensation</span>
-            </a>
-
-            <a href="{{ url_for('employee_compensation_report') }}">
-                <span aria-hidden="true">📊</span>
-                <span>Compensation Report</span>
-            </a>
-
-            <a href="{{ url_for('employee_compensation_history') }}">
-                <span aria-hidden="true">🕘</span>
-                <span>Compensation History</span>
-            </a>
-
-            <a href="{{ url_for('employee_pay_summary') }}">
-                <span aria-hidden="true">🧾</span>
-                <span>Employee Pay Summary</span>
-            </a>
-
-            <a href="{{ url_for('compensation_types_report') }}">
-                <span aria-hidden="true">⚙️</span>
-                <span>Manage Compensation Types</span>
-            </a>
-
-        </div>
+        {% endif %}
 
     </div>
 

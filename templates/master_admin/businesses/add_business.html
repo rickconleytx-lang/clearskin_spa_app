@@ -27,6 +27,10 @@ Add Business | Peach Suite Pro
       action=""
       class="standard-form">
 
+    <input type="hidden"
+           name="security_csrf_token"
+           value="{{ security_csrf_token }}">
+
     <section class="form-card">
         <h2>Business Information</h2>
 

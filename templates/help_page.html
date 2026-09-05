@@ -8,29 +8,60 @@
 
     <h1>{{ page[0] }}</h1>
 
+    {% if admin_preview %}
+        <p class="page-subtitle">
+            Master Admin Preview — {{ selected_language }}
+        </p>
+    {% endif %}
+
     <div class="help-content">
         {{ page[1] | safe }}
     </div>
 
-    {% if page_key == "sms_email_terms" %}
+    {% if page_key == "sms_email_terms" and not admin_preview %}
         <hr>
 
-        <form method="POST" action="{{ url_for('sms_email_terms') }}">
+        <p>
+            <strong>Current Agreement Version:</strong>
+            {{ current_terms_version }}
+        </p>
 
-            <label>
-                <input type="checkbox"
-                       name="agree_terms"
-                       required>
-                I agree to the SMS and Email Terms and Conditions.
-            </label>
+        {% if print_mode %}
 
-            <br><br>
+            <script>
+                window.addEventListener(
+                    "load",
+                    function () {
+                        window.print();
+                    }
+                );
+            </script>
 
-            <button type="submit">
-                Accept Terms
-            </button>
+        {% else %}
 
-        </form>
+            <form method="POST"
+                  action="{{ url_for('sms_email_terms') }}">
+
+                <input type="hidden"
+                       name="security_csrf_token"
+                       value="{{ security_csrf_token }}">
+
+                <label>
+                    <input type="checkbox"
+                           name="agree_terms"
+                           required>
+                    I agree to the SMS and Email Terms and Conditions.
+                </label>
+
+                <br><br>
+
+                <button type="submit">
+                    Accept Terms
+                </button>
+
+            </form>
+
+        {% endif %}
     {% endif %}
 
 </div>

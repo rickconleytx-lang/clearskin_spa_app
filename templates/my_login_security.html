@@ -1,0 +1,273 @@
+{% extends "base.html" %}
+
+{% block title %}My Login Security | Peach Suite Pro{% endblock %}
+
+{% block content %}
+
+<style>
+.my-security-page {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 24px 18px 48px;
+}
+
+.my-security-header {
+    margin-bottom: 24px;
+}
+
+.my-security-header h1 {
+    margin: 0 0 8px;
+    font-size: 2rem;
+}
+
+.my-security-header p {
+    margin: 0;
+    line-height: 1.6;
+    color: #555;
+}
+
+.my-security-grid {
+    display: grid;
+    gap: 18px;
+}
+
+.my-security-card {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 14px;
+    padding: 22px;
+}
+
+.my-security-card h2 {
+    margin: 0 0 8px;
+    font-size: 1.25rem;
+}
+
+.my-security-card p {
+    margin: 0;
+    line-height: 1.6;
+    color: #555;
+}
+
+.my-security-status-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid #eee;
+}
+
+.my-security-status {
+    min-width: 0;
+}
+
+.my-security-status strong {
+    display: block;
+    margin-bottom: 4px;
+}
+
+.my-security-status span {
+    color: #666;
+    line-height: 1.5;
+}
+
+.my-security-badge {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 5px 10px;
+    border-radius: 999px;
+    background: #eef6ee;
+    font-weight: 700;
+    font-size: 0.9rem;
+}
+
+.my-security-badge.inactive {
+    background: #f3f3f3;
+}
+
+.my-security-action {
+    display: inline-block;
+    flex-shrink: 0;
+    padding: 10px 16px;
+    border: 1px solid #bbb;
+    border-radius: 9px;
+    background: #fff;
+    color: inherit;
+    text-decoration: none;
+    font-weight: 700;
+}
+
+.my-security-action:hover {
+    background: #f6f6f6;
+}
+
+.my-security-note {
+    margin-top: 22px;
+    padding: 14px 16px;
+    border-radius: 10px;
+    background: #f7f7f7;
+    color: #555;
+    line-height: 1.55;
+}
+
+@media (max-width: 640px) {
+    .my-security-status-row {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .my-security-action {
+        width: 100%;
+        text-align: center;
+        box-sizing: border-box;
+    }
+}
+</style>
+
+<div class="my-security-page">
+
+    <div class="my-security-header">
+        <h1>My Login Security</h1>
+
+        <p>
+            Manage the password and two-step verification methods
+            that protect your Peach Suite Pro sign-in.
+        </p>
+    </div>
+
+    <div class="my-security-grid">
+
+        <section class="my-security-card">
+            <h2>🔑 Password</h2>
+
+            <p>
+                Your password protects the first step of your
+                Peach Suite Pro sign-in.
+            </p>
+
+            <div class="my-security-status-row">
+
+                <div class="my-security-status">
+                    <strong>Password</strong>
+
+                    <span>
+                        {% if password_changed_at %}
+                            Last changed
+                            {{ password_changed_at.strftime(
+                                "%B %d, %Y"
+                            ) }}
+                        {% else %}
+                            Password change date is not available.
+                        {% endif %}
+                    </span>
+                </div>
+
+                <a
+                    class="my-security-action"
+                    href="{{ url_for('change_password') }}"
+                >
+                    Change Password
+                </a>
+
+            </div>
+        </section>
+
+
+        <section class="my-security-card">
+            <h2>🔐 Two-Step Verification</h2>
+
+            <p>
+                Add an extra security check after your password.
+            </p>
+
+            <div class="my-security-status-row">
+
+                <div class="my-security-status">
+                    <strong>Current Verification Method</strong>
+
+                    <span>
+                        {{ active_mfa_method_label }}
+                    </span>
+
+                    {% if active_mfa_method %}
+                        <span class="my-security-badge">
+                            Active
+                        </span>
+                    {% else %}
+                        <span class="my-security-badge inactive">
+                            Not Active
+                        </span>
+                    {% endif %}
+                </div>
+
+                {% if can_change_mfa_method %}
+                    <a
+                        class="my-security-action"
+                        href="{{ url_for('mfa_method_change') }}"
+                    >
+                        Change Verification Method
+                    </a>
+                {% endif %}
+
+            </div>
+
+            {% if session.get("role") == "master_admin" %}
+                <div class="my-security-status-row">
+                    <div class="my-security-status">
+                        <strong>Master Admin Security</strong>
+                        <span>
+                            Master Admin accounts use Authenticator
+                            App verification.
+                        </span>
+                    </div>
+                </div>
+            {% endif %}
+
+            {% if (
+                active_mfa_method == "authenticator"
+                and authenticator_active
+            ) %}
+
+                <div class="my-security-status-row">
+
+                    <div class="my-security-status">
+                        <strong>Recovery Codes</strong>
+
+                        <span>
+                            {{ active_recovery_code_count }}
+                            unused
+                            {% if active_recovery_code_count == 1 %}
+                                recovery code
+                            {% else %}
+                                recovery codes
+                            {% endif %}
+                            available.
+                        </span>
+                    </div>
+
+                    <a
+                        class="my-security-action"
+                        href="{{ url_for('mfa_recovery_codes') }}"
+                    >
+                        Manage Recovery Codes
+                    </a>
+
+                </div>
+
+            {% endif %}
+
+        </section>
+
+    </div>
+
+    <div class="my-security-note">
+        These settings apply only to your own Peach Suite Pro
+        sign-in. Business-wide Login Security settings are managed
+        separately by authorized administrators.
+    </div>
+
+</div>
+
+{% endblock %}

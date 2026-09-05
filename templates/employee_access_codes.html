@@ -1,0 +1,329 @@
+{% extends "base.html" %}
+
+{% block title %}Employee Access Codes{% endblock %}
+
+{% block content %}
+
+<h1>Employee Access Codes</h1>
+
+<p>
+    Provider Workspace:
+    <strong>{{ workspace.unit_name }}</strong>
+</p>
+
+<p>
+    Employee Access Codes identify the individual employee
+    authorizing sensitive actions while using a shared
+    Peach Suite Pro business login.
+</p>
+
+<div class="card" style="margin-bottom: 24px;">
+    <div class="card-body">
+        <h2>Secure Session Timeout</h2>
+
+        <p>
+            After an employee enters their Employee Access Code,
+            their verified secure session remains active while
+            they work within protected areas of Peach Suite Pro.
+            They may move between protected pages without
+            entering their code again.
+        </p>
+
+        <p>
+            If they leave a protected area, a
+            <strong>15-second grace period</strong> begins.
+            Returning to a protected page within 15 seconds
+            keeps the secure session active. After 15 seconds
+            outside the protected area, the secure session ends
+            and the employee must enter their Employee Access
+            Code again.
+        </p>
+
+        <p style="margin-bottom: 0;">
+            Selecting <strong>End Current Session</strong> or
+            pressing <strong>Esc</strong> ends the secure session
+            immediately.
+        </p>
+    </div>
+</div>
+
+<div class="card" style="margin-bottom: 24px;">
+    <div class="card-body">
+        <h2>Access Code Settings</h2>
+
+        <p>
+            <strong>Status:</strong>
+            {% if settings.is_enabled %}
+                Enabled
+            {% else %}
+                Not Enabled
+            {% endif %}
+        </p>
+
+        <p>
+            Choose the Employee Access Code format for this
+            Provider Workspace. The same format applies to
+            every employee assigned to this workspace.
+        </p>
+
+        <form
+            method="post"
+            action="{{ url_for('employee_access_codes_admin') }}"
+        >
+            <input
+                type="hidden"
+                name="security_csrf_token"
+                value="{{ security_csrf_token }}"
+            >
+
+            <div style="margin-bottom: 16px;">
+                <label for="code_length">
+                    <strong>Code Length</strong>
+                </label>
+                <br>
+
+                <select
+                    id="code_length"
+                    name="code_length"
+                    required
+                >
+                    <option value="">
+                        Select code length
+                    </option>
+
+                    <option
+                        value="4"
+                        {% if settings.code_length == 4 %}
+                            selected
+                        {% endif %}
+                    >
+                        4 characters
+                    </option>
+
+                    <option
+                        value="5"
+                        {% if settings.code_length == 5 %}
+                            selected
+                        {% endif %}
+                    >
+                        5 characters
+                    </option>
+                </select>
+            </div>
+
+            <div style="margin-bottom: 16px;">
+                <label for="code_character_set">
+                    <strong>Code Type</strong>
+                </label>
+                <br>
+
+                <select
+                    id="code_character_set"
+                    name="code_character_set"
+                    required
+                >
+                    <option value="">
+                        Select code type
+                    </option>
+
+                    <option
+                        value="numeric"
+                        {% if
+                            settings.code_character_set
+                            == "numeric"
+                        %}
+                            selected
+                        {% endif %}
+                    >
+                        Numeric — numbers only
+                    </option>
+
+                    <option
+                        value="alphanumeric"
+                        {% if
+                            settings.code_character_set
+                            == "alphanumeric"
+                        %}
+                            selected
+                        {% endif %}
+                    >
+                        Alphanumeric — letters and numbers
+                    </option>
+                </select>
+            </div>
+
+            <div style="margin-bottom: 16px;">
+                <label>
+                    <input
+                        type="checkbox"
+                        name="is_enabled"
+                        value="1"
+                        {% if settings.is_enabled %}
+                            checked
+                        {% endif %}
+                    >
+                    Enable Employee Access Codes for this
+                    Provider Workspace
+                </label>
+            </div>
+
+            <p style="font-size: 0.95em;">
+                Once employee codes are assigned, the code
+                format cannot be changed until those active
+                codes are reset or revoked.
+            </p>
+
+            <button type="submit">
+                Save Access Code Settings
+            </button>
+        </form>
+    </div>
+</div>
+
+<div class="card" style="margin-bottom: 24px;">
+    <div class="card-body">
+        <h2>Workspace Employees</h2>
+
+        {% if employees %}
+            <div style="overflow-x: auto;">
+                <table style="width: 100%; border-collapse: collapse;">
+                    <thead>
+                        <tr>
+                            <th style="text-align: left; padding: 8px;">
+                                Employee
+                            </th>
+                            <th style="text-align: left; padding: 8px;">
+                                Workspace Status
+                            </th>
+                            <th style="text-align: left; padding: 8px;">
+                                Access Code
+                            </th>
+                            <th style="text-align: left; padding: 8px;">
+                                Last Used
+                            </th>
+                            <th style="text-align: left; padding: 8px;">
+                                Action
+                            </th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        {% for employee in employees %}
+                            {% set employee_name =
+                                employee.employee_nickname
+                                or (
+                                    (
+                                        (employee.first_name or "")
+                                        ~ " "
+                                        ~ (employee.last_name or "")
+                                    ) | trim
+                                )
+                                or (
+                                    "Employee "
+                                    ~ employee.employee_id
+                                )
+                            %}
+
+                            {% set workspace_active =
+                                employee.employee_is_active
+                                and
+                                employee.workspace_membership_is_active
+                            %}
+
+                            <tr>
+                                <td style="padding: 8px;">
+                                    {{ employee_name }}
+                                </td>
+
+                                <td style="padding: 8px;">
+                                    {% if workspace_active %}
+                                        Active
+                                    {% else %}
+                                        Inactive
+                                    {% endif %}
+                                </td>
+
+                                <td style="padding: 8px;">
+                                    {% if
+                                        employee.employee_access_code_credential_id
+                                    %}
+                                        Assigned
+                                    {% else %}
+                                        Not Assigned
+                                    {% endif %}
+                                </td>
+
+                                <td style="padding: 8px;">
+                                    {% if employee.last_used_at %}
+                                        {{ employee.last_used_at }}
+                                    {% else %}
+                                        Never
+                                    {% endif %}
+                                </td>
+
+                                <td style="padding: 8px;">
+                                    {% if not settings.is_enabled %}
+                                        Enable codes first
+                                    {% elif not workspace_active %}
+                                        Unavailable
+                                    {% else %}
+                                        <form
+                                            method="post"
+                                            action="{{ url_for(
+                                                'employee_access_code_issue',
+                                                employee_id=employee.employee_id
+                                            ) }}"
+                                            style="margin: 0;"
+                                        >
+                                            <input
+                                                type="hidden"
+                                                name="security_csrf_token"
+                                                value="{{ security_csrf_token }}"
+                                            >
+
+                                            <input
+                                                type="hidden"
+                                                name="action_nonce"
+                                                value="{{ action_nonce }}"
+                                            >
+
+                                            {% if
+                                                employee.employee_access_code_credential_id
+                                            %}
+                                                <button
+                                                    type="submit"
+                                                    onclick="return confirm(
+                                                        'Reset this Employee Access Code? The current code will stop working immediately.'
+                                                    );"
+                                                >
+                                                    Reset Code
+                                                </button>
+                                            {% else %}
+                                                <button type="submit">
+                                                    Generate Code
+                                                </button>
+                                            {% endif %}
+                                        </form>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <p>
+                No employees are currently assigned to this
+                Provider Workspace.
+            </p>
+        {% endif %}
+    </div>
+</div>
+
+<p>
+    <a href="{{ url_for('employee_admin') }}">
+        Back to Employee Admin
+    </a>
+</p>
+
+{% endblock %}

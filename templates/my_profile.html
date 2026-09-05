@@ -1,0 +1,381 @@
+{% extends "base.html" %}
+
+{% block title %}My Profile | Peach Suite Pro{% endblock %}
+
+{% block content %}
+
+<style>
+.my-profile-page {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 24px 18px 48px;
+}
+
+.my-profile-header {
+    margin-bottom: 24px;
+}
+
+.my-profile-header h1 {
+    margin: 0 0 8px;
+    font-size: 2rem;
+}
+
+.my-profile-header p {
+    margin: 0;
+    color: #555;
+    line-height: 1.6;
+}
+
+.my-profile-card {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 14px;
+    padding: 22px;
+    margin-bottom: 18px;
+}
+
+.my-profile-card h2 {
+    margin: 0 0 8px;
+    font-size: 1.25rem;
+}
+
+.my-profile-card-intro {
+    margin: 0 0 20px;
+    color: #555;
+    line-height: 1.55;
+}
+
+.my-profile-grid {
+    display: grid;
+    grid-template-columns: repeat(
+        2,
+        minmax(0, 1fr)
+    );
+    gap: 18px;
+}
+
+.my-profile-field {
+    min-width: 0;
+}
+
+.my-profile-field.full {
+    grid-column: 1 / -1;
+}
+
+.my-profile-field label {
+    display: block;
+    margin-bottom: 6px;
+    font-weight: 700;
+}
+
+.my-profile-field input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 11px 12px;
+    border: 1px solid #bbb;
+    border-radius: 9px;
+    font: inherit;
+}
+
+.my-profile-field input[readonly] {
+    background: #f5f5f5;
+    color: #555;
+}
+
+.my-profile-help {
+    display: block;
+    margin-top: 6px;
+    color: #666;
+    font-size: 0.9rem;
+    line-height: 1.45;
+}
+
+.my-profile-sensitive {
+    margin-top: 20px;
+    padding: 16px;
+    border-radius: 10px;
+    background: #f7f7f7;
+}
+
+.my-profile-sensitive p {
+    margin: 0 0 14px;
+    color: #555;
+    line-height: 1.55;
+}
+
+.my-profile-actions {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: 22px;
+}
+
+.my-profile-save {
+    padding: 10px 18px;
+    border: 0;
+    border-radius: 9px;
+    cursor: pointer;
+    font: inherit;
+    font-weight: 700;
+}
+
+.my-profile-cancel {
+    display: inline-block;
+    padding: 10px 18px;
+    border: 1px solid #bbb;
+    border-radius: 9px;
+    color: inherit;
+    text-decoration: none;
+    font-weight: 700;
+}
+
+.my-profile-note {
+    margin-top: 18px;
+    padding: 14px 16px;
+    border-radius: 10px;
+    background: #f7f7f7;
+    color: #555;
+    line-height: 1.55;
+}
+
+@media (max-width: 640px) {
+    .my-profile-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .my-profile-field.full {
+        grid-column: auto;
+    }
+
+    .my-profile-actions {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .my-profile-save,
+    .my-profile-cancel {
+        width: 100%;
+        box-sizing: border-box;
+        text-align: center;
+    }
+}
+</style>
+
+<div class="my-profile-page">
+
+    <div class="my-profile-header">
+        <h1>My Profile</h1>
+
+        <p>
+            Manage your personal Peach Suite Pro account
+            information.
+        </p>
+    </div>
+
+    <form
+        method="POST"
+        action="{{ url_for('my_profile') }}"
+    >
+
+        <input
+            type="hidden"
+            name="security_csrf_token"
+            value="{{ security_csrf_token }}"
+        >
+
+        <section class="my-profile-card">
+
+            <h2>👤 Personal Information</h2>
+
+            <p class="my-profile-card-intro">
+                These details identify you as the person signed
+                in to Peach Suite Pro.
+            </p>
+
+            <div class="my-profile-grid">
+
+                <div class="my-profile-field">
+                    <label for="firstName">
+                        First Name
+                    </label>
+
+                    <input
+                        type="text"
+                        id="firstName"
+                        name="first_name"
+                        value="{{ first_name }}"
+                        maxlength="100"
+                        autocomplete="given-name"
+                        required
+                    >
+                </div>
+
+                <div class="my-profile-field">
+                    <label for="lastName">
+                        Last Name
+                    </label>
+
+                    <input
+                        type="text"
+                        id="lastName"
+                        name="last_name"
+                        value="{{ last_name }}"
+                        maxlength="100"
+                        autocomplete="family-name"
+                        required
+                    >
+                </div>
+
+                <div class="my-profile-field full">
+                    <label for="mobilePhone">
+                        Personal Mobile Phone
+                    </label>
+
+                    <input
+                        type="tel"
+                        id="mobilePhone"
+                        name="mobile_phone"
+                        value="{{ mobile_phone }}"
+                        maxlength="25"
+                        autocomplete="tel"
+                        placeholder="(817) 555-1212"
+                    >
+
+                    <span class="my-profile-help">
+                        This is your personal account mobile
+                        number, not the business phone number.
+                        It may later be used for login-security
+                        verification after you confirm ownership.
+                    </span>
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <section class="my-profile-card">
+
+            <h2>🔐 Login Information</h2>
+
+            <p class="my-profile-card-intro">
+                These fields are currently protected from direct
+                editing.
+            </p>
+
+            <div class="my-profile-grid">
+
+                <div class="my-profile-field full">
+                    <label for="loginEmail">
+                        Login Email
+                    </label>
+
+                    <input
+                        type="email"
+                        id="loginEmail"
+                        value="{{ email }}"
+                        readonly
+                    >
+
+                    <span class="my-profile-help">
+                        Email changes will use a separate verified
+                        security process.
+                    </span>
+                </div>
+
+                <div class="my-profile-field">
+                    <label for="username">
+                        Username
+                    </label>
+
+                    <input
+                        type="text"
+                        id="username"
+                        value="{{ username }}"
+                        readonly
+                    >
+                </div>
+
+                <div class="my-profile-field">
+                    <label for="accountRole">
+                        Account Role
+                    </label>
+
+                    <input
+                        type="text"
+                        id="accountRole"
+                        value="{{ role
+                            | replace('_', ' ')
+                            | title
+                        }}"
+                        readonly
+                    >
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <section class="my-profile-card">
+
+            <h2>🛡️ Confirm Sensitive Changes</h2>
+
+            <div class="my-profile-sensitive">
+
+                <p>
+                    If you add, change, or remove your personal
+                    mobile number, enter your current
+                    business-login password to confirm the
+                    change. A password is not required when only
+                    updating your name.
+                </p>
+
+                <div class="my-profile-field">
+                    <label for="currentPassword">
+                        Current Password
+                    </label>
+
+                    <input
+                        type="password"
+                        id="currentPassword"
+                        name="current_password"
+                        maxlength="128"
+                        autocomplete="current-password"
+                    >
+                </div>
+
+            </div>
+
+            <div class="my-profile-actions">
+
+                <button
+                    type="submit"
+                    class="my-profile-save btn btn-primary"
+                >
+                    Save My Profile
+                </button>
+
+                <a
+                    href="{{ url_for('my_login_security') }}"
+                    class="my-profile-cancel"
+                >
+                    Cancel
+                </a>
+
+            </div>
+
+        </section>
+
+    </form>
+
+    <div class="my-profile-note">
+        Your personal profile is separate from your business
+        profile, appointment-support contact information, and
+        Peach Suite Pro business-wide Login Security settings.
+    </div>
+
+</div>
+
+{% endblock %}

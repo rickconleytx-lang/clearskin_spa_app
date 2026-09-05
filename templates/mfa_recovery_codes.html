@@ -1,0 +1,559 @@
+{% extends "base.html" %}
+
+{% block title %}
+Recovery Codes | Peach Suite Pro
+{% endblock %}
+
+{% block content %}
+
+<style>
+.mfa-recovery-page {
+    max-width: 920px;
+    margin: 0 auto;
+}
+
+.mfa-recovery-header {
+    margin-bottom: 24px;
+}
+
+.mfa-recovery-header h1 {
+    margin-bottom: 8px;
+}
+
+.mfa-recovery-header p {
+    max-width: 760px;
+    margin: 0;
+    line-height: 1.55;
+    color: #555;
+}
+
+.mfa-recovery-card {
+    margin-bottom: 18px;
+    padding: 22px;
+    border: 1px solid #dddddd;
+    border-radius: 14px;
+    background: #ffffff;
+}
+
+.mfa-recovery-card h2 {
+    margin-top: 0;
+    margin-bottom: 8px;
+    font-size: 20px;
+}
+
+.mfa-recovery-card p {
+    margin-top: 0;
+    line-height: 1.55;
+    color: #555;
+}
+
+.mfa-recovery-important {
+    margin-bottom: 18px;
+    padding: 16px 18px;
+    border: 1px solid #d8b56d;
+    border-radius: 12px;
+    background: #fff9ec;
+    line-height: 1.55;
+}
+
+.mfa-recovery-success {
+    margin-bottom: 18px;
+    padding: 16px 18px;
+    border: 1px solid #b9d7bd;
+    border-radius: 12px;
+    background: #f3fbf4;
+    line-height: 1.55;
+}
+
+.mfa-recovery-field {
+    max-width: 480px;
+    margin-top: 18px;
+}
+
+.mfa-recovery-field label {
+    display: block;
+    margin-bottom: 7px;
+    font-weight: 700;
+}
+
+.mfa-recovery-field input {
+    width: 100%;
+    min-height: 44px;
+    box-sizing: border-box;
+    padding: 9px 11px;
+    border: 1px solid #cccccc;
+    border-radius: 9px;
+    background: #ffffff;
+    font: inherit;
+}
+
+.mfa-recovery-actions,
+.mfa-save-tools {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 24px;
+    flex-wrap: wrap;
+}
+
+.mfa-recovery-primary,
+.mfa-save-button {
+    min-height: 44px;
+    padding: 10px 18px;
+    border: 0;
+    border-radius: 9px;
+    background: #2d2d2d;
+    color: #ffffff;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.mfa-recovery-secondary {
+    display: inline-flex;
+    min-height: 44px;
+    align-items: center;
+    padding: 10px 18px;
+    box-sizing: border-box;
+    border: 1px solid #cccccc;
+    border-radius: 9px;
+    background: #ffffff;
+    color: #333333;
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.mfa-recovery-list {
+    display: grid;
+    grid-template-columns: repeat(
+        auto-fit,
+        minmax(210px, 1fr)
+    );
+    gap: 10px;
+    padding: 0;
+    margin: 20px 0 0;
+    list-style: none;
+}
+
+.mfa-recovery-code {
+    padding: 12px 14px;
+    border: 1px solid #dddddd;
+    border-radius: 9px;
+    background: #f7f7f7;
+    font-family: monospace;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-align: center;
+}
+
+.mfa-save-status {
+    width: 100%;
+    min-height: 24px;
+    line-height: 1.45;
+    color: #444444;
+}
+
+@media print {
+    .mfa-recovery-header p,
+    .mfa-recovery-success,
+    .mfa-save-tools,
+    .mfa-recovery-actions,
+    nav,
+    header,
+    footer {
+        display: none !important;
+    }
+
+    .mfa-recovery-card {
+        border: 0;
+        padding: 0;
+    }
+
+    .mfa-recovery-code {
+        break-inside: avoid;
+    }
+}
+</style>
+
+
+<div class="mfa-recovery-page">
+
+    {% if mode == "confirm" %}
+
+        <div class="mfa-recovery-header">
+
+            <h1>Recovery Codes</h1>
+
+            <p>
+                Create a fresh set of backup codes for your
+                Peach Suite Pro authenticator-app verification.
+            </p>
+
+        </div>
+
+
+        <div
+            class="mfa-recovery-important"
+            role="alert"
+        >
+
+            <strong>
+                Regenerating recovery codes does not change your
+                authenticator app.
+            </strong>
+
+            <br><br>
+
+            Your current authenticator remains connected and will
+            continue generating the same six-digit security codes.
+
+            <br><br>
+
+            Any old recovery codes that have not already been used
+            will stop working as soon as the new set is created.
+            Previously used codes and prior code history remain
+            preserved for security auditing.
+
+        </div>
+
+
+        <form
+            method="POST"
+            action="{{ url_for('mfa_recovery_codes') }}"
+        >
+
+            <input
+                type="hidden"
+                name="security_csrf_token"
+                value="{{ security_csrf_token }}"
+            >
+
+            <input
+                type="hidden"
+                name="regeneration_nonce"
+                value="{{ regeneration_nonce }}"
+            >
+
+
+            <section class="mfa-recovery-card">
+
+                <h2>Verify Current Password</h2>
+
+                <p>
+                    For security, enter the business-login password
+                    you currently use for this Peach Suite Pro account.
+                </p>
+
+                <div class="mfa-recovery-field">
+
+                    <label for="current_password">
+                        Current Password
+                    </label>
+
+                    <input
+                        type="password"
+                        id="current_password"
+                        name="current_password"
+                        autocomplete="current-password"
+                        required
+                        autofocus
+                    >
+
+                </div>
+
+            </section>
+
+
+            <div class="mfa-recovery-actions">
+
+                <button
+                    type="submit"
+                    class="mfa-recovery-primary"
+                >
+                    Regenerate Recovery Codes
+                </button>
+
+                <a
+                    href="{{ url_for(return_endpoint) }}"
+                    class="mfa-recovery-secondary"
+                >
+                    Cancel
+                </a>
+
+            </div>
+
+        </form>
+
+
+    {% elif mode == "success" %}
+
+        <div class="mfa-recovery-header">
+
+            <h1>Save Your New Recovery Codes</h1>
+
+            <p>
+                Your fresh Peach Suite Pro recovery codes are ready.
+            </p>
+
+        </div>
+
+
+        <div
+            class="mfa-recovery-success"
+            role="alert"
+        >
+
+            <strong>
+                Save these codes now.
+            </strong>
+
+            <br><br>
+
+            This new set is displayed only on this page. Peach Suite Pro
+            will not be able to show these same plaintext codes again
+            after you leave.
+
+            <br><br>
+
+            Each recovery code can be used only once. Your authenticator
+            app remains connected and unchanged.
+
+            {% if invalidated_count is not none %}
+
+                <br><br>
+
+                {{ invalidated_count }}
+                unused prior recovery
+                {{ "code was" if invalidated_count == 1 else "codes were" }}
+                invalidated when this new set was created.
+
+            {% endif %}
+
+        </div>
+
+
+        <section class="mfa-recovery-card">
+
+            <h2>New Recovery Codes</h2>
+
+            <p>
+                Store these in a password manager or another secure
+                place you can reach if your phone is unavailable.
+            </p>
+
+            <ul
+                class="mfa-recovery-list"
+                id="mfaRecoveryCodes"
+                aria-label="MFA recovery codes"
+            >
+
+                {% for recovery_code in recovery_codes %}
+
+                    <li class="mfa-recovery-code">
+                        {{ recovery_code }}
+                    </li>
+
+                {% endfor %}
+
+            </ul>
+
+
+            <div
+                class="mfa-save-tools"
+                aria-label="Recovery code save options"
+            >
+
+                <button
+                    type="button"
+                    class="mfa-save-button"
+                    id="copyRecoveryCodes"
+                >
+                    Copy All Codes
+                </button>
+
+                <button
+                    type="button"
+                    class="mfa-save-button"
+                    id="downloadRecoveryCodes"
+                >
+                    Download Codes
+                </button>
+
+                <button
+                    type="button"
+                    class="mfa-save-button"
+                    id="printRecoveryCodes"
+                >
+                    Print / Save as PDF
+                </button>
+
+                <div
+                    class="mfa-save-status"
+                    id="mfaSaveStatus"
+                    role="status"
+                    aria-live="polite"
+                ></div>
+
+            </div>
+
+        </section>
+
+
+        <div class="mfa-recovery-actions">
+
+            <a
+                href="{{ url_for(return_endpoint) }}"
+                class="mfa-recovery-secondary"
+            >
+                I Saved My Recovery Codes
+            </a>
+
+        </div>
+
+    {% endif %}
+
+</div>
+
+
+{% if mode == "success" %}
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const codesElement = document.getElementById(
+        "mfaRecoveryCodes"
+    );
+
+    const copyButton = document.getElementById(
+        "copyRecoveryCodes"
+    );
+
+    const downloadButton = document.getElementById(
+        "downloadRecoveryCodes"
+    );
+
+    const printButton = document.getElementById(
+        "printRecoveryCodes"
+    );
+
+    const statusElement = document.getElementById(
+        "mfaSaveStatus"
+    );
+
+    if (
+        !codesElement
+        || !copyButton
+        || !downloadButton
+        || !printButton
+        || !statusElement
+    ) {
+        return;
+    }
+
+    const getRecoveryCodes = function () {
+        return Array.from(
+            codesElement.querySelectorAll(
+                ".mfa-recovery-code"
+            )
+        )
+        .map(function (element) {
+            return element.textContent.trim();
+        })
+        .filter(Boolean);
+    };
+
+    const showStatus = function (message) {
+        statusElement.textContent = message;
+    };
+
+    copyButton.addEventListener(
+        "click",
+        async function () {
+            const codes = getRecoveryCodes();
+
+            if (!codes.length) {
+                showStatus(
+                    "No recovery codes are available."
+                );
+                return;
+            }
+
+            const text = codes.join("\n");
+
+            try {
+                await navigator.clipboard.writeText(
+                    text
+                );
+
+                showStatus(
+                    "Recovery codes copied. Paste them into a secure password manager or other safe location."
+                );
+            } catch (error) {
+                showStatus(
+                    "Your browser could not copy the codes automatically. You can select and copy the codes above."
+                );
+            }
+        }
+    );
+
+    downloadButton.addEventListener(
+        "click",
+        function () {
+            const codes = getRecoveryCodes();
+
+            if (!codes.length) {
+                showStatus(
+                    "No recovery codes are available."
+                );
+                return;
+            }
+
+            const content = [
+                "Peach Suite Pro MFA Recovery Codes",
+                "",
+                "Keep these codes somewhere secure.",
+                "Each code can be used only once.",
+                "",
+                ...codes,
+                "",
+            ].join("\n");
+
+            const blob = new Blob(
+                [content],
+                {
+                    type: "text/plain;charset=utf-8",
+                }
+            );
+
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+
+            link.href = url;
+            link.download = (
+                "peach-suite-pro-recovery-codes.txt"
+            );
+
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+
+            URL.revokeObjectURL(url);
+
+            showStatus(
+                "Recovery codes downloaded to your device."
+            );
+        }
+    );
+
+    printButton.addEventListener(
+        "click",
+        function () {
+            window.print();
+        }
+    );
+});
+</script>
+
+{% endif %}
+
+{% endblock %}

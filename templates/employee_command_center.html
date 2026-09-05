@@ -435,21 +435,23 @@
         </div>
 
 
-        <div class="summary-card">
-            <div class="summary-label">Pay Type</div>
+        {% if nav_access.can_view_employee_compensation %}
+            <div class="summary-card">
+                <div class="summary-label">Pay Type</div>
 
-            <div class="summary-value">
-                {{ employee.pay_type or "Not Entered" }}
-            </div>
+                <div class="summary-value">
+                    {{ employee.pay_type or "Not Entered" }}
+                </div>
 
-            <div class="summary-detail">
-                {% if employee.pay_rate is not none %}
-                    Current rate: ${{ "{:,.2f}".format(employee.pay_rate) }}
-                {% else %}
-                    No pay rate entered
-                {% endif %}
+                <div class="summary-detail">
+                    {% if employee.pay_rate is not none %}
+                        Current rate: ${{ "{:,.2f}".format(employee.pay_rate) }}
+                    {% else %}
+                        No pay rate entered
+                    {% endif %}
+                </div>
             </div>
-        </div>
+        {% endif %}
 
 
         <div class="summary-card">
@@ -483,61 +485,67 @@
 
         <div class="quick-action-grid">
 
-            <a class="quick-action"
-               href="{{ url_for(
-                   'edit_employee',
-                   employee_id=employee.employee_id
-               ) }}">
+            {% if nav_access.can_manage_employees %}
+                <a class="quick-action"
+                   href="{{ url_for(
+                       'edit_employee',
+                       employee_id=employee.employee_id
+                   ) }}">
 
-                <span class="quick-action-icon">✏️</span>
+                    <span class="quick-action-icon">✏️</span>
 
-                <span>
-                    <span class="quick-action-title">
-                        Edit Employee
+                    <span>
+                        <span class="quick-action-title">
+                            Edit Employee
+                        </span>
+
+                        <span class="quick-action-description">
+                            Update employee information
+                        </span>
                     </span>
 
-                    <span class="quick-action-description">
-                        Update employee information
-                    </span>
-                </span>
-
-            </a>
+                </a>
+            {% endif %}
 
 
-            <a class="quick-action"
-               href="{{ url_for('employee_compensation_report') }}">
+            {% if nav_access.can_view_employee_compensation %}
+                <a class="quick-action"
+                   href="{{ url_for('employee_compensation_report') }}">
 
-                <span class="quick-action-icon">💵</span>
+                    <span class="quick-action-icon">💵</span>
 
-                <span>
-                    <span class="quick-action-title">
-                        Compensation Report
-                    </span>
+                    <span>
+                        <span class="quick-action-title">
+                            Compensation Report
+                        </span>
 
-                    <span class="quick-action-description">
-                        Review earnings and payments
-                    </span>
-                </span>
-
-            </a>
-
-
-            <a class="quick-action"
-               href="{{ url_for('calendar_view') }}">
-
-                <span class="quick-action-icon">📅</span>
-
-                <span>
-                    <span class="quick-action-title">
-                        View Calendar
+                        <span class="quick-action-description">
+                            Review earnings and payments
+                        </span>
                     </span>
 
-                    <span class="quick-action-description">
-                        Review scheduled appointments
-                    </span>
-                </span>
+                </a>
+            {% endif %}
 
-            </a>
+
+            {% if nav_access.can_view_calendar %}
+                <a class="quick-action"
+                   href="{{ url_for('calendar_view') }}">
+
+                    <span class="quick-action-icon">📅</span>
+
+                    <span>
+                        <span class="quick-action-title">
+                            View Calendar
+                        </span>
+
+                        <span class="quick-action-description">
+                            Review scheduled appointments
+                        </span>
+                    </span>
+
+                </a>
+            {% endif %}
 
 
             <a class="quick-action"
@@ -765,6 +773,7 @@
 
 
         <!-- Compensation -->
+        {% if nav_access.can_view_employee_compensation %}
         <section class="employee-section">
 
             <h2 class="section-heading">
@@ -822,6 +831,7 @@
             </div>
 
         </section>
+        {% endif %}
 
     </div>
 
@@ -849,13 +859,59 @@
             ← Back to Employees
         </a>
 
-        <a class="btn"
-           href="{{ url_for(
-               'edit_employee',
-               employee_id=employee.employee_id
-           ) }}">
-            Edit Employee
-        </a>
+        {% if nav_access.can_manage_employees %}
+            <a class="btn"
+               href="{{ url_for(
+                   'edit_employee',
+                   employee_id=employee.employee_id
+               ) }}">
+                Edit Employee
+            </a>
+
+            {% if employee.is_active %}
+                <form
+                    method="POST"
+                    action="{{ url_for(
+                        'archive_employee',
+                        employee_id=employee.employee_id
+                    ) }}"
+                    onsubmit="return confirm(
+                        'Archive this employee? Historical records will be preserved.'
+                    );"
+                >
+                    <input
+                        type="hidden"
+                        name="security_csrf_token"
+                        value="{{ security_csrf_token }}"
+                    >
+
+                    <button type="submit" class="btn">
+                        Archive Employee
+                    </button>
+                </form>
+            {% else %}
+                <form
+                    method="POST"
+                    action="{{ url_for(
+                        'reactivate_employee',
+                        employee_id=employee.employee_id
+                    ) }}"
+                    onsubmit="return confirm(
+                        'Reactivate this employee?'
+                    );"
+                >
+                    <input
+                        type="hidden"
+                        name="security_csrf_token"
+                        value="{{ security_csrf_token }}"
+                    >
+
+                    <button type="submit" class="btn">
+                        Reactivate Employee
+                    </button>
+                </form>
+            {% endif %}
+        {% endif %}
 
     </div>
 

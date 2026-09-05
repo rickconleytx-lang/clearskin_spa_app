@@ -1,0 +1,243 @@
+{% extends "base.html" %}
+{% block title %}Users{% endblock %}
+
+{% block content %}
+<style>
+    .users-page {
+        max-width: 1100px;
+        margin: 0 auto;
+    }
+
+    .users-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 18px;
+        margin-bottom: 24px;
+    }
+
+    .users-header h1 {
+        margin: 0 0 8px;
+    }
+
+    .users-header p {
+        margin: 0;
+        line-height: 1.5;
+        opacity: .8;
+        max-width: 720px;
+    }
+
+    .users-card {
+        background: var(--surface-color, #fff);
+        border: 1px solid rgba(0, 0, 0, .10);
+        border-radius: 14px;
+        overflow: hidden;
+    }
+
+    .users-table-wrap {
+        overflow-x: auto;
+    }
+
+    .users-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .users-table th,
+    .users-table td {
+        text-align: left;
+        padding: 14px 16px;
+        border-bottom: 1px solid rgba(0, 0, 0, .08);
+        vertical-align: top;
+    }
+
+    .users-table th {
+        font-size: .86rem;
+        text-transform: uppercase;
+        letter-spacing: .03em;
+        opacity: .72;
+        white-space: nowrap;
+    }
+
+    .users-table tr:last-child td {
+        border-bottom: none;
+    }
+
+    .user-name {
+        font-weight: 700;
+    }
+
+    .user-secondary {
+        margin-top: 3px;
+        font-size: .9rem;
+        opacity: .72;
+    }
+
+    .user-role {
+        font-weight: 600;
+    }
+
+    .status-badge {
+        display: inline-block;
+        padding: 4px 9px;
+        border-radius: 999px;
+        font-size: .82rem;
+        font-weight: 700;
+        background: rgba(0, 0, 0, .06);
+    }
+
+    .status-badge.active {
+        background: rgba(46, 125, 50, .12);
+    }
+
+    .status-badge.inactive {
+        background: rgba(120, 120, 120, .13);
+    }
+
+    .user-access-note {
+        margin-top: 4px;
+        font-size: .82rem;
+        opacity: .7;
+    }
+
+    .empty-users {
+        padding: 28px;
+        text-align: center;
+        line-height: 1.5;
+    }
+
+    @media (max-width: 700px) {
+        .users-header {
+            flex-direction: column;
+        }
+    }
+</style>
+
+<div class="users-page">
+
+    <div class="users-header">
+        <div>
+            <h1>Users</h1>
+            <p>
+                Manage the people who can sign in to Peach Suite Pro for
+                this business. User access is controlled by business role
+                and the current workspace.
+            </p>
+        </div>
+
+        <a class="btn" href="{{ url_for('add_user') }}">
+            Add User
+        </a>
+    </div>
+
+    <div class="users-card">
+
+        {% if users %}
+
+            <div class="users-table-wrap">
+                <table class="users-table">
+                    <thead>
+                        <tr>
+                            <th>User</th>
+                            <th>Role</th>
+                            <th>Login</th>
+                            <th>Mobile</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        {% for user in users %}
+                            <tr>
+                                <td>
+                                    <div class="user-name">
+                                        {{ user.first_name }}
+                                        {{ user.last_name }}
+                                    </div>
+
+                                    {% if not user.can_manage %}
+                                        <div class="user-access-note">
+                                            Higher-level account
+                                        </div>
+                                    {% endif %}
+                                </td>
+
+                                <td>
+                                    <span class="user-role">
+                                        {{ user.role_label }}
+                                    </span>
+                                </td>
+
+                                <td>
+                                    <div>
+                                        {{ user.username }}
+                                    </div>
+
+                                    <div class="user-secondary">
+                                        {{ user.email }}
+                                    </div>
+                                </td>
+
+                                <td>
+                                    {% if user.sms_phone %}
+                                        {{ user.sms_phone }}
+                                    {% else %}
+                                        <span class="user-secondary">
+                                            Not provided
+                                        </span>
+                                    {% endif %}
+                                </td>
+
+                                <td>
+                                    {% if
+                                        user.user_active
+                                        and user.membership_active
+                                    %}
+                                        <span class="status-badge active">
+                                            Active
+                                        </span>
+                                    {% else %}
+                                        <span class="status-badge inactive">
+                                            Inactive
+                                        </span>
+                                    {% endif %}
+                                </td>
+
+                                <td>
+                                    {% if
+                                        user.can_manage
+                                        and user.user_active
+                                        and user.membership_active
+                                    %}
+                                        <a class="btn"
+                                           href="{{ url_for(
+                                               'edit_business_user',
+                                               target_user_id=user.user_id
+                                           ) }}">
+                                            Edit
+                                        </a>
+                                    {% else %}
+                                        <span class="user-secondary">
+                                            —
+                                        </span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+        {% else %}
+
+            <div class="empty-users">
+                No users are currently assigned to this workspace.
+            </div>
+
+        {% endif %}
+
+    </div>
+
+</div>
+{% endblock %}

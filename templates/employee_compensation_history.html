@@ -1,9 +1,60 @@
 {% extends "base.html" %}
 
-{% block title %}Employee Compensation History{% endblock %}
+{% block title %}Employee Compensation History
+
+
+{% endblock %}
 
 {% block content %}
 <h1>Employee Compensation History</h1>
+
+{% if employee_access_verified %}
+<div
+    style="
+        margin-bottom: 18px;
+        padding: 12px 14px;
+        border: 1px solid #bbb;
+        border-radius: 8px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+    "
+>
+    <div>
+        <strong>Verified User:</strong>
+        {{ employee_access_verified.display_name }}
+    </div>
+
+    <form
+        id="employee-access-end-form"
+        method="POST"
+        action="{{ url_for('employee_access_end') }}"
+        style="margin: 0;"
+    >
+        <input
+            type="hidden"
+            name="security_csrf_token"
+            value="{{ security_csrf_token }}"
+        >
+        <input
+            type="hidden"
+            name="page_scope"
+            value="{{ employee_access_page_scope }}"
+        >
+        <input
+            type="hidden"
+            name="return_path"
+            value="{{ employee_access_return_path }}"
+        >
+
+        <button type="submit" class="btn btn-secondary">
+            End Current Session
+        </button>
+    </form>
+</div>
+{% endif %}
 
 <form method="GET" action="{{ url_for('employee_compensation_history') }}">
     <div class="form-group">
@@ -107,6 +158,11 @@
                         action="{{ url_for('delete_employee_compensation', compensation_id=row[0]) }}"
                         style="display:inline;"
                         onsubmit="return confirm('Delete this entire compensation entry and all attached compensation lines? This cannot be undone.');">
+                      <input
+                          type="hidden"
+                          name="security_csrf_token"
+                          value="{{ security_csrf_token }}"
+                      >
                       <button type="submit" class="btn btn-small">
                           Delete FULL Entry
                       </button>

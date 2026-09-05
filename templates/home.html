@@ -36,11 +36,11 @@
     <div class="narrow-cards">
         {{ section_card("Daily Change Log", "Record development updates and daily changes", url_for('log_it')) }}
         {{ section_card("Feedbacks", "Feedbacks", url_for('feedback_admin')) }}
-        {{ section_card("Create New Help Page", "Create a New Help Page", url_for('new_help_page')) }}
+        {{ section_card("Create New Help Page", "Create a New Help Page", url_for('edit_help_page')) }}
         {{ section_card(
-            "Edit Existing Help Page",  
-            "Edit an existing Help Page, then change page in address", 
-            url_for('edit_help_page', page_key='calendar') 
+            "Manage Help Pages",
+            "Search, review, edit, and manage Help Page translations",
+            url_for('help_pages_manager')
          ) }}
     </div>
 

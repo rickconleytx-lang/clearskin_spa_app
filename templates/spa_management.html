@@ -37,13 +37,42 @@
 
         <h3>SMS & Email Terms</h3>
 
-        {% if terms_status and terms_status[0] %}
+        {% if terms_current %}
             <p>✅ Current SMS & Email Terms accepted.</p>
             <p>Accepted at: {{ terms_status[1] }}</p>
-            <p>Version: {{ terms_status[2] }}</p>
+            <p>Accepted Version: {{ terms_status[2] }}</p>
+
+            <a href="{{ url_for('sms_email_terms') }}" class="btn">
+                Review Terms
+            </a>
+
+        {% elif terms_status and terms_status[0] %}
+            <p style="color: #b45309;">
+                ⚠️ Updated SMS & Email Terms require review.
+            </p>
+
+            <p>
+                Previously accepted version:
+                {{ terms_status[2] or "Unknown" }}
+            </p>
+
+            <p>
+                Current required version:
+                {{ current_terms_version }}
+            </p>
+
+            <a href="{{ url_for('sms_email_terms') }}" class="btn">
+                Review and Accept Current Terms
+            </a>
+
         {% else %}
             <p style="color: red;">
                 ❌ SMS & Email Terms have not been accepted.
+            </p>
+
+            <p>
+                Current required version:
+                {{ current_terms_version }}
             </p>
 
             <a href="{{ url_for('sms_email_terms') }}" class="btn">
@@ -51,6 +80,13 @@
             </a>
 
         {% endif %}
+
+        <a href="{{ url_for('sms_email_terms', print='1') }}"
+           class="btn"
+           target="_blank"
+           rel="noopener">
+            🖨️ Print Terms
+        </a>
 
     </div>
 

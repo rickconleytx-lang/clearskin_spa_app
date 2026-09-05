@@ -19,6 +19,8 @@ import struct
 import time
 from urllib.parse import quote, urlencode
 
+import cv2
+
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
@@ -29,8 +31,10 @@ class MFAError(RuntimeError):
 
 _ENCRYPTION_VERSION = "v1"
 _RECOVERY_HASH_VERSION = "v1"
+_VERIFICATION_CODE_HASH_VERSION = "v1"
 
 TOTP_DIGITS = 6
+VERIFICATION_CODE_DIGITS = 6
 TOTP_PERIOD_SECONDS = 30
 TOTP_SECRET_BYTES = 20
 TOTP_ALLOWED_DRIFT_STEPS = 1
@@ -177,6 +181,214 @@ def get_recovery_pepper():
             "MFA_RECOVERY_PEPPER",
             "",
         )
+    )
+
+
+def generate_verification_code_pepper():
+    """
+    Generate a dedicated 256-bit verification-code pepper
+    suitable for MFA_VERIFICATION_CODE_PEPPER.
+
+    This helper does not persist the pepper anywhere.
+    """
+    return _b64encode(
+        secrets.token_bytes(32)
+    )
+
+
+def decode_verification_code_pepper(
+    encoded_pepper,
+):
+    pepper = _b64decode(
+        encoded_pepper,
+        "MFA verification-code pepper",
+    )
+
+    if len(pepper) != 32:
+        raise MFAError(
+            "MFA verification-code pepper must decode "
+            "to exactly 32 bytes."
+        )
+
+    return pepper
+
+
+def get_verification_code_pepper():
+    """
+    Load the dedicated PSP MFA verification-code pepper.
+
+    The raw pepper belongs only in server environment
+    configuration, never Git or the database.
+    """
+    return decode_verification_code_pepper(
+        os.environ.get(
+            "MFA_VERIFICATION_CODE_PEPPER",
+            "",
+        )
+    )
+
+
+def _normalize_verification_code(code):
+    code = str(code or "").strip()
+
+    if (
+        len(code) != VERIFICATION_CODE_DIGITS
+        or not code.isdigit()
+    ):
+        raise MFAError(
+            "MFA verification code must be exactly "
+            f"{VERIFICATION_CODE_DIGITS} digits."
+        )
+
+    return code
+
+
+def _normalize_verification_method(method):
+    method = str(method or "").strip().lower()
+
+    if method not in {
+        "sms",
+        "email",
+    }:
+        raise MFAError(
+            "MFA verification method is not valid."
+        )
+
+    return method
+
+
+def _normalize_verification_purpose(purpose):
+    purpose = str(purpose or "").strip().lower()
+
+    if purpose not in {
+        "enrollment",
+        "login",
+        "method_change",
+    }:
+        raise MFAError(
+            "MFA verification purpose is not valid."
+        )
+
+    return purpose
+
+
+def generate_verification_code():
+    """
+    Generate one cryptographically random 6-digit
+    SMS/email MFA verification code.
+    """
+    return str(
+        secrets.randbelow(
+            10 ** VERIFICATION_CODE_DIGITS
+        )
+    ).zfill(
+        VERIFICATION_CODE_DIGITS
+    )
+
+
+def hash_verification_code(
+    code,
+    *,
+    user_id,
+    method,
+    purpose,
+    pepper=None,
+):
+    """
+    Produce the keyed hash stored for one short-lived
+    SMS/email MFA verification code.
+    """
+    normalized_code = (
+        _normalize_verification_code(code)
+    )
+
+    user_id = _require_user_id(user_id)
+
+    method = _normalize_verification_method(
+        method
+    )
+
+    purpose = _normalize_verification_purpose(
+        purpose
+    )
+
+    pepper = (
+        pepper
+        if pepper is not None
+        else get_verification_code_pepper()
+    )
+
+    if not isinstance(pepper, bytes):
+        raise MFAError(
+            "MFA verification-code pepper must be bytes."
+        )
+
+    if len(pepper) != 32:
+        raise MFAError(
+            "MFA verification-code pepper must be "
+            "exactly 32 bytes."
+        )
+
+    message = (
+        "peach-suite-pro|mfa-verification-code|"
+        f"user:{user_id}|"
+        f"method:{method}|"
+        f"purpose:{purpose}|"
+        f"code:{normalized_code}|"
+        f"version:{_VERIFICATION_CODE_HASH_VERSION}"
+    ).encode(
+        "utf-8"
+    )
+
+    return hmac.new(
+        pepper,
+        message,
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def verify_verification_code(
+    code,
+    stored_hash,
+    *,
+    user_id,
+    method,
+    purpose,
+    pepper=None,
+):
+    """
+    Compare a submitted SMS/email MFA code to one
+    stored keyed hash in constant time.
+    """
+    stored_hash = str(
+        stored_hash or ""
+    ).strip().lower()
+
+    if (
+        len(stored_hash) != 64
+        or any(
+            character
+            not in "0123456789abcdef"
+            for character in stored_hash
+        )
+    ):
+        return False
+
+    try:
+        candidate_hash = hash_verification_code(
+            code,
+            user_id=user_id,
+            method=method,
+            purpose=purpose,
+            pepper=pepper,
+        )
+
+    except MFAError:
+        return False
+
+    return hmac.compare_digest(
+        candidate_hash,
+        stored_hash,
     )
 
 
@@ -848,3 +1060,89 @@ def verify_recovery_code(
         candidate_hash,
         stored_hash,
     )
+
+
+def build_totp_qr_png(
+    provisioning_uri,
+    *,
+    scale=8,
+    border_modules=4,
+):
+    """
+    Render an authenticator provisioning URI as PNG bytes.
+
+    QR generation occurs locally inside Peach Suite Pro.
+    The provisioning URI must never be sent to an outside
+    QR-generation service or written to application logs.
+    """
+    provisioning_uri = _require_text(
+        provisioning_uri,
+        "MFA provisioning URI",
+    )
+
+    try:
+        scale = int(scale)
+        border_modules = int(
+            border_modules
+        )
+
+    except (TypeError, ValueError) as exc:
+        raise MFAError(
+            "MFA QR dimensions must be integers."
+        ) from exc
+
+    if scale < 1 or scale > 32:
+        raise MFAError(
+            "MFA QR scale must be between 1 and 32."
+        )
+
+    if (
+        border_modules < 4
+        or border_modules > 16
+    ):
+        raise MFAError(
+            "MFA QR border must be between "
+            "4 and 16 modules."
+        )
+
+    try:
+        encoder = cv2.QRCodeEncoder_create()
+
+        qr_code = encoder.encode(
+            provisioning_uri
+        )
+
+        qr_code = cv2.copyMakeBorder(
+            qr_code,
+            border_modules,
+            border_modules,
+            border_modules,
+            border_modules,
+            cv2.BORDER_CONSTANT,
+            value=255,
+        )
+
+        qr_code = cv2.resize(
+            qr_code,
+            None,
+            fx=scale,
+            fy=scale,
+            interpolation=cv2.INTER_NEAREST,
+        )
+
+        encoded_ok, png_data = cv2.imencode(
+            ".png",
+            qr_code,
+        )
+
+    except Exception as exc:
+        raise MFAError(
+            "MFA QR code could not be generated."
+        ) from exc
+
+    if not encoded_ok:
+        raise MFAError(
+            "MFA QR code could not be encoded."
+        )
+
+    return png_data.tobytes()

@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+
+{% block title %}Employee Access Code | Peach Suite Pro{% endblock %}
+
+{% block content %}
+
+<style>
+.employee-access-issued-page {
+    max-width: 760px;
+    margin: 0 auto;
+}
+
+.employee-access-issued-header {
+    margin-bottom: 24px;
+}
+
+.employee-access-issued-header h1 {
+    margin-bottom: 8px;
+}
+
+.employee-access-issued-header p {
+    margin: 0;
+    line-height: 1.55;
+    color: #555;
+}
+
+.employee-access-issued-notice {
+    margin-bottom: 18px;
+    padding: 16px 18px;
+    border: 1px solid #d8b56d;
+    border-radius: 12px;
+    background: #fff9ec;
+    line-height: 1.55;
+}
+
+.employee-access-issued-card {
+    margin-bottom: 18px;
+    padding: 24px;
+    border: 1px solid #dddddd;
+    border-radius: 14px;
+    background: #ffffff;
+    text-align: center;
+}
+
+.employee-access-issued-card h2 {
+    margin-top: 0;
+    margin-bottom: 6px;
+}
+
+.employee-access-issued-code {
+    display: inline-block;
+    margin: 20px 0;
+    padding: 16px 24px;
+    border: 1px solid #cccccc;
+    border-radius: 10px;
+    background: #f7f7f7;
+    font-family: monospace;
+    font-size: 30px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+}
+
+.employee-access-issued-actions {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 18px;
+}
+
+.employee-access-issued-button {
+    min-height: 44px;
+    padding: 10px 18px;
+    border: 0;
+    border-radius: 9px;
+    background: #2d2d2d;
+    color: #ffffff;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.employee-access-issued-link {
+    display: inline-flex;
+    min-height: 44px;
+    align-items: center;
+    padding: 10px 18px;
+    box-sizing: border-box;
+    border: 1px solid #cccccc;
+    border-radius: 9px;
+    background: #ffffff;
+    color: #333333;
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.employee-access-issued-status {
+    min-height: 24px;
+    margin-top: 12px;
+    color: #444444;
+}
+</style>
+
+
+<div class="employee-access-issued-page">
+
+    <div class="employee-access-issued-header">
+        <h1>
+            {% if is_reset %}
+                New Employee Access Code
+            {% else %}
+                Employee Access Code Created
+            {% endif %}
+        </h1>
+
+        <p>
+            Provider Workspace:
+            <strong>{{ workspace.unit_name }}</strong>
+        </p>
+    </div>
+
+
+    <div
+        class="employee-access-issued-notice"
+        role="alert"
+    >
+        <strong>
+            Record this code now.
+        </strong>
+
+        <br><br>
+
+        Peach Suite Pro displays this Employee Access Code
+        only on this page. After you leave, the same plaintext
+        code cannot be viewed again.
+
+        {% if is_reset %}
+            <br><br>
+
+            The employee's previous access code has been revoked
+            and will no longer work.
+        {% endif %}
+
+        <br><br>
+
+        Give this code only to
+        <strong>{{ employee_name }}</strong>.
+    </div>
+
+
+    <section class="employee-access-issued-card">
+
+        <h2>{{ employee_name }}</h2>
+
+        <p>
+            Employee Access Code
+        </p>
+
+        <div
+            class="employee-access-issued-code"
+            id="employeeAccessIssuedCode"
+            aria-label="Employee Access Code"
+        >
+            {{ generated_code }}
+        </div>
+
+        <div class="employee-access-issued-actions">
+            <button
+                type="button"
+                class="employee-access-issued-button"
+                id="copyEmployeeAccessCode"
+            >
+                Copy Code
+            </button>
+
+            <a
+                href="{{ url_for('employee_access_codes_admin') }}"
+                class="employee-access-issued-link"
+            >
+                I Recorded the Code
+            </a>
+        </div>
+
+        <div
+            class="employee-access-issued-status"
+            id="employeeAccessIssuedStatus"
+            role="status"
+            aria-live="polite"
+        ></div>
+
+    </section>
+
+</div>
+
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const codeElement = document.getElementById(
+        "employeeAccessIssuedCode"
+    );
+
+    const copyButton = document.getElementById(
+        "copyEmployeeAccessCode"
+    );
+
+    const statusElement = document.getElementById(
+        "employeeAccessIssuedStatus"
+    );
+
+    if (
+        !codeElement
+        || !copyButton
+        || !statusElement
+    ) {
+        return;
+    }
+
+    copyButton.addEventListener(
+        "click",
+        async function () {
+            const code = codeElement.textContent.trim();
+
+            if (!code) {
+                statusElement.textContent =
+                    "No Employee Access Code is available.";
+                return;
+            }
+
+            try {
+                await navigator.clipboard.writeText(code);
+
+                statusElement.textContent =
+                    "Employee Access Code copied.";
+            } catch (error) {
+                statusElement.textContent =
+                    "Your browser could not copy the code automatically. You can select and copy the code above.";
+            }
+        }
+    );
+});
+</script>
+
+{% endblock %}

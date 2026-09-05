@@ -19,6 +19,14 @@
         <div class="narrow-cards">
             {{ section_card("Back to Employees Home", "",  url_for('employees_home')) }}
             {{ section_card("Add New Employee", "",  url_for('add_employee')) }}
+
+            {% if nav_access.can_manage_employee_access_codes %}
+                {{ section_card(
+                    "Employee Access Codes",
+                    "Set up and manage employee verification codes",
+                    url_for('employee_access_codes_admin')
+                ) }}
+            {% endif %}
         </div>
 
 <br>

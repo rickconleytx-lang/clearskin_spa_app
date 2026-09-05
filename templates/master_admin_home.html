@@ -29,11 +29,11 @@
         <div class="narrow-cards">
             {{ section_card("System Activity", "", url_for('system_activity')) }} 
             {{ section_card("SMS & Email Footers", "Edit Email & SMS Footers", url_for('master_messaging_footers')) }}
-            {{ section_card("Create New Help Page", "Create a New Help Page", url_for('new_help_page')) }}
+            {{ section_card("Create New Help Page", "Create a New Help Page", url_for('edit_help_page')) }}
             {{ section_card(
-                "Edit Existing Help Page",  
-                "Edit an existing Help Page, then change page in address", 
-                url_for('edit_help_page', page_key='calendar') 
+                "Manage Help Pages",
+                "Search, review, edit, and manage Help Page translations",
+                url_for('help_pages_manager')
             ) }}
         </div>
  <br>           

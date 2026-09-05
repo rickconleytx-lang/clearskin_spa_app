@@ -19,6 +19,62 @@
 {% endif %}
 </p>
 
+{% set health_icons = {
+    "green": "🟢",
+    "yellow": "🟡",
+    "red": "🔴",
+    "gray": "⚪"
+} %}
+
+<div style="
+    display:grid;
+    grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));
+    gap:12px;
+    margin:18px 0 24px 0;
+">
+    {% for card in system_health_cards %}
+        <div style="
+            border:1px solid #e3e3e3;
+            border-radius:10px;
+            padding:14px 16px;
+            background:#fff;
+            min-height:92px;
+        ">
+            <div style="
+                display:flex;
+                align-items:center;
+                gap:8px;
+                margin-bottom:6px;
+            ">
+                <span style="font-size:17px;">
+                    {{ health_icons.get(card.status, "⚪") }}
+                </span>
+
+                <strong style="font-size:15px;">
+                    {{ card.label }}
+                </strong>
+            </div>
+
+            <div style="
+                font-size:13px;
+                font-weight:600;
+                color:#444;
+                margin-bottom:4px;
+            ">
+                {{ card.status_text }}
+            </div>
+
+            <div style="
+                font-size:12px;
+                line-height:1.35;
+                color:#777;
+            ">
+                {{ card.detail }}
+            </div>
+        </div>
+    {% endfor %}
+</div>
+
 <form method="get" style="margin:20px 0; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
 
     <select name="category">
@@ -34,6 +90,7 @@
         <option value="">All Severities</option>
         <option value="INFO" {% if severity == "INFO" %}selected{% endif %}>INFO</option>
         <option value="WARNING" {% if severity == "WARNING" %}selected{% endif %}>WARNING</option>
+        <option value="ERROR" {% if severity == "ERROR" %}selected{% endif %}>ERROR</option>
         <option value="ALERT" {% if severity == "ALERT" %}selected{% endif %}>ALERT</option>
     </select>
 
@@ -124,7 +181,7 @@
                         <span style="font-size:14px;">🟢</span>
                     {% elif sev == "WARNING" %}
                         <span style="font-size:14px;">🟡</span>
-                    {% elif sev == "ALERT" %}
+                    {% elif sev in ("ALERT", "ERROR") %}
                         <span style="font-size:14px;">🔴</span>
                     {% else %}
                         <span style="font-size:14px;">⚪</span>

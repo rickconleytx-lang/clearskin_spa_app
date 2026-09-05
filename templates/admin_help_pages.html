@@ -1,0 +1,333 @@
+{% extends "base.html" %}
+
+{% block title %}Help Pages Manager{% endblock %}
+
+{% block content %}
+
+<div class="page-card help-center-page">
+
+    <div class="page-header">
+        <div>
+            <h1>🍑 Help Pages Manager</h1>
+
+            <p class="page-subtitle">
+                Manage Peach Suite Pro Help Center articles and translations.
+            </p>
+        </div>
+    </div>
+
+    <div class="form-buttons" style="margin-bottom: 18px;">
+        <a
+            href="{{ url_for('edit_help_page') }}"
+            class="btn btn-primary"
+        >
+            + Create New Help Page
+        </a>
+    </div>
+
+    <form
+        method="GET"
+        action="{{ url_for('help_pages_manager') }}"
+        class="help-center-search"
+    >
+        <input
+            type="search"
+            name="search"
+            value="{{ search or '' }}"
+            placeholder="Search page name, key, or title"
+            autocomplete="off"
+        >
+
+        <select name="filter">
+            <option
+                value="all"
+                {% if page_filter == "all" %}selected{% endif %}
+            >
+                All Pages
+            </option>
+
+            <option
+                value="en"
+                {% if page_filter == "en" %}selected{% endif %}
+            >
+                Has English
+            </option>
+
+            <option
+                value="es"
+                {% if page_filter == "es" %}selected{% endif %}
+            >
+                Has Spanish
+            </option>
+
+            <option
+                value="missing_es"
+                {% if page_filter == "missing_es" %}selected{% endif %}
+            >
+                Missing Spanish
+            </option>
+        </select>
+
+        <button
+            type="submit"
+            class="tool-pill tool-pill-small"
+        >
+            Apply
+        </button>
+
+        {% if search or page_filter != "all" %}
+            <a
+                href="{{ url_for('help_pages_manager') }}"
+                class="tool-pill tool-pill-small"
+            >
+                Clear
+            </a>
+        {% endif %}
+    </form>
+
+    <div class="help-center-directory-header">
+        <div>
+            <h2>Help Page Catalog</h2>
+
+            <p>
+                One row represents one Help Page key.
+                English and Spanish are managed separately.
+            </p>
+        </div>
+
+        <div class="record-count">
+            {{ pages|length }}
+            {% if pages|length == 1 %}
+                page shown
+            {% else %}
+                pages shown
+            {% endif %}
+        </div>
+    </div>
+
+    <div
+        style="
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 18px;
+        "
+    >
+        <span class="tool-pill tool-pill-small">
+            Total: {{ counts.total }}
+        </span>
+
+        <span class="tool-pill tool-pill-small">
+            English: {{ counts.en }}
+        </span>
+
+        <span class="tool-pill tool-pill-small">
+            Spanish: {{ counts.es }}
+        </span>
+
+        <span class="tool-pill tool-pill-small">
+            Missing Spanish: {{ counts.missing_es }}
+        </span>
+    </div>
+
+    {% if pages %}
+
+        <div class="table-container">
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Page</th>
+                        <th>Page Key</th>
+                        <th>Order</th>
+                        <th>English</th>
+                        <th>Spanish</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+
+                    {% for page in pages %}
+
+                        <tr>
+                            <td>
+                                <strong>
+                                    {{ page.display_name }}
+                                </strong>
+
+                                {% if page.is_special_terms %}
+                                    <br>
+                                    <small>
+                                        Messaging Agreement
+                                    </small>
+                                {% endif %}
+                            </td>
+
+                            <td>
+                                <code>{{ page.page_key }}</code>
+                            </td>
+
+                            <td>
+                                {% if page.display_order is not none %}
+                                    {{ page.display_order }}
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </td>
+
+                            <td>
+                                {% if page.en_id %}
+                                    <strong>
+                                        {{ page.en_title }}
+                                    </strong>
+
+                                    <br>
+
+                                    {% if page.en_active %}
+                                        <small>✅ Active</small>
+                                    {% else %}
+                                        <small>⏸ Inactive</small>
+                                    {% endif %}
+
+                                    <br>
+
+                                    <a
+                                        href="{{
+                                            url_for(
+                                                'preview_help_page',
+                                                page_key=page.page_key,
+                                                lang='EN'
+                                            )
+                                        }}"
+                                        class="btn btn-small"
+                                        target="_blank"
+                                        rel="noopener"
+                                    >
+                                        View EN
+                                    </a>
+
+                                    <a
+                                        href="{{
+                                            url_for(
+                                                'edit_help_page',
+                                                page_key=page.page_key,
+                                                lang='EN'
+                                            )
+                                        }}"
+                                        class="btn btn-small"
+                                    >
+                                        Edit EN
+                                    </a>
+                                {% else %}
+                                    <span style="color: #b91c1c; font-weight: 600;">
+                                        — Missing
+                                    </span>
+
+                                    <br>
+
+                                    <a
+                                        href="{{
+                                            url_for(
+                                                'edit_help_page',
+                                                page_key=page.page_key,
+                                                lang='EN'
+                                            )
+                                        }}"
+                                        class="btn btn-small"
+                                    >
+                                        Add EN
+                                    </a>
+                                {% endif %}
+                            </td>
+
+                            <td>
+                                {% if page.es_id %}
+                                    <strong>
+                                        {{ page.es_title }}
+                                    </strong>
+
+                                    <br>
+
+                                    {% if page.es_active %}
+                                        <small>✅ Active</small>
+                                    {% else %}
+                                        <small>⏸ Inactive</small>
+                                    {% endif %}
+
+                                    <br>
+
+                                    <a
+                                        href="{{
+                                            url_for(
+                                                'preview_help_page',
+                                                page_key=page.page_key,
+                                                lang='ES'
+                                            )
+                                        }}"
+                                        class="btn btn-small"
+                                        target="_blank"
+                                        rel="noopener"
+                                    >
+                                        View ES
+                                    </a>
+
+                                    <a
+                                        href="{{
+                                            url_for(
+                                                'edit_help_page',
+                                                page_key=page.page_key,
+                                                lang='ES'
+                                            )
+                                        }}"
+                                        class="btn btn-small"
+                                    >
+                                        Edit ES
+                                    </a>
+                                {% else %}
+                                    <span style="color: #b91c1c; font-weight: 600;">
+                                        — Missing
+                                    </span>
+
+                                    <br>
+
+                                    <a
+                                        href="{{
+                                            url_for(
+                                                'edit_help_page',
+                                                page_key=page.page_key,
+                                                lang='ES'
+                                            )
+                                        }}"
+                                        class="btn btn-small"
+                                    >
+                                        Add ES
+                                    </a>
+                                {% endif %}
+                            </td>
+
+                        </tr>
+
+                    {% endfor %}
+
+                </tbody>
+            </table>
+
+        </div>
+
+    {% else %}
+
+        <div class="help-center-empty">
+            <strong>
+                No matching Help Pages were found.
+            </strong>
+
+            <p>
+                Try another search term or clear the current filter.
+            </p>
+        </div>
+
+    {% endif %}
+
+</div>
+
+{% endblock %}

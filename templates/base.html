@@ -485,6 +485,7 @@
             or nav_access.can_view_employees
             or nav_access.can_view_financials
             or nav_access.can_view_business_management
+            or nav_access.can_manage_users
         ) %}
 
 
@@ -590,7 +591,10 @@
         {% endif %}
 
 
-        {% if nav_access.can_view_business_management %}
+        {% if (
+            nav_access.can_view_business_management
+            or nav_access.can_manage_users
+        ) %}
             {% include "partials/business_management_menu.html" %}
         {% endif %}
 
@@ -3950,6 +3954,65 @@ document.addEventListener(
     const pageSessionMarker =
         {{ session.get("_browser_session_marker", "") | tojson }};
 
+    const employeeAccessSecurePage =
+        {% if
+            session.get("_employee_access_page_verification")
+            and request.endpoint in [
+                "employee_compensation_report",
+                "employee_compensation_history",
+                "add_employee_compensation",
+                "edit_employee_compensation"
+            ]
+        %}
+            true
+        {% else %}
+            false
+        {% endif %};
+
+    function employeeAccessEscapeEndHandler(event) {
+
+        if (
+            !employeeAccessSecurePage
+            || event.key !== "Escape"
+        ) {
+            return;
+        }
+
+        const endForm =
+            document.getElementById(
+                "employee-access-end-form"
+            );
+
+        if (!endForm) {
+            return;
+        }
+
+        /*
+         * Employee Access Esc is handled in capture phase so the
+         * global Search/Menu Escape handlers cannot consume it first.
+         *
+         * Use the exact same normal POST as End Current Session.
+         * Do not use fetch, pagehide, or sendBeacon here.
+         */
+        event.preventDefault();
+        event.stopImmediatePropagation();
+
+        /*
+         * Hide protected information immediately while the secure
+         * Employee Access End POST navigates to the server.
+         */
+        document.documentElement.style.visibility = "hidden";
+
+        endForm.submit();
+    }
+
+    document.addEventListener(
+        "keydown",
+        employeeAccessEscapeEndHandler,
+        true
+    );
+
+
     const sessionStateUrl =
         {{ url_for("browser_session_state") | tojson }};
 
@@ -4404,6 +4467,11 @@ document.addEventListener(
             tabPresenceToken
         );
 
+        formData.append(
+            "employee_access_secure",
+            employeeAccessSecurePage ? "1" : "0"
+        );
+
         try {
 
             const response = await fetch(
@@ -4513,6 +4581,11 @@ document.addEventListener(
         formData.append(
             "tab_token",
             tabPresenceToken
+        );
+
+        formData.append(
+            "employee_access_secure",
+            employeeAccessSecurePage ? "1" : "0"
         );
 
         try {
@@ -4945,7 +5018,41 @@ document.addEventListener(
 
     window.addEventListener(
         "pageshow",
-        function () {
+        function (event) {
+
+            /*
+             * A protected Employee Access page restored from browser
+             * history must never display a stale snapshot.
+             *
+             * Force a fresh server request before revealing the page.
+             * The protected Flask route then revalidates Employee Access
+             * and returns the verification challenge if that secure
+             * session has ended.
+             */
+            const navigationEntry =
+                (
+                    window.performance
+                    && typeof window.performance.getEntriesByType
+                        === "function"
+                )
+                    ? window.performance
+                        .getEntriesByType("navigation")[0]
+                    : null;
+
+            const restoredFromHistory =
+                Boolean(event && event.persisted)
+                || (
+                    navigationEntry
+                    && navigationEntry.type === "back_forward"
+                );
+
+            if (
+                employeeAccessSecurePage
+                && restoredFromHistory
+            ) {
+                window.location.reload();
+                return;
+            }
 
             if (tabPresenceClosed) {
 
@@ -4965,6 +5072,18 @@ document.addEventListener(
     window.addEventListener(
         "pagehide",
         function () {
+
+            /*
+             * Hide protected content before Safari/other browsers can
+             * preserve this document in the back-forward cache.
+             *
+             * A restored copy remains hidden until the pageshow handler
+             * above forces server revalidation.
+             */
+            if (employeeAccessSecurePage) {
+                document.documentElement.style.visibility = "hidden";
+            }
+
             sendTabPresenceClose();
         }
     );

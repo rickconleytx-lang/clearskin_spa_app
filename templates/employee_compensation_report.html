@@ -5,6 +5,58 @@
 {% block content %}
 <div class="report-page">
 
+    {% if employee_access_verified %}
+    <div
+        class="no-print"
+        style="
+            margin-bottom: 18px;
+            padding: 12px 14px;
+            border: 1px solid #bbb;
+            border-radius: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        "
+    >
+        <div>
+            <strong>Verified User:</strong>
+            {{ employee_access_verified.display_name }}
+        </div>
+
+        <form
+            id="employee-access-end-form"
+            method="POST"
+            action="{{ url_for('employee_access_end') }}"
+            style="margin: 0;"
+        >
+            <input
+                type="hidden"
+                name="security_csrf_token"
+                value="{{ security_csrf_token }}"
+            >
+
+            <input
+                type="hidden"
+                name="page_scope"
+                value="{{ employee_access_page_scope }}"
+            >
+
+
+            <input
+                type="hidden"
+                name="return_path"
+                value="{{ employee_access_return_path }}"
+            >
+
+            <button type="submit" class="btn btn-secondary">
+                End Current Session
+            </button>
+        </form>
+    </div>
+    {% endif %}
+
 
 
     <div class="report-header">
@@ -189,4 +241,7 @@
     </div>
 
 </div>
+
+
+
 {% endblock %}

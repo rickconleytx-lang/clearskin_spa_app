@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block title %}Employee Verification{% endblock %}
+
+{% block content %}
+<div style="max-width: 520px; margin: 30px auto;">
+    <h1>Employee Verification</h1>
+
+    <p>
+        Enter your Employee Access Code to open
+        <strong>{{ page_title }}</strong>.
+    </p>
+
+    <p>
+        Your business login identifies the Peach Suite Pro session.
+        Your Employee Access Code identifies who is using this
+        sensitive page.
+    </p>
+
+    <form
+        method="POST"
+        action="{{ url_for('employee_access_verify') }}"
+        autocomplete="off"
+    >
+        <input
+            type="hidden"
+            name="security_csrf_token"
+            value="{{ security_csrf_token }}"
+        >
+
+        <input
+            type="hidden"
+            name="page_scope"
+            value="{{ page_scope }}"
+        >
+
+        <input
+            type="hidden"
+            name="return_path"
+            value="{{ return_path }}"
+        >
+
+        <input
+            type="hidden"
+            name="challenge_token"
+            value="{{ challenge_token }}"
+        >
+
+        <input
+            type="hidden"
+            name="page_instance_id"
+            value="{{ page_instance_id }}"
+        >
+
+        <div class="form-group">
+            <label for="employee_access_code">
+                Employee Access Code
+            </label>
+
+            <input
+                type="password"
+                id="employee_access_code"
+                name="employee_access_code"
+                maxlength="5"
+                autocapitalize="characters"
+                autocomplete="off"
+                required
+                autofocus
+            >
+        </div>
+
+        <div class="form-buttons">
+            <button type="submit" class="btn">
+                Verify Employee
+            </button>
+
+            <a
+                href="{{ url_for('morning_briefing') }}"
+                class="btn btn-secondary"
+            >
+                Cancel
+            </a>
+        </div>
+    </form>
+</div>
+{% endblock %}
