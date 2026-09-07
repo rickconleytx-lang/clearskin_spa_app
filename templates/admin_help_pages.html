@@ -134,14 +134,12 @@
 
         <div class="table-container">
 
-            <table>
+            <table style="width: 100%; table-layout: fixed;">
                 <thead>
                     <tr>
-                        <th>Page</th>
-                        <th>Page Key</th>
-                        <th>Order</th>
-                        <th>English</th>
-                        <th>Spanish</th>
+                        <th style="width: 32%;">Page</th>
+                        <th style="width: 34%;">English</th>
+                        <th style="width: 34%;">Spanish</th>
                     </tr>
                 </thead>
 
@@ -161,18 +159,20 @@
                                         Messaging Agreement
                                     </small>
                                 {% endif %}
-                            </td>
 
-                            <td>
-                                <code>{{ page.page_key }}</code>
-                            </td>
-
-                            <td>
-                                {% if page.display_order is not none %}
-                                    {{ page.display_order }}
-                                {% else %}
-                                    —
-                                {% endif %}
+                                <div style="margin-top: 6px;">
+                                    <small style="color: #667085;">
+                                        Key:
+                                        <code>{{ page.page_key }}</code>
+                                        &nbsp;•&nbsp;
+                                        Order:
+                                        {% if page.display_order is not none %}
+                                            {{ page.display_order }}
+                                        {% else %}
+                                            —
+                                        {% endif %}
+                                    </small>
+                                </div>
                             </td>
 
                             <td>
