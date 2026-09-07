@@ -1,0 +1,944 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <meta
+        name="robots"
+        content="noindex, nofollow"
+    >
+
+    <meta
+        name="referrer"
+        content="no-referrer"
+    >
+
+    <title>
+        Secure Account Recovery | Peach Suite Pro
+    </title>
+
+    <link
+        rel="icon"
+        type="image/png"
+        href="{{ url_for(
+            'static',
+            filename='peachsuite-icon.png'
+        ) }}?v=20260618"
+    >
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            margin: 0;
+            min-height: 100%;
+        }
+
+        body {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            font-family:
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                sans-serif;
+            background: #f8f6f2;
+            color: #2d2d2d;
+        }
+
+        .recovery-shell {
+            width: min(520px, 100%);
+        }
+
+        .recovery-card {
+            padding: 36px 32px;
+            background: #ffffff;
+            border: 1px solid #e7e2dc;
+            border-radius: 18px;
+            box-shadow:
+                0 18px 50px rgba(0, 0, 0, 0.08);
+        }
+
+        .recovery-brand {
+            margin-bottom: 24px;
+            text-align: center;
+        }
+
+        .recovery-brand img {
+            display: block;
+            width: min(280px, 100%);
+            height: auto;
+            margin: 0 auto 18px;
+        }
+
+        .recovery-brand h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 700;
+        }
+
+        .recovery-brand p {
+            margin: 8px 0 0;
+            color: #666666;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .recovery-success {
+            margin-bottom: 18px;
+            padding: 14px 16px;
+            border: 1px solid #b9d9bc;
+            border-radius: 10px;
+            background: #eef8ef;
+            color: #275c2d;
+            font-size: 14px;
+            line-height: 1.55;
+        }
+
+        .recovery-note {
+            margin-bottom: 18px;
+            padding: 14px 16px;
+            border-radius: 10px;
+            background: #f7f5f2;
+            color: #555555;
+            font-size: 13px;
+            line-height: 1.55;
+        }
+
+        .recovery-important {
+            border: 1px solid #e0b97a;
+            background: #fff8e8;
+            color: #4b3820;
+        }
+
+        .recovery-step {
+            margin-top: 16px;
+            padding: 16px;
+            border: 1px solid #ddd7d0;
+            border-radius: 12px;
+            background: #ffffff;
+        }
+
+        .recovery-step strong {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 15px;
+        }
+
+        .recovery-step span {
+            color: #666666;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        .recovery-action-form {
+            margin-top: 16px;
+        }
+
+        .recovery-action {
+            width: 100%;
+            padding: 13px 18px;
+            border: 0;
+            border-radius: 10px;
+            background: #2d2d2d;
+            color: #ffffff;
+            font: inherit;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .recovery-action:hover {
+            opacity: 0.9;
+        }
+
+        .recovery-field {
+            margin-top: 18px;
+        }
+
+        .recovery-field label {
+            display: block;
+            margin-bottom: 7px;
+            font-size: 13px;
+            font-weight: 700;
+        }
+
+        .recovery-field input {
+            width: 100%;
+            padding: 12px 13px;
+            border: 1px solid #cfc8c0;
+            border-radius: 9px;
+            background: #ffffff;
+            color: #2d2d2d;
+            font: inherit;
+            font-size: 16px;
+            letter-spacing: 0.08em;
+        }
+
+        .recovery-error {
+            margin-top: 14px;
+            padding: 12px 14px;
+            border: 1px solid #dfaaaa;
+            border-radius: 9px;
+            background: #fff1f1;
+            color: #7a2929;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        .recovery-codes {
+            display: grid;
+            grid-template-columns:
+                repeat(2, minmax(0, 1fr));
+            gap: 9px;
+            margin-top: 18px;
+        }
+
+        .recovery-code {
+            padding: 10px 12px;
+            border: 1px solid #ddd7d0;
+            border-radius: 8px;
+            background: #f7f5f2;
+            font-family: ui-monospace, SFMono-Regular,
+                Menlo, Monaco, Consolas, monospace;
+            font-size: 13px;
+            text-align: center;
+            overflow-wrap: anywhere;
+        }
+
+        .recovery-code-tools {
+            display: flex;
+            align-items: stretch;
+            gap: 10px;
+            margin-top: 16px;
+            flex-wrap: wrap;
+        }
+
+        .recovery-code-tool {
+            flex: 1 1 190px;
+            min-height: 44px;
+            padding: 11px 16px;
+            border: 1px solid #cfc8c0;
+            border-radius: 9px;
+            background: #ffffff;
+            color: #2d2d2d;
+            font: inherit;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .recovery-code-tool:hover {
+            background: #f7f5f2;
+        }
+
+        .recovery-copy-status {
+            width: 100%;
+            min-height: 20px;
+            color: #555555;
+            font-size: 13px;
+            line-height: 1.45;
+        }
+
+        .recovery-signin-link {
+            display: block;
+            margin-top: 18px;
+            padding: 13px 18px;
+            border-radius: 10px;
+            background: #2d2d2d;
+            color: #ffffff;
+            font-size: 14px;
+            font-weight: 700;
+            text-align: center;
+            text-decoration: none;
+        }
+
+        .recovery-qr-wrap {
+            margin: 18px 0;
+            text-align: center;
+        }
+
+        .recovery-qr {
+            width: min(220px, 100%);
+            height: auto;
+            border: 1px solid #ddd7d0;
+            border-radius: 10px;
+            background: #ffffff;
+            padding: 10px;
+        }
+
+        .recovery-method-list {
+            display: grid;
+            gap: 12px;
+            margin-top: 16px;
+        }
+
+        .recovery-method {
+            padding: 14px 16px;
+            border: 1px solid #ddd7d0;
+            border-radius: 10px;
+            background: #f9f8f6;
+        }
+
+        .recovery-method strong {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 14px;
+        }
+
+        .recovery-method span {
+            color: #666666;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        .recovery-footer {
+            margin-top: 24px;
+            text-align: center;
+            color: #777777;
+            font-size: 12px;
+        }
+
+        @media print {
+            body {
+                display: block;
+                padding: 0;
+                background: #ffffff;
+            }
+
+            .recovery-shell {
+                width: 100%;
+            }
+
+            .recovery-card {
+                padding: 0;
+                border: 0;
+                box-shadow: none;
+            }
+
+            .recovery-code {
+                break-inside: avoid;
+            }
+
+            .recovery-code-tools,
+            .recovery-signin-link,
+            .recovery-footer {
+                display: none !important;
+            }
+        }
+
+        @media (max-width: 520px) {
+            .recovery-card {
+                padding: 30px 22px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <main class="recovery-shell">
+        <section
+            class="recovery-card"
+            aria-labelledby="recoveryTitle"
+        >
+            <div class="recovery-brand">
+                <img
+                    src="{{ url_for(
+                        'static',
+                        filename='images/smallbanner.png'
+                    ) }}"
+                    alt="Peach Suite Pro"
+                >
+
+                <h1 id="recoveryTitle">
+                    Identity Verified
+                </h1>
+
+                <p>
+                    Peach Suite Pro has opened a restricted
+                    Account Recovery security session.
+                </p>
+            </div>
+
+            <div
+                class="recovery-success"
+                role="status"
+            >
+                Your required independent recovery factors
+                were verified successfully.
+            </div>
+
+            <div class="recovery-note recovery-important">
+                <strong>
+                    You are not signed in to your business.
+                </strong><br>
+                This restricted session can be used only to
+                rebuild your account security. Your normal
+                Peach Suite Pro data and business features
+                remain unavailable.
+            </div>
+
+            {% if mode == "recovery_codes" %}
+
+            <div class="recovery-success">
+                <strong>
+                    Account Recovery Complete
+                </strong><br>
+                Your new Authenticator App verification
+                method is active. Existing Peach Suite Pro
+                business sessions for this account have been
+                invalidated.
+            </div>
+
+            <div class="recovery-step">
+                <strong>
+                    Save Your New Recovery Codes
+                </strong>
+
+                <span>
+                    These codes are shown only now. Store them
+                    somewhere secure. Each code can be used
+                    only once if you cannot access your
+                    Authenticator app.
+                </span>
+
+                <div class="recovery-codes">
+                    {% for code in recovery_codes %}
+                    <div class="recovery-code">
+                        {{ code }}
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <div class="recovery-code-tools">
+                    <button
+                        type="button"
+                        class="recovery-code-tool"
+                        id="copyRecoveryCodesButton"
+                    >
+                        Copy All Recovery Codes
+                    </button>
+
+                    <button
+                        type="button"
+                        class="recovery-code-tool"
+                        id="printRecoveryCodesButton"
+                    >
+                        Print / Save as PDF
+                    </button>
+
+                    <div
+                        class="recovery-copy-status"
+                        id="recoveryCopyStatus"
+                        role="status"
+                        aria-live="polite"
+                    ></div>
+                </div>
+
+                <a
+                    class="recovery-signin-link"
+                    href="{{ url_for('login') }}"
+                >
+                    Return to Sign In
+                </a>
+            </div>
+
+            {% elif mode == "code_complete" %}
+
+            <div class="recovery-success">
+                <strong>
+                    Account Recovery Complete
+                </strong><br>
+                Your new {{ code_method_label }} verification
+                method is active. Existing Peach Suite Pro
+                business sessions for this account have been
+                invalidated.
+            </div>
+
+            <div class="recovery-step">
+                <strong>
+                    Your Account Security Has Been Rebuilt
+                </strong>
+
+                <span>
+                    Account Recovery did not sign you in to the
+                    business. Return to Sign In and use your
+                    password plus your new
+                    {{ code_method_label }} verification method.
+                </span>
+
+                <a
+                    class="recovery-signin-link"
+                    href="{{ url_for('login') }}"
+                >
+                    Return to Sign In
+                </a>
+            </div>
+
+            {% elif mode == "code_verify" %}
+
+            <div class="recovery-step">
+                <strong>
+                    Verify Your New {{ code_method_label }} Method
+                </strong>
+
+                <span>
+                    Enter the most recent security code sent to
+                    {{ code_destination_description }}.
+                    Your previous MFA method remains active until
+                    this fresh code is successfully verified.
+                </span>
+
+                {% if delivery_message %}
+                <div
+                    class="recovery-success"
+                    role="status"
+                    style="margin-top: 16px; margin-bottom: 0;"
+                >
+                    {{ delivery_message }}
+                </div>
+                {% endif %}
+
+                {% if verification_error %}
+                <div
+                    class="recovery-error"
+                    role="alert"
+                >
+                    {{ verification_error }}
+                </div>
+                {% endif %}
+
+                <form
+                    class="recovery-action-form"
+                    method="post"
+                    action="{{ url_for(
+                        'mfa_account_recovery_restricted'
+                    ) }}"
+                    autocomplete="off"
+                >
+                    <input
+                        type="hidden"
+                        name="security_csrf_token"
+                        value="{{ verify_code_csrf_token }}"
+                    >
+
+                    <input
+                        type="hidden"
+                        name="recovery_action"
+                        value="verify_code_rebuild"
+                    >
+
+                    <div class="recovery-field">
+                        <label for="verificationCode">
+                            Verification Code
+                        </label>
+
+                        <input
+                            id="verificationCode"
+                            name="verification_code"
+                            type="text"
+                            inputmode="numeric"
+                            autocomplete="one-time-code"
+                            autocapitalize="off"
+                            spellcheck="false"
+                            maxlength="8"
+                            required
+                            autofocus
+                        >
+                    </div>
+
+                    <button
+                        class="recovery-action"
+                        type="submit"
+                    >
+                        Verify {{ code_method_label }}
+                    </button>
+                </form>
+
+                <form
+                    class="recovery-action-form"
+                    method="post"
+                    action="{{ url_for(
+                        'mfa_account_recovery_restricted'
+                    ) }}"
+                    autocomplete="off"
+                >
+                    <input
+                        type="hidden"
+                        name="security_csrf_token"
+                        value="{{ resend_code_csrf_token }}"
+                    >
+
+                    <input
+                        type="hidden"
+                        name="recovery_action"
+                        value="resend_code_rebuild"
+                    >
+
+                    <input
+                        type="hidden"
+                        name="mfa_method"
+                        value="{{ code_method }}"
+                    >
+
+                    <button
+                        class="recovery-action"
+                        type="submit"
+                    >
+                        Send New Code
+                    </button>
+                </form>
+
+                <div
+                    class="recovery-note"
+                    style="margin-top: 16px; margin-bottom: 0;"
+                >
+                    Only the newest successfully delivered
+                    verification code can be used.
+                </div>
+            </div>
+
+            {% elif mode == "authenticator_setup" %}
+
+            <div class="recovery-step">
+                <strong>
+                    Set Up Your New Authenticator
+                </strong>
+
+                <span>
+                    Open your authenticator app and scan this
+                    new QR code. Your previous MFA credential
+                    has not been retired yet.
+                </span>
+
+                <div class="recovery-qr-wrap">
+                    <img
+                        class="recovery-qr"
+                        src="{{ url_for(
+                            'mfa_account_recovery_restricted_qr'
+                        ) }}"
+                        alt="Authenticator setup QR code"
+                    >
+                </div>
+
+                <span>
+                    Enter the current code from your
+                    Authenticator app below. Peach Suite Pro
+                    will not activate this replacement until
+                    that code has been verified.
+                </span>
+
+                {% if verification_error %}
+                <div
+                    class="recovery-error"
+                    role="alert"
+                >
+                    {{ verification_error }}
+                </div>
+                {% endif %}
+
+                <form
+                    class="recovery-action-form"
+                    method="post"
+                    action="{{ url_for(
+                        'mfa_account_recovery_restricted'
+                    ) }}"
+                    autocomplete="off"
+                >
+                    <input
+                        type="hidden"
+                        name="security_csrf_token"
+                        value="{{ security_csrf_token }}"
+                    >
+
+                    <input
+                        type="hidden"
+                        name="recovery_action"
+                        value="verify_authenticator"
+                    >
+
+                    <div class="recovery-field">
+                        <label for="verificationCode">
+                            Verification Code
+                        </label>
+
+                        <input
+                            id="verificationCode"
+                            name="verification_code"
+                            type="text"
+                            inputmode="numeric"
+                            autocomplete="one-time-code"
+                            autocapitalize="off"
+                            spellcheck="false"
+                            maxlength="8"
+                            required
+                            autofocus
+                        >
+                    </div>
+
+                    <button
+                        class="recovery-action"
+                        type="submit"
+                    >
+                        Verify New Authenticator
+                    </button>
+                </form>
+            </div>
+
+            {% elif mode == "select" %}
+
+            <div class="recovery-step">
+                <strong>
+                    Choose Your New Verification Method
+                </strong>
+
+                <span>
+                    Your old MFA protection remains unchanged
+                    until a fresh replacement method has been
+                    successfully verified.
+                </span>
+
+                <div class="recovery-method-list">
+                    {% for method in available_methods %}
+                    <div class="recovery-method">
+                        <strong>
+                            {{ method.label }}
+                        </strong>
+
+                        <span>
+                            {{ method.description }}
+                        </span>
+
+                        {% if method.actionable %}
+                        <form
+                            class="recovery-action-form"
+                            method="post"
+                            action="{{ url_for(
+                                'mfa_account_recovery_restricted'
+                            ) }}"
+                        >
+                            <input
+                                type="hidden"
+                                name="security_csrf_token"
+                                value="{{ security_csrf_token }}"
+                            >
+
+                            <input
+                                type="hidden"
+                                name="recovery_action"
+                                value="select_method"
+                            >
+
+                            <input
+                                type="hidden"
+                                name="mfa_method"
+                                value="{{ method.value }}"
+                            >
+
+                            <button
+                                class="recovery-action"
+                                type="submit"
+                            >
+                                Set Up {{ method.label }}
+                            </button>
+                        </form>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            {% else %}
+
+            <div class="recovery-step">
+                <strong>
+                    Next — Rebuild Multi-Factor Authentication
+                </strong>
+
+                <span>
+                    Peach Suite Pro will retire the old MFA
+                    credentials only after you establish and
+                    verify fresh MFA protection.
+                </span>
+
+                <form
+                    class="recovery-action-form"
+                    method="post"
+                    action="{{ url_for(
+                        'mfa_account_recovery_restricted'
+                    ) }}"
+                >
+                    <input
+                        type="hidden"
+                        name="security_csrf_token"
+                        value="{{ security_csrf_token }}"
+                    >
+
+                    <input
+                        type="hidden"
+                        name="recovery_action"
+                        value="continue"
+                    >
+
+                    <button
+                        class="recovery-action"
+                        type="submit"
+                    >
+                        Continue to Rebuild MFA
+                    </button>
+                </form>
+            </div>
+
+            {% endif %}
+
+            <div class="recovery-step">
+                <strong>
+                    Fresh Recovery Protection
+                </strong>
+
+                <span>
+                    After MFA is rebuilt, new recovery codes
+                    will be issued when applicable. Existing
+                    recovery credentials that must no longer
+                    be trusted will be revoked or rotated as
+                    part of recovery completion.
+                </span>
+            </div>
+
+            <div class="recovery-note" style="margin-top: 18px;">
+                For security, this Recovery Session is
+                short-lived. If it expires before recovery is
+                completed, Peach Suite Pro will require you to
+                restart the verified recovery process.
+            </div>
+
+            <div class="recovery-footer">
+                Peach Suite Pro
+            </div>
+        </section>
+    </main>
+{% if mode == "recovery_codes" %}
+<script>
+(function () {
+    const copyButton = document.getElementById(
+        "copyRecoveryCodesButton"
+    );
+
+    const printButton = document.getElementById(
+        "printRecoveryCodesButton"
+    );
+
+    const copyStatus = document.getElementById(
+        "recoveryCopyStatus"
+    );
+
+    function getRecoveryCodesText() {
+        return Array.from(
+            document.querySelectorAll(".recovery-code")
+        )
+            .map(function (element) {
+                return element.textContent.trim();
+            })
+            .filter(Boolean)
+            .join("\n");
+    }
+
+    async function copyRecoveryCodes() {
+        const recoveryCodesText = getRecoveryCodesText();
+
+        if (!recoveryCodesText) {
+            copyStatus.textContent =
+                "Recovery codes could not be copied.";
+            return;
+        }
+
+        try {
+            if (
+                navigator.clipboard
+                && window.isSecureContext
+            ) {
+                await navigator.clipboard.writeText(
+                    recoveryCodesText
+                );
+            } else {
+                const textarea = document.createElement(
+                    "textarea"
+                );
+
+                textarea.value = recoveryCodesText;
+                textarea.setAttribute(
+                    "readonly",
+                    ""
+                );
+
+                textarea.style.position = "fixed";
+                textarea.style.opacity = "0";
+
+                document.body.appendChild(
+                    textarea
+                );
+
+                textarea.select();
+
+                const copied = document.execCommand(
+                    "copy"
+                );
+
+                textarea.remove();
+
+                if (!copied) {
+                    throw new Error(
+                        "Clipboard copy was not accepted."
+                    );
+                }
+            }
+
+            copyStatus.textContent =
+                "All recovery codes copied.";
+
+            copyButton.textContent = "Copied";
+
+            window.setTimeout(function () {
+                copyButton.textContent =
+                    "Copy All Recovery Codes";
+            }, 2000);
+
+        } catch (error) {
+            copyStatus.textContent =
+                "Automatic copy was unavailable. "
+                + "Select and copy the codes manually.";
+        }
+    }
+
+    if (copyButton) {
+        copyButton.addEventListener(
+            "click",
+            copyRecoveryCodes
+        );
+    }
+
+    if (printButton) {
+        printButton.addEventListener(
+            "click",
+            function () {
+                window.print();
+            }
+        );
+    }
+})();
+</script>
+{% endif %}
+
+</body>
+</html>

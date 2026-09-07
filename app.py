@@ -72,11 +72,15 @@ from services.mfa_security import (
     build_totp_uri,
     decrypt_totp_secret,
     encrypt_totp_secret,
+    generate_account_recovery_key,
     generate_recovery_codes,
     generate_totp_secret,
     generate_verification_code,
+    get_verification_code_pepper,
+    hash_account_recovery_key,
     hash_recovery_code,
     hash_verification_code,
+    verify_account_recovery_key,
     verify_recovery_code,
     verify_totp_code,
     verify_verification_code,
@@ -4065,6 +4069,8 @@ MFA_REQUIRED_ROLES = frozenset({
 })
 
 MFA_PENDING_LOGIN_MAX_AGE_SECONDS = 10 * 60
+MFA_ACCOUNT_RECOVERY_PENDING_MAX_AGE_SECONDS = 10 * 60
+MFA_ACCOUNT_RECOVERY_SESSION_MAX_AGE_SECONDS = 10 * 60
 
 MFA_VERIFICATION_CODE_MINUTES = 10
 MFA_VERIFICATION_RESEND_COOLDOWN_SECONDS = 60
@@ -4093,19 +4099,4079 @@ def _mfa_no_store(response):
     return response
 
 
+def _create_or_reuse_mfa_account_recovery_request(
+    pending,
+):
+    if not isinstance(pending, dict):
+        return {
+            "status": "invalid_state",
+        }
+
+    try:
+        user_id = int(
+            pending.get("target_user_id")
+        )
+        password_verified_at_epoch = int(
+            pending.get(
+                "password_verified_at_epoch"
+            )
+        )
+    except (TypeError, ValueError):
+        return {
+            "status": "invalid_state",
+        }
+
+    if (
+        user_id <= 0
+        or password_verified_at_epoch <= 0
+    ):
+        return {
+            "status": "invalid_state",
+        }
+
+    password_verified_at = datetime.fromtimestamp(
+        password_verified_at_epoch,
+        tz=timezone.utc,
+    )
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        user = _mfa_pending_user_record(
+            cur,
+            pending,
+            for_update=True,
+        )
+
+        if not user:
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        remaining_minutes = (
+            _mfa_login_lock_remaining_minutes(
+                user
+            )
+        )
+
+        if remaining_minutes is not None:
+            conn.rollback()
+
+            return {
+                "status": "locked",
+                "remaining_minutes": (
+                    remaining_minutes
+                ),
+            }
+
+        password_age_seconds = (
+            user[10] - password_verified_at
+        ).total_seconds()
+
+        # The migration permits the password proof to
+        # precede creation of the recovery case by no
+        # more than 15 minutes. A small future-clock
+        # tolerance mirrors the pending-MFA checks.
+        if (
+            password_age_seconds < -60
+            or password_age_seconds > 15 * 60
+        ):
+            conn.rollback()
+
+            return {
+                "status": "password_verification_expired",
+            }
+
+        cur.execute(
+            """
+            SELECT
+                mfa_recovery_contact_id,
+                contact_type
+            FROM mfa_recovery_contacts
+            WHERE user_id = %s
+              AND verified_at IS NOT NULL
+              AND revoked_at IS NULL
+            ORDER BY contact_type
+            FOR UPDATE
+            """,
+            (user_id,),
+        )
+
+        recovery_contacts = cur.fetchall()
+
+        available_factor_types = {
+            (
+                "recovery_email"
+                if str(row[1] or "").strip().lower()
+                    == "email"
+                else "recovery_sms"
+            )
+            for row in recovery_contacts
+            if str(row[1] or "").strip().lower()
+                in {"email", "sms"}
+        }
+
+        cur.execute(
+            """
+            SELECT
+                mfa_account_recovery_key_id
+            FROM mfa_account_recovery_keys
+            WHERE user_id = %s
+              AND invalidated_at IS NULL
+            FOR UPDATE
+            """,
+            (user_id,),
+        )
+
+        active_recovery_key = cur.fetchone()
+
+        if active_recovery_key:
+            available_factor_types.add(
+                "recovery_key"
+            )
+
+        factor_count = len(
+            available_factor_types
+        )
+
+        if factor_count < 2:
+            conn.rollback()
+
+            return {
+                "status": "insufficient_factors",
+                "factor_count": factor_count,
+                "required_proof_count": 2,
+            }
+
+        cur.execute(
+            """
+            SELECT
+                mfa_account_recovery_request_id,
+                status,
+                required_proof_count,
+                expires_at
+            FROM mfa_account_recovery_requests
+            WHERE user_id = %s
+              AND status NOT IN (
+                  'completed',
+                  'cancelled',
+                  'expired'
+              )
+            FOR UPDATE
+            """,
+            (user_id,),
+        )
+
+        active_request = cur.fetchone()
+
+        if active_request:
+            active_request_id = int(
+                active_request[0]
+            )
+            active_status = str(
+                active_request[1] or ""
+            ).strip().lower()
+            active_required_count = int(
+                active_request[2]
+            )
+            active_expires_at = (
+                active_request[3]
+            )
+
+            if (
+                active_status in {
+                    "pending",
+                    "self_service_verified",
+                }
+                and active_expires_at
+                    <= user[10]
+            ):
+                cur.execute(
+                    """
+                    UPDATE mfa_account_recovery_requests
+                    SET status = 'expired'
+                    WHERE mfa_account_recovery_request_id = %s
+                      AND user_id = %s
+                      AND status IN (
+                          'pending',
+                          'self_service_verified'
+                      )
+                      AND expires_at <= NOW()
+                    """,
+                    (
+                        active_request_id,
+                        user_id,
+                    ),
+                )
+
+                cur.execute(
+                    """
+                    UPDATE mfa_verification_challenges
+                    SET invalidated_at = NOW()
+                    WHERE user_id = %s
+                      AND purpose = 'account_recovery'
+                      AND recovery_request_id = %s
+                      AND used_at IS NULL
+                      AND invalidated_at IS NULL
+                    """,
+                    (
+                        user_id,
+                        active_request_id,
+                    ),
+                )
+
+                log_audit(
+                    cur,
+                    spa_id=user[1],
+                    user_id=user_id,
+                    action_type=(
+                        "mfa_account_recovery_expired"
+                    ),
+                    table_name=(
+                        "mfa_account_recovery_requests"
+                    ),
+                    record_id=active_request_id,
+                    notes=(
+                        "Expired an unfinished self-service "
+                        "Account Recovery case before starting "
+                        "a new password-verified recovery case."
+                    ),
+                )
+
+                active_request = None
+
+            elif active_status in {
+                "pending",
+                "self_service_verified",
+            }:
+                if active_required_count != 2:
+                    conn.rollback()
+
+                    return {
+                        "status": "invalid_state",
+                    }
+
+                conn.commit()
+
+                return {
+                    "status": "success",
+                    "reused": True,
+                    "recovery_request_id": (
+                        active_request_id
+                    ),
+                    "recovery_status": (
+                        active_status
+                    ),
+                    "factor_count": factor_count,
+                    "required_proof_count": 2,
+                }
+
+            elif active_status == "restricted":
+                if active_required_count != 2:
+                    conn.rollback()
+
+                    return {
+                        "status": "invalid_state",
+                    }
+
+                # A restricted recovery may outlive its short browser
+                # session. A fresh password-authenticated restart must
+                # prove two trusted recovery factors again. Preserve
+                # the same recovery request and any exact in-progress
+                # replacement MFA credential.
+                cur.execute(
+                    """
+                    UPDATE mfa_account_recovery_proofs
+                    SET superseded_at = NOW()
+                    WHERE mfa_account_recovery_request_id = %s
+                      AND user_id = %s
+                      AND proof_type IN (
+                          'recovery_email',
+                          'recovery_sms',
+                          'recovery_key'
+                      )
+                      AND superseded_at IS NULL
+                    RETURNING mfa_account_recovery_proof_id
+                    """,
+                    (
+                        active_request_id,
+                        user_id,
+                    ),
+                )
+
+                superseded_proof_count = len(
+                    cur.fetchall()
+                )
+
+                # Old proof-delivery challenges must not carry into
+                # the fresh re-verification window. Do not touch
+                # account_recovery_rebuild challenges because those
+                # belong to the exact replacement MFA state.
+                cur.execute(
+                    """
+                    UPDATE mfa_verification_challenges
+                    SET invalidated_at = NOW()
+                    WHERE user_id = %s
+                      AND purpose = 'account_recovery'
+                      AND recovery_request_id = %s
+                      AND used_at IS NULL
+                      AND invalidated_at IS NULL
+                    """,
+                    (
+                        user_id,
+                        active_request_id,
+                    ),
+                )
+
+                cur.execute(
+                    """
+                    UPDATE mfa_account_recovery_requests
+                    SET
+                        proof_reverification_started_at = NOW(),
+                        proof_reverification_expires_at =
+                            NOW() + INTERVAL '10 minutes',
+                        proof_reverification_verified_at = NULL
+                    WHERE mfa_account_recovery_request_id = %s
+                      AND user_id = %s
+                      AND status = 'restricted'
+                    RETURNING
+                        mfa_account_recovery_request_id,
+                        proof_reverification_expires_at
+                    """,
+                    (
+                        active_request_id,
+                        user_id,
+                    ),
+                )
+
+                restarted_request = cur.fetchone()
+
+                if not restarted_request:
+                    raise RuntimeError(
+                        "Interrupted Account Recovery could not "
+                        "start fresh proof re-verification safely."
+                    )
+
+                log_audit(
+                    cur,
+                    spa_id=user[1],
+                    user_id=user_id,
+                    action_type=(
+                        "mfa_account_recovery_reverification_started"
+                    ),
+                    table_name=(
+                        "mfa_account_recovery_requests"
+                    ),
+                    record_id=active_request_id,
+                    notes=(
+                        "Fresh password verification restarted an "
+                        "interrupted restricted Account Recovery case. "
+                        "Prior self-service proofs were superseded and "
+                        "two fresh trusted recovery proofs are required. "
+                        "The existing restricted MFA rebuild state was "
+                        "preserved. "
+                        f"{superseded_proof_count} prior current "
+                        "self-service proof(s) were superseded."
+                    ),
+                )
+
+                conn.commit()
+
+                return {
+                    "status": "success",
+                    "reused": True,
+                    "reverification": True,
+                    "recovery_request_id": (
+                        active_request_id
+                    ),
+                    "recovery_status": "restricted",
+                    "factor_count": factor_count,
+                    "required_proof_count": 2,
+                }
+
+            else:
+                conn.rollback()
+
+                return {
+                    "status": "recovery_in_progress",
+                    "recovery_request_id": (
+                        active_request_id
+                    ),
+                    "recovery_status": (
+                        active_status
+                    ),
+                }
+
+        cur.execute(
+            """
+            INSERT INTO mfa_account_recovery_requests (
+                user_id,
+                status,
+                required_proof_count,
+                password_verified_at,
+                expires_at
+            )
+            VALUES (
+                %s,
+                'pending',
+                2,
+                %s,
+                NOW() + INTERVAL '10 minutes'
+            )
+            RETURNING
+                mfa_account_recovery_request_id,
+                expires_at
+            """,
+            (
+                user_id,
+                password_verified_at,
+            ),
+        )
+
+        created_request = cur.fetchone()
+
+        if not created_request:
+            raise RuntimeError(
+                "Account Recovery request was not created."
+            )
+
+        recovery_request_id = int(
+            created_request[0]
+        )
+
+        log_audit(
+            cur,
+            spa_id=user[1],
+            user_id=user_id,
+            action_type=(
+                "mfa_account_recovery_started"
+            ),
+            table_name=(
+                "mfa_account_recovery_requests"
+            ),
+            record_id=recovery_request_id,
+            notes=(
+                "Password-verified self-service Account "
+                "Recovery started. Two different trusted "
+                "recovery factors are required. No normal "
+                "business session was created."
+            ),
+        )
+
+        conn.commit()
+
+        return {
+            "status": "success",
+            "reused": False,
+            "recovery_request_id": (
+                recovery_request_id
+            ),
+            "recovery_status": "pending",
+            "factor_count": factor_count,
+            "required_proof_count": 2,
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _clear_pending_mfa_account_recovery():
+    session.pop(
+        "_pending_mfa_account_recovery",
+        None,
+    )
+    session.pop(
+        "_public_security_csrf",
+        None,
+    )
+
+
+def _start_pending_mfa_account_recovery(
+    pending,
+    *,
+    recovery_request_id,
+):
+    if not isinstance(pending, dict):
+        raise ValueError(
+            "Pending MFA login context is required "
+            "for Account Recovery."
+        )
+
+    try:
+        user_id = int(
+            pending.get("target_user_id")
+        )
+        recovery_request_id = int(
+            recovery_request_id
+        )
+        password_verified_at_epoch = int(
+            pending.get(
+                "password_verified_at_epoch"
+            )
+        )
+    except (TypeError, ValueError):
+        raise ValueError(
+            "Pending Account Recovery identity is invalid."
+        )
+
+    spa_id = pending.get("target_spa_id")
+
+    role = str(
+        pending.get("target_role")
+        or ""
+    ).strip()
+
+    source_mfa_challenge_id = str(
+        pending.get("challenge_id")
+        or ""
+    ).strip()
+
+    if (
+        user_id <= 0
+        or recovery_request_id <= 0
+        or password_verified_at_epoch <= 0
+        or not _mfa_required_for_role(role)
+        or not source_mfa_challenge_id
+    ):
+        raise ValueError(
+            "Pending Account Recovery context is invalid."
+        )
+
+    recovery_pending = {
+        "user_id": user_id,
+        "spa_id": spa_id,
+        "role": role,
+        "recovery_request_id": recovery_request_id,
+        "issued_at": int(time.time()),
+        "password_verified_at_epoch": (
+            password_verified_at_epoch
+        ),
+        "challenge_id": secrets.token_urlsafe(32),
+        "source_mfa_challenge_id": (
+            source_mfa_challenge_id
+        ),
+    }
+
+    # Account Recovery is a separate, restricted security
+    # path. It must not coexist with a normal business
+    # session or the ordinary pending-MFA login flow.
+    session.clear()
+
+    session[
+        "_pending_mfa_account_recovery"
+    ] = recovery_pending
+
+    return recovery_pending
+
+
+def _pending_mfa_account_recovery():
+    recovery_pending = session.get(
+        "_pending_mfa_account_recovery"
+    )
+
+    if not isinstance(
+        recovery_pending,
+        dict,
+    ):
+        return None
+
+    try:
+        user_id = int(
+            recovery_pending.get("user_id")
+        )
+        recovery_request_id = int(
+            recovery_pending.get(
+                "recovery_request_id"
+            )
+        )
+        issued_at = int(
+            recovery_pending.get("issued_at")
+        )
+        password_verified_at_epoch = int(
+            recovery_pending.get(
+                "password_verified_at_epoch"
+            )
+        )
+    except (TypeError, ValueError):
+        _clear_pending_mfa_account_recovery()
+        return None
+
+    role = str(
+        recovery_pending.get("role")
+        or ""
+    ).strip()
+
+    challenge_id = str(
+        recovery_pending.get("challenge_id")
+        or ""
+    ).strip()
+
+    source_mfa_challenge_id = str(
+        recovery_pending.get(
+            "source_mfa_challenge_id"
+        )
+        or ""
+    ).strip()
+
+    age_seconds = (
+        int(time.time()) - issued_at
+    )
+
+    recovery_pending_valid = bool(
+        user_id > 0
+        and recovery_request_id > 0
+        and _mfa_required_for_role(role)
+        and challenge_id
+        and source_mfa_challenge_id
+        and password_verified_at_epoch > 0
+        and password_verified_at_epoch <= issued_at + 60
+        and (
+            issued_at - password_verified_at_epoch
+        ) <= 15 * 60
+        and age_seconds >= 0
+        and age_seconds
+            <= MFA_ACCOUNT_RECOVERY_PENDING_MAX_AGE_SECONDS
+        and session.get("user_id") is None
+        and session.get("spa_id") is None
+        and session.get("_pending_mfa_login") is None
+    )
+
+    if not recovery_pending_valid:
+        _clear_pending_mfa_account_recovery()
+        return None
+
+    return {
+        "user_id": user_id,
+        "spa_id": recovery_pending.get("spa_id"),
+        "role": role,
+        "recovery_request_id": recovery_request_id,
+        "issued_at": issued_at,
+        "password_verified_at_epoch": (
+            password_verified_at_epoch
+        ),
+        "challenge_id": challenge_id,
+        "source_mfa_challenge_id": (
+            source_mfa_challenge_id
+        ),
+    }
+
+
+def _mfa_account_recovery_pending_csrf_purpose(
+    recovery_pending,
+    action,
+):
+    if not isinstance(
+        recovery_pending,
+        dict,
+    ):
+        raise ValueError(
+            "Pending Account Recovery context is required."
+        )
+
+    action = str(action or "").strip()
+
+    if action not in {
+        "send_email",
+        "send_sms",
+        "verify_email",
+        "verify_sms",
+        "verify_key",
+    }:
+        raise ValueError(
+            "Account Recovery CSRF action is invalid."
+        )
+
+    try:
+        user_id = int(
+            recovery_pending["user_id"]
+        )
+        recovery_request_id = int(
+            recovery_pending[
+                "recovery_request_id"
+            ]
+        )
+    except (
+        KeyError,
+        TypeError,
+        ValueError,
+    ):
+        raise ValueError(
+            "Pending Account Recovery identity is invalid."
+        )
+
+    challenge_id = str(
+        recovery_pending.get("challenge_id")
+        or ""
+    ).strip()
+
+    if (
+        user_id <= 0
+        or recovery_request_id <= 0
+        or not challenge_id
+    ):
+        raise ValueError(
+            "Pending Account Recovery identity is invalid."
+        )
+
+    return (
+        f"mfa-account-recovery:{action}:"
+        f"user:{user_id}:"
+        f"request:{recovery_request_id}:"
+        f"{challenge_id}"
+    )
+
+
+def _mfa_account_recovery_context(
+    recovery_pending,
+):
+    if not isinstance(
+        recovery_pending,
+        dict,
+    ):
+        return {
+            "status": "invalid_state",
+        }
+
+    try:
+        user_id = int(
+            recovery_pending.get("user_id")
+        )
+        recovery_request_id = int(
+            recovery_pending.get(
+                "recovery_request_id"
+            )
+        )
+    except (TypeError, ValueError):
+        return {
+            "status": "invalid_state",
+        }
+
+    pending_spa_id = recovery_pending.get(
+        "spa_id"
+    )
+
+    pending_role = str(
+        recovery_pending.get("role")
+        or ""
+    ).strip()
+
+    if (
+        user_id <= 0
+        or recovery_request_id <= 0
+        or not _mfa_required_for_role(
+            pending_role
+        )
+    ):
+        return {
+            "status": "invalid_state",
+        }
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                u.spa_id,
+                u.role,
+                u.active,
+                NOW(),
+                r.status,
+                r.required_proof_count,
+                r.expires_at,
+                r.recovery_verified_at,
+                r.restricted_session_started_at,
+                r.security_hold_until,
+                r.proof_reverification_started_at,
+                r.proof_reverification_expires_at,
+                r.proof_reverification_verified_at
+            FROM users u
+            JOIN mfa_account_recovery_requests r
+              ON r.user_id = u.user_id
+            WHERE u.user_id = %s
+              AND r.mfa_account_recovery_request_id = %s
+            """,
+            (
+                user_id,
+                recovery_request_id,
+            ),
+        )
+
+        row = cur.fetchone()
+
+        if (
+            not row
+            or not row[2]
+            or row[0] != pending_spa_id
+            or str(row[1] or "").strip()
+                != pending_role
+            or not _mfa_required_for_role(
+                row[1]
+            )
+        ):
+            return {
+                "status": "invalid_state",
+            }
+
+        now_at = row[3]
+
+        recovery_status = str(
+            row[4] or ""
+        ).strip().lower()
+
+        required_proof_count = int(
+            row[5]
+        )
+
+        expires_at = row[6]
+        recovery_verified_at = row[7]
+        restricted_started_at = row[8]
+        security_hold_until = row[9]
+
+        proof_reverification_started_at = row[10]
+        proof_reverification_expires_at = row[11]
+        proof_reverification_verified_at = row[12]
+        if (
+            recovery_status
+            in {
+                "pending",
+                "self_service_verified",
+            }
+            and expires_at <= now_at
+        ):
+            return {
+                "status": "expired",
+                "recovery_request_id": (
+                    recovery_request_id
+                ),
+            }
+
+        if recovery_status not in {
+            "pending",
+            "self_service_verified",
+            "restricted",
+        }:
+            return {
+                "status": "invalid_state",
+            }
+
+        if recovery_status == "restricted":
+            if (
+                restricted_started_at is None
+                or proof_reverification_started_at is None
+                or proof_reverification_expires_at is None
+            ):
+                return {
+                    "status": "invalid_state",
+                }
+
+            if proof_reverification_expires_at <= now_at:
+                return {
+                    "status": "expired",
+                    "recovery_request_id": (
+                        recovery_request_id
+                    ),
+                }
+
+        if (
+            recovery_status
+                == "self_service_verified"
+            and (
+                recovery_verified_at is None
+                or restricted_started_at
+                    is not None
+            )
+        ):
+            return {
+                "status": "invalid_state",
+            }
+
+        cur.execute(
+            """
+            SELECT
+                rc.mfa_recovery_contact_id,
+                rc.contact_type,
+                rc.contact_value,
+                EXISTS (
+                    SELECT 1
+                    FROM mfa_account_recovery_proofs p
+                    WHERE
+                        p.mfa_account_recovery_request_id
+                            = %s
+                        AND p.user_id = rc.user_id
+                        AND p.superseded_at IS NULL
+                        AND p.recovery_contact_id
+                            = rc.mfa_recovery_contact_id
+                        AND (
+                            (
+                                rc.contact_type = 'email'
+                                AND p.proof_type
+                                    = 'recovery_email'
+                                AND p.recovery_method
+                                    = 'email'
+                            )
+                            OR
+                            (
+                                rc.contact_type = 'sms'
+                                AND p.proof_type
+                                    = 'recovery_sms'
+                                AND p.recovery_method
+                                    = 'sms'
+                            )
+                        )
+                ) AS proof_verified,
+                (
+                    SELECT
+                        vc.mfa_verification_challenge_id
+                    FROM mfa_verification_challenges vc
+                    WHERE vc.user_id = rc.user_id
+                      AND vc.method = rc.contact_type
+                      AND vc.purpose = 'account_recovery'
+                      AND vc.recovery_contact_id
+                            = rc.mfa_recovery_contact_id
+                      AND vc.recovery_request_id = %s
+                      AND vc.delivery_sent_at IS NOT NULL
+                      AND vc.used_at IS NULL
+                      AND vc.invalidated_at IS NULL
+                      AND vc.expires_at > NOW()
+                    ORDER BY
+                        vc.delivery_sent_at DESC,
+                        vc.mfa_verification_challenge_id DESC
+                    LIMIT 1
+                ) AS active_challenge_id
+            FROM mfa_recovery_contacts rc
+            WHERE rc.user_id = %s
+              AND rc.verified_at IS NOT NULL
+              AND rc.revoked_at IS NULL
+            ORDER BY rc.contact_type
+            """,
+            (
+                recovery_request_id,
+                recovery_request_id,
+                user_id,
+            ),
+        )
+
+        trusted_contacts = []
+
+        for contact_row in cur.fetchall():
+            contact_id = int(
+                contact_row[0]
+            )
+
+            method = str(
+                contact_row[1] or ""
+            ).strip().lower()
+
+            contact_value = (
+                contact_row[2]
+            )
+
+            proof_verified = bool(
+                contact_row[3]
+            )
+
+            active_challenge_id = (
+                int(contact_row[4])
+                if contact_row[4] is not None
+                else None
+            )
+
+            if method == "email":
+                masked_label = (
+                    _mask_mfa_recovery_email_for_display(
+                        contact_value
+                    )
+                )
+
+            elif method == "sms":
+                masked_label = (
+                    _mask_mfa_recovery_phone_for_display(
+                        contact_value
+                    )
+                )
+
+            else:
+                continue
+
+            trusted_contacts.append({
+                "recovery_contact_id": (
+                    contact_id
+                ),
+                "method": method,
+                "masked_label": masked_label,
+                "proof_verified": (
+                    proof_verified
+                ),
+                "active_challenge_id": (
+                    active_challenge_id
+                ),
+            })
+
+        cur.execute(
+            """
+            SELECT
+                rk.mfa_account_recovery_key_id,
+                EXISTS (
+                    SELECT 1
+                    FROM mfa_account_recovery_proofs p
+                    WHERE
+                        p.mfa_account_recovery_request_id
+                            = %s
+                        AND p.user_id = rk.user_id
+                        AND p.superseded_at IS NULL
+                        AND p.proof_type
+                            = 'recovery_key'
+                        AND p.recovery_key_id
+                            = rk.mfa_account_recovery_key_id
+                ) AS proof_verified
+            FROM mfa_account_recovery_keys rk
+            WHERE rk.user_id = %s
+              AND rk.invalidated_at IS NULL
+            LIMIT 1
+            """,
+            (
+                recovery_request_id,
+                user_id,
+            ),
+        )
+
+        recovery_key_row = cur.fetchone()
+
+        recovery_key_available = bool(
+            recovery_key_row
+        )
+
+        recovery_key_verified = bool(
+            recovery_key_row
+            and recovery_key_row[1]
+        )
+
+        proof_count = sum(
+            1
+            for contact in trusted_contacts
+            if contact["proof_verified"]
+        )
+
+        if recovery_key_verified:
+            proof_count += 1
+
+        factor_count = (
+            len(trusted_contacts)
+            + (
+                1
+                if recovery_key_available
+                else 0
+            )
+        )
+
+        return {
+            "status": "success",
+            "user_id": user_id,
+            "spa_id": row[0],
+            "role": pending_role,
+            "recovery_request_id": (
+                recovery_request_id
+            ),
+            "recovery_status": (
+                recovery_status
+            ),
+            "required_proof_count": (
+                required_proof_count
+            ),
+            "proof_count": proof_count,
+            "factor_count": factor_count,
+            "trusted_contacts": (
+                trusted_contacts
+            ),
+            "recovery_key_available": (
+                recovery_key_available
+            ),
+            "recovery_key_verified": (
+                recovery_key_verified
+            ),
+            "recovery_verified": (
+                recovery_status
+                    == "self_service_verified"
+                or (
+                    recovery_status == "restricted"
+                    and proof_reverification_verified_at
+                        is not None
+                    and proof_reverification_expires_at
+                        is not None
+                    and proof_reverification_expires_at
+                        > now_at
+                )
+            ),
+            "proof_reverification": (
+                recovery_status == "restricted"
+            ),
+            "proof_reverification_verified": (
+                recovery_status == "restricted"
+                and proof_reverification_verified_at
+                    is not None
+            ),
+            "expires_at": expires_at,
+            "security_hold_until": (
+                security_hold_until
+            ),
+        }
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _clear_mfa_account_recovery_session():
+    session.pop(
+        "_mfa_account_recovery_session",
+        None,
+    )
+    session.pop(
+        "_public_security_csrf",
+        None,
+    )
+
+
+def _establish_mfa_account_recovery_session_state(
+    *,
+    user_id,
+    recovery_request_id,
+):
+    try:
+        user_id = int(user_id)
+        recovery_request_id = int(
+            recovery_request_id
+        )
+    except (TypeError, ValueError):
+        raise ValueError(
+            "MFA account-recovery session identity is invalid."
+        )
+
+    if (
+        user_id <= 0
+        or recovery_request_id <= 0
+    ):
+        raise ValueError(
+            "MFA account-recovery session identity is invalid."
+        )
+
+    # Restricted recovery must never coexist with a normal
+    # authenticated Peach Suite Pro business session.
+    session.clear()
+
+    recovery_session = {
+        "user_id": user_id,
+        "recovery_request_id": recovery_request_id,
+        "issued_at": int(time.time()),
+        "challenge_id": secrets.token_urlsafe(32),
+    }
+
+    session[
+        "_mfa_account_recovery_session"
+    ] = recovery_session
+
+    return recovery_session
+
+
+def _mfa_account_recovery_session():
+    recovery_session = session.get(
+        "_mfa_account_recovery_session"
+    )
+
+    if not isinstance(
+        recovery_session,
+        dict,
+    ):
+        return None
+
+    try:
+        user_id = int(
+            recovery_session.get("user_id")
+        )
+        recovery_request_id = int(
+            recovery_session.get(
+                "recovery_request_id"
+            )
+        )
+        issued_at = int(
+            recovery_session.get("issued_at")
+        )
+    except (TypeError, ValueError):
+        _clear_mfa_account_recovery_session()
+        return None
+
+    challenge_id = str(
+        recovery_session.get("challenge_id")
+        or ""
+    ).strip()
+
+    age_seconds = (
+        int(time.time()) - issued_at
+    )
+
+    recovery_session_valid = bool(
+        user_id > 0
+        and recovery_request_id > 0
+        and challenge_id
+        and age_seconds >= 0
+        and age_seconds
+            <= MFA_ACCOUNT_RECOVERY_SESSION_MAX_AGE_SECONDS
+        and session.get("user_id") is None
+        and session.get("spa_id") is None
+    )
+
+    if not recovery_session_valid:
+        _clear_mfa_account_recovery_session()
+        return None
+
+    return {
+        "user_id": user_id,
+        "recovery_request_id": recovery_request_id,
+        "issued_at": issued_at,
+        "challenge_id": challenge_id,
+    }
+
+
+def _open_mfa_account_recovery_session():
+    recovery_pending = (
+        _pending_mfa_account_recovery()
+    )
+
+    if not recovery_pending:
+        return {
+            "status": "invalid_state",
+        }
+
+    try:
+        user_id = int(
+            recovery_pending.get("user_id")
+        )
+        recovery_request_id = int(
+            recovery_pending.get(
+                "recovery_request_id"
+            )
+        )
+    except (TypeError, ValueError):
+        return {
+            "status": "invalid_state",
+        }
+
+    pending_spa_id = recovery_pending.get(
+        "spa_id"
+    )
+    pending_role = str(
+        recovery_pending.get("role")
+        or ""
+    ).strip()
+
+    if (
+        user_id <= 0
+        or recovery_request_id <= 0
+        or not _mfa_required_for_role(
+            pending_role
+        )
+    ):
+        return {
+            "status": "invalid_state",
+        }
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                user_id,
+                spa_id,
+                role,
+                active,
+                NOW()
+            FROM users
+            WHERE user_id = %s
+            FOR UPDATE
+            """,
+            (user_id,),
+        )
+
+        user = cur.fetchone()
+
+        if (
+            not user
+            or not user[3]
+            or user[1] != pending_spa_id
+            or str(user[2] or "").strip()
+                != pending_role
+            or not _mfa_required_for_role(
+                user[2]
+            )
+        ):
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        cur.execute(
+            """
+            SELECT
+                mfa_account_recovery_request_id,
+                status,
+                required_proof_count,
+                expires_at,
+                recovery_verified_at,
+                restricted_session_started_at,
+                security_hold_until,
+                proof_reverification_started_at,
+                proof_reverification_expires_at,
+                proof_reverification_verified_at
+            FROM mfa_account_recovery_requests
+            WHERE mfa_account_recovery_request_id = %s
+              AND user_id = %s
+            FOR UPDATE
+            """,
+            (
+                recovery_request_id,
+                user_id,
+            ),
+        )
+
+        recovery_request = cur.fetchone()
+
+        if not recovery_request:
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        status = str(
+            recovery_request[1] or ""
+        ).strip().lower()
+
+        required_proof_count = int(
+            recovery_request[2]
+        )
+        expires_at = recovery_request[3]
+        recovery_verified_at = (
+            recovery_request[4]
+        )
+        restricted_started_at = (
+            recovery_request[5]
+        )
+        security_hold_until = (
+            recovery_request[6]
+        )
+        proof_reverification_started_at = (
+            recovery_request[7]
+        )
+        proof_reverification_expires_at = (
+            recovery_request[8]
+        )
+        proof_reverification_verified_at = (
+            recovery_request[9]
+        )
+        now_at = user[4]
+
+        if (
+            status == "self_service_verified"
+            and expires_at <= now_at
+        ):
+            cur.execute(
+                """
+                UPDATE mfa_account_recovery_requests
+                SET status = 'expired'
+                WHERE mfa_account_recovery_request_id = %s
+                  AND user_id = %s
+                  AND status = 'self_service_verified'
+                  AND expires_at <= NOW()
+                """,
+                (
+                    recovery_request_id,
+                    user_id,
+                ),
+            )
+
+            cur.execute(
+                """
+                UPDATE mfa_verification_challenges
+                SET invalidated_at = NOW()
+                WHERE user_id = %s
+                  AND purpose = 'account_recovery'
+                  AND recovery_request_id = %s
+                  AND used_at IS NULL
+                  AND invalidated_at IS NULL
+                """,
+                (
+                    user_id,
+                    recovery_request_id,
+                ),
+            )
+
+            conn.commit()
+            _clear_pending_mfa_account_recovery()
+
+            return {
+                "status": "expired",
+            }
+        first_restricted_entry = (
+            status == "self_service_verified"
+            and recovery_verified_at is not None
+            and restricted_started_at is None
+        )
+
+        interrupted_restricted_resume = (
+            status == "restricted"
+            and recovery_verified_at is not None
+            and restricted_started_at is not None
+            and proof_reverification_started_at
+                is not None
+            and proof_reverification_expires_at
+                is not None
+            and proof_reverification_expires_at
+                > now_at
+            and proof_reverification_verified_at
+                is not None
+        )
+
+        if not (
+            first_restricted_entry
+            or interrupted_restricted_resume
+        ):
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+
+        if (
+            security_hold_until is not None
+            and security_hold_until > now_at
+        ):
+            conn.rollback()
+
+            return {
+                "status": "security_hold",
+                "security_hold_until": (
+                    security_hold_until
+                ),
+            }
+
+        # Count only proofs whose exact underlying trusted
+        # recovery factor is still active. Revoking a contact
+        # or Recovery Key immediately stops that proof from
+        # authorizing entry into restricted recovery.
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM mfa_account_recovery_proofs p
+            LEFT JOIN mfa_recovery_contacts rc
+              ON rc.mfa_recovery_contact_id
+                    = p.recovery_contact_id
+             AND rc.user_id = p.user_id
+            LEFT JOIN mfa_account_recovery_keys rk
+              ON rk.mfa_account_recovery_key_id
+                    = p.recovery_key_id
+             AND rk.user_id = p.user_id
+            WHERE p.mfa_account_recovery_request_id = %s
+              AND p.user_id = %s
+              AND p.superseded_at IS NULL
+              AND (
+                  (
+                      p.proof_type = 'recovery_email'
+                      AND p.recovery_method = 'email'
+                      AND rc.mfa_recovery_contact_id
+                          IS NOT NULL
+                      AND rc.verified_at IS NOT NULL
+                      AND rc.revoked_at IS NULL
+                  )
+                  OR
+                  (
+                      p.proof_type = 'recovery_sms'
+                      AND p.recovery_method = 'sms'
+                      AND rc.mfa_recovery_contact_id
+                          IS NOT NULL
+                      AND rc.verified_at IS NOT NULL
+                      AND rc.revoked_at IS NULL
+                  )
+                  OR
+                  (
+                      p.proof_type = 'recovery_key'
+                      AND rk.mfa_account_recovery_key_id
+                          IS NOT NULL
+                      AND rk.invalidated_at IS NULL
+                  )
+              )
+            """,
+            (
+                recovery_request_id,
+                user_id,
+            ),
+        )
+
+        active_proof_count = int(
+            cur.fetchone()[0] or 0
+        )
+
+        if (
+            active_proof_count
+            < required_proof_count
+        ):
+            cur.execute(
+                """
+                UPDATE mfa_account_recovery_requests
+                SET
+                    status = 'cancelled',
+                    cancelled_at = NOW()
+                WHERE mfa_account_recovery_request_id = %s
+                  AND user_id = %s
+                  AND status = 'self_service_verified'
+                """,
+                (
+                    recovery_request_id,
+                    user_id,
+                ),
+            )
+
+            cur.execute(
+                """
+                UPDATE mfa_verification_challenges
+                SET invalidated_at = NOW()
+                WHERE user_id = %s
+                  AND purpose = 'account_recovery'
+                  AND recovery_request_id = %s
+                  AND used_at IS NULL
+                  AND invalidated_at IS NULL
+                """,
+                (
+                    user_id,
+                    recovery_request_id,
+                ),
+            )
+
+            log_audit(
+                cur,
+                spa_id=user[1],
+                user_id=user_id,
+                action_type=(
+                    "mfa_account_recovery_cancelled_factor_changed"
+                ),
+                table_name=(
+                    "mfa_account_recovery_requests"
+                ),
+                record_id=recovery_request_id,
+                notes=(
+                    "Account Recovery was cancelled because "
+                    "one or more recovery factors used for "
+                    "verification are no longer active. A new "
+                    "password-verified recovery attempt is "
+                    "required."
+                ),
+            )
+
+            conn.commit()
+            _clear_pending_mfa_account_recovery()
+
+            return {
+                "status": "factor_changed",
+                "proof_count": active_proof_count,
+                "required_proof_count": (
+                    required_proof_count
+                ),
+            }
+
+        # Do not persist status='restricted' yet. The browser
+        # first receives a narrowly scoped Recovery Session.
+        # The restricted recovery route will revalidate that
+        # session and atomically persist the restricted state.
+        conn.rollback()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    recovery_session = (
+        _establish_mfa_account_recovery_session_state(
+            user_id=user_id,
+            recovery_request_id=recovery_request_id,
+        )
+    )
+
+    return {
+        "status": "success",
+        "recovery_request_id": recovery_request_id,
+        "recovery_session": recovery_session,
+    }
+
+def _enter_mfa_account_recovery_restricted_session():
+    recovery_session = (
+        _mfa_account_recovery_session()
+    )
+
+    if not recovery_session:
+        return {
+            "status": "invalid_state",
+        }
+
+    try:
+        user_id = int(
+            recovery_session.get("user_id")
+        )
+        recovery_request_id = int(
+            recovery_session.get(
+                "recovery_request_id"
+            )
+        )
+    except (TypeError, ValueError):
+        return {
+            "status": "invalid_state",
+        }
+
+    if (
+        user_id <= 0
+        or recovery_request_id <= 0
+    ):
+        return {
+            "status": "invalid_state",
+        }
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                user_id,
+                spa_id,
+                role,
+                active,
+                NOW()
+            FROM users
+            WHERE user_id = %s
+            FOR UPDATE
+            """,
+            (user_id,),
+        )
+
+        user = cur.fetchone()
+
+        if (
+            not user
+            or not user[3]
+            or not _mfa_required_for_role(
+                user[2]
+            )
+        ):
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        cur.execute(
+            """
+            SELECT
+                mfa_account_recovery_request_id,
+                status,
+                required_proof_count,
+                expires_at,
+                recovery_verified_at,
+                restricted_session_started_at,
+                security_hold_until
+            FROM mfa_account_recovery_requests
+            WHERE mfa_account_recovery_request_id = %s
+              AND user_id = %s
+            FOR UPDATE
+            """,
+            (
+                recovery_request_id,
+                user_id,
+            ),
+        )
+
+        recovery_request = cur.fetchone()
+
+        if not recovery_request:
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        recovery_status = str(
+            recovery_request[1] or ""
+        ).strip().lower()
+
+        required_proof_count = int(
+            recovery_request[2]
+        )
+
+        expires_at = recovery_request[3]
+        recovery_verified_at = (
+            recovery_request[4]
+        )
+        restricted_started_at = (
+            recovery_request[5]
+        )
+        security_hold_until = (
+            recovery_request[6]
+        )
+        now_at = user[4]
+
+        if (
+            recovery_status
+                == "self_service_verified"
+            and expires_at <= now_at
+        ):
+            cur.execute(
+                """
+                UPDATE mfa_account_recovery_requests
+                SET status = 'expired'
+                WHERE mfa_account_recovery_request_id = %s
+                  AND user_id = %s
+                  AND status = 'self_service_verified'
+                  AND expires_at <= NOW()
+                """,
+                (
+                    recovery_request_id,
+                    user_id,
+                ),
+            )
+
+            cur.execute(
+                """
+                UPDATE mfa_verification_challenges
+                SET invalidated_at = NOW()
+                WHERE user_id = %s
+                  AND purpose = 'account_recovery'
+                  AND recovery_request_id = %s
+                  AND used_at IS NULL
+                  AND invalidated_at IS NULL
+                """,
+                (
+                    user_id,
+                    recovery_request_id,
+                ),
+            )
+
+            log_audit(
+                cur,
+                spa_id=user[1],
+                user_id=user_id,
+                action_type=(
+                    "mfa_account_recovery_expired"
+                ),
+                table_name=(
+                    "mfa_account_recovery_requests"
+                ),
+                record_id=recovery_request_id,
+                notes=(
+                    "Account Recovery expired before "
+                    "the restricted recovery session "
+                    "could begin."
+                ),
+            )
+
+            conn.commit()
+            _clear_mfa_account_recovery_session()
+
+            return {
+                "status": "expired",
+            }
+
+        if recovery_status not in {
+            "self_service_verified",
+            "restricted",
+        }:
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        if recovery_verified_at is None:
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        if (
+            recovery_status == "self_service_verified"
+            and restricted_started_at is not None
+        ):
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        if (
+            recovery_status == "restricted"
+            and restricted_started_at is None
+        ):
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        if (
+            security_hold_until is not None
+            and security_hold_until > now_at
+        ):
+            conn.rollback()
+
+            return {
+                "status": "security_hold",
+                "security_hold_until": (
+                    security_hold_until
+                ),
+            }
+
+        # Revalidate the exact factors used for recovery
+        # immediately before entering or resuming the
+        # restricted security session.
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM mfa_account_recovery_proofs p
+
+            LEFT JOIN mfa_recovery_contacts rc
+              ON rc.mfa_recovery_contact_id
+                    = p.recovery_contact_id
+             AND rc.user_id = p.user_id
+
+            LEFT JOIN mfa_account_recovery_keys rk
+              ON rk.mfa_account_recovery_key_id
+                    = p.recovery_key_id
+             AND rk.user_id = p.user_id
+
+            WHERE p.mfa_account_recovery_request_id = %s
+              AND p.user_id = %s
+              AND p.superseded_at IS NULL
+              AND (
+                    (
+                        p.proof_type = 'recovery_email'
+                        AND p.recovery_method = 'email'
+                        AND rc.mfa_recovery_contact_id
+                            IS NOT NULL
+                        AND rc.verified_at IS NOT NULL
+                        AND rc.revoked_at IS NULL
+                    )
+                    OR
+                    (
+                        p.proof_type = 'recovery_sms'
+                        AND p.recovery_method = 'sms'
+                        AND rc.mfa_recovery_contact_id
+                            IS NOT NULL
+                        AND rc.verified_at IS NOT NULL
+                        AND rc.revoked_at IS NULL
+                    )
+                    OR
+                    (
+                        p.proof_type = 'recovery_key'
+                        AND rk.mfa_account_recovery_key_id
+                            IS NOT NULL
+                        AND rk.invalidated_at IS NULL
+                    )
+              )
+            """,
+            (
+                recovery_request_id,
+                user_id,
+            ),
+        )
+
+        active_proof_count = int(
+            cur.fetchone()[0] or 0
+        )
+
+        if (
+            active_proof_count
+            < required_proof_count
+        ):
+            cur.execute(
+                """
+                UPDATE mfa_account_recovery_requests
+                SET
+                    status = 'cancelled',
+                    cancelled_at = NOW()
+                WHERE mfa_account_recovery_request_id = %s
+                  AND user_id = %s
+                  AND status IN (
+                      'self_service_verified',
+                      'restricted'
+                  )
+                """,
+                (
+                    recovery_request_id,
+                    user_id,
+                ),
+            )
+
+            cur.execute(
+                """
+                UPDATE mfa_verification_challenges
+                SET invalidated_at = NOW()
+                WHERE user_id = %s
+                  AND purpose = 'account_recovery'
+                  AND recovery_request_id = %s
+                  AND used_at IS NULL
+                  AND invalidated_at IS NULL
+                """,
+                (
+                    user_id,
+                    recovery_request_id,
+                ),
+            )
+
+            log_audit(
+                cur,
+                spa_id=user[1],
+                user_id=user_id,
+                action_type=(
+                    "mfa_account_recovery_cancelled_factor_changed"
+                ),
+                table_name=(
+                    "mfa_account_recovery_requests"
+                ),
+                record_id=recovery_request_id,
+                notes=(
+                    "Restricted Account Recovery was "
+                    "cancelled because one or more "
+                    "verified recovery factors are no "
+                    "longer active."
+                ),
+            )
+
+            conn.commit()
+            _clear_mfa_account_recovery_session()
+
+            return {
+                "status": "factor_changed",
+                "proof_count": active_proof_count,
+                "required_proof_count": (
+                    required_proof_count
+                ),
+            }
+
+        if recovery_status == "restricted":
+            conn.rollback()
+
+            return {
+                "status": "success",
+                "resumed": True,
+                "user_id": user_id,
+                "spa_id": user[1],
+                "role": user[2],
+                "recovery_request_id": (
+                    recovery_request_id
+                ),
+                "restricted_session_started_at": (
+                    restricted_started_at
+                ),
+            }
+
+        cur.execute(
+            """
+            UPDATE mfa_account_recovery_requests
+            SET
+                status = 'restricted',
+                restricted_session_started_at = NOW()
+            WHERE mfa_account_recovery_request_id = %s
+              AND user_id = %s
+              AND status = 'self_service_verified'
+              AND recovery_verified_at IS NOT NULL
+              AND restricted_session_started_at IS NULL
+            RETURNING restricted_session_started_at
+            """,
+            (
+                recovery_request_id,
+                user_id,
+            ),
+        )
+
+        transitioned = cur.fetchone()
+
+        if not transitioned:
+            raise RuntimeError(
+                "Account Recovery could not enter "
+                "restricted recovery safely."
+            )
+
+        restricted_started_at = transitioned[0]
+
+        log_audit(
+            cur,
+            spa_id=user[1],
+            user_id=user_id,
+            action_type=(
+                "mfa_account_recovery_restricted_started"
+            ),
+            table_name=(
+                "mfa_account_recovery_requests"
+            ),
+            record_id=recovery_request_id,
+            notes=(
+                "Restricted Account Recovery session "
+                "started after required recovery proofs "
+                "were revalidated. No normal business "
+                "session was created."
+            ),
+        )
+
+        conn.commit()
+
+        return {
+            "status": "success",
+            "resumed": False,
+            "user_id": user_id,
+            "spa_id": user[1],
+            "role": user[2],
+            "recovery_request_id": (
+                recovery_request_id
+            ),
+            "restricted_session_started_at": (
+                restricted_started_at
+            ),
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _start_mfa_account_recovery_authenticator_rebuild(
+    recovery_session,
+):
+    if not isinstance(recovery_session, dict):
+        return {
+            "status": "invalid_state",
+        }
+
+    try:
+        user_id = int(
+            recovery_session.get("user_id")
+        )
+        recovery_request_id = int(
+            recovery_session.get(
+                "recovery_request_id"
+            )
+        )
+    except (TypeError, ValueError):
+        return {
+            "status": "invalid_state",
+        }
+
+    if (
+        user_id <= 0
+        or recovery_request_id <= 0
+    ):
+        return {
+            "status": "invalid_state",
+        }
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                user_id,
+                spa_id,
+                role,
+                active
+            FROM users
+            WHERE user_id = %s
+            FOR UPDATE
+            """,
+            (user_id,),
+        )
+
+        user = cur.fetchone()
+
+        if (
+            not user
+            or not user[3]
+            or not _mfa_required_for_role(
+                user[2]
+            )
+            or str(
+                user[2] or ""
+            ).strip() not in {
+                "admin",
+                "manager",
+                "master_admin",
+            }
+        ):
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        cur.execute(
+            """
+            SELECT
+                status,
+                restricted_session_started_at,
+                security_hold_until,
+                required_proof_count,
+                mfa_rebuild_method,
+                mfa_rebuild_started_at,
+                replacement_authenticator_id,
+                replacement_verification_challenge_id,
+                mfa_rebuild_verified_at
+            FROM mfa_account_recovery_requests
+            WHERE mfa_account_recovery_request_id = %s
+              AND user_id = %s
+            FOR UPDATE
+            """,
+            (
+                recovery_request_id,
+                user_id,
+            ),
+        )
+
+        recovery_request = cur.fetchone()
+
+        if not recovery_request:
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        recovery_status = str(
+            recovery_request[0] or ""
+        ).strip().lower()
+
+        restricted_started_at = (
+            recovery_request[1]
+        )
+
+        security_hold_until = (
+            recovery_request[2]
+        )
+
+        required_proof_count = int(
+            recovery_request[3]
+        )
+
+        rebuild_method = str(
+            recovery_request[4] or ""
+        ).strip().lower()
+
+        rebuild_started_at = (
+            recovery_request[5]
+        )
+
+        replacement_authenticator_id = (
+            recovery_request[6]
+        )
+
+        replacement_challenge_id = (
+            recovery_request[7]
+        )
+
+        rebuild_verified_at = (
+            recovery_request[8]
+        )
+
+        cur.execute("SELECT NOW()")
+        now_at = cur.fetchone()[0]
+
+        if (
+            recovery_status != "restricted"
+            or restricted_started_at is None
+            or required_proof_count <= 0
+            or rebuild_verified_at is not None
+            or (
+                security_hold_until is not None
+                and security_hold_until > now_at
+            )
+        ):
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        # Revalidate the exact recovery factors again inside
+        # this credential-creation transaction. The route also
+        # validates them, but a security-sensitive write must
+        # not rely on validation performed by an earlier
+        # transaction.
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM mfa_account_recovery_proofs p
+
+            LEFT JOIN mfa_recovery_contacts rc
+              ON rc.mfa_recovery_contact_id
+                    = p.recovery_contact_id
+             AND rc.user_id = p.user_id
+
+            LEFT JOIN mfa_account_recovery_keys rk
+              ON rk.mfa_account_recovery_key_id
+                    = p.recovery_key_id
+             AND rk.user_id = p.user_id
+
+            WHERE p.mfa_account_recovery_request_id = %s
+              AND p.user_id = %s
+              AND p.superseded_at IS NULL
+              AND (
+                    (
+                        p.proof_type = 'recovery_email'
+                        AND p.recovery_method = 'email'
+                        AND rc.mfa_recovery_contact_id
+                            IS NOT NULL
+                        AND rc.verified_at IS NOT NULL
+                        AND rc.revoked_at IS NULL
+                    )
+                    OR
+                    (
+                        p.proof_type = 'recovery_sms'
+                        AND p.recovery_method = 'sms'
+                        AND rc.mfa_recovery_contact_id
+                            IS NOT NULL
+                        AND rc.verified_at IS NOT NULL
+                        AND rc.revoked_at IS NULL
+                    )
+                    OR
+                    (
+                        p.proof_type = 'recovery_key'
+                        AND rk.mfa_account_recovery_key_id
+                            IS NOT NULL
+                        AND rk.invalidated_at IS NULL
+                    )
+              )
+            """,
+            (
+                recovery_request_id,
+                user_id,
+            ),
+        )
+
+        active_proof_count = int(
+            cur.fetchone()[0] or 0
+        )
+
+        if active_proof_count < required_proof_count:
+            cur.execute(
+                """
+                UPDATE mfa_account_recovery_requests
+                SET
+                    status = 'cancelled',
+                    cancelled_at = NOW()
+                WHERE mfa_account_recovery_request_id = %s
+                  AND user_id = %s
+                  AND status = 'restricted'
+                """,
+                (
+                    recovery_request_id,
+                    user_id,
+                ),
+            )
+
+            cur.execute(
+                """
+                UPDATE mfa_verification_challenges
+                SET invalidated_at = NOW()
+                WHERE user_id = %s
+                  AND purpose = 'account_recovery'
+                  AND recovery_request_id = %s
+                  AND used_at IS NULL
+                  AND invalidated_at IS NULL
+                """,
+                (
+                    user_id,
+                    recovery_request_id,
+                ),
+            )
+
+            log_audit(
+                cur,
+                spa_id=user[1],
+                user_id=user_id,
+                action_type=(
+                    "mfa_account_recovery_cancelled_factor_changed"
+                ),
+                table_name=(
+                    "mfa_account_recovery_requests"
+                ),
+                record_id=recovery_request_id,
+                notes=(
+                    "Restricted Account Recovery was "
+                    "cancelled immediately before MFA "
+                    "rebuild because one or more verified "
+                    "recovery factors were no longer active. "
+                    "No replacement MFA credential was "
+                    "created."
+                ),
+            )
+
+            conn.commit()
+
+            _clear_mfa_account_recovery_session()
+
+            return {
+                "status": "factor_changed",
+                "proof_count": active_proof_count,
+                "required_proof_count": (
+                    required_proof_count
+                ),
+            }
+
+        # If this exact recovery case already started an
+        # Authenticator rebuild, reuse only the exact request-bound
+        # candidate. Never create a second silent replacement.
+        if rebuild_method:
+            if (
+                rebuild_method != "authenticator"
+                or rebuild_started_at is None
+                or replacement_authenticator_id is None
+                or replacement_challenge_id is not None
+            ):
+                conn.rollback()
+
+                return {
+                    "status": "invalid_state",
+                }
+
+            cur.execute(
+                """
+                SELECT
+                    mfa_authenticator_id,
+                    verified_at,
+                    revoked_at
+                FROM mfa_authenticators
+                WHERE mfa_authenticator_id = %s
+                  AND user_id = %s
+                FOR UPDATE
+                """,
+                (
+                    replacement_authenticator_id,
+                    user_id,
+                ),
+            )
+
+            candidate = cur.fetchone()
+
+            if (
+                not candidate
+                or candidate[1] is not None
+                or candidate[2] is not None
+            ):
+                conn.rollback()
+
+                return {
+                    "status": "invalid_state",
+                }
+
+            conn.rollback()
+
+            return {
+                "status": "success",
+                "resumed": True,
+                "user_id": user_id,
+                "spa_id": user[1],
+                "role": user[2],
+                "recovery_request_id": (
+                    recovery_request_id
+                ),
+                "authenticator_id": int(
+                    candidate[0]
+                ),
+            }
+
+        if (
+            rebuild_started_at is not None
+            or replacement_authenticator_id is not None
+            or replacement_challenge_id is not None
+        ):
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        secret = generate_totp_secret()
+
+        encrypted_secret = encrypt_totp_secret(
+            secret,
+            user_id=user_id,
+        )
+
+        # Do not retain the plaintext secret in application state.
+        secret = None
+
+        cur.execute(
+            """
+            INSERT INTO mfa_authenticators (
+                user_id,
+                totp_secret_encrypted
+            )
+            VALUES (%s, %s)
+            RETURNING mfa_authenticator_id
+            """,
+            (
+                user_id,
+                encrypted_secret,
+            ),
+        )
+
+        authenticator_id = int(
+            cur.fetchone()[0]
+        )
+
+        cur.execute(
+            """
+            UPDATE mfa_account_recovery_requests
+            SET
+                mfa_rebuild_method = 'authenticator',
+                mfa_rebuild_started_at = NOW(),
+                replacement_authenticator_id = %s
+            WHERE mfa_account_recovery_request_id = %s
+              AND user_id = %s
+              AND status = 'restricted'
+              AND restricted_session_started_at IS NOT NULL
+              AND mfa_rebuild_method IS NULL
+              AND mfa_rebuild_started_at IS NULL
+              AND replacement_authenticator_id IS NULL
+              AND replacement_verification_challenge_id IS NULL
+              AND mfa_rebuild_verified_at IS NULL
+            RETURNING mfa_rebuild_started_at
+            """,
+            (
+                authenticator_id,
+                recovery_request_id,
+                user_id,
+            ),
+        )
+
+        rebuild_started = cur.fetchone()
+
+        if not rebuild_started:
+            raise RuntimeError(
+                "Account Recovery Authenticator rebuild "
+                "could not be bound safely."
+            )
+
+        log_audit(
+            cur,
+            spa_id=user[1],
+            user_id=user_id,
+            action_type=(
+                "mfa_account_recovery_rebuild_authenticator_started"
+            ),
+            table_name=(
+                "mfa_account_recovery_requests"
+            ),
+            record_id=recovery_request_id,
+            notes=(
+                "Restricted Account Recovery began a fresh "
+                "Authenticator App enrollment. The existing "
+                "MFA credential remains active until the "
+                "replacement is successfully verified."
+            ),
+        )
+
+        conn.commit()
+
+        return {
+            "status": "success",
+            "resumed": False,
+            "user_id": user_id,
+            "spa_id": user[1],
+            "role": user[2],
+            "recovery_request_id": (
+                recovery_request_id
+            ),
+            "authenticator_id": authenticator_id,
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _verify_mfa_account_recovery_authenticator_rebuild(
+    recovery_session,
+    submitted_code,
+):
+    if not isinstance(recovery_session, dict):
+        return {
+            "status": "invalid_state",
+        }
+
+    try:
+        user_id = int(
+            recovery_session.get("user_id")
+        )
+
+        recovery_request_id = int(
+            recovery_session.get(
+                "recovery_request_id"
+            )
+        )
+
+    except (TypeError, ValueError):
+        return {
+            "status": "invalid_state",
+        }
+
+    submitted_code = str(
+        submitted_code or ""
+    ).strip()
+
+    if (
+        user_id <= 0
+        or recovery_request_id <= 0
+        or not submitted_code
+    ):
+        return {
+            "status": "invalid_state",
+        }
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    completed_spa_id = None
+
+    try:
+        # Use the ordinary MFA user tuple so the central
+        # login-lock helpers remain authoritative here too.
+        cur.execute(
+            """
+            SELECT
+                user_id,
+                spa_id,
+                first_name,
+                last_name,
+                email,
+                password_hash,
+                role,
+                password_changed_at,
+                must_change_password,
+                login_locked_until,
+                NOW(),
+                sms_phone,
+                security_session_version
+            FROM users
+            WHERE user_id = %s
+              AND active = TRUE
+            FOR UPDATE
+            """,
+            (user_id,),
+        )
+
+        user = cur.fetchone()
+
+        if (
+            not user
+            or not _mfa_required_for_role(user[6])
+            or str(user[6] or "").strip() not in {
+                "admin",
+                "manager",
+                "master_admin",
+            }
+        ):
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        remaining_minutes = (
+            _mfa_login_lock_remaining_minutes(
+                user
+            )
+        )
+
+        if remaining_minutes is not None:
+            conn.rollback()
+
+            return {
+                "status": "locked",
+                "remaining_minutes": (
+                    remaining_minutes
+                ),
+            }
+
+        cur.execute(
+            """
+            SELECT
+                status,
+                required_proof_count,
+                restricted_session_started_at,
+                security_hold_until,
+                mfa_rebuild_method,
+                mfa_rebuild_started_at,
+                replacement_authenticator_id,
+                replacement_verification_challenge_id,
+                mfa_rebuild_verified_at,
+                completed_at,
+                cancelled_at
+            FROM mfa_account_recovery_requests
+            WHERE mfa_account_recovery_request_id = %s
+              AND user_id = %s
+            FOR UPDATE
+            """,
+            (
+                recovery_request_id,
+                user_id,
+            ),
+        )
+
+        recovery_request = cur.fetchone()
+
+        if not recovery_request:
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        recovery_status = str(
+            recovery_request[0] or ""
+        ).strip().lower()
+
+        required_proof_count = int(
+            recovery_request[1]
+        )
+
+        restricted_started_at = (
+            recovery_request[2]
+        )
+
+        security_hold_until = (
+            recovery_request[3]
+        )
+
+        rebuild_method = str(
+            recovery_request[4] or ""
+        ).strip().lower()
+
+        rebuild_started_at = (
+            recovery_request[5]
+        )
+
+        replacement_authenticator_id = (
+            recovery_request[6]
+        )
+
+        replacement_challenge_id = (
+            recovery_request[7]
+        )
+
+        rebuild_verified_at = (
+            recovery_request[8]
+        )
+
+        completed_at = recovery_request[9]
+        cancelled_at = recovery_request[10]
+        now_at = user[10]
+
+        if (
+            recovery_status != "restricted"
+            or required_proof_count <= 0
+            or restricted_started_at is None
+            or rebuild_method != "authenticator"
+            or rebuild_started_at is None
+            or replacement_authenticator_id is None
+            or replacement_challenge_id is not None
+            or rebuild_verified_at is not None
+            or completed_at is not None
+            or cancelled_at is not None
+            or (
+                security_hold_until is not None
+                and security_hold_until > now_at
+            )
+        ):
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        # Revalidate the exact recovery proofs in the same
+        # transaction that verifies and activates replacement
+        # MFA. No earlier request check is trusted for this write.
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM mfa_account_recovery_proofs p
+
+            LEFT JOIN mfa_recovery_contacts rc
+              ON rc.mfa_recovery_contact_id
+                    = p.recovery_contact_id
+             AND rc.user_id = p.user_id
+
+            LEFT JOIN mfa_account_recovery_keys rk
+              ON rk.mfa_account_recovery_key_id
+                    = p.recovery_key_id
+             AND rk.user_id = p.user_id
+
+            WHERE p.mfa_account_recovery_request_id = %s
+              AND p.user_id = %s
+              AND p.superseded_at IS NULL
+              AND (
+                    (
+                        p.proof_type = 'recovery_email'
+                        AND p.recovery_method = 'email'
+                        AND rc.mfa_recovery_contact_id
+                            IS NOT NULL
+                        AND rc.verified_at IS NOT NULL
+                        AND rc.revoked_at IS NULL
+                    )
+                    OR
+                    (
+                        p.proof_type = 'recovery_sms'
+                        AND p.recovery_method = 'sms'
+                        AND rc.mfa_recovery_contact_id
+                            IS NOT NULL
+                        AND rc.verified_at IS NOT NULL
+                        AND rc.revoked_at IS NULL
+                    )
+                    OR
+                    (
+                        p.proof_type = 'recovery_key'
+                        AND rk.mfa_account_recovery_key_id
+                            IS NOT NULL
+                        AND rk.invalidated_at IS NULL
+                    )
+              )
+            """,
+            (
+                recovery_request_id,
+                user_id,
+            ),
+        )
+
+        active_proof_count = int(
+            cur.fetchone()[0] or 0
+        )
+
+        if active_proof_count < required_proof_count:
+            cur.execute(
+                """
+                UPDATE mfa_account_recovery_requests
+                SET
+                    status = 'cancelled',
+                    cancelled_at = NOW()
+                WHERE mfa_account_recovery_request_id = %s
+                  AND user_id = %s
+                  AND status = 'restricted'
+                """,
+                (
+                    recovery_request_id,
+                    user_id,
+                ),
+            )
+
+            cur.execute(
+                """
+                UPDATE mfa_authenticators
+                SET revoked_at = NOW()
+                WHERE mfa_authenticator_id = %s
+                  AND user_id = %s
+                  AND verified_at IS NULL
+                  AND revoked_at IS NULL
+                """,
+                (
+                    replacement_authenticator_id,
+                    user_id,
+                ),
+            )
+
+            log_audit(
+                cur,
+                spa_id=user[1],
+                user_id=user_id,
+                action_type=(
+                    "mfa_account_recovery_cancelled_factor_changed"
+                ),
+                table_name=(
+                    "mfa_account_recovery_requests"
+                ),
+                record_id=recovery_request_id,
+                notes=(
+                    "Restricted Account Recovery was "
+                    "cancelled during replacement MFA "
+                    "verification because one or more "
+                    "verified recovery factors were no "
+                    "longer active. The unverified "
+                    "replacement Authenticator was revoked."
+                ),
+            )
+
+            conn.commit()
+
+            return {
+                "status": "factor_changed",
+            }
+
+        setting = _mfa_user_setting_record(
+            cur,
+            user_id,
+            for_update=True,
+        )
+
+        active_method = (
+            str(
+                setting[2] or ""
+            ).strip().lower()
+            if setting
+            else ""
+        )
+
+        enabled_at = (
+            setting[3]
+            if setting
+            else None
+        )
+
+        if (
+            not setting
+            or active_method not in {
+                "authenticator",
+                "sms",
+                "email",
+            }
+            or enabled_at is None
+            or (
+                str(user[6] or "").strip()
+                    == "master_admin"
+                and active_method
+                    != "authenticator"
+            )
+        ):
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        cur.execute(
+            """
+            SELECT
+                mfa_authenticator_id,
+                totp_secret_encrypted,
+                verified_at,
+                revoked_at,
+                last_accepted_totp_counter
+            FROM mfa_authenticators
+            WHERE mfa_authenticator_id = %s
+              AND user_id = %s
+            FOR UPDATE
+            """,
+            (
+                replacement_authenticator_id,
+                user_id,
+            ),
+        )
+
+        authenticator = cur.fetchone()
+
+        if (
+            not authenticator
+            or authenticator[2] is not None
+            or authenticator[3] is not None
+        ):
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        secret = decrypt_totp_secret(
+            authenticator[1],
+            user_id=user_id,
+        )
+
+        accepted_counter = verify_totp_code(
+            secret,
+            submitted_code,
+            last_accepted_counter=(
+                authenticator[4]
+            ),
+        )
+
+        secret = None
+
+        if accepted_counter is None:
+            newly_locked = (
+                _record_failed_mfa_verification(
+                    cur,
+                    user,
+                    action_type=(
+                        "mfa_account_recovery_rebuild_"
+                        "authenticator_verification_failed"
+                    ),
+                    notes=(
+                        "Restricted Account Recovery "
+                        "replacement Authenticator "
+                        "verification failed."
+                    ),
+                )
+            )
+
+            conn.commit()
+
+            return {
+                "status": (
+                    "locked"
+                    if newly_locked
+                    else "invalid"
+                ),
+                "remaining_minutes": (
+                    LOGIN_FAILURE_LOCK_MINUTES
+                    if newly_locked
+                    else None
+                ),
+            }
+
+        recovery_codes = (
+            generate_recovery_codes()
+        )
+
+        recovery_hashes = [
+            hash_recovery_code(
+                recovery_code,
+                user_id=user_id,
+            )
+            for recovery_code
+            in recovery_codes
+        ]
+
+        # The submitted TOTP has already been verified against
+        # the exact request-bound candidate. Retire any prior
+        # current Authenticator before marking the replacement
+        # verified so the verified-active uniqueness rule is
+        # never violated. This remains inside the same database
+        # transaction; rollback restores the prior credential if
+        # any later recovery-completion step fails.
+        cur.execute(
+            """
+            UPDATE mfa_authenticators
+            SET revoked_at = NOW()
+            WHERE user_id = %s
+              AND mfa_authenticator_id <> %s
+              AND revoked_at IS NULL
+            """,
+            (
+                user_id,
+                replacement_authenticator_id,
+            ),
+        )
+
+        # Now verify the exact request-bound candidate.
+        cur.execute(
+            """
+            UPDATE mfa_authenticators
+            SET
+                verified_at = NOW(),
+                last_accepted_totp_counter = %s
+            WHERE mfa_authenticator_id = %s
+              AND user_id = %s
+              AND verified_at IS NULL
+              AND revoked_at IS NULL
+            RETURNING mfa_authenticator_id
+            """,
+            (
+                accepted_counter,
+                replacement_authenticator_id,
+                user_id,
+            ),
+        )
+
+        if not cur.fetchone():
+            raise RuntimeError(
+                "Account Recovery replacement "
+                "Authenticator could not be verified safely."
+            )
+
+        for recovery_hash in recovery_hashes:
+            cur.execute(
+                """
+                INSERT INTO mfa_recovery_codes (
+                    mfa_authenticator_id,
+                    code_hash
+                )
+                VALUES (%s, %s)
+                """,
+                (
+                    replacement_authenticator_id,
+                    recovery_hash,
+                ),
+            )
+
+        # Any prior Authenticator recovery codes are no longer
+        # valid after catastrophic MFA rebuild.
+        cur.execute(
+            """
+            UPDATE mfa_recovery_codes rc
+            SET invalidated_at = NOW()
+            FROM mfa_authenticators a
+            WHERE
+                rc.mfa_authenticator_id
+                    = a.mfa_authenticator_id
+                AND a.user_id = %s
+                AND a.mfa_authenticator_id <> %s
+                AND rc.used_at IS NULL
+                AND rc.invalidated_at IS NULL
+            """,
+            (
+                user_id,
+                replacement_authenticator_id,
+            ),
+        )
+
+        cur.execute(
+            """
+            UPDATE mfa_user_settings
+            SET
+                active_method = 'authenticator',
+                enabled_at = NOW(),
+                updated_at = NOW()
+            WHERE user_id = %s
+              AND active_method IN (
+                    'authenticator',
+                    'sms',
+                    'email'
+              )
+              AND enabled_at IS NOT NULL
+            RETURNING mfa_user_setting_id
+            """,
+            (user_id,),
+        )
+
+        updated_setting = cur.fetchone()
+
+        if not updated_setting:
+            raise RuntimeError(
+                "Account Recovery could not activate "
+                "the replacement Authenticator safely."
+            )
+
+        # Mark the recovery request verified and completed only
+        # after fresh MFA is fully established.
+        cur.execute(
+            """
+            UPDATE mfa_account_recovery_requests
+            SET
+                mfa_rebuild_verified_at = NOW(),
+                status = 'completed',
+                completed_at = NOW()
+            WHERE mfa_account_recovery_request_id = %s
+              AND user_id = %s
+              AND status = 'restricted'
+              AND mfa_rebuild_method = 'authenticator'
+              AND replacement_authenticator_id = %s
+              AND replacement_verification_challenge_id IS NULL
+              AND mfa_rebuild_started_at IS NOT NULL
+              AND mfa_rebuild_verified_at IS NULL
+              AND completed_at IS NULL
+              AND cancelled_at IS NULL
+            RETURNING completed_at
+            """,
+            (
+                recovery_request_id,
+                user_id,
+                replacement_authenticator_id,
+            ),
+        )
+
+        completed = cur.fetchone()
+
+        if not completed:
+            raise RuntimeError(
+                "Account Recovery could not be "
+                "completed safely."
+            )
+
+        # Catastrophic recovery invalidates every already-issued
+        # normal business session for this user.
+        cur.execute(
+            """
+            UPDATE users
+            SET
+                security_session_version
+                    = security_session_version + 1
+            WHERE user_id = %s
+              AND active = TRUE
+            RETURNING security_session_version
+            """,
+            (user_id,),
+        )
+
+        version_row = cur.fetchone()
+
+        if not version_row:
+            raise RuntimeError(
+                "Account Recovery could not invalidate "
+                "prior business sessions safely."
+            )
+
+        new_security_session_version = int(
+            version_row[0]
+        )
+
+        # No outstanding recovery challenge may survive a
+        # successfully completed recovery case.
+        cur.execute(
+            """
+            UPDATE mfa_verification_challenges
+            SET invalidated_at = NOW()
+            WHERE user_id = %s
+              AND recovery_request_id = %s
+              AND purpose IN (
+                    'account_recovery',
+                    'account_recovery_rebuild'
+              )
+              AND used_at IS NULL
+              AND invalidated_at IS NULL
+            """,
+            (
+                user_id,
+                recovery_request_id,
+            ),
+        )
+
+        _clear_failed_business_login_state(
+            cur,
+            user_id,
+        )
+
+        log_audit(
+            cur,
+            spa_id=user[1],
+            user_id=user_id,
+            action_type=(
+                "mfa_account_recovery_rebuild_authenticator_verified"
+            ),
+            table_name=(
+                "mfa_authenticators"
+            ),
+            record_id=replacement_authenticator_id,
+            notes=(
+                "Fresh Authenticator App MFA was verified "
+                "inside restricted Account Recovery. Fresh "
+                "one-time Authenticator recovery codes were "
+                "created and prior Authenticator credentials "
+                "were retired."
+            ),
+        )
+
+        log_audit(
+            cur,
+            spa_id=user[1],
+            user_id=user_id,
+            action_type=(
+                "mfa_account_recovery_completed"
+            ),
+            table_name=(
+                "mfa_account_recovery_requests"
+            ),
+            record_id=recovery_request_id,
+            notes=(
+                "Account Recovery completed after fresh MFA "
+                "verification. Existing normal business "
+                "sessions were invalidated. No normal business "
+                "session was created by recovery completion."
+            ),
+        )
+
+        conn.commit()
+
+        completed_spa_id = user[1]
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    # System Activity uses its own database connection, so log
+    # only after the authoritative recovery transaction commits.
+    log_security(
+        "Account Recovery completed after fresh "
+        "Authenticator App MFA verification. Existing "
+        "business sessions were invalidated.",
+        severity="INFO",
+        spa_id=completed_spa_id,
+        related_type=(
+            "mfa_account_recovery_request"
+        ),
+        related_id=recovery_request_id,
+        created_by=user_id,
+    )
+
+    return {
+        "status": "success",
+        "recovery_codes": recovery_codes,
+        "authenticator_id": (
+            replacement_authenticator_id
+        ),
+        "security_session_version": (
+            new_security_session_version
+        ),
+    }
+
+
+
+def _verify_mfa_account_recovery_code_rebuild(
+    recovery_session,
+    submitted_code,
+):
+    if not isinstance(recovery_session, dict):
+        return {
+            "status": "invalid_state",
+        }
+
+    try:
+        user_id = int(
+            recovery_session.get("user_id")
+        )
+
+        recovery_request_id = int(
+            recovery_session.get(
+                "recovery_request_id"
+            )
+        )
+
+    except (TypeError, ValueError):
+        return {
+            "status": "invalid_state",
+        }
+
+    submitted_code = str(
+        submitted_code or ""
+    ).strip()
+
+    if (
+        user_id <= 0
+        or recovery_request_id <= 0
+        or not submitted_code
+    ):
+        return {
+            "status": "invalid_state",
+        }
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    completed_spa_id = None
+    completed_method = None
+    new_security_session_version = None
+
+    try:
+        # Use the ordinary MFA user tuple so the central
+        # login-lock helpers remain authoritative here too.
+        cur.execute(
+            """
+            SELECT
+                user_id,
+                spa_id,
+                first_name,
+                last_name,
+                email,
+                password_hash,
+                role,
+                password_changed_at,
+                must_change_password,
+                login_locked_until,
+                NOW(),
+                sms_phone,
+                security_session_version
+            FROM users
+            WHERE user_id = %s
+              AND active = TRUE
+            FOR UPDATE
+            """,
+            (user_id,),
+        )
+
+        user = cur.fetchone()
+
+        if (
+            not user
+            or not _mfa_required_for_role(user[6])
+            or str(user[6] or "").strip() not in {
+                "admin",
+                "manager",
+            }
+        ):
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        remaining_minutes = (
+            _mfa_login_lock_remaining_minutes(
+                user
+            )
+        )
+
+        if remaining_minutes is not None:
+            conn.rollback()
+
+            return {
+                "status": "locked",
+                "remaining_minutes": remaining_minutes,
+            }
+
+        cur.execute(
+            """
+            SELECT
+                status,
+                required_proof_count,
+                restricted_session_started_at,
+                security_hold_until,
+                mfa_rebuild_method,
+                mfa_rebuild_started_at,
+                replacement_authenticator_id,
+                replacement_verification_challenge_id,
+                mfa_rebuild_verified_at,
+                completed_at,
+                cancelled_at
+            FROM mfa_account_recovery_requests
+            WHERE mfa_account_recovery_request_id = %s
+              AND user_id = %s
+            FOR UPDATE
+            """,
+            (
+                recovery_request_id,
+                user_id,
+            ),
+        )
+
+        recovery_request = cur.fetchone()
+
+        if not recovery_request:
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        recovery_status = str(
+            recovery_request[0] or ""
+        ).strip().lower()
+
+        required_proof_count = int(
+            recovery_request[1] or 0
+        )
+
+        restricted_started_at = (
+            recovery_request[2]
+        )
+
+        security_hold_until = (
+            recovery_request[3]
+        )
+
+        rebuild_method = str(
+            recovery_request[4] or ""
+        ).strip().lower()
+
+        rebuild_started_at = (
+            recovery_request[5]
+        )
+
+        replacement_authenticator_id = (
+            recovery_request[6]
+        )
+
+        replacement_challenge_id = (
+            recovery_request[7]
+        )
+
+        rebuild_verified_at = (
+            recovery_request[8]
+        )
+
+        completed_at = recovery_request[9]
+        cancelled_at = recovery_request[10]
+        now_at = user[10]
+
+        if (
+            recovery_status != "restricted"
+            or required_proof_count <= 0
+            or restricted_started_at is None
+            or rebuild_method not in {
+                "sms",
+                "email",
+            }
+            or rebuild_started_at is None
+            or replacement_authenticator_id is not None
+            or replacement_challenge_id is None
+            or rebuild_verified_at is not None
+            or completed_at is not None
+            or cancelled_at is not None
+            or (
+                security_hold_until is not None
+                and security_hold_until > now_at
+            )
+        ):
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        try:
+            replacement_challenge_id = int(
+                replacement_challenge_id
+            )
+        except (TypeError, ValueError):
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        if replacement_challenge_id <= 0:
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        # Revalidate the exact recovery proofs inside the same
+        # transaction that verifies and activates the replacement
+        # SMS/email MFA method.
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM mfa_account_recovery_proofs p
+
+            LEFT JOIN mfa_recovery_contacts rc
+              ON rc.mfa_recovery_contact_id
+                    = p.recovery_contact_id
+             AND rc.user_id = p.user_id
+
+            LEFT JOIN mfa_account_recovery_keys rk
+              ON rk.mfa_account_recovery_key_id
+                    = p.recovery_key_id
+             AND rk.user_id = p.user_id
+
+            WHERE p.mfa_account_recovery_request_id = %s
+              AND p.user_id = %s
+              AND p.superseded_at IS NULL
+              AND (
+                    (
+                        p.proof_type = 'recovery_email'
+                        AND p.recovery_method = 'email'
+                        AND rc.mfa_recovery_contact_id
+                            IS NOT NULL
+                        AND rc.verified_at IS NOT NULL
+                        AND rc.revoked_at IS NULL
+                    )
+                    OR
+                    (
+                        p.proof_type = 'recovery_sms'
+                        AND p.recovery_method = 'sms'
+                        AND rc.mfa_recovery_contact_id
+                            IS NOT NULL
+                        AND rc.verified_at IS NOT NULL
+                        AND rc.revoked_at IS NULL
+                    )
+                    OR
+                    (
+                        p.proof_type = 'recovery_key'
+                        AND rk.mfa_account_recovery_key_id
+                            IS NOT NULL
+                        AND rk.invalidated_at IS NULL
+                    )
+              )
+            """,
+            (
+                recovery_request_id,
+                user_id,
+            ),
+        )
+
+        active_proof_count = int(
+            cur.fetchone()[0] or 0
+        )
+
+        if active_proof_count < required_proof_count:
+            cur.execute(
+                """
+                UPDATE mfa_account_recovery_requests
+                SET
+                    status = 'cancelled',
+                    cancelled_at = NOW()
+                WHERE mfa_account_recovery_request_id = %s
+                  AND user_id = %s
+                  AND status = 'restricted'
+                """,
+                (
+                    recovery_request_id,
+                    user_id,
+                ),
+            )
+
+            cur.execute(
+                """
+                UPDATE mfa_verification_challenges
+                SET invalidated_at = NOW()
+                WHERE user_id = %s
+                  AND recovery_request_id = %s
+                  AND purpose IN (
+                        'account_recovery',
+                        'account_recovery_rebuild'
+                  )
+                  AND used_at IS NULL
+                  AND invalidated_at IS NULL
+                """,
+                (
+                    user_id,
+                    recovery_request_id,
+                ),
+            )
+
+            log_audit(
+                cur,
+                spa_id=user[1],
+                user_id=user_id,
+                action_type=(
+                    "mfa_account_recovery_cancelled_factor_changed"
+                ),
+                table_name=(
+                    "mfa_account_recovery_requests"
+                ),
+                record_id=recovery_request_id,
+                notes=(
+                    "Restricted Account Recovery was "
+                    "cancelled during replacement SMS/email "
+                    "MFA verification because one or more "
+                    "verified recovery factors were no "
+                    "longer active. The replacement "
+                    "verification challenge was invalidated."
+                ),
+            )
+
+            conn.commit()
+
+            return {
+                "status": "factor_changed",
+            }
+
+        setting = _mfa_user_setting_record(
+            cur,
+            user_id,
+            for_update=True,
+        )
+
+        active_method = (
+            str(
+                setting[2] or ""
+            ).strip().lower()
+            if setting
+            else ""
+        )
+
+        enabled_at = (
+            setting[3]
+            if setting
+            else None
+        )
+
+        if (
+            not setting
+            or active_method not in {
+                "authenticator",
+                "sms",
+                "email",
+            }
+            or enabled_at is None
+        ):
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        # Re-normalize the CURRENT normal account destination.
+        # The challenge hash itself is bound to this value, so a
+        # phone/email change after delivery makes the old code fail.
+        destination_value = (
+            user[11]
+            if rebuild_method == "sms"
+            else user[4]
+        )
+
+        try:
+            if rebuild_method == "sms":
+                normalized_destination = (
+                    _normalize_user_mobile_phone(
+                        destination_value
+                    )
+                )
+            else:
+                normalized_destination = (
+                    _normalize_mfa_recovery_email(
+                        destination_value
+                    )
+                )
+        except ValueError:
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        if not normalized_destination:
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        # Lock only the exact challenge that was successfully
+        # delivered and bound to this exact recovery request.
+        cur.execute(
+            """
+            SELECT
+                mfa_verification_challenge_id,
+                code_hash
+            FROM mfa_verification_challenges
+            WHERE mfa_verification_challenge_id = %s
+              AND user_id = %s
+              AND method = %s
+              AND purpose = 'account_recovery_rebuild'
+              AND recovery_contact_id IS NULL
+              AND recovery_request_id = %s
+              AND delivery_sent_at IS NOT NULL
+              AND used_at IS NULL
+              AND invalidated_at IS NULL
+              AND expires_at > NOW()
+            FOR UPDATE
+            """,
+            (
+                replacement_challenge_id,
+                user_id,
+                rebuild_method,
+                recovery_request_id,
+            ),
+        )
+
+        challenge = cur.fetchone()
+
+        if not challenge:
+            conn.rollback()
+
+            return {
+                "status": "missing_challenge",
+            }
+
+        rebuild_pepper = (
+            _mfa_account_recovery_rebuild_verification_pepper(
+                user_id=user_id,
+                recovery_request_id=recovery_request_id,
+                method=rebuild_method,
+                normalized_destination=(
+                    normalized_destination
+                ),
+            )
+        )
+
+        verified = verify_verification_code(
+            submitted_code,
+            challenge[1],
+            user_id=user_id,
+            method=rebuild_method,
+            purpose="account_recovery_rebuild",
+            pepper=rebuild_pepper,
+        )
+
+        rebuild_pepper = None
+        submitted_code = None
+
+        if not verified:
+            method_label = (
+                "Text-message"
+                if rebuild_method == "sms"
+                else "Email"
+            )
+
+            newly_locked = (
+                _record_failed_mfa_verification(
+                    cur,
+                    user,
+                    action_type=(
+                        "mfa_account_recovery_rebuild_"
+                        f"{rebuild_method}_verification_failed"
+                    ),
+                    notes=(
+                        "Restricted Account Recovery "
+                        f"replacement {method_label} "
+                        "verification failed."
+                    ),
+                )
+            )
+
+            conn.commit()
+
+            return {
+                "status": (
+                    "locked"
+                    if newly_locked
+                    else "invalid"
+                ),
+                "remaining_minutes": (
+                    LOGIN_FAILURE_LOCK_MINUTES
+                    if newly_locked
+                    else None
+                ),
+            }
+
+        # Consume only the exact request-bound challenge that was
+        # just cryptographically verified.
+        cur.execute(
+            """
+            UPDATE mfa_verification_challenges
+            SET used_at = NOW()
+            WHERE mfa_verification_challenge_id = %s
+              AND user_id = %s
+              AND method = %s
+              AND purpose = 'account_recovery_rebuild'
+              AND recovery_contact_id IS NULL
+              AND recovery_request_id = %s
+              AND delivery_sent_at IS NOT NULL
+              AND used_at IS NULL
+              AND invalidated_at IS NULL
+              AND expires_at > NOW()
+            RETURNING mfa_verification_challenge_id
+            """,
+            (
+                challenge[0],
+                user_id,
+                rebuild_method,
+                recovery_request_id,
+            ),
+        )
+
+        if not cur.fetchone():
+            raise RuntimeError(
+                "Account Recovery rebuild challenge could "
+                "not be consumed safely."
+            )
+
+        # Catastrophic recovery to SMS/email retires every
+        # Authenticator recovery code still associated with this
+        # account. No ordinary Authenticator recovery code may
+        # survive after Authenticator is no longer the active method.
+        cur.execute(
+            """
+            UPDATE mfa_recovery_codes rc
+            SET invalidated_at = NOW()
+            FROM mfa_authenticators a
+            WHERE
+                rc.mfa_authenticator_id
+                    = a.mfa_authenticator_id
+                AND a.user_id = %s
+                AND rc.used_at IS NULL
+                AND rc.invalidated_at IS NULL
+            RETURNING rc.mfa_recovery_code_id
+            """,
+            (user_id,),
+        )
+
+        invalidated_recovery_count = len(
+            cur.fetchall()
+        )
+
+        # Retire every Authenticator credential for this account.
+        # SMS/email recovery completion never leaves an old
+        # Authenticator usable in parallel.
+        cur.execute(
+            """
+            UPDATE mfa_authenticators
+            SET revoked_at = NOW()
+            WHERE user_id = %s
+              AND revoked_at IS NULL
+            """,
+            (user_id,),
+        )
+
+        cur.execute(
+            """
+            UPDATE mfa_user_settings
+            SET
+                active_method = %s,
+                enabled_at = NOW(),
+                updated_at = NOW()
+            WHERE user_id = %s
+              AND active_method IN (
+                    'authenticator',
+                    'sms',
+                    'email'
+              )
+              AND enabled_at IS NOT NULL
+            RETURNING mfa_user_setting_id
+            """,
+            (
+                rebuild_method,
+                user_id,
+            ),
+        )
+
+        updated_setting = cur.fetchone()
+
+        if not updated_setting:
+            raise RuntimeError(
+                "Account Recovery could not activate "
+                "the replacement SMS/email MFA safely."
+            )
+
+        # Complete the exact recovery request only after the
+        # fresh request-bound code is consumed and the replacement
+        # method is active.
+        cur.execute(
+            """
+            UPDATE mfa_account_recovery_requests
+            SET
+                mfa_rebuild_verified_at = NOW(),
+                status = 'completed',
+                completed_at = NOW()
+            WHERE mfa_account_recovery_request_id = %s
+              AND user_id = %s
+              AND status = 'restricted'
+              AND mfa_rebuild_method = %s
+              AND replacement_authenticator_id IS NULL
+              AND replacement_verification_challenge_id = %s
+              AND mfa_rebuild_started_at IS NOT NULL
+              AND mfa_rebuild_verified_at IS NULL
+              AND completed_at IS NULL
+              AND cancelled_at IS NULL
+            RETURNING completed_at
+            """,
+            (
+                recovery_request_id,
+                user_id,
+                rebuild_method,
+                replacement_challenge_id,
+            ),
+        )
+
+        completed = cur.fetchone()
+
+        if not completed:
+            raise RuntimeError(
+                "Account Recovery could not be "
+                "completed safely."
+            )
+
+        # Catastrophic recovery invalidates every already-issued
+        # normal business session for this user.
+        cur.execute(
+            """
+            UPDATE users
+            SET
+                security_session_version
+                    = security_session_version + 1
+            WHERE user_id = %s
+              AND active = TRUE
+            RETURNING security_session_version
+            """,
+            (user_id,),
+        )
+
+        version_row = cur.fetchone()
+
+        if not version_row:
+            raise RuntimeError(
+                "Account Recovery could not invalidate "
+                "prior business sessions safely."
+            )
+
+        new_security_session_version = int(
+            version_row[0]
+        )
+
+        # No outstanding recovery challenge may survive a
+        # successfully completed recovery case.
+        cur.execute(
+            """
+            UPDATE mfa_verification_challenges
+            SET invalidated_at = NOW()
+            WHERE user_id = %s
+              AND recovery_request_id = %s
+              AND purpose IN (
+                    'account_recovery',
+                    'account_recovery_rebuild'
+              )
+              AND used_at IS NULL
+              AND invalidated_at IS NULL
+            """,
+            (
+                user_id,
+                recovery_request_id,
+            ),
+        )
+
+        _clear_failed_business_login_state(
+            cur,
+            user_id,
+        )
+
+        method_label = (
+            "Text Message"
+            if rebuild_method == "sms"
+            else "Email"
+        )
+
+        log_audit(
+            cur,
+            spa_id=user[1],
+            user_id=user_id,
+            action_type=(
+                "mfa_account_recovery_rebuild_"
+                f"{rebuild_method}_verified"
+            ),
+            table_name="mfa_verification_challenges",
+            record_id=replacement_challenge_id,
+            notes=(
+                f"Fresh {method_label} MFA was verified "
+                "inside restricted Account Recovery. "
+                "Prior Authenticator credentials were retired "
+                f"and {invalidated_recovery_count} unused "
+                "Authenticator recovery code(s) were invalidated."
+            ),
+        )
+
+        log_audit(
+            cur,
+            spa_id=user[1],
+            user_id=user_id,
+            action_type=(
+                "mfa_account_recovery_completed"
+            ),
+            table_name=(
+                "mfa_account_recovery_requests"
+            ),
+            record_id=recovery_request_id,
+            notes=(
+                "Account Recovery completed after fresh MFA "
+                "verification. Existing normal business "
+                "sessions were invalidated. No normal business "
+                "session was created by recovery completion."
+            ),
+        )
+
+        conn.commit()
+
+        completed_spa_id = user[1]
+        completed_method = rebuild_method
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    method_label = (
+        "Text Message"
+        if completed_method == "sms"
+        else "Email"
+    )
+
+    # System Activity uses its own database connection, so log
+    # only after the authoritative recovery transaction commits.
+    log_security(
+        "Account Recovery completed after fresh "
+        f"{method_label} MFA verification. Existing "
+        "business sessions were invalidated.",
+        severity="INFO",
+        spa_id=completed_spa_id,
+        related_type=(
+            "mfa_account_recovery_request"
+        ),
+        related_id=recovery_request_id,
+        created_by=user_id,
+    )
+
+    return {
+        "status": "success",
+        "new_method": completed_method,
+        "security_session_version": (
+            new_security_session_version
+        ),
+    }
+
+
 def _clear_pending_mfa_login():
     session.pop("_pending_mfa_login", None)
     session.pop("_public_security_csrf", None)
 
 
-def _start_pending_mfa_login(user):
+def _start_pending_mfa_login(
+    user,
+    *,
+    password_verified_at_epoch,
+):
     user_id = int(user[0])
     spa_id = user[1]
     role = str(user[6] or "").strip()
 
-    if not _mfa_required_for_role(role):
+    try:
+        password_verified_at_epoch = int(
+            password_verified_at_epoch
+        )
+    except (TypeError, ValueError):
         raise ValueError(
-            "Pending MFA login requires an MFA role."
+            "Pending MFA login password-verification "
+            "timestamp is invalid."
+        )
+
+    if (
+        not _mfa_required_for_role(role)
+        or password_verified_at_epoch <= 0
+    ):
+        raise ValueError(
+            "Pending MFA login requires an MFA role "
+            "and valid password verification."
         )
 
     pending = {
@@ -4115,6 +8181,9 @@ def _start_pending_mfa_login(user):
         "source_user_id": session.get("user_id"),
         "source_spa_id": session.get("spa_id"),
         "issued_at": int(time.time()),
+        "password_verified_at_epoch": (
+            password_verified_at_epoch
+        ),
         "challenge_id": secrets.token_urlsafe(32),
         "enrollment_authenticator_id": None,
         "enrollment_verified_authenticator_id": None,
@@ -4143,6 +8212,12 @@ def _pending_mfa_login():
 
         issued_at = int(
             pending.get("issued_at")
+        )
+
+        password_verified_at_epoch = int(
+            pending.get(
+                "password_verified_at_epoch"
+            )
         )
 
     except (TypeError, ValueError):
@@ -4278,6 +8353,8 @@ def _pending_mfa_login():
         )
         and challenge_id
         and enrollment_ids_valid
+        and password_verified_at_epoch > 0
+        and password_verified_at_epoch <= issued_at + 60
         and age_seconds >= 0
         and age_seconds
             <= MFA_PENDING_LOGIN_MAX_AGE_SECONDS
@@ -4304,6 +8381,9 @@ def _pending_mfa_login():
             "source_spa_id"
         ),
         "issued_at": issued_at,
+        "password_verified_at_epoch": (
+            password_verified_at_epoch
+        ),
         "challenge_id": challenge_id,
         "enrollment_authenticator_id": (
             enrollment_authenticator_id
@@ -4358,6 +8438,1118 @@ def _mfa_user_setting_record(
     )
 
     return cur.fetchone()
+
+
+def _mfa_active_account_recovery_request(
+    user_id,
+):
+    try:
+        user_id = int(user_id)
+    except (TypeError, ValueError):
+        return None
+
+    if user_id <= 0:
+        return None
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        # Recovery V2 is being developed before its migration
+        # is applied. Until the table exists, ordinary login
+        # must continue to operate normally.
+        cur.execute(
+            """
+            SELECT to_regclass(
+                'public.mfa_account_recovery_requests'
+            )
+            """
+        )
+
+        table_exists = cur.fetchone()
+
+        if (
+            not table_exists
+            or table_exists[0] is None
+        ):
+            return None
+
+        cur.execute(
+            """
+            SELECT
+                mfa_account_recovery_request_id,
+                status,
+                required_proof_count,
+                expires_at,
+                recovery_verified_at,
+                restricted_session_started_at,
+                security_hold_until
+            FROM mfa_account_recovery_requests
+            WHERE user_id = %s
+              AND status NOT IN (
+                  'completed',
+                  'cancelled',
+                  'expired'
+              )
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (user_id,),
+        )
+
+        row = cur.fetchone()
+
+        if not row:
+            return None
+
+        return {
+            "recovery_request_id": int(row[0]),
+            "status": str(
+                row[1] or ""
+            ).strip().lower(),
+            "required_proof_count": int(row[2]),
+            "expires_at": row[3],
+            "recovery_verified_at": row[4],
+            "restricted_session_started_at": row[5],
+            "security_hold_until": row[6],
+        }
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _mfa_recovery_verification_delivery_limit_state(
+    cur,
+    *,
+    user_id,
+    method,
+    purpose,
+    recovery_contact_id,
+    recovery_request_id=None,
+):
+    normalized_method = str(
+        method or ""
+    ).strip().lower()
+
+    normalized_purpose = str(
+        purpose or ""
+    ).strip().lower()
+
+    if normalized_method not in {
+        "sms",
+        "email",
+    }:
+        raise ValueError(
+            "MFA recovery verification method is invalid."
+        )
+
+    if normalized_purpose not in {
+        "recovery_contact_setup",
+        "account_recovery",
+    }:
+        raise ValueError(
+            "MFA recovery verification purpose is invalid."
+        )
+
+    cur.execute(
+        '''
+        SELECT
+            COUNT(*) FILTER (
+                WHERE delivery_sent_at >= (
+                    NOW() - INTERVAL '1 hour'
+                )
+            ),
+            MAX(delivery_sent_at),
+            MIN(delivery_sent_at) FILTER (
+                WHERE delivery_sent_at >= (
+                    NOW() - INTERVAL '1 hour'
+                )
+            ),
+            NOW()
+        FROM mfa_verification_challenges
+        WHERE user_id = %s
+          AND method = %s
+          AND purpose = %s
+          AND recovery_contact_id = %s
+          AND recovery_request_id IS NOT DISTINCT FROM %s
+          AND delivery_sent_at IS NOT NULL
+        ''',
+        (
+            user_id,
+            normalized_method,
+            normalized_purpose,
+            recovery_contact_id,
+            recovery_request_id,
+        ),
+    )
+
+    row = cur.fetchone()
+
+    if not row:
+        raise RuntimeError(
+            "MFA recovery verification delivery limit state "
+            "could not be determined."
+        )
+
+    successful_deliveries = int(row[0] or 0)
+    latest_delivery_at = row[1]
+    oldest_hour_delivery_at = row[2]
+    now_at = row[3]
+
+    if latest_delivery_at is not None:
+        cooldown_elapsed = (
+            now_at - latest_delivery_at
+        ).total_seconds()
+
+        if (
+            cooldown_elapsed
+            < MFA_VERIFICATION_RESEND_COOLDOWN_SECONDS
+        ):
+            retry_seconds = max(
+                1,
+                int(
+                    MFA_VERIFICATION_RESEND_COOLDOWN_SECONDS
+                    - cooldown_elapsed
+                )
+                + 1,
+            )
+
+            return {
+                "allowed": False,
+                "reason": "cooldown",
+                "retry_seconds": retry_seconds,
+            }
+
+    if (
+        successful_deliveries
+        >= MFA_VERIFICATION_MAX_SECURITY_DELIVERIES_PER_HOUR
+    ):
+        if oldest_hour_delivery_at is None:
+            raise RuntimeError(
+                "MFA recovery verification hourly limit state "
+                "is inconsistent."
+            )
+
+        hourly_elapsed = (
+            now_at - oldest_hour_delivery_at
+        ).total_seconds()
+
+        retry_seconds = max(
+            1,
+            int(
+                (60 * 60) - hourly_elapsed
+            )
+            + 1,
+        )
+
+        return {
+            "allowed": False,
+            "reason": "hourly_limit",
+            "retry_seconds": retry_seconds,
+        }
+
+    return {
+        "allowed": True,
+        "reason": None,
+        "retry_seconds": 0,
+    }
+
+
+
+def _mfa_account_recovery_rebuild_delivery_limit_state(
+    cur,
+    *,
+    user_id,
+    method,
+    recovery_request_id,
+):
+    normalized_method = str(
+        method or ""
+    ).strip().lower()
+
+    if normalized_method not in {
+        "sms",
+        "email",
+    }:
+        raise ValueError(
+            "Account Recovery rebuild verification method is invalid."
+        )
+
+    try:
+        user_id = int(user_id)
+        recovery_request_id = int(recovery_request_id)
+    except (TypeError, ValueError):
+        raise ValueError(
+            "Account Recovery rebuild context is invalid."
+        )
+
+    if user_id <= 0 or recovery_request_id <= 0:
+        raise ValueError(
+            "Account Recovery rebuild context is invalid."
+        )
+
+    cur.execute(
+        """
+        SELECT
+            COUNT(*) FILTER (
+                WHERE delivery_sent_at >= (
+                    NOW() - INTERVAL '1 hour'
+                )
+            ),
+            MAX(delivery_sent_at),
+            MIN(delivery_sent_at) FILTER (
+                WHERE delivery_sent_at >= (
+                    NOW() - INTERVAL '1 hour'
+                )
+            ),
+            NOW()
+        FROM mfa_verification_challenges
+        WHERE user_id = %s
+          AND method = %s
+          AND purpose = 'account_recovery_rebuild'
+          AND recovery_contact_id IS NULL
+          AND recovery_request_id = %s
+          AND delivery_sent_at IS NOT NULL
+        """,
+        (
+            user_id,
+            normalized_method,
+            recovery_request_id,
+        ),
+    )
+
+    row = cur.fetchone()
+
+    if not row:
+        raise RuntimeError(
+            "Account Recovery rebuild verification delivery "
+            "limit state could not be determined."
+        )
+
+    successful_deliveries = int(row[0] or 0)
+    latest_delivery_at = row[1]
+    oldest_hour_delivery_at = row[2]
+    now_at = row[3]
+
+    if latest_delivery_at is not None:
+        cooldown_elapsed = (
+            now_at - latest_delivery_at
+        ).total_seconds()
+
+        if (
+            cooldown_elapsed
+            < MFA_VERIFICATION_RESEND_COOLDOWN_SECONDS
+        ):
+            retry_seconds = max(
+                1,
+                int(
+                    MFA_VERIFICATION_RESEND_COOLDOWN_SECONDS
+                    - cooldown_elapsed
+                )
+                + 1,
+            )
+
+            return {
+                "allowed": False,
+                "reason": "cooldown",
+                "retry_seconds": retry_seconds,
+            }
+
+    if (
+        successful_deliveries
+        >= MFA_VERIFICATION_MAX_SECURITY_DELIVERIES_PER_HOUR
+    ):
+        if oldest_hour_delivery_at is None:
+            raise RuntimeError(
+                "Account Recovery rebuild verification hourly "
+                "limit state is inconsistent."
+            )
+
+        hourly_elapsed = (
+            now_at - oldest_hour_delivery_at
+        ).total_seconds()
+
+        retry_seconds = max(
+            1,
+            int((60 * 60) - hourly_elapsed) + 1,
+        )
+
+        return {
+            "allowed": False,
+            "reason": "hourly_limit",
+            "retry_seconds": retry_seconds,
+        }
+
+    return {
+        "allowed": True,
+        "reason": None,
+        "retry_seconds": 0,
+    }
+
+
+
+def _mfa_account_recovery_rebuild_verification_pepper(
+    *,
+    user_id,
+    recovery_request_id,
+    method,
+    normalized_destination,
+):
+    """
+    Derive a dedicated 32-byte verification-code pepper for one
+    catastrophic Account Recovery rebuild context.
+
+    The visible verification code remains exactly six digits.
+    The derived pepper additionally binds its stored hash to the
+    exact user, recovery request, replacement method, and current
+    normal-account destination.
+    """
+    import hashlib
+    import hmac
+
+    try:
+        user_id = int(user_id)
+        recovery_request_id = int(
+            recovery_request_id
+        )
+    except (TypeError, ValueError):
+        raise MFAError(
+            "Account Recovery rebuild context is invalid."
+        )
+
+    normalized_method = str(
+        method or ""
+    ).strip().lower()
+
+    destination = str(
+        normalized_destination or ""
+    ).strip()
+
+    if (
+        user_id <= 0
+        or recovery_request_id <= 0
+        or normalized_method not in {
+            "sms",
+            "email",
+        }
+        or not destination
+    ):
+        raise MFAError(
+            "Account Recovery rebuild context is invalid."
+        )
+
+    base_pepper = get_verification_code_pepper()
+
+    context = (
+        "peach-suite-pro|"
+        "mfa-account-recovery-rebuild-pepper|"
+        f"user:{user_id}|"
+        f"request:{recovery_request_id}|"
+        f"method:{normalized_method}|"
+        f"destination:{destination}|"
+        "version:1"
+    ).encode(
+        "utf-8"
+    )
+
+    derived_pepper = hmac.new(
+        base_pepper,
+        context,
+        hashlib.sha256,
+    ).digest()
+
+    base_pepper = None
+    context = None
+
+    return derived_pepper
+
+
+def _reserve_mfa_account_recovery_rebuild_challenge(
+    cur,
+    *,
+    user_id,
+    method,
+    recovery_request_id,
+):
+    normalized_method = str(
+        method or ""
+    ).strip().lower()
+
+    if normalized_method not in {
+        "sms",
+        "email",
+    }:
+        raise ValueError(
+            "Account Recovery rebuild verification method is invalid."
+        )
+
+    try:
+        user_id = int(user_id)
+        recovery_request_id = int(recovery_request_id)
+    except (TypeError, ValueError):
+        raise ValueError(
+            "Account Recovery rebuild context is invalid."
+        )
+
+    if user_id <= 0 or recovery_request_id <= 0:
+        raise ValueError(
+            "Account Recovery rebuild context is invalid."
+        )
+
+    # Serialize reservation against the exact active account.
+    # Master Admin remains Authenticator-only.
+    cur.execute(
+        """
+        SELECT
+            user_id,
+            spa_id,
+            role,
+            email,
+            sms_phone
+        FROM users
+        WHERE user_id = %s
+          AND active = TRUE
+        FOR UPDATE
+        """,
+        (user_id,),
+    )
+
+    user = cur.fetchone()
+
+    if not user:
+        return {
+            "allowed": False,
+            "reason": "invalid_user",
+            "retry_seconds": 0,
+        }
+
+    role = str(user[2] or "").strip()
+
+    if role not in {
+        "admin",
+        "manager",
+    }:
+        return {
+            "allowed": False,
+            "reason": "method_not_allowed",
+            "retry_seconds": 0,
+        }
+
+    destination_value = (
+        user[4]
+        if normalized_method == "sms"
+        else user[3]
+    )
+
+    if not str(destination_value or "").strip():
+        return {
+            "allowed": False,
+            "reason": "missing_destination",
+            "retry_seconds": 0,
+        }
+
+    # Canonicalize the normal account destination before creating
+    # the code hash. The rebuild code is cryptographically bound
+    # to this exact destination and recovery request so a later
+    # phone/email change cannot silently inherit an already-sent
+    # recovery code.
+    try:
+        if normalized_method == "sms":
+            normalized_destination = (
+                _normalize_user_mobile_phone(
+                    destination_value
+                )
+            )
+        else:
+            normalized_destination = (
+                _normalize_mfa_recovery_email(
+                    destination_value
+                )
+            )
+    except ValueError:
+        return {
+            "allowed": False,
+            "reason": "missing_destination",
+            "retry_seconds": 0,
+        }
+
+    if not normalized_destination:
+        return {
+            "allowed": False,
+            "reason": "missing_destination",
+            "retry_seconds": 0,
+        }
+
+    # Lock and validate the exact restricted Account Recovery request.
+    # A delivered SMS/email challenge may replace an earlier challenge
+    # only for the same rebuild method and same request.
+    cur.execute(
+        """
+        SELECT
+            status,
+            restricted_session_started_at,
+            security_hold_until,
+            required_proof_count,
+            mfa_rebuild_method,
+            mfa_rebuild_started_at,
+            replacement_authenticator_id,
+            replacement_verification_challenge_id,
+            mfa_rebuild_verified_at,
+            completed_at,
+            cancelled_at,
+            NOW()
+        FROM mfa_account_recovery_requests
+        WHERE mfa_account_recovery_request_id = %s
+          AND user_id = %s
+        FOR UPDATE
+        """,
+        (
+            recovery_request_id,
+            user_id,
+        ),
+    )
+
+    recovery_request = cur.fetchone()
+
+    if not recovery_request:
+        return {
+            "allowed": False,
+            "reason": "invalid_recovery_request",
+            "retry_seconds": 0,
+        }
+
+    status = str(
+        recovery_request[0] or ""
+    ).strip().lower()
+
+    restricted_started_at = recovery_request[1]
+    security_hold_until = recovery_request[2]
+
+    required_proof_count = int(
+        recovery_request[3] or 0
+    )
+
+    existing_method = str(
+        recovery_request[4] or ""
+    ).strip().lower()
+
+    existing_started_at = recovery_request[5]
+    existing_authenticator_id = recovery_request[6]
+    existing_challenge_id = recovery_request[7]
+    rebuild_verified_at = recovery_request[8]
+    completed_at = recovery_request[9]
+    cancelled_at = recovery_request[10]
+    now_at = recovery_request[11]
+
+    if (
+        status != "restricted"
+        or restricted_started_at is None
+        or required_proof_count <= 0
+        or rebuild_verified_at is not None
+        or completed_at is not None
+        or cancelled_at is not None
+        or (
+            security_hold_until is not None
+            and security_hold_until > now_at
+        )
+    ):
+        return {
+            "allowed": False,
+            "reason": "invalid_recovery_request",
+            "retry_seconds": 0,
+        }
+
+    # Revalidate the exact recovery proofs inside this same
+    # security-sensitive reservation transaction. A restricted
+    # recovery session must not authorize a new MFA destination if
+    # one of the proofs used to establish recovery has since changed.
+    cur.execute(
+        """
+        SELECT COUNT(*)
+        FROM mfa_account_recovery_proofs p
+
+        LEFT JOIN mfa_recovery_contacts rc
+          ON rc.mfa_recovery_contact_id = p.recovery_contact_id
+         AND rc.user_id = p.user_id
+
+        LEFT JOIN mfa_account_recovery_keys rk
+          ON rk.mfa_account_recovery_key_id = p.recovery_key_id
+         AND rk.user_id = p.user_id
+
+        WHERE p.mfa_account_recovery_request_id = %s
+          AND p.user_id = %s
+          AND p.superseded_at IS NULL
+          AND (
+                (
+                    p.proof_type = 'recovery_email'
+                    AND p.recovery_method = 'email'
+                    AND rc.mfa_recovery_contact_id IS NOT NULL
+                    AND rc.verified_at IS NOT NULL
+                    AND rc.revoked_at IS NULL
+                )
+                OR
+                (
+                    p.proof_type = 'recovery_sms'
+                    AND p.recovery_method = 'sms'
+                    AND rc.mfa_recovery_contact_id IS NOT NULL
+                    AND rc.verified_at IS NOT NULL
+                    AND rc.revoked_at IS NULL
+                )
+                OR
+                (
+                    p.proof_type = 'recovery_key'
+                    AND rk.mfa_account_recovery_key_id IS NOT NULL
+                    AND rk.invalidated_at IS NULL
+                )
+          )
+        """,
+        (
+            recovery_request_id,
+            user_id,
+        ),
+    )
+
+    active_proof_count = int(
+        cur.fetchone()[0] or 0
+    )
+
+    if active_proof_count < required_proof_count:
+        cur.execute(
+            """
+            UPDATE mfa_account_recovery_requests
+            SET
+                status = 'cancelled',
+                cancelled_at = NOW()
+            WHERE mfa_account_recovery_request_id = %s
+              AND user_id = %s
+              AND status = 'restricted'
+            """,
+            (
+                recovery_request_id,
+                user_id,
+            ),
+        )
+
+        # Invalidate both recovery-proof codes and any previously
+        # delivered code-rebuild challenge for this exact request.
+        cur.execute(
+            """
+            UPDATE mfa_verification_challenges
+            SET invalidated_at = NOW()
+            WHERE user_id = %s
+              AND recovery_request_id = %s
+              AND purpose IN (
+                    'account_recovery',
+                    'account_recovery_rebuild'
+              )
+              AND used_at IS NULL
+              AND invalidated_at IS NULL
+            """,
+            (
+                user_id,
+                recovery_request_id,
+            ),
+        )
+
+        log_audit(
+            cur,
+            spa_id=user[1],
+            user_id=user_id,
+            action_type=(
+                "mfa_account_recovery_cancelled_factor_changed"
+            ),
+            table_name="mfa_account_recovery_requests",
+            record_id=recovery_request_id,
+            notes=(
+                "Restricted Account Recovery was cancelled "
+                "immediately before SMS/email MFA rebuild "
+                "challenge reservation because one or more "
+                "verified recovery factors were no longer "
+                "active. No new rebuild verification "
+                "challenge was reserved."
+            ),
+        )
+
+        return {
+            "allowed": False,
+            "reason": "factor_changed",
+            "retry_seconds": 0,
+            "proof_count": active_proof_count,
+            "required_proof_count": required_proof_count,
+        }
+
+    rebuild_is_blank = bool(
+        not existing_method
+        and existing_started_at is None
+        and existing_authenticator_id is None
+        and existing_challenge_id is None
+    )
+
+    rebuild_is_same_code_method = bool(
+        existing_method == normalized_method
+        and existing_started_at is not None
+        and existing_authenticator_id is None
+        and existing_challenge_id is not None
+    )
+
+    if not (
+        rebuild_is_blank
+        or rebuild_is_same_code_method
+    ):
+        return {
+            "allowed": False,
+            "reason": "rebuild_already_started",
+            "retry_seconds": 0,
+        }
+
+    limit_state = (
+        _mfa_account_recovery_rebuild_delivery_limit_state(
+            cur,
+            user_id=user_id,
+            method=normalized_method,
+            recovery_request_id=recovery_request_id,
+        )
+    )
+
+    if not limit_state["allowed"]:
+        return limit_state
+
+    raw_code = generate_verification_code()
+
+    # Keep the visible value as an ordinary six-digit MFA code.
+    # Catastrophic recovery gets its extra request/destination
+    # binding through a context-derived 32-byte HMAC pepper.
+    rebuild_pepper = (
+        _mfa_account_recovery_rebuild_verification_pepper(
+            user_id=user_id,
+            recovery_request_id=recovery_request_id,
+            method=normalized_method,
+            normalized_destination=(
+                normalized_destination
+            ),
+        )
+    )
+
+    code_hash = hash_verification_code(
+        raw_code,
+        user_id=user_id,
+        method=normalized_method,
+        purpose="account_recovery_rebuild",
+        pepper=rebuild_pepper,
+    )
+
+    rebuild_pepper = None
+
+    cur.execute(
+        """
+        INSERT INTO mfa_verification_challenges (
+            user_id,
+            method,
+            purpose,
+            code_hash,
+            expires_at,
+            recovery_contact_id,
+            recovery_request_id
+        )
+        VALUES (
+            %s,
+            %s,
+            'account_recovery_rebuild',
+            %s,
+            NOW() + (
+                %s * INTERVAL '1 minute'
+            ),
+            NULL,
+            %s
+        )
+        RETURNING
+            mfa_verification_challenge_id,
+            expires_at
+        """,
+        (
+            user_id,
+            normalized_method,
+            code_hash,
+            MFA_VERIFICATION_CODE_MINUTES,
+            recovery_request_id,
+        ),
+    )
+
+    challenge = cur.fetchone()
+
+    if not challenge:
+        raise RuntimeError(
+            "Account Recovery rebuild verification challenge "
+            "reservation failed."
+        )
+
+    return {
+        "allowed": True,
+        "reason": None,
+        "retry_seconds": 0,
+        "mfa_verification_challenge_id": challenge[0],
+        "raw_code": raw_code,
+        "expires_at": challenge[1],
+        "method": normalized_method,
+        "purpose": "account_recovery_rebuild",
+        "recovery_request_id": recovery_request_id,
+    }
+
+
+def _reserve_mfa_recovery_verification_challenge(
+    cur,
+    *,
+    user_id,
+    method,
+    purpose,
+    recovery_contact_id,
+    recovery_request_id=None,
+):
+    normalized_method = str(
+        method or ""
+    ).strip().lower()
+
+    normalized_purpose = str(
+        purpose or ""
+    ).strip().lower()
+
+    if normalized_method not in {
+        "sms",
+        "email",
+    }:
+        raise ValueError(
+            "MFA recovery verification method is invalid."
+        )
+
+    if normalized_purpose not in {
+        "recovery_contact_setup",
+        "account_recovery",
+    }:
+        raise ValueError(
+            "MFA recovery verification purpose is invalid."
+        )
+
+    try:
+        recovery_contact_id = int(
+            recovery_contact_id
+        )
+    except (TypeError, ValueError):
+        raise ValueError(
+            "MFA recovery contact is invalid."
+        )
+
+    if recovery_contact_id <= 0:
+        raise ValueError(
+            "MFA recovery contact is invalid."
+        )
+
+    if normalized_purpose == "recovery_contact_setup":
+        if recovery_request_id is not None:
+            raise ValueError(
+                "Recovery-contact setup cannot use an "
+                "account-recovery request."
+            )
+
+    else:
+        try:
+            recovery_request_id = int(
+                recovery_request_id
+            )
+        except (TypeError, ValueError):
+            raise ValueError(
+                "MFA account-recovery request is invalid."
+            )
+
+        if recovery_request_id <= 0:
+            raise ValueError(
+                "MFA account-recovery request is invalid."
+            )
+
+    # Serialize recovery challenge reservation for this account.
+    cur.execute(
+        '''
+        SELECT user_id
+        FROM users
+        WHERE user_id = %s
+          AND active = TRUE
+        FOR UPDATE
+        ''',
+        (user_id,),
+    )
+
+    if not cur.fetchone():
+        return {
+            "allowed": False,
+            "reason": "invalid_user",
+            "retry_seconds": 0,
+        }
+
+    # The exact recovery destination must belong to this account,
+    # match the requested delivery method, and remain unrevoked.
+    cur.execute(
+        '''
+        SELECT
+            mfa_recovery_contact_id,
+            verified_at,
+            revoked_at
+        FROM mfa_recovery_contacts
+        WHERE mfa_recovery_contact_id = %s
+          AND user_id = %s
+          AND contact_type = %s
+        FOR UPDATE
+        ''',
+        (
+            recovery_contact_id,
+            user_id,
+            normalized_method,
+        ),
+    )
+
+    recovery_contact = cur.fetchone()
+
+    if (
+        not recovery_contact
+        or recovery_contact[2] is not None
+    ):
+        return {
+            "allowed": False,
+            "reason": "invalid_recovery_contact",
+            "retry_seconds": 0,
+        }
+
+    if normalized_purpose == "recovery_contact_setup":
+        if recovery_contact[1] is not None:
+            return {
+                "allowed": False,
+                "reason": "invalid_recovery_contact",
+                "retry_seconds": 0,
+            }
+
+    else:
+        if recovery_contact[1] is None:
+            return {
+                "allowed": False,
+                "reason": "invalid_recovery_contact",
+                "retry_seconds": 0,
+            }
+
+        cur.execute(
+            '''
+            SELECT
+                mfa_account_recovery_request_id
+            FROM mfa_account_recovery_requests
+            WHERE mfa_account_recovery_request_id = %s
+              AND user_id = %s
+              AND (
+                  (
+                      status = 'pending'
+                      AND expires_at > NOW()
+                  )
+                  OR
+                  (
+                      status = 'restricted'
+                      AND restricted_session_started_at IS NOT NULL
+                      AND proof_reverification_started_at IS NOT NULL
+                      AND proof_reverification_expires_at > NOW()
+                      AND proof_reverification_verified_at IS NULL
+                  )
+              )
+            FOR UPDATE
+            ''',
+            (
+                recovery_request_id,
+                user_id,
+            ),
+        )
+
+        if not cur.fetchone():
+            return {
+                "allowed": False,
+                "reason": "invalid_recovery_request",
+                "retry_seconds": 0,
+            }
+
+    limit_state = (
+        _mfa_recovery_verification_delivery_limit_state(
+            cur,
+            user_id=user_id,
+            method=normalized_method,
+            purpose=normalized_purpose,
+            recovery_contact_id=recovery_contact_id,
+            recovery_request_id=recovery_request_id,
+        )
+    )
+
+    if not limit_state["allowed"]:
+        return limit_state
+
+    raw_code = generate_verification_code()
+
+    code_hash = hash_verification_code(
+        raw_code,
+        user_id=user_id,
+        method=normalized_method,
+        purpose=normalized_purpose,
+    )
+
+    cur.execute(
+        '''
+        INSERT INTO mfa_verification_challenges (
+            user_id,
+            method,
+            purpose,
+            code_hash,
+            expires_at,
+            recovery_contact_id,
+            recovery_request_id
+        )
+        VALUES (
+            %s,
+            %s,
+            %s,
+            %s,
+            NOW() + (
+                %s * INTERVAL '1 minute'
+            ),
+            %s,
+            %s
+        )
+        RETURNING
+            mfa_verification_challenge_id,
+            expires_at
+        ''',
+        (
+            user_id,
+            normalized_method,
+            normalized_purpose,
+            code_hash,
+            MFA_VERIFICATION_CODE_MINUTES,
+            recovery_contact_id,
+            recovery_request_id,
+        ),
+    )
+
+    challenge = cur.fetchone()
+
+    if not challenge:
+        raise RuntimeError(
+            "MFA recovery verification challenge "
+            "reservation failed."
+        )
+
+    return {
+        "allowed": True,
+        "reason": None,
+        "retry_seconds": 0,
+        "mfa_verification_challenge_id": challenge[0],
+        "raw_code": raw_code,
+        "expires_at": challenge[1],
+        "method": normalized_method,
+        "purpose": normalized_purpose,
+        "recovery_contact_id": recovery_contact_id,
+        "recovery_request_id": recovery_request_id,
+    }
 
 
 def _mfa_verification_challenge_record(
@@ -5045,6 +10237,1955 @@ def _invalidate_unsent_mfa_verification_challenge(
     return cur.fetchone() is not None
 
 
+
+def _finalize_mfa_account_recovery_rebuild_delivery(
+    cur,
+    *,
+    user_id,
+    method,
+    recovery_request_id,
+    mfa_verification_challenge_id,
+    expected_destination,
+):
+    normalized_method = str(
+        method or ""
+    ).strip().lower()
+
+    if normalized_method not in {
+        "sms",
+        "email",
+    }:
+        raise ValueError(
+            "Account Recovery rebuild verification method is invalid."
+        )
+
+    try:
+        user_id = int(user_id)
+        recovery_request_id = int(recovery_request_id)
+        mfa_verification_challenge_id = int(
+            mfa_verification_challenge_id
+        )
+    except (TypeError, ValueError):
+        raise ValueError(
+            "Account Recovery rebuild delivery context is invalid."
+        )
+
+    if (
+        user_id <= 0
+        or recovery_request_id <= 0
+        or mfa_verification_challenge_id <= 0
+    ):
+        raise ValueError(
+            "Account Recovery rebuild delivery context is invalid."
+        )
+
+    try:
+        if normalized_method == "sms":
+            expected_destination = (
+                _normalize_user_mobile_phone(
+                    expected_destination
+                )
+            )
+        else:
+            expected_destination = (
+                _normalize_mfa_recovery_email(
+                    expected_destination
+                )
+            )
+    except ValueError:
+        raise ValueError(
+            "Account Recovery rebuild delivery destination is invalid."
+        )
+
+    if not expected_destination:
+        raise ValueError(
+            "Account Recovery rebuild delivery destination is invalid."
+        )
+
+    # Re-lock the account after the external provider call.
+    cur.execute(
+        """
+        SELECT
+            user_id,
+            spa_id,
+            role,
+            email,
+            sms_phone
+        FROM users
+        WHERE user_id = %s
+          AND active = TRUE
+        FOR UPDATE
+        """,
+        (user_id,),
+    )
+
+    user = cur.fetchone()
+
+    if (
+        not user
+        or str(user[2] or "").strip() not in {
+            "admin",
+            "manager",
+        }
+    ):
+        raise RuntimeError(
+            "Account Recovery rebuild account is no longer eligible."
+        )
+
+    current_destination_value = (
+        user[4]
+        if normalized_method == "sms"
+        else user[3]
+    )
+
+    try:
+        if normalized_method == "sms":
+            current_destination = (
+                _normalize_user_mobile_phone(
+                    current_destination_value
+                )
+            )
+        else:
+            current_destination = (
+                _normalize_mfa_recovery_email(
+                    current_destination_value
+                )
+            )
+    except ValueError:
+        current_destination = None
+
+    # Lock the exact request-bound challenge accepted by the
+    # delivery provider. Trusted recovery contacts are intentionally
+    # absent from rebuild challenges.
+    cur.execute(
+        """
+        SELECT
+            mfa_verification_challenge_id,
+            expires_at,
+            delivery_sent_at,
+            used_at,
+            invalidated_at,
+            NOW()
+        FROM mfa_verification_challenges
+        WHERE mfa_verification_challenge_id = %s
+          AND user_id = %s
+          AND method = %s
+          AND purpose = 'account_recovery_rebuild'
+          AND recovery_contact_id IS NULL
+          AND recovery_request_id = %s
+        FOR UPDATE
+        """,
+        (
+            mfa_verification_challenge_id,
+            user_id,
+            normalized_method,
+            recovery_request_id,
+        ),
+    )
+
+    challenge = cur.fetchone()
+
+    if (
+        not challenge
+        or challenge[2] is not None
+        or challenge[3] is not None
+        or challenge[4] is not None
+    ):
+        raise RuntimeError(
+            "Account Recovery rebuild verification challenge "
+            "could not be finalized."
+        )
+
+    # The code may become usable only if the normal account
+    # destination is still exactly the destination to which the
+    # provider accepted this code. A concurrent phone/email change
+    # invalidates the challenge rather than trusting a stale address.
+    if (
+        not current_destination
+        or current_destination != expected_destination
+    ):
+        cur.execute(
+            """
+            UPDATE mfa_verification_challenges
+            SET invalidated_at = NOW()
+            WHERE mfa_verification_challenge_id = %s
+              AND user_id = %s
+              AND method = %s
+              AND purpose = 'account_recovery_rebuild'
+              AND recovery_contact_id IS NULL
+              AND recovery_request_id = %s
+              AND delivery_sent_at IS NULL
+              AND used_at IS NULL
+              AND invalidated_at IS NULL
+            RETURNING mfa_verification_challenge_id
+            """,
+            (
+                mfa_verification_challenge_id,
+                user_id,
+                normalized_method,
+                recovery_request_id,
+            ),
+        )
+
+        invalidated = cur.fetchone()
+
+        if not invalidated:
+            raise RuntimeError(
+                "Account Recovery rebuild challenge could not be "
+                "invalidated after destination change."
+            )
+
+        log_audit(
+            cur,
+            spa_id=user[1],
+            user_id=user_id,
+            action_type=(
+                "mfa_account_recovery_rebuild_destination_changed"
+            ),
+            table_name="mfa_verification_challenges",
+            record_id=mfa_verification_challenge_id,
+            notes=(
+                f"{normalized_method.upper()} Account Recovery "
+                "rebuild code was delivered, but the normal account "
+                "destination changed before delivery finalization. "
+                "The code was invalidated and was not bound as the "
+                "replacement MFA credential."
+            ),
+        )
+
+        return {
+            "status": "destination_changed",
+        }
+
+    expires_at = challenge[1]
+    now_at = challenge[5]
+
+    # Never activate a provider-accepted response after expiration.
+    # Do not set delivery_sent_at after expires_at because the schema
+    # correctly requires delivery_sent_at <= expires_at.
+    if expires_at <= now_at:
+        cur.execute(
+            """
+            UPDATE mfa_verification_challenges
+            SET invalidated_at = NOW()
+            WHERE mfa_verification_challenge_id = %s
+              AND user_id = %s
+              AND method = %s
+              AND purpose = 'account_recovery_rebuild'
+              AND recovery_contact_id IS NULL
+              AND recovery_request_id = %s
+              AND delivery_sent_at IS NULL
+              AND used_at IS NULL
+              AND invalidated_at IS NULL
+            RETURNING mfa_verification_challenge_id
+            """,
+            (
+                mfa_verification_challenge_id,
+                user_id,
+                normalized_method,
+                recovery_request_id,
+            ),
+        )
+
+        return {
+            "status": "expired",
+        }
+
+    cur.execute(
+        """
+        SELECT
+            status,
+            restricted_session_started_at,
+            security_hold_until,
+            required_proof_count,
+            mfa_rebuild_method,
+            mfa_rebuild_started_at,
+            replacement_authenticator_id,
+            replacement_verification_challenge_id,
+            mfa_rebuild_verified_at,
+            completed_at,
+            cancelled_at,
+            NOW()
+        FROM mfa_account_recovery_requests
+        WHERE mfa_account_recovery_request_id = %s
+          AND user_id = %s
+        FOR UPDATE
+        """,
+        (
+            recovery_request_id,
+            user_id,
+        ),
+    )
+
+    recovery_request = cur.fetchone()
+
+    if not recovery_request:
+        raise RuntimeError(
+            "Account Recovery rebuild request is no longer available."
+        )
+
+    recovery_status = str(
+        recovery_request[0] or ""
+    ).strip().lower()
+
+    restricted_started_at = recovery_request[1]
+    security_hold_until = recovery_request[2]
+
+    required_proof_count = int(
+        recovery_request[3] or 0
+    )
+
+    rebuild_method = str(
+        recovery_request[4] or ""
+    ).strip().lower()
+
+    rebuild_started_at = recovery_request[5]
+    replacement_authenticator_id = recovery_request[6]
+    replacement_challenge_id = recovery_request[7]
+    rebuild_verified_at = recovery_request[8]
+    completed_at = recovery_request[9]
+    cancelled_at = recovery_request[10]
+    now_at = recovery_request[11]
+
+    if (
+        recovery_status != "restricted"
+        or restricted_started_at is None
+        or required_proof_count <= 0
+        or rebuild_verified_at is not None
+        or completed_at is not None
+        or cancelled_at is not None
+        or (
+            security_hold_until is not None
+            and security_hold_until > now_at
+        )
+    ):
+        cur.execute(
+            """
+            UPDATE mfa_verification_challenges
+            SET invalidated_at = NOW()
+            WHERE mfa_verification_challenge_id = %s
+              AND user_id = %s
+              AND method = %s
+              AND purpose = 'account_recovery_rebuild'
+              AND recovery_contact_id IS NULL
+              AND recovery_request_id = %s
+              AND delivery_sent_at IS NULL
+              AND used_at IS NULL
+              AND invalidated_at IS NULL
+            """,
+            (
+                mfa_verification_challenge_id,
+                user_id,
+                normalized_method,
+                recovery_request_id,
+            ),
+        )
+
+        return {
+            "status": "invalid_state",
+        }
+
+    # Revalidate the exact recovery factors again after the provider
+    # call. Reservation and provider delivery occur in separate
+    # transactions, so the finalizer must independently prove that
+    # the recovery authority is still valid before activating a code.
+    cur.execute(
+        """
+        SELECT COUNT(*)
+        FROM mfa_account_recovery_proofs p
+
+        LEFT JOIN mfa_recovery_contacts rc
+          ON rc.mfa_recovery_contact_id = p.recovery_contact_id
+         AND rc.user_id = p.user_id
+
+        LEFT JOIN mfa_account_recovery_keys rk
+          ON rk.mfa_account_recovery_key_id = p.recovery_key_id
+         AND rk.user_id = p.user_id
+
+        WHERE p.mfa_account_recovery_request_id = %s
+          AND p.user_id = %s
+          AND p.superseded_at IS NULL
+          AND (
+                (
+                    p.proof_type = 'recovery_email'
+                    AND p.recovery_method = 'email'
+                    AND rc.mfa_recovery_contact_id IS NOT NULL
+                    AND rc.verified_at IS NOT NULL
+                    AND rc.revoked_at IS NULL
+                )
+                OR
+                (
+                    p.proof_type = 'recovery_sms'
+                    AND p.recovery_method = 'sms'
+                    AND rc.mfa_recovery_contact_id IS NOT NULL
+                    AND rc.verified_at IS NOT NULL
+                    AND rc.revoked_at IS NULL
+                )
+                OR
+                (
+                    p.proof_type = 'recovery_key'
+                    AND rk.mfa_account_recovery_key_id IS NOT NULL
+                    AND rk.invalidated_at IS NULL
+                )
+          )
+        """,
+        (
+            recovery_request_id,
+            user_id,
+        ),
+    )
+
+    active_proof_count = int(
+        cur.fetchone()[0] or 0
+    )
+
+    if active_proof_count < required_proof_count:
+        cur.execute(
+            """
+            UPDATE mfa_account_recovery_requests
+            SET
+                status = 'cancelled',
+                cancelled_at = NOW()
+            WHERE mfa_account_recovery_request_id = %s
+              AND user_id = %s
+              AND status = 'restricted'
+            """,
+            (
+                recovery_request_id,
+                user_id,
+            ),
+        )
+
+        cur.execute(
+            """
+            UPDATE mfa_verification_challenges
+            SET invalidated_at = NOW()
+            WHERE user_id = %s
+              AND recovery_request_id = %s
+              AND purpose IN (
+                    'account_recovery',
+                    'account_recovery_rebuild'
+              )
+              AND used_at IS NULL
+              AND invalidated_at IS NULL
+            """,
+            (
+                user_id,
+                recovery_request_id,
+            ),
+        )
+
+        log_audit(
+            cur,
+            spa_id=user[1],
+            user_id=user_id,
+            action_type=(
+                "mfa_account_recovery_cancelled_factor_changed"
+            ),
+            table_name="mfa_account_recovery_requests",
+            record_id=recovery_request_id,
+            notes=(
+                "Restricted Account Recovery was cancelled "
+                "after SMS/email delivery because one or more "
+                "verified recovery factors were no longer active. "
+                "The delivered rebuild code was not activated."
+            ),
+        )
+
+        return {
+            "status": "factor_changed",
+            "proof_count": active_proof_count,
+            "required_proof_count": required_proof_count,
+        }
+
+    rebuild_is_blank = bool(
+        not rebuild_method
+        and rebuild_started_at is None
+        and replacement_authenticator_id is None
+        and replacement_challenge_id is None
+    )
+
+    rebuild_is_same_code_method = bool(
+        rebuild_method == normalized_method
+        and rebuild_started_at is not None
+        and replacement_authenticator_id is None
+        and replacement_challenge_id is not None
+    )
+
+    if not (
+        rebuild_is_blank
+        or rebuild_is_same_code_method
+    ):
+        cur.execute(
+            """
+            UPDATE mfa_verification_challenges
+            SET invalidated_at = NOW()
+            WHERE mfa_verification_challenge_id = %s
+              AND user_id = %s
+              AND method = %s
+              AND purpose = 'account_recovery_rebuild'
+              AND recovery_contact_id IS NULL
+              AND recovery_request_id = %s
+              AND delivery_sent_at IS NULL
+              AND used_at IS NULL
+              AND invalidated_at IS NULL
+            """,
+            (
+                mfa_verification_challenge_id,
+                user_id,
+                normalized_method,
+                recovery_request_id,
+            ),
+        )
+
+        return {
+            "status": "invalid_state",
+        }
+
+    # If a newer challenge for this exact rebuild context has already
+    # completed delivery finalization, this older provider response
+    # must never become the active rebuild credential.
+    cur.execute(
+        """
+        SELECT EXISTS (
+            SELECT 1
+            FROM mfa_verification_challenges
+            WHERE user_id = %s
+              AND method = %s
+              AND purpose = 'account_recovery_rebuild'
+              AND recovery_contact_id IS NULL
+              AND recovery_request_id = %s
+              AND mfa_verification_challenge_id > %s
+              AND delivery_sent_at IS NOT NULL
+        )
+        """,
+        (
+            user_id,
+            normalized_method,
+            recovery_request_id,
+            mfa_verification_challenge_id,
+        ),
+    )
+
+    newer_delivery_exists = bool(
+        cur.fetchone()[0]
+    )
+
+    if newer_delivery_exists:
+        cur.execute(
+            """
+            UPDATE mfa_verification_challenges
+            SET
+                delivery_sent_at = NOW(),
+                invalidated_at = NOW()
+            WHERE mfa_verification_challenge_id = %s
+              AND user_id = %s
+              AND method = %s
+              AND purpose = 'account_recovery_rebuild'
+              AND recovery_contact_id IS NULL
+              AND recovery_request_id = %s
+              AND delivery_sent_at IS NULL
+              AND used_at IS NULL
+              AND invalidated_at IS NULL
+              AND expires_at > NOW()
+            RETURNING mfa_verification_challenge_id
+            """,
+            (
+                mfa_verification_challenge_id,
+                user_id,
+                normalized_method,
+                recovery_request_id,
+            ),
+        )
+
+        if not cur.fetchone():
+            raise RuntimeError(
+                "Superseded Account Recovery rebuild challenge "
+                "could not be finalized."
+            )
+
+        log_audit(
+            cur,
+            spa_id=user[1],
+            user_id=user_id,
+            action_type=(
+                "mfa_account_recovery_rebuild_verification_code_sent"
+            ),
+            table_name="mfa_verification_challenges",
+            record_id=mfa_verification_challenge_id,
+            notes=(
+                f"{normalized_method.upper()} Account Recovery "
+                "rebuild code was accepted for delivery, but a "
+                "newer delivered code was already active. "
+                "This older challenge was invalidated."
+            ),
+        )
+
+        return {
+            "status": "superseded",
+        }
+
+    cur.execute(
+        """
+        UPDATE mfa_verification_challenges
+        SET delivery_sent_at = NOW()
+        WHERE mfa_verification_challenge_id = %s
+          AND user_id = %s
+          AND method = %s
+          AND purpose = 'account_recovery_rebuild'
+          AND recovery_contact_id IS NULL
+          AND recovery_request_id = %s
+          AND delivery_sent_at IS NULL
+          AND used_at IS NULL
+          AND invalidated_at IS NULL
+          AND expires_at > NOW()
+        RETURNING mfa_verification_challenge_id
+        """,
+        (
+            mfa_verification_challenge_id,
+            user_id,
+            normalized_method,
+            recovery_request_id,
+        ),
+    )
+
+    if not cur.fetchone():
+        raise RuntimeError(
+            "Account Recovery rebuild verification challenge "
+            "could not be activated after delivery."
+        )
+
+    # Newest delivered challenge wins only within this exact
+    # recovery request and rebuild method.
+    cur.execute(
+        """
+        UPDATE mfa_verification_challenges
+        SET invalidated_at = NOW()
+        WHERE user_id = %s
+          AND method = %s
+          AND purpose = 'account_recovery_rebuild'
+          AND recovery_contact_id IS NULL
+          AND recovery_request_id = %s
+          AND mfa_verification_challenge_id < %s
+          AND used_at IS NULL
+          AND invalidated_at IS NULL
+        """,
+        (
+            user_id,
+            normalized_method,
+            recovery_request_id,
+            mfa_verification_challenge_id,
+        ),
+    )
+
+    # Bind the recovery request only after successful delivery.
+    # A resend replaces only the exact challenge id; it does not
+    # restart or silently change the selected rebuild method.
+    cur.execute(
+        """
+        UPDATE mfa_account_recovery_requests
+        SET
+            mfa_rebuild_method = %s,
+            mfa_rebuild_started_at = COALESCE(
+                mfa_rebuild_started_at,
+                NOW()
+            ),
+            replacement_authenticator_id = NULL,
+            replacement_verification_challenge_id = %s
+        WHERE mfa_account_recovery_request_id = %s
+          AND user_id = %s
+          AND status = 'restricted'
+          AND restricted_session_started_at IS NOT NULL
+          AND mfa_rebuild_verified_at IS NULL
+          AND completed_at IS NULL
+          AND cancelled_at IS NULL
+          AND replacement_authenticator_id IS NULL
+          AND (
+                mfa_rebuild_method IS NULL
+                OR mfa_rebuild_method = %s
+          )
+          AND (
+                replacement_verification_challenge_id IS NULL
+                OR mfa_rebuild_method = %s
+          )
+        RETURNING replacement_verification_challenge_id
+        """,
+        (
+            normalized_method,
+            mfa_verification_challenge_id,
+            recovery_request_id,
+            user_id,
+            normalized_method,
+            normalized_method,
+        ),
+    )
+
+    bound_request = cur.fetchone()
+
+    if (
+        not bound_request
+        or int(bound_request[0])
+            != mfa_verification_challenge_id
+    ):
+        raise RuntimeError(
+            "Account Recovery rebuild challenge could not be "
+            "bound safely after delivery."
+        )
+
+    log_audit(
+        cur,
+        spa_id=user[1],
+        user_id=user_id,
+        action_type=(
+            "mfa_account_recovery_rebuild_verification_code_sent"
+        ),
+        table_name="mfa_verification_challenges",
+        record_id=mfa_verification_challenge_id,
+        notes=(
+            f"{normalized_method.upper()} Account Recovery rebuild "
+            "verification code accepted for delivery and bound to "
+            "the exact restricted recovery request. Older unused "
+            "challenges for this request and method were invalidated."
+        ),
+    )
+
+    return {
+        "status": "sent",
+        "mfa_verification_challenge_id": (
+            mfa_verification_challenge_id
+        ),
+    }
+
+
+def _invalidate_unsent_mfa_account_recovery_rebuild_challenge(
+    cur,
+    *,
+    user_id,
+    method,
+    recovery_request_id,
+    mfa_verification_challenge_id,
+):
+    normalized_method = str(
+        method or ""
+    ).strip().lower()
+
+    if normalized_method not in {
+        "sms",
+        "email",
+    }:
+        raise ValueError(
+            "Account Recovery rebuild verification method is invalid."
+        )
+
+    try:
+        user_id = int(user_id)
+        recovery_request_id = int(recovery_request_id)
+        mfa_verification_challenge_id = int(
+            mfa_verification_challenge_id
+        )
+    except (TypeError, ValueError):
+        raise ValueError(
+            "Account Recovery rebuild challenge context is invalid."
+        )
+
+    cur.execute(
+        """
+        UPDATE mfa_verification_challenges
+        SET invalidated_at = NOW()
+        WHERE mfa_verification_challenge_id = %s
+          AND user_id = %s
+          AND method = %s
+          AND purpose = 'account_recovery_rebuild'
+          AND recovery_contact_id IS NULL
+          AND recovery_request_id = %s
+          AND delivery_sent_at IS NULL
+          AND used_at IS NULL
+          AND invalidated_at IS NULL
+        RETURNING mfa_verification_challenge_id
+        """,
+        (
+            mfa_verification_challenge_id,
+            user_id,
+            normalized_method,
+            recovery_request_id,
+        ),
+    )
+
+    return cur.fetchone() is not None
+
+
+def _finalize_mfa_recovery_verification_delivery(
+    cur,
+    *,
+    user_id,
+    method,
+    purpose,
+    recovery_contact_id,
+    recovery_request_id,
+    mfa_verification_challenge_id,
+):
+    normalized_method = str(
+        method or ""
+    ).strip().lower()
+
+    normalized_purpose = str(
+        purpose or ""
+    ).strip().lower()
+
+    if normalized_method not in {
+        "sms",
+        "email",
+    }:
+        raise ValueError(
+            "MFA recovery verification method is invalid."
+        )
+
+    if normalized_purpose not in {
+        "recovery_contact_setup",
+        "account_recovery",
+    }:
+        raise ValueError(
+            "MFA recovery verification purpose is invalid."
+        )
+
+    # Re-lock the account before making a provider-accepted recovery
+    # challenge usable.
+    cur.execute(
+        '''
+        SELECT
+            user_id,
+            spa_id
+        FROM users
+        WHERE user_id = %s
+          AND active = TRUE
+        FOR UPDATE
+        ''',
+        (user_id,),
+    )
+
+    user = cur.fetchone()
+
+    if not user:
+        raise RuntimeError(
+            "MFA recovery verification account is no longer available."
+        )
+
+    cur.execute(
+        '''
+        SELECT
+            c.mfa_verification_challenge_id,
+            c.expires_at,
+            c.delivery_sent_at,
+            c.used_at,
+            c.invalidated_at,
+            NOW(),
+            rc.verified_at,
+            rc.revoked_at
+        FROM mfa_verification_challenges c
+
+        JOIN mfa_recovery_contacts rc
+          ON rc.mfa_recovery_contact_id = c.recovery_contact_id
+         AND rc.user_id = c.user_id
+         AND rc.contact_type = c.method
+
+        WHERE c.mfa_verification_challenge_id = %s
+          AND c.user_id = %s
+          AND c.method = %s
+          AND c.purpose = %s
+          AND c.recovery_contact_id = %s
+          AND c.recovery_request_id IS NOT DISTINCT FROM %s
+        FOR UPDATE OF c, rc
+        ''',
+        (
+            mfa_verification_challenge_id,
+            user_id,
+            normalized_method,
+            normalized_purpose,
+            recovery_contact_id,
+            recovery_request_id,
+        ),
+    )
+
+    challenge = cur.fetchone()
+
+    if (
+        not challenge
+        or challenge[2] is not None
+        or challenge[3] is not None
+        or challenge[4] is not None
+    ):
+        raise RuntimeError(
+            "MFA recovery verification challenge "
+            "could not be finalized."
+        )
+
+    expires_at = challenge[1]
+    now_at = challenge[5]
+    contact_verified_at = challenge[6]
+    contact_revoked_at = challenge[7]
+
+    recovery_status = None
+    recovery_expires_at = None
+    restricted_session_started_at = None
+    proof_reverification_started_at = None
+    proof_reverification_expires_at = None
+    proof_reverification_verified_at = None
+
+    if normalized_purpose == "account_recovery":
+        cur.execute(
+            '''
+            SELECT
+                status,
+                expires_at,
+                restricted_session_started_at,
+                proof_reverification_started_at,
+                proof_reverification_expires_at,
+                proof_reverification_verified_at
+            FROM mfa_account_recovery_requests
+            WHERE mfa_account_recovery_request_id = %s
+              AND user_id = %s
+            FOR UPDATE
+            ''',
+            (
+                recovery_request_id,
+                user_id,
+            ),
+        )
+
+        recovery_request = cur.fetchone()
+
+        if recovery_request:
+            recovery_status = recovery_request[0]
+            recovery_expires_at = recovery_request[1]
+            restricted_session_started_at = (
+                recovery_request[2]
+            )
+            proof_reverification_started_at = (
+                recovery_request[3]
+            )
+            proof_reverification_expires_at = (
+                recovery_request[4]
+            )
+            proof_reverification_verified_at = (
+                recovery_request[5]
+            )
+
+    recovery_context_valid = (
+        contact_revoked_at is None
+    )
+
+    if normalized_purpose == "recovery_contact_setup":
+        recovery_context_valid = (
+            recovery_context_valid
+            and contact_verified_at is None
+            and recovery_request_id is None
+        )
+
+    else:
+        recovery_context_valid = (
+            recovery_context_valid
+            and contact_verified_at is not None
+            and recovery_request_id is not None
+            and (
+                (
+                    recovery_status == "pending"
+                    and recovery_expires_at is not None
+                    and recovery_expires_at > now_at
+                )
+                or
+                (
+                    recovery_status == "restricted"
+                    and restricted_session_started_at is not None
+                    and proof_reverification_started_at is not None
+                    and proof_reverification_expires_at is not None
+                    and proof_reverification_expires_at > now_at
+                    and proof_reverification_verified_at is None
+                )
+            )
+        )
+
+    # A provider response arriving after expiration, contact revocation,
+    # or recovery-request invalidation must never make the code usable.
+    if (
+        expires_at <= now_at
+        or not recovery_context_valid
+    ):
+        cur.execute(
+            '''
+            UPDATE mfa_verification_challenges
+            SET
+                delivery_sent_at = NOW(),
+                invalidated_at = COALESCE(
+                    invalidated_at,
+                    NOW()
+                )
+            WHERE mfa_verification_challenge_id = %s
+              AND user_id = %s
+              AND method = %s
+              AND purpose = %s
+              AND recovery_contact_id = %s
+              AND recovery_request_id IS NOT DISTINCT FROM %s
+              AND delivery_sent_at IS NULL
+              AND used_at IS NULL
+              AND invalidated_at IS NULL
+            ''',
+            (
+                mfa_verification_challenge_id,
+                user_id,
+                normalized_method,
+                normalized_purpose,
+                recovery_contact_id,
+                recovery_request_id,
+            ),
+        )
+
+        return False
+
+    # A newer successfully delivered challenge for this exact recovery
+    # context wins. Other recovery factors remain independent.
+    cur.execute(
+        '''
+        SELECT EXISTS (
+            SELECT 1
+            FROM mfa_verification_challenges
+            WHERE user_id = %s
+              AND method = %s
+              AND purpose = %s
+              AND recovery_contact_id = %s
+              AND recovery_request_id IS NOT DISTINCT FROM %s
+              AND mfa_verification_challenge_id > %s
+              AND delivery_sent_at IS NOT NULL
+        )
+        ''',
+        (
+            user_id,
+            normalized_method,
+            normalized_purpose,
+            recovery_contact_id,
+            recovery_request_id,
+            mfa_verification_challenge_id,
+        ),
+    )
+
+    newer_delivery_exists = bool(
+        cur.fetchone()[0]
+    )
+
+    if newer_delivery_exists:
+        cur.execute(
+            '''
+            UPDATE mfa_verification_challenges
+            SET
+                delivery_sent_at = NOW(),
+                invalidated_at = COALESCE(
+                    invalidated_at,
+                    NOW()
+                )
+            WHERE mfa_verification_challenge_id = %s
+              AND user_id = %s
+              AND method = %s
+              AND purpose = %s
+              AND recovery_contact_id = %s
+              AND recovery_request_id IS NOT DISTINCT FROM %s
+              AND delivery_sent_at IS NULL
+              AND used_at IS NULL
+              AND invalidated_at IS NULL
+            RETURNING mfa_verification_challenge_id
+            ''',
+            (
+                mfa_verification_challenge_id,
+                user_id,
+                normalized_method,
+                normalized_purpose,
+                recovery_contact_id,
+                recovery_request_id,
+            ),
+        )
+
+        if not cur.fetchone():
+            raise RuntimeError(
+                "Superseded MFA recovery verification challenge "
+                "could not be finalized."
+            )
+
+        log_audit(
+            cur,
+            spa_id=user[1],
+            user_id=user_id,
+            action_type="mfa_recovery_verification_code_sent",
+            table_name="mfa_verification_challenges",
+            record_id=mfa_verification_challenge_id,
+            notes=(
+                f"{normalized_method.upper()} recovery verification "
+                f"code accepted for {normalized_purpose}, but a "
+                "newer delivered code was already active. "
+                "This older challenge was invalidated."
+            ),
+        )
+
+        return False
+
+    cur.execute(
+        '''
+        UPDATE mfa_verification_challenges
+        SET delivery_sent_at = NOW()
+        WHERE mfa_verification_challenge_id = %s
+          AND user_id = %s
+          AND method = %s
+          AND purpose = %s
+          AND recovery_contact_id = %s
+          AND recovery_request_id IS NOT DISTINCT FROM %s
+          AND delivery_sent_at IS NULL
+          AND used_at IS NULL
+          AND invalidated_at IS NULL
+          AND expires_at > NOW()
+        RETURNING mfa_verification_challenge_id
+        ''',
+        (
+            mfa_verification_challenge_id,
+            user_id,
+            normalized_method,
+            normalized_purpose,
+            recovery_contact_id,
+            recovery_request_id,
+        ),
+    )
+
+    if not cur.fetchone():
+        raise RuntimeError(
+            "MFA recovery verification challenge could not be "
+            "activated after delivery."
+        )
+
+    cur.execute(
+        '''
+        UPDATE mfa_verification_challenges
+        SET invalidated_at = NOW()
+        WHERE user_id = %s
+          AND method = %s
+          AND purpose = %s
+          AND recovery_contact_id = %s
+          AND recovery_request_id IS NOT DISTINCT FROM %s
+          AND mfa_verification_challenge_id < %s
+          AND used_at IS NULL
+          AND invalidated_at IS NULL
+        ''',
+        (
+            user_id,
+            normalized_method,
+            normalized_purpose,
+            recovery_contact_id,
+            recovery_request_id,
+            mfa_verification_challenge_id,
+        ),
+    )
+
+    log_audit(
+        cur,
+        spa_id=user[1],
+        user_id=user_id,
+        action_type="mfa_recovery_verification_code_sent",
+        table_name="mfa_verification_challenges",
+        record_id=mfa_verification_challenge_id,
+        notes=(
+            f"{normalized_method.upper()} recovery verification "
+            f"code accepted for {normalized_purpose}. "
+            "Older unused challenges for this exact recovery "
+            "context were invalidated."
+        ),
+    )
+
+    return True
+
+
+def _invalidate_unsent_mfa_recovery_verification_challenge(
+    cur,
+    *,
+    user_id,
+    method,
+    purpose,
+    recovery_contact_id,
+    recovery_request_id,
+    mfa_verification_challenge_id,
+):
+    normalized_method = str(
+        method or ""
+    ).strip().lower()
+
+    normalized_purpose = str(
+        purpose or ""
+    ).strip().lower()
+
+    if normalized_method not in {
+        "sms",
+        "email",
+    }:
+        raise ValueError(
+            "MFA recovery verification method is invalid."
+        )
+
+    if normalized_purpose not in {
+        "recovery_contact_setup",
+        "account_recovery",
+    }:
+        raise ValueError(
+            "MFA recovery verification purpose is invalid."
+        )
+
+    cur.execute(
+        '''
+        UPDATE mfa_verification_challenges
+        SET invalidated_at = NOW()
+        WHERE mfa_verification_challenge_id = %s
+          AND user_id = %s
+          AND method = %s
+          AND purpose = %s
+          AND recovery_contact_id = %s
+          AND recovery_request_id IS NOT DISTINCT FROM %s
+          AND delivery_sent_at IS NULL
+          AND used_at IS NULL
+          AND invalidated_at IS NULL
+        RETURNING mfa_verification_challenge_id
+        ''',
+        (
+            mfa_verification_challenge_id,
+            user_id,
+            normalized_method,
+            normalized_purpose,
+            recovery_contact_id,
+            recovery_request_id,
+        ),
+    )
+
+    return cur.fetchone() is not None
+
+
+def _send_mfa_recovery_verification_code(
+    *,
+    user_id,
+    method,
+    purpose,
+    recovery_contact_id,
+    recovery_request_id=None,
+):
+    normalized_method = str(
+        method or ""
+    ).strip().lower()
+
+    normalized_purpose = str(
+        purpose or ""
+    ).strip().lower()
+
+    if normalized_method not in {
+        "sms",
+        "email",
+    }:
+        raise ValueError(
+            "MFA recovery verification method is invalid."
+        )
+
+    if normalized_purpose not in {
+        "recovery_contact_setup",
+        "account_recovery",
+    }:
+        raise ValueError(
+            "MFA recovery verification purpose is invalid."
+        )
+
+    try:
+        recovery_contact_id = int(
+            recovery_contact_id
+        )
+    except (TypeError, ValueError):
+        raise ValueError(
+            "MFA recovery contact is invalid."
+        )
+
+    if recovery_contact_id <= 0:
+        raise ValueError(
+            "MFA recovery contact is invalid."
+        )
+
+    if normalized_purpose == "recovery_contact_setup":
+        if recovery_request_id is not None:
+            raise ValueError(
+                "Recovery-contact setup cannot use an "
+                "account-recovery request."
+            )
+    else:
+        try:
+            recovery_request_id = int(
+                recovery_request_id
+            )
+        except (TypeError, ValueError):
+            raise ValueError(
+                "MFA account-recovery request is invalid."
+            )
+
+        if recovery_request_id <= 0:
+            raise ValueError(
+                "MFA account-recovery request is invalid."
+            )
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            '''
+            SELECT
+                u.spa_id,
+                rc.contact_value
+            FROM mfa_recovery_contacts rc
+
+            JOIN users u
+              ON u.user_id = rc.user_id
+
+            WHERE rc.mfa_recovery_contact_id = %s
+              AND rc.user_id = %s
+              AND rc.contact_type = %s
+              AND rc.revoked_at IS NULL
+              AND u.active = TRUE
+            LIMIT 1
+            FOR UPDATE OF rc, u
+            ''',
+            (
+                recovery_contact_id,
+                user_id,
+                normalized_method,
+            ),
+        )
+
+        contact_row = cur.fetchone()
+
+        if not contact_row:
+            conn.rollback()
+
+            return {
+                "status": "invalid_recovery_contact",
+                "retry_seconds": 0,
+            }
+
+        target_spa_id = contact_row[0]
+        destination_value = contact_row[1]
+
+        if normalized_method == "sms":
+            try:
+                destination = (
+                    _normalize_user_mobile_phone(
+                        destination_value
+                    )
+                )
+            except ValueError:
+                conn.rollback()
+
+                return {
+                    "status": "invalid_recovery_contact",
+                    "retry_seconds": 0,
+                }
+
+        else:
+            try:
+                destination = (
+                    _normalize_mfa_recovery_email(
+                        destination_value
+                    )
+                )
+            except ValueError:
+                conn.rollback()
+
+                return {
+                    "status": "invalid_recovery_contact",
+                    "retry_seconds": 0,
+                }
+
+        if not destination:
+            conn.rollback()
+
+            return {
+                "status": "invalid_recovery_contact",
+                "retry_seconds": 0,
+            }
+
+        reservation = (
+            _reserve_mfa_recovery_verification_challenge(
+                cur,
+                user_id=user_id,
+                method=normalized_method,
+                purpose=normalized_purpose,
+                recovery_contact_id=recovery_contact_id,
+                recovery_request_id=recovery_request_id,
+            )
+        )
+
+        if not reservation["allowed"]:
+            conn.rollback()
+
+            return {
+                "status": reservation["reason"],
+                "retry_seconds": reservation.get(
+                    "retry_seconds",
+                    0,
+                ),
+            }
+
+        challenge_id = reservation[
+            "mfa_verification_challenge_id"
+        ]
+
+        raw_code = reservation["raw_code"]
+        expires_at = reservation["expires_at"]
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    delivery_accepted = False
+
+    verification_context = (
+        "trusted recovery contact"
+        if normalized_purpose == "recovery_contact_setup"
+        else "account recovery"
+    )
+
+    if normalized_method == "sms":
+        message_body = (
+            f"Your Peach Suite Pro {verification_context} "
+            f"verification code is {raw_code}. "
+            f"It expires in "
+            f"{MFA_VERIFICATION_CODE_MINUTES} minutes. "
+            "Do not share this code."
+        )
+
+        try:
+            sms_result = send_peach_suite_platform_sms(
+                recipient_phone=destination,
+                message_body=message_body,
+                message_type="security_verification",
+            )
+
+            delivery_accepted = bool(
+                isinstance(sms_result, dict)
+                and sms_result.get("success")
+            )
+
+            if isinstance(sms_result, dict):
+                sms_result.pop(
+                    "final_message_body",
+                    None,
+                )
+
+        except Exception:
+            log_security(
+                "MFA account-recovery verification "
+                "SMS send failed.",
+                severity="ERROR",
+                spa_id=target_spa_id,
+                related_type=(
+                    "mfa_recovery_verification_sms"
+                ),
+                related_id=user_id,
+            )
+
+    else:
+        email_body = (
+            f"Your Peach Suite Pro {verification_context} "
+            f"verification code is {raw_code}.\n\n"
+            f"This code expires in "
+            f"{MFA_VERIFICATION_CODE_MINUTES} minutes "
+            "and can be used only once.\n\n"
+            "Do not share this code with anyone. "
+            "Peach Suite Pro will never ask you to send "
+            "this code by email or text."
+        )
+
+        try:
+            response = send_email(
+                to=destination,
+                subject=(
+                    f"Your Peach Suite Pro "
+                    f"{verification_context} verification code"
+                ),
+                body=email_body,
+                add_footer=False,
+            )
+
+            delivery_accepted = bool(
+                response is not None
+                and 200
+                <= int(response.status_code)
+                < 300
+            )
+
+        except Exception:
+            log_security(
+                "MFA account-recovery verification "
+                "email send failed.",
+                severity="ERROR",
+                spa_id=target_spa_id,
+                related_type=(
+                    "mfa_recovery_verification_email"
+                ),
+                related_id=user_id,
+            )
+
+    # The raw code must not survive beyond the provider call.
+    raw_code = None
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        if delivery_accepted:
+            usable = (
+                _finalize_mfa_recovery_verification_delivery(
+                    cur,
+                    user_id=user_id,
+                    method=normalized_method,
+                    purpose=normalized_purpose,
+                    recovery_contact_id=recovery_contact_id,
+                    recovery_request_id=recovery_request_id,
+                    mfa_verification_challenge_id=(
+                        challenge_id
+                    ),
+                )
+            )
+
+            conn.commit()
+
+            return {
+                "status": (
+                    "sent"
+                    if usable
+                    else "superseded"
+                ),
+                "retry_seconds": 0,
+                "expires_at": expires_at,
+                "method": normalized_method,
+                "mfa_verification_challenge_id": (
+                    challenge_id
+                    if usable
+                    else None
+                ),
+                "recovery_contact_id": (
+                    recovery_contact_id
+                ),
+                "recovery_request_id": (
+                    recovery_request_id
+                ),
+            }
+
+        _invalidate_unsent_mfa_recovery_verification_challenge(
+            cur,
+            user_id=user_id,
+            method=normalized_method,
+            purpose=normalized_purpose,
+            recovery_contact_id=recovery_contact_id,
+            recovery_request_id=recovery_request_id,
+            mfa_verification_challenge_id=challenge_id,
+        )
+
+        conn.commit()
+
+        return {
+            "status": "delivery_failed",
+            "retry_seconds": 0,
+            "method": normalized_method,
+        }
+
+    except Exception:
+        conn.rollback()
+
+        log_security(
+            "MFA account-recovery verification "
+            "challenge finalization failed.",
+            severity="ERROR",
+            spa_id=target_spa_id,
+            related_type=(
+                "mfa_recovery_verification_challenge"
+            ),
+            related_id=user_id,
+        )
+
+        return {
+            "status": "delivery_failed",
+            "retry_seconds": 0,
+            "method": normalized_method,
+        }
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+def _send_mfa_account_recovery_rebuild_verification_code(
+    *,
+    user_id,
+    method,
+    recovery_request_id,
+):
+    normalized_method = str(
+        method or ""
+    ).strip().lower()
+
+    if normalized_method not in {
+        "sms",
+        "email",
+    }:
+        raise ValueError(
+            "Account Recovery rebuild verification method is invalid."
+        )
+
+    try:
+        user_id = int(user_id)
+        recovery_request_id = int(recovery_request_id)
+    except (TypeError, ValueError):
+        raise ValueError(
+            "Account Recovery rebuild delivery context is invalid."
+        )
+
+    if user_id <= 0 or recovery_request_id <= 0:
+        raise ValueError(
+            "Account Recovery rebuild delivery context is invalid."
+        )
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        reservation = (
+            _reserve_mfa_account_recovery_rebuild_challenge(
+                cur,
+                user_id=user_id,
+                method=normalized_method,
+                recovery_request_id=recovery_request_id,
+            )
+        )
+
+        if not reservation["allowed"]:
+            reason = str(
+                reservation.get("reason") or ""
+            ).strip().lower()
+
+            # factor_changed deliberately cancels the recovery
+            # request and writes its audit record. Preserve that
+            # security decision instead of rolling it back.
+            if reason == "factor_changed":
+                conn.commit()
+            else:
+                conn.rollback()
+
+            return {
+                "status": reason or "invalid_state",
+                "retry_seconds": reservation.get(
+                    "retry_seconds",
+                    0,
+                ),
+                "proof_count": reservation.get(
+                    "proof_count"
+                ),
+                "required_proof_count": reservation.get(
+                    "required_proof_count"
+                ),
+            }
+
+        challenge_id = int(
+            reservation[
+                "mfa_verification_challenge_id"
+            ]
+        )
+
+        raw_code = reservation["raw_code"]
+        expires_at = reservation["expires_at"]
+
+        # Read the normal account destination in the same
+        # reservation transaction. Trusted Recovery contacts
+        # are intentionally never used for MFA rebuild delivery.
+        cur.execute(
+            """
+            SELECT
+                spa_id,
+                role,
+                email,
+                sms_phone
+            FROM users
+            WHERE user_id = %s
+              AND active = TRUE
+            LIMIT 1
+            """,
+            (user_id,),
+        )
+
+        user = cur.fetchone()
+
+        if (
+            not user
+            or str(user[1] or "").strip() not in {
+                "admin",
+                "manager",
+            }
+        ):
+            conn.rollback()
+
+            return {
+                "status": "invalid_user",
+                "retry_seconds": 0,
+            }
+
+        target_spa_id = user[0]
+
+        destination_value = (
+            user[3]
+            if normalized_method == "sms"
+            else user[2]
+        )
+
+        if normalized_method == "sms":
+            try:
+                destination = (
+                    _normalize_user_mobile_phone(
+                        destination_value
+                    )
+                )
+            except ValueError:
+                conn.rollback()
+
+                return {
+                    "status": "missing_destination",
+                    "retry_seconds": 0,
+                    "method": normalized_method,
+                }
+
+        else:
+            try:
+                destination = (
+                    _normalize_mfa_recovery_email(
+                        destination_value
+                    )
+                )
+            except ValueError:
+                conn.rollback()
+
+                return {
+                    "status": "missing_destination",
+                    "retry_seconds": 0,
+                    "method": normalized_method,
+                }
+
+        if not destination:
+            conn.rollback()
+
+            return {
+                "status": "missing_destination",
+                "retry_seconds": 0,
+                "method": normalized_method,
+            }
+
+        # Persist the request-bound challenge before calling an
+        # external provider. It is not usable until the separate
+        # delivery-finalization transaction succeeds.
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    delivery_accepted = False
+
+    if normalized_method == "sms":
+        message_body = (
+            "Your Peach Suite Pro Account Recovery security "
+            f"verification code is {raw_code}. "
+            f"It expires in "
+            f"{MFA_VERIFICATION_CODE_MINUTES} minutes. "
+            "Use this code only to set Text Message as your "
+            "new two-step verification method. "
+            "Do not share this code."
+        )
+
+        try:
+            sms_result = send_peach_suite_platform_sms(
+                recipient_phone=destination,
+                message_body=message_body,
+                message_type="security_verification",
+            )
+
+            delivery_accepted = bool(
+                isinstance(sms_result, dict)
+                and sms_result.get("success")
+            )
+
+            if isinstance(sms_result, dict):
+                sms_result.pop(
+                    "final_message_body",
+                    None,
+                )
+
+        except Exception:
+            log_security(
+                "Account Recovery MFA rebuild SMS send failed.",
+                severity="ERROR",
+                spa_id=target_spa_id,
+                related_type=(
+                    "mfa_account_recovery_rebuild_sms"
+                ),
+                related_id=recovery_request_id,
+                created_by=user_id,
+            )
+
+    else:
+        email_body = (
+            "Your Peach Suite Pro Account Recovery security "
+            f"verification code is {raw_code}.\n\n"
+            f"This code expires in "
+            f"{MFA_VERIFICATION_CODE_MINUTES} minutes "
+            "and can be used only once.\n\n"
+            "Use this code only to set Email as your new "
+            "two-step verification method.\n\n"
+            "Do not share this code with anyone. "
+            "Peach Suite Pro will never ask you to send "
+            "this code by email or text."
+        )
+
+        try:
+            response = send_email(
+                to=destination,
+                subject=(
+                    "Your Peach Suite Pro Account Recovery "
+                    "security verification code"
+                ),
+                body=email_body,
+                add_footer=False,
+            )
+
+            delivery_accepted = bool(
+                response is not None
+                and 200
+                <= int(response.status_code)
+                < 300
+            )
+
+        except Exception:
+            log_security(
+                "Account Recovery MFA rebuild email send failed.",
+                severity="ERROR",
+                spa_id=target_spa_id,
+                related_type=(
+                    "mfa_account_recovery_rebuild_email"
+                ),
+                related_id=recovery_request_id,
+                created_by=user_id,
+            )
+
+    # Raw verification codes must not survive beyond the
+    # provider call.
+    raw_code = None
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        if delivery_accepted:
+            finalization = (
+                _finalize_mfa_account_recovery_rebuild_delivery(
+                    cur,
+                    user_id=user_id,
+                    method=normalized_method,
+                    recovery_request_id=recovery_request_id,
+                    mfa_verification_challenge_id=(
+                        challenge_id
+                    ),
+                    expected_destination=destination,
+                )
+            )
+
+            final_status = str(
+                finalization.get("status") or ""
+            ).strip().lower()
+
+            # The finalizer may deliberately cancel the request
+            # after detecting a changed recovery proof. All of its
+            # security-state decisions must be committed.
+            conn.commit()
+
+            return {
+                "status": final_status or "invalid_state",
+                "retry_seconds": 0,
+                "expires_at": expires_at,
+                "method": normalized_method,
+                "mfa_verification_challenge_id": (
+                    challenge_id
+                    if final_status == "sent"
+                    else None
+                ),
+                "recovery_request_id": recovery_request_id,
+                "proof_count": finalization.get(
+                    "proof_count"
+                ),
+                "required_proof_count": finalization.get(
+                    "required_proof_count"
+                ),
+            }
+
+        _invalidate_unsent_mfa_account_recovery_rebuild_challenge(
+            cur,
+            user_id=user_id,
+            method=normalized_method,
+            recovery_request_id=recovery_request_id,
+            mfa_verification_challenge_id=challenge_id,
+        )
+
+        conn.commit()
+
+        return {
+            "status": "delivery_failed",
+            "retry_seconds": 0,
+            "method": normalized_method,
+            "recovery_request_id": recovery_request_id,
+        }
+
+    except Exception:
+        conn.rollback()
+
+        log_security(
+            "Account Recovery MFA rebuild challenge "
+            "finalization failed.",
+            severity="ERROR",
+            spa_id=target_spa_id,
+            related_type=(
+                "mfa_account_recovery_rebuild_challenge"
+            ),
+            related_id=recovery_request_id,
+            created_by=user_id,
+        )
+
+        return {
+            "status": "delivery_failed",
+            "retry_seconds": 0,
+            "method": normalized_method,
+            "recovery_request_id": recovery_request_id,
+        }
+
+    finally:
+        cur.close()
+        conn.close()
+
+
 def _send_mfa_verification_code(
     *,
     user_id,
@@ -5602,11 +12743,87 @@ def _mfa_authenticator_record(
             last_accepted_totp_counter
         FROM mfa_authenticators
         WHERE user_id = %s
+          AND verified_at IS NOT NULL
           AND revoked_at IS NULL
+        ORDER BY
+            verified_at DESC,
+            mfa_authenticator_id DESC
         LIMIT 1
         {lock_clause}
         """,
         (user_id,),
+    )
+
+    return cur.fetchone()
+
+
+
+def _mfa_authenticator_candidate_record(
+    cur,
+    user_id,
+    *,
+    authenticator_id=None,
+    for_update=False,
+):
+    """
+    Return only an unverified, non-revoked Authenticator
+    candidate.
+
+    This is deliberately separate from
+    _mfa_authenticator_record(), which returns only the
+    verified active Authenticator.
+    """
+    lock_clause = (
+        " FOR UPDATE"
+        if for_update
+        else ""
+    )
+
+    params = [user_id]
+
+    authenticator_clause = ""
+
+    if authenticator_id is not None:
+        try:
+            authenticator_id = int(
+                authenticator_id
+            )
+        except (TypeError, ValueError):
+            return None
+
+        if authenticator_id <= 0:
+            return None
+
+        authenticator_clause = (
+            " AND mfa_authenticator_id = %s"
+        )
+
+        params.append(
+            authenticator_id
+        )
+
+    cur.execute(
+        f"""
+        SELECT
+            mfa_authenticator_id,
+            user_id,
+            totp_secret_encrypted,
+            created_at,
+            verified_at,
+            revoked_at,
+            last_accepted_totp_counter
+        FROM mfa_authenticators
+        WHERE user_id = %s
+          AND verified_at IS NULL
+          AND revoked_at IS NULL
+          {authenticator_clause}
+        ORDER BY
+            created_at DESC,
+            mfa_authenticator_id DESC
+        LIMIT 1
+        {lock_clause}
+        """,
+        tuple(params),
     )
 
     return cur.fetchone()
@@ -5768,6 +12985,202 @@ def _regenerate_mfa_recovery_codes(
         conn.close()
 
 
+
+def _regenerate_account_recovery_key(
+    *,
+    user_id,
+    spa_id,
+    session_role,
+    current_password,
+):
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                spa_id,
+                password_hash,
+                role,
+                login_locked_until,
+                NOW()
+            FROM users
+            WHERE user_id = %s
+              AND active = TRUE
+            FOR UPDATE
+            """,
+            (user_id,),
+        )
+
+        user = cur.fetchone()
+
+        account_matches_session = bool(
+            user
+            and user[0] == spa_id
+            and user[2] == session_role
+        )
+
+        if not account_matches_session:
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        if (
+            user[3] is not None
+            and user[3] > user[4]
+        ):
+            conn.rollback()
+
+            return {
+                "status": "locked",
+            }
+
+        if not check_password_hash(
+            user[1],
+            current_password,
+        ):
+            log_audit(
+                cur,
+                spa_id=spa_id,
+                user_id=user_id,
+                action_type=(
+                    "mfa_account_recovery_key_regeneration_failed"
+                ),
+                table_name="users",
+                record_id=user_id,
+                notes=(
+                    "Current password verification failed "
+                    "during Account Recovery Key generation."
+                ),
+            )
+
+            conn.commit()
+
+            return {
+                "status": "invalid_password",
+            }
+
+        setting = _mfa_user_setting_record(
+            cur,
+            user_id,
+        )
+
+        active_mfa_method = (
+            str(setting[2] or "").strip().lower()
+            if (
+                setting
+                and setting[3] is not None
+            )
+            else ""
+        )
+
+        if active_mfa_method not in {
+            "authenticator",
+            "sms",
+            "email",
+        }:
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        recovery_key = generate_account_recovery_key()
+
+        recovery_key_hash = hash_account_recovery_key(
+            recovery_key,
+            user_id=user_id,
+        )
+
+        cur.execute(
+            """
+            UPDATE mfa_account_recovery_keys
+            SET invalidated_at = NOW()
+            WHERE user_id = %s
+              AND invalidated_at IS NULL
+            RETURNING mfa_account_recovery_key_id
+            """,
+            (user_id,),
+        )
+
+        invalidated_key_ids = [
+            int(row[0])
+            for row in cur.fetchall()
+        ]
+
+        cur.execute(
+            """
+            INSERT INTO mfa_account_recovery_keys (
+                user_id,
+                key_hash
+            )
+            VALUES (%s, %s)
+            RETURNING mfa_account_recovery_key_id
+            """,
+            (
+                user_id,
+                recovery_key_hash,
+            ),
+        )
+
+        new_key_row = cur.fetchone()
+
+        if not new_key_row:
+            raise RuntimeError(
+                "Account Recovery Key could not be created safely."
+            )
+
+        recovery_key_id = int(
+            new_key_row[0]
+        )
+
+        action_type = (
+            "mfa_account_recovery_key_rotated"
+            if invalidated_key_ids
+            else "mfa_account_recovery_key_created"
+        )
+
+        log_audit(
+            cur,
+            spa_id=spa_id,
+            user_id=user_id,
+            action_type=action_type,
+            table_name="mfa_account_recovery_keys",
+            record_id=recovery_key_id,
+            notes=(
+                "A new PSP Account Recovery Key was created. "
+                f"{len(invalidated_key_ids)} prior active "
+                "Account Recovery Key(s) invalidated. "
+                "Only the keyed hash was stored; the raw key "
+                "is available only for one-time display."
+            ),
+        )
+
+        conn.commit()
+
+        return {
+            "status": "success",
+            "recovery_key_id": recovery_key_id,
+            "recovery_key": recovery_key,
+            "invalidated_count": len(
+                invalidated_key_ids
+            ),
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
 def _mfa_pending_user_record(
     cur,
     pending,
@@ -5868,18 +13281,23 @@ def _prepare_mfa_enrollment_for_login(user):
                 "during sign-in."
             )
 
-        authenticator = _mfa_authenticator_record(
+        active_authenticator = _mfa_authenticator_record(
             cur,
             user_id,
             for_update=True,
         )
 
-        if (
-            authenticator
-            and authenticator[4] is not None
-        ):
+        if active_authenticator:
             conn.commit()
             return None
+
+        authenticator = (
+            _mfa_authenticator_candidate_record(
+                cur,
+                user_id,
+                for_update=True,
+            )
+        )
 
         if authenticator:
             enrollment_id = authenticator[0]
@@ -5938,6 +13356,1292 @@ def _prepare_mfa_enrollment_for_login(user):
         cur.close()
         conn.close()
 
+
+
+
+def _clear_pending_mfa_recovery_contact_setup():
+    session.pop(
+        "_pending_mfa_recovery_contact_setup",
+        None,
+    )
+
+
+def _start_pending_mfa_recovery_contact_setup(
+    *,
+    user_id,
+    spa_id,
+    role,
+    method,
+    recovery_contact_id,
+):
+    normalized_method = str(
+        method or ""
+    ).strip().lower()
+
+    if normalized_method not in {
+        "sms",
+        "email",
+    }:
+        raise ValueError(
+            "Trusted recovery contact method is invalid."
+        )
+
+    try:
+        user_id = int(user_id)
+        recovery_contact_id = int(
+            recovery_contact_id
+        )
+    except (TypeError, ValueError):
+        raise ValueError(
+            "Trusted recovery contact setup identifiers are invalid."
+        )
+
+    normalized_role = str(
+        role or ""
+    ).strip()
+
+    if (
+        user_id <= 0
+        or recovery_contact_id <= 0
+        or not normalized_role
+    ):
+        raise ValueError(
+            "Trusted recovery contact setup state is invalid."
+        )
+
+    pending = {
+        "user_id": user_id,
+        "spa_id": spa_id,
+        "role": normalized_role,
+        "method": normalized_method,
+        "recovery_contact_id": recovery_contact_id,
+        "issued_at": int(time.time()),
+        "flow_id": secrets.token_urlsafe(32),
+        "mfa_verification_challenge_id": None,
+    }
+
+    session[
+        "_pending_mfa_recovery_contact_setup"
+    ] = pending
+
+    return pending
+
+
+def _pending_mfa_recovery_contact_setup():
+    pending = session.get(
+        "_pending_mfa_recovery_contact_setup"
+    )
+
+    if not isinstance(pending, dict):
+        return None
+
+    try:
+        user_id = int(
+            pending.get("user_id")
+        )
+        recovery_contact_id = int(
+            pending.get("recovery_contact_id")
+        )
+        issued_at = int(
+            pending.get("issued_at")
+        )
+    except (TypeError, ValueError):
+        _clear_pending_mfa_recovery_contact_setup()
+        return None
+
+    method = str(
+        pending.get("method")
+        or ""
+    ).strip().lower()
+
+    role = str(
+        pending.get("role")
+        or ""
+    ).strip()
+
+    flow_id = str(
+        pending.get("flow_id")
+        or ""
+    ).strip()
+
+    challenge_id = pending.get(
+        "mfa_verification_challenge_id"
+    )
+
+    try:
+        if challenge_id is not None:
+            challenge_id = int(
+                challenge_id
+            )
+    except (TypeError, ValueError):
+        _clear_pending_mfa_recovery_contact_setup()
+        return None
+
+    age_seconds = (
+        int(time.time()) - issued_at
+    )
+
+    valid = bool(
+        user_id > 0
+        and recovery_contact_id > 0
+        and method in {
+            "sms",
+            "email",
+        }
+        and role
+        and flow_id
+        and age_seconds >= 0
+        and age_seconds
+            <= MFA_PENDING_LOGIN_MAX_AGE_SECONDS
+        and pending.get("user_id")
+            == session.get("user_id")
+        and pending.get("spa_id")
+            == session.get("spa_id")
+        and role
+            == str(
+                session.get("role")
+                or ""
+            ).strip()
+        and (
+            challenge_id is None
+            or challenge_id > 0
+        )
+    )
+
+    if not valid:
+        _clear_pending_mfa_recovery_contact_setup()
+        return None
+
+    pending["user_id"] = user_id
+    pending[
+        "recovery_contact_id"
+    ] = recovery_contact_id
+    pending["issued_at"] = issued_at
+    pending["method"] = method
+    pending["role"] = role
+    pending["flow_id"] = flow_id
+    pending[
+        "mfa_verification_challenge_id"
+    ] = challenge_id
+
+    return pending
+
+
+
+def _create_pending_mfa_recovery_contact_setup(
+    *,
+    user_id,
+    spa_id,
+    role,
+    method,
+    contact_value,
+):
+    normalized_method = str(
+        method or ""
+    ).strip().lower()
+
+    if normalized_method not in {
+        "sms",
+        "email",
+    }:
+        return {
+            "status": "invalid_method",
+        }
+
+    try:
+        user_id = int(user_id)
+    except (TypeError, ValueError):
+        return {
+            "status": "invalid_state",
+        }
+
+    normalized_role = str(
+        role or ""
+    ).strip()
+
+    if user_id <= 0 or not normalized_role:
+        return {
+            "status": "invalid_state",
+        }
+
+    try:
+        if normalized_method == "sms":
+            normalized_value = (
+                _normalize_user_mobile_phone(
+                    contact_value
+                )
+            )
+        else:
+            normalized_value = (
+                _normalize_mfa_recovery_email(
+                    contact_value
+                )
+            )
+    except ValueError as exc:
+        return {
+            "status": "invalid_contact",
+            "message": str(exc),
+        }
+
+    if not normalized_value:
+        return {
+            "status": "invalid_contact",
+            "message": (
+                "Please enter a trusted recovery "
+                + (
+                    "mobile number."
+                    if normalized_method == "sms"
+                    else "email address."
+                )
+            ),
+        }
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        # Use the standard MFA user tuple so the existing
+        # account-lock helper remains authoritative.
+        cur.execute(
+            """
+            SELECT
+                user_id,
+                spa_id,
+                first_name,
+                last_name,
+                email,
+                password_hash,
+                role,
+                password_changed_at,
+                must_change_password,
+                login_locked_until,
+                NOW(),
+                sms_phone
+            FROM users
+            WHERE user_id = %s
+              AND active = TRUE
+            FOR UPDATE
+            """,
+            (user_id,),
+        )
+
+        user = cur.fetchone()
+
+        account_matches_session = bool(
+            user
+            and user[0] == session.get("user_id")
+            and user[1] == session.get("spa_id")
+            and user[1] == spa_id
+            and str(
+                user[6] or ""
+            ).strip()
+                == str(
+                    session.get("role")
+                    or ""
+                ).strip()
+            and str(
+                user[6] or ""
+            ).strip()
+                == normalized_role
+        )
+
+        if not account_matches_session:
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        remaining_minutes = (
+            _mfa_login_lock_remaining_minutes(
+                user
+            )
+        )
+
+        if remaining_minutes is not None:
+            conn.rollback()
+
+            return {
+                "status": "locked",
+                "remaining_minutes": remaining_minutes,
+            }
+
+        setting = _mfa_user_setting_record(
+            cur,
+            user[0],
+            for_update=True,
+        )
+
+        active_method = (
+            str(
+                setting[2] or ""
+            ).strip().lower()
+            if (
+                setting
+                and setting[3] is not None
+            )
+            else ""
+        )
+
+        if active_method not in {
+            "authenticator",
+            "sms",
+            "email",
+        }:
+            conn.rollback()
+
+            return {
+                "status": "mfa_not_configured",
+            }
+
+        # A Trusted Recovery destination must be independent
+        # from the account's ordinary login/MFA destination.
+        if normalized_method == "email":
+            try:
+                ordinary_destination = (
+                    _normalize_mfa_recovery_email(
+                        user[4]
+                    )
+                )
+            except ValueError:
+                conn.rollback()
+
+                return {
+                    "status": "invalid_state",
+                }
+
+            if (
+                ordinary_destination
+                and normalized_value
+                    == ordinary_destination
+            ):
+                conn.rollback()
+
+                return {
+                    "status": "same_as_account_contact",
+                }
+
+        else:
+            try:
+                ordinary_destination = (
+                    _normalize_user_mobile_phone(
+                        user[11]
+                    )
+                    if user[11]
+                    else ""
+                )
+            except ValueError:
+                conn.rollback()
+
+                return {
+                    "status": "invalid_state",
+                }
+
+            if (
+                ordinary_destination
+                and normalized_value
+                    == ordinary_destination
+            ):
+                conn.rollback()
+
+                return {
+                    "status": "same_as_account_contact",
+                }
+
+        # Serialize current and pending contacts of this type.
+        cur.execute(
+            """
+            SELECT
+                mfa_recovery_contact_id,
+                contact_value,
+                verified_at,
+                revoked_at
+            FROM mfa_recovery_contacts
+            WHERE user_id = %s
+              AND contact_type = %s
+              AND revoked_at IS NULL
+            ORDER BY
+                verified_at DESC NULLS LAST,
+                mfa_recovery_contact_id DESC
+            FOR UPDATE
+            """,
+            (
+                user[0],
+                normalized_method,
+            ),
+        )
+
+        current_rows = cur.fetchall()
+
+        verified_contact = None
+        pending_contact = None
+
+        for row in current_rows:
+            if row[2] is not None:
+                verified_contact = row
+            else:
+                pending_contact = row
+
+        if (
+            verified_contact
+            and str(
+                verified_contact[1] or ""
+            ).strip().lower()
+                == normalized_value.lower()
+        ):
+            conn.rollback()
+
+            return {
+                "status": "already_verified",
+                "recovery_contact_id": int(
+                    verified_contact[0]
+                ),
+            }
+
+        if (
+            pending_contact
+            and str(
+                pending_contact[1] or ""
+            ).strip().lower()
+                == normalized_value.lower()
+        ):
+            recovery_contact_id = int(
+                pending_contact[0]
+            )
+
+            conn.commit()
+
+            return {
+                "status": "pending",
+                "recovery_contact_id": (
+                    recovery_contact_id
+                ),
+                "method": normalized_method,
+                "masked_label": (
+                    _mask_mfa_recovery_phone_for_display(
+                        normalized_value
+                    )
+                    if normalized_method == "sms"
+                    else _mask_mfa_recovery_email_for_display(
+                        normalized_value
+                    )
+                ),
+            }
+
+        retired_pending_id = None
+
+        if pending_contact:
+            retired_pending_id = int(
+                pending_contact[0]
+            )
+
+            cur.execute(
+                """
+                UPDATE mfa_recovery_contacts
+                SET revoked_at = NOW()
+                WHERE mfa_recovery_contact_id = %s
+                  AND user_id = %s
+                  AND contact_type = %s
+                  AND verified_at IS NULL
+                  AND revoked_at IS NULL
+                RETURNING mfa_recovery_contact_id
+                """,
+                (
+                    retired_pending_id,
+                    user[0],
+                    normalized_method,
+                ),
+            )
+
+            if not cur.fetchone():
+                raise RuntimeError(
+                    "Pending Trusted Recovery contact "
+                    "could not be retired safely."
+                )
+
+        cur.execute(
+            """
+            INSERT INTO mfa_recovery_contacts (
+                user_id,
+                contact_type,
+                contact_value
+            )
+            VALUES (%s, %s, %s)
+            RETURNING mfa_recovery_contact_id
+            """,
+            (
+                user[0],
+                normalized_method,
+                normalized_value,
+            ),
+        )
+
+        created = cur.fetchone()
+
+        if not created:
+            raise RuntimeError(
+                "Pending Trusted Recovery contact "
+                "could not be created."
+            )
+
+        recovery_contact_id = int(
+            created[0]
+        )
+
+        log_audit(
+            cur,
+            spa_id=user[1],
+            user_id=user[0],
+            action_type=(
+                "mfa_recovery_contact_setup_started"
+            ),
+            table_name="mfa_recovery_contacts",
+            record_id=recovery_contact_id,
+            notes=(
+                f"Trusted recovery "
+                f"{'phone' if normalized_method == 'sms' else 'email'} "
+                "setup started. The new destination remains "
+                "untrusted until its verification code succeeds."
+                + (
+                    " A previous unfinished setup for this "
+                    "contact type was revoked."
+                    if retired_pending_id is not None
+                    else ""
+                )
+            ),
+        )
+
+        conn.commit()
+
+        return {
+            "status": "created",
+            "recovery_contact_id": (
+                recovery_contact_id
+            ),
+            "method": normalized_method,
+            "masked_label": (
+                _mask_mfa_recovery_phone_for_display(
+                    normalized_value
+                )
+                if normalized_method == "sms"
+                else _mask_mfa_recovery_email_for_display(
+                    normalized_value
+                )
+            ),
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+def _verify_mfa_recovery_contact_setup_code(
+    pending,
+    submitted_code,
+):
+    if not isinstance(pending, dict):
+        return {
+            "status": "invalid_state",
+        }
+
+    method = str(
+        pending.get("method")
+        or ""
+    ).strip().lower()
+
+    if method not in {
+        "sms",
+        "email",
+    }:
+        return {
+            "status": "invalid_state",
+        }
+
+    role = str(
+        pending.get("role")
+        or ""
+    ).strip()
+
+    try:
+        user_id = int(
+            pending.get("user_id")
+        )
+        recovery_contact_id = int(
+            pending.get("recovery_contact_id")
+        )
+        challenge_id = int(
+            pending.get(
+                "mfa_verification_challenge_id"
+            )
+        )
+    except (TypeError, ValueError):
+        return {
+            "status": "invalid_state",
+        }
+
+    if (
+        user_id <= 0
+        or recovery_contact_id <= 0
+        or challenge_id <= 0
+        or not role
+    ):
+        return {
+            "status": "invalid_state",
+        }
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        # Re-lock the exact logged-in account. Trusted Recovery
+        # enrollment is an authenticated security-setting change.
+        cur.execute(
+            """
+            SELECT
+                user_id,
+                spa_id,
+                first_name,
+                last_name,
+                email,
+                password_hash,
+                role,
+                password_changed_at,
+                must_change_password,
+                login_locked_until,
+                NOW(),
+                sms_phone
+            FROM users
+            WHERE user_id = %s
+              AND active = TRUE
+            FOR UPDATE
+            """,
+            (user_id,),
+        )
+
+        user = cur.fetchone()
+
+        account_matches_session = bool(
+            user
+            and user[0] == session.get("user_id")
+            and user[1] == session.get("spa_id")
+            and user[1] == pending.get("spa_id")
+            and str(
+                user[6] or ""
+            ).strip()
+                == str(
+                    session.get("role")
+                    or ""
+                ).strip()
+            and str(
+                user[6] or ""
+            ).strip()
+                == role
+        )
+
+        if not account_matches_session:
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        remaining_minutes = (
+            _mfa_login_lock_remaining_minutes(
+                user
+            )
+        )
+
+        if remaining_minutes is not None:
+            conn.rollback()
+
+            return {
+                "status": "locked",
+                "remaining_minutes": remaining_minutes,
+            }
+
+        setting = _mfa_user_setting_record(
+            cur,
+            user[0],
+            for_update=True,
+        )
+
+        active_method = (
+            str(
+                setting[2] or ""
+            ).strip().lower()
+            if (
+                setting
+                and setting[3] is not None
+            )
+            else ""
+        )
+
+        if active_method not in {
+            "authenticator",
+            "sms",
+            "email",
+        }:
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        # Lock the exact pending destination being verified.
+        cur.execute(
+            """
+            SELECT
+                mfa_recovery_contact_id,
+                contact_value,
+                verified_at,
+                revoked_at
+            FROM mfa_recovery_contacts
+            WHERE mfa_recovery_contact_id = %s
+              AND user_id = %s
+              AND contact_type = %s
+            FOR UPDATE
+            """,
+            (
+                recovery_contact_id,
+                user[0],
+                method,
+            ),
+        )
+
+        recovery_contact = cur.fetchone()
+
+        if (
+            not recovery_contact
+            or recovery_contact[2] is not None
+            or recovery_contact[3] is not None
+        ):
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        contact_value = str(
+            recovery_contact[1] or ""
+        ).strip()
+
+        # Revalidate the destination at promotion time so a
+        # concurrent profile change cannot turn this recovery
+        # factor into the ordinary account/MFA destination.
+        try:
+            if method == "email":
+                normalized_contact_value = (
+                    _normalize_mfa_recovery_email(
+                        contact_value
+                    )
+                )
+
+                ordinary_destination = (
+                    _normalize_mfa_recovery_email(
+                        user[4]
+                    )
+                )
+
+            else:
+                normalized_contact_value = (
+                    _normalize_user_mobile_phone(
+                        contact_value
+                    )
+                )
+
+                ordinary_destination = (
+                    _normalize_user_mobile_phone(
+                        user[11]
+                    )
+                    if user[11]
+                    else ""
+                )
+
+        except ValueError:
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        if (
+            not normalized_contact_value
+            or (
+                ordinary_destination
+                and normalized_contact_value
+                    == ordinary_destination
+            )
+        ):
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        # The challenge must be the exact delivered setup
+        # challenge for this user and this pending destination.
+        cur.execute(
+            """
+            SELECT
+                mfa_verification_challenge_id,
+                code_hash
+            FROM mfa_verification_challenges
+            WHERE mfa_verification_challenge_id = %s
+              AND user_id = %s
+              AND method = %s
+              AND purpose = 'recovery_contact_setup'
+              AND recovery_contact_id = %s
+              AND recovery_request_id IS NULL
+              AND delivery_sent_at IS NOT NULL
+              AND used_at IS NULL
+              AND invalidated_at IS NULL
+              AND expires_at > NOW()
+            FOR UPDATE
+            """,
+            (
+                challenge_id,
+                user[0],
+                method,
+                recovery_contact_id,
+            ),
+        )
+
+        challenge = cur.fetchone()
+
+        if not challenge:
+            conn.rollback()
+
+            return {
+                "status": "missing_challenge",
+            }
+
+        verified = verify_verification_code(
+            submitted_code,
+            challenge[1],
+            user_id=user[0],
+            method=method,
+            purpose="recovery_contact_setup",
+        )
+
+        if not verified:
+            method_label = (
+                "Trusted recovery phone"
+                if method == "sms"
+                else "Trusted recovery email"
+            )
+
+            newly_locked = (
+                _record_failed_mfa_verification(
+                    cur,
+                    user,
+                    action_type=(
+                        "mfa_recovery_contact_setup_verification_failed"
+                    ),
+                    notes=(
+                        f"{method_label} setup verification failed."
+                    ),
+                )
+            )
+
+            conn.commit()
+
+            return {
+                "status": (
+                    "locked"
+                    if newly_locked
+                    else "invalid"
+                ),
+                "remaining_minutes": (
+                    LOGIN_FAILURE_LOCK_MINUTES
+                    if newly_locked
+                    else None
+                ),
+            }
+
+        # Consume the exact delivered challenge atomically.
+        cur.execute(
+            """
+            UPDATE mfa_verification_challenges
+            SET used_at = NOW()
+            WHERE mfa_verification_challenge_id = %s
+              AND user_id = %s
+              AND method = %s
+              AND purpose = 'recovery_contact_setup'
+              AND recovery_contact_id = %s
+              AND recovery_request_id IS NULL
+              AND delivery_sent_at IS NOT NULL
+              AND used_at IS NULL
+              AND invalidated_at IS NULL
+              AND expires_at > NOW()
+            RETURNING mfa_verification_challenge_id
+            """,
+            (
+                challenge[0],
+                user[0],
+                method,
+                recovery_contact_id,
+            ),
+        )
+
+        if not cur.fetchone():
+            raise RuntimeError(
+                "Trusted Recovery setup challenge "
+                "could not be consumed safely."
+            )
+
+        # Revoke the prior CURRENT trusted destination first.
+        # This ordering is required by the partial unique index
+        # that permits only one active verified contact per type.
+        cur.execute(
+            """
+            UPDATE mfa_recovery_contacts
+            SET revoked_at = NOW()
+            WHERE user_id = %s
+              AND contact_type = %s
+              AND mfa_recovery_contact_id <> %s
+              AND verified_at IS NOT NULL
+              AND revoked_at IS NULL
+            RETURNING mfa_recovery_contact_id
+            """,
+            (
+                user[0],
+                method,
+                recovery_contact_id,
+            ),
+        )
+
+        replaced_contact_ids = [
+            int(row[0])
+            for row in cur.fetchall()
+        ]
+
+        # Promote only the exact pending destination whose code
+        # was successfully verified.
+        cur.execute(
+            """
+            UPDATE mfa_recovery_contacts
+            SET verified_at = NOW()
+            WHERE mfa_recovery_contact_id = %s
+              AND user_id = %s
+              AND contact_type = %s
+              AND verified_at IS NULL
+              AND revoked_at IS NULL
+            RETURNING
+                mfa_recovery_contact_id,
+                verified_at
+            """,
+            (
+                recovery_contact_id,
+                user[0],
+                method,
+            ),
+        )
+
+        promoted = cur.fetchone()
+
+        if not promoted:
+            raise RuntimeError(
+                "Trusted Recovery contact could not "
+                "be promoted safely."
+            )
+
+        # No other setup code for this destination should remain
+        # usable after successful enrollment.
+        cur.execute(
+            """
+            UPDATE mfa_verification_challenges
+            SET invalidated_at = NOW()
+            WHERE user_id = %s
+              AND method = %s
+              AND purpose = 'recovery_contact_setup'
+              AND recovery_contact_id = %s
+              AND recovery_request_id IS NULL
+              AND mfa_verification_challenge_id <> %s
+              AND used_at IS NULL
+              AND invalidated_at IS NULL
+            """,
+            (
+                user[0],
+                method,
+                recovery_contact_id,
+                challenge[0],
+            ),
+        )
+
+        for old_contact_id in replaced_contact_ids:
+            log_audit(
+                cur,
+                spa_id=user[1],
+                user_id=user[0],
+                action_type=(
+                    "mfa_recovery_contact_replaced"
+                ),
+                table_name="mfa_recovery_contacts",
+                record_id=old_contact_id,
+                notes=(
+                    "Previous trusted recovery "
+                    f"{'phone' if method == 'sms' else 'email'} "
+                    "was revoked after its verified "
+                    "replacement became active."
+                ),
+            )
+
+        log_audit(
+            cur,
+            spa_id=user[1],
+            user_id=user[0],
+            action_type=(
+                "mfa_recovery_contact_setup_verified"
+            ),
+            table_name="mfa_recovery_contacts",
+            record_id=recovery_contact_id,
+            notes=(
+                "Trusted recovery "
+                f"{'phone' if method == 'sms' else 'email'} "
+                "was verified and activated."
+            ),
+        )
+
+        conn.commit()
+
+        return {
+            "status": "success",
+            "recovery_contact_id": recovery_contact_id,
+            "method": method,
+            "verified_at": promoted[1],
+            "replaced_contact_count": len(
+                replaced_contact_ids
+            ),
+            "masked_label": (
+                _mask_mfa_recovery_phone_for_display(
+                    normalized_contact_value
+                )
+                if method == "sms"
+                else _mask_mfa_recovery_email_for_display(
+                    normalized_contact_value
+                )
+            ),
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+def _revoke_pending_mfa_recovery_contact_setup(
+    pending,
+):
+    if not isinstance(pending, dict):
+        return {
+            "status": "not_applicable",
+        }
+
+    method = str(
+        pending.get("method")
+        or ""
+    ).strip().lower()
+
+    role = str(
+        pending.get("role")
+        or ""
+    ).strip()
+
+    try:
+        user_id = int(
+            pending.get("user_id")
+        )
+        recovery_contact_id = int(
+            pending.get("recovery_contact_id")
+        )
+    except (TypeError, ValueError):
+        return {
+            "status": "invalid_state",
+        }
+
+    if (
+        user_id <= 0
+        or recovery_contact_id <= 0
+        or method not in {
+            "sms",
+            "email",
+        }
+        or not role
+    ):
+        return {
+            "status": "invalid_state",
+        }
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                user_id,
+                spa_id,
+                role
+            FROM users
+            WHERE user_id = %s
+              AND active = TRUE
+            FOR UPDATE
+            """,
+            (user_id,),
+        )
+
+        user = cur.fetchone()
+
+        account_matches_session = bool(
+            user
+            and user[0] == session.get("user_id")
+            and user[1] == session.get("spa_id")
+            and user[1] == pending.get("spa_id")
+            and str(
+                user[2] or ""
+            ).strip()
+                == str(
+                    session.get("role")
+                    or ""
+                ).strip()
+            and str(
+                user[2] or ""
+            ).strip()
+                == role
+        )
+
+        if not account_matches_session:
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        cur.execute(
+            """
+            SELECT
+                mfa_recovery_contact_id,
+                verified_at,
+                revoked_at
+            FROM mfa_recovery_contacts
+            WHERE mfa_recovery_contact_id = %s
+              AND user_id = %s
+              AND contact_type = %s
+            FOR UPDATE
+            """,
+            (
+                recovery_contact_id,
+                user_id,
+                method,
+            ),
+        )
+
+        contact = cur.fetchone()
+
+        if not contact:
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        # Never revoke a verified Trusted Recovery contact from
+        # cancellation of an unfinished setup flow.
+        if (
+            contact[1] is not None
+            or contact[2] is not None
+        ):
+            conn.rollback()
+
+            return {
+                "status": "not_applicable",
+            }
+
+        cur.execute(
+            """
+            UPDATE mfa_recovery_contacts
+            SET revoked_at = NOW()
+            WHERE mfa_recovery_contact_id = %s
+              AND user_id = %s
+              AND contact_type = %s
+              AND verified_at IS NULL
+              AND revoked_at IS NULL
+            RETURNING mfa_recovery_contact_id
+            """,
+            (
+                recovery_contact_id,
+                user_id,
+                method,
+            ),
+        )
+
+        if not cur.fetchone():
+            raise RuntimeError(
+                "Pending Trusted Recovery contact "
+                "could not be cancelled safely."
+            )
+
+        cur.execute(
+            """
+            UPDATE mfa_verification_challenges
+            SET invalidated_at = NOW()
+            WHERE user_id = %s
+              AND method = %s
+              AND purpose = 'recovery_contact_setup'
+              AND recovery_contact_id = %s
+              AND recovery_request_id IS NULL
+              AND used_at IS NULL
+              AND invalidated_at IS NULL
+            """,
+            (
+                user_id,
+                method,
+                recovery_contact_id,
+            ),
+        )
+
+        log_audit(
+            cur,
+            spa_id=user[1],
+            user_id=user_id,
+            action_type=(
+                "mfa_recovery_contact_setup_cancelled"
+            ),
+            table_name="mfa_recovery_contacts",
+            record_id=recovery_contact_id,
+            notes=(
+                "Unfinished trusted recovery "
+                f"{'phone' if method == 'sms' else 'email'} "
+                "setup was cancelled and revoked."
+            ),
+        )
+
+        conn.commit()
+
+        return {
+            "status": "success",
+            "recovery_contact_id": recovery_contact_id,
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
 
 
 def _clear_pending_mfa_method_change():
@@ -6578,10 +15282,24 @@ def _prepare_mfa_authenticator_method_change(
                 "status": "invalid_state",
             }
 
-        authenticator = _mfa_authenticator_record(
+        active_authenticator = _mfa_authenticator_record(
             cur,
             user[0],
             for_update=True,
+        )
+
+        if active_authenticator:
+            conn.rollback()
+            return {
+                "status": "invalid_state",
+            }
+
+        authenticator = (
+            _mfa_authenticator_candidate_record(
+                cur,
+                user[0],
+                for_update=True,
+            )
         )
 
         if authenticator:
@@ -6822,7 +15540,7 @@ def _verify_mfa_authenticator_method_change(
                 "status": "invalid_state",
             }
 
-        authenticator = _mfa_authenticator_record(
+        authenticator = _mfa_authenticator_candidate_record(
             cur,
             user[0],
             for_update=True,
@@ -7439,6 +16157,7 @@ def _mfa_pending_csrf_purpose(
         "enroll",
         "verify",
         "recovery",
+        "account_recovery_start",
         "complete",
     }:
         raise ValueError(
@@ -7503,6 +16222,1205 @@ def _record_failed_mfa_verification(
     )
 
     return newly_locked
+
+
+def _verify_mfa_account_recovery_contact_proof(
+    *,
+    user_id,
+    recovery_request_id,
+    recovery_contact_id,
+    mfa_verification_challenge_id,
+    method,
+    submitted_code,
+):
+    normalized_method = str(
+        method or ""
+    ).strip().lower()
+
+    if normalized_method not in {
+        "sms",
+        "email",
+    }:
+        return {
+            "status": "invalid_state",
+        }
+
+    try:
+        user_id = int(user_id)
+        recovery_request_id = int(
+            recovery_request_id
+        )
+        recovery_contact_id = int(
+            recovery_contact_id
+        )
+        mfa_verification_challenge_id = int(
+            mfa_verification_challenge_id
+        )
+    except (TypeError, ValueError):
+        return {
+            "status": "invalid_state",
+        }
+
+    if (
+        user_id <= 0
+        or recovery_request_id <= 0
+        or recovery_contact_id <= 0
+        or mfa_verification_challenge_id <= 0
+    ):
+        return {
+            "status": "invalid_state",
+        }
+
+    proof_type = (
+        "recovery_sms"
+        if normalized_method == "sms"
+        else "recovery_email"
+    )
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        # Match the ordinary MFA user tuple so the existing
+        # business-login lock helper remains authoritative.
+        cur.execute(
+            """
+            SELECT
+                user_id,
+                spa_id,
+                first_name,
+                last_name,
+                email,
+                password_hash,
+                role,
+                password_changed_at,
+                must_change_password,
+                login_locked_until,
+                NOW(),
+                sms_phone
+            FROM users
+            WHERE user_id = %s
+              AND active = TRUE
+            FOR UPDATE
+            """,
+            (user_id,),
+        )
+
+        user = cur.fetchone()
+
+        if not user:
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        remaining_minutes = (
+            _mfa_login_lock_remaining_minutes(
+                user
+            )
+        )
+
+        if remaining_minutes is not None:
+            conn.rollback()
+
+            return {
+                "status": "locked",
+                "remaining_minutes": remaining_minutes,
+            }
+
+        cur.execute(
+            """
+            SELECT
+                mfa_account_recovery_request_id,
+                status,
+                required_proof_count,
+                expires_at,
+                recovery_verified_at,
+                restricted_session_started_at,
+                proof_reverification_started_at,
+                proof_reverification_expires_at,
+                proof_reverification_verified_at
+            FROM mfa_account_recovery_requests
+            WHERE mfa_account_recovery_request_id = %s
+              AND user_id = %s
+            FOR UPDATE
+            """,
+            (
+                recovery_request_id,
+                user_id,
+            ),
+        )
+
+        recovery_request = cur.fetchone()
+
+        if not recovery_request:
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        recovery_status = str(
+            recovery_request[1] or ""
+        ).strip().lower()
+
+        required_proof_count = int(
+            recovery_request[2]
+        )
+
+        recovery_expires_at = (
+            recovery_request[3]
+        )
+
+        now_at = user[10]
+
+        recovery_verified_at = recovery_request[4]
+        restricted_session_started_at = (
+            recovery_request[5]
+        )
+        proof_reverification_started_at = (
+            recovery_request[6]
+        )
+        proof_reverification_expires_at = (
+            recovery_request[7]
+        )
+        proof_reverification_verified_at = (
+            recovery_request[8]
+        )
+
+        if (
+            recovery_status == "pending"
+            and recovery_expires_at <= now_at
+        ):
+            cur.execute(
+                """
+                UPDATE mfa_account_recovery_requests
+                SET status = 'expired'
+                WHERE mfa_account_recovery_request_id = %s
+                  AND user_id = %s
+                  AND status = 'pending'
+                  AND expires_at <= NOW()
+                """,
+                (
+                    recovery_request_id,
+                    user_id,
+                ),
+            )
+
+            cur.execute(
+                """
+                UPDATE mfa_verification_challenges
+                SET invalidated_at = NOW()
+                WHERE user_id = %s
+                  AND purpose = 'account_recovery'
+                  AND recovery_request_id = %s
+                  AND used_at IS NULL
+                  AND invalidated_at IS NULL
+                """,
+                (
+                    user_id,
+                    recovery_request_id,
+                ),
+            )
+
+            conn.commit()
+
+            return {
+                "status": "expired",
+            }
+
+        restricted_reverification = (
+            recovery_status == "restricted"
+            and recovery_verified_at is not None
+            and restricted_session_started_at is not None
+            and proof_reverification_started_at is not None
+            and proof_reverification_expires_at is not None
+        )
+
+        if (
+            restricted_reverification
+            and proof_reverification_expires_at <= now_at
+        ):
+            conn.rollback()
+
+            return {
+                "status": "expired",
+            }
+
+        if (
+            recovery_status == "restricted"
+            and proof_reverification_verified_at is not None
+        ):
+            conn.rollback()
+
+            return {
+                "status": "recovery_verified",
+            }
+
+        if (
+            recovery_status != "pending"
+            and not (
+                restricted_reverification
+                and proof_reverification_expires_at > now_at
+                and proof_reverification_verified_at is None
+            )
+        ):
+            conn.rollback()
+
+            return {
+                "status": (
+                    "recovery_verified"
+                    if recovery_status == "self_service_verified"
+                    else "invalid_state"
+                ),
+            }
+
+        cur.execute(
+            """
+            SELECT
+                mfa_recovery_contact_id,
+                verified_at,
+                revoked_at
+            FROM mfa_recovery_contacts
+            WHERE mfa_recovery_contact_id = %s
+              AND user_id = %s
+              AND contact_type = %s
+            FOR UPDATE
+            """,
+            (
+                recovery_contact_id,
+                user_id,
+                normalized_method,
+            ),
+        )
+
+        recovery_contact = cur.fetchone()
+
+        if (
+            not recovery_contact
+            or recovery_contact[1] is None
+            or recovery_contact[2] is not None
+        ):
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        cur.execute(
+            """
+            SELECT
+                mfa_verification_challenge_id,
+                code_hash
+            FROM mfa_verification_challenges
+            WHERE mfa_verification_challenge_id = %s
+              AND user_id = %s
+              AND method = %s
+              AND purpose = 'account_recovery'
+              AND recovery_contact_id = %s
+              AND recovery_request_id = %s
+              AND delivery_sent_at IS NOT NULL
+              AND used_at IS NULL
+              AND invalidated_at IS NULL
+              AND expires_at > NOW()
+            FOR UPDATE
+            """,
+            (
+                mfa_verification_challenge_id,
+                user_id,
+                normalized_method,
+                recovery_contact_id,
+                recovery_request_id,
+            ),
+        )
+
+        challenge = cur.fetchone()
+
+        if not challenge:
+            conn.rollback()
+
+            return {
+                "status": "missing_challenge",
+            }
+
+        verified = verify_verification_code(
+            submitted_code,
+            challenge[1],
+            user_id=user_id,
+            method=normalized_method,
+            purpose="account_recovery",
+        )
+
+        if not verified:
+            method_label = (
+                "Trusted recovery phone"
+                if normalized_method == "sms"
+                else "Trusted recovery email"
+            )
+
+            newly_locked = (
+                _record_failed_mfa_verification(
+                    cur,
+                    user,
+                    action_type=(
+                        "mfa_account_recovery_verification_failed"
+                    ),
+                    notes=(
+                        f"{method_label} account-recovery "
+                        "verification failed."
+                    ),
+                )
+            )
+
+            conn.commit()
+
+            return {
+                "status": (
+                    "locked"
+                    if newly_locked
+                    else "invalid"
+                ),
+                "remaining_minutes": (
+                    LOGIN_FAILURE_LOCK_MINUTES
+                    if newly_locked
+                    else None
+                ),
+            }
+
+        # Consume the exact delivered challenge atomically.
+        cur.execute(
+            """
+            UPDATE mfa_verification_challenges
+            SET used_at = NOW()
+            WHERE mfa_verification_challenge_id = %s
+              AND user_id = %s
+              AND method = %s
+              AND purpose = 'account_recovery'
+              AND recovery_contact_id = %s
+              AND recovery_request_id = %s
+              AND delivery_sent_at IS NOT NULL
+              AND used_at IS NULL
+              AND invalidated_at IS NULL
+              AND expires_at > NOW()
+            RETURNING mfa_verification_challenge_id
+            """,
+            (
+                challenge[0],
+                user_id,
+                normalized_method,
+                recovery_contact_id,
+                recovery_request_id,
+            ),
+        )
+
+        if not cur.fetchone():
+            raise RuntimeError(
+                "MFA account-recovery verification "
+                "challenge could not be consumed safely."
+            )
+
+        cur.execute(
+            """
+            UPDATE mfa_recovery_contacts
+            SET last_used_at = NOW()
+            WHERE mfa_recovery_contact_id = %s
+              AND user_id = %s
+              AND contact_type = %s
+              AND verified_at IS NOT NULL
+              AND revoked_at IS NULL
+            RETURNING mfa_recovery_contact_id
+            """,
+            (
+                recovery_contact_id,
+                user_id,
+                normalized_method,
+            ),
+        )
+
+        if not cur.fetchone():
+            raise RuntimeError(
+                "Trusted recovery contact could not "
+                "be recorded as used."
+            )
+
+        # The partial unique index ensures only one CURRENT proof
+        # of each factor type can count for one recovery request.
+        # Superseded proofs remain available for security audit history.
+        cur.execute(
+            """
+            INSERT INTO mfa_account_recovery_proofs (
+                mfa_account_recovery_request_id,
+                user_id,
+                proof_type,
+                recovery_contact_id,
+                recovery_method,
+                verification_challenge_id
+            )
+            VALUES (
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s
+            )
+            ON CONFLICT (
+              mfa_account_recovery_request_id,
+              proof_type
+            )
+            WHERE superseded_at IS NULL
+            DO NOTHING
+            RETURNING mfa_account_recovery_proof_id
+            """,
+            (
+                recovery_request_id,
+                user_id,
+                proof_type,
+                recovery_contact_id,
+                normalized_method,
+                challenge[0],
+            ),
+        )
+
+        inserted_proof = cur.fetchone()
+
+        if inserted_proof:
+            proof_id = inserted_proof[0]
+            new_proof = True
+        else:
+            cur.execute(
+                """
+                SELECT mfa_account_recovery_proof_id
+                FROM mfa_account_recovery_proofs
+                WHERE mfa_account_recovery_request_id = %s
+                  AND user_id = %s
+                  AND proof_type = %s
+                AND superseded_at IS NULL
+                LIMIT 1
+                """,
+                (
+                    recovery_request_id,
+                    user_id,
+                    proof_type,
+                ),
+            )
+
+            existing_proof = cur.fetchone()
+
+            if not existing_proof:
+                raise RuntimeError(
+                    "Existing account-recovery proof "
+                    "could not be resolved safely."
+                )
+
+            proof_id = existing_proof[0]
+            new_proof = False
+
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM mfa_account_recovery_proofs
+            WHERE mfa_account_recovery_request_id = %s
+              AND user_id = %s
+              AND superseded_at IS NULL
+              AND proof_type IN (
+                  'recovery_email',
+                  'recovery_sms',
+                  'recovery_key'
+              )
+            """,
+            (
+                recovery_request_id,
+                user_id,
+            ),
+        )
+
+        proof_count = int(
+            cur.fetchone()[0] or 0
+        )
+
+        recovery_verified = (
+            proof_count >= required_proof_count
+        )
+
+        if recovery_verified:
+            if recovery_status == "pending":
+                cur.execute(
+                    """
+                    UPDATE mfa_account_recovery_requests
+                    SET
+                        status = 'self_service_verified',
+                        recovery_verified_at = COALESCE(
+                            recovery_verified_at,
+                            NOW()
+                        )
+                    WHERE mfa_account_recovery_request_id = %s
+                        AND user_id = %s
+                        AND status = 'pending'
+                        AND expires_at > NOW()
+                    RETURNING mfa_account_recovery_request_id
+                    """,
+                    (
+                        recovery_request_id,
+                        user_id,
+                    ),
+                )
+
+                if not cur.fetchone():
+                    raise RuntimeError(
+                        'MFA account recovery could not be '
+                        'advanced safely after proof verification.'
+                    )
+
+            else:
+                cur.execute(
+                    """
+                    UPDATE mfa_account_recovery_requests
+                    SET proof_reverification_verified_at = NOW()
+                    WHERE mfa_account_recovery_request_id = %s
+                        AND user_id = %s
+                        AND status = 'restricted'
+                        AND restricted_session_started_at IS NOT NULL
+                        AND proof_reverification_started_at IS NOT NULL
+                        AND proof_reverification_expires_at > NOW()
+                        AND proof_reverification_verified_at IS NULL
+                    RETURNING mfa_account_recovery_request_id
+                    """,
+                    (
+                        recovery_request_id,
+                        user_id,
+                    ),
+                )
+
+                if not cur.fetchone():
+                    raise RuntimeError(
+                        'Interrupted Account Recovery fresh-proof '
+                        'verification could not be completed safely.'
+                    )
+
+        proof_context_label = (
+            "fresh recovery"
+            if recovery_status == "restricted"
+            else "self-service"
+        )
+
+        log_audit(
+            cur,
+            spa_id=user[1],
+            user_id=user_id,
+            action_type=(
+                "mfa_account_recovery_proof_verified"
+            ),
+            table_name="mfa_account_recovery_proofs",
+            record_id=proof_id,
+            notes=(
+                f"{'Phone' if normalized_method == 'sms' else 'Email'} "
+                "trusted recovery proof verified. "
+                f"{proof_count} of {required_proof_count} "
+                f"required {proof_context_label} proofs are now present."
+            ),
+        )
+
+        if recovery_verified:
+            if recovery_status == "pending":
+                completion_action = (
+                    "mfa_account_recovery_self_service_verified"
+                )
+                completion_notes = (
+                    "Required independent self-service "
+                    "account-recovery proofs were verified. "
+                    "No normal business session was created."
+                )
+            else:
+                completion_action = (
+                    "mfa_account_recovery_reverification_verified"
+                )
+                completion_notes = (
+                    "Required fresh recovery proofs were verified "
+                    "for an interrupted restricted Account Recovery "
+                    "case. The existing MFA rebuild state was "
+                    "preserved and no normal business session "
+                    "was created."
+                )
+
+            log_audit(
+                cur,
+                spa_id=user[1],
+                user_id=user_id,
+                action_type=completion_action,
+                table_name="mfa_account_recovery_requests",
+                record_id=recovery_request_id,
+                notes=completion_notes,
+            )
+
+        # Deliberately do NOT clear failed business-login state here.
+        # Recovery proof success is not a normal MFA login.
+
+        conn.commit()
+
+        return {
+            "status": (
+                "recovery_verified"
+                if recovery_verified
+                else "proof_verified"
+            ),
+            "recovery_request_id": recovery_request_id,
+            "proof_type": proof_type,
+            "proof_count": proof_count,
+            "required_proof_count": required_proof_count,
+            "new_proof": new_proof,
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _verify_mfa_account_recovery_key_proof(
+    *,
+    user_id,
+    recovery_request_id,
+    submitted_key,
+):
+    try:
+        user_id = int(user_id)
+        recovery_request_id = int(
+            recovery_request_id
+        )
+    except (TypeError, ValueError):
+        return {
+            "status": "invalid_state",
+        }
+
+    if (
+        user_id <= 0
+        or recovery_request_id <= 0
+    ):
+        return {
+            "status": "invalid_state",
+        }
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        # Match the ordinary MFA user tuple so the existing
+        # business-login lock helper remains authoritative.
+        cur.execute(
+            """
+            SELECT
+                user_id,
+                spa_id,
+                first_name,
+                last_name,
+                email,
+                password_hash,
+                role,
+                password_changed_at,
+                must_change_password,
+                login_locked_until,
+                NOW(),
+                sms_phone
+            FROM users
+            WHERE user_id = %s
+              AND active = TRUE
+            FOR UPDATE
+            """,
+            (user_id,),
+        )
+
+        user = cur.fetchone()
+
+        if not user:
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        remaining_minutes = (
+            _mfa_login_lock_remaining_minutes(
+                user
+            )
+        )
+
+        if remaining_minutes is not None:
+            conn.rollback()
+
+            return {
+                "status": "locked",
+                "remaining_minutes": remaining_minutes,
+            }
+
+        cur.execute(
+            """
+            SELECT
+                mfa_account_recovery_request_id,
+                status,
+                required_proof_count,
+                expires_at,
+                recovery_verified_at,
+                restricted_session_started_at,
+                proof_reverification_started_at,
+                proof_reverification_expires_at,
+                proof_reverification_verified_at
+            FROM mfa_account_recovery_requests
+            WHERE mfa_account_recovery_request_id = %s
+              AND user_id = %s
+            FOR UPDATE
+            """,
+            (
+                recovery_request_id,
+                user_id,
+            ),
+        )
+
+        recovery_request = cur.fetchone()
+
+        if not recovery_request:
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        recovery_status = str(
+            recovery_request[1] or ""
+        ).strip().lower()
+
+        required_proof_count = int(
+            recovery_request[2]
+        )
+
+        recovery_expires_at = (
+            recovery_request[3]
+        )
+
+        now_at = user[10]
+
+        recovery_verified_at = recovery_request[4]
+        restricted_session_started_at = (
+            recovery_request[5]
+        )
+        proof_reverification_started_at = (
+            recovery_request[6]
+        )
+        proof_reverification_expires_at = (
+            recovery_request[7]
+        )
+        proof_reverification_verified_at = (
+            recovery_request[8]
+        )
+
+        if (
+            recovery_status == "pending"
+            and recovery_expires_at <= now_at
+        ):
+            cur.execute(
+                """
+                UPDATE mfa_account_recovery_requests
+                SET status = 'expired'
+                WHERE mfa_account_recovery_request_id = %s
+                  AND user_id = %s
+                  AND status = 'pending'
+                  AND expires_at <= NOW()
+                """,
+                (
+                    recovery_request_id,
+                    user_id,
+                ),
+            )
+
+            cur.execute(
+                """
+                UPDATE mfa_verification_challenges
+                SET invalidated_at = NOW()
+                WHERE user_id = %s
+                  AND purpose = 'account_recovery'
+                  AND recovery_request_id = %s
+                  AND used_at IS NULL
+                  AND invalidated_at IS NULL
+                """,
+                (
+                    user_id,
+                    recovery_request_id,
+                ),
+            )
+
+            conn.commit()
+
+            return {
+                "status": "expired",
+            }
+
+        restricted_reverification = (
+            recovery_status == "restricted"
+            and recovery_verified_at is not None
+            and restricted_session_started_at is not None
+            and proof_reverification_started_at is not None
+            and proof_reverification_expires_at is not None
+        )
+
+        if (
+            restricted_reverification
+            and proof_reverification_expires_at <= now_at
+        ):
+            conn.rollback()
+
+            return {
+                "status": "expired",
+            }
+
+        if (
+            recovery_status == "restricted"
+            and proof_reverification_verified_at is not None
+        ):
+            conn.rollback()
+
+            return {
+                "status": "recovery_verified",
+            }
+
+        if (
+            recovery_status != "pending"
+            and not (
+                restricted_reverification
+                and proof_reverification_expires_at > now_at
+                and proof_reverification_verified_at is None
+            )
+        ):
+            conn.rollback()
+
+            return {
+                "status": (
+                    "recovery_verified"
+                    if recovery_status == "self_service_verified"
+                    else "invalid_state"
+                ),
+            }
+
+        cur.execute(
+            """
+            SELECT
+                mfa_account_recovery_key_id,
+                key_hash
+            FROM mfa_account_recovery_keys
+            WHERE user_id = %s
+              AND invalidated_at IS NULL
+            LIMIT 1
+            FOR UPDATE
+            """,
+            (user_id,),
+        )
+
+        recovery_key = cur.fetchone()
+
+        if not recovery_key:
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        verified = verify_account_recovery_key(
+            submitted_key,
+            recovery_key[1],
+            user_id=user_id,
+        )
+
+        if not verified:
+            newly_locked = (
+                _record_failed_mfa_verification(
+                    cur,
+                    user,
+                    action_type=(
+                        "mfa_account_recovery_verification_failed"
+                    ),
+                    notes=(
+                        "Account Recovery Key verification failed."
+                    ),
+                )
+            )
+
+            conn.commit()
+
+            return {
+                "status": (
+                    "locked"
+                    if newly_locked
+                    else "invalid"
+                ),
+                "remaining_minutes": (
+                    LOGIN_FAILURE_LOCK_MINUTES
+                    if newly_locked
+                    else None
+                ),
+            }
+
+        cur.execute(
+            """
+            UPDATE mfa_account_recovery_keys
+            SET last_used_at = NOW()
+            WHERE mfa_account_recovery_key_id = %s
+              AND user_id = %s
+              AND invalidated_at IS NULL
+            RETURNING mfa_account_recovery_key_id
+            """,
+            (
+                recovery_key[0],
+                user_id,
+            ),
+        )
+
+        if not cur.fetchone():
+            raise RuntimeError(
+                "Account Recovery Key could not "
+                "be recorded as used safely."
+            )
+
+        cur.execute(
+            """
+            INSERT INTO mfa_account_recovery_proofs (
+                mfa_account_recovery_request_id,
+                user_id,
+                proof_type,
+                recovery_key_id
+            )
+            VALUES (
+                %s,
+                %s,
+                'recovery_key',
+                %s
+            )
+            ON CONFLICT (
+              mfa_account_recovery_request_id,
+              proof_type
+            )
+            WHERE superseded_at IS NULL
+            DO NOTHING
+            RETURNING mfa_account_recovery_proof_id
+            """,
+            (
+                recovery_request_id,
+                user_id,
+                recovery_key[0],
+            ),
+        )
+
+        inserted_proof = cur.fetchone()
+
+        if inserted_proof:
+            proof_id = inserted_proof[0]
+            new_proof = True
+        else:
+            cur.execute(
+                """
+                SELECT mfa_account_recovery_proof_id
+                FROM mfa_account_recovery_proofs
+                WHERE mfa_account_recovery_request_id = %s
+                  AND user_id = %s
+                  AND proof_type = 'recovery_key'
+                AND superseded_at IS NULL
+                LIMIT 1
+                """,
+                (
+                    recovery_request_id,
+                    user_id,
+                ),
+            )
+
+            existing_proof = cur.fetchone()
+
+            if not existing_proof:
+                raise RuntimeError(
+                    "Existing Account Recovery Key proof "
+                    "could not be resolved safely."
+                )
+
+            proof_id = existing_proof[0]
+            new_proof = False
+
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM mfa_account_recovery_proofs
+            WHERE mfa_account_recovery_request_id = %s
+              AND user_id = %s
+              AND superseded_at IS NULL
+              AND proof_type IN (
+                  'recovery_email',
+                  'recovery_sms',
+                  'recovery_key'
+              )
+            """,
+            (
+                recovery_request_id,
+                user_id,
+            ),
+        )
+
+        proof_count = int(
+            cur.fetchone()[0] or 0
+        )
+
+        recovery_verified = (
+            proof_count >= required_proof_count
+        )
+
+        if recovery_verified:
+            if recovery_status == "pending":
+                cur.execute(
+                    """
+                    UPDATE mfa_account_recovery_requests
+                    SET
+                        status = 'self_service_verified',
+                        recovery_verified_at = COALESCE(
+                            recovery_verified_at,
+                            NOW()
+                        )
+                    WHERE mfa_account_recovery_request_id = %s
+                        AND user_id = %s
+                        AND status = 'pending'
+                        AND expires_at > NOW()
+                    RETURNING mfa_account_recovery_request_id
+                    """,
+                    (
+                        recovery_request_id,
+                        user_id,
+                    ),
+                )
+
+                if not cur.fetchone():
+                    raise RuntimeError(
+                        'MFA account recovery could not be '
+                        'advanced safely after key verification.'
+                    )
+
+            else:
+                cur.execute(
+                    """
+                    UPDATE mfa_account_recovery_requests
+                    SET proof_reverification_verified_at = NOW()
+                    WHERE mfa_account_recovery_request_id = %s
+                        AND user_id = %s
+                        AND status = 'restricted'
+                        AND restricted_session_started_at IS NOT NULL
+                        AND proof_reverification_started_at IS NOT NULL
+                        AND proof_reverification_expires_at > NOW()
+                        AND proof_reverification_verified_at IS NULL
+                    RETURNING mfa_account_recovery_request_id
+                    """,
+                    (
+                        recovery_request_id,
+                        user_id,
+                    ),
+                )
+
+                if not cur.fetchone():
+                    raise RuntimeError(
+                        'Interrupted Account Recovery fresh-proof '
+                        'verification could not be completed safely.'
+                    )
+
+        proof_context_label = (
+            "fresh recovery"
+            if recovery_status == "restricted"
+            else "self-service"
+        )
+
+        log_audit(
+            cur,
+            spa_id=user[1],
+            user_id=user_id,
+            action_type=(
+                "mfa_account_recovery_proof_verified"
+            ),
+            table_name="mfa_account_recovery_proofs",
+            record_id=proof_id,
+            notes=(
+                "Account Recovery Key proof verified. "
+                f"{proof_count} of {required_proof_count} "
+                f"required {proof_context_label} proofs are now present."
+            ),
+        )
+
+        if recovery_verified:
+            if recovery_status == "pending":
+                completion_action = (
+                    "mfa_account_recovery_self_service_verified"
+                )
+                completion_notes = (
+                    "Required independent self-service "
+                    "account-recovery proofs were verified. "
+                    "No normal business session was created."
+                )
+            else:
+                completion_action = (
+                    "mfa_account_recovery_reverification_verified"
+                )
+                completion_notes = (
+                    "Required fresh recovery proofs were verified "
+                    "for an interrupted restricted Account Recovery "
+                    "case. The existing MFA rebuild state was "
+                    "preserved and no normal business session "
+                    "was created."
+                )
+
+            log_audit(
+                cur,
+                spa_id=user[1],
+                user_id=user_id,
+                action_type=completion_action,
+                table_name="mfa_account_recovery_requests",
+                record_id=recovery_request_id,
+                notes=completion_notes,
+            )
+
+        # Deliberately do NOT clear failed business-login state here.
+        # Recovery proof success is not a normal MFA login.
+
+        conn.commit()
+
+        # The authoritative audit above committed with the recovery
+        # transaction. System Activity uses its own connection, so
+        # publish this visible SECURITY event only after that succeeds.
+        log_security(
+            "PSP Account Recovery Key successfully used as an "
+            "Account Recovery proof.",
+            severity="INFO",
+            spa_id=user[1],
+            related_type="mfa_account_recovery_request",
+            related_id=recovery_request_id,
+            created_by=user_id,
+        )
+
+        return {
+            "status": (
+                "recovery_verified"
+                if recovery_verified
+                else "proof_verified"
+            ),
+            "recovery_request_id": recovery_request_id,
+            "proof_type": "recovery_key",
+            "proof_count": proof_count,
+            "required_proof_count": required_proof_count,
+            "new_proof": new_proof,
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
 
 
 def _verify_mfa_code_for_login(
@@ -7899,7 +17817,7 @@ def _verify_mfa_enrollment_for_login(
                 "status": "invalid_state",
             }
 
-        authenticator = _mfa_authenticator_record(
+        authenticator = _mfa_authenticator_candidate_record(
             cur,
             user[0],
             for_update=True,
@@ -11123,6 +21041,64 @@ def _public_security_csrf_token(purpose):
     return token
 
 
+def _mfa_account_recovery_restricted_csrf_purpose(
+    recovery_session,
+    action,
+):
+    if not isinstance(recovery_session, dict):
+        raise ValueError(
+            "Restricted Account Recovery session is invalid."
+        )
+
+    try:
+        user_id = int(
+            recovery_session.get("user_id")
+        )
+        recovery_request_id = int(
+            recovery_session.get(
+                "recovery_request_id"
+            )
+        )
+    except (TypeError, ValueError):
+        raise ValueError(
+            "Restricted Account Recovery session is invalid."
+        )
+
+    challenge_id = str(
+        recovery_session.get("challenge_id")
+        or ""
+    ).strip()
+
+    normalized_action = str(
+        action or ""
+    ).strip().lower()
+
+    if (
+        user_id <= 0
+        or recovery_request_id <= 0
+        or not challenge_id
+        or normalized_action not in {
+            "continue",
+            "select_method",
+            "verify_authenticator",
+            "verify_code_rebuild",
+            "resend_code_rebuild",
+        }
+    ):
+        raise ValueError(
+            "Restricted Account Recovery CSRF purpose "
+            "is invalid."
+        )
+
+    return (
+        "mfa_account_recovery_restricted:"
+        f"{user_id}:"
+        f"{recovery_request_id}:"
+        f"{challenge_id}:"
+        f"{normalized_action}"
+    )
+
+
 def _public_security_csrf_valid(
     submitted_token,
     purpose,
@@ -11474,6 +21450,80 @@ def _normalize_user_mobile_phone(value):
         )
 
     return "+1" + digits
+
+
+def _normalize_mfa_recovery_email(value):
+
+    normalized_email = str(
+        value or ""
+    ).strip().lower()
+
+    if not normalized_email:
+        return ""
+
+    if len(normalized_email) > 254:
+        raise ValueError(
+            "Recovery email must contain no more than "
+            "254 characters."
+        )
+
+    if not re.fullmatch(
+        r"[^@\s]+@[^@\s]+\.[^@\s]+",
+        normalized_email,
+    ):
+        raise ValueError(
+            "Please enter a valid recovery email address."
+        )
+
+    return normalized_email
+
+
+def _mask_mfa_recovery_email_for_display(value):
+
+    normalized_email = str(
+        value or ""
+    ).strip().lower()
+
+    if (
+        not normalized_email
+        or "@" not in normalized_email
+    ):
+        return "Trusted recovery email"
+
+    local_part, domain = normalized_email.rsplit(
+        "@",
+        1,
+    )
+
+    if not local_part or not domain:
+        return "Trusted recovery email"
+
+    return (
+        f"{local_part[0]}"
+        f"•••@{domain}"
+    )
+
+
+def _mask_mfa_recovery_phone_for_display(value):
+
+    raw_value = str(value or "").strip()
+
+    digits = "".join(
+        character
+        for character in raw_value
+        if character.isdigit()
+    )
+
+    if (
+        len(digits) == 11
+        and digits.startswith("1")
+    ):
+        digits = digits[1:]
+
+    if len(digits) != 10:
+        return "Trusted recovery phone"
+
+    return f"••• ••• {digits[-4:]}"
 
 
 def _format_user_mobile_phone_for_display(value):
@@ -17734,7 +27784,8 @@ def _business_login_lifecycle_state(user_id):
                 role,
                 active,
                 password_changed_at,
-                must_change_password
+                must_change_password,
+                security_session_version
             FROM users
             WHERE user_id = %s
             LIMIT 1
@@ -17757,6 +27808,10 @@ def load_spa():
         "mfa_login",
         "mfa_login_qr",
         "mfa_login_recovery",
+        "mfa_account_recovery_start",
+        "mfa_account_recovery",
+        "mfa_account_recovery_restricted",
+        "mfa_account_recovery_restricted_qr",
         "mfa_login_complete",
         "forgot_password",
         "reset_password",
@@ -17790,11 +27845,26 @@ def load_spa():
     session_spa_id = session.get("spa_id")
     session_role = session.get("role")
 
+    try:
+        session_security_session_version = int(
+            session.get("_security_session_version")
+        )
+    except (TypeError, ValueError):
+        session_security_session_version = None
+
+    current_security_session_version = (
+        int(lifecycle_state[5])
+        if lifecycle_state
+        else None
+    )
+
     account_matches_session = bool(
         lifecycle_state
         and lifecycle_state[2]
         and lifecycle_state[0] == session_spa_id
         and lifecycle_state[1] == session_role
+        and session_security_session_version
+            == current_security_session_version
     )
 
     if not account_matches_session:
@@ -36097,13 +46167,42 @@ def birthday_offers1_home():
 #
 #   ---------------------------------------------
 
-def _continue_business_login_after_password(user):
+def _continue_business_login_after_password(
+    user,
+    *,
+    password_verified_at_epoch,
+):
     role = str(user[6] or "").strip()
 
     if not _mfa_required_for_role(role):
         return _complete_business_login(user)
 
-    pending = _start_pending_mfa_login(user)
+    pending = _start_pending_mfa_login(
+        user,
+        password_verified_at_epoch=(
+            password_verified_at_epoch
+        ),
+    )
+
+    active_recovery = (
+        _mfa_active_account_recovery_request(
+            user[0]
+        )
+    )
+
+    if (
+        active_recovery
+        and active_recovery.get("status")
+            == "restricted"
+    ):
+        # A restricted Account Recovery case owns the
+        # security lifecycle for this account. Do not
+        # prepare, send, or enroll ordinary MFA here.
+        session.pop("_pending_login_switch", None)
+
+        return redirect(
+            url_for("mfa_login")
+        )
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -36259,6 +46358,29 @@ def _complete_business_login(user):
     password_changed_at = user[7]
     must_change_password = bool(user[8])
 
+    lifecycle_state = _business_login_lifecycle_state(
+        user[0]
+    )
+
+    if (
+        not lifecycle_state
+        or not lifecycle_state[2]
+        or lifecycle_state[0] != user[1]
+        or lifecycle_state[1] != role
+    ):
+        session.clear()
+
+        return redirect(
+            url_for(
+                "login",
+                session_ended="1",
+            )
+        )
+
+    security_session_version = int(
+        lifecycle_state[5]
+    )
+
     existing_marker = str(
         session.get("_browser_session_marker")
         or ""
@@ -36289,6 +46411,9 @@ def _complete_business_login(user):
     )
     session["_must_change_password"] = (
         must_change_password
+    )
+    session["_security_session_version"] = (
+        security_session_version
     )
     session["_browser_session_marker"] = (
         browser_session_marker
@@ -36365,11 +46490,21 @@ def _mfa_pending_login_context(pending):
             user[0],
         )
 
+        candidate_authenticator = (
+            _mfa_authenticator_candidate_record(
+                cur,
+                user[0],
+            )
+        )
+
         return {
             "status": "success",
             "user": user,
             "setting": setting,
             "authenticator": authenticator,
+            "candidate_authenticator": (
+                candidate_authenticator
+            ),
         }
 
     finally:
@@ -36424,6 +46559,66 @@ def _mfa_login_locked_response(
     )
 
 
+def _mfa_account_recovery_restart_response(
+    message=None,
+):
+    # A failed or expired Account Recovery path must not
+    # leave any ordinary MFA, pending-recovery, or restricted
+    # Recovery Session state in the browser.
+    _clear_pending_mfa_login()
+    _clear_pending_mfa_account_recovery()
+    _clear_mfa_account_recovery_session()
+
+    flash(
+        message
+        or (
+            "Your Account Recovery verification expired "
+            "or could not be verified. Please sign in "
+            "again to restart recovery."
+        ),
+        "error",
+    )
+
+    return _mfa_no_store(
+        redirect(
+            url_for("login")
+        )
+    )
+
+
+def _mfa_account_recovery_locked_response(
+    remaining_minutes,
+):
+    try:
+        remaining_minutes = max(
+            1,
+            int(remaining_minutes),
+        )
+    except (TypeError, ValueError):
+        remaining_minutes = (
+            LOGIN_FAILURE_LOCK_MINUTES
+        )
+
+    _clear_pending_mfa_login()
+    _clear_pending_mfa_account_recovery()
+    _clear_mfa_account_recovery_session()
+
+    flash(
+        "Too many unsuccessful security verification "
+        "attempts. This account is temporarily locked "
+        "for security. Please try again in "
+        f"{remaining_minutes} "
+        f"{'minute' if remaining_minutes == 1 else 'minutes'}.",
+        "error",
+    )
+
+    return _mfa_no_store(
+        redirect(
+            url_for("login")
+        )
+    )
+
+
 @app.route(
     "/login/mfa",
     methods=["GET", "POST"],
@@ -36433,6 +46628,48 @@ def mfa_login():
 
     if not pending:
         return _mfa_login_restart_response()
+
+    active_recovery = (
+        _mfa_active_account_recovery_request(
+            pending["target_user_id"]
+        )
+    )
+
+    if (
+        active_recovery
+        and active_recovery.get("status")
+            == "restricted"
+    ):
+        # Never expose ordinary MFA verification or
+        # first-time enrollment while a restricted
+        # Account Recovery case is active.
+        if request.method == "POST":
+            abort(400)
+
+        csrf_purpose = (
+            _mfa_pending_csrf_purpose(
+                pending,
+                "account_recovery_start",
+            )
+        )
+
+        security_csrf_token = (
+            _public_security_csrf_token(
+                csrf_purpose
+            )
+        )
+
+        return _mfa_no_store(
+            render_template(
+                "mfa_login.html",
+                mode=(
+                    "account_recovery_in_progress"
+                ),
+                security_csrf_token=(
+                    security_csrf_token
+                ),
+            )
+        )
 
     if request.method == "POST":
         submitted_action = str(
@@ -37273,6 +47510,19 @@ def mfa_login():
             )
         )
 
+        account_recovery_purpose = (
+            _mfa_pending_csrf_purpose(
+                pending,
+                "account_recovery_start",
+            )
+        )
+
+        account_recovery_csrf_token = (
+            _public_security_csrf_token(
+                account_recovery_purpose
+            )
+        )
+
         return _mfa_no_store(
             render_template(
                 "mfa_login.html",
@@ -37287,6 +47537,9 @@ def mfa_login():
                 ),
                 resend_csrf_token=(
                     resend_csrf_token
+                ),
+                account_recovery_csrf_token=(
+                    account_recovery_csrf_token
                 ),
             )
         )
@@ -37420,12 +47673,28 @@ def mfa_login():
         )
     )
 
+    account_recovery_purpose = (
+        _mfa_pending_csrf_purpose(
+            pending,
+            "account_recovery_start",
+        )
+    )
+
+    account_recovery_csrf_token = (
+        _public_security_csrf_token(
+            account_recovery_purpose
+        )
+    )
+
     return _mfa_no_store(
         render_template(
             "mfa_login.html",
             mode="verify",
             security_csrf_token=(
                 security_csrf_token
+            ),
+            account_recovery_csrf_token=(
+                account_recovery_csrf_token
             ),
         )
     )
@@ -37467,7 +47736,9 @@ def mfa_login_qr():
         abort(404)
 
     user = context["user"]
-    authenticator = context["authenticator"]
+    authenticator = context[
+        "candidate_authenticator"
+    ]
 
     if (
         not authenticator
@@ -37671,6 +47942,1633 @@ def mfa_login_recovery():
             ),
         )
     )
+
+
+@app.route(
+    "/login/mfa/account-recovery/start",
+    methods=["POST"],
+)
+def mfa_account_recovery_start():
+    pending = _pending_mfa_login()
+
+    if not pending:
+        return _mfa_login_restart_response()
+
+    context = _mfa_pending_login_context(
+        pending
+    )
+
+    if context["status"] == "locked":
+        return _mfa_login_locked_response(
+            context.get("remaining_minutes")
+        )
+
+    if context["status"] != "success":
+        return _mfa_login_restart_response()
+
+    csrf_purpose = (
+        _mfa_pending_csrf_purpose(
+            pending,
+            "account_recovery_start",
+        )
+    )
+
+    submitted_token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _public_security_csrf_valid(
+        submitted_token,
+        csrf_purpose,
+    ):
+        abort(400)
+
+    result = (
+        _create_or_reuse_mfa_account_recovery_request(
+            pending
+        )
+    )
+
+    status = str(
+        result.get("status")
+        or ""
+    ).strip().lower()
+
+    if status == "locked":
+        return _mfa_login_locked_response(
+            result.get("remaining_minutes")
+        )
+
+    if status == "password_verification_expired":
+        _clear_pending_mfa_login()
+
+        flash(
+            "Your password verification expired. "
+            "Please sign in again before starting "
+            "Account Recovery.",
+            "error",
+        )
+
+        return _mfa_no_store(
+            redirect(
+                url_for("login")
+            )
+        )
+
+    if status == "insufficient_factors":
+        flash(
+            "Self-service Account Recovery requires "
+            "at least two trusted recovery factors "
+            "that were set up before this sign-in. "
+            "Use your available MFA method or Recovery "
+            "Code. If you still cannot recover access, "
+            "contact Peach Suite Pro Support for "
+            "verified account recovery.",
+            "error",
+        )
+
+        return _mfa_no_store(
+            redirect(
+                url_for("mfa_login")
+            )
+        )
+
+    if status == "recovery_in_progress":
+        flash(
+            "An Account Recovery case is already in "
+            "progress for this account. Peach Suite "
+            "Pro will not bypass or disable MFA. "
+            "Contact Peach Suite Pro Support if you "
+            "need help continuing verified recovery.",
+            "error",
+        )
+
+        return _mfa_no_store(
+            redirect(
+                url_for("mfa_login")
+            )
+        )
+
+    if status != "success":
+        return _mfa_login_restart_response()
+
+    recovery_request_id = result.get(
+        "recovery_request_id"
+    )
+
+    recovery_pending = (
+        _start_pending_mfa_account_recovery(
+            pending,
+            recovery_request_id=(
+                recovery_request_id
+            ),
+        )
+    )
+
+    if not recovery_pending:
+        return _mfa_login_restart_response()
+
+    return _mfa_no_store(
+        redirect(
+            url_for(
+                "mfa_account_recovery"
+            )
+        )
+    )
+
+
+@app.route(
+    "/login/mfa/account-recovery",
+    methods=["GET", "POST"],
+)
+def mfa_account_recovery():
+    recovery_pending = (
+        _pending_mfa_account_recovery()
+    )
+
+    if not recovery_pending:
+        return _mfa_account_recovery_restart_response()
+
+    context = _mfa_account_recovery_context(
+        recovery_pending
+    )
+
+    context_status = str(
+        context.get("status")
+        or ""
+    ).strip().lower()
+
+    if context_status == "expired":
+        return _mfa_account_recovery_restart_response(
+            "Your Account Recovery session expired. "
+            "Please sign in again to restart recovery."
+        )
+
+    if context_status != "success":
+        return _mfa_account_recovery_restart_response()
+
+    if context.get("recovery_verified"):
+        open_result = (
+            _open_mfa_account_recovery_session()
+        )
+
+        open_status = str(
+            open_result.get("status")
+            or ""
+        ).strip().lower()
+
+        if open_status == "success":
+            return _mfa_no_store(
+                redirect(
+                    url_for(
+                        "mfa_account_recovery_restricted"
+                    )
+                )
+            )
+
+        if open_status == "security_hold":
+            flash(
+                "Your Account Recovery case is under "
+                "a temporary security hold. Peach Suite "
+                "Pro will not bypass the hold.",
+                "error",
+            )
+
+            return _mfa_no_store(
+                redirect(
+                    url_for(
+                        "mfa_account_recovery"
+                    )
+                )
+            )
+
+        if open_status == "factor_changed":
+            return _mfa_account_recovery_restart_response(
+                "A trusted recovery factor changed during "
+                "verification. For security, please sign "
+                "in again and start a new recovery attempt."
+            )
+
+        if open_status == "expired":
+            return _mfa_account_recovery_restart_response(
+                "Your Account Recovery session expired. "
+                "Please sign in again to restart recovery."
+            )
+
+        return _mfa_account_recovery_restart_response()
+
+    allowed_actions = {
+        "send_email",
+        "send_sms",
+        "verify_email",
+        "verify_sms",
+        "verify_key",
+    }
+
+    if request.method == "POST":
+        action = str(
+            request.form.get(
+                "recovery_action",
+                "",
+            )
+            or ""
+        ).strip().lower()
+
+        if action not in allowed_actions:
+            abort(400)
+
+        csrf_purpose = (
+            _mfa_account_recovery_pending_csrf_purpose(
+                recovery_pending,
+                action,
+            )
+        )
+
+        submitted_token = request.form.get(
+            "security_csrf_token",
+            "",
+        )
+
+        if not _public_security_csrf_valid(
+            submitted_token,
+            csrf_purpose,
+        ):
+            abort(400)
+
+        if action == "verify_key":
+            if (
+                not context.get(
+                    "recovery_key_available"
+                )
+                or context.get(
+                    "recovery_key_verified"
+                )
+            ):
+                return _mfa_account_recovery_restart_response()
+
+            result = (
+                _verify_mfa_account_recovery_key_proof(
+                    user_id=context["user_id"],
+                    recovery_request_id=context[
+                        "recovery_request_id"
+                    ],
+                    submitted_key=request.form.get(
+                        "recovery_key",
+                        "",
+                    ),
+                )
+            )
+
+        else:
+            method = (
+                "email"
+                if action.endswith("email")
+                else "sms"
+            )
+
+            try:
+                recovery_contact_id = int(
+                    request.form.get(
+                        "recovery_contact_id",
+                        "",
+                    )
+                )
+            except (TypeError, ValueError):
+                abort(400)
+
+            target_contact = next(
+                (
+                    contact
+                    for contact
+                    in context["trusted_contacts"]
+                    if (
+                        contact[
+                            "recovery_contact_id"
+                        ]
+                        == recovery_contact_id
+                        and contact["method"]
+                            == method
+                    )
+                ),
+                None,
+            )
+
+            if not target_contact:
+                abort(400)
+
+            if action.startswith("send_"):
+                if target_contact[
+                    "proof_verified"
+                ]:
+                    return _mfa_no_store(
+                        redirect(
+                            url_for(
+                                "mfa_account_recovery"
+                            )
+                        )
+                    )
+
+                result = (
+                    _send_mfa_recovery_verification_code(
+                        user_id=context["user_id"],
+                        method=method,
+                        purpose="account_recovery",
+                        recovery_contact_id=(
+                            recovery_contact_id
+                        ),
+                        recovery_request_id=context[
+                            "recovery_request_id"
+                        ],
+                    )
+                )
+
+                result_status = str(
+                    result.get("status")
+                    or ""
+                ).strip().lower()
+
+                if result_status == "sent":
+                    flash(
+                        "A 6-digit Account Recovery "
+                        "verification code was sent to "
+                        "your trusted recovery "
+                        f"{'email' if method == 'email' else 'phone'}.",
+                        "success",
+                    )
+
+                elif result_status == "superseded":
+                    flash(
+                        "A newer Account Recovery code is "
+                        "already active. Please use the "
+                        "most recently delivered code.",
+                        "info",
+                    )
+
+                elif result_status == "cooldown":
+                    retry_seconds = max(
+                        1,
+                        int(
+                            result.get(
+                                "retry_seconds",
+                                1,
+                            )
+                            or 1
+                        ),
+                    )
+
+                    flash(
+                        "Please wait "
+                        f"{retry_seconds} "
+                        f"{'second' if retry_seconds == 1 else 'seconds'} "
+                        "before requesting another code.",
+                        "error",
+                    )
+
+                elif result_status == "hourly_limit":
+                    retry_seconds = max(
+                        1,
+                        int(
+                            result.get(
+                                "retry_seconds",
+                                1,
+                            )
+                            or 1
+                        ),
+                    )
+
+                    retry_minutes = max(
+                        1,
+                        (
+                            retry_seconds + 59
+                        ) // 60,
+                    )
+
+                    flash(
+                        "The security-code request limit "
+                        "has been reached. Please try "
+                        "again in about "
+                        f"{retry_minutes} "
+                        f"{'minute' if retry_minutes == 1 else 'minutes'}.",
+                        "error",
+                    )
+
+                elif result_status == "delivery_failed":
+                    flash(
+                        "Peach Suite Pro could not deliver "
+                        "that recovery code right now. "
+                        "Please try again.",
+                        "error",
+                    )
+
+                elif result_status in {
+                    "invalid_user",
+                    "invalid_recovery_contact",
+                    "invalid_recovery_request",
+                }:
+                    return (
+                        _mfa_account_recovery_restart_response()
+                    )
+
+                else:
+                    return (
+                        _mfa_account_recovery_restart_response()
+                    )
+
+                return _mfa_no_store(
+                    redirect(
+                        url_for(
+                            "mfa_account_recovery"
+                        )
+                    )
+                )
+
+            active_challenge_id = (
+                target_contact.get(
+                    "active_challenge_id"
+                )
+            )
+
+            if not active_challenge_id:
+                flash(
+                    "Request a new verification code "
+                    "before entering a code.",
+                    "error",
+                )
+
+                return _mfa_no_store(
+                    redirect(
+                        url_for(
+                            "mfa_account_recovery"
+                        )
+                    )
+                )
+
+            result = (
+                _verify_mfa_account_recovery_contact_proof(
+                    user_id=context["user_id"],
+                    recovery_request_id=context[
+                        "recovery_request_id"
+                    ],
+                    recovery_contact_id=(
+                        recovery_contact_id
+                    ),
+                    mfa_verification_challenge_id=(
+                        active_challenge_id
+                    ),
+                    method=method,
+                    submitted_code=request.form.get(
+                        "verification_code",
+                        "",
+                    ),
+                )
+            )
+
+        result_status = str(
+            result.get("status")
+            or ""
+        ).strip().lower()
+
+        if result_status == "locked":
+            return _mfa_account_recovery_locked_response(
+                result.get("remaining_minutes")
+            )
+
+        if result_status == "recovery_verified":
+            open_result = (
+                _open_mfa_account_recovery_session()
+            )
+
+            open_status = str(
+                open_result.get("status")
+                or ""
+            ).strip().lower()
+
+            if open_status == "success":
+                return _mfa_no_store(
+                    redirect(
+                        url_for(
+                            "mfa_account_recovery_restricted"
+                        )
+                    )
+                )
+
+            if open_status == "factor_changed":
+                return _mfa_account_recovery_restart_response(
+                    "A trusted recovery factor changed "
+                    "during verification. For security, "
+                    "please sign in again and start a "
+                    "new recovery attempt."
+                )
+
+            if open_status == "expired":
+                return _mfa_account_recovery_restart_response(
+                    "Your Account Recovery session "
+                    "expired. Please sign in again to "
+                    "restart recovery."
+                )
+
+            if open_status == "security_hold":
+                flash(
+                    "Your Account Recovery case is under "
+                    "a temporary security hold. Peach "
+                    "Suite Pro will not bypass the hold.",
+                    "error",
+                )
+
+                return _mfa_no_store(
+                    redirect(
+                        url_for(
+                            "mfa_account_recovery"
+                        )
+                    )
+                )
+
+            return _mfa_account_recovery_restart_response()
+
+        if result_status == "proof_verified":
+            flash(
+                "Recovery factor verified. "
+                "Complete one more different recovery "
+                "factor to continue.",
+                "success",
+            )
+
+            return _mfa_no_store(
+                redirect(
+                    url_for(
+                        "mfa_account_recovery"
+                    )
+                )
+            )
+
+        if result_status == "invalid":
+            flash(
+                "That recovery verification could not "
+                "be confirmed. Please try again.",
+                "error",
+            )
+
+            return _mfa_no_store(
+                redirect(
+                    url_for(
+                        "mfa_account_recovery"
+                    )
+                )
+            )
+
+        if result_status == "missing_challenge":
+            flash(
+                "That verification code is no longer "
+                "available. Please request a new code.",
+                "error",
+            )
+
+            return _mfa_no_store(
+                redirect(
+                    url_for(
+                        "mfa_account_recovery"
+                    )
+                )
+            )
+
+        if result_status == "expired":
+            return _mfa_account_recovery_restart_response(
+                "Your Account Recovery session expired. "
+                "Please sign in again to restart recovery."
+            )
+
+        return _mfa_account_recovery_restart_response()
+
+    csrf_tokens = {
+        action: _public_security_csrf_token(
+            _mfa_account_recovery_pending_csrf_purpose(
+                recovery_pending,
+                action,
+            )
+        )
+        for action in allowed_actions
+    }
+
+    return _mfa_no_store(
+        render_template(
+            "mfa_account_recovery.html",
+            recovery=context,
+            csrf_tokens=csrf_tokens,
+        )
+    )
+
+
+def _mfa_account_recovery_code_rebuild_response(
+    recovery_session,
+    recovery_result,
+    *,
+    method,
+    verification_error=None,
+    delivery_message=None,
+):
+    normalized_method = str(
+        method or ""
+    ).strip().lower()
+
+    if normalized_method not in {
+        "sms",
+        "email",
+    }:
+        raise ValueError(
+            "Account Recovery rebuild method is invalid."
+        )
+
+    method_label = (
+        "Text Message"
+        if normalized_method == "sms"
+        else "Email"
+    )
+
+    destination_description = (
+        "the text-message number already configured "
+        "for this account"
+        if normalized_method == "sms"
+        else
+        "the login email already configured "
+        "for this account"
+    )
+
+    verify_purpose = (
+        _mfa_account_recovery_restricted_csrf_purpose(
+            recovery_session,
+            "verify_code_rebuild",
+        )
+    )
+
+    resend_purpose = (
+        _mfa_account_recovery_restricted_csrf_purpose(
+            recovery_session,
+            "resend_code_rebuild",
+        )
+    )
+
+    verify_token = _public_security_csrf_token(
+        verify_purpose
+    )
+
+    resend_token = _public_security_csrf_token(
+        resend_purpose
+    )
+
+    return _mfa_no_store(
+        render_template(
+            "mfa_account_recovery_restricted.html",
+            recovery=recovery_result,
+            mode="code_verify",
+            available_methods=None,
+            security_csrf_token=None,
+            verification_error=verification_error,
+            delivery_message=delivery_message,
+            recovery_codes=None,
+            code_method=normalized_method,
+            code_method_label=method_label,
+            code_destination_description=(
+                destination_description
+            ),
+            verify_code_csrf_token=verify_token,
+            resend_code_csrf_token=resend_token,
+        )
+    )
+
+
+@app.route(
+    "/login/mfa/account-recovery/restricted",
+    methods=["GET", "POST"],
+)
+def mfa_account_recovery_restricted():
+    recovery_session = (
+        _mfa_account_recovery_session()
+    )
+
+    if not recovery_session:
+        return _mfa_account_recovery_restart_response()
+
+    result = (
+        _enter_mfa_account_recovery_restricted_session()
+    )
+
+    status = str(
+        result.get("status")
+        or ""
+    ).strip().lower()
+
+    if status == "expired":
+        return _mfa_account_recovery_restart_response(
+            "Your Account Recovery session expired. "
+            "Please sign in again to restart recovery."
+        )
+
+    if status == "factor_changed":
+        return _mfa_account_recovery_restart_response(
+            "A trusted recovery factor changed during "
+            "recovery. For security, please sign in "
+            "again and start a new recovery attempt."
+        )
+
+    if status == "security_hold":
+        return _mfa_account_recovery_restart_response(
+            "Your Account Recovery case is under a "
+            "temporary security hold. Peach Suite Pro "
+            "will not bypass the hold."
+        )
+
+    if status != "success":
+        return _mfa_account_recovery_restart_response()
+
+    if request.method == "POST":
+        recovery_action = str(
+            request.form.get(
+                "recovery_action",
+                "continue",
+            )
+            or ""
+        ).strip().lower()
+
+        if recovery_action not in {
+            "continue",
+            "select_method",
+            "verify_authenticator",
+            "verify_code_rebuild",
+            "resend_code_rebuild",
+        }:
+            abort(400)
+
+        csrf_purpose = (
+            _mfa_account_recovery_restricted_csrf_purpose(
+                recovery_session,
+                recovery_action,
+            )
+        )
+
+        submitted_token = request.form.get(
+            "security_csrf_token",
+            "",
+        )
+
+        if not _public_security_csrf_valid(
+            submitted_token,
+            csrf_purpose,
+        ):
+            abort(400)
+
+        if recovery_action == "verify_code_rebuild":
+            submitted_code = request.form.get(
+                "verification_code",
+                "",
+            )
+
+            verification = (
+                _verify_mfa_account_recovery_code_rebuild(
+                    recovery_session,
+                    submitted_code,
+                )
+            )
+
+            verification_status = str(
+                verification.get("status")
+                or ""
+            ).strip().lower()
+
+            if verification_status == "success":
+                completed_method = str(
+                    verification.get("new_method")
+                    or ""
+                ).strip().lower()
+
+                completed_label = (
+                    "Text Message"
+                    if completed_method == "sms"
+                    else "Email"
+                )
+
+                # Recovery completion never creates a normal
+                # business session. Remove only the narrow
+                # recovery session and require a fresh sign-in.
+                _clear_mfa_account_recovery_session()
+
+                return _mfa_no_store(
+                    render_template(
+                        "mfa_account_recovery_restricted.html",
+                        recovery=result,
+                        mode="code_complete",
+                        available_methods=None,
+                        security_csrf_token=None,
+                        verification_error=None,
+                        delivery_message=None,
+                        recovery_codes=None,
+                        code_method=completed_method,
+                        code_method_label=completed_label,
+                        code_destination_description=None,
+                        verify_code_csrf_token=None,
+                        resend_code_csrf_token=None,
+                    )
+                )
+
+            if verification_status in {
+                "invalid",
+                "missing_challenge",
+            }:
+                error_message = (
+                    "That verification code was not accepted. "
+                    "Enter the most recent code sent by "
+                    "Peach Suite Pro."
+                    if verification_status == "invalid"
+                    else
+                    "That verification code is no longer "
+                    "active. Request a new code below."
+                )
+
+                return (
+                    _mfa_account_recovery_code_rebuild_response(
+                        recovery_session,
+                        result,
+                        method="sms",
+                        verification_error=error_message,
+                    )
+                )
+
+            if verification_status == "locked":
+                _clear_mfa_account_recovery_session()
+
+                remaining_minutes = verification.get(
+                    "remaining_minutes"
+                )
+
+                message = (
+                    "Too many unsuccessful verification "
+                    "attempts. For security, Account Recovery "
+                    "must be restarted after the temporary "
+                    "account lock expires."
+                )
+
+                if remaining_minutes:
+                    message += (
+                        " Please try again in about "
+                        f"{remaining_minutes} minute(s)."
+                    )
+
+                return (
+                    _mfa_account_recovery_restart_response(
+                        message
+                    )
+                )
+
+            if verification_status == "factor_changed":
+                _clear_mfa_account_recovery_session()
+
+                return (
+                    _mfa_account_recovery_restart_response(
+                        "A trusted recovery factor changed "
+                        "during recovery. For security, "
+                        "please sign in again and restart "
+                        "verified Account Recovery."
+                    )
+                )
+
+            return (
+                _mfa_account_recovery_restart_response()
+            )
+
+        if recovery_action == "resend_code_rebuild":
+            requested_method = str(
+                request.form.get(
+                    "mfa_method",
+                    "",
+                )
+                or ""
+            ).strip().lower()
+
+            # Text Message is the first code-based rebuild
+            # method exposed through the restricted UI.
+            if requested_method != "sms":
+                abort(400)
+
+            delivery = (
+                _send_mfa_account_recovery_rebuild_verification_code(
+                    user_id=int(
+                        recovery_session["user_id"]
+                    ),
+                    method="sms",
+                    recovery_request_id=int(
+                        recovery_session[
+                            "recovery_request_id"
+                        ]
+                    ),
+                )
+            )
+
+            delivery_status = str(
+                delivery.get("status")
+                or ""
+            ).strip().lower()
+
+            if delivery_status == "sent":
+                return (
+                    _mfa_account_recovery_code_rebuild_response(
+                        recovery_session,
+                        result,
+                        method="sms",
+                        delivery_message=(
+                            "A new verification code was sent. "
+                            "Only the most recently delivered "
+                            "code will work."
+                        ),
+                    )
+                )
+
+            if delivery_status == "superseded":
+                return (
+                    _mfa_account_recovery_code_rebuild_response(
+                        recovery_session,
+                        result,
+                        method="sms",
+                        delivery_message=(
+                            "A newer verification code is "
+                            "already active. Use the most "
+                            "recent Peach Suite Pro text."
+                        ),
+                    )
+                )
+
+            if delivery_status == "cooldown":
+                retry_seconds = int(
+                    delivery.get("retry_seconds")
+                    or 0
+                )
+
+                message = (
+                    "A verification code was sent recently."
+                )
+
+                if retry_seconds > 0:
+                    message += (
+                        " You can request another in about "
+                        f"{retry_seconds} second(s)."
+                    )
+
+                return (
+                    _mfa_account_recovery_code_rebuild_response(
+                        recovery_session,
+                        result,
+                        method="sms",
+                        delivery_message=message,
+                    )
+                )
+
+            if delivery_status == "hourly_limit":
+                retry_seconds = int(
+                    delivery.get("retry_seconds")
+                    or 0
+                )
+
+                retry_minutes = max(
+                    1,
+                    (retry_seconds + 59) // 60,
+                )
+
+                return (
+                    _mfa_account_recovery_code_rebuild_response(
+                        recovery_session,
+                        result,
+                        method="sms",
+                        verification_error=(
+                            "Too many security codes have "
+                            "been sent for this recovery "
+                            "attempt. Try again in about "
+                            f"{retry_minutes} minute(s)."
+                        ),
+                    )
+                )
+
+            if delivery_status == "delivery_failed":
+                return (
+                    _mfa_account_recovery_code_rebuild_response(
+                        recovery_session,
+                        result,
+                        method="sms",
+                        verification_error=(
+                            "Peach Suite Pro could not send "
+                            "a new verification code. Your "
+                            "previously delivered code remains "
+                            "unchanged if it has not expired."
+                        ),
+                    )
+                )
+
+            if delivery_status == "factor_changed":
+                _clear_mfa_account_recovery_session()
+
+                return (
+                    _mfa_account_recovery_restart_response(
+                        "A trusted recovery factor changed "
+                        "during recovery. For security, "
+                        "please sign in again and restart "
+                        "verified Account Recovery."
+                    )
+                )
+
+            if delivery_status == "destination_changed":
+                _clear_mfa_account_recovery_session()
+
+                return (
+                    _mfa_account_recovery_restart_response(
+                        "The account verification destination "
+                        "changed while the security code was "
+                        "being delivered. Please sign in again "
+                        "and restart verified Account Recovery."
+                    )
+                )
+
+            return (
+                _mfa_account_recovery_restart_response()
+            )
+
+        if recovery_action == "verify_authenticator":
+            submitted_code = request.form.get(
+                "verification_code",
+                "",
+            )
+
+            verification = (
+                _verify_mfa_account_recovery_authenticator_rebuild(
+                    recovery_session,
+                    submitted_code,
+                )
+            )
+
+            verification_status = str(
+                verification.get("status")
+                or ""
+            ).strip().lower()
+
+            if verification_status == "success":
+                # Completion must never create a normal business
+                # session. Remove the narrow recovery session and
+                # show the newly issued recovery codes directly
+                # in this no-store response only.
+                _clear_mfa_account_recovery_session()
+
+                return _mfa_no_store(
+                    render_template(
+                        "mfa_account_recovery_restricted.html",
+                        recovery=result,
+                        mode="recovery_codes",
+                        available_methods=None,
+                        security_csrf_token=None,
+                        verification_error=None,
+                        recovery_codes=(
+                            verification[
+                                "recovery_codes"
+                            ]
+                        ),
+                    )
+                )
+
+            if verification_status == "invalid":
+                verify_csrf_purpose = (
+                    _mfa_account_recovery_restricted_csrf_purpose(
+                        recovery_session,
+                        "verify_authenticator",
+                    )
+                )
+
+                verify_csrf_token = (
+                    _public_security_csrf_token(
+                        verify_csrf_purpose
+                    )
+                )
+
+                return _mfa_no_store(
+                    render_template(
+                        "mfa_account_recovery_restricted.html",
+                        recovery=result,
+                        mode="authenticator_setup",
+                        available_methods=None,
+                        security_csrf_token=(
+                            verify_csrf_token
+                        ),
+                        verification_error=(
+                            "That verification code was not "
+                            "accepted. Enter the current code "
+                            "shown in your Authenticator app."
+                        ),
+                        recovery_codes=None,
+                    )
+                )
+
+            if verification_status == "locked":
+                _clear_mfa_account_recovery_session()
+
+                remaining_minutes = (
+                    verification.get(
+                        "remaining_minutes"
+                    )
+                )
+
+                message = (
+                    "Too many unsuccessful verification "
+                    "attempts. For security, Account Recovery "
+                    "must be restarted after the temporary "
+                    "account lock expires."
+                )
+
+                if remaining_minutes:
+                    message += (
+                        " Please try again in about "
+                        f"{remaining_minutes} minute(s)."
+                    )
+
+                return (
+                    _mfa_account_recovery_restart_response(
+                        message
+                    )
+                )
+
+            if verification_status == "factor_changed":
+                _clear_mfa_account_recovery_session()
+
+                return (
+                    _mfa_account_recovery_restart_response(
+                        "A trusted recovery factor changed "
+                        "during recovery. For security, "
+                        "please sign in again and restart "
+                        "verified Account Recovery."
+                    )
+                )
+
+            return (
+                _mfa_account_recovery_restart_response()
+            )
+
+        if recovery_action == "select_method":
+            selected_method = str(
+                request.form.get(
+                    "mfa_method",
+                    "",
+                )
+                or ""
+            ).strip().lower()
+
+            if selected_method not in {
+                "authenticator",
+                "sms",
+            }:
+                abort(400)
+
+            if selected_method == "sms":
+                delivery = (
+                    _send_mfa_account_recovery_rebuild_verification_code(
+                        user_id=int(
+                            recovery_session["user_id"]
+                        ),
+                        method="sms",
+                        recovery_request_id=int(
+                            recovery_session[
+                                "recovery_request_id"
+                            ]
+                        ),
+                    )
+                )
+
+                delivery_status = str(
+                    delivery.get("status")
+                    or ""
+                ).strip().lower()
+
+                if delivery_status == "sent":
+                    return (
+                        _mfa_account_recovery_code_rebuild_response(
+                            recovery_session,
+                            result,
+                            method="sms",
+                            delivery_message=(
+                                "A fresh security verification "
+                                "code was sent. Enter the most "
+                                "recent Peach Suite Pro text below."
+                            ),
+                        )
+                    )
+
+                if delivery_status == "superseded":
+                    return (
+                        _mfa_account_recovery_code_rebuild_response(
+                            recovery_session,
+                            result,
+                            method="sms",
+                            delivery_message=(
+                                "A newer verification code is "
+                                "already active. Use the most "
+                                "recent Peach Suite Pro text."
+                            ),
+                        )
+                    )
+
+                if delivery_status == "cooldown":
+                    retry_seconds = int(
+                        delivery.get("retry_seconds")
+                        or 0
+                    )
+
+                    message = (
+                        "A verification code was sent recently."
+                    )
+
+                    if retry_seconds > 0:
+                        message += (
+                            " You can request another in about "
+                            f"{retry_seconds} second(s)."
+                        )
+
+                    return (
+                        _mfa_account_recovery_code_rebuild_response(
+                            recovery_session,
+                            result,
+                            method="sms",
+                            delivery_message=message,
+                        )
+                    )
+
+                if delivery_status == "hourly_limit":
+                    retry_seconds = int(
+                        delivery.get("retry_seconds")
+                        or 0
+                    )
+
+                    retry_minutes = max(
+                        1,
+                        (retry_seconds + 59) // 60,
+                    )
+
+                    return (
+                        _mfa_account_recovery_code_rebuild_response(
+                            recovery_session,
+                            result,
+                            method="sms",
+                            verification_error=(
+                                "Too many security codes have "
+                                "been sent for this recovery "
+                                "attempt. Try again in about "
+                                f"{retry_minutes} minute(s)."
+                            ),
+                        )
+                    )
+
+                if delivery_status == "factor_changed":
+                    _clear_mfa_account_recovery_session()
+
+                    return (
+                        _mfa_account_recovery_restart_response(
+                            "A trusted recovery factor changed "
+                            "during recovery. For security, "
+                            "please sign in again and restart "
+                            "verified Account Recovery."
+                        )
+                    )
+
+                if delivery_status == "destination_changed":
+                    _clear_mfa_account_recovery_session()
+
+                    return (
+                        _mfa_account_recovery_restart_response(
+                            "The account verification destination "
+                            "changed while the security code was "
+                            "being delivered. Please sign in again "
+                            "and restart verified Account Recovery."
+                        )
+                    )
+
+                if delivery_status == "delivery_failed":
+                    return (
+                        _mfa_account_recovery_restart_response(
+                            "Peach Suite Pro could not deliver "
+                            "the Text Message verification code. "
+                            "No replacement MFA method was "
+                            "activated."
+                        )
+                    )
+
+                return (
+                    _mfa_account_recovery_restart_response()
+                )
+
+            rebuild = (
+                _start_mfa_account_recovery_authenticator_rebuild(
+                    recovery_session
+                )
+            )
+
+            if rebuild.get("status") != "success":
+                return (
+                    _mfa_account_recovery_restart_response()
+                )
+
+            verify_csrf_purpose = (
+                _mfa_account_recovery_restricted_csrf_purpose(
+                    recovery_session,
+                    "verify_authenticator",
+                )
+            )
+
+            verify_csrf_token = (
+                _public_security_csrf_token(
+                    verify_csrf_purpose
+                )
+            )
+
+            return _mfa_no_store(
+                render_template(
+                    "mfa_account_recovery_restricted.html",
+                    recovery=result,
+                    mode="authenticator_setup",
+                    available_methods=None,
+                    security_csrf_token=(
+                        verify_csrf_token
+                    ),
+                    verification_error=None,
+                    recovery_codes=None,
+                )
+            )
+
+        user_id = int(
+            recovery_session["user_id"]
+        )
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        try:
+            cur.execute(
+                """
+                SELECT
+                    role,
+                    email,
+                    sms_phone
+                FROM users
+                WHERE user_id = %s
+                  AND active = TRUE
+                LIMIT 1
+                """,
+                (user_id,),
+            )
+
+            user = cur.fetchone()
+
+        finally:
+            cur.close()
+            conn.close()
+
+        if not user:
+            return (
+                _mfa_account_recovery_restart_response()
+            )
+
+        role = str(
+            user[0] or ""
+        ).strip()
+
+        if role not in {
+            "admin",
+            "manager",
+            "master_admin",
+        }:
+            return (
+                _mfa_account_recovery_restart_response()
+            )
+
+        available_methods = [
+            {
+                "value": "authenticator",
+                "label": "Authenticator App",
+                "description": (
+                    "Set up a completely new authenticator "
+                    "credential and receive fresh recovery "
+                    "codes."
+                ),
+                "actionable": True,
+            },
+        ]
+
+        if role != "master_admin":
+            if str(user[2] or "").strip():
+                available_methods.append(
+                    {
+                        "value": "sms",
+                        "label": "Text Message",
+                        "description": (
+                            "Verify a fresh code sent to the "
+                            "text-message number already "
+                            "configured for this account."
+                        ),
+                        "actionable": True,
+                    }
+                )
+
+            if str(user[1] or "").strip():
+                available_methods.append(
+                    {
+                        "value": "email",
+                        "label": "Email",
+                        "description": (
+                            "Verify a fresh code sent to the "
+                            "login email already configured "
+                            "for this account."
+                        ),
+                        "actionable": False,
+                    }
+                )
+
+        select_csrf_purpose = (
+            _mfa_account_recovery_restricted_csrf_purpose(
+                recovery_session,
+                "select_method",
+            )
+        )
+
+        select_csrf_token = (
+            _public_security_csrf_token(
+                select_csrf_purpose
+            )
+        )
+
+        return _mfa_no_store(
+            render_template(
+                "mfa_account_recovery_restricted.html",
+                recovery=result,
+                mode="select",
+                available_methods=available_methods,
+                security_csrf_token=(
+                    select_csrf_token
+                ),
+            )
+        )
+
+    csrf_purpose = (
+        _mfa_account_recovery_restricted_csrf_purpose(
+            recovery_session,
+            "continue",
+        )
+    )
+
+    security_csrf_token = (
+        _public_security_csrf_token(
+            csrf_purpose
+        )
+    )
+
+    return _mfa_no_store(
+        render_template(
+            "mfa_account_recovery_restricted.html",
+            recovery=result,
+            mode="overview",
+            available_methods=None,
+            security_csrf_token=(
+                security_csrf_token
+            ),
+        )
+    )
+
+
+@app.route(
+    "/login/mfa/account-recovery/restricted/qr"
+)
+def mfa_account_recovery_restricted_qr():
+    recovery_session = (
+        _mfa_account_recovery_session()
+    )
+
+    if not recovery_session:
+        abort(404)
+
+    result = (
+        _enter_mfa_account_recovery_restricted_session()
+    )
+
+    if str(
+        result.get("status") or ""
+    ).strip().lower() != "success":
+        abort(404)
+
+    user_id = int(
+        recovery_session["user_id"]
+    )
+
+    recovery_request_id = int(
+        recovery_session[
+            "recovery_request_id"
+        ]
+    )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                a.totp_secret_encrypted,
+                a.verified_at,
+                a.revoked_at,
+                u.email,
+                u.spa_id
+            FROM mfa_account_recovery_requests r
+
+            JOIN mfa_authenticators a
+              ON a.mfa_authenticator_id
+                    = r.replacement_authenticator_id
+             AND a.user_id = r.user_id
+
+            JOIN users u
+              ON u.user_id = r.user_id
+             AND u.active = TRUE
+
+            WHERE r.mfa_account_recovery_request_id = %s
+              AND r.user_id = %s
+              AND r.status = 'restricted'
+              AND r.mfa_rebuild_method = 'authenticator'
+              AND r.mfa_rebuild_started_at IS NOT NULL
+              AND r.replacement_authenticator_id IS NOT NULL
+              AND r.replacement_verification_challenge_id IS NULL
+              AND r.mfa_rebuild_verified_at IS NULL
+            LIMIT 1
+            """,
+            (
+                recovery_request_id,
+                user_id,
+            ),
+        )
+
+        row = cur.fetchone()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if (
+        not row
+        or row[1] is not None
+        or row[2] is not None
+    ):
+        abort(404)
+
+    encrypted_secret = row[0]
+    account_name = row[3]
+    spa_id = row[4]
+
+    try:
+        secret = decrypt_totp_secret(
+            encrypted_secret,
+            user_id=user_id,
+        )
+
+        provisioning_uri = build_totp_uri(
+            secret,
+            account_name=account_name,
+        )
+
+        png_data = build_totp_qr_png(
+            provisioning_uri
+        )
+
+        secret = None
+        provisioning_uri = None
+
+    except MFAError:
+        log_security(
+            "Account Recovery Authenticator QR "
+            "generation failed.",
+            severity="ERROR",
+            spa_id=spa_id,
+            related_type=(
+                "mfa_account_recovery_authenticator_qr"
+            ),
+            related_id=recovery_request_id,
+            created_by=user_id,
+        )
+
+        return _mfa_no_store(
+            (
+                "Authenticator setup image is "
+                "temporarily unavailable.",
+                503,
+            )
+        )
+
+    response = Response(
+        png_data,
+        mimetype="image/png",
+    )
+
+    response.headers[
+        "X-Content-Type-Options"
+    ] = "nosniff"
+
+    return _mfa_no_store(response)
 
 
 @app.route(
@@ -38377,7 +50275,10 @@ def login():
             )
 
         return _continue_business_login_after_password(
-            user
+            user,
+            password_verified_at_epoch=int(
+                user[10].timestamp()
+            ),
         )
 
     session.pop("_pending_login_switch", None)
@@ -38519,7 +50420,8 @@ def confirm_login_business_switch():
         return redirect(url_for("login"))
 
     return _continue_business_login_after_password(
-        user
+        user,
+        password_verified_at_epoch=created_at,
     )
 
 
@@ -38884,6 +50786,121 @@ def my_login_security():
                 cur.fetchone()[0] or 0
             )
 
+        trusted_recovery = {
+            "email": {
+                "verified": None,
+                "pending": None,
+            },
+            "sms": {
+                "verified": None,
+                "pending": None,
+            },
+        }
+
+        active_account_recovery_key = False
+
+        if account_matches_session:
+            cur.execute(
+                """
+                SELECT
+                    mfa_account_recovery_key_id
+                FROM mfa_account_recovery_keys
+                WHERE user_id = %s
+                  AND invalidated_at IS NULL
+                LIMIT 1
+                """,
+                (user_id,),
+            )
+
+            active_account_recovery_key = bool(
+                cur.fetchone()
+            )
+
+            cur.execute(
+                """
+                SELECT
+                    mfa_recovery_contact_id,
+                    contact_type,
+                    contact_value,
+                    created_at,
+                    verified_at
+                FROM mfa_recovery_contacts
+                WHERE user_id = %s
+                  AND contact_type IN (
+                      'email',
+                      'sms'
+                  )
+                  AND revoked_at IS NULL
+                ORDER BY
+                    contact_type,
+                    verified_at DESC NULLS LAST,
+                    created_at DESC,
+                    mfa_recovery_contact_id DESC
+                """,
+                (user_id,),
+            )
+
+            for recovery_row in cur.fetchall():
+                recovery_contact_id = int(
+                    recovery_row[0]
+                )
+
+                recovery_method = str(
+                    recovery_row[1] or ""
+                ).strip().lower()
+
+                recovery_value = str(
+                    recovery_row[2] or ""
+                ).strip()
+
+                if recovery_method not in {
+                    "email",
+                    "sms",
+                }:
+                    continue
+
+                masked_label = (
+                    _mask_mfa_recovery_phone_for_display(
+                        recovery_value
+                    )
+                    if recovery_method == "sms"
+                    else _mask_mfa_recovery_email_for_display(
+                        recovery_value
+                    )
+                )
+
+                recovery_entry = {
+                    "recovery_contact_id": (
+                        recovery_contact_id
+                    ),
+                    "masked_label": masked_label,
+                    "created_at": recovery_row[3],
+                    "verified_at": recovery_row[4],
+                }
+
+                recovery_state = (
+                    "verified"
+                    if recovery_row[4] is not None
+                    else "pending"
+                )
+
+                # Partial unique indexes permit at most one
+                # current verified and one current pending row
+                # per recovery-contact type. Keep the loader
+                # fail-quiet if historical corruption exists;
+                # the write paths remain fail-closed.
+                if (
+                    trusted_recovery[
+                        recovery_method
+                    ][recovery_state]
+                    is None
+                ):
+                    trusted_recovery[
+                        recovery_method
+                    ][recovery_state] = (
+                        recovery_entry
+                    )
+
     finally:
         cur.close()
         conn.close()
@@ -38928,6 +50945,1281 @@ def my_login_security():
             active_recovery_code_count=(
                 active_recovery_code_count
             ),
+            trusted_recovery_email=(
+                trusted_recovery["email"]
+            ),
+            trusted_recovery_phone=(
+                trusted_recovery["sms"]
+            ),
+            active_account_recovery_key=(
+                active_account_recovery_key
+            ),
+            can_manage_trusted_recovery=bool(
+                active_mfa_method in {
+                    "authenticator",
+                    "sms",
+                    "email",
+                }
+            ),
+        )
+    )
+
+
+
+
+@app.route(
+    "/account/security/trusted-recovery/<method>",
+    methods=["GET", "POST"],
+)
+@login_required
+def mfa_recovery_contact_setup(method):
+
+    user_id = session.get("user_id")
+    spa_id = session.get("spa_id")
+    session_role = str(
+        session.get("role") or ""
+    ).strip()
+
+    normalized_method = str(
+        method or ""
+    ).strip().lower()
+
+    if normalized_method not in {
+        "email",
+        "sms",
+    }:
+        abort(404)
+
+    if not user_id:
+        return redirect(url_for("login"))
+
+    def load_security_state():
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        try:
+            cur.execute(
+                """
+                SELECT
+                    user_id,
+                    spa_id,
+                    first_name,
+                    last_name,
+                    email,
+                    password_hash,
+                    role,
+                    password_changed_at,
+                    must_change_password,
+                    login_locked_until,
+                    NOW(),
+                    sms_phone
+                FROM users
+                WHERE user_id = %s
+                  AND active = TRUE
+                LIMIT 1
+                """,
+                (user_id,),
+            )
+
+            user = cur.fetchone()
+
+            account_matches = bool(
+                user
+                and user[1] == spa_id
+                and str(
+                    user[6] or ""
+                ).strip() == session_role
+            )
+
+            if not account_matches:
+                return None
+
+            setting = _mfa_user_setting_record(
+                cur,
+                user_id,
+            )
+
+            active_method = (
+                str(
+                    setting[2] or ""
+                ).strip().lower()
+                if (
+                    setting
+                    and setting[3] is not None
+                )
+                else ""
+            )
+
+            return {
+                "user": user,
+                "active_method": active_method,
+            }
+
+        finally:
+            cur.close()
+            conn.close()
+
+    def pending_contact_display(pending_state):
+        if not isinstance(pending_state, dict):
+            return None
+
+        try:
+            pending_user_id = int(
+                pending_state.get("user_id")
+            )
+            pending_contact_id = int(
+                pending_state.get(
+                    "recovery_contact_id"
+                )
+            )
+        except (TypeError, ValueError):
+            return None
+
+        pending_method = str(
+            pending_state.get("method")
+            or ""
+        ).strip().lower()
+
+        if (
+            pending_user_id != user_id
+            or pending_method != normalized_method
+            or pending_contact_id <= 0
+        ):
+            return None
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        try:
+            cur.execute(
+                """
+                SELECT
+                    contact_value
+                FROM mfa_recovery_contacts
+                WHERE mfa_recovery_contact_id = %s
+                  AND user_id = %s
+                  AND contact_type = %s
+                  AND verified_at IS NULL
+                  AND revoked_at IS NULL
+                LIMIT 1
+                """,
+                (
+                    pending_contact_id,
+                    user_id,
+                    normalized_method,
+                ),
+            )
+
+            row = cur.fetchone()
+
+            if not row:
+                return None
+
+            contact_value = str(
+                row[0] or ""
+            ).strip()
+
+            return (
+                _mask_mfa_recovery_phone_for_display(
+                    contact_value
+                )
+                if normalized_method == "sms"
+                else _mask_mfa_recovery_email_for_display(
+                    contact_value
+                )
+            )
+
+        finally:
+            cur.close()
+            conn.close()
+
+    state = load_security_state()
+
+    if not state:
+        _clear_pending_mfa_recovery_contact_setup()
+        session.clear()
+
+        return redirect(
+            url_for(
+                "login",
+                session_ended="1",
+            )
+        )
+
+    if state["active_method"] not in {
+        "authenticator",
+        "sms",
+        "email",
+    }:
+        _clear_pending_mfa_recovery_contact_setup()
+
+        flash(
+            "Two-step verification must be active before "
+            "Trusted Recovery can be configured.",
+            "error",
+        )
+
+        return _mfa_no_store(
+            redirect(
+                url_for("my_login_security")
+            )
+        )
+
+    login_locked_until = state["user"][9]
+    login_now = state["user"][10]
+
+    if (
+        login_locked_until is not None
+        and login_locked_until > login_now
+    ):
+        _clear_pending_mfa_recovery_contact_setup()
+        session.clear()
+
+        flash(
+            "This account is temporarily locked for security. "
+            "Please sign in again after the lock expires.",
+            "error",
+        )
+
+        return redirect(url_for("login"))
+
+    pending = (
+        _pending_mfa_recovery_contact_setup()
+    )
+
+    if pending:
+        pending_method = str(
+            pending.get("method")
+            or ""
+        ).strip().lower()
+
+        if pending_method != normalized_method:
+            return _mfa_no_store(
+                redirect(
+                    url_for(
+                        "mfa_recovery_contact_setup",
+                        method=pending_method,
+                    )
+                )
+            )
+
+        pending_label = pending_contact_display(
+            pending
+        )
+
+        if not pending_label:
+            _clear_pending_mfa_recovery_contact_setup()
+            pending = None
+
+            flash(
+                "That Trusted Recovery setup is no longer "
+                "available. Please start again.",
+                "error",
+            )
+
+            return _mfa_no_store(
+                redirect(
+                    url_for(
+                        "mfa_recovery_contact_setup",
+                        method=normalized_method,
+                    )
+                )
+            )
+    else:
+        pending_label = None
+
+    if request.method == "POST":
+
+        submitted_token = request.form.get(
+            "security_csrf_token",
+            "",
+        )
+
+        if not _security_form_csrf_valid(
+            submitted_token
+        ):
+            abort(400)
+
+        action = str(
+            request.form.get(
+                "recovery_action",
+                "",
+            )
+            or ""
+        ).strip().lower()
+
+        if action in {
+            "cancel",
+            "resend_code",
+            "verify",
+        }:
+            if not pending:
+                abort(400)
+
+            submitted_flow_id = str(
+                request.form.get(
+                    "flow_id",
+                    "",
+                )
+                or ""
+            ).strip()
+
+            expected_flow_id = str(
+                pending.get("flow_id")
+                or ""
+            ).strip()
+
+            if (
+                not submitted_flow_id
+                or not expected_flow_id
+                or not hmac.compare_digest(
+                    submitted_flow_id,
+                    expected_flow_id,
+                )
+            ):
+                abort(400)
+
+        if action == "cancel":
+            cleanup = (
+                _revoke_pending_mfa_recovery_contact_setup(
+                    pending
+                )
+            )
+
+            cleanup_status = str(
+                cleanup.get("status")
+                or ""
+            ).strip().lower()
+
+            _clear_pending_mfa_recovery_contact_setup()
+
+            session.pop(
+                "_security_form_csrf",
+                None,
+            )
+
+            if cleanup_status == "invalid_state":
+                flash(
+                    "Peach Suite Pro could not safely cancel "
+                    "that Trusted Recovery setup. No verified "
+                    "Trusted Recovery contact was changed.",
+                    "error",
+                )
+            else:
+                flash(
+                    "Trusted Recovery setup was cancelled.",
+                    "success",
+                )
+
+            return _mfa_no_store(
+                redirect(
+                    url_for("my_login_security")
+                )
+            )
+
+        if action == "start":
+            if pending:
+                abort(400)
+
+            current_password = request.form.get(
+                "current_password",
+                "",
+            )
+
+            if not current_password:
+                flash(
+                    "Please enter your current password.",
+                    "error",
+                )
+
+                return _mfa_no_store(
+                    redirect(
+                        url_for(
+                            "mfa_recovery_contact_setup",
+                            method=normalized_method,
+                        )
+                    )
+                )
+
+            if not check_password_hash(
+                state["user"][5],
+                current_password,
+            ):
+                audit_conn = get_db_connection()
+                audit_conn.autocommit = False
+                audit_cur = audit_conn.cursor()
+
+                try:
+                    log_audit(
+                        audit_cur,
+                        spa_id=spa_id,
+                        user_id=user_id,
+                        action_type=(
+                            "mfa_recovery_contact_setup_password_failed"
+                        ),
+                        table_name="users",
+                        record_id=user_id,
+                        notes=(
+                            "Current password verification failed "
+                            "during Trusted Recovery contact setup."
+                        ),
+                    )
+
+                    audit_conn.commit()
+
+                except Exception:
+                    audit_conn.rollback()
+                    raise
+
+                finally:
+                    audit_cur.close()
+                    audit_conn.close()
+
+                flash(
+                    "Current password is incorrect. "
+                    "No security settings were changed.",
+                    "error",
+                )
+
+                return _mfa_no_store(
+                    redirect(
+                        url_for(
+                            "mfa_recovery_contact_setup",
+                            method=normalized_method,
+                        )
+                    )
+                )
+
+            contact_value = request.form.get(
+                "contact_value",
+                "",
+            )
+
+            creation = (
+                _create_pending_mfa_recovery_contact_setup(
+                    user_id=user_id,
+                    spa_id=spa_id,
+                    role=session_role,
+                    method=normalized_method,
+                    contact_value=contact_value,
+                )
+            )
+
+            creation_status = str(
+                creation.get("status")
+                or ""
+            ).strip().lower()
+
+            if creation_status == "already_verified":
+                flash(
+                    (
+                        "That phone number is already your "
+                        "verified Trusted Recovery phone."
+                        if normalized_method == "sms"
+                        else
+                        "That email address is already your "
+                        "verified Trusted Recovery email."
+                    ),
+                    "success",
+                )
+
+                return _mfa_no_store(
+                    redirect(
+                        url_for("my_login_security")
+                    )
+                )
+
+            if creation_status == "invalid_contact":
+                flash(
+                    str(
+                        creation.get("message")
+                        or (
+                            "Please enter a valid mobile phone number."
+                            if normalized_method == "sms"
+                            else
+                            "Please enter a valid email address."
+                        )
+                    ),
+                    "error",
+                )
+
+                return _mfa_no_store(
+                    redirect(
+                        url_for(
+                            "mfa_recovery_contact_setup",
+                            method=normalized_method,
+                        )
+                    )
+                )
+
+            if creation_status == "same_as_account_contact":
+                flash(
+                    (
+                        "Your Trusted Recovery phone must be "
+                        "different from your personal mobile number."
+                        if normalized_method == "sms"
+                        else
+                        "Your Trusted Recovery email must be "
+                        "different from your login email."
+                    ),
+                    "error",
+                )
+
+                return _mfa_no_store(
+                    redirect(
+                        url_for(
+                            "mfa_recovery_contact_setup",
+                            method=normalized_method,
+                        )
+                    )
+                )
+
+            if creation_status == "locked":
+                _clear_pending_mfa_recovery_contact_setup()
+                session.clear()
+
+                flash(
+                    "This account is temporarily locked for "
+                    "security. Please sign in again later.",
+                    "error",
+                )
+
+                return redirect(url_for("login"))
+
+            if creation_status not in {
+                "created",
+                "pending",
+            }:
+                flash(
+                    "Peach Suite Pro could not safely start "
+                    "Trusted Recovery setup. No verified "
+                    "recovery contact was changed.",
+                    "error",
+                )
+
+                return _mfa_no_store(
+                    redirect(
+                        url_for("my_login_security")
+                    )
+                )
+
+            pending = (
+                _start_pending_mfa_recovery_contact_setup(
+                    user_id=user_id,
+                    spa_id=spa_id,
+                    role=session_role,
+                    method=normalized_method,
+                    recovery_contact_id=(
+                        creation[
+                            "recovery_contact_id"
+                        ]
+                    ),
+                )
+            )
+
+            delivery = (
+                _send_mfa_recovery_verification_code(
+                    user_id=user_id,
+                    method=normalized_method,
+                    purpose=(
+                        "recovery_contact_setup"
+                    ),
+                    recovery_contact_id=(
+                        creation[
+                            "recovery_contact_id"
+                        ]
+                    ),
+                    recovery_request_id=None,
+                )
+            )
+
+            delivery_status = str(
+                delivery.get("status")
+                or ""
+            ).strip().lower()
+
+            if delivery_status == "sent":
+                challenge_id = delivery.get(
+                    "mfa_verification_challenge_id"
+                )
+
+                try:
+                    challenge_id = int(
+                        challenge_id
+                    )
+                except (TypeError, ValueError):
+                    raise RuntimeError(
+                        "Trusted Recovery delivery returned "
+                        "an invalid verification challenge."
+                    )
+
+                if challenge_id <= 0:
+                    raise RuntimeError(
+                        "Trusted Recovery delivery returned "
+                        "an invalid verification challenge."
+                    )
+
+                pending[
+                    "mfa_verification_challenge_id"
+                ] = challenge_id
+
+                session[
+                    "_pending_mfa_recovery_contact_setup"
+                ] = pending
+
+                flash(
+                    "A Trusted Recovery verification code "
+                    "was sent.",
+                    "success",
+                )
+
+            elif delivery_status == "cooldown":
+                flash(
+                    "A verification code was sent recently. "
+                    "Please wait before requesting another.",
+                    "error",
+                )
+
+            elif delivery_status == "hourly_limit":
+                flash(
+                    "The verification-code delivery limit "
+                    "has been reached. Please try again later.",
+                    "error",
+                )
+
+            elif delivery_status in {
+                "invalid_recovery_contact",
+                "superseded",
+            }:
+                cleanup = (
+                    _revoke_pending_mfa_recovery_contact_setup(
+                        pending
+                    )
+                )
+
+                _clear_pending_mfa_recovery_contact_setup()
+
+                flash(
+                    "That Trusted Recovery setup is no longer "
+                    "valid. Please start again.",
+                    "error",
+                )
+
+                return _mfa_no_store(
+                    redirect(
+                        url_for(
+                            "mfa_recovery_contact_setup",
+                            method=normalized_method,
+                        )
+                    )
+                )
+
+            else:
+                flash(
+                    "Peach Suite Pro could not send the "
+                    "verification code right now. You can "
+                    "try again.",
+                    "error",
+                )
+
+            return _mfa_no_store(
+                redirect(
+                    url_for(
+                        "mfa_recovery_contact_setup",
+                        method=normalized_method,
+                    )
+                )
+            )
+
+        if action == "resend_code":
+            delivery = (
+                _send_mfa_recovery_verification_code(
+                    user_id=user_id,
+                    method=normalized_method,
+                    purpose=(
+                        "recovery_contact_setup"
+                    ),
+                    recovery_contact_id=(
+                        pending[
+                            "recovery_contact_id"
+                        ]
+                    ),
+                    recovery_request_id=None,
+                )
+            )
+
+            delivery_status = str(
+                delivery.get("status")
+                or ""
+            ).strip().lower()
+
+            if delivery_status == "sent":
+                challenge_id = delivery.get(
+                    "mfa_verification_challenge_id"
+                )
+
+                try:
+                    challenge_id = int(
+                        challenge_id
+                    )
+                except (TypeError, ValueError):
+                    raise RuntimeError(
+                        "Trusted Recovery resend returned "
+                        "an invalid verification challenge."
+                    )
+
+                if challenge_id <= 0:
+                    raise RuntimeError(
+                        "Trusted Recovery resend returned "
+                        "an invalid verification challenge."
+                    )
+
+                pending[
+                    "mfa_verification_challenge_id"
+                ] = challenge_id
+
+                session[
+                    "_pending_mfa_recovery_contact_setup"
+                ] = pending
+
+                flash(
+                    "A new Trusted Recovery verification "
+                    "code was sent.",
+                    "success",
+                )
+
+            elif delivery_status == "cooldown":
+                flash(
+                    "A verification code was sent recently. "
+                    "Please wait before requesting another.",
+                    "error",
+                )
+
+            elif delivery_status == "hourly_limit":
+                flash(
+                    "The verification-code delivery limit "
+                    "has been reached. Please try again later.",
+                    "error",
+                )
+
+            elif delivery_status in {
+                "invalid_recovery_contact",
+                "superseded",
+            }:
+                _revoke_pending_mfa_recovery_contact_setup(
+                    pending
+                )
+
+                _clear_pending_mfa_recovery_contact_setup()
+
+                flash(
+                    "That Trusted Recovery setup is no longer "
+                    "valid. Please start again.",
+                    "error",
+                )
+
+                return _mfa_no_store(
+                    redirect(
+                        url_for(
+                            "mfa_recovery_contact_setup",
+                            method=normalized_method,
+                        )
+                    )
+                )
+
+            else:
+                flash(
+                    "Peach Suite Pro could not send a new "
+                    "verification code right now.",
+                    "error",
+                )
+
+            return _mfa_no_store(
+                redirect(
+                    url_for(
+                        "mfa_recovery_contact_setup",
+                        method=normalized_method,
+                    )
+                )
+            )
+
+        if action == "verify":
+            if not pending.get(
+                "mfa_verification_challenge_id"
+            ):
+                flash(
+                    "Please request a new verification code.",
+                    "error",
+                )
+
+                return _mfa_no_store(
+                    redirect(
+                        url_for(
+                            "mfa_recovery_contact_setup",
+                            method=normalized_method,
+                        )
+                    )
+                )
+
+            result = (
+                _verify_mfa_recovery_contact_setup_code(
+                    pending,
+                    request.form.get(
+                        "verification_code",
+                        "",
+                    ),
+                )
+            )
+
+            result_status = str(
+                result.get("status")
+                or ""
+            ).strip().lower()
+
+            if result_status == "success":
+                _clear_pending_mfa_recovery_contact_setup()
+
+                session.pop(
+                    "_security_form_csrf",
+                    None,
+                )
+
+                flash(
+                    (
+                        "Your Trusted Recovery phone is "
+                        "now verified and active."
+                        if normalized_method == "sms"
+                        else
+                        "Your Trusted Recovery email is "
+                        "now verified and active."
+                    ),
+                    "success",
+                )
+
+                return _mfa_no_store(
+                    redirect(
+                        url_for("my_login_security")
+                    )
+                )
+
+            if result_status == "locked":
+                _revoke_pending_mfa_recovery_contact_setup(
+                    pending
+                )
+
+                _clear_pending_mfa_recovery_contact_setup()
+                session.clear()
+
+                flash(
+                    "Too many unsuccessful security "
+                    "verification attempts. Please sign "
+                    "in again later.",
+                    "error",
+                )
+
+                return redirect(url_for("login"))
+
+            if result_status in {
+                "invalid_state",
+                "missing_challenge",
+            }:
+                _revoke_pending_mfa_recovery_contact_setup(
+                    pending
+                )
+
+                _clear_pending_mfa_recovery_contact_setup()
+
+                flash(
+                    "That Trusted Recovery verification is "
+                    "no longer valid. Please start again.",
+                    "error",
+                )
+
+                return _mfa_no_store(
+                    redirect(
+                        url_for("my_login_security")
+                    )
+                )
+
+            flash(
+                "That verification code could not be "
+                "verified. Please try again.",
+                "error",
+            )
+
+            return _mfa_no_store(
+                redirect(
+                    url_for(
+                        "mfa_recovery_contact_setup",
+                        method=normalized_method,
+                    )
+                )
+            )
+
+        abort(400)
+
+    pending = (
+        _pending_mfa_recovery_contact_setup()
+    )
+
+    pending_label = (
+        pending_contact_display(pending)
+        if pending
+        else None
+    )
+
+    if pending and not pending_label:
+        _clear_pending_mfa_recovery_contact_setup()
+
+        flash(
+            "That Trusted Recovery setup is no longer "
+            "available. Please start again.",
+            "error",
+        )
+
+        return _mfa_no_store(
+            redirect(
+                url_for(
+                    "mfa_recovery_contact_setup",
+                    method=normalized_method,
+                )
+            )
+        )
+
+    return _mfa_no_store(
+        render_template(
+            "mfa_recovery_contact_setup.html",
+            recovery_method=normalized_method,
+            recovery_method_label=(
+                "Trusted Recovery Phone"
+                if normalized_method == "sms"
+                else "Trusted Recovery Email"
+            ),
+            pending=pending,
+            pending_label=pending_label,
+            security_csrf_token=(
+                _security_form_csrf_token()
+            ),
+        )
+    )
+
+
+@app.route(
+    "/account/security/account-recovery-key",
+    methods=["GET", "POST"],
+)
+@login_required
+def mfa_account_recovery_key():
+
+    import hmac
+
+    user_id = session.get("user_id")
+    spa_id = session.get("spa_id")
+    session_role = str(
+        session.get("role") or ""
+    ).strip()
+
+    if not user_id:
+        return redirect(url_for("login"))
+
+    return_endpoint = "my_login_security"
+
+    if request.method == "POST":
+
+        submitted_token = request.form.get(
+            "security_csrf_token",
+            "",
+        )
+
+        if not _security_form_csrf_valid(
+            submitted_token
+        ):
+            abort(400)
+
+        submitted_nonce = str(
+            request.form.get(
+                "recovery_key_nonce",
+                "",
+            )
+            or ""
+        )
+
+        nonce_record = session.pop(
+            "_mfa_account_recovery_key_nonce",
+            None,
+        )
+
+        nonce_valid = False
+
+        if isinstance(nonce_record, dict):
+
+            expected_nonce = str(
+                nonce_record.get("token")
+                or ""
+            )
+
+            try:
+                nonce_issued_at = int(
+                    nonce_record.get("issued_at")
+                    or 0
+                )
+            except (TypeError, ValueError):
+                nonce_issued_at = 0
+
+            nonce_valid = bool(
+                submitted_nonce
+                and expected_nonce
+                and nonce_record.get("user_id")
+                    == user_id
+                and nonce_issued_at > 0
+                and int(time.time()) - nonce_issued_at
+                    <= SECURITY_FORM_CSRF_MAX_AGE_SECONDS
+                and hmac.compare_digest(
+                    submitted_nonce,
+                    expected_nonce,
+                )
+            )
+
+        if not nonce_valid:
+            abort(400)
+
+        current_password = request.form.get(
+            "current_password",
+            "",
+        )
+
+        if not current_password:
+
+            flash(
+                "Please enter your current password.",
+                "error",
+            )
+
+            return _mfa_no_store(
+                redirect(
+                    url_for(
+                        "mfa_account_recovery_key"
+                    )
+                )
+            )
+
+        result = _regenerate_account_recovery_key(
+            user_id=user_id,
+            spa_id=spa_id,
+            session_role=session_role,
+            current_password=current_password,
+        )
+
+        if result["status"] == "invalid_password":
+
+            flash(
+                "Current password is incorrect.",
+                "error",
+            )
+
+            return _mfa_no_store(
+                redirect(
+                    url_for(
+                        "mfa_account_recovery_key"
+                    )
+                )
+            )
+
+        if result["status"] == "locked":
+
+            session.clear()
+
+            flash(
+                "This account is temporarily locked for security. "
+                "Please sign in again after the lock expires.",
+                "error",
+            )
+
+            return _mfa_no_store(
+                redirect(
+                    url_for("login")
+                )
+            )
+
+        if result["status"] != "success":
+
+            flash(
+                "Peach Suite Pro could not create an "
+                "Account Recovery Key for this account. "
+                "No recovery key was changed.",
+                "error",
+            )
+
+            return _mfa_no_store(
+                redirect(
+                    url_for(return_endpoint)
+                )
+            )
+
+        session.pop(
+            "_security_form_csrf",
+            None,
+        )
+
+        return _mfa_no_store(
+            render_template(
+                "mfa_account_recovery_key.html",
+                mode="success",
+                recovery_key=(
+                    result["recovery_key"]
+                ),
+                invalidated_count=(
+                    result["invalidated_count"]
+                ),
+                return_endpoint=return_endpoint,
+            )
+        )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                spa_id,
+                role,
+                login_locked_until,
+                NOW()
+            FROM users
+            WHERE user_id = %s
+              AND active = TRUE
+            """,
+            (user_id,),
+        )
+
+        user = cur.fetchone()
+
+        account_matches_session = bool(
+            user
+            and user[0] == spa_id
+            and str(
+                user[1] or ""
+            ).strip() == session_role
+        )
+
+        setting = (
+            _mfa_user_setting_record(
+                cur,
+                user_id,
+            )
+            if account_matches_session
+            else None
+        )
+
+        active_mfa_method = (
+            str(
+                setting[2] or ""
+            ).strip().lower()
+            if (
+                setting
+                and setting[3] is not None
+            )
+            else ""
+        )
+
+        active_key_exists = False
+
+        if (
+            account_matches_session
+            and active_mfa_method in {
+                "authenticator",
+                "sms",
+                "email",
+            }
+        ):
+            cur.execute(
+                """
+                SELECT
+                    mfa_account_recovery_key_id
+                FROM mfa_account_recovery_keys
+                WHERE user_id = %s
+                  AND invalidated_at IS NULL
+                LIMIT 1
+                """,
+                (user_id,),
+            )
+
+            active_key_exists = bool(
+                cur.fetchone()
+            )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if not account_matches_session:
+        session.clear()
+
+        return redirect(
+            url_for(
+                "login",
+                session_ended="1",
+            )
+        )
+
+    if (
+        user[2] is not None
+        and user[2] > user[3]
+    ):
+        session.clear()
+
+        flash(
+            "This account is temporarily locked for security. "
+            "Please sign in again after the lock expires.",
+            "error",
+        )
+
+        return redirect(url_for("login"))
+
+    if active_mfa_method not in {
+        "authenticator",
+        "sms",
+        "email",
+    }:
+        flash(
+            "Two-step verification must be active before "
+            "an Account Recovery Key can be configured.",
+            "error",
+        )
+
+        return _mfa_no_store(
+            redirect(
+                url_for(return_endpoint)
+            )
+        )
+
+    recovery_key_nonce = secrets.token_urlsafe(32)
+
+    session["_mfa_account_recovery_key_nonce"] = {
+        "token": recovery_key_nonce,
+        "user_id": user_id,
+        "issued_at": int(time.time()),
+    }
+
+    security_csrf_token = (
+        _security_form_csrf_token()
+    )
+
+    return _mfa_no_store(
+        render_template(
+            "mfa_account_recovery_key.html",
+            mode="confirm",
+            active_key_exists=active_key_exists,
+            recovery_key=None,
+            invalidated_count=None,
+            security_csrf_token=(
+                security_csrf_token
+            ),
+            recovery_key_nonce=(
+                recovery_key_nonce
+            ),
+            return_endpoint=return_endpoint,
         )
     )
 
@@ -40187,7 +53479,7 @@ def mfa_method_change_qr():
         ):
             abort(404)
 
-        authenticator = _mfa_authenticator_record(
+        authenticator = _mfa_authenticator_candidate_record(
             cur,
             user_id,
         )
@@ -41755,11 +55047,26 @@ def browser_session_state():
     session_spa_id = session.get("spa_id")
     session_role = session.get("role")
 
+    try:
+        session_security_session_version = int(
+            session.get("_security_session_version")
+        )
+    except (TypeError, ValueError):
+        session_security_session_version = None
+
+    current_security_session_version = (
+        int(lifecycle_state[5])
+        if lifecycle_state
+        else None
+    )
+
     account_matches_session = bool(
         lifecycle_state
         and lifecycle_state[2]
         and lifecycle_state[0] == session_spa_id
         and lifecycle_state[1] == session_role
+        and session_security_session_version
+            == current_security_session_version
     )
 
     if not account_matches_session:

@@ -245,13 +245,19 @@
                             {% endif %}
                             available.
                         </span>
+
+                        <span>
+                            Existing recovery codes cannot be viewed again.
+                            Regenerating will invalidate all unused current
+                            codes and create a new set.
+                        </span>
                     </div>
 
                     <a
                         class="my-security-action"
                         href="{{ url_for('mfa_recovery_codes') }}"
                     >
-                        Manage Recovery Codes
+                        Regenerate Recovery Codes
                     </a>
 
                 </div>
@@ -259,6 +265,198 @@
             {% endif %}
 
         </section>
+
+
+        {% if can_manage_trusted_recovery %}
+
+        <section class="my-security-card">
+
+            <h2>🛟 Trusted Account Recovery</h2>
+
+            <p>
+                Add trusted recovery contacts that can help you
+                regain access if you lose your normal two-step
+                verification method.
+            </p>
+
+            <div class="my-security-status-row">
+
+                <div class="my-security-status">
+
+                    <strong>Trusted Recovery Email</strong>
+
+                    {% if trusted_recovery_email.verified %}
+
+                        <span>
+                            {{
+                                trusted_recovery_email.verified.masked_label
+                            }}
+                        </span>
+
+                        <span class="my-security-badge">
+                            Verified
+                        </span>
+
+                    {% else %}
+
+                        <span>
+                            No verified recovery email is configured.
+                        </span>
+
+                        <span class="my-security-badge inactive">
+                            Not Set
+                        </span>
+
+                    {% endif %}
+
+                    {% if trusted_recovery_email.pending %}
+
+                        <span>
+                            Verification pending for
+                            {{
+                                trusted_recovery_email.pending.masked_label
+                            }}.
+                        </span>
+
+                    {% endif %}
+
+                </div>
+
+                <a
+                    class="my-security-action"
+                    href="{{
+                        url_for(
+                            'mfa_recovery_contact_setup',
+                            method='email'
+                        )
+                    }}"
+                >
+                    {% if trusted_recovery_email.verified %}
+                        Change Recovery Email
+                    {% else %}
+                        Set Up Recovery Email
+                    {% endif %}
+                </a>
+
+            </div>
+
+
+            <div class="my-security-status-row">
+
+                <div class="my-security-status">
+
+                    <strong>Trusted Recovery Phone</strong>
+
+                    {% if trusted_recovery_phone.verified %}
+
+                        <span>
+                            {{
+                                trusted_recovery_phone.verified.masked_label
+                            }}
+                        </span>
+
+                        <span class="my-security-badge">
+                            Verified
+                        </span>
+
+                    {% else %}
+
+                        <span>
+                            No verified recovery phone is configured.
+                        </span>
+
+                        <span class="my-security-badge inactive">
+                            Not Set
+                        </span>
+
+                    {% endif %}
+
+                    {% if trusted_recovery_phone.pending %}
+
+                        <span>
+                            Verification pending for
+                            {{
+                                trusted_recovery_phone.pending.masked_label
+                            }}.
+                        </span>
+
+                    {% endif %}
+
+                </div>
+
+                <a
+                    class="my-security-action"
+                    href="{{
+                        url_for(
+                            'mfa_recovery_contact_setup',
+                            method='sms'
+                        )
+                    }}"
+                >
+                    {% if trusted_recovery_phone.verified %}
+                        Change Recovery Phone
+                    {% else %}
+                        Set Up Recovery Phone
+                    {% endif %}
+                </a>
+
+            </div>
+
+
+            <div class="my-security-status-row">
+
+                <div class="my-security-status">
+
+                    <strong>PSP Account Recovery Key</strong>
+
+                    {% if active_account_recovery_key %}
+
+                        <span>
+                            An Account Recovery Key is configured.
+                        </span>
+
+                        <span class="my-security-badge">
+                            Configured
+                        </span>
+
+                    {% else %}
+
+                        <span>
+                            No Account Recovery Key is configured.
+                        </span>
+
+                        <span class="my-security-badge inactive">
+                            Not Set
+                        </span>
+
+                    {% endif %}
+
+                </div>
+
+                <a
+                    class="my-security-action"
+                    href="{{ url_for('mfa_account_recovery_key') }}"
+                >
+                    {% if active_account_recovery_key %}
+                        Replace Recovery Key
+                    {% else %}
+                        Create Recovery Key
+                    {% endif %}
+                </a>
+
+            </div>
+
+
+            <div class="my-security-note">
+                Trusted Recovery contacts are separate from your
+                normal sign-in verification method. Replacing one
+                does not disable the currently verified contact until
+                the replacement has been successfully verified.
+            </div>
+
+        </section>
+
+        {% endif %}
 
     </div>
 

@@ -294,6 +294,29 @@
             background: #f3f1ee;
         }
 
+        .mfa-recovery-link-form {
+            margin-top: 16px;
+            text-align: center;
+        }
+
+        .mfa-recovery-link {
+            margin: 0;
+            padding: 0;
+            border: 0;
+            background: transparent;
+            color: #555555;
+            font: inherit;
+            font-size: 14px;
+            font-weight: 600;
+            text-decoration: underline;
+            text-underline-offset: 2px;
+            cursor: pointer;
+        }
+
+        .mfa-recovery-link:hover {
+            color: #222222;
+        }
+
         .mfa-recovery-list {
             display: grid;
             grid-template-columns:
@@ -534,6 +557,17 @@
                         recovery code.
                     </p>
 
+                {% elif mode == "account_recovery_in_progress" %}
+                    <h1 id="mfaTitle">
+                        Account Recovery in Progress
+                    </h1>
+
+                    <p>
+                        Peach Suite Pro detected an unfinished
+                        verified Account Recovery session for
+                        this account.
+                    </p>
+
                 {% else %}
                     <h1 id="mfaTitle">
                         Verify Your Identity
@@ -723,6 +757,27 @@
                         {% else %}
                             Send Verification Code
                         {% endif %}
+                    </button>
+                </form>
+
+                <form
+                    method="POST"
+                    action="{{ url_for(
+                        'mfa_account_recovery_start'
+                    ) }}"
+                    class="mfa-recovery-link-form"
+                >
+                    <input
+                        type="hidden"
+                        name="security_csrf_token"
+                        value="{{ account_recovery_csrf_token }}"
+                    >
+
+                    <button
+                        type="submit"
+                        class="mfa-recovery-link"
+                    >
+                        Can’t use your verification method?
                     </button>
                 </form>
 
@@ -1014,6 +1069,54 @@
                     Use Authenticator App
                 </a>
 
+            {% elif mode == "account_recovery_in_progress" %}
+                <div
+                    class="mfa-note mfa-important"
+                    role="alert"
+                >
+                    <strong>
+                        Normal MFA setup is temporarily unavailable.
+                    </strong><br>
+                    For security, Peach Suite Pro will not treat
+                    this account like a new MFA enrollment while
+                    verified Account Recovery is already underway.
+                </div>
+
+                <div class="mfa-note">
+                    To continue safely, restart verified Account
+                    Recovery. Your password has already been
+                    verified for this sign-in, but Peach Suite Pro
+                    will require two trusted recovery factors again.
+                    Previous recovery proofs will not be reused.
+                </div>
+
+                <form
+                    method="POST"
+                    action="{{ url_for(
+                        'mfa_account_recovery_start'
+                    ) }}"
+                >
+                    <input
+                        type="hidden"
+                        name="security_csrf_token"
+                        value="{{ security_csrf_token }}"
+                    >
+
+                    <button
+                        type="submit"
+                        class="mfa-button"
+                    >
+                        Restart Verified Account Recovery
+                    </button>
+                </form>
+
+                <a
+                    href="{{ url_for('login') }}"
+                    class="mfa-secondary"
+                >
+                    Return to Sign In
+                </a>
+
             {% else %}
                 <form
                     method="POST"
@@ -1065,6 +1168,27 @@
                 >
                     Use a Recovery Code
                 </a>
+
+                <form
+                    method="POST"
+                    action="{{ url_for(
+                        'mfa_account_recovery_start'
+                    ) }}"
+                    class="mfa-recovery-link-form"
+                >
+                    <input
+                        type="hidden"
+                        name="security_csrf_token"
+                        value="{{ account_recovery_csrf_token }}"
+                    >
+
+                    <button
+                        type="submit"
+                        class="mfa-recovery-link"
+                    >
+                        Can’t use your verification method?
+                    </button>
+                </form>
             {% endif %}
 
             <div class="mfa-footer">

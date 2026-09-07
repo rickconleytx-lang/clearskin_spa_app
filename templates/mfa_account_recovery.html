@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <meta
+        name="robots"
+        content="noindex, nofollow"
+    >
+
+    <meta
+        name="referrer"
+        content="no-referrer"
+    >
+
+    <title>
+        Account Recovery | Peach Suite Pro
+    </title>
+
+    <link
+        rel="icon"
+        type="image/png"
+        href="{{ url_for(
+            'static',
+            filename='peachsuite-icon.png'
+        ) }}?v=20260618"
+    >
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            margin: 0;
+            min-height: 100%;
+        }
+
+        body {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            font-family:
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                sans-serif;
+            background: #f8f6f2;
+            color: #2d2d2d;
+        }
+
+        .mfa-shell {
+            width: min(560px, 100%);
+        }
+
+        .mfa-card {
+            padding: 36px 32px;
+            background: #ffffff;
+            border: 1px solid #e7e2dc;
+            border-radius: 18px;
+            box-shadow:
+                0 18px 50px rgba(0, 0, 0, 0.08);
+        }
+
+        .mfa-brand {
+            margin-bottom: 24px;
+            text-align: center;
+        }
+
+        .mfa-brand img {
+            display: block;
+            width: min(280px, 100%);
+            height: auto;
+            margin: 0 auto 18px;
+        }
+
+        .mfa-brand h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 700;
+        }
+
+        .mfa-brand p {
+            margin: 8px 0 0;
+            color: #666666;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .mfa-flash {
+            margin-bottom: 18px;
+            padding: 12px 14px;
+            border-radius: 10px;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .mfa-flash.error {
+            background: #fff0f0;
+            border: 1px solid #e5b5b5;
+            color: #7a2020;
+        }
+
+        .mfa-flash.success {
+            background: #eef8ef;
+            border: 1px solid #b9d9bc;
+            color: #275c2d;
+        }
+
+        .mfa-flash.info {
+            background: #f1f5fb;
+            border: 1px solid #bdcce1;
+            color: #304b70;
+        }
+
+        .mfa-note {
+            margin-bottom: 18px;
+            padding: 12px 14px;
+            border-radius: 10px;
+            background: #f7f5f2;
+            color: #555555;
+            font-size: 13px;
+            line-height: 1.55;
+        }
+
+        .mfa-important {
+            background: #fff8e8;
+            border: 1px solid #e0b97a;
+            color: #4b3820;
+        }
+
+        .recovery-progress {
+            margin-bottom: 20px;
+            padding: 14px 16px;
+            border: 1px solid #ddd7d0;
+            border-radius: 10px;
+            background: #faf9f7;
+            text-align: center;
+        }
+
+        .recovery-progress strong {
+            display: block;
+            margin-bottom: 4px;
+            font-size: 16px;
+        }
+
+        .recovery-progress span {
+            color: #666666;
+            font-size: 13px;
+        }
+
+        .recovery-factor {
+            margin-top: 16px;
+            padding: 16px;
+            border: 1px solid #ddd7d0;
+            border-radius: 12px;
+            background: #ffffff;
+        }
+
+        .recovery-factor.verified {
+            border-color: #b9d9bc;
+            background: #f6fbf6;
+        }
+
+        .recovery-factor-header {
+            margin-bottom: 12px;
+        }
+
+        .recovery-factor-header strong {
+            display: block;
+            margin-bottom: 4px;
+            font-size: 15px;
+        }
+
+        .recovery-factor-header span {
+            color: #666666;
+            font-size: 13px;
+            line-height: 1.45;
+        }
+
+        .recovery-verified {
+            margin-top: 10px;
+            color: #275c2d;
+            font-size: 13px;
+            font-weight: 700;
+        }
+
+        .mfa-field {
+            margin: 14px 0;
+        }
+
+        .mfa-field label {
+            display: block;
+            margin-bottom: 7px;
+            font-size: 14px;
+            font-weight: 650;
+        }
+
+        .mfa-field input {
+            width: 100%;
+            min-height: 48px;
+            padding: 10px 12px;
+            border: 1px solid #cfc9c2;
+            border-radius: 9px;
+            background: #ffffff;
+            color: #222222;
+            font: inherit;
+            font-size: 18px;
+            text-align: center;
+        }
+
+        .mfa-field input.code-input {
+            font-size: 20px;
+            letter-spacing: 0.08em;
+        }
+
+        .mfa-field input:focus {
+            outline: 3px solid rgba(210, 141, 94, 0.18);
+            border-color: #b87345;
+        }
+
+        .mfa-button,
+        .mfa-secondary {
+            width: 100%;
+            min-height: 46px;
+            border-radius: 10px;
+            font: inherit;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .mfa-button {
+            margin-top: 4px;
+            border: 0;
+            background: #2d2d2d;
+            color: #ffffff;
+        }
+
+        .mfa-button:hover {
+            background: #171717;
+        }
+
+        .mfa-secondary {
+            margin-top: 10px;
+            border: 1px solid #bdb7b0;
+            background: #ffffff;
+            color: #2d2d2d;
+        }
+
+        .mfa-secondary:hover {
+            background: #f3f1ee;
+        }
+
+        .mfa-footer {
+            margin-top: 24px;
+            text-align: center;
+            color: #777777;
+            font-size: 12px;
+        }
+
+        @media (max-width: 520px) {
+            .mfa-card {
+                padding: 30px 22px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <main class="mfa-shell">
+        <section
+            class="mfa-card"
+            aria-labelledby="recoveryTitle"
+        >
+            <div class="mfa-brand">
+                <img
+                    src="{{ url_for(
+                        'static',
+                        filename='images/smallbanner.png'
+                    ) }}"
+                    alt="Peach Suite Pro"
+                >
+
+                <h1 id="recoveryTitle">
+                    Account Recovery
+                </h1>
+
+                <p>
+                    Verify two different trusted recovery
+                    factors to continue securely.
+                </p>
+            </div>
+
+            {% with messages =
+                get_flashed_messages(
+                    with_categories=true
+                )
+            %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div
+                            class="mfa-flash {{ category }}"
+                            role="alert"
+                        >
+                            {{ message }}
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            <div class="mfa-note mfa-important">
+                Account Recovery does not sign you in
+                directly. After two trusted factors are
+                verified, Peach Suite Pro will open a
+                restricted security session so your MFA
+                protection can be rebuilt safely.
+            </div>
+
+            <div class="recovery-progress">
+                <strong>
+                    {{ recovery.proof_count }}
+                    of
+                    {{ recovery.required_proof_count }}
+                    recovery factors verified
+                </strong>
+
+                <span>
+                    Two different recovery factors are required.
+                </span>
+            </div>
+
+            {% for contact in recovery.trusted_contacts %}
+                {% set send_action =
+                    'send_' ~ contact.method
+                %}
+                {% set verify_action =
+                    'verify_' ~ contact.method
+                %}
+
+                <div
+                    class="recovery-factor{% if contact.proof_verified %} verified{% endif %}"
+                >
+                    <div class="recovery-factor-header">
+                        <strong>
+                            {% if contact.method == "email" %}
+                                Trusted Recovery Email
+                            {% else %}
+                                Trusted Recovery Phone
+                            {% endif %}
+                        </strong>
+
+                        <span>
+                            {{ contact.masked_label }}
+                        </span>
+                    </div>
+
+                    {% if contact.proof_verified %}
+                        <div class="recovery-verified">
+                            ✓ Verified for this recovery attempt
+                        </div>
+
+                    {% else %}
+                        {% if contact.active_challenge_id %}
+                            <form
+                                method="POST"
+                                action="{{ url_for(
+                                    'mfa_account_recovery'
+                                ) }}"
+                            >
+                                <input
+                                    type="hidden"
+                                    name="security_csrf_token"
+                                    value="{{ csrf_tokens[verify_action] }}"
+                                >
+
+                                <input
+                                    type="hidden"
+                                    name="recovery_action"
+                                    value="{{ verify_action }}"
+                                >
+
+                                <input
+                                    type="hidden"
+                                    name="recovery_contact_id"
+                                    value="{{ contact.recovery_contact_id }}"
+                                >
+
+                                <div class="mfa-field">
+                                    <label
+                                        for="recoveryCode{{ contact.recovery_contact_id }}"
+                                    >
+                                        6-Digit Verification Code
+                                    </label>
+
+                                    <input
+                                        class="code-input"
+                                        type="text"
+                                        id="recoveryCode{{ contact.recovery_contact_id }}"
+                                        name="verification_code"
+                                        inputmode="numeric"
+                                        autocomplete="one-time-code"
+                                        pattern="[0-9]{6}"
+                                        maxlength="6"
+                                        required
+                                    >
+                                </div>
+
+                                <button
+                                    type="submit"
+                                    class="mfa-button"
+                                >
+                                    Verify
+                                    {% if contact.method == "email" %}
+                                        Recovery Email
+                                    {% else %}
+                                        Recovery Phone
+                                    {% endif %}
+                                </button>
+                            </form>
+                        {% endif %}
+
+                        <form
+                            method="POST"
+                            action="{{ url_for(
+                                'mfa_account_recovery'
+                            ) }}"
+                        >
+                            <input
+                                type="hidden"
+                                name="security_csrf_token"
+                                value="{{ csrf_tokens[send_action] }}"
+                            >
+
+                            <input
+                                type="hidden"
+                                name="recovery_action"
+                                value="{{ send_action }}"
+                            >
+
+                            <input
+                                type="hidden"
+                                name="recovery_contact_id"
+                                value="{{ contact.recovery_contact_id }}"
+                            >
+
+                            <button
+                                type="submit"
+                                class="mfa-secondary"
+                            >
+                                {% if contact.active_challenge_id %}
+                                    Send a New Code
+                                {% else %}
+                                    Send Verification Code
+                                {% endif %}
+                            </button>
+                        </form>
+                    {% endif %}
+                </div>
+            {% endfor %}
+
+            {% if recovery.recovery_key_available %}
+                <div
+                    class="recovery-factor{% if recovery.recovery_key_verified %} verified{% endif %}"
+                >
+                    <div class="recovery-factor-header">
+                        <strong>
+                            Account Recovery Key
+                        </strong>
+
+                        <span>
+                            Use the Peach Suite Pro Recovery Key
+                            you saved when recovery protection
+                            was configured.
+                        </span>
+                    </div>
+
+                    {% if recovery.recovery_key_verified %}
+                        <div class="recovery-verified">
+                            ✓ Verified for this recovery attempt
+                        </div>
+
+                    {% else %}
+                        <form
+                            method="POST"
+                            action="{{ url_for(
+                                'mfa_account_recovery'
+                            ) }}"
+                        >
+                            <input
+                                type="hidden"
+                                name="security_csrf_token"
+                                value="{{ csrf_tokens['verify_key'] }}"
+                            >
+
+                            <input
+                                type="hidden"
+                                name="recovery_action"
+                                value="verify_key"
+                            >
+
+                            <div class="mfa-field">
+                                <label for="accountRecoveryKey">
+                                    Account Recovery Key
+                                </label>
+
+                                <input
+                                    type="text"
+                                    id="accountRecoveryKey"
+                                    name="recovery_key"
+                                    autocomplete="off"
+                                    autocapitalize="characters"
+                                    spellcheck="false"
+                                    maxlength="64"
+                                    placeholder="PEACH-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"
+                                    required
+                                >
+                            </div>
+
+                            <button
+                                type="submit"
+                                class="mfa-button"
+                            >
+                                Verify Recovery Key
+                            </button>
+                        </form>
+                    {% endif %}
+                </div>
+            {% endif %}
+
+            <div
+                class="mfa-note"
+                style="margin-top: 20px;"
+            >
+                <strong>
+                    Still can’t recover your account?
+                </strong><br>
+                You will not permanently lose access to
+                your Peach Suite Pro business. Contact
+                Peach Suite Pro Support to begin verified
+                account recovery.
+            </div>
+
+            <div class="mfa-footer">
+                Peach Suite Pro
+            </div>
+        </section>
+    </main>
+</body>
+</html>

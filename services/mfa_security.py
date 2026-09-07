@@ -31,6 +31,7 @@ class MFAError(RuntimeError):
 
 _ENCRYPTION_VERSION = "v1"
 _RECOVERY_HASH_VERSION = "v1"
+_ACCOUNT_RECOVERY_KEY_HASH_VERSION = "v1"
 _VERIFICATION_CODE_HASH_VERSION = "v1"
 
 TOTP_DIGITS = 6
@@ -41,6 +42,8 @@ TOTP_ALLOWED_DRIFT_STEPS = 1
 
 RECOVERY_CODE_COUNT = 10
 RECOVERY_CODE_HEX_LENGTH = 20
+ACCOUNT_RECOVERY_KEY_BYTES = 16
+ACCOUNT_RECOVERY_KEY_HEX_LENGTH = ACCOUNT_RECOVERY_KEY_BYTES * 2
 
 
 def _require_text(value, field_name):
@@ -264,6 +267,9 @@ def _normalize_verification_purpose(purpose):
         "enrollment",
         "login",
         "method_change",
+        "recovery_contact_setup",
+        "account_recovery",
+        "account_recovery_rebuild",
     }:
         raise MFAError(
             "MFA verification purpose is not valid."
@@ -1051,6 +1057,165 @@ def verify_recovery_code(
                 user_id=user_id,
                 pepper=pepper,
             )
+        )
+
+    except MFAError:
+        return False
+
+    return hmac.compare_digest(
+        candidate_hash,
+        stored_hash,
+    )
+
+
+def _normalize_account_recovery_key(key):
+    """
+    Normalize one PSP Account Recovery Key for hashing.
+
+    Display separators and the PEACH prefix are accepted for
+    user-friendly entry but are not part of the normalized secret.
+    """
+    normalized = (
+        str(key or "")
+        .strip()
+        .replace("-", "")
+        .replace(" ", "")
+        .upper()
+    )
+
+    if normalized.startswith("PEACH"):
+        normalized = normalized[5:]
+
+    if (
+        len(normalized) != ACCOUNT_RECOVERY_KEY_HEX_LENGTH
+        or any(
+            character not in "0123456789ABCDEF"
+            for character in normalized
+        )
+    ):
+        raise MFAError(
+            "Account Recovery Key has an invalid format."
+        )
+
+    return normalized
+
+
+def _format_account_recovery_key(normalized_key):
+    """
+    Format a normalized Account Recovery Key for one-time display.
+    """
+    return "PEACH-" + "-".join(
+        normalized_key[index:index + 4]
+        for index in range(
+            0,
+            len(normalized_key),
+            4,
+        )
+    )
+
+
+def generate_account_recovery_key():
+    """
+    Generate one display-only 128-bit PSP Account Recovery Key.
+
+    The caller must display this key only once and persist only
+    its keyed cryptographic hash.
+    """
+    normalized_key = secrets.token_hex(
+        ACCOUNT_RECOVERY_KEY_BYTES
+    ).upper()
+
+    return _format_account_recovery_key(
+        normalized_key
+    )
+
+
+def hash_account_recovery_key(
+    key,
+    *,
+    user_id,
+    pepper=None,
+):
+    """
+    Produce the keyed hash stored for one PSP Account Recovery Key.
+
+    The Account Recovery Key uses the existing dedicated MFA
+    recovery pepper but a separate cryptographic domain from
+    ordinary one-time MFA recovery codes.
+    """
+    normalized_key = _normalize_account_recovery_key(
+        key
+    )
+
+    user_id = _require_user_id(
+        user_id
+    )
+
+    pepper = (
+        pepper
+        if pepper is not None
+        else get_recovery_pepper()
+    )
+
+    if not isinstance(
+        pepper,
+        bytes,
+    ):
+        raise MFAError(
+            "MFA recovery pepper must be bytes."
+        )
+
+    if len(pepper) != 32:
+        raise MFAError(
+            "MFA recovery pepper must be exactly "
+            "32 bytes."
+        )
+
+    message = (
+        "peach-suite-pro|account-recovery-key|"
+        f"user:{user_id}|"
+        f"key:{normalized_key}|"
+        f"version:{_ACCOUNT_RECOVERY_KEY_HASH_VERSION}"
+    ).encode(
+        "utf-8"
+    )
+
+    return hmac.new(
+        pepper,
+        message,
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def verify_account_recovery_key(
+    key,
+    stored_hash,
+    *,
+    user_id,
+    pepper=None,
+):
+    """
+    Compare a submitted Account Recovery Key to its stored keyed
+    hash without exposing the raw recovery credential.
+    """
+    stored_hash = str(
+        stored_hash or ""
+    ).strip().lower()
+
+    if (
+        len(stored_hash) != 64
+        or any(
+            character not in "0123456789abcdef"
+            for character in stored_hash
+        )
+    ):
+        return False
+
+    try:
+        candidate_hash = hash_account_recovery_key(
+            key,
+            user_id=user_id,
+            pepper=pepper,
         )
 
     except MFAError:

@@ -1,0 +1,355 @@
+{% extends "base.html" %}
+
+{% block title %}{{ recovery_method_label }} | Peach Suite Pro{% endblock %}
+
+{% block content %}
+
+<style>
+.mfa-change-page {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 24px 18px 48px;
+}
+
+.mfa-change-card {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 14px;
+    padding: 24px;
+}
+
+.mfa-change-card h1 {
+    margin: 0 0 8px;
+    font-size: 1.8rem;
+}
+
+.mfa-change-card p {
+    color: #555;
+    line-height: 1.6;
+}
+
+.mfa-current {
+    margin: 20px 0;
+    padding: 14px 16px;
+    border-radius: 10px;
+    background: #f7f7f7;
+}
+
+.mfa-password,
+.mfa-code,
+.mfa-contact {
+    width: 100%;
+    box-sizing: border-box;
+    margin-top: 8px;
+    padding: 12px;
+    border: 1px solid #bbb;
+    border-radius: 9px;
+    font-size: 1rem;
+}
+
+.mfa-field {
+    margin-top: 22px;
+}
+
+.mfa-field label {
+    display: block;
+    font-weight: 700;
+}
+
+.mfa-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+.mfa-primary,
+.mfa-secondary {
+    padding: 11px 16px;
+    border-radius: 9px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.mfa-primary {
+    border: 1px solid #222;
+    background: #222;
+    color: #fff;
+}
+
+.mfa-secondary {
+    border: 1px solid #bbb;
+    background: #fff;
+    color: inherit;
+}
+
+.mfa-note {
+    margin-top: 18px;
+    padding: 14px 16px;
+    border-radius: 10px;
+    background: #f7f7f7;
+    color: #555;
+    line-height: 1.55;
+}
+
+.mfa-warning {
+    margin-top: 18px;
+    padding: 14px 16px;
+    border-radius: 10px;
+    background: #fff8e8;
+    border: 1px solid #ead9a5;
+    color: #555;
+    line-height: 1.55;
+}
+</style>
+
+<div class="mfa-change-page">
+    <div class="mfa-change-card">
+
+        {% if not pending %}
+
+            <h1>Set Up {{ recovery_method_label }}</h1>
+
+            <p>
+                Add a separate trusted
+                {% if recovery_method == "sms" %}
+                    phone number
+                {% else %}
+                    email address
+                {% endif %}
+                that Peach Suite Pro can use only for account recovery.
+            </p>
+
+            <div class="mfa-note">
+                This is separate from your normal two-step verification
+                method. Your current sign-in verification method will not
+                change.
+            </div>
+
+            <div class="mfa-warning">
+                For stronger recovery protection, your Trusted Recovery
+                {% if recovery_method == "sms" %}
+                    phone must be different from your personal mobile number.
+                {% else %}
+                    email must be different from your login email.
+                {% endif %}
+            </div>
+
+            <form method="post">
+                <input
+                    type="hidden"
+                    name="security_csrf_token"
+                    value="{{ security_csrf_token }}"
+                >
+
+                <input
+                    type="hidden"
+                    name="recovery_action"
+                    value="start"
+                >
+
+                <div class="mfa-field">
+                    <label for="contact_value">
+                        {% if recovery_method == "sms" %}
+                            Trusted Recovery Phone
+                        {% else %}
+                            Trusted Recovery Email
+                        {% endif %}
+                    </label>
+
+                    <input
+                        class="mfa-contact"
+                        id="contact_value"
+                        name="contact_value"
+                        type="{% if recovery_method == 'sms' %}tel{% else %}email{% endif %}"
+                        autocomplete="{% if recovery_method == 'sms' %}tel{% else %}email{% endif %}"
+                        {% if recovery_method == "sms" %}
+                            inputmode="tel"
+                            placeholder="(555) 555-1234"
+                        {% else %}
+                            placeholder="recovery@example.com"
+                        {% endif %}
+                        required
+                    >
+                </div>
+
+                <div class="mfa-field">
+                    <label for="current_password">
+                        Current Password
+                    </label>
+
+                    <input
+                        class="mfa-password"
+                        id="current_password"
+                        name="current_password"
+                        type="password"
+                        autocomplete="off"
+                        required
+                    >
+                </div>
+
+                <div class="mfa-actions">
+                    <button
+                        class="mfa-primary"
+                        type="submit"
+                    >
+                        Send Verification Code
+                    </button>
+
+                    <a
+                        class="mfa-secondary"
+                        href="{{ url_for('my_login_security') }}"
+                        style="text-decoration:none;"
+                    >
+                        Cancel
+                    </a>
+                </div>
+            </form>
+
+        {% else %}
+
+            <h1>Verify {{ recovery_method_label }}</h1>
+
+            <p>
+                Enter the verification code Peach Suite Pro sent to
+                the new Trusted Recovery destination.
+            </p>
+
+            <div class="mfa-current">
+                <strong>Verification sent to:</strong>
+                {{ pending_label }}
+            </div>
+
+            <div class="mfa-note">
+                Your existing verified Trusted Recovery
+                {% if recovery_method == "sms" %}
+                    phone
+                {% else %}
+                    email
+                {% endif %}
+                remains active until this replacement is successfully
+                verified.
+            </div>
+
+            {% if pending.get("mfa_verification_challenge_id") %}
+
+                <form method="post">
+                    <input
+                        type="hidden"
+                        name="security_csrf_token"
+                        value="{{ security_csrf_token }}"
+                    >
+
+                    <input
+                        type="hidden"
+                        name="recovery_action"
+                        value="verify"
+                    >
+
+                    <input
+                        type="hidden"
+                        name="flow_id"
+                        value="{{ pending.get('flow_id', '') }}"
+                    >
+
+                    <div class="mfa-field">
+                        <label for="verification_code">
+                            Verification Code
+                        </label>
+
+                        <input
+                            class="mfa-code"
+                            id="verification_code"
+                            name="verification_code"
+                            type="text"
+                            inputmode="numeric"
+                            autocomplete="one-time-code"
+                            maxlength="12"
+                            required
+                            autofocus
+                        >
+                    </div>
+
+                    <div class="mfa-actions">
+                        <button
+                            class="mfa-primary"
+                            type="submit"
+                        >
+                            Verify and Activate
+                        </button>
+                    </div>
+                </form>
+
+            {% else %}
+
+                <div class="mfa-warning">
+                    There is no active verification code for this setup.
+                    Request a new code to continue.
+                </div>
+
+            {% endif %}
+
+            <div class="mfa-actions">
+
+                <form method="post">
+                    <input
+                        type="hidden"
+                        name="security_csrf_token"
+                        value="{{ security_csrf_token }}"
+                    >
+
+                    <input
+                        type="hidden"
+                        name="recovery_action"
+                        value="resend_code"
+                    >
+
+                    <input
+                        type="hidden"
+                        name="flow_id"
+                        value="{{ pending.get('flow_id', '') }}"
+                    >
+
+                    <button
+                        class="mfa-secondary"
+                        type="submit"
+                    >
+                        Send New Code
+                    </button>
+                </form>
+
+                <form method="post">
+                    <input
+                        type="hidden"
+                        name="security_csrf_token"
+                        value="{{ security_csrf_token }}"
+                    >
+
+                    <input
+                        type="hidden"
+                        name="recovery_action"
+                        value="cancel"
+                    >
+
+                    <input
+                        type="hidden"
+                        name="flow_id"
+                        value="{{ pending.get('flow_id', '') }}"
+                    >
+
+                    <button
+                        class="mfa-secondary"
+                        type="submit"
+                    >
+                        Cancel Setup
+                    </button>
+                </form>
+
+            </div>
+
+        {% endif %}
+
+    </div>
+</div>
+
+{% endblock %}
