@@ -86176,6 +86176,28 @@ def quick_reschedule_appointment(appointment_id):
     provider_employee_id = old_appt[7]
     service_type_id = old_appt[8]
 
+    old_status_normalized = (
+        str(old_status or "")
+        .strip()
+        .lower()
+    )
+
+    if old_status_normalized not in {
+        "booked",
+        "cancelled",
+        "canceled"
+    }:
+        cur.close()
+        conn.close()
+
+        flash(
+            "Only booked or cancelled appointments "
+            "can be rescheduled.",
+            "error"
+        )
+
+        return return_to_calendar_context()
+
 
     availability = (
         _appointment_reschedule_is_available(
@@ -86211,12 +86233,6 @@ def quick_reschedule_appointment(appointment_id):
         return return_to_calendar_context()
 
 
-
-    old_status_normalized = (
-        str(old_status or "")
-        .strip()
-        .lower()
-    )
 
     new_status = (
         "booked"
@@ -92305,7 +92321,6 @@ def edit_appointment(appointment_id):
         appointment_date = request.form["appointment_date"]
         appointment_time = request.form["appointment_time"]
         duration = request.form["duration"]
-        room_number = request.form["room_number"]
         notes = request.form["notes"].strip()
 
         duration_value = int(duration) if duration else None
@@ -92408,7 +92423,6 @@ def edit_appointment(appointment_id):
                 appointment_date = %s,
                 appointment_time = %s,
                 duration_minutes = %s,
-                room_number = %s,
                 notes = %s,
                 updated_at = CURRENT_TIMESTAMP
             {filter_sql}
@@ -92418,7 +92432,6 @@ def edit_appointment(appointment_id):
             appointment_date,
             appointment_time,
             duration_value,
-            room_number,
             notes,
             *params
         ))
@@ -92481,7 +92494,6 @@ def edit_appointment(appointment_id):
             appointment_date,
             appointment_time,
             duration_minutes,
-            room_number,
             notes,
             service_type,
             price_at_booking
@@ -92788,253 +92800,17 @@ def reschedule_appointment(appointment_id):
     conn = get_db_connection()
     cur = conn.cursor()
 
-    appt_filter = """
-        WHERE appointment_id = %s
-          AND spa_id = %s
-          AND business_unit_id = %s
-    """
-
-    appt_params = [
-        appointment_id,
-        spa_id,
-        business_unit_id
-    ]
-
-    if request.method == "POST":
-        service_type_id = (request.form.get("service_type_id") or "").strip()
-        appointment_date = (request.form.get("appointment_date") or "").strip()
-        appointment_time = (request.form.get("appointment_time") or "").strip()
-        status = (request.form.get("status") or "").strip()
-        notes = (request.form.get("notes") or "").strip()
-        original_date = (request.form.get("original_date") or "").strip()
-
-        if not service_type_id or not appointment_date or not appointment_time or not status:
-            flash("Please complete all required fields.", "error")
-            cur.close()
-            conn.close()
-            return redirect(url_for("reschedule_appointment", appointment_id=appointment_id))
-
-        service_spa_id = spa_id
-
-
-        cur.execute(f"""
-            SELECT
-                client_id,
-                appointment_date,
-                appointment_time,
-                status,
-                business_unit_id,
-                duration_minutes,
-                provider_employee_id,
-                service_type_id
-            FROM appointments
-            {appt_filter}
-        """, appt_params)
-
-        old_appt = cur.fetchone()
-
-        if not old_appt:
-            cur.close()
-            conn.close()
-            flash("Appointment not found or not authorized.", "error")
-            return redirect(url_for("appointments"))
-
-        client_id = old_appt[0]
-        old_date = old_appt[1]
-        old_time = old_appt[2]
-        old_status = old_appt[3]
-        appointment_business_unit_id = old_appt[4]
-        duration_minutes = old_appt[5]
-        provider_employee_id = old_appt[6]
-        old_service_type_id = old_appt[7]
-
-        cur.execute("""
-            SELECT 1
-            FROM service_name_types
-            WHERE service_type_id = %s
-              AND spa_id = %s
-        """, (service_type_id, service_spa_id))
-
-        if not cur.fetchone():
-            flash("Invalid service selected.", "error")
-            cur.close()
-            conn.close()
-            return redirect(url_for("reschedule_appointment", appointment_id=appointment_id))
-
-
-        inactive_statuses = {
-            "cancelled",
-            "canceled",
-            "completed",
-            "no show",
-            "no-show",
-            "re-scheduled",
-            "rescheduled"
-        }
-
-        old_status_normalized = (
-            str(old_status or "")
-            .strip()
-            .lower()
-        )
-
-        target_status_normalized = (
-            str(status or "")
-            .strip()
-            .lower()
-        )
-
-        schedule_changed = (
-            str(old_date) != appointment_date
-            or str(old_time)[:5]
-                != appointment_time[:5]
-            or str(old_service_type_id or "")
-                != str(service_type_id)
-        )
-
-        reactivating_appointment = (
-            old_status_normalized
-                in inactive_statuses
-            and target_status_normalized
-                not in inactive_statuses
-        )
-
-        if (
-            target_status_normalized
-                not in inactive_statuses
-            and (
-                schedule_changed
-                or reactivating_appointment
-            )
-        ):
-            availability = (
-                _appointment_reschedule_is_available(
-                    cur=cur,
-                    spa_id=service_spa_id,
-                    business_unit_id=
-                        appointment_business_unit_id,
-                    appointment_date=
-                        appointment_date,
-                    appointment_time=
-                        appointment_time,
-                    duration_minutes=
-                        duration_minutes,
-                    provider_employee_id=
-                        provider_employee_id,
-                    service_type_id=
-                        service_type_id,
-                    exclude_appointment_id=
-                        appointment_id
-                )
-            )
-
-            if not availability.get("valid"):
-                conn.rollback()
-                cur.close()
-                conn.close()
-
-                flash(
-                    availability.get("message")
-                    or (
-                        "That appointment time is "
-                        "no longer available."
-                    ),
-                    "error"
-                )
-
-                return redirect(url_for(
-                    "reschedule_appointment",
-                    appointment_id=
-                        appointment_id
-                ))
-
-
-        cur.execute(f"""
-            UPDATE appointments
-            SET
-                service_type_id = %s,
-                appointment_date = %s,
-                appointment_time = %s,
-                status = %s,
-                notes = %s,
-                updated_at = CURRENT_TIMESTAMP
-            {appt_filter}
-        """, (
-            service_type_id,
-            appointment_date,
-            appointment_time,
-            status,
-            notes,
-            *appt_params
-        ))
-
-        if cur.rowcount == 0:
-            conn.rollback()
-            cur.close()
-            conn.close()
-            flash("Appointment not found or not authorized.", "error")
-            return redirect(url_for("appointments"))
-
-
-        action_type = "rescheduled"
-
-        if str(old_date) == appointment_date and str(old_time)[:5] == appointment_time[:5]:
-            action_type = "updated"
-        else:
-            action_type = "rescheduled"
-
-
-        log_audit(
-            cur,
-            spa_id=service_spa_id,
-            user_id=user_id,
-            action_type=f"appointment_{action_type}",
-            table_name="appointments",
-            record_id=appointment_id,
-            old_value=f"{old_date} {old_time} {old_status}",
-            new_value=f"{appointment_date} {appointment_time} {status}",
-            notes="Appointment rescheduled" if action_type == "rescheduled" else "Appointment updated"
-        )
-
-        log_appointment_history(
-            cur,
-            spa_id=service_spa_id,
-            business_unit_id=business_unit_id,
-            appointment_id=appointment_id,
-            client_id=client_id,
-            user_id=user_id,
-            action_type=action_type,
-            old_date=old_date,
-            old_time=old_time,
-            new_date=appointment_date,
-            new_time=appointment_time,
-            old_status=old_status,
-            new_status=status,
-            notes="Appointment rescheduled" if action_type == "rescheduled" else "Appointment updated"
-        )
-
-
-        conn.commit()
-        cur.close()
-        conn.close()
-
-        flash("Appointment rescheduled successfully.", "success")
-        return redirect(url_for("daily_schedule", date=appointment_date or original_date))
-
-
-    select_filter = """
+    filter_sql = """
         WHERE a.appointment_id = %s
           AND a.spa_id = %s
           AND a.business_unit_id = %s
     """
 
-    select_params = [
+    params = [
         appointment_id,
         spa_id,
         business_unit_id
     ]
-
-
 
     cur.execute(f"""
         SELECT
@@ -93047,14 +92823,17 @@ def reschedule_appointment(appointment_id):
             a.appointment_time,
             a.status,
             a.notes,
-            a.spa_id
+            a.spa_id,
+            a.business_unit_id,
+            a.duration_minutes,
+            a.provider_employee_id
         FROM appointments a
         JOIN clients c
-            ON a.client_id = c.client_id
-           AND a.spa_id = c.spa_id
-           AND a.business_unit_id = c.business_unit_id
-        {select_filter}
-    """, select_params)
+          ON a.client_id = c.client_id
+         AND a.spa_id = c.spa_id
+         AND a.business_unit_id = c.business_unit_id
+        {filter_sql}
+    """, params)
 
     appointment = cur.fetchone()
 
@@ -93064,33 +92843,207 @@ def reschedule_appointment(appointment_id):
         flash("Appointment not found or not authorized.", "error")
         return redirect(url_for("appointments"))
 
-    appointment_spa_id = appointment[9]
+    old_status = appointment[7]
 
-    cur.execute("""
-        SELECT service_type_id, service_name
-        FROM service_name_types
-        WHERE spa_id = %s
-        ORDER BY service_name
-    """, (appointment_spa_id,))
+    old_status_normalized = (
+        str(old_status or "")
+        .strip()
+        .lower()
+    )
 
-    service_types = cur.fetchall()
+    if old_status_normalized not in {
+        "booked",
+        "cancelled",
+        "canceled"
+    }:
+        cur.close()
+        conn.close()
+
+        flash(
+            "Only booked or cancelled appointments "
+            "can be rescheduled.",
+            "error"
+        )
+
+        return redirect(url_for("appointments"))
+
+    if request.method == "POST":
+        appointment_date = (
+            request.form.get("appointment_date") or ""
+        ).strip()
+
+        appointment_time = (
+            request.form.get("appointment_time") or ""
+        ).strip()
+
+        if not appointment_date or not appointment_time:
+            flash(
+                "Date and time are required to reschedule.",
+                "error"
+            )
+            cur.close()
+            conn.close()
+
+            return redirect(url_for(
+                "reschedule_appointment",
+                appointment_id=appointment_id
+            ))
+
+        client_id = appointment[1]
+        service_type_id = appointment[4]
+        old_date = appointment[5]
+        old_time = appointment[6]
+        appointment_spa_id = appointment[9]
+        appointment_business_unit_id = appointment[10]
+        duration_minutes = appointment[11]
+        provider_employee_id = appointment[12]
+
+        availability = (
+            _appointment_reschedule_is_available(
+                cur=cur,
+                spa_id=appointment_spa_id,
+                business_unit_id=
+                    appointment_business_unit_id,
+                appointment_date=appointment_date,
+                appointment_time=appointment_time,
+                duration_minutes=duration_minutes,
+                provider_employee_id=
+                    provider_employee_id,
+                service_type_id=service_type_id,
+                exclude_appointment_id=
+                    appointment_id
+            )
+        )
+
+        if not availability.get("valid"):
+            conn.rollback()
+            cur.close()
+            conn.close()
+
+            flash(
+                availability.get("message")
+                or (
+                    "That appointment time is "
+                    "no longer available."
+                ),
+                "error"
+            )
+
+            return redirect(url_for(
+                "reschedule_appointment",
+                appointment_id=appointment_id
+            ))
+
+        new_status = (
+            "booked"
+            if old_status_normalized in {
+                "cancelled",
+                "canceled"
+            }
+            else old_status
+        )
+
+        cur.execute("""
+            UPDATE appointments
+            SET appointment_date = %s,
+                appointment_time = %s,
+                status = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE appointment_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+        """, (
+            appointment_date,
+            appointment_time,
+            new_status,
+            appointment_id,
+            spa_id,
+            business_unit_id
+        ))
+
+        if cur.rowcount == 0:
+            conn.rollback()
+            cur.close()
+            conn.close()
+
+            flash(
+                "Appointment not found or not authorized.",
+                "error"
+            )
+
+            return redirect(url_for("appointments"))
+
+        action_type = "rescheduled"
+
+        if (
+            str(old_date) == appointment_date
+            and str(old_time)[:5] == appointment_time[:5]
+        ):
+            action_type = "updated"
+
+        log_audit(
+            cur,
+            spa_id=appointment_spa_id,
+            user_id=user_id,
+            action_type=f"appointment_{action_type}",
+            table_name="appointments",
+            record_id=appointment_id,
+            old_value=f"{old_date} {old_time} {old_status}",
+            new_value=(
+                f"{appointment_date} "
+                f"{appointment_time} "
+                f"{new_status}"
+            ),
+            notes=(
+                "Appointment rescheduled"
+                if action_type == "rescheduled"
+                else "Appointment updated"
+            )
+        )
+
+        log_appointment_history(
+            cur,
+            spa_id=appointment_spa_id,
+            business_unit_id=
+                appointment_business_unit_id,
+            appointment_id=appointment_id,
+            client_id=client_id,
+            user_id=user_id,
+            action_type=action_type,
+            old_date=old_date,
+            old_time=old_time,
+            new_date=appointment_date,
+            new_time=appointment_time,
+            old_status=old_status,
+            new_status=new_status,
+            notes=(
+                "Appointment rescheduled"
+                if action_type == "rescheduled"
+                else "Appointment updated"
+            )
+        )
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        flash(
+            "Appointment rescheduled successfully.",
+            "success"
+        )
+
+        return redirect(url_for(
+            "daily_schedule",
+            date=appointment_date
+        ))
 
     cur.close()
     conn.close()
 
     return render_template(
         "reschedule_appointment.html",
-        appointment=appointment,
-        service_types=service_types
+        appointment=appointment
     )
-
-
-
-
-
-
-
-
 
 
 #  -----------------

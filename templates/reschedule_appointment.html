@@ -9,20 +9,12 @@
     {{ appointment[3] }}, {{ appointment[2] }}
 </p>
 
+<p>
+    Choose a new date and time for this appointment.
+    Service and appointment details can be changed from Edit Appointment.
+</p>
+
 <form method="POST">
-    <input type="hidden" name="original_date" value="{{ appointment[5].isoformat() if appointment[5] else '' }}">
-
-    <label for="service_type_id">Service</label>
-    <select name="service_type_id" id="service_type_id" required>
-        <option value="">Select Service</option>
-        {% for service in service_types %}
-            <option value="{{ service[0] }}"
-                {% if appointment[4] and appointment[4]|string == service[0]|string %}selected{% endif %}>
-                {{ service[1] }}
-            </option>
-        {% endfor %}
-    </select>
-
     <label for="appointment_date">Appointment Date</label>
     <input type="date"
            id="appointment_date"
@@ -37,22 +29,12 @@
            value="{{ appointment[6].strftime('%H:%M') if appointment[6] else '' }}"
            required>
 
-    <label for="status">Status</label>
-    <select name="status" id="status" required>
-        <option value="booked" {% if appointment[7] == 'booked' %}selected{% endif %}>Booked</option>
-        <option value="completed" {% if appointment[7] == 'completed' %}selected{% endif %}>Completed</option>
-        <option value="cancelled" {% if appointment[7] == 'cancelled' %}selected{% endif %}>Cancelled</option>
-        <option value="no_show" {% if appointment[7] == 'no_show' %}selected{% endif %}>No Show</option>
-    </select>
-
-    <label for="notes">Notes</label>
-    <textarea name="notes" id="notes" rows="4">{{ appointment[8] or '' }}</textarea>
-
     <br><br>
 
     <button type="submit" class="btn">Save Reschedule</button>
 
-    <a href="{{ url_for('daily_schedule', date=appointment[5].isoformat() if appointment[5] else '') }}" class="btn">
+    <a href="{{ url_for('daily_schedule', date=appointment[5].isoformat() if appointment[5] else '') }}"
+       class="btn">
         Cancel
     </a>
 </form>

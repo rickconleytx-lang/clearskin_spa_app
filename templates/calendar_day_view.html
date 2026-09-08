@@ -354,16 +354,6 @@
         white-space: nowrap;
     }
 
-    .day-appt-room {
-        display: block;
-        margin-top: 2px;
-        overflow: hidden;
-        color: #514b47;
-        font-size: 0.65rem;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
     .day-empty-state {
         max-width: 760px;
         padding: 28px;
@@ -849,12 +839,6 @@
                                         {{ appt.service_name }}
                                     </span>
 
-                                    {% if appt.room_number %}
-                                        <span class="day-appt-room">
-                                            Room:
-                                            {{ appt.room_number }}
-                                        </span>
-                                    {% endif %}
                                 </button>
                             {% endif %}
                         {% endfor %}

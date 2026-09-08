@@ -439,27 +439,28 @@
         </div>
 
 
-    <hr>
+    <div id="modalQuickRescheduleSection">
+        <hr>
 
-    <h3>Quick Reschedule</h3>
+        <h3>Quick Reschedule</h3>
 
-    <form method="POST" id="modalRescheduleForm">
-        <label><p style="color: red;">New Date</p></label>
-        <input type="date" name="appointment_date" id="modalRescheduleDate" required>
+        <form method="POST" id="modalRescheduleForm">
+            <label><p style="color: red;">New Date</p></label>
+            <input type="date" name="appointment_date" id="modalRescheduleDate" required>
 
-        <label><p style="color: red;">New Time</p></label>
-        <input type="time" name="appointment_time" id="modalRescheduleTime" required>
+            <label><p style="color: red;">New Time</p></label>
+            <input type="time" name="appointment_time" id="modalRescheduleTime" required>
 
-        <button type="submit"
-            class="btn"
-            style="background: #4a7c59; color: white;"
-            onclick="return confirm('Reschedule this appointment?')">
-        Reschedule
-    </button>
-    <hr>
-    <br>
-
-</form>
+            <button type="submit"
+                class="btn"
+                style="background: #4a7c59; color: white;"
+                onclick="return confirm('Reschedule this appointment?')">
+                Reschedule
+            </button>
+            <hr>
+            <br>
+        </form>
+    </div>
 
     <div class="form-buttons">
             <a
@@ -949,6 +950,24 @@ function openAppointmentModal(appointmentId, clickedElement) {
             if (rescheduleForm) {
                 rescheduleForm.action =
                     `/quick_reschedule_appointment/${appointmentId}`;
+            }
+
+            const quickRescheduleSection =
+                document.getElementById(
+                    "modalQuickRescheduleSection"
+                );
+
+            if (quickRescheduleSection) {
+                const rescheduleAvailable = [
+                    "booked",
+                    "cancelled",
+                    "canceled"
+                ].includes(status);
+
+                quickRescheduleSection.style.display =
+                    rescheduleAvailable
+                        ? "block"
+                        : "none";
             }
 
             const rescheduleDate =
