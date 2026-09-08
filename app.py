@@ -2480,6 +2480,8 @@ def _load_public_support_categories(language_code):
                     hc.help_category_id
              AND ht.show_on_web = TRUE
              AND ht.publication_status = 'published'
+             AND COALESCE(ht.content_type, 'guide')
+                    IN ('guide', 'how_to')
 
             JOIN LATERAL (
                 SELECT
@@ -2546,6 +2548,134 @@ def _load_public_support_categories(language_code):
                 "description": row[1],
                 "public_slug": row[2],
                 "article_count": row[3],
+            }
+            for row in cur.fetchall()
+        ]
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _load_public_support_articles_by_type(
+    language_code,
+    content_type,
+):
+    """
+    Load publish-ready public Support articles for a dedicated
+    homepage section such as FAQ or Troubleshooting.
+    """
+
+    language_code = (
+        _normalize_public_support_language(
+            language_code
+        )
+    )
+
+    content_type = str(
+        content_type or ""
+    ).strip().lower()
+
+    if content_type not in {
+        "faq",
+        "troubleshooting",
+    }:
+        return []
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                ht.page_key,
+                ht.content_type,
+                ht.display_order,
+                hp.title,
+                hp.summary,
+                hp.public_slug,
+                hp.updated_at,
+                hct.display_name
+
+            FROM help_topics ht
+
+            JOIN help_categories hc
+              ON hc.help_category_id =
+                    ht.help_category_id
+             AND hc.is_active = TRUE
+
+            JOIN help_category_translations hct
+              ON hct.help_category_id =
+                    hc.help_category_id
+             AND UPPER(hct.language_code) = %s
+             AND hct.public_slug IS NOT NULL
+             AND BTRIM(hct.public_slug) <> ''
+
+            JOIN LATERAL (
+                SELECT
+                    hp.help_page_id,
+                    hp.title,
+                    hp.summary,
+                    hp.public_slug,
+                    hp.updated_at,
+                    hp.is_active,
+                    hp.translation_status,
+                    hp.content
+
+                FROM help_pages hp
+
+                WHERE hp.spa_id IS NULL
+                  AND hp.page_key = ht.page_key
+                  AND UPPER(hp.language_code) = %s
+
+                ORDER BY hp.help_page_id DESC
+
+                LIMIT 1
+            ) hp ON TRUE
+
+            WHERE ht.show_on_web = TRUE
+              AND ht.publication_status = 'published'
+              AND COALESCE(ht.content_type, 'guide') = %s
+
+              AND hp.is_active = TRUE
+              AND LOWER(
+                    COALESCE(
+                        hp.translation_status,
+                        'complete'
+                    )
+                  ) = 'complete'
+
+              AND hp.public_slug IS NOT NULL
+              AND BTRIM(hp.public_slug) <> ''
+
+              AND hp.title IS NOT NULL
+              AND BTRIM(hp.title) <> ''
+
+              AND hp.content IS NOT NULL
+              AND BTRIM(hp.content) <> ''
+
+            ORDER BY
+                ht.display_order NULLS LAST,
+                hp.title
+            """,
+            (
+                language_code,
+                language_code,
+                content_type,
+            ),
+        )
+
+        return [
+            {
+                "page_key": row[0],
+                "content_type": row[1],
+                "display_order": row[2],
+                "title": row[3],
+                "summary": row[4] or "",
+                "public_slug": row[5],
+                "updated_at": row[6],
+                "category_display_name": row[7],
             }
             for row in cur.fetchall()
         ]
@@ -2678,6 +2808,8 @@ def _load_public_support_category(
             WHERE ht.help_category_id = %s
               AND ht.show_on_web = TRUE
               AND ht.publication_status = 'published'
+              AND COALESCE(ht.content_type, 'guide')
+                    IN ('guide', 'how_to')
 
               AND hp.is_active = TRUE
               AND LOWER(
@@ -3405,10 +3537,28 @@ def _render_public_support_home():
         )
     )
 
+    support_faq_articles = (
+        _load_public_support_articles_by_type(
+            support_language,
+            "faq",
+        )
+    )
+
+    support_troubleshooting_articles = (
+        _load_public_support_articles_by_type(
+            support_language,
+            "troubleshooting",
+        )
+    )
+
     return render_template(
         "support_site/home.html",
         support_language=support_language,
         support_categories=support_categories,
+        support_faq_articles=support_faq_articles,
+        support_troubleshooting_articles=(
+            support_troubleshooting_articles
+        ),
         support_language_url_en="/?lang=EN",
         support_language_url_es="/?lang=ES",
     )

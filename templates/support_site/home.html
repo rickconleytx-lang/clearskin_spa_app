@@ -187,6 +187,163 @@
 </section>
 
 
+<section
+    class="support-categories"
+    aria-labelledby="support-faq-heading"
+>
+    <div class="support-section-heading">
+        <div>
+            <p class="support-kicker">
+                {% if support_language == 'ES' %}
+                    Respuestas rápidas
+                {% else %}
+                    Quick answers
+                {% endif %}
+            </p>
+
+            <h2 id="support-faq-heading">
+                {% if support_language == 'ES' %}
+                    Preguntas frecuentes
+                {% else %}
+                    FAQs
+                {% endif %}
+            </h2>
+        </div>
+
+        <p>
+            {% if support_language == 'ES' %}
+                Respuestas a funciones difíciles, poco comunes
+                o menos obvias de Peach Suite Pro.
+            {% else %}
+                Answers to tricky, uncommon, or less obvious
+                Peach Suite Pro questions.
+            {% endif %}
+        </p>
+    </div>
+
+    {% if support_faq_articles %}
+        <div class="support-article-list">
+            {% for article in support_faq_articles %}
+                <a
+                    class="support-article-card"
+                    href="/article/{{ article.public_slug }}?lang={{ support_language }}"
+                >
+                    <div class="support-article-card-copy">
+                        <div class="support-article-type">
+                            FAQ
+                        </div>
+
+                        <h2>{{ article.title }}</h2>
+
+                        {% if article.summary %}
+                            <p>{{ article.summary }}</p>
+                        {% endif %}
+                    </div>
+
+                    <span
+                        class="support-article-arrow"
+                        aria-hidden="true"
+                    >
+                        →
+                    </span>
+                </a>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="support-empty-state">
+            <h3>
+                {% if support_language == 'ES' %}
+                    Las preguntas frecuentes están en preparación.
+                {% else %}
+                    FAQ articles are being prepared.
+                {% endif %}
+            </h3>
+        </div>
+    {% endif %}
+</section>
+
+
+<section
+    class="support-categories"
+    aria-labelledby="support-troubleshooting-heading"
+>
+    <div class="support-section-heading">
+        <div>
+            <p class="support-kicker">
+                {% if support_language == 'ES' %}
+                    ¿Algo no funciona?
+                {% else %}
+                    Something not working?
+                {% endif %}
+            </p>
+
+            <h2 id="support-troubleshooting-heading">
+                {% if support_language == 'ES' %}
+                    Solución de problemas
+                {% else %}
+                    Troubleshooting
+                {% endif %}
+            </h2>
+        </div>
+
+        <p>
+            {% if support_language == 'ES' %}
+                Encuentre ayuda con mensajes, redirecciones,
+                errores y comportamientos inesperados.
+            {% else %}
+                Find help with messages, redirects, failures,
+                and unexpected behavior.
+            {% endif %}
+        </p>
+    </div>
+
+    {% if support_troubleshooting_articles %}
+        <div class="support-article-list">
+            {% for article in support_troubleshooting_articles %}
+                <a
+                    class="support-article-card"
+                    href="/article/{{ article.public_slug }}?lang={{ support_language }}"
+                >
+                    <div class="support-article-card-copy">
+                        <div class="support-article-type">
+                            {% if support_language == 'ES' %}
+                                Solución de Problemas
+                            {% else %}
+                                Troubleshooting
+                            {% endif %}
+                        </div>
+
+                        <h2>{{ article.title }}</h2>
+
+                        {% if article.summary %}
+                            <p>{{ article.summary }}</p>
+                        {% endif %}
+                    </div>
+
+                    <span
+                        class="support-article-arrow"
+                        aria-hidden="true"
+                    >
+                        →
+                    </span>
+                </a>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="support-empty-state">
+            <h3>
+                {% if support_language == 'ES' %}
+                    Los artículos de solución de problemas
+                    están en preparación.
+                {% else %}
+                    Troubleshooting articles are being prepared.
+                {% endif %}
+            </h3>
+        </div>
+    {% endif %}
+</section>
+
+
 <section class="support-assistance">
     <div class="support-assistance-inner">
 
