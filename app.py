@@ -59997,6 +59997,21 @@ def help_pages_manager():
     if page_filter not in allowed_filters:
         page_filter = "all"
 
+    article_type_filter = str(
+        request.args.get("type", "all")
+        or "all"
+    ).strip().lower()
+
+    allowed_article_type_filters = {
+        "all",
+        "help",
+        "faq",
+        "troubleshooting",
+    }
+
+    if article_type_filter not in allowed_article_type_filters:
+        article_type_filter = "all"
+
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -60290,6 +60305,31 @@ def help_pages_manager():
         ):
             continue
 
+        content_type = str(
+            page["content_type"] or "guide"
+        ).strip().lower()
+
+        if (
+            article_type_filter == "help"
+            and content_type not in {
+                "guide",
+                "how_to",
+            }
+        ):
+            continue
+
+        if (
+            article_type_filter == "faq"
+            and content_type != "faq"
+        ):
+            continue
+
+        if (
+            article_type_filter == "troubleshooting"
+            and content_type != "troubleshooting"
+        ):
+            continue
+
         if search_lower:
 
             searchable = " ".join([
@@ -60316,6 +60356,7 @@ def help_pages_manager():
         counts=counts,
         search=search,
         page_filter=page_filter,
+        article_type_filter=article_type_filter,
     )
 
 

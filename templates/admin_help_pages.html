@@ -39,7 +39,43 @@
             autocomplete="off"
         >
 
-        <select name="filter">
+        <select
+            name="type"
+            aria-label="Article Type"
+        >
+            <option
+                value="all"
+                {% if article_type_filter == "all" %}selected{% endif %}
+            >
+                All Types
+            </option>
+
+            <option
+                value="help"
+                {% if article_type_filter == "help" %}selected{% endif %}
+            >
+                Help
+            </option>
+
+            <option
+                value="faq"
+                {% if article_type_filter == "faq" %}selected{% endif %}
+            >
+                FAQ
+            </option>
+
+            <option
+                value="troubleshooting"
+                {% if article_type_filter == "troubleshooting" %}selected{% endif %}
+            >
+                Troubleshooting
+            </option>
+        </select>
+
+        <select
+            name="filter"
+            aria-label="Language Filter"
+        >
             <option
                 value="all"
                 {% if page_filter == "all" %}selected{% endif %}
@@ -76,7 +112,11 @@
             Apply
         </button>
 
-        {% if search or page_filter != "all" %}
+        {% if
+            search
+            or page_filter != "all"
+            or article_type_filter != "all"
+        %}
             <a
                 href="{{ url_for('help_pages_manager') }}"
                 class="tool-pill tool-pill-small"
