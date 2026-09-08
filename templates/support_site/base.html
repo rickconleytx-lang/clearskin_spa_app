@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="{{ support_language|default('EN')|lower }}">
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <meta
+        name="description"
+        content="{% block meta_description %}Find answers, guides, troubleshooting help, and tutorials for Peach Suite Pro.{% endblock %}"
+    >
+
+    <title>
+        {% block title %}Peach Suite Pro Support{% endblock %}
+    </title>
+
+    <link
+        rel="icon"
+        href="{{ url_for('static', filename='peachsuite-icon.png') }}"
+    >
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='css/support_center.css') }}"
+    >
+
+    {% block head_extra %}{% endblock %}
+</head>
+
+<body>
+    <a class="skip-link" href="#main-content">
+        Skip to main content
+    </a>
+
+    <header class="support-header">
+        <div class="support-header-inner">
+            <a
+                class="support-brand"
+                href="{{ support_home_url|default('/' ~ ('?lang=ES' if support_language == 'ES' else '')) }}"
+                aria-label="Peach Suite Pro Support Center"
+            >
+                <img
+                    class="support-brand-icon"
+                    src="{{ url_for('static', filename='peachsuite-icon.png') }}"
+                    alt=""
+                >
+
+                <span class="support-brand-copy">
+                    <strong>Peach Suite Pro</strong>
+                    <span>Support Center</span>
+                </span>
+            </a>
+
+            <div class="support-header-actions">
+                <nav
+                    class="support-language-switch"
+                    aria-label="Language"
+                >
+                    <a
+                        href="{{ support_language_url_en|default('/?lang=EN') }}"
+                        {% if support_language == 'EN' %}
+                            aria-current="page"
+                            class="is-active"
+                        {% endif %}
+                    >
+                        EN
+                    </a>
+
+                    <span aria-hidden="true">|</span>
+
+                    <a
+                        href="{{ support_language_url_es|default('/?lang=ES') }}"
+                        {% if support_language == 'ES' %}
+                            aria-current="page"
+                            class="is-active"
+                        {% endif %}
+                    >
+                        ES
+                    </a>
+                </nav>
+
+                <a
+                    class="support-sign-in"
+                    href="https://app.peachsuitepro.com/login"
+                >
+                    Sign In
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <main id="main-content">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="support-footer">
+        <div class="support-footer-inner">
+            <div>
+                <strong>Peach Suite Pro</strong>
+                <p>
+                    Business management, simplified.
+                </p>
+            </div>
+
+            <div class="support-footer-links">
+                <a href="https://peachsuitepro.com">
+                    PeachSuitePro.com
+                </a>
+
+                <a href="https://app.peachsuitepro.com/login">
+                    Sign In
+                </a>
+            </div>
+        </div>
+
+        <div class="support-footer-legal">
+            &copy; {{ current_year }} Just Peachy Data LLC.
+            All rights reserved.
+        </div>
+    </footer>
+</body>
+</html>

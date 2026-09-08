@@ -1,0 +1,234 @@
+{% extends "support_site/base.html" %}
+
+{% block title %}
+    Peach Suite Pro Support Center
+{% endblock %}
+
+{% block content %}
+
+<section class="support-hero">
+    <div class="support-hero-inner">
+
+        <p class="support-eyebrow">
+            Peach Suite Pro Support
+        </p>
+
+        <h1>
+            {% if support_language == 'ES' %}
+                ¿Cómo podemos ayudarle?
+            {% else %}
+                How can we help?
+            {% endif %}
+        </h1>
+
+        <p class="support-hero-copy">
+            {% if support_language == 'ES' %}
+                Encuentre guías, respuestas, solución de problemas
+                y tutoriales para Peach Suite Pro.
+            {% else %}
+                Find guides, answers, troubleshooting help,
+                and tutorials for Peach Suite Pro.
+            {% endif %}
+        </p>
+
+        <form
+            class="support-search"
+            method="get"
+            action="/search"
+            role="search"
+        >
+            <input
+                type="hidden"
+                name="lang"
+                value="{{ support_language }}"
+            >
+
+            <label class="sr-only" for="support-search-query">
+                {% if support_language == 'ES' %}
+                    Buscar en el Centro de Soporte
+                {% else %}
+                    Search the Support Center
+                {% endif %}
+            </label>
+
+            <div class="support-search-box">
+                <span
+                    class="support-search-icon"
+                    aria-hidden="true"
+                >
+                    ⌕
+                </span>
+
+                <input
+                    id="support-search-query"
+                    name="q"
+                    type="search"
+                    autocomplete="off"
+                    placeholder="{% if support_language == 'ES' %}Buscar ayuda de Peach Suite Pro...{% else %}Search Peach Suite Pro help...{% endif %}"
+                >
+
+                <button type="submit">
+                    {% if support_language == 'ES' %}
+                        Buscar
+                    {% else %}
+                        Search
+                    {% endif %}
+                </button>
+            </div>
+        </form>
+
+    </div>
+</section>
+
+
+<section
+    class="support-section"
+    aria-labelledby="support-categories-heading"
+>
+    <div class="support-section-heading">
+
+        <div>
+            <p class="support-kicker">
+                {% if support_language == 'ES' %}
+                    Explorar
+                {% else %}
+                    Browse
+                {% endif %}
+            </p>
+
+            <h2 id="support-categories-heading">
+                {% if support_language == 'ES' %}
+                    Temas de ayuda
+                {% else %}
+                    Help topics
+                {% endif %}
+            </h2>
+        </div>
+
+        <p>
+            {% if support_language == 'ES' %}
+                Explore Peach Suite Pro por área de producto.
+            {% else %}
+                Explore Peach Suite Pro by product area.
+            {% endif %}
+        </p>
+    </div>
+
+
+    {% if support_categories %}
+
+        <div class="support-category-grid">
+
+            {% for category in support_categories %}
+
+                <a
+                    class="support-category-card"
+                    href="/category/{{ category.public_slug }}?lang={{ support_language }}"
+                >
+                    <div class="support-category-card-top">
+                        <span class="support-category-mark">
+                            {{ category.display_name[:1] }}
+                        </span>
+
+                        {% if category.article_count %}
+                            <span class="support-category-count">
+                                {{ category.article_count }}
+                            </span>
+                        {% endif %}
+                    </div>
+
+                    <h3>
+                        {{ category.display_name }}
+                    </h3>
+
+                    {% if category.description %}
+                        <p>
+                            {{ category.description }}
+                        </p>
+                    {% endif %}
+
+                    <span class="support-category-link">
+                        {% if support_language == 'ES' %}
+                            Ver ayuda
+                        {% else %}
+                            View help
+                        {% endif %}
+                        <span aria-hidden="true">→</span>
+                    </span>
+                </a>
+
+            {% endfor %}
+
+        </div>
+
+    {% else %}
+
+        <div class="support-empty-state">
+            <h3>
+                {% if support_language == 'ES' %}
+                    La biblioteca de ayuda está en preparación.
+                {% else %}
+                    The Support library is being prepared.
+                {% endif %}
+            </h3>
+
+            <p>
+                {% if support_language == 'ES' %}
+                    Los artículos aparecerán aquí a medida que
+                    se publiquen.
+                {% else %}
+                    Articles will appear here as they are published.
+                {% endif %}
+            </p>
+        </div>
+
+    {% endif %}
+
+</section>
+
+
+<section class="support-assistance">
+    <div class="support-assistance-inner">
+
+        <div>
+            <p class="support-kicker">
+                {% if support_language == 'ES' %}
+                    ¿Aún necesita ayuda?
+                {% else %}
+                    Still need help?
+                {% endif %}
+            </p>
+
+            <h2>
+                {% if support_language == 'ES' %}
+                    Estamos aquí para ayudarle.
+                {% else %}
+                    We’re here to help.
+                {% endif %}
+            </h2>
+
+            <p>
+                {% if support_language == 'ES' %}
+                    Si no encuentra la respuesta que necesita,
+                    podrá ponerse en contacto con Soporte de
+                    Peach Suite Pro desde aquí.
+                {% else %}
+                    If you can’t find the answer you need,
+                    you’ll be able to contact Peach Suite Pro
+                    Support from here.
+                {% endif %}
+            </p>
+        </div>
+
+        <span class="support-coming-soon">
+            {% if support_language == 'ES' %}
+                Soporte
+            {% else %}
+                Support
+            {% endif %}
+        </span>
+
+    </div>
+</section>
+
+{% endblock %}

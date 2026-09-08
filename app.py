@@ -66,6 +66,7 @@ from services.coach import (
     build_action_cards
 )
 from services.sms_service import send_sms_telnyx
+from services.help_html import sanitize_help_html
 from services.mfa_security import (
     MFAError,
     build_totp_qr_png,
@@ -1566,6 +1567,7 @@ def _build_unique_workspace_public_slug(
         "imap",
         "pop",
         "status",
+        "support",
     }
 
     candidate_number = 0
@@ -1954,6 +1956,1487 @@ def _normalize_public_website_hostname(hostname):
     return hostname
 
 
+def _is_public_support_host(hostname):
+    """
+    Return True only for the Peach Suite Pro public Support host.
+
+    support.localhost is normalized by the existing public-host
+    helper to support.peachsuitepro.com for local development.
+    """
+
+    return (
+        _normalize_public_website_hostname(hostname)
+        == "support.peachsuitepro.com"
+    )
+
+
+def _normalize_public_support_language(language_code):
+    """
+    Public Support Center V1 supports English and Spanish.
+    Unknown or missing language values safely fall back to English.
+    """
+
+    language_code = str(
+        language_code or ""
+    ).strip().upper()
+
+    if language_code == "ES":
+        return "ES"
+
+    return "EN"
+
+
+def _normalize_public_support_slug(value):
+    """
+    Normalize one public Support article slug.
+
+    Slugs are lowercase ASCII, use hyphens as separators,
+    and stay within help_pages.public_slug VARCHAR(180).
+    """
+
+    import re
+    import unicodedata
+
+    normalized_value = unicodedata.normalize(
+        "NFKD",
+        str(value or ""),
+    )
+
+    normalized_value = (
+        normalized_value
+        .encode("ascii", "ignore")
+        .decode("ascii")
+    )
+
+    slug = re.sub(
+        r"[^a-zA-Z0-9]+",
+        "-",
+        normalized_value,
+    ).strip("-").lower()
+
+    return slug[:180].rstrip("-")
+
+
+def _build_unique_public_support_article_slug(
+    cur,
+    requested_slug,
+    article_title,
+    language_code,
+    help_page_id=None,
+):
+    """
+    Build one unique language-specific public Support article slug.
+
+    A manually supplied slug is preferred. If it is blank or
+    normalizes to nothing, the translated article title is used.
+
+    Existing saved slugs can be passed back in so URLs remain stable
+    when an article title changes.
+    """
+
+    language_code = str(
+        language_code or ""
+    ).strip().upper()
+
+    if language_code not in {
+        "EN",
+        "ES",
+    }:
+        raise ValueError(
+            "Unsupported Help article language."
+        )
+
+    base_slug = _normalize_public_support_slug(
+        requested_slug
+    )
+
+    if not base_slug:
+        base_slug = (
+            _normalize_public_support_slug(
+                article_title
+            )
+        )
+
+    if not base_slug:
+        base_slug = "help-article"
+
+    candidate_number = 1
+
+    while candidate_number <= 10000:
+
+        if candidate_number == 1:
+            suffix = ""
+        else:
+            suffix = f"-{candidate_number}"
+
+        base_limit = 180 - len(suffix)
+
+        candidate = (
+            base_slug[:base_limit]
+            .rstrip("-")
+            + suffix
+        )
+
+        query = """
+            SELECT help_page_id
+
+            FROM help_pages
+
+            WHERE spa_id IS NULL
+              AND UPPER(language_code) = %s
+              AND LOWER(public_slug) = LOWER(%s)
+        """
+
+        params = [
+            language_code,
+            candidate,
+        ]
+
+        if help_page_id is not None:
+            query += """
+              AND help_page_id <> %s
+            """
+
+            params.append(help_page_id)
+
+        query += """
+            LIMIT 1
+        """
+
+        cur.execute(
+            query,
+            tuple(params),
+        )
+
+        if not cur.fetchone():
+            return candidate
+
+        candidate_number += 1
+
+    raise ValueError(
+        "Unable to create a unique Support article slug."
+    )
+
+
+def _public_support_youtube_video_id(value):
+    """
+    Extract and validate a YouTube video ID from supported YouTube URLs.
+
+    Arbitrary iframe/embed URLs are never accepted. The returned ID
+    may later be used to construct a trusted youtube-nocookie embed.
+    """
+
+    import re
+    from urllib.parse import parse_qs, urlparse
+
+    raw_url = str(value or "").strip()
+
+    if not raw_url:
+        return None
+
+    try:
+        parsed = urlparse(raw_url)
+        parsed_port = parsed.port
+    except ValueError as exc:
+        raise ValueError(
+            "Enter a valid YouTube URL."
+        ) from exc
+
+    if parsed.scheme.lower() not in {
+        "http",
+        "https",
+    }:
+        raise ValueError(
+            "Enter a valid YouTube URL."
+        )
+
+    if parsed.username or parsed.password:
+        raise ValueError(
+            "Enter a valid YouTube URL."
+        )
+
+    if parsed_port not in {
+        None,
+        80,
+        443,
+    }:
+        raise ValueError(
+            "Enter a valid YouTube URL."
+        )
+
+    hostname = (
+        parsed.hostname
+        or ""
+    ).lower().rstrip(".")
+
+    video_id = None
+
+    if hostname in {
+        "youtu.be",
+        "www.youtu.be",
+    }:
+        path_parts = [
+            part
+            for part in parsed.path.split("/")
+            if part
+        ]
+
+        if path_parts:
+            video_id = path_parts[0]
+
+    elif hostname in {
+        "youtube.com",
+        "www.youtube.com",
+        "m.youtube.com",
+        "music.youtube.com",
+    }:
+        path_parts = [
+            part
+            for part in parsed.path.split("/")
+            if part
+        ]
+
+        if (
+            path_parts
+            and path_parts[0] == "watch"
+        ):
+            video_id = (
+                parse_qs(
+                    parsed.query
+                ).get(
+                    "v",
+                    [None],
+                )[0]
+            )
+
+        elif (
+            len(path_parts) >= 2
+            and path_parts[0] in {
+                "shorts",
+                "embed",
+                "live",
+            }
+        ):
+            video_id = path_parts[1]
+
+    elif hostname in {
+        "youtube-nocookie.com",
+        "www.youtube-nocookie.com",
+    }:
+        path_parts = [
+            part
+            for part in parsed.path.split("/")
+            if part
+        ]
+
+        if (
+            len(path_parts) >= 2
+            and path_parts[0] == "embed"
+        ):
+            video_id = path_parts[1]
+
+    if not video_id:
+        raise ValueError(
+            "Enter a valid YouTube video URL."
+        )
+
+    if not re.fullmatch(
+        r"[A-Za-z0-9_-]{11}",
+        video_id,
+    ):
+        raise ValueError(
+            "Enter a valid YouTube video URL."
+        )
+
+    return video_id
+
+
+def _normalize_public_support_youtube_url(value):
+    """
+    Return a canonical YouTube watch URL for a validated video.
+    Blank values remain blank/None.
+    """
+
+    video_id = (
+        _public_support_youtube_video_id(
+            value
+        )
+    )
+
+    if not video_id:
+        return None
+
+    return (
+        "https://www.youtube.com/watch?v="
+        + video_id
+    )
+
+
+def _public_support_publication_readiness(
+    cur,
+    page_key,
+    help_category_id,
+):
+    """
+    Return public Web publication blockers for one Help topic.
+
+    Peach Suite Pro Support V1 is bilingual. A Web-published topic
+    must have publication-ready English and Spanish article rows.
+    """
+
+    blockers = []
+
+    if help_category_id is None:
+        blockers.append(
+            "Choose a Support category."
+        )
+
+    else:
+        cur.execute(
+            """
+            SELECT
+                hc.is_active,
+
+                BOOL_OR(
+                    UPPER(hct.language_code) = 'EN'
+                    AND NULLIF(
+                        BTRIM(hct.public_slug),
+                        ''
+                    ) IS NOT NULL
+                ) AS has_en_public_slug,
+
+                BOOL_OR(
+                    UPPER(hct.language_code) = 'ES'
+                    AND NULLIF(
+                        BTRIM(hct.public_slug),
+                        ''
+                    ) IS NOT NULL
+                ) AS has_es_public_slug
+
+            FROM help_categories hc
+
+            LEFT JOIN help_category_translations hct
+              ON hct.help_category_id =
+                    hc.help_category_id
+
+            WHERE hc.help_category_id = %s
+
+            GROUP BY
+                hc.help_category_id,
+                hc.is_active
+            """,
+            (help_category_id,),
+        )
+
+        category_row = cur.fetchone()
+
+        if not category_row:
+            blockers.append(
+                "Choose a valid Support category."
+            )
+
+        else:
+            if not bool(category_row[0]):
+                blockers.append(
+                    "Support category must be Active."
+                )
+
+            if not bool(category_row[1]):
+                blockers.append(
+                    "Support category needs an English public URL slug."
+                )
+
+            if not bool(category_row[2]):
+                blockers.append(
+                    "Support category needs a Spanish public URL slug."
+                )
+
+    cur.execute(
+        """
+        SELECT DISTINCT ON (
+            UPPER(language_code)
+        )
+            UPPER(language_code),
+            is_active,
+            COALESCE(
+                translation_status,
+                'complete'
+            ),
+            NULLIF(
+                BTRIM(public_slug),
+                ''
+            ),
+            NULLIF(
+                BTRIM(title),
+                ''
+            ),
+            NULLIF(
+                BTRIM(content),
+                ''
+            )
+
+        FROM help_pages
+
+        WHERE spa_id IS NULL
+          AND page_key = %s
+          AND UPPER(language_code) IN (
+              'EN',
+              'ES'
+          )
+
+        ORDER BY
+            UPPER(language_code),
+            help_page_id DESC
+        """,
+        (page_key,),
+    )
+
+    language_rows = {
+        row[0]: row
+        for row in cur.fetchall()
+    }
+
+    for language_code, language_name in (
+        ("EN", "English"),
+        ("ES", "Spanish"),
+    ):
+
+        row = language_rows.get(
+            language_code
+        )
+
+        if not row:
+            blockers.append(
+                f"{language_name} article is missing."
+            )
+            continue
+
+        if not bool(row[1]):
+            blockers.append(
+                f"{language_name} article must be Active."
+            )
+
+        if str(row[2] or "").lower() != "complete":
+            blockers.append(
+                f"{language_name} Translation Status "
+                "must be Complete."
+            )
+
+        if not row[3]:
+            blockers.append(
+                f"{language_name} article needs a "
+                "Public URL Slug."
+            )
+
+        if not row[4]:
+            blockers.append(
+                f"{language_name} article needs a title."
+            )
+
+        if not row[5]:
+            blockers.append(
+                f"{language_name} article needs content."
+            )
+
+    return blockers
+
+
+def _load_public_support_categories(language_code):
+    """
+    Load public Support categories containing at least one article
+    that is actually publish-ready in the requested language.
+
+    Public Support never falls back to English for a missing Spanish
+    translation. Each language must have its own complete article.
+    """
+
+    language_code = (
+        _normalize_public_support_language(
+            language_code
+        )
+    )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                hct.display_name,
+                hct.description,
+                hct.public_slug,
+                COUNT(ht.help_topic_id) AS article_count
+
+            FROM help_categories hc
+
+            JOIN help_category_translations hct
+              ON hct.help_category_id =
+                    hc.help_category_id
+             AND UPPER(hct.language_code) = %s
+
+            JOIN help_topics ht
+              ON ht.help_category_id =
+                    hc.help_category_id
+             AND ht.show_on_web = TRUE
+             AND ht.publication_status = 'published'
+
+            JOIN LATERAL (
+                SELECT
+                    hp.help_page_id,
+                    hp.is_active,
+                    hp.translation_status,
+                    hp.public_slug,
+                    hp.title,
+                    hp.content
+
+                FROM help_pages hp
+
+                WHERE hp.spa_id IS NULL
+                  AND hp.page_key = ht.page_key
+                  AND UPPER(hp.language_code) = %s
+
+                ORDER BY hp.help_page_id DESC
+
+                LIMIT 1
+            ) hp ON TRUE
+
+            WHERE hc.is_active = TRUE
+
+              AND hct.public_slug IS NOT NULL
+              AND BTRIM(hct.public_slug) <> ''
+
+              AND hp.is_active = TRUE
+              AND LOWER(
+                    COALESCE(
+                        hp.translation_status,
+                        'complete'
+                    )
+                  ) = 'complete'
+
+              AND hp.public_slug IS NOT NULL
+              AND BTRIM(hp.public_slug) <> ''
+
+              AND hp.title IS NOT NULL
+              AND BTRIM(hp.title) <> ''
+
+              AND hp.content IS NOT NULL
+              AND BTRIM(hp.content) <> ''
+
+            GROUP BY
+                hc.help_category_id,
+                hc.display_order,
+                hct.display_name,
+                hct.description,
+                hct.public_slug
+
+            ORDER BY
+                hc.display_order,
+                hct.display_name
+            """,
+            (
+                language_code,
+                language_code,
+            ),
+        )
+
+        return [
+            {
+                "display_name": row[0],
+                "description": row[1],
+                "public_slug": row[2],
+                "article_count": row[3],
+            }
+            for row in cur.fetchall()
+        ]
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _load_public_support_category(
+    public_slug,
+    language_code,
+):
+    """
+    Load one public Support category and its publish-ready articles.
+
+    Direct category URLs remain unavailable until the category has at
+    least one article ready in the requested language.
+    """
+
+    language_code = (
+        _normalize_public_support_language(
+            language_code
+        )
+    )
+
+    public_slug = str(
+        public_slug or ""
+    ).strip().lower()
+
+    if not public_slug:
+        return None
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                hc.help_category_id,
+                hct.display_name,
+                hct.description,
+                hct.public_slug
+
+            FROM help_categories hc
+
+            JOIN help_category_translations hct
+              ON hct.help_category_id =
+                    hc.help_category_id
+             AND UPPER(hct.language_code) = %s
+
+            WHERE hc.is_active = TRUE
+              AND LOWER(hct.public_slug) = LOWER(%s)
+
+            LIMIT 1
+            """,
+            (
+                language_code,
+                public_slug,
+            ),
+        )
+
+        category_row = cur.fetchone()
+
+        if not category_row:
+            return None
+
+        help_category_id = category_row[0]
+
+        cur.execute(
+            """
+            SELECT
+                UPPER(language_code),
+                public_slug
+
+            FROM help_category_translations
+
+            WHERE help_category_id = %s
+              AND UPPER(language_code) IN (
+                  'EN',
+                  'ES'
+              )
+              AND public_slug IS NOT NULL
+              AND BTRIM(public_slug) <> ''
+            """,
+            (help_category_id,),
+        )
+
+        language_slugs = {
+            row[0]: row[1]
+            for row in cur.fetchall()
+        }
+
+        cur.execute(
+            """
+            SELECT
+                ht.page_key,
+                ht.content_type,
+                ht.display_order,
+                hp.title,
+                hp.summary,
+                hp.public_slug,
+                hp.updated_at
+
+            FROM help_topics ht
+
+            JOIN LATERAL (
+                SELECT
+                    hp.help_page_id,
+                    hp.title,
+                    hp.summary,
+                    hp.public_slug,
+                    hp.updated_at,
+                    hp.is_active,
+                    hp.translation_status,
+                    hp.content
+
+                FROM help_pages hp
+
+                WHERE hp.spa_id IS NULL
+                  AND hp.page_key = ht.page_key
+                  AND UPPER(hp.language_code) = %s
+
+                ORDER BY hp.help_page_id DESC
+
+                LIMIT 1
+            ) hp ON TRUE
+
+            WHERE ht.help_category_id = %s
+              AND ht.show_on_web = TRUE
+              AND ht.publication_status = 'published'
+
+              AND hp.is_active = TRUE
+              AND LOWER(
+                    COALESCE(
+                        hp.translation_status,
+                        'complete'
+                    )
+                  ) = 'complete'
+
+              AND hp.public_slug IS NOT NULL
+              AND BTRIM(hp.public_slug) <> ''
+
+              AND hp.title IS NOT NULL
+              AND BTRIM(hp.title) <> ''
+
+              AND hp.content IS NOT NULL
+              AND BTRIM(hp.content) <> ''
+
+            ORDER BY
+                ht.display_order NULLS LAST,
+                hp.title
+            """,
+            (
+                language_code,
+                help_category_id,
+            ),
+        )
+
+        articles = [
+            {
+                "page_key": row[0],
+                "content_type": row[1],
+                "display_order": row[2],
+                "title": row[3],
+                "summary": row[4] or "",
+                "public_slug": row[5],
+                "updated_at": row[6],
+            }
+            for row in cur.fetchall()
+        ]
+
+        if not articles:
+            return None
+
+        return {
+            "help_category_id": help_category_id,
+            "display_name": category_row[1],
+            "description": category_row[2] or "",
+            "public_slug": category_row[3],
+            "articles": articles,
+            "language_url_en": (
+                "/category/"
+                + language_slugs["EN"]
+                + "?lang=EN"
+                if language_slugs.get("EN")
+                else "/?lang=EN"
+            ),
+            "language_url_es": (
+                "/category/"
+                + language_slugs["ES"]
+                + "?lang=ES"
+                if language_slugs.get("ES")
+                else "/?lang=ES"
+            ),
+        }
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _load_public_support_article(
+    public_slug,
+    language_code,
+):
+    """
+    Load one publish-ready public Support article.
+
+    Content is sanitized here before it reaches the Jinja render
+    boundary. Draft, archived, inactive, untranslated, or incomplete
+    articles are never returned.
+    """
+
+    language_code = (
+        _normalize_public_support_language(
+            language_code
+        )
+    )
+
+    public_slug = str(
+        public_slug or ""
+    ).strip().lower()
+
+    if not public_slug:
+        return None
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                ht.help_topic_id,
+                ht.page_key,
+                ht.content_type,
+                ht.tutorial_video_url,
+
+                hp.title,
+                hp.summary,
+                hp.content,
+                hp.public_slug,
+                hp.seo_description,
+                hp.updated_at,
+
+                hc.help_category_id,
+                hct.display_name,
+                hct.public_slug
+
+            FROM help_topics ht
+
+            JOIN help_categories hc
+              ON hc.help_category_id =
+                    ht.help_category_id
+             AND hc.is_active = TRUE
+
+            JOIN help_category_translations hct
+              ON hct.help_category_id =
+                    hc.help_category_id
+             AND UPPER(hct.language_code) = %s
+             AND hct.public_slug IS NOT NULL
+             AND BTRIM(hct.public_slug) <> ''
+
+            JOIN LATERAL (
+                SELECT
+                    hp.help_page_id,
+                    hp.title,
+                    hp.summary,
+                    hp.content,
+                    hp.public_slug,
+                    hp.seo_description,
+                    hp.updated_at,
+                    hp.is_active,
+                    hp.translation_status
+
+                FROM help_pages hp
+
+                WHERE hp.spa_id IS NULL
+                  AND hp.page_key = ht.page_key
+                  AND UPPER(hp.language_code) = %s
+
+                ORDER BY hp.help_page_id DESC
+
+                LIMIT 1
+            ) hp ON TRUE
+
+            WHERE ht.show_on_web = TRUE
+              AND ht.publication_status = 'published'
+
+              AND hp.is_active = TRUE
+              AND LOWER(
+                    COALESCE(
+                        hp.translation_status,
+                        'complete'
+                    )
+                  ) = 'complete'
+
+              AND hp.public_slug IS NOT NULL
+              AND BTRIM(hp.public_slug) <> ''
+              AND LOWER(hp.public_slug) = LOWER(%s)
+
+              AND hp.title IS NOT NULL
+              AND BTRIM(hp.title) <> ''
+
+              AND hp.content IS NOT NULL
+              AND BTRIM(hp.content) <> ''
+
+            LIMIT 1
+            """,
+            (
+                language_code,
+                language_code,
+                public_slug,
+            ),
+        )
+
+        row = cur.fetchone()
+
+        if not row:
+            return None
+
+        page_key = row[1]
+        help_category_id = row[10]
+
+        cur.execute(
+            """
+            SELECT DISTINCT ON (
+                UPPER(language_code)
+            )
+                UPPER(language_code),
+                public_slug,
+                is_active,
+                translation_status,
+                title,
+                content
+
+            FROM help_pages
+
+            WHERE spa_id IS NULL
+              AND page_key = %s
+              AND UPPER(language_code) IN (
+                  'EN',
+                  'ES'
+              )
+
+            ORDER BY
+                UPPER(language_code),
+                help_page_id DESC
+            """,
+            (page_key,),
+        )
+
+        article_language_slugs = {}
+
+        for lang_row in cur.fetchall():
+
+            lang = lang_row[0]
+
+            if (
+                bool(lang_row[2])
+                and str(
+                    lang_row[3] or ""
+                ).lower() == "complete"
+                and str(
+                    lang_row[1] or ""
+                ).strip()
+                and str(
+                    lang_row[4] or ""
+                ).strip()
+                and str(
+                    lang_row[5] or ""
+                ).strip()
+            ):
+                article_language_slugs[
+                    lang
+                ] = lang_row[1]
+
+        cur.execute(
+            """
+            SELECT
+                UPPER(language_code),
+                public_slug
+
+            FROM help_category_translations
+
+            WHERE help_category_id = %s
+              AND UPPER(language_code) IN (
+                  'EN',
+                  'ES'
+              )
+              AND public_slug IS NOT NULL
+              AND BTRIM(public_slug) <> ''
+            """,
+            (help_category_id,),
+        )
+
+        category_language_slugs = {
+            lang_row[0]: lang_row[1]
+            for lang_row in cur.fetchall()
+        }
+
+        video_embed_url = None
+
+        if row[3]:
+            try:
+                video_id = (
+                    _public_support_youtube_video_id(
+                        row[3]
+                    )
+                )
+            except ValueError:
+                video_id = None
+
+            if video_id:
+                video_embed_url = (
+                    "https://www.youtube-nocookie.com/embed/"
+                    + video_id
+                )
+
+        sanitized_content = (
+            sanitize_help_html(
+                row[6]
+            )
+        )
+
+        return {
+            "help_topic_id": row[0],
+            "page_key": page_key,
+            "content_type": row[2],
+            "tutorial_video_url": row[3] or "",
+            "video_embed_url": video_embed_url,
+            "title": row[4],
+            "summary": row[5] or "",
+            "content": sanitized_content,
+            "public_slug": row[7],
+            "seo_description": (
+                row[8]
+                or row[5]
+                or ""
+            ),
+            "updated_at": row[9],
+            "help_category_id": help_category_id,
+            "category_display_name": row[11],
+            "category_public_slug": row[12],
+
+            "language_url_en": (
+                "/article/"
+                + article_language_slugs["EN"]
+                + "?lang=EN"
+                if article_language_slugs.get("EN")
+                else "/?lang=EN"
+            ),
+
+            "language_url_es": (
+                "/article/"
+                + article_language_slugs["ES"]
+                + "?lang=ES"
+                if article_language_slugs.get("ES")
+                else "/?lang=ES"
+            ),
+
+            "category_url_en": (
+                "/category/"
+                + category_language_slugs["EN"]
+                + "?lang=EN"
+                if category_language_slugs.get("EN")
+                else "/?lang=EN"
+            ),
+
+            "category_url_es": (
+                "/category/"
+                + category_language_slugs["ES"]
+                + "?lang=ES"
+                if category_language_slugs.get("ES")
+                else "/?lang=ES"
+            ),
+        }
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _load_public_support_search(
+    search_query,
+    language_code,
+):
+    """
+    Search publish-ready public Support articles in one language.
+
+    Search never exposes Draft, archived, inactive, untranslated,
+    incomplete, or Web-disabled Help content.
+    """
+
+    language_code = (
+        _normalize_public_support_language(
+            language_code
+        )
+    )
+
+    search_query = str(
+        search_query or ""
+    ).strip()[:200]
+
+    if not search_query:
+        return []
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                ht.page_key,
+                ht.content_type,
+                ht.display_order,
+                hp.title,
+                hp.summary,
+                hp.public_slug,
+                hp.updated_at,
+                hct.display_name
+
+            FROM help_topics ht
+
+            JOIN help_categories hc
+              ON hc.help_category_id =
+                    ht.help_category_id
+             AND hc.is_active = TRUE
+
+            JOIN help_category_translations hct
+              ON hct.help_category_id =
+                    hc.help_category_id
+             AND UPPER(hct.language_code) = %s
+             AND hct.public_slug IS NOT NULL
+             AND BTRIM(hct.public_slug) <> ''
+
+            JOIN LATERAL (
+                SELECT
+                    hp.help_page_id,
+                    hp.title,
+                    hp.summary,
+                    hp.search_keywords,
+                    hp.content,
+                    hp.public_slug,
+                    hp.updated_at,
+                    hp.is_active,
+                    hp.translation_status
+
+                FROM help_pages hp
+
+                WHERE hp.spa_id IS NULL
+                  AND hp.page_key = ht.page_key
+                  AND UPPER(hp.language_code) = %s
+
+                ORDER BY hp.help_page_id DESC
+
+                LIMIT 1
+            ) hp ON TRUE
+
+            WHERE ht.show_on_web = TRUE
+              AND ht.publication_status = 'published'
+
+              AND hp.is_active = TRUE
+              AND LOWER(
+                    COALESCE(
+                        hp.translation_status,
+                        'complete'
+                    )
+                  ) = 'complete'
+
+              AND hp.public_slug IS NOT NULL
+              AND BTRIM(hp.public_slug) <> ''
+
+              AND hp.title IS NOT NULL
+              AND BTRIM(hp.title) <> ''
+
+              AND hp.content IS NOT NULL
+              AND BTRIM(hp.content) <> ''
+
+              AND (
+                    STRPOS(
+                        LOWER(COALESCE(hp.title, '')),
+                        LOWER(%s)
+                    ) > 0
+
+                    OR STRPOS(
+                        LOWER(COALESCE(hp.summary, '')),
+                        LOWER(%s)
+                    ) > 0
+
+                    OR STRPOS(
+                        LOWER(
+                            COALESCE(
+                                hp.search_keywords,
+                                ''
+                            )
+                        ),
+                        LOWER(%s)
+                    ) > 0
+
+                    OR STRPOS(
+                        LOWER(COALESCE(hp.content, '')),
+                        LOWER(%s)
+                    ) > 0
+
+                    OR STRPOS(
+                        LOWER(COALESCE(hct.display_name, '')),
+                        LOWER(%s)
+                    ) > 0
+
+                    OR STRPOS(
+                        LOWER(
+                            REPLACE(
+                                COALESCE(ht.content_type, ''),
+                                '_',
+                                ' '
+                            )
+                        ),
+                        LOWER(
+                            REPLACE(%s, '-', ' ')
+                        )
+                    ) > 0
+              )
+
+            ORDER BY
+                CASE
+                    WHEN STRPOS(
+                        LOWER(COALESCE(hp.title, '')),
+                        LOWER(%s)
+                    ) > 0
+                        THEN 0
+
+                    WHEN STRPOS(
+                        LOWER(
+                            COALESCE(
+                                hp.search_keywords,
+                                ''
+                            )
+                        ),
+                        LOWER(%s)
+                    ) > 0
+                        THEN 1
+
+                    WHEN STRPOS(
+                        LOWER(COALESCE(hp.summary, '')),
+                        LOWER(%s)
+                    ) > 0
+                        THEN 2
+
+                    WHEN STRPOS(
+                        LOWER(COALESCE(hct.display_name, '')),
+                        LOWER(%s)
+                    ) > 0
+                        THEN 3
+
+                    WHEN STRPOS(
+                        LOWER(
+                            REPLACE(
+                                COALESCE(ht.content_type, ''),
+                                '_',
+                                ' '
+                            )
+                        ),
+                        LOWER(
+                            REPLACE(%s, '-', ' ')
+                        )
+                    ) > 0
+                        THEN 4
+
+                    ELSE 5
+                END,
+
+                ht.display_order NULLS LAST,
+                hp.title
+
+            LIMIT 50
+            """,
+            (
+                language_code,
+                language_code,
+                search_query,
+                search_query,
+                search_query,
+                search_query,
+                search_query,
+                search_query,
+                search_query,
+                search_query,
+                search_query,
+                search_query,
+                search_query,
+            ),
+        )
+
+        return [
+            {
+                "page_key": row[0],
+                "content_type": row[1],
+                "display_order": row[2],
+                "title": row[3],
+                "summary": row[4] or "",
+                "public_slug": row[5],
+                "updated_at": row[6],
+                "category_display_name": row[7],
+            }
+            for row in cur.fetchall()
+        ]
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _render_public_support_search():
+    """
+    Render public Support search results.
+    """
+
+    from urllib.parse import quote_plus
+
+    support_language = (
+        _normalize_public_support_language(
+            request.args.get("lang")
+        )
+    )
+
+    search_query = str(
+        request.args.get("q")
+        or ""
+    ).strip()[:200]
+
+    search_results = (
+        _load_public_support_search(
+            search_query,
+            support_language,
+        )
+        if search_query
+        else []
+    )
+
+    encoded_query = quote_plus(
+        search_query
+    )
+
+    if encoded_query:
+        language_url_en = (
+            "/search?q="
+            + encoded_query
+            + "&lang=EN"
+        )
+
+        language_url_es = (
+            "/search?q="
+            + encoded_query
+            + "&lang=ES"
+        )
+
+    else:
+        language_url_en = "/search?lang=EN"
+        language_url_es = "/search?lang=ES"
+
+    return render_template(
+        "support_site/search.html",
+        support_language=support_language,
+        search_query=search_query,
+        search_results=search_results,
+        support_language_url_en=language_url_en,
+        support_language_url_es=language_url_es,
+    )
+
+
+def _render_public_support_category(public_slug):
+    """
+    Render one public Support category.
+    """
+
+    support_language = (
+        _normalize_public_support_language(
+            request.args.get("lang")
+        )
+    )
+
+    category = (
+        _load_public_support_category(
+            public_slug,
+            support_language,
+        )
+    )
+
+    if not category:
+        return _render_public_support_not_found()
+
+    return render_template(
+        "support_site/category.html",
+        support_language=support_language,
+        category=category,
+        support_language_url_en=(
+            category["language_url_en"]
+        ),
+        support_language_url_es=(
+            category["language_url_es"]
+        ),
+    )
+
+
+def _render_public_support_article(public_slug):
+    """
+    Render one public Support article.
+    """
+
+    support_language = (
+        _normalize_public_support_language(
+            request.args.get("lang")
+        )
+    )
+
+    article = (
+        _load_public_support_article(
+            public_slug,
+            support_language,
+        )
+    )
+
+    if not article:
+        return _render_public_support_not_found()
+
+    return render_template(
+        "support_site/article.html",
+        support_language=support_language,
+        article=article,
+        support_language_url_en=(
+            article["language_url_en"]
+        ),
+        support_language_url_es=(
+            article["language_url_es"]
+        ),
+    )
+
+
+def _render_public_support_home():
+    """
+    Render the public Peach Suite Pro Support Center homepage.
+    """
+
+    support_language = (
+        _normalize_public_support_language(
+            request.args.get("lang")
+        )
+    )
+
+    support_categories = (
+        _load_public_support_categories(
+            support_language
+        )
+    )
+
+    return render_template(
+        "support_site/home.html",
+        support_language=support_language,
+        support_categories=support_categories,
+        support_language_url_en="/?lang=EN",
+        support_language_url_es="/?lang=ES",
+    )
+
+
+def _render_public_support_not_found():
+    """
+    Keep unknown Support-host URLs inside the public Support site
+    instead of falling through to authenticated PSP routing.
+    """
+
+    support_language = (
+        _normalize_public_support_language(
+            request.args.get("lang")
+        )
+    )
+
+    return (
+        render_template(
+            "support_site/404.html",
+            support_language=support_language,
+            support_language_url_en="/?lang=EN",
+            support_language_url_es="/?lang=ES",
+        ),
+        404,
+    )
+
+
 def _build_business_initials(business_name):
     """
     Create short display initials from the tenant business name.
@@ -1994,6 +3477,11 @@ def _resolve_public_website_host(hostname):
     )
 
     if not hostname:
+        return None
+
+    # Peach Suite Pro system hostnames must never resolve
+    # as customer PeachWeb tenant websites.
+    if hostname == "support.peachsuitepro.com":
         return None
 
     conn = get_db_connection()
@@ -2631,6 +4119,82 @@ def _render_public_tenant_home(tenant):
         website_links=
             content["website_links"],
     )
+
+
+@app.before_request
+def route_public_support_site():
+    """
+    Route the Peach Suite Pro Support hostname before tenant and
+    authenticated PSP request handling.
+
+    Static files continue through Flask's normal static route.
+    Every other Support-host request remains contained inside the
+    public Support site.
+    """
+
+    if not _is_public_support_host(
+        request.host
+    ):
+        return None
+
+    if request.endpoint == "static":
+        return None
+
+    if request.method not in (
+        "GET",
+        "HEAD",
+    ):
+        return _render_public_support_not_found()
+
+    if request.path == "/":
+        return _render_public_support_home()
+
+    if request.path == "/search":
+        return _render_public_support_search()
+
+    category_prefix = "/category/"
+
+    if request.path.startswith(
+        category_prefix
+    ):
+        category_slug = request.path[
+            len(category_prefix):
+        ]
+
+        if (
+            category_slug
+            and "/" not in category_slug
+        ):
+            return (
+                _render_public_support_category(
+                    category_slug
+                )
+            )
+
+        return _render_public_support_not_found()
+
+    article_prefix = "/article/"
+
+    if request.path.startswith(
+        article_prefix
+    ):
+        article_slug = request.path[
+            len(article_prefix):
+        ]
+
+        if (
+            article_slug
+            and "/" not in article_slug
+        ):
+            return (
+                _render_public_support_article(
+                    article_slug
+                )
+            )
+
+        return _render_public_support_not_found()
+
+    return _render_public_support_not_found()
 
 
 @app.before_request
@@ -57965,6 +59529,299 @@ def preview_help_page(page_key):
     )
 
 
+
+def _load_admin_support_preview_article(
+    page_key,
+    language_code,
+):
+    """
+    Load one Help translation for a Master Admin Web Support preview.
+
+    Unlike the public Support loader, this intentionally permits Draft
+    topics so Master Admin can review the Web presentation before
+    publishing. Stored HTML is still sanitized exactly as it will be
+    on the public Support site.
+    """
+
+    language_code = str(
+        language_code or ""
+    ).strip().upper()
+
+    if language_code not in {
+        "EN",
+        "ES",
+    }:
+        return None
+
+    page_key = str(
+        page_key or ""
+    ).strip()
+
+    if not page_key:
+        return None
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            WITH latest_page AS (
+                SELECT
+                    help_page_id,
+                    page_key,
+                    title,
+                    summary,
+                    content,
+                    public_slug,
+                    seo_description,
+                    updated_at,
+                    is_active,
+                    translation_status
+
+                FROM help_pages
+
+                WHERE spa_id IS NULL
+                  AND page_key = %s
+                  AND UPPER(language_code) = %s
+
+                ORDER BY help_page_id DESC
+
+                LIMIT 1
+            )
+
+            SELECT
+                hp.title,
+                hp.summary,
+                hp.content,
+                hp.public_slug,
+                hp.seo_description,
+                hp.updated_at,
+                hp.is_active,
+                hp.translation_status,
+
+                COALESCE(
+                    ht.content_type,
+                    'guide'
+                ) AS content_type,
+
+                ht.tutorial_video_url,
+
+                COALESCE(
+                    ht.publication_status,
+                    'draft'
+                ) AS publication_status,
+
+                COALESCE(
+                    ht.show_on_web,
+                    FALSE
+                ) AS show_on_web,
+
+                hct.display_name,
+                hct.public_slug
+
+            FROM latest_page hp
+
+            LEFT JOIN help_topics ht
+              ON ht.page_key = hp.page_key
+
+            LEFT JOIN help_categories hc
+              ON hc.help_category_id =
+                    ht.help_category_id
+
+            LEFT JOIN help_category_translations hct
+              ON hct.help_category_id =
+                    hc.help_category_id
+             AND UPPER(hct.language_code) = %s
+            """,
+            (
+                page_key,
+                language_code,
+                language_code,
+            ),
+        )
+
+        row = cur.fetchone()
+
+        if not row:
+            return None
+
+        video_embed_url = None
+
+        if row[9]:
+            try:
+                video_id = (
+                    _public_support_youtube_video_id(
+                        row[9]
+                    )
+                )
+            except ValueError:
+                video_id = None
+
+            if video_id:
+                video_embed_url = (
+                    "https://www.youtube-nocookie.com/embed/"
+                    + video_id
+                )
+
+        cur.execute(
+            """
+            SELECT DISTINCT ON (
+                UPPER(language_code)
+            )
+                UPPER(language_code)
+
+            FROM help_pages
+
+            WHERE spa_id IS NULL
+              AND page_key = %s
+              AND UPPER(language_code) IN (
+                  'EN',
+                  'ES'
+              )
+
+            ORDER BY
+                UPPER(language_code),
+                help_page_id DESC
+            """,
+            (page_key,),
+        )
+
+        available_languages = {
+            language_row[0]
+            for language_row in cur.fetchall()
+        }
+
+        return {
+            "page_key": page_key,
+            "title": row[0],
+            "summary": row[1] or "",
+            "content": sanitize_help_html(
+                row[2]
+            ),
+            "public_slug": row[3] or "",
+            "seo_description": (
+                row[4]
+                or row[1]
+                or ""
+            ),
+            "updated_at": row[5],
+            "is_active": bool(row[6]),
+            "translation_status": (
+                row[7]
+                or "complete"
+            ),
+            "content_type": row[8],
+            "tutorial_video_url": (
+                row[9]
+                or ""
+            ),
+            "video_embed_url": video_embed_url,
+            "publication_status": row[10],
+            "show_on_web": bool(row[11]),
+            "category_display_name": (
+                row[12]
+                or (
+                    "Sin categoría"
+                    if language_code == "ES"
+                    else "Uncategorized"
+                )
+            ),
+            "category_public_slug": (
+                row[13]
+                or ""
+            ),
+            "available_languages": (
+                available_languages
+            ),
+        }
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route(
+    "/admin/help-pages/web-preview/<page_key>"
+)
+@login_required
+@master_admin_required
+def preview_help_page_web(page_key):
+    """
+    Preview a Help article using its public Support Center presentation
+    without publishing it.
+    """
+
+    language_code = str(
+        request.args.get("lang", "EN")
+        or "EN"
+    ).strip().upper()
+
+    if language_code not in {
+        "EN",
+        "ES",
+    }:
+        abort(400)
+
+    article = (
+        _load_admin_support_preview_article(
+            page_key,
+            language_code,
+        )
+    )
+
+    if not article:
+        flash(
+            f"{language_code} Help Page translation not found.",
+            "warning",
+        )
+
+        return redirect(
+            url_for("help_pages_manager")
+        )
+
+    available_languages = (
+        article["available_languages"]
+    )
+
+    support_language_url_en = (
+        url_for(
+            "preview_help_page_web",
+            page_key=page_key,
+            lang="EN",
+        )
+        if "EN" in available_languages
+        else url_for("help_pages_manager")
+    )
+
+    support_language_url_es = (
+        url_for(
+            "preview_help_page_web",
+            page_key=page_key,
+            lang="ES",
+        )
+        if "ES" in available_languages
+        else url_for("help_pages_manager")
+    )
+
+    return render_template(
+        "support_site/article.html",
+        support_language=language_code,
+        article=article,
+        support_language_url_en=(
+            support_language_url_en
+        ),
+        support_language_url_es=(
+            support_language_url_es
+        ),
+        support_home_url=url_for(
+            "help_pages_manager"
+        ),
+        admin_web_preview=True,
+        admin_preview_page_key=page_key,
+    )
+
+
 @app.route("/admin/help-pages")
 @login_required
 @master_admin_required
@@ -58067,55 +59924,135 @@ def help_pages_manager():
 
             FROM latest
             GROUP BY page_key
-            ORDER BY
-                COALESCE(
-                    COALESCE(
-                        MAX(display_order) FILTER (
-                            WHERE language_code = 'EN'
-                        ),
-                        MAX(display_order) FILTER (
-                            WHERE language_code = 'ES'
-                        )
-                    ),
-                    999999
-                ),
-                LOWER(
-                    COALESCE(
-                        MAX(
-                            NULLIF(display_name, '')
-                        ) FILTER (
-                            WHERE language_code = 'EN'
-                        ),
-                        MAX(
-                            NULLIF(display_name, '')
-                        ) FILTER (
-                            WHERE language_code = 'ES'
-                        ),
-                        page_key
-                    )
-                ),
-                page_key
         """)
 
         rows = cur.fetchall()
+
+        cur.execute("""
+            SELECT
+                ht.page_key,
+
+                COALESCE(
+                    NULLIF(hct.display_name, ''),
+                    NULLIF(hc.category_key, ''),
+                    'Uncategorized'
+                ) AS category_name,
+
+                ht.content_type,
+                ht.show_in_app,
+                ht.show_on_web,
+                ht.publication_status,
+                ht.display_order,
+                ht.help_category_id
+
+            FROM help_topics ht
+
+            LEFT JOIN help_categories hc
+              ON hc.help_category_id =
+                    ht.help_category_id
+
+            LEFT JOIN help_category_translations hct
+              ON hct.help_category_id =
+                    hc.help_category_id
+             AND UPPER(hct.language_code) = 'EN'
+        """)
+
+        topic_rows = cur.fetchall()
+
+        web_ready_by_key = {}
+
+        for topic_row in topic_rows:
+            topic_page_key = topic_row[0]
+            topic_show_on_web = bool(topic_row[4])
+            topic_publication_status = topic_row[5]
+            topic_help_category_id = topic_row[7]
+
+            if (
+                topic_show_on_web
+                and topic_publication_status == "published"
+            ):
+                web_ready_by_key[topic_page_key] = not (
+                    _public_support_publication_readiness(
+                        cur,
+                        topic_page_key,
+                        topic_help_category_id,
+                    )
+                )
+
+            else:
+                web_ready_by_key[topic_page_key] = False
 
     finally:
         cur.close()
         conn.close()
 
+    topic_by_key = {
+        row[0]: {
+            "category_name": row[1],
+            "content_type": row[2],
+            "show_in_app": bool(row[3]),
+            "show_on_web": bool(row[4]),
+            "publication_status": row[5],
+            "display_order": row[6],
+            "web_ready": web_ready_by_key.get(
+                row[0],
+                False,
+            ),
+        }
+        for row in topic_rows
+    }
+
     pages = []
 
     for row in rows:
+
+        topic = topic_by_key.get(
+            row[0],
+            {},
+        )
+
+        topic_display_order = topic.get(
+            "display_order"
+        )
+
         page = {
             "page_key": row[0],
             "display_name": row[1],
-            "display_order": row[2],
+            "display_order": (
+                topic_display_order
+                if topic_display_order is not None
+                else row[2]
+            ),
             "en_id": row[3],
             "en_title": row[4],
             "en_active": row[5],
             "es_id": row[6],
             "es_title": row[7],
             "es_active": row[8],
+            "category_name": topic.get(
+                "category_name",
+                "Uncategorized",
+            ),
+            "content_type": topic.get(
+                "content_type",
+                "guide",
+            ),
+            "show_in_app": topic.get(
+                "show_in_app",
+                True,
+            ),
+            "show_on_web": topic.get(
+                "show_on_web",
+                False,
+            ),
+            "publication_status": topic.get(
+                "publication_status",
+                "draft",
+            ),
+            "web_ready": topic.get(
+                "web_ready",
+                False,
+            ),
             "is_special_terms": (
                 row[0] == "sms_email_terms"
             ),
@@ -58123,18 +60060,36 @@ def help_pages_manager():
 
         pages.append(page)
 
+    pages.sort(
+        key=lambda page: (
+            (
+                page["display_order"]
+                if page["display_order"] is not None
+                else 999999
+            ),
+            str(
+                page["display_name"]
+                or page["page_key"]
+            ).lower(),
+            page["page_key"],
+        )
+    )
+
     counts = {
         "total": len(pages),
+
         "en": sum(
             1
             for page in pages
             if page["en_id"] is not None
         ),
+
         "es": sum(
             1
             for page in pages
             if page["es_id"] is not None
         ),
+
         "missing_es": sum(
             1
             for page in pages
@@ -58142,6 +60097,19 @@ def help_pages_manager():
                 page["en_id"] is not None
                 and page["es_id"] is None
             )
+        ),
+
+        "web_published": sum(
+            1
+            for page in pages
+            if page["web_ready"]
+        ),
+
+        "draft": sum(
+            1
+            for page in pages
+            if page["publication_status"]
+            == "draft"
         ),
     }
 
@@ -58173,11 +60141,18 @@ def help_pages_manager():
             continue
 
         if search_lower:
+
             searchable = " ".join([
                 str(page["page_key"] or ""),
                 str(page["display_name"] or ""),
                 str(page["en_title"] or ""),
                 str(page["es_title"] or ""),
+                str(page["category_name"] or ""),
+                str(page["content_type"] or ""),
+                str(
+                    page["publication_status"]
+                    or ""
+                ),
             ]).lower()
 
             if search_lower not in searchable:
@@ -58200,6 +60175,8 @@ def help_pages_manager():
 @master_admin_required
 def edit_help_page(page_key=None):
 
+    creating_topic = page_key is None
+
     security_csrf_token = _security_form_csrf_token()
 
     conn = get_db_connection()
@@ -58207,6 +60184,8 @@ def edit_help_page(page_key=None):
     cur = conn.cursor()
 
     if request.method == "POST":
+
+        publication_warning = None
 
         submitted_token = request.form.get(
             "security_csrf_token",
@@ -58243,26 +60222,251 @@ def edit_help_page(page_key=None):
             "",
         ).strip()
 
-        language_code = request.form.get(
+        submitted_language_code = request.form.get(
             "language_code",
             "EN",
         ).strip().upper()
 
+        if creating_topic:
+            language_code = submitted_language_code
+
+        else:
+            language_code = (
+                request.args.get(
+                    "lang",
+                    ""
+                )
+                or ""
+            ).strip().upper()
+
+            # Existing Help translations are opened by language
+            # through the editor URL. Do not allow a tampered hidden
+            # form field to save into a different translation.
+            if (
+                not language_code
+                or submitted_language_code
+                    != language_code
+            ):
+                conn.rollback()
+                cur.close()
+                conn.close()
+                abort(400)
+
         if language_code not in {
             "EN",
             "ES",
-            "FR",
-            "DE",
         }:
             conn.rollback()
             cur.close()
             conn.close()
             abort(400)
 
-        display_order = (
+        display_order_raw = (
             request.form.get("display_order")
-            or None
+            or ""
+        ).strip()
+
+        if display_order_raw:
+            try:
+                display_order = int(
+                    display_order_raw
+                )
+            except ValueError:
+                conn.rollback()
+                cur.close()
+                conn.close()
+                abort(400)
+        else:
+            display_order = None
+
+        help_category_id_raw = (
+            request.form.get(
+                "help_category_id"
+            )
+            or ""
+        ).strip()
+
+        if help_category_id_raw:
+            try:
+                help_category_id = int(
+                    help_category_id_raw
+                )
+            except ValueError:
+                conn.rollback()
+                cur.close()
+                conn.close()
+                abort(400)
+        else:
+            help_category_id = None
+
+        content_type = (
+            request.form.get(
+                "content_type",
+                "guide",
+            )
+            or "guide"
+        ).strip().lower()
+
+        if content_type not in {
+            "guide",
+            "how_to",
+            "faq",
+            "troubleshooting",
+        }:
+            conn.rollback()
+            cur.close()
+            conn.close()
+            abort(400)
+
+        publication_status = (
+            request.form.get(
+                "publication_status",
+                "draft",
+            )
+            or "draft"
+        ).strip().lower()
+
+        if publication_status not in {
+            "draft",
+            "published",
+            "archived",
+        }:
+            conn.rollback()
+            cur.close()
+            conn.close()
+            abort(400)
+
+        show_in_app = (
+            request.form.get("show_in_app")
+            == "on"
         )
+
+        show_on_web = (
+            request.form.get("show_on_web")
+            == "on"
+        )
+
+        # Messaging terms remain part of the dedicated
+        # compliance workflow, not the ordinary Web Support
+        # article directory.
+        if page_key == "sms_email_terms":
+            show_on_web = False
+
+        raw_tutorial_video_url = (
+            request.form.get(
+                "tutorial_video_url",
+                ""
+            )
+            or ""
+        ).strip()
+
+        try:
+            tutorial_video_url = (
+                _normalize_public_support_youtube_url(
+                    raw_tutorial_video_url
+                )
+            )
+        except ValueError as exc:
+            conn.rollback()
+            cur.close()
+            conn.close()
+
+            flash(
+                str(exc),
+                "error",
+            )
+
+            if creating_topic:
+                return redirect(
+                    url_for(
+                        "edit_help_page",
+                        lang=language_code,
+                    )
+                )
+
+            return redirect(
+                url_for(
+                    "edit_help_page",
+                    page_key=page_key,
+                    lang=language_code,
+                )
+            )
+
+        summary = (
+            request.form.get(
+                "summary",
+                ""
+            )
+            or ""
+        ).strip()
+
+        search_keywords = (
+            request.form.get(
+                "search_keywords",
+                ""
+            )
+            or ""
+        ).strip()
+
+        requested_public_slug = (
+            request.form.get(
+                "public_slug",
+                ""
+            )
+            or ""
+        ).strip()
+
+        seo_description = (
+            request.form.get(
+                "seo_description",
+                ""
+            )
+            or ""
+        ).strip()
+
+        if len(seo_description) > 320:
+            conn.rollback()
+            cur.close()
+            conn.close()
+
+            flash(
+                "SEO Description must be 320 characters or fewer.",
+                "error",
+            )
+
+            if creating_topic:
+                return redirect(
+                    url_for(
+                        "edit_help_page",
+                        lang=language_code,
+                    )
+                )
+
+            return redirect(
+                url_for(
+                    "edit_help_page",
+                    page_key=page_key,
+                    lang=language_code,
+                )
+            )
+
+        translation_status = (
+            request.form.get(
+                "translation_status",
+                "draft",
+            )
+            or "draft"
+        ).strip().lower()
+
+        if translation_status not in {
+            "draft",
+            "review",
+            "complete",
+        }:
+            conn.rollback()
+            cur.close()
+            conn.close()
+            abort(400)
 
         content = request.form.get(
             "content",
@@ -58275,6 +60479,48 @@ def edit_help_page(page_key=None):
         )
 
         try:
+
+            if help_category_id is not None:
+                cur.execute(
+                    """
+                    SELECT 1
+
+                    FROM help_categories
+
+                    WHERE help_category_id = %s
+                      AND is_active = TRUE
+                    """,
+                    (help_category_id,),
+                )
+
+                if not cur.fetchone():
+                    raise ValueError(
+                        "Invalid Help category."
+                    )
+
+            cur.execute(
+                """
+                SELECT
+                    help_topic_id,
+                    help_category_id,
+                    content_type,
+                    show_in_app,
+                    show_on_web,
+                    publication_status,
+                    display_order,
+                    tutorial_video_url
+
+                FROM help_topics
+
+                WHERE page_key = %s
+
+                FOR UPDATE
+                """,
+                (page_key,),
+            )
+
+            existing_topic = cur.fetchone()
+
             cur.execute(
                 """
                 SELECT
@@ -58283,13 +60529,23 @@ def edit_help_page(page_key=None):
                     title,
                     display_order,
                     content,
-                    is_active
+                    is_active,
+                    summary,
+                    search_keywords,
+                    public_slug,
+                    seo_description,
+                    translation_status
+
                 FROM help_pages
+
                 WHERE page_key = %s
                   AND language_code = %s
                   AND spa_id IS NULL
+
                 ORDER BY help_page_id DESC
+
                 LIMIT 1
+
                 FOR UPDATE
                 """,
                 (
@@ -58300,7 +60556,49 @@ def edit_help_page(page_key=None):
 
             existing = cur.fetchone()
 
+            # The edit route may add a missing EN/ES translation for an
+            # existing Help topic, but it must not create an entirely new
+            # topic from an arbitrary /edit/<page_key> URL.
+            if (
+                not creating_topic
+                and existing_topic is None
+                and existing is None
+            ):
+                abort(404)
+
+            existing_help_page_id = (
+                existing[0]
+                if existing
+                else None
+            )
+
+            slug_source = (
+                requested_public_slug
+            )
+
+            # If this translation already has a public URL and
+            # Master Admin leaves the slug field blank, preserve
+            # the existing URL instead of changing it merely
+            # because the article title changed.
+            if (
+                not slug_source
+                and existing
+                and existing[8]
+            ):
+                slug_source = existing[8]
+
+            public_slug = (
+                _build_unique_public_support_article_slug(
+                    cur,
+                    slug_source,
+                    title,
+                    language_code,
+                    help_page_id=existing_help_page_id,
+                )
+            )
+
             if existing:
+
                 help_page_id = existing[0]
 
                 old_value = (
@@ -58309,7 +60607,9 @@ def edit_help_page(page_key=None):
                     f"display_name={existing[1] or ''}; "
                     f"title={existing[2] or ''}; "
                     f"order={existing[3]}; "
-                    f"active={bool(existing[5])}"
+                    f"active={bool(existing[5])}; "
+                    f"slug={existing[8] or ''}; "
+                    f"translation_status={existing[10] or ''}"
                 )
 
                 content_changed = (
@@ -58317,15 +60617,43 @@ def edit_help_page(page_key=None):
                     != content
                 )
 
+                metadata_changed = any((
+                    str(existing[6] or "")
+                    != summary,
+
+                    str(existing[7] or "")
+                    != search_keywords,
+
+                    str(existing[8] or "")
+                    != public_slug,
+
+                    str(existing[9] or "")
+                    != seo_description,
+
+                    str(
+                        existing[10]
+                        or "complete"
+                    ).lower()
+                    != translation_status,
+                ))
+
                 cur.execute(
                     """
                     UPDATE help_pages
+
                     SET display_name = %s,
                         title = %s,
                         language_code = %s,
                         display_order = %s,
                         content = %s,
-                        is_active = %s
+                        is_active = %s,
+                        summary = %s,
+                        search_keywords = %s,
+                        public_slug = %s,
+                        seo_description = %s,
+                        translation_status = %s,
+                        updated_at = NOW()
+
                     WHERE help_page_id = %s
                       AND spa_id IS NULL
                     """,
@@ -58336,14 +60664,23 @@ def edit_help_page(page_key=None):
                         display_order,
                         content,
                         is_active,
+                        summary or None,
+                        search_keywords or None,
+                        public_slug,
+                        seo_description or None,
+                        translation_status,
                         help_page_id,
                     ),
                 )
 
-                action_type = "help_page_updated"
+                action_type = (
+                    "help_page_updated"
+                )
+
                 action_word = "updated"
 
             else:
+
                 cur.execute(
                     """
                     INSERT INTO help_pages
@@ -58354,9 +60691,31 @@ def edit_help_page(page_key=None):
                             language_code,
                             display_order,
                             content,
-                            is_active
+                            is_active,
+                            summary,
+                            search_keywords,
+                            public_slug,
+                            seo_description,
+                            translation_status,
+                            updated_at
                         )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+
+                    VALUES (
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        NOW()
+                    )
+
                     RETURNING help_page_id
                     """,
                     (
@@ -58367,14 +60726,47 @@ def edit_help_page(page_key=None):
                         display_order,
                         content,
                         is_active,
+                        summary or None,
+                        search_keywords or None,
+                        public_slug,
+                        seo_description or None,
+                        translation_status,
                     ),
                 )
 
                 help_page_id = cur.fetchone()[0]
+
                 old_value = None
                 content_changed = True
+                metadata_changed = True
                 action_type = "help_page_created"
                 action_word = "created"
+
+            # Web publication is stricter than ordinary Draft
+            # editing. Save the article work, but hold the shared
+            # topic as Draft until EN and ES are both public-ready.
+            if (
+                publication_status == "published"
+                and show_on_web
+            ):
+                publication_blockers = (
+                    _public_support_publication_readiness(
+                        cur,
+                        page_key,
+                        help_category_id,
+                    )
+                )
+
+                if publication_blockers:
+                    publication_status = "draft"
+
+                    publication_warning = (
+                        "Saved as Draft. Web publishing "
+                        "is not ready: "
+                        + " ".join(
+                            publication_blockers
+                        )
+                    )
 
             new_value = (
                 f"page_key={page_key}; "
@@ -58382,7 +60774,9 @@ def edit_help_page(page_key=None):
                 f"display_name={display_name}; "
                 f"title={title}; "
                 f"order={display_order}; "
-                f"active={is_active}"
+                f"active={is_active}; "
+                f"slug={public_slug}; "
+                f"translation_status={translation_status}"
             )
 
             log_audit(
@@ -58399,7 +60793,195 @@ def edit_help_page(page_key=None):
                     f"{action_word} PSP-global Help Page "
                     f"{page_key} ({language_code}). "
                     "Article content changed: "
-                    f"{'yes' if content_changed else 'no'}."
+                    f"{'yes' if content_changed else 'no'}. "
+                    "Article metadata changed: "
+                    f"{'yes' if metadata_changed else 'no'}."
+                ),
+            )
+
+            if existing_topic:
+
+                help_topic_id = existing_topic[0]
+
+                old_topic_value = (
+                    f"page_key={page_key}; "
+                    f"category_id={existing_topic[1]}; "
+                    f"type={existing_topic[2]}; "
+                    f"in_app={bool(existing_topic[3])}; "
+                    f"web={bool(existing_topic[4])}; "
+                    f"status={existing_topic[5]}; "
+                    f"order={existing_topic[6]}; "
+                    f"video={existing_topic[7] or ''}"
+                )
+
+                cur.execute(
+                    """
+                    UPDATE help_topics
+
+                    SET help_category_id = %s,
+                        content_type = %s,
+                        show_in_app = %s,
+                        show_on_web = %s,
+                        publication_status = %s,
+                        display_order = %s,
+                        tutorial_video_url = %s,
+                        updated_by = %s,
+                        updated_at = NOW(),
+                        published_at = CASE
+                            WHEN %s = 'published'
+                                 AND published_at IS NULL
+                            THEN NOW()
+                            ELSE published_at
+                        END,
+                        archived_at = CASE
+                            WHEN %s = 'archived'
+                            THEN COALESCE(
+                                archived_at,
+                                NOW()
+                            )
+                            ELSE NULL
+                        END
+
+                    WHERE help_topic_id = %s
+                    """,
+                    (
+                        help_category_id,
+                        content_type,
+                        show_in_app,
+                        show_on_web,
+                        publication_status,
+                        display_order,
+                        tutorial_video_url,
+                        session.get("user_id"),
+                        publication_status,
+                        publication_status,
+                        help_topic_id,
+                    ),
+                )
+
+                topic_action_type = (
+                    "help_topic_updated"
+                )
+
+                topic_action_word = "updated"
+
+            else:
+
+                old_topic_value = None
+
+                cur.execute(
+                    """
+                    INSERT INTO help_topics
+                        (
+                            page_key,
+                            help_category_id,
+                            content_type,
+                            show_in_app,
+                            show_on_web,
+                            publication_status,
+                            display_order,
+                            tutorial_video_url,
+                            published_at,
+                            archived_at,
+                            created_by,
+                            updated_by,
+                            created_at,
+                            updated_at
+                        )
+
+                    VALUES (
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        CASE
+                            WHEN %s = 'published'
+                            THEN NOW()
+                            ELSE NULL
+                        END,
+                        CASE
+                            WHEN %s = 'archived'
+                            THEN NOW()
+                            ELSE NULL
+                        END,
+                        %s,
+                        %s,
+                        NOW(),
+                        NOW()
+                    )
+
+                    RETURNING help_topic_id
+                    """,
+                    (
+                        page_key,
+                        help_category_id,
+                        content_type,
+                        show_in_app,
+                        show_on_web,
+                        publication_status,
+                        display_order,
+                        tutorial_video_url,
+                        publication_status,
+                        publication_status,
+                        session.get("user_id"),
+                        session.get("user_id"),
+                    ),
+                )
+
+                help_topic_id = cur.fetchone()[0]
+
+                topic_action_type = (
+                    "help_topic_created"
+                )
+
+                topic_action_word = "created"
+
+            # Topic order is canonical. Keep existing language rows
+            # synchronized so the current in-app Help directory
+            # continues using the same ordering.
+            cur.execute(
+                """
+                UPDATE help_pages
+
+                SET display_order = %s
+
+                WHERE page_key = %s
+                  AND spa_id IS NULL
+                """,
+                (
+                    display_order,
+                    page_key,
+                ),
+            )
+
+            new_topic_value = (
+                f"page_key={page_key}; "
+                f"category_id={help_category_id}; "
+                f"type={content_type}; "
+                f"in_app={show_in_app}; "
+                f"web={show_on_web}; "
+                f"status={publication_status}; "
+                f"order={display_order}; "
+                f"video={tutorial_video_url or ''}"
+            )
+
+            log_audit(
+                cur,
+                spa_id=None,
+                user_id=session.get("user_id"),
+                action_type=topic_action_type,
+                table_name="help_topics",
+                record_id=help_topic_id,
+                old_value=old_topic_value,
+                new_value=new_topic_value,
+                notes=(
+                    "Master Admin "
+                    f"{topic_action_word} shared Help topic "
+                    f"settings for {page_key}."
                 ),
             )
 
@@ -58413,10 +60995,16 @@ def edit_help_page(page_key=None):
             cur.close()
             conn.close()
 
-        flash(
-            "Help page saved.",
-            "success",
-        )
+        if publication_warning:
+            flash(
+                publication_warning,
+                "warning",
+            )
+        else:
+            flash(
+                "Help page saved.",
+                "success",
+            )
 
         return redirect(
             url_for(
@@ -58434,12 +61022,11 @@ def edit_help_page(page_key=None):
     if language_code not in {
         "EN",
         "ES",
-        "FR",
-        "DE",
     }:
         language_code = "EN"
 
     try:
+
         cur.execute(
             """
             SELECT
@@ -58449,12 +61036,21 @@ def edit_help_page(page_key=None):
                 language_code,
                 display_order,
                 content,
-                is_active
+                is_active,
+                summary,
+                search_keywords,
+                public_slug,
+                seo_description,
+                translation_status
+
             FROM help_pages
+
             WHERE page_key = %s
               AND language_code = %s
               AND spa_id IS NULL
+
             ORDER BY help_page_id DESC
+
             LIMIT 1
             """,
             (
@@ -58465,16 +61061,135 @@ def edit_help_page(page_key=None):
 
         page = cur.fetchone()
 
+        cur.execute(
+            """
+            SELECT
+                help_topic_id,
+                help_category_id,
+                content_type,
+                show_in_app,
+                show_on_web,
+                publication_status,
+                display_order,
+                tutorial_video_url
+
+            FROM help_topics
+
+            WHERE page_key = %s
+            """,
+            (page_key,),
+        )
+
+        topic_row = cur.fetchone()
+
+        cur.execute(
+            """
+            SELECT
+                hc.help_category_id,
+                COALESCE(
+                    NULLIF(hct.display_name, ''),
+                    hc.category_key
+                ) AS display_name
+
+            FROM help_categories hc
+
+            LEFT JOIN help_category_translations hct
+              ON hct.help_category_id =
+                    hc.help_category_id
+             AND UPPER(hct.language_code) = 'EN'
+
+            WHERE hc.is_active = TRUE
+
+            ORDER BY
+                hc.display_order,
+                display_name
+            """
+        )
+
+        help_categories = cur.fetchall()
+
     finally:
         cur.close()
         conn.close()
+
+    # A real topic may legitimately be missing one EN/ES translation.
+    # In that case the editor creates only the missing translation.
+    # A page key that exists nowhere is not a valid edit target.
+    if (
+        page_key
+        and page is None
+        and topic_row is None
+    ):
+        abort(404)
+
+    if page:
+        article_meta = {
+            "summary": page[7] or "",
+            "search_keywords": page[8] or "",
+            "public_slug": page[9] or "",
+            "seo_description": page[10] or "",
+            "translation_status": (
+                page[11]
+                or "complete"
+            ),
+        }
+    else:
+        article_meta = {
+            "summary": "",
+            "search_keywords": "",
+            "public_slug": "",
+            "seo_description": "",
+            "translation_status": "draft",
+        }
+
+    if topic_row:
+        topic = {
+            "help_topic_id": topic_row[0],
+            "help_category_id": topic_row[1],
+            "content_type": topic_row[2],
+            "show_in_app": bool(topic_row[3]),
+            "show_on_web": bool(topic_row[4]),
+            "publication_status": topic_row[5],
+            "display_order": topic_row[6],
+            "tutorial_video_url": (
+                topic_row[7] or ""
+            ),
+        }
+    else:
+        topic = {
+            "help_topic_id": None,
+            "help_category_id": None,
+            "content_type": "guide",
+            "show_in_app": True,
+            "show_on_web": (
+                page_key != "sms_email_terms"
+            ),
+            "publication_status": "draft",
+            "display_order": (
+                page[4]
+                if page
+                else None
+            ),
+            "tutorial_video_url": "",
+        }
 
     return render_template(
         "admin_edit_help_page.html",
         page=page,
         page_key=page_key,
         language_code=language_code,
-        mode="edit" if page else "new",
+        mode=(
+            "edit"
+            if page
+            else (
+                "translation"
+                if topic_row
+                else "new"
+            )
+        ),
+        topic=topic,
+        article_meta=article_meta,
+        help_categories=help_categories,
         security_csrf_token=security_csrf_token,
     )
 

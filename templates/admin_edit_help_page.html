@@ -5,6 +5,8 @@
 <h1>
     {% if mode == "edit" %}
         Edit Help Page
+    {% elif mode == "translation" %}
+        Add Help Page Translation
     {% else %}
         Create New Help Page
     {% endif %}
@@ -20,11 +22,21 @@
 
     <div class="form-group">
         <label for="page_key">Page Key</label>
-        <input type="text"
-               id="page_key"
-               name="page_key"
-               value="{{ page[0] if page else page_key }}"
-               required>
+        <input
+            type="text"
+            id="page_key"
+            name="page_key"
+            value="{{ page[0] if page else page_key }}"
+            {% if page_key %}readonly{% endif %}
+            required
+        >
+
+        {% if page_key %}
+            <small>
+                The Page Key is the stable identity for this Help topic
+                and cannot be changed after creation.
+            </small>
+        {% endif %}
     </div>
 
     <div class="form-group">
@@ -49,22 +61,333 @@
 
     <div class="form-group">
         <label for="language_code">Language</label>
-        <select id="language_code" name="language_code" required>
-            <option value="EN" {% if (page and page[3] == 'EN') or (not page and language_code == 'EN') %}selected{% endif %}>🇺🇸 EN - English</option>
-            <option value="ES" {% if (page and page[3] == 'ES') or (not page and language_code == 'ES') %}selected{% endif %}>🇪🇸 ES - Spanish</option>
-            <option value="FR" {% if (page and page[3] == 'FR') or (not page and language_code == 'FR') %}selected{% endif %}>🇫🇷 FR - French</option>
-            <option value="DE" {% if (page and page[3] == 'DE') or (not page and language_code == 'DE') %}selected{% endif %}>🇩🇪 DE - German</option>
+        {% if page_key %}
+            <input
+                type="hidden"
+                name="language_code"
+                value="{{ language_code }}"
+            >
+
+            <input
+                type="text"
+                value="{% if language_code == 'ES' %}🇪🇸 ES - Spanish{% else %}🇺🇸 EN - English{% endif %}"
+                readonly
+            >
+
+            <small>
+                Use the Help Pages Manager to open a different
+                language version of this topic.
+            </small>
+        {% else %}
+            <select
+                id="language_code"
+                name="language_code"
+                required
+            >
+                <option
+                    value="EN"
+                    {% if language_code == 'EN' %}selected{% endif %}
+                >
+                    🇺🇸 EN - English
+                </option>
+
+                <option
+                    value="ES"
+                    {% if language_code == 'ES' %}selected{% endif %}
+                >
+                    🇪🇸 ES - Spanish
+                </option>
+
+            </select>
+        {% endif %}
+    </div>
+
+    <hr>
+
+    <h2>Support Topic Settings</h2>
+
+    <p>
+        These settings are shared by every language version of this
+        Help topic, including English and Spanish.
+    </p>
+
+    <div class="form-group">
+        <label for="help_category_id">Category</label>
+
+        <select
+            id="help_category_id"
+            name="help_category_id"
+        >
+            <option value="">Uncategorized</option>
+
+            {% for category in help_categories %}
+                <option
+                    value="{{ category[0] }}"
+                    {% if topic.help_category_id == category[0] %}
+                        selected
+                    {% endif %}
+                >
+                    {{ category[1] }}
+                </option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label for="content_type">Article Type</label>
+
+        <select
+            id="content_type"
+            name="content_type"
+            required
+        >
+            <option
+                value="guide"
+                {% if topic.content_type == "guide" %}selected{% endif %}
+            >
+                Guide
+            </option>
+
+            <option
+                value="how_to"
+                {% if topic.content_type == "how_to" %}selected{% endif %}
+            >
+                How-To
+            </option>
+
+            <option
+                value="faq"
+                {% if topic.content_type == "faq" %}selected{% endif %}
+            >
+                FAQ
+            </option>
+
+            <option
+                value="troubleshooting"
+                {% if topic.content_type == "troubleshooting" %}selected{% endif %}
+            >
+                Troubleshooting
+            </option>
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label for="publication_status">
+            Publication Status
+        </label>
+
+        <select
+            id="publication_status"
+            name="publication_status"
+            required
+        >
+            <option
+                value="draft"
+                {% if topic.publication_status == "draft" %}selected{% endif %}
+            >
+                Draft
+            </option>
+
+            <option
+                value="published"
+                {% if topic.publication_status == "published" %}selected{% endif %}
+            >
+                Published
+            </option>
+
+            <option
+                value="archived"
+                {% if topic.publication_status == "archived" %}selected{% endif %}
+            >
+                Archived
+            </option>
         </select>
     </div>
 
     <div class="form-group">
         <label for="display_order">Display Order</label>
-        <input type="number"
-               id="display_order"
-               name="display_order"
-               value="{{ page[4] if page else '' }}">
+
+        <input
+            type="number"
+            id="display_order"
+            name="display_order"
+            value="{{
+                topic.display_order
+                if topic.display_order is not none
+                else (page[4] if page else '')
+            }}"
+        >
     </div>
-    <p>Display Order: Use increments of 10 (10, 20, 30..) to allow for future reordering</p>
+
+    <p>
+        Use increments of 10 (10, 20, 30...) to leave room for
+        future reordering. Display Order is shared by all translations.
+    </p>
+
+    <div class="form-group">
+        <label for="tutorial_video_url">
+            YouTube Tutorial URL
+        </label>
+
+        <input
+            type="url"
+            id="tutorial_video_url"
+            name="tutorial_video_url"
+            value="{{ topic.tutorial_video_url }}"
+            placeholder="https://www.youtube.com/watch?v=..."
+        >
+    </div>
+
+    <div class="form-group">
+        <label>
+            <input
+                type="checkbox"
+                name="show_in_app"
+                {% if topic.show_in_app %}checked{% endif %}
+            >
+            Show in Peach Suite Pro
+        </label>
+    </div>
+
+    <div class="form-group">
+        <label>
+            <input
+                type="checkbox"
+                name="show_on_web"
+                {% if topic.show_on_web %}checked{% endif %}
+                {% if page_key == "sms_email_terms" %}disabled{% endif %}
+            >
+            Show on Web Support
+        </label>
+
+        {% if page_key == "sms_email_terms" %}
+            <p>
+                Messaging Agreement content remains in its dedicated
+                compliance workflow and is not published as an
+                ordinary Support article.
+            </p>
+        {% endif %}
+    </div>
+
+    <hr>
+
+    <h2>{{ language_code }} Article Content</h2>
+
+    <p>
+        These fields belong only to this language version of the
+        article.
+    </p>
+
+    <div class="form-group">
+        <label for="translation_status">
+            Translation Status
+        </label>
+
+        <select
+            id="translation_status"
+            name="translation_status"
+            required
+        >
+            <option
+                value="draft"
+                {% if article_meta.translation_status == "draft" %}selected{% endif %}
+            >
+                Draft
+            </option>
+
+            <option
+                value="review"
+                {% if article_meta.translation_status == "review" %}selected{% endif %}
+            >
+                Needs Review
+            </option>
+
+            <option
+                value="complete"
+                {% if article_meta.translation_status == "complete" %}selected{% endif %}
+            >
+                Complete
+            </option>
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label for="public_slug">
+            Public URL Slug
+        </label>
+
+        <input
+            type="text"
+            id="public_slug"
+            name="public_slug"
+            maxlength="180"
+            value="{{ article_meta.public_slug }}"
+            placeholder="using-the-calendar"
+        >
+
+        <small>
+            Leave blank the first time and Peach Suite Pro will
+            generate a clean URL from the article title. Once saved,
+            keep this value stable unless you intentionally want to
+            change the public article URL.
+        </small>
+    </div>
+
+    <div class="form-group">
+        <label for="summary">
+            Article Summary
+        </label>
+
+        <textarea
+            id="summary"
+            name="summary"
+            rows="3"
+            style="width: 100%;"
+            placeholder="A short description shown in Support search and article listings."
+        >{{ article_meta.summary }}</textarea>
+    </div>
+
+    <div class="form-group">
+        <label for="search_keywords">
+            Search Keywords
+        </label>
+
+        <textarea
+            id="search_keywords"
+            name="search_keywords"
+            rows="3"
+            style="width: 100%;"
+            placeholder="Example: reschedule, move appointment, change appointment time"
+        >{{ article_meta.search_keywords }}</textarea>
+
+        <small>
+            Optional. Support search will automatically search the
+            article title, summary, content, category, and type.
+            Use this field for synonyms or alternate phrases a user
+            might search for.
+        </small>
+    </div>
+
+    <div class="form-group">
+        <label for="seo_description">
+            SEO Description
+        </label>
+
+        <textarea
+            id="seo_description"
+            name="seo_description"
+            rows="3"
+            maxlength="320"
+            style="width: 100%;"
+            placeholder="Short search-engine description for this article."
+        >{{ article_meta.seo_description }}</textarea>
+
+        <small>
+            Maximum 320 characters. This may be used as the public
+            page description for search engines and link previews.
+        </small>
+    </div>
+
     <div class="form-group">
         <label for="content">Help Page Content</label>
         <textarea id="content"

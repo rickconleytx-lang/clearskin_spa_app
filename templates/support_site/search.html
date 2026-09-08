@@ -1,0 +1,269 @@
+{% extends "support_site/base.html" %}
+
+{% block title %}
+    {% if support_language == 'ES' %}
+        Buscar | Peach Suite Pro Support
+    {% else %}
+        Search | Peach Suite Pro Support
+    {% endif %}
+{% endblock %}
+
+{% block meta_description %}
+    {% if support_language == 'ES' %}
+        Busque guías, respuestas y ayuda de Peach Suite Pro.
+    {% else %}
+        Search Peach Suite Pro guides, answers, and support articles.
+    {% endif %}
+{% endblock %}
+
+{% block content %}
+
+<section class="support-page-shell">
+
+    <nav class="support-breadcrumbs" aria-label="Breadcrumb">
+
+        <a href="/{% if support_language == 'ES' %}?lang=ES{% endif %}">
+            {% if support_language == 'ES' %}
+                Centro de Soporte
+            {% else %}
+                Support Center
+            {% endif %}
+        </a>
+
+        <span aria-hidden="true">›</span>
+
+        <span aria-current="page">
+            {% if support_language == 'ES' %}
+                Buscar
+            {% else %}
+                Search
+            {% endif %}
+        </span>
+
+    </nav>
+
+
+    <header class="support-category-header">
+
+        <p class="support-kicker">
+            {% if support_language == 'ES' %}
+                Buscar Ayuda
+            {% else %}
+                Search Support
+            {% endif %}
+        </p>
+
+        <h1>
+            {% if support_language == 'ES' %}
+                Buscar en Peach Suite Pro Support
+            {% else %}
+                Search Peach Suite Pro Support
+            {% endif %}
+        </h1>
+
+        <form
+            class="support-search"
+            method="get"
+            action="/search"
+            role="search"
+        >
+            <input
+                type="hidden"
+                name="lang"
+                value="{{ support_language }}"
+            >
+
+            <label
+                class="sr-only"
+                for="support-search-results-query"
+            >
+                {% if support_language == 'ES' %}
+                    Buscar en el Centro de Soporte
+                {% else %}
+                    Search the Support Center
+                {% endif %}
+            </label>
+
+            <div class="support-search-box">
+
+                <span
+                    class="support-search-icon"
+                    aria-hidden="true"
+                >
+                    ⌕
+                </span>
+
+                <input
+                    id="support-search-results-query"
+                    name="q"
+                    type="search"
+                    value="{{ search_query }}"
+                    autocomplete="off"
+                    placeholder="{% if support_language == 'ES' %}Buscar ayuda de Peach Suite Pro...{% else %}Search Peach Suite Pro help...{% endif %}"
+                >
+
+                <button type="submit">
+                    {% if support_language == 'ES' %}
+                        Buscar
+                    {% else %}
+                        Search
+                    {% endif %}
+                </button>
+
+            </div>
+        </form>
+
+    </header>
+
+
+    {% if search_query %}
+
+        {% if search_results %}
+
+            <div class="support-section-heading">
+
+                <div>
+                    <p class="support-kicker">
+                        {% if support_language == 'ES' %}
+                            Resultados
+                        {% else %}
+                            Results
+                        {% endif %}
+                    </p>
+
+                    <h2>
+                        {{ search_results|length }}
+                        {% if support_language == 'ES' %}
+                            {% if search_results|length == 1 %}
+                                resultado para
+                            {% else %}
+                                resultados para
+                            {% endif %}
+                        {% else %}
+                            {% if search_results|length == 1 %}
+                                result for
+                            {% else %}
+                                results for
+                            {% endif %}
+                        {% endif %}
+                        “{{ search_query }}”
+                    </h2>
+                </div>
+
+            </div>
+
+            <div class="support-article-list">
+
+                {% for article in search_results %}
+
+                    <a
+                        class="support-article-card"
+                        href="/article/{{ article.public_slug }}?lang={{ support_language }}"
+                    >
+
+                        <div class="support-article-card-copy">
+
+                            <div class="support-article-type">
+
+                                {% if article.content_type == "how_to" %}
+                                    {% if support_language == 'ES' %}
+                                        Cómo Hacerlo
+                                    {% else %}
+                                        How-To
+                                    {% endif %}
+
+                                {% elif article.content_type == "faq" %}
+                                    FAQ
+
+                                {% elif article.content_type == "troubleshooting" %}
+                                    {% if support_language == 'ES' %}
+                                        Solución de Problemas
+                                    {% else %}
+                                        Troubleshooting
+                                    {% endif %}
+
+                                {% else %}
+                                    {% if support_language == 'ES' %}
+                                        Guía
+                                    {% else %}
+                                        Guide
+                                    {% endif %}
+                                {% endif %}
+
+                            </div>
+
+                            <h2>{{ article.title }}</h2>
+
+                            <p>
+                                {{ article.category_display_name }}
+                                {% if article.summary %}
+                                    · {{ article.summary }}
+                                {% endif %}
+                            </p>
+
+                        </div>
+
+                        <span
+                            class="support-article-arrow"
+                            aria-hidden="true"
+                        >
+                            →
+                        </span>
+
+                    </a>
+
+                {% endfor %}
+
+            </div>
+
+        {% else %}
+
+            <div class="support-empty-state">
+
+                <h3>
+                    {% if support_language == 'ES' %}
+                        No encontramos resultados para “{{ search_query }}”.
+                    {% else %}
+                        We couldn’t find results for “{{ search_query }}”.
+                    {% endif %}
+                </h3>
+
+                <p>
+                    {% if support_language == 'ES' %}
+                        Intente usar menos palabras o términos diferentes.
+                    {% else %}
+                        Try fewer words or different search terms.
+                    {% endif %}
+                </p>
+
+            </div>
+
+        {% endif %}
+
+    {% else %}
+
+        <div class="support-empty-state">
+
+            <h3>
+                {% if support_language == 'ES' %}
+                    ¿Qué podemos ayudarle a encontrar?
+                {% else %}
+                    What can we help you find?
+                {% endif %}
+            </h3>
+
+            <p>
+                {% if support_language == 'ES' %}
+                    Escriba una palabra o frase para buscar en los artículos publicados.
+                {% else %}
+                    Enter a word or phrase to search published Support articles.
+                {% endif %}
+            </p>
+
+        </div>
+
+    {% endif %}
+
+</section>
+
+{% endblock %}

@@ -1,0 +1,220 @@
+{% extends "support_site/base.html" %}
+
+{% block title %}
+    {{ article.title }} | Peach Suite Pro Support
+{% endblock %}
+
+{% block meta_description %}
+    {{ article.seo_description }}
+{% endblock %}
+
+{% block content %}
+
+<section class="support-page-shell support-article-shell">
+
+    {% if admin_web_preview %}
+
+        <div
+            class="support-web-preview-banner"
+            role="status"
+        >
+            <strong>Master Admin Web Preview</strong>
+
+            <span>
+                PREVIEW — NOT PUBLIC
+            </span>
+
+            <small>
+                Status:
+                {{ article.publication_status|title }}
+                · Web:
+                {% if article.show_on_web %}
+                    Enabled
+                {% else %}
+                    Disabled
+                {% endif %}
+                · Translation:
+                {{ article.translation_status|title }}
+                ·
+                {% if article.is_active %}
+                    Active
+                {% else %}
+                    Inactive
+                {% endif %}
+            </small>
+        </div>
+
+    {% endif %}
+
+    <nav class="support-breadcrumbs" aria-label="Breadcrumb">
+
+        <a href="{{ support_home_url|default('/' ~ ('?lang=ES' if support_language == 'ES' else '')) }}">
+            {% if admin_web_preview %}
+                Help Pages Manager
+            {% elif support_language == 'ES' %}
+                Centro de Soporte
+            {% else %}
+                Support Center
+            {% endif %}
+        </a>
+
+        <span aria-hidden="true">›</span>
+
+        {% if admin_web_preview %}
+
+            <span>
+                {{ article.category_display_name }}
+            </span>
+
+        {% else %}
+
+            <a
+                href="/category/{{ article.category_public_slug }}?lang={{ support_language }}"
+            >
+                {{ article.category_display_name }}
+            </a>
+
+        {% endif %}
+
+        <span aria-hidden="true">›</span>
+
+        <span aria-current="page">
+            {{ article.title }}
+        </span>
+
+    </nav>
+
+
+    <article class="support-article">
+
+        <header class="support-article-header">
+
+            <div class="support-article-type">
+
+                {% if article.content_type == "how_to" %}
+                    {% if support_language == 'ES' %}
+                        Cómo Hacerlo
+                    {% else %}
+                        How-To
+                    {% endif %}
+
+                {% elif article.content_type == "faq" %}
+                    FAQ
+
+                {% elif article.content_type == "troubleshooting" %}
+                    {% if support_language == 'ES' %}
+                        Solución de Problemas
+                    {% else %}
+                        Troubleshooting
+                    {% endif %}
+
+                {% else %}
+                    {% if support_language == 'ES' %}
+                        Guía
+                    {% else %}
+                        Guide
+                    {% endif %}
+                {% endif %}
+
+            </div>
+
+            <h1>{{ article.title }}</h1>
+
+            {% if article.summary %}
+                <p class="support-article-summary">
+                    {{ article.summary }}
+                </p>
+            {% endif %}
+
+            {% if article.updated_at %}
+                <p class="support-article-updated">
+                    {% if support_language == 'ES' %}
+                        Actualizado:
+                    {% else %}
+                        Updated:
+                    {% endif %}
+
+                    {{ article.updated_at.strftime('%B %d, %Y') }}
+                </p>
+            {% endif %}
+
+        </header>
+
+
+        {% if article.video_embed_url %}
+
+            <section
+                class="support-video-section"
+                aria-label="{% if support_language == 'ES' %}Video tutorial{% else %}Video tutorial{% endif %}"
+            >
+
+                <div class="support-video-frame">
+
+                    <iframe
+                        src="{{ article.video_embed_url }}"
+                        title="{{ article.title }} tutorial"
+                        loading="lazy"
+                        referrerpolicy="strict-origin-when-cross-origin"
+                        allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture"
+                        allowfullscreen
+                    ></iframe>
+
+                </div>
+
+            </section>
+
+        {% endif %}
+
+
+        <div class="support-article-body">
+            {{ article.content | safe }}
+        </div>
+
+
+        <footer class="support-article-footer">
+
+            {% if admin_web_preview %}
+
+                <a
+                    class="support-back-link"
+                    href="{{ url_for('help_pages_manager') }}"
+                >
+                    ← Return to Help Pages Manager
+                </a>
+
+                <a
+                    class="support-preview-edit-link"
+                    href="{{
+                        url_for(
+                            'edit_help_page',
+                            page_key=admin_preview_page_key,
+                            lang=support_language
+                        )
+                    }}"
+                >
+                    Edit {{ support_language }}
+                </a>
+
+            {% else %}
+
+                <a
+                    class="support-back-link"
+                    href="/category/{{ article.category_public_slug }}?lang={{ support_language }}"
+                >
+                    ←
+                    {% if support_language == 'ES' %}
+                        Volver a {{ article.category_display_name }}
+                    {% else %}
+                        Back to {{ article.category_display_name }}
+                    {% endif %}
+                </a>
+
+            {% endif %}
+
+        </footer>
+
+    </article>
+
+</section>
+
+{% endblock %}

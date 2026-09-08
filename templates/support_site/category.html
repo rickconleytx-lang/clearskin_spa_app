@@ -1,0 +1,118 @@
+{% extends "support_site/base.html" %}
+
+{% block title %}
+    {{ category.display_name }} | Peach Suite Pro Support
+{% endblock %}
+
+{% block meta_description %}
+    {{ category.description or category.display_name }}
+{% endblock %}
+
+{% block content %}
+
+<section class="support-page-shell">
+
+    <nav class="support-breadcrumbs" aria-label="Breadcrumb">
+
+        <a href="/{% if support_language == 'ES' %}?lang=ES{% endif %}">
+            {% if support_language == 'ES' %}
+                Centro de Soporte
+            {% else %}
+                Support Center
+            {% endif %}
+        </a>
+
+        <span aria-hidden="true">›</span>
+
+        <span aria-current="page">
+            {{ category.display_name }}
+        </span>
+
+    </nav>
+
+
+    <header class="support-category-header">
+
+        <p class="support-kicker">
+            {% if support_language == 'ES' %}
+                Categoría de Ayuda
+            {% else %}
+                Help Category
+            {% endif %}
+        </p>
+
+        <h1>{{ category.display_name }}</h1>
+
+        {% if category.description %}
+            <p>
+                {{ category.description }}
+            </p>
+        {% endif %}
+
+    </header>
+
+
+    <div class="support-article-list">
+
+        {% for article in category.articles %}
+
+            <a
+                class="support-article-card"
+                href="/article/{{ article.public_slug }}?lang={{ support_language }}"
+            >
+
+                <div class="support-article-card-copy">
+
+                    <div class="support-article-type">
+
+                        {% if article.content_type == "how_to" %}
+                            {% if support_language == 'ES' %}
+                                Cómo Hacerlo
+                            {% else %}
+                                How-To
+                            {% endif %}
+
+                        {% elif article.content_type == "faq" %}
+                            FAQ
+
+                        {% elif article.content_type == "troubleshooting" %}
+                            {% if support_language == 'ES' %}
+                                Solución de Problemas
+                            {% else %}
+                                Troubleshooting
+                            {% endif %}
+
+                        {% else %}
+                            {% if support_language == 'ES' %}
+                                Guía
+                            {% else %}
+                                Guide
+                            {% endif %}
+                        {% endif %}
+
+                    </div>
+
+                    <h2>{{ article.title }}</h2>
+
+                    {% if article.summary %}
+                        <p>{{ article.summary }}</p>
+                    {% endif %}
+
+                </div>
+
+                <span
+                    class="support-article-arrow"
+                    aria-hidden="true"
+                >
+                    →
+                </span>
+
+            </a>
+
+        {% endfor %}
+
+    </div>
+
+</section>
+
+{% endblock %}

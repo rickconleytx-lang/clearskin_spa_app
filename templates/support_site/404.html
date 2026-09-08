@@ -1,0 +1,46 @@
+{% extends "support_site/base.html" %}
+
+{% block title %}
+    Page Not Found | Peach Suite Pro Support
+{% endblock %}
+
+{% block content %}
+
+<section class="support-not-found">
+    <div class="support-not-found-card">
+
+        <p class="support-error-code">404</p>
+
+        <h1>
+            {% if support_language == 'ES' %}
+                No encontramos esa página.
+            {% else %}
+                We couldn’t find that page.
+            {% endif %}
+        </h1>
+
+        <p>
+            {% if support_language == 'ES' %}
+                La página de soporte que solicitó no existe
+                o ya no está disponible.
+            {% else %}
+                The Support page you requested doesn’t exist
+                or is no longer available.
+            {% endif %}
+        </p>
+
+        <a
+            class="support-primary-button"
+            href="/{% if support_language == 'ES' %}?lang=ES{% endif %}"
+        >
+            {% if support_language == 'ES' %}
+                Volver al Centro de Soporte
+            {% else %}
+                Return to Support Center
+            {% endif %}
+        </a>
+
+    </div>
+</section>
+
+{% endblock %}

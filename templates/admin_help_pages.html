@@ -11,7 +11,8 @@
             <h1>🍑 Help Pages Manager</h1>
 
             <p class="page-subtitle">
-                Manage Peach Suite Pro Help Center articles and translations.
+                Manage Peach Suite Pro Help and public Support Center
+                articles, translations, and publication status.
             </p>
         </div>
     </div>
@@ -90,8 +91,8 @@
             <h2>Help Page Catalog</h2>
 
             <p>
-                One row represents one Help Page key.
-                English and Spanish are managed separately.
+                One row represents one stable Help topic.
+                English and Spanish remain paired under the same key.
             </p>
         </div>
 
@@ -127,6 +128,14 @@
 
         <span class="tool-pill tool-pill-small">
             Missing Spanish: {{ counts.missing_es }}
+        </span>
+
+        <span class="tool-pill tool-pill-small">
+            Published Web: {{ counts.web_published }}
+        </span>
+
+        <span class="tool-pill tool-pill-small">
+            Draft: {{ counts.draft }}
         </span>
     </div>
 
@@ -173,6 +182,49 @@
                                         {% endif %}
                                     </small>
                                 </div>
+
+                                <div
+                                    style="
+                                        margin-top: 7px;
+                                        display: flex;
+                                        flex-wrap: wrap;
+                                        gap: 5px;
+                                    "
+                                >
+                                    <small class="tool-pill tool-pill-small">
+                                        {{ page.category_name }}
+                                    </small>
+
+                                    <small class="tool-pill tool-pill-small">
+                                        {{
+                                            page.content_type
+                                            | replace('_', ' ')
+                                            | title
+                                        }}
+                                    </small>
+
+                                    <small class="tool-pill tool-pill-small">
+                                        {% if page.publication_status == 'published' %}
+                                            Published
+                                        {% elif page.publication_status == 'archived' %}
+                                            Archived
+                                        {% else %}
+                                            Draft
+                                        {% endif %}
+                                    </small>
+
+                                    {% if page.show_in_app %}
+                                        <small class="tool-pill tool-pill-small">
+                                            In App
+                                        </small>
+                                    {% endif %}
+
+                                    {% if page.show_on_web %}
+                                        <small class="tool-pill tool-pill-small">
+                                            Web
+                                        </small>
+                                    {% endif %}
+                                </div>
                             </td>
 
                             <td>
@@ -203,7 +255,22 @@
                                         target="_blank"
                                         rel="noopener"
                                     >
-                                        View EN
+                                        In-App Preview
+                                    </a>
+
+                                    <a
+                                        href="{{
+                                            url_for(
+                                                'preview_help_page_web',
+                                                page_key=page.page_key,
+                                                lang='EN'
+                                            )
+                                        }}"
+                                        class="btn btn-small"
+                                        target="_blank"
+                                        rel="noopener"
+                                    >
+                                        Web Preview
                                     </a>
 
                                     <a
@@ -268,7 +335,22 @@
                                         target="_blank"
                                         rel="noopener"
                                     >
-                                        View ES
+                                        In-App Preview
+                                    </a>
+
+                                    <a
+                                        href="{{
+                                            url_for(
+                                                'preview_help_page_web',
+                                                page_key=page.page_key,
+                                                lang='ES'
+                                            )
+                                        }}"
+                                        class="btn btn-small"
+                                        target="_blank"
+                                        rel="noopener"
+                                    >
+                                        Web Preview
                                     </a>
 
                                     <a
