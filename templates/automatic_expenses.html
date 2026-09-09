@@ -18,12 +18,26 @@
             Add Recurring Expense
         </a>
 
+        {% if view_mode == "archived" %}
+            <a href="{{ url_for('automatic_expenses') }}"
+               class="tool-pill tool-pill-large">
+                Current Recurring Expenses
+            </a>
+        {% else %}
+            <a href="{{ url_for('automatic_expenses', view='archived') }}"
+               class="tool-pill tool-pill-large">
+                Archived
+            </a>
+        {% endif %}
+
         <a href="{{ url_for('expenses_home') }}"
            class="tool-pill tool-pill-large">
             Expenses Home
         </a>
     </div>
 </div>
+
+{% if view_mode != "archived" %}
 
 <div class="summary-card-grid">
 
@@ -81,6 +95,8 @@
     </p>
 
 </div>
+
+{% endif %}
 
 {% if automatic_expenses %}
 
@@ -260,7 +276,10 @@
 
                     <div class="command-card-status">
 
-                        {% if expense.processing_type == "auto_alert" %}
+                        {% if view_mode == "archived" %}
+                            This recurring expense is archived and will not post.
+
+                        {% elif expense.processing_type == "auto_alert" %}
                             Coach Peach will alert you when this expense posts.
 
                         {% elif expense.processing_type == "auto_silent" %}
@@ -276,55 +295,113 @@
 
                     <div class="command-card-tools">
 
-                        <div class="automatic-expense-actions">
+                        {% if view_mode == "archived" %}
 
-                            {% if expense.is_active and expense.next_post_date %}
-                                <form method="POST"
-                                    action="{{ url_for(
-                                        'post_current_automatic_expense',
-                                        automatic_expense_id=expense.automatic_expense_id
-                                    ) }}"
-                                    style="display:inline;">
+                            <form method="POST"
+                                  action="{{ url_for(
+                                      'restore_automatic_expense',
+                                      automatic_expense_id=expense.automatic_expense_id
+                                  ) }}"
+                                  style="display:inline;">
 
-                                    <button type="submit"
-                                            class="tool-pill tool-pill-small"
-                                            onclick="return confirm(
-                                                'Post the current scheduled payment?'
-                                            );">
-                                        Post Current
-                                    </button>
-                                </form>
-                            {% endif %}
+                                <button type="submit"
+                                        class="tool-pill tool-pill-small"
+                                        onclick="return confirm(
+                                            'Restore this recurring expense? Missed dates while it was archived will not be posted.'
+                                        );">
+                                    Restore
+                                </button>
+                            </form>
 
-                            {% if expense.is_active %}
-                                <form method="POST"
-                                    action="{{ url_for(
-                                        'post_extra_automatic_expense',
-                                        automatic_expense_id=expense.automatic_expense_id
-                                    ) }}"
-                                    style="display:inline;">
+                        {% else %}
 
-                                    <button type="submit"
-                                            class="tool-pill tool-pill-small"
-                                            onclick="return confirm(
-                                                'Post an extra payment without changing the next scheduled date?'
-                                            );">
-                                        Post Extra Payment
-                                    </button>
-                                </form>
-                            {% endif %}
+                            <div class="automatic-expense-actions">
 
-                        </div>
+                                {% if expense.is_active and expense.next_post_date %}
+                                    <form method="POST"
+                                          action="{{ url_for(
+                                              'post_current_automatic_expense',
+                                              automatic_expense_id=expense.automatic_expense_id
+                                          ) }}"
+                                          style="display:inline;">
 
-                        <a href="{{ url_for(
-                            'edit_automatic_expense',
-                            automatic_expense_id=expense.automatic_expense_id
-                        ) }}"
-                           class="tool-pill tool-pill-small">
-                            Edit
-                        </a>
+                                        <button type="submit"
+                                                class="tool-pill tool-pill-small"
+                                                onclick="return confirm(
+                                                    'Post the current scheduled payment?'
+                                                );">
+                                            Post Current
+                                        </button>
+                                    </form>
 
-                        
+                                    <form method="POST"
+                                          action="{{ url_for(
+                                              'skip_current_automatic_expense',
+                                              automatic_expense_id=expense.automatic_expense_id
+                                          ) }}"
+                                          style="display:inline;">
+
+                                        <input
+                                            type="hidden"
+                                            name="scheduled_date"
+                                            value="{{ expense.next_post_date.strftime('%Y-%m-%d') }}"
+                                        >
+
+                                        <button type="submit"
+                                                class="tool-pill tool-pill-small"
+                                                onclick="return confirm(
+                                                    'Skip this scheduled payment? The recurring expense will continue with its next scheduled date.'
+                                                );">
+                                            Skip Payment
+                                        </button>
+                                    </form>
+                                {% endif %}
+
+                                {% if expense.is_active %}
+                                    <form method="POST"
+                                          action="{{ url_for(
+                                              'post_extra_automatic_expense',
+                                              automatic_expense_id=expense.automatic_expense_id
+                                          ) }}"
+                                          style="display:inline;">
+
+                                        <button type="submit"
+                                                class="tool-pill tool-pill-small"
+                                                onclick="return confirm(
+                                                    'Post an extra payment without changing the next scheduled date?'
+                                                );">
+                                            Post Extra Payment
+                                        </button>
+                                    </form>
+                                {% endif %}
+
+                            </div>
+
+                            <a href="{{ url_for(
+                                'edit_automatic_expense',
+                                automatic_expense_id=expense.automatic_expense_id
+                            ) }}"
+                               class="tool-pill tool-pill-small">
+                                Edit
+                            </a>
+
+                            <form method="POST"
+                                  action="{{ url_for(
+                                      'archive_automatic_expense',
+                                      automatic_expense_id=expense.automatic_expense_id
+                                  ) }}"
+                                  style="display:inline;">
+
+                                <button type="submit"
+                                        class="tool-pill tool-pill-small"
+                                        onclick="return confirm(
+                                            'Archive this recurring expense? It will stop processing until restored.'
+                                        );">
+                                    Archive
+                                </button>
+                            </form>
+
+                        {% endif %}
 
                     </div>
 
@@ -340,17 +417,35 @@
 
     <div class="empty-state">
 
-        <h2>No Automatic Expenses Yet</h2>
+        {% if view_mode == "archived" %}
 
-        <p>
-            Add recurring rent, subscriptions, insurance, and other repeating
-            business expenses.
-        </p>
+            <h2>No Archived Recurring Expenses</h2>
 
-        <a href="{{ url_for('add_automatic_expense') }}"
-           class="tool-pill tool-pill-large">
-            Add Automatic Expense
-        </a>
+            <p>
+                Recurring expenses you archive will appear here and can
+                be restored later.
+            </p>
+
+            <a href="{{ url_for('automatic_expenses') }}"
+               class="tool-pill tool-pill-large">
+                Current Recurring Expenses
+            </a>
+
+        {% else %}
+
+            <h2>No Automatic Expenses Yet</h2>
+
+            <p>
+                Add recurring rent, subscriptions, insurance, and other repeating
+                business expenses.
+            </p>
+
+            <a href="{{ url_for('add_automatic_expense') }}"
+               class="tool-pill tool-pill-large">
+                Add Automatic Expense
+            </a>
+
+        {% endif %}
 
     </div>
 

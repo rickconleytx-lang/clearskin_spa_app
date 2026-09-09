@@ -81431,7 +81431,8 @@ def post_automatic_expense_payment(
                 ae.end_date,                   -- 8
                 ae.is_active,                  -- 9
                 ec.expense_cat_name,           -- 10
-                pm.payment_method              -- 11
+                pm.payment_method,              -- 11
+            ae.archived_at                  -- 12
             FROM automatic_expenses ae
 
             LEFT JOIN expense_categories ec
@@ -81483,6 +81484,15 @@ def post_automatic_expense_payment(
             or "Recurring Expense"
         )
         payment_method = recurring_expense[11]
+        archived_at = recurring_expense[12]
+
+        if archived_at is not None:
+            conn.rollback()
+
+            return {
+                "success": False,
+                "message": "This recurring expense is archived."
+            }
 
         if posting_type == "scheduled":
             if not is_active:
@@ -81810,6 +81820,266 @@ def post_automatic_expense_payment(
 
 ###################################################
 #
+#       SKIP CURRENT AUTOMATIC EXPENSE PAYMENT
+#
+##############################################################
+
+
+def skip_current_automatic_expense_payment(
+    automatic_expense_id,
+    spa_id,
+    business_unit_id,
+    expected_scheduled_date,
+):
+    processed_date = get_spa_now(spa_id).date()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                automatic_expense_id,     -- 0
+                expense_name,             -- 1
+                frequency,                -- 2
+                next_post_date,           -- 3
+                end_date,                 -- 4
+                is_active,                -- 5
+                archived_at               -- 6
+            FROM automatic_expenses
+            WHERE automatic_expense_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            FOR UPDATE
+        """, (
+            automatic_expense_id,
+            spa_id,
+            business_unit_id,
+        ))
+
+        recurring_expense = cur.fetchone()
+
+        if recurring_expense is None:
+            conn.rollback()
+
+            return {
+                "success": False,
+                "message": "Recurring expense not found.",
+            }
+
+        expense_name = recurring_expense[1]
+        frequency = recurring_expense[2]
+        scheduled_date = recurring_expense[3]
+        end_date = recurring_expense[4]
+        is_active = recurring_expense[5]
+        archived_at = recurring_expense[6]
+
+        if archived_at is not None:
+            conn.rollback()
+
+            return {
+                "success": False,
+                "message": "This recurring expense is archived.",
+            }
+
+        if not is_active:
+            conn.rollback()
+
+            return {
+                "success": False,
+                "message": "This recurring expense is not active.",
+            }
+
+        if scheduled_date is None:
+            conn.rollback()
+
+            return {
+                "success": False,
+                "message": (
+                    "This recurring expense does not have "
+                    "a scheduled payment to skip."
+                ),
+            }
+
+        if (
+            not expected_scheduled_date
+            or str(scheduled_date) != str(expected_scheduled_date)
+        ):
+            conn.rollback()
+
+            return {
+                "success": False,
+                "schedule_changed": True,
+                "message": (
+                    "The recurring expense schedule changed before "
+                    "the payment could be skipped. Please review the "
+                    "current scheduled date and try again."
+                ),
+            }
+
+        cur.execute("""
+            SELECT
+                occurrence_id,
+                occurrence_status,
+                expense_id
+            FROM automatic_expense_occurrences
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND automatic_expense_id = %s
+              AND scheduled_date = %s
+              AND posting_type = 'scheduled'
+            FOR UPDATE
+        """, (
+            spa_id,
+            business_unit_id,
+            automatic_expense_id,
+            scheduled_date,
+        ))
+
+        existing_occurrence = cur.fetchone()
+
+        if (
+            existing_occurrence
+            and (
+                existing_occurrence[1] in {
+                    "posted",
+                    "posted_manual",
+                }
+                or existing_occurrence[2] is not None
+            )
+        ):
+            conn.rollback()
+
+            return {
+                "success": False,
+                "already_posted": True,
+                "message": (
+                    "The current scheduled payment has already "
+                    "been posted and cannot be skipped."
+                ),
+            }
+
+        if existing_occurrence:
+            cur.execute("""
+                UPDATE automatic_expense_occurrences
+                SET
+                    expense_id = NULL,
+                    occurrence_status = 'skipped',
+                    error_message = NULL,
+                    processed_at = CURRENT_TIMESTAMP,
+                    posting_type = 'scheduled',
+                    coach_alert_required = FALSE,
+                    coach_alert_message = NULL,
+                    coach_alert_acknowledged_at = NULL
+                WHERE occurrence_id = %s
+                  AND spa_id = %s
+                  AND business_unit_id = %s
+            """, (
+                existing_occurrence[0],
+                spa_id,
+                business_unit_id,
+            ))
+
+        else:
+            cur.execute("""
+                INSERT INTO automatic_expense_occurrences (
+                    spa_id,
+                    business_unit_id,
+                    automatic_expense_id,
+                    scheduled_date,
+                    expense_id,
+                    occurrence_status,
+                    error_message,
+                    processed_at,
+                    posting_type,
+                    coach_alert_required,
+                    coach_alert_message,
+                    coach_alert_acknowledged_at
+                )
+                VALUES (
+                    %s, %s, %s, %s,
+                    NULL, 'skipped', NULL,
+                    CURRENT_TIMESTAMP,
+                    'scheduled',
+                    FALSE, NULL, NULL
+                )
+            """, (
+                spa_id,
+                business_unit_id,
+                automatic_expense_id,
+                scheduled_date,
+            ))
+
+        next_post_date = advance_automatic_expense_date(
+            scheduled_date,
+            frequency,
+        )
+
+        next_is_active = True
+
+        if (
+            end_date
+            and next_post_date > end_date
+        ):
+            next_post_date = None
+            next_is_active = False
+
+        cur.execute("""
+            UPDATE automatic_expenses
+            SET
+                next_post_date = %s,
+                last_processed_date = %s,
+                skip_next_occurrence = FALSE,
+                skipped_occurrence_date = %s,
+                last_error_message = NULL,
+                last_error_at = NULL,
+                is_active = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE automatic_expense_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+        """, (
+            next_post_date,
+            processed_date,
+            scheduled_date,
+            next_is_active,
+            automatic_expense_id,
+            spa_id,
+            business_unit_id,
+        ))
+
+        conn.commit()
+
+        return {
+            "success": True,
+            "expense_name": expense_name,
+            "skipped_date": scheduled_date,
+            "next_post_date": next_post_date,
+        }
+
+    except Exception:
+        conn.rollback()
+
+        app.logger.exception(
+            "Failed to skip recurring expense %s.",
+            automatic_expense_id,
+        )
+
+        return {
+            "success": False,
+            "message": (
+                "The recurring expense payment could not be skipped."
+            ),
+        }
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+###################################################
+#
 #       POST CURRENT AUTOMATIC EXPENSE
 #
 ##############################################################
@@ -81884,6 +82154,92 @@ def post_current_automatic_expense(automatic_expense_id):
 
 
 
+
+
+
+###################################################
+#
+#   SKIP CURRENT AUTOMATIC EXPENSE
+#
+##############################################################
+
+
+@app.route(
+    "/automatic-expenses/<int:automatic_expense_id>/skip-current",
+    methods=["POST"]
+)
+@login_required
+@spa_required
+def skip_current_automatic_expense(automatic_expense_id):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to skip recurring expense payments.",
+            "error"
+        )
+        return redirect(url_for("automatic_expenses"))
+
+    expected_scheduled_date = str(
+        request.form.get("scheduled_date", "")
+        or ""
+    ).strip()
+
+    result = skip_current_automatic_expense_payment(
+        automatic_expense_id=automatic_expense_id,
+        spa_id=spa_id,
+        business_unit_id=business_unit_id,
+        expected_scheduled_date=expected_scheduled_date,
+    )
+
+    if not result.get("success"):
+        flash(
+            result.get(
+                "message",
+                "The current payment could not be skipped."
+            ),
+            "error"
+        )
+
+        return redirect(
+            url_for("automatic_expenses")
+        )
+
+    skipped_date = result.get("skipped_date")
+    next_post_date = result.get("next_post_date")
+
+    skipped_date_text = (
+        f"{skipped_date.strftime('%B')} "
+        f"{skipped_date.day}, "
+        f"{skipped_date.year}"
+    )
+
+    if next_post_date:
+        next_date_text = (
+            f"{next_post_date.strftime('%B')} "
+            f"{next_post_date.day}, "
+            f"{next_post_date.year}"
+        )
+
+        flash(
+            f"Payment for {skipped_date_text} skipped. "
+            f"Next scheduled date: {next_date_text}.",
+            "success"
+        )
+
+    else:
+        flash(
+            f"Payment for {skipped_date_text} skipped. "
+            "This recurring expense has reached the end "
+            "of its schedule.",
+            "success"
+        )
+
+    return redirect(
+        url_for("automatic_expenses")
+    )
 
 
 
@@ -81969,6 +82325,289 @@ def post_extra_automatic_expense(automatic_expense_id):
 
 
 
+
+###################################################
+#
+#   ARCHIVE AUTOMATIC EXPENSE
+#
+##############################################################
+
+
+@app.route(
+    "/automatic-expenses/<int:automatic_expense_id>/archive",
+    methods=["POST"]
+)
+@login_required
+@spa_required
+def archive_automatic_expense(automatic_expense_id):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to archive recurring expenses.",
+            "error"
+        )
+
+        return redirect(url_for("automatic_expenses"))
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            UPDATE automatic_expenses
+            SET
+                archived_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE automatic_expense_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND archived_at IS NULL
+            RETURNING expense_name
+        """, (
+            automatic_expense_id,
+            spa_id,
+            business_unit_id,
+        ))
+
+        archived_row = cur.fetchone()
+
+        if archived_row is None:
+            conn.rollback()
+
+            flash(
+                "Recurring expense not found or already archived.",
+                "error"
+            )
+
+            return redirect(url_for("automatic_expenses"))
+
+        conn.commit()
+
+        flash(
+            f"{archived_row[0]} archived.",
+            "success"
+        )
+
+    except Exception:
+        conn.rollback()
+
+        app.logger.exception(
+            "Failed to archive recurring expense %s.",
+            automatic_expense_id
+        )
+
+        flash(
+            "The recurring expense could not be archived.",
+            "error"
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    return redirect(url_for("automatic_expenses"))
+
+
+###################################################
+#
+#   RESTORE AUTOMATIC EXPENSE
+#
+##############################################################
+
+
+@app.route(
+    "/automatic-expenses/<int:automatic_expense_id>/restore",
+    methods=["POST"]
+)
+@login_required
+@spa_required
+def restore_automatic_expense(automatic_expense_id):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to restore recurring expenses.",
+            "error"
+        )
+
+        return redirect(
+            url_for(
+                "automatic_expenses",
+                view="archived"
+            )
+        )
+
+    today = get_spa_now(spa_id).date()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                expense_name,       -- 0
+                frequency,          -- 1
+                next_post_date,     -- 2
+                end_date,           -- 3
+                is_active,          -- 4
+                archived_at         -- 5
+            FROM automatic_expenses
+            WHERE automatic_expense_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            FOR UPDATE
+        """, (
+            automatic_expense_id,
+            spa_id,
+            business_unit_id,
+        ))
+
+        recurring_expense = cur.fetchone()
+
+        if recurring_expense is None:
+            conn.rollback()
+
+            flash(
+                "Recurring expense not found.",
+                "error"
+            )
+
+            return redirect(
+                url_for(
+                    "automatic_expenses",
+                    view="archived"
+                )
+            )
+
+        if recurring_expense[5] is None:
+            conn.rollback()
+
+            flash(
+                "This recurring expense is not archived.",
+                "error"
+            )
+
+            return redirect(
+                url_for(
+                    "automatic_expenses",
+                    view="archived"
+                )
+            )
+
+        expense_name = recurring_expense[0]
+        frequency = recurring_expense[1]
+        next_post_date = recurring_expense[2]
+        end_date = recurring_expense[3]
+        restored_is_active = bool(recurring_expense[4])
+
+        restored_next_post_date = next_post_date
+
+        if (
+            restored_is_active
+            and restored_next_post_date is not None
+        ):
+            while restored_next_post_date < today:
+                candidate_date = advance_automatic_expense_date(
+                    restored_next_post_date,
+                    frequency,
+                )
+
+                if (
+                    end_date is not None
+                    and candidate_date > end_date
+                ):
+                    restored_is_active = False
+                    break
+
+                restored_next_post_date = candidate_date
+
+        if (
+            restored_is_active
+            and end_date is not None
+            and restored_next_post_date is not None
+            and restored_next_post_date > end_date
+        ):
+            restored_is_active = False
+
+        cur.execute("""
+            UPDATE automatic_expenses
+            SET
+                archived_at = NULL,
+                next_post_date = %s,
+                is_active = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE automatic_expense_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND archived_at IS NOT NULL
+        """, (
+            restored_next_post_date,
+            restored_is_active,
+            automatic_expense_id,
+            spa_id,
+            business_unit_id,
+        ))
+
+        if cur.rowcount != 1:
+            raise ValueError(
+                "Recurring expense was not restored."
+            )
+
+        conn.commit()
+
+        if (
+            restored_is_active
+            and restored_next_post_date is not None
+        ):
+            next_date_text = (
+                f"{restored_next_post_date.strftime('%B')} "
+                f"{restored_next_post_date.day}, "
+                f"{restored_next_post_date.year}"
+            )
+
+            flash(
+                f"{expense_name} restored. "
+                f"Next scheduled date: {next_date_text}.",
+                "success"
+            )
+
+        else:
+            flash(
+                f"{expense_name} restored. "
+                "Its recurring schedule is no longer active.",
+                "success"
+            )
+
+    except Exception:
+        conn.rollback()
+
+        app.logger.exception(
+            "Failed to restore recurring expense %s.",
+            automatic_expense_id
+        )
+
+        flash(
+            "The recurring expense could not be restored.",
+            "error"
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    return redirect(
+        url_for(
+            "automatic_expenses",
+            view="archived"
+        )
+    )
+
+
 ###############################################
 #
 #   RECORD AUTOMATIC EXPENSE PROCESSING ERROR
@@ -81998,6 +82637,7 @@ def record_automatic_expense_processing_error(
             WHERE automatic_expense_id = %s
               AND spa_id = %s
               AND business_unit_id = %s
+              AND archived_at IS NULL
         """, (
             error_message,
             automatic_expense_id,
@@ -82049,6 +82689,7 @@ def process_due_automatic_expenses(dry_run=False):
                 COALESCE(skip_next_occurrence, FALSE) -- 8
             FROM automatic_expenses
             WHERE is_active = TRUE
+              AND archived_at IS NULL
               AND processing_type IN (
                     'auto_alert',
                     'auto_silent'
@@ -82345,6 +82986,14 @@ def automatic_expenses():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
 
+    view_mode = str(
+        request.args.get("view", "active")
+        or "active"
+    ).strip().lower()
+
+    if view_mode not in {"active", "archived"}:
+        view_mode = "active"
+
     if business_unit_id is None:
         flash(
             "A valid Provider Workspace is required "
@@ -82374,7 +83023,8 @@ def automatic_expenses():
             ae.last_error_at,                  -- 13
             ae.last_success_at,                -- 14
             pm.payment_method,                  -- 15
-            ae.start_date                       --16
+            ae.start_date,                      -- 16
+            ae.archived_at                      -- 17
         FROM automatic_expenses ae
         LEFT JOIN expense_categories ec
             ON ae.expense_cat_id = ec.expense_cat_id
@@ -82384,13 +83034,20 @@ def automatic_expenses():
            AND pm.spa_id = ae.spa_id
         WHERE ae.spa_id = %s
           AND ae.business_unit_id = %s
+          AND (
+                (%s = 'active' AND ae.archived_at IS NULL)
+                OR
+                (%s = 'archived' AND ae.archived_at IS NOT NULL)
+              )
         ORDER BY
             ae.is_active DESC,
             ae.next_post_date ASC,
             ae.expense_name ASC
     """, (
         spa_id,
-        business_unit_id
+        business_unit_id,
+        view_mode,
+        view_mode,
     ))
 
     automatic_expense_rows = cur.fetchall()
@@ -82419,10 +83076,14 @@ def automatic_expenses():
         is_active = row[9]
         skip_next = row[10]
         last_error_message = row[12]
+        archived_at = row[17]
 
         annual_total = amount * annual_multipliers.get(frequency, 0)
 
-        if not is_active:
+        if archived_at is not None:
+            payment_health = "Archived"
+            payment_health_class = "inactive"
+        elif not is_active:
             payment_health = "Not Scheduled"
             payment_health_class = "inactive"
         elif last_error_message:
@@ -82441,7 +83102,10 @@ def automatic_expenses():
             payment_health = "On Schedule"
             payment_health_class = "on-schedule"
 
-        operating_status = "Active" if is_active else "Paused"
+        if archived_at is not None:
+            operating_status = "Archived"
+        else:
+            operating_status = "Active" if is_active else "Paused"
 
         processing_labels = {
             "auto_alert": "Auto-post + Coach Alert",
@@ -82471,6 +83135,7 @@ def automatic_expenses():
             "last_success_at": row[14],
             "payment_method": row[15],
             "start_date": row[16],
+            "archived_at": archived_at,
             "estimated_annual_total": annual_total,
             "payment_health": payment_health,
             "payment_health_class": payment_health_class,
@@ -82484,7 +83149,10 @@ def automatic_expenses():
     active_expenses = [
         expense
         for expense in automatic_expense_list
-        if expense["is_active"]
+        if (
+            expense["is_active"]
+            and expense["archived_at"] is None
+        )
     ]
 
     monthly_total = 0
@@ -82645,7 +83313,8 @@ def automatic_expenses():
         "automatic_expenses.html",
         automatic_expenses=automatic_expense_list,
         summary=summary,
-        coach_message=coach_message
+        coach_message=coach_message,
+        view_mode=view_mode,
     )
 
 
@@ -83070,7 +83739,8 @@ def edit_automatic_expense(automatic_expense_id):
             processing_type,            -- 10
             description,                -- 11
             notes,                      -- 12
-            is_active                   -- 13
+            is_active,                 -- 13
+            archived_at                -- 14
         FROM automatic_expenses
         WHERE automatic_expense_id = %s
           AND spa_id = %s
@@ -83094,6 +83764,22 @@ def edit_automatic_expense(automatic_expense_id):
 
         return redirect(
             url_for("automatic_expenses")
+        )
+
+    if automatic_expense[14] is not None:
+        cur.close()
+        conn.close()
+
+        flash(
+            "Restore this recurring expense before editing it.",
+            "error"
+        )
+
+        return redirect(
+            url_for(
+                "automatic_expenses",
+                view="archived"
+            )
         )
 
     original_frequency = automatic_expense[6]
@@ -83390,6 +84076,7 @@ def edit_automatic_expense(automatic_expense_id):
                 WHERE automatic_expense_id = %s
                   AND spa_id = %s
                   AND business_unit_id = %s
+                  AND archived_at IS NULL
             """, (
                 form_data["expense_name"],
                 form_data["vendor_name"] or None,
@@ -91622,6 +92309,7 @@ def morning_briefing():
         WHERE spa_id = %s
         AND business_unit_id = %s
         AND is_active = TRUE
+        AND archived_at IS NULL
         AND (
                 last_error_message IS NOT NULL
                 OR next_post_date <= %s
