@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block title %}Access Restricted{% endblock %}
+
+{% block content %}
+<div style="max-width: 620px; margin: 30px auto;">
+    <h1>Access Restricted</h1>
+
+    <p>
+        <strong>{{ employee_display_name }}</strong>
+        is verified, but does not currently have access to
+        <strong>{{ area_label }}</strong>.
+    </p>
+
+    {% if employee_access_level and required_access_level %}
+        <p>
+            Your PSP Access Level is
+            <strong>Level {{ employee_access_level }}</strong>.
+            This area currently requires
+            <strong>PSP Access Level {{ required_access_level }}</strong>.
+        </p>
+    {% else %}
+        <p>
+            A valid PSP Access Level is not currently assigned
+            for this restricted area.
+        </p>
+    {% endif %}
+
+    <p>
+        Contact the business Owner or authorized administrator
+        if your access needs to be changed.
+    </p>
+
+    <div
+        style="
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 20px;
+        "
+    >
+        <form
+            method="post"
+            action="{{ url_for('employee_access_end') }}"
+            style="margin: 0;"
+        >
+            <input
+                type="hidden"
+                name="security_csrf_token"
+                value="{{ security_csrf_token }}"
+            >
+            <input
+                type="hidden"
+                name="page_scope"
+                value="{{ employee_access_page_scope }}"
+            >
+            <input
+                type="hidden"
+                name="return_path"
+                value="{{ employee_access_return_path }}"
+            >
+
+            <button
+                type="submit"
+                class="btn"
+                style="
+                    width: 260px;
+                    max-width: 100%;
+                    text-align: center;
+                "
+            >
+                Verify Another Employee
+            </button>
+        </form>
+
+        <form
+            method="post"
+            action="{{ url_for('employee_access_end') }}"
+            style="margin: 0;"
+        >
+            <input
+                type="hidden"
+                name="security_csrf_token"
+                value="{{ security_csrf_token }}"
+            >
+            <input
+                type="hidden"
+                name="page_scope"
+                value="{{ employee_access_page_scope }}"
+            >
+            <input
+                type="hidden"
+                name="return_path"
+                value="{{ url_for('morning_briefing') }}"
+            >
+
+            <button
+                type="submit"
+                class="btn btn-secondary"
+                style="
+                    width: 260px;
+                    max-width: 100%;
+                    text-align: center;
+                "
+            >
+                Return to Daily Briefing
+            </button>
+        </form>
+    </div>
+</div>
+{% endblock %}

@@ -86,28 +86,6 @@
             {% endif %}
 
 
-            {% if nav_access.can_manage_users %}
-
-                <a href="{{ url_for('business_users') }}">
-                    <span aria-hidden="true">👥</span>
-                    <span>Users</span>
-                </a>
-
-            {% endif %}
-
-
-            {% if nav_access.can_manage_security_settings %}
-
-                <a href="{{ url_for(
-                    'login_security_settings'
-                ) }}">
-                    <span aria-hidden="true">🔐</span>
-                    <span>Login Security</span>
-                </a>
-
-            {% endif %}
-
-
             {% if nav_access.can_view_business_management %}
 
                 <a href="{{ url_for('help_center') }}">
@@ -118,6 +96,60 @@
             {% endif %}
 
         </div>
+
+
+        {% if (
+            nav_access.can_manage_users
+            or nav_access.can_manage_security_settings
+            or nav_access.can_manage_employee_access_codes
+        ) %}
+
+            <div class="user-menu-divider"></div>
+
+            <div class="app-menu-submenu-section">
+
+                <div class="app-menu-submenu-heading">
+                    🔐 Security
+                </div>
+
+                {% if nav_access.can_manage_users %}
+
+                    <a href="{{ url_for('business_users') }}">
+                        <span aria-hidden="true">👥</span>
+                        <span>Users</span>
+                    </a>
+
+                {% endif %}
+
+
+                {% if nav_access.can_manage_security_settings %}
+
+                    <a href="{{ url_for(
+                        'login_security_settings'
+                    ) }}">
+                        <span aria-hidden="true">🔐</span>
+                        <span>Login Security</span>
+                    </a>
+
+                {% endif %}
+
+
+                {% if nav_access.can_manage_employee_access_codes %}
+
+                    <a href="{{ url_for(
+                        'employee_access_codes_admin'
+                    ) }}">
+                        <span aria-hidden="true">🛡️</span>
+                        <span>
+                            Employee Verification &amp; Access Settings
+                        </span>
+                    </a>
+
+                {% endif %}
+
+            </div>
+
+        {% endif %}
 
 
     </div>

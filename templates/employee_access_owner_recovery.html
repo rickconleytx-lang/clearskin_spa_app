@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+
+{% block title %}Owner Verification Code Recovery{% endblock %}
+
+{% block content %}
+<div style="max-width: 520px; margin: 30px auto;">
+    <h1>Owner Verification Code Recovery</h1>
+
+    <p>
+        If an Owner has forgotten their Employee Verification Code,
+        another authorized Owner — or the same Owner — can verify
+        their Peach Suite Pro credentials here.
+    </p>
+
+    <p>
+        Enter the PSP email address and password for an active
+        <strong>Owner</strong> in this Provider Workspace.
+    </p>
+
+    <p>
+        Successful verification opens
+        <strong>Employee Verification &amp; Access Settings</strong>
+        only, where a Verification Code can be generated or reset.
+        This does not change the currently signed-in Peach Suite Pro
+        user and does not provide access to other restricted areas.
+    </p>
+
+    <form
+        method="POST"
+        action="{{ url_for('employee_access_owner_recovery_login') }}"
+        autocomplete="off"
+    >
+        <input
+            type="hidden"
+            name="security_csrf_token"
+            value="{{ security_csrf_token }}"
+        >
+
+        <div class="form-group">
+            <label for="email">
+                Owner PSP Email
+            </label>
+
+            <input
+                type="email"
+                id="email"
+                name="email"
+                maxlength="254"
+                autocomplete="username"
+                required
+                autofocus
+            >
+        </div>
+
+        <div class="form-group">
+            <label for="password">
+                Owner PSP Password
+            </label>
+
+            <input
+                type="password"
+                id="password"
+                name="password"
+                maxlength="128"
+                autocomplete="current-password"
+                required
+            >
+        </div>
+
+        <div class="form-buttons">
+            <button
+                type="submit"
+                class="btn"
+                style="
+                    width: 260px;
+                    max-width: 100%;
+                    text-align: center;
+                "
+            >
+                Verify Owner
+            </button>
+
+            <a
+                href="{{ url_for('morning_briefing') }}"
+                class="btn btn-secondary"
+                style="
+                    width: 260px;
+                    max-width: 100%;
+                    text-align: center;
+                    box-sizing: border-box;
+                "
+            >
+                Cancel
+            </a>
+        </div>
+    </form>
+</div>
+{% endblock %}

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Employee Access Code | Peach Suite Pro{% endblock %}
+{% block title %}Employee Verification Code | Peach Suite Pro{% endblock %}
 
 {% block content %}
 
@@ -108,9 +108,9 @@
     <div class="employee-access-issued-header">
         <h1>
             {% if is_reset %}
-                New Employee Access Code
+                New Employee Verification Code
             {% else %}
-                Employee Access Code Created
+                Employee Verification Code Created
             {% endif %}
         </h1>
 
@@ -131,7 +131,7 @@
 
         <br><br>
 
-        Peach Suite Pro displays this Employee Access Code
+        Peach Suite Pro displays this Employee Verification Code
         only on this page. After you leave, the same plaintext
         code cannot be viewed again.
 
@@ -154,13 +154,13 @@
         <h2>{{ employee_name }}</h2>
 
         <p>
-            Employee Access Code
+            Employee Verification Code
         </p>
 
         <div
             class="employee-access-issued-code"
             id="employeeAccessIssuedCode"
-            aria-label="Employee Access Code"
+            aria-label="Employee Verification Code"
         >
             {{ generated_code }}
         </div>
@@ -223,7 +223,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
             if (!code) {
                 statusElement.textContent =
-                    "No Employee Access Code is available.";
+                    "No Employee Verification Code is available.";
                 return;
             }
 
@@ -231,7 +231,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 await navigator.clipboard.writeText(code);
 
                 statusElement.textContent =
-                    "Employee Access Code copied.";
+                    "Employee Verification Code copied.";
             } catch (error) {
                 statusElement.textContent =
                     "Your browser could not copy the code automatically. You can select and copy the code above.";

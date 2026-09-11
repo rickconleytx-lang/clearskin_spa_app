@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}Employee Roles{% endblock %}
+
+{% block content %}
+
+<h1>Employee Roles</h1>
+
+<div class="form-buttons">
+    <a href="{{ url_for('admin') }}" class="btn">
+        Back to Admin
+    </a>
+</div>
+
+<div style="
+    max-width: 760px;
+    margin-top: 20px;
+    margin-bottom: 24px;
+    padding: 16px 18px;
+    border: 1px solid #d8d8d8;
+    border-radius: 8px;
+">
+    <strong>How Employee Roles work</strong>
+
+    <p style="margin-bottom: 0;">
+        Owner is the permanent first role. Enter roles 2–5
+        from highest level of responsibility to lowest.
+        You may leave any unused role blank.
+        Employee Roles do not determine access to restricted
+        Peach Suite Pro areas. PSP Access Levels are assigned
+        separately.
+    </p>
+</div>
+
+<form method="POST" style="max-width: 760px;">
+
+    {% for role in role_slots %}
+        <div class="form-group" style="margin-bottom: 18px;">
+
+            <label for="role_slot_{{ role.slot }}">
+                Role {{ role.slot }}
+            </label>
+
+            {% if role.fixed %}
+                <input
+                    type="text"
+                    id="role_slot_{{ role.slot }}"
+                    value="Owner"
+                    disabled
+                    style="background-color: #f3f3f3;"
+                >
+
+                <div style="
+                    margin-top: 5px;
+                    font-size: 0.9em;
+                    color: #666;
+                ">
+                    Owner is required and cannot be changed.
+                </div>
+
+            {% else %}
+                <input
+                    type="text"
+                    id="role_slot_{{ role.slot }}"
+                    name="role_slot_{{ role.slot }}"
+                    value="{{ role.role_name }}"
+                    maxlength="100"
+                    autocomplete="off"
+                >
+            {% endif %}
+
+        </div>
+    {% endfor %}
+
+    <div class="form-buttons">
+        <button type="submit" class="btn">
+            Save Employee Roles
+        </button>
+    </div>
+
+</form>
+
+{% endblock %}

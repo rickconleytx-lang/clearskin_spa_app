@@ -26,6 +26,26 @@
         <textarea name="business_description" rows="4"
                   placeholder="Briefly describe what your business does.">{{ profile[3] if profile else '' }}</textarea>
 
+        <label>Business Email</label>
+        <input type="email"
+               name="business_email"
+               maxlength="254"
+               value="{{ (profile[28] or '') if profile else '' }}"
+               placeholder="Business contact email">
+        <div style="color:#777; font-size:0.9rem; margin-top:-6px; margin-bottom:14px;">
+            <span style="display:block; margin: 10px 0 18px 0; color:#777;">Used as the business contact email.</span>
+        </div>
+
+        <label>Personal Email</label>
+        <input type="email"
+               name="personal_email"
+               maxlength="254"
+               value="{{ (profile[29] or '') if profile else '' }}"
+               placeholder="Owner personal email">
+        <div style="color:#777; font-size:0.9rem; margin-top:-6px; margin-bottom:14px;">
+            <span style="display:block; margin: 10px 0 18px 0; color:#777;">Private owner contact email. This does not change your Peach Suite Pro login email.</span>
+        </div>
+
         <label>Business Address</label>
         <input type="text" name="business_address"
                value="{{ profile[4] if profile else '' }}">

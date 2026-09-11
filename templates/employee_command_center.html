@@ -673,6 +673,21 @@
 
 
                 <div class="detail-row">
+                    <div class="detail-label">PSP Access Level</div>
+
+                    <div class="detail-value">
+                        {% if employee.access_level == 1 %}
+                            Level 1 — Full Access
+                        {% elif employee.access_level %}
+                            Level {{ employee.access_level }}
+                        {% else %}
+                            No Restricted Area Access
+                        {% endif %}
+                    </div>
+                </div>
+
+
+                <div class="detail-row">
                     <div class="detail-label">Job Title</div>
 
                     <div class="detail-value">

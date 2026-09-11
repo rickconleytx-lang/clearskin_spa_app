@@ -7,13 +7,13 @@
     <h1>Employee Verification</h1>
 
     <p>
-        Enter your Employee Access Code to open
+        Enter your Employee Verification Code to open
         <strong>{{ page_title }}</strong>.
     </p>
 
     <p>
         Your business login identifies the Peach Suite Pro session.
-        Your Employee Access Code identifies who is using this
+        Your Employee Verification Code identifies who is using this
         sensitive page.
     </p>
 
@@ -54,7 +54,7 @@
 
         <div class="form-group">
             <label for="employee_access_code">
-                Employee Access Code
+                Employee Verification Code
             </label>
 
             <input
@@ -69,14 +69,47 @@
             >
         </div>
 
-        <div class="form-buttons">
-            <button type="submit" class="btn">
+        <div
+            class="form-buttons"
+            style="
+                flex-direction: column;
+                align-items: flex-start;
+            "
+        >
+            <button
+                type="submit"
+                class="btn"
+                style="
+                    width: 260px;
+                    max-width: 100%;
+                    text-align: center;
+                "
+            >
                 Verify Employee
             </button>
 
             <a
+                href="{{ url_for('employee_access_owner_recovery_login') }}"
+                style="
+                    width: 260px;
+                    max-width: 100%;
+                    text-align: center;
+                    margin: 0;
+                    box-sizing: border-box;
+                "
+            >
+                Forgot Verification Code?
+            </a>
+
+            <a
                 href="{{ url_for('morning_briefing') }}"
                 class="btn btn-secondary"
+                style="
+                    width: 260px;
+                    max-width: 100%;
+                    text-align: center;
+                    box-sizing: border-box;
+                "
             >
                 Cancel
             </a>

@@ -43,6 +43,42 @@
     </div>
 
     <div class="form-group">
+        <label for="access_level">PSP Access Level</label>
+
+        <select id="access_level"
+                name="access_level">
+            <option value="">
+                No Restricted Area Access
+            </option>
+            <option value="1">
+                Level 1 — Full Access
+            </option>
+            <option value="2">
+                Level 2
+            </option>
+            <option value="3">
+                Level 3
+            </option>
+            <option value="4">
+                Level 4
+            </option>
+            <option value="5">
+                Level 5
+            </option>
+        </select>
+
+        <div style="
+            margin-top: 5px;
+            font-size: 0.9em;
+            color: #666;
+        ">
+            PSP Access Level controls access to restricted areas
+            and is separate from Employee Role. Level 1 has full
+            access. Leave blank for no restricted-area access.
+        </div>
+    </div>
+
+    <div class="form-group">
         <label for="provider_color_code">Provider Color</label>
         <input type="color"
             id="provider_color_code"

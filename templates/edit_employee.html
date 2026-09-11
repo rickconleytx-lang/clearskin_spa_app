@@ -53,7 +53,55 @@
                 </option>
             {% endfor %}
         </select>
-   
+    </div>
+
+    <div class="form-group">
+        <label for="access_level">PSP Access Level</label>
+
+        <select id="access_level"
+                name="access_level">
+            <option value=""
+                    {% if employee.access_level is none %}selected{% endif %}>
+                No Restricted Area Access
+            </option>
+
+            <option value="1"
+                    {% if employee.access_level == 1 %}selected{% endif %}>
+                Level 1 — Full Access
+            </option>
+
+            <option value="2"
+                    {% if employee.access_level == 2 %}selected{% endif %}>
+                Level 2
+            </option>
+
+            <option value="3"
+                    {% if employee.access_level == 3 %}selected{% endif %}>
+                Level 3
+            </option>
+
+            <option value="4"
+                    {% if employee.access_level == 4 %}selected{% endif %}>
+                Level 4
+            </option>
+
+            <option value="5"
+                    {% if employee.access_level == 5 %}selected{% endif %}>
+                Level 5
+            </option>
+        </select>
+
+        <div style="
+            margin-top: 5px;
+            font-size: 0.9em;
+            color: #666;
+        ">
+            PSP Access Level controls access to restricted areas
+            and is separate from Employee Role. Level 1 has full
+            access. Leave blank for no restricted-area access.
+        </div>
+    </div>
+
     <br>
     <div class="form-group">
     <label for="provider_color_code">Provider Color</label>

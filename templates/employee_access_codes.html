@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 
-{% block title %}Employee Access Codes{% endblock %}
+{% block title %}Employee Verification & Access Settings{% endblock %}
 
 {% block content %}
 
-<h1>Employee Access Codes</h1>
+<h1>Employee Verification &amp; Access Settings</h1>
 
 <p>
     Provider Workspace:
@@ -12,17 +12,32 @@
 </p>
 
 <p>
-    Employee Access Codes identify the individual employee
+    Employee Verification Codes identify the individual employee
     authorizing sensitive actions while using a shared
     Peach Suite Pro business login.
 </p>
 
+{% if owner_recovery_mode %}
+<div class="card" style="margin-bottom: 24px;">
+    <div class="card-body">
+        <h2>Recovery Session Timeout</h2>
+
+        <p style="margin-bottom: 0;">
+            Owner Recovery remains available for up to
+            <strong>5 minutes</strong>. During that time, it can
+            only be used to generate or reset Employee Verification
+            Codes. It does not provide access to other restricted
+            areas of Peach Suite Pro.
+        </p>
+    </div>
+</div>
+{% else %}
 <div class="card" style="margin-bottom: 24px;">
     <div class="card-body">
         <h2>Secure Session Timeout</h2>
 
         <p>
-            After an employee enters their Employee Access Code,
+            After an employee enters their Employee Verification Code,
             their verified secure session remains active while
             they work within protected areas of Peach Suite Pro.
             They may move between protected pages without
@@ -35,7 +50,7 @@
             Returning to a protected page within 15 seconds
             keeps the secure session active. After 15 seconds
             outside the protected area, the secure session ends
-            and the employee must enter their Employee Access
+            and the employee must enter their Employee Verification
             Code again.
         </p>
 
@@ -46,10 +61,32 @@
         </p>
     </div>
 </div>
+{% endif %}
 
+{% if owner_recovery_mode %}
 <div class="card" style="margin-bottom: 24px;">
     <div class="card-body">
-        <h2>Access Code Settings</h2>
+        <h2 style="color: #b91c1c;">Owner Recovery Mode</h2>
+
+        <p>
+            <strong>Authenticated Owner:</strong>
+            {{ owner_recovery.owner_display_name }}
+        </p>
+
+        <p style="margin-bottom: 0;">
+            This temporary recovery session can only generate or reset
+            Employee Verification Codes. Business Access Setup,
+            Verification Code Settings, and PSP Access Levels cannot
+            be changed from recovery mode.
+        </p>
+    </div>
+</div>
+{% endif %}
+
+{% if not owner_recovery_mode %}
+<div class="card" style="margin-bottom: 24px;">
+    <div class="card-body">
+        <h2>Employee Verification Code Settings</h2>
 
         <p>
             <strong>Status:</strong>
@@ -61,7 +98,7 @@
         </p>
 
         <p>
-            Choose the Employee Access Code format for this
+            Choose the Employee Verification Code format for this
             Provider Workspace. The same format applies to
             every employee assigned to this workspace.
         </p>
@@ -75,6 +112,50 @@
                 name="security_csrf_token"
                 value="{{ security_csrf_token }}"
             >
+
+
+            <div style="margin-bottom: 22px;">
+                <h3 style="margin-bottom: 10px;">
+                    Business Access Setup
+                </h3>
+
+                <label style="display: block; margin-bottom: 10px;">
+                    <input
+                        type="radio"
+                        name="business_access_mode"
+                        value="solo"
+                        {% if business_access_mode == "solo" %}
+                            checked
+                        {% endif %}
+                        required
+                    >
+                    <strong>Solo Operator</strong>
+                    — I am the only person who uses Peach Suite Pro
+                    for this business.
+                </label>
+
+                <label style="display: block; margin-bottom: 10px;">
+                    <input
+                        type="radio"
+                        name="business_access_mode"
+                        value="other_users"
+                        {% if business_access_mode == "other_users" %}
+                            checked
+                        {% endif %}
+                        required
+                    >
+                    <strong>Other users will have access</strong>
+                    — Employees, managers, providers, or other
+                    authorized users may use Peach Suite Pro.
+                </label>
+
+                <p style="font-size: 0.95em; margin-bottom: 0;">
+                    Employee Verification Codes are required when other
+                    users will have access.
+                </p>
+            </div>
+
+            <hr style="margin: 20px 0;">
 
             <div style="margin-bottom: 16px;">
                 <label for="code_length">
@@ -152,21 +233,6 @@
                 </select>
             </div>
 
-            <div style="margin-bottom: 16px;">
-                <label>
-                    <input
-                        type="checkbox"
-                        name="is_enabled"
-                        value="1"
-                        {% if settings.is_enabled %}
-                            checked
-                        {% endif %}
-                    >
-                    Enable Employee Access Codes for this
-                    Provider Workspace
-                </label>
-            </div>
-
             <p style="font-size: 0.95em;">
                 Once employee codes are assigned, the code
                 format cannot be changed until those active
@@ -174,11 +240,144 @@
             </p>
 
             <button type="submit">
-                Save Access Code Settings
+                Save Verification Code Settings
             </button>
         </form>
     </div>
 </div>
+
+<div class="card" style="margin-bottom: 24px;">
+    <div class="card-body">
+        <h2>PSP Access Levels</h2>
+
+        <p>
+            Set the PSP Access Level required to enter each
+            restricted area of Peach Suite Pro.
+        </p>
+
+        <p style="font-size: 0.95em;">
+            <strong>Level 1</strong> is Full Access.
+            An area set to Level 1 can be accessed only by Level 1.
+            An area set to Level 2 can be accessed by Levels 1–2,
+            Level 3 by Levels 1–3, and so on.
+        </p>
+
+        {% if not can_manage_psp_access_levels %}
+            <p>
+                <strong>Only the Owner can change PSP Access Level
+                requirements.</strong>
+            </p>
+        {% endif %}
+
+        <form
+            method="post"
+            action="{{ url_for('save_psp_access_levels') }}"
+        >
+            <input
+                type="hidden"
+                name="security_csrf_token"
+                value="{{ security_csrf_token }}"
+            >
+
+            <div style="overflow-x: auto;">
+                <table
+                    style="width: 100%; border-collapse: collapse;"
+                >
+                    <thead>
+                        <tr>
+                            <th
+                                style="text-align: left; padding: 8px;"
+                            >
+                                Restricted Area
+                            </th>
+                            <th
+                                style="text-align: left; padding: 8px;"
+                            >
+                                Required PSP Access Level
+                            </th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        {% for area in psp_access_levels %}
+                            <tr>
+                                <td style="padding: 8px;">
+                                    {{ area.area_label }}
+                                </td>
+
+                                <td style="padding: 8px;">
+                                    <select
+                                        name="required_access_level_{{ area.area_key }}"
+                                        {% if not can_manage_psp_access_levels %}
+                                            disabled
+                                        {% endif %}
+                                        required
+                                    >
+                                        <option
+                                            value="1"
+                                            {% if area.required_access_level == 1 %}
+                                                selected
+                                            {% endif %}
+                                        >
+                                            Level 1 — Level 1 only
+                                        </option>
+
+                                        <option
+                                            value="2"
+                                            {% if area.required_access_level == 2 %}
+                                                selected
+                                            {% endif %}
+                                        >
+                                            Level 2 — Levels 1–2
+                                        </option>
+
+                                        <option
+                                            value="3"
+                                            {% if area.required_access_level == 3 %}
+                                                selected
+                                            {% endif %}
+                                        >
+                                            Level 3 — Levels 1–3
+                                        </option>
+
+                                        <option
+                                            value="4"
+                                            {% if area.required_access_level == 4 %}
+                                                selected
+                                            {% endif %}
+                                        >
+                                            Level 4 — Levels 1–4
+                                        </option>
+
+                                        <option
+                                            value="5"
+                                            {% if area.required_access_level == 5 %}
+                                                selected
+                                            {% endif %}
+                                        >
+                                            Level 5 — Levels 1–5
+                                        </option>
+                                    </select>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            {% if can_manage_psp_access_levels %}
+                <div style="margin-top: 18px;">
+                    <button type="submit">
+                        Save PSP Access Levels
+                    </button>
+                </div>
+            {% endif %}
+        </form>
+    </div>
+</div>
+
+
+{% endif %}
 
 <div class="card" style="margin-bottom: 24px;">
     <div class="card-body">
@@ -193,10 +392,16 @@
                                 Employee
                             </th>
                             <th style="text-align: left; padding: 8px;">
-                                Workspace Status
+                                Status
                             </th>
                             <th style="text-align: left; padding: 8px;">
-                                Access Code
+                                Role
+                            </th>
+                            <th style="text-align: left; padding: 8px;">
+                                Access Level
+                            </th>
+                            <th style="text-align: left; padding: 8px;">
+                                Verification Code
                             </th>
                             <th style="text-align: left; padding: 8px;">
                                 Last Used
@@ -244,7 +449,19 @@
                                 </td>
 
                                 <td style="padding: 8px;">
-                                    {% if
+                                    {{ employee.employee_role_name or "Not Assigned" }}
+                            </td>
+
+                                <td style="padding: 8px;">
+                                    {% if employee.psp_access_level %}
+                                        Level {{ employee.psp_access_level }}
+                                    {% else %}
+                                        None
+                                    {% endif %}
+                                </td>
+
+                            <td style="padding: 8px;">
+                                {% if
                                         employee.employee_access_code_credential_id
                                     %}
                                         Assigned
@@ -262,9 +479,7 @@
                                 </td>
 
                                 <td style="padding: 8px;">
-                                    {% if not settings.is_enabled %}
-                                        Enable codes first
-                                    {% elif not workspace_active %}
+                                    {% if not workspace_active %}
                                         Unavailable
                                     {% else %}
                                         <form
@@ -293,14 +508,14 @@
                                                 <button
                                                     type="submit"
                                                     onclick="return confirm(
-                                                        'Reset this Employee Access Code? The current code will stop working immediately.'
+                                                        'Reset this Employee Verification Code? The current code will stop working immediately.'
                                                     );"
                                                 >
-                                                    Reset Code
+                                                    Reset Verification Code
                                                 </button>
                                             {% else %}
                                                 <button type="submit">
-                                                    Generate Code
+                                                    Generate Verification Code
                                                 </button>
                                             {% endif %}
                                         </form>

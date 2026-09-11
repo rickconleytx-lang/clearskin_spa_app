@@ -21136,7 +21136,7 @@ def _verify_employee_access_submission(
             table_name="employee_access_code_attempts",
             record_id=attempt_id,
             notes=(
-                "Employee Access Code verified "
+                "Employee Verification Code verified "
                 f"for page scope {page_scope}."
             ),
             business_unit_id=business_unit_id,
@@ -21392,6 +21392,7 @@ def _consume_employee_access_page_challenge(
 
 
 EMPLOYEE_ACCESS_SECURE_GRACE_SECONDS = 15
+EMPLOYEE_ACCESS_OWNER_RECOVERY_SECONDS = 300
 
 
 def _employee_access_secure_presence(
@@ -21905,6 +21906,21 @@ def _end_employee_access_secure_session(
         conn.close()
 
 
+PSP_ACCESS_AREA_LABELS = {
+    "employees_compensation": "Employee Compensation",
+    "financial_management": "Financial Management",
+    "add_income": "Add Income",
+    "add_expense": "Add Expense",
+    "business_goals": "Business Goals",
+    "business_users": "Business Users",
+    "business_security": "Business Security",
+}
+
+PSP_ACCESS_AREA_KEYS = frozenset(
+    PSP_ACCESS_AREA_LABELS.keys()
+)
+
+
 EMPLOYEE_ACCESS_SENSITIVE_PAGE_SCOPES = frozenset({
     "employee_compensation_report",
     "employee_compensation_history",
@@ -21917,6 +21933,13 @@ def _employee_access_sensitive_page_scope_allowed(page_scope):
 
     if page_scope in EMPLOYEE_ACCESS_SENSITIVE_PAGE_SCOPES:
         return True
+
+    psp_access_prefix = "psp_access:"
+
+    if page_scope.startswith(psp_access_prefix):
+        area_key = page_scope[len(psp_access_prefix):]
+
+        return area_key in PSP_ACCESS_AREA_KEYS
 
     edit_prefix = "edit_employee_compensation:"
 
@@ -21931,6 +21954,688 @@ def _employee_access_sensitive_page_scope_allowed(page_scope):
         return False
 
     return record_id > 0
+
+
+def _psp_access_authorization(
+    *,
+    spa_id,
+    business_unit_id,
+    employee_id,
+    area_key,
+):
+    """
+    Evaluate one verified employee against one restricted PSP area.
+
+    PSP Access Levels are hierarchical:
+        Level 1 may enter areas requiring Levels 1 through 5.
+        Level 2 may enter areas requiring Levels 2 through 5.
+        ...
+        Level 5 may enter only areas requiring Level 5.
+
+    Access levels are always read from the database so an Owner's
+    changes take effect immediately. No PSP Access Level is cached
+    in the Employee Verification session.
+    """
+
+    area_key = str(area_key or "").strip()
+
+    if area_key not in PSP_ACCESS_AREA_KEYS:
+        return {
+            "allowed": False,
+            "employee_access_level": None,
+            "required_access_level": None,
+            "area_key": area_key,
+        }
+
+    try:
+        spa_id = int(spa_id)
+        business_unit_id = int(business_unit_id)
+        employee_id = int(employee_id)
+    except (TypeError, ValueError):
+        return {
+            "allowed": False,
+            "employee_access_level": None,
+            "required_access_level": None,
+            "area_key": area_key,
+        }
+
+    if (
+        spa_id <= 0
+        or business_unit_id <= 0
+        or employee_id <= 0
+    ):
+        return {
+            "allowed": False,
+            "employee_access_level": None,
+            "required_access_level": None,
+            "area_key": area_key,
+        }
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                ebum.access_level,
+                paas.required_access_level
+            FROM employee_business_unit_memberships ebum
+            JOIN employees e
+              ON e.spa_id = ebum.spa_id
+             AND e.employee_id = ebum.employee_id
+            JOIN psp_access_area_settings paas
+              ON paas.spa_id = ebum.spa_id
+             AND paas.business_unit_id = ebum.business_unit_id
+             AND paas.area_key = %s
+            WHERE ebum.spa_id = %s
+              AND ebum.business_unit_id = %s
+              AND ebum.employee_id = %s
+              AND ebum.is_active = TRUE
+              AND e.is_active = TRUE
+            LIMIT 1
+            """,
+            (
+                area_key,
+                spa_id,
+                business_unit_id,
+                employee_id,
+            ),
+        )
+
+        row = cur.fetchone()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if not row:
+        return {
+            "allowed": False,
+            "employee_access_level": None,
+            "required_access_level": None,
+            "area_key": area_key,
+        }
+
+    employee_access_level = row[0]
+    required_access_level = row[1]
+
+    try:
+        employee_access_level = int(employee_access_level)
+        required_access_level = int(required_access_level)
+    except (TypeError, ValueError):
+        return {
+            "allowed": False,
+            "employee_access_level": None,
+            "required_access_level": None,
+            "area_key": area_key,
+        }
+
+    levels_valid = bool(
+        1 <= employee_access_level <= 5
+        and 1 <= required_access_level <= 5
+    )
+
+    return {
+        "allowed": bool(
+            levels_valid
+            and employee_access_level <= required_access_level
+        ),
+        "employee_access_level": employee_access_level,
+        "required_access_level": required_access_level,
+        "area_key": area_key,
+    }
+
+
+
+def _employee_access_owner_recovery_identity(
+    *,
+    spa_id,
+    business_unit_id,
+    owner_user_id,
+):
+    """
+    Return the active Role 1 Owner identity linked to one PSP user
+    in the current workspace, or None when the identity is not
+    currently authorized.
+    """
+
+    try:
+        spa_id = int(spa_id)
+        business_unit_id = int(business_unit_id)
+        owner_user_id = int(owner_user_id)
+    except (TypeError, ValueError):
+        return None
+
+    if (
+        spa_id <= 0
+        or business_unit_id <= 0
+        or owner_user_id <= 0
+    ):
+        return None
+
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                u.user_id,
+                bum.employee_id,
+                e.first_name,
+                e.last_name
+            FROM users u
+            JOIN business_unit_memberships bum
+              ON bum.user_id = u.user_id
+            JOIN employee_business_unit_memberships ebum
+              ON ebum.spa_id = bum.spa_id
+             AND ebum.business_unit_id = bum.business_unit_id
+             AND ebum.employee_id = bum.employee_id
+            JOIN employees e
+              ON e.spa_id = ebum.spa_id
+             AND e.employee_id = ebum.employee_id
+            JOIN employee_roles er
+              ON er.spa_id = e.spa_id
+             AND er.employee_role_id = e.employee_role_id
+            WHERE u.user_id = %s
+              AND u.active = TRUE
+              AND bum.spa_id = %s
+              AND bum.business_unit_id = %s
+              AND bum.is_active = TRUE
+              AND bum.employee_id IS NOT NULL
+              AND ebum.is_active = TRUE
+              AND e.is_active = TRUE
+              AND er.is_active = TRUE
+              AND er.role_slot = 1
+            LIMIT 1
+            """,
+            (
+                owner_user_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        row = cur.fetchone()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if not row:
+        return None
+
+    return {
+        "owner_user_id": int(row["user_id"]),
+        "owner_employee_id": int(row["employee_id"]),
+        "owner_display_name": (
+            f'{row["first_name"] or ""} '
+            f'{row["last_name"] or ""}'
+        ).strip()
+        or f'Employee {row["employee_id"]}',
+    }
+
+
+def _clear_employee_access_owner_recovery():
+    recovery_removed = session.pop(
+        "_employee_access_owner_recovery",
+        None,
+    )
+
+    open_marker_removed = session.pop(
+        "_employee_access_owner_recovery_open_logged",
+        None,
+    )
+
+    if (
+        recovery_removed is not None
+        or open_marker_removed is not None
+    ):
+        session.modified = True
+
+
+def _set_employee_access_owner_recovery(
+    *,
+    spa_id,
+    business_unit_id,
+    session_user_id,
+    owner_user_id,
+):
+    owner = _employee_access_owner_recovery_identity(
+        spa_id=spa_id,
+        business_unit_id=business_unit_id,
+        owner_user_id=owner_user_id,
+    )
+
+    if not owner:
+        raise ValueError(
+            "Owner recovery identity is not authorized."
+        )
+
+    security_session_hash = (
+        _employee_access_security_session_hash(
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            user_id=session_user_id,
+        )
+    )
+
+    session["_employee_access_owner_recovery"] = {
+        "spa_id": int(spa_id),
+        "business_unit_id": int(business_unit_id),
+        "session_user_id": int(session_user_id),
+        "owner_user_id": owner["owner_user_id"],
+        "owner_employee_id": owner["owner_employee_id"],
+        "owner_display_name": owner["owner_display_name"],
+        "issued_at": int(time.time()),
+        "security_session_hash": security_session_hash,
+    }
+    session.modified = True
+
+    return owner
+
+
+def _employee_access_owner_recovery(
+    *,
+    spa_id,
+    business_unit_id,
+    session_user_id,
+):
+    record = session.get(
+        "_employee_access_owner_recovery"
+    )
+
+    if not isinstance(record, dict):
+        return None
+
+    try:
+        spa_id = int(spa_id)
+        business_unit_id = int(business_unit_id)
+        session_user_id = int(session_user_id)
+        owner_user_id = int(record.get("owner_user_id"))
+        owner_employee_id = int(
+            record.get("owner_employee_id")
+        )
+        issued_at = int(record.get("issued_at") or 0)
+    except (TypeError, ValueError):
+        _clear_employee_access_owner_recovery()
+        return None
+
+    expected_security_session_hash = str(
+        record.get("security_session_hash") or ""
+    )
+
+    current_security_session_hash = (
+        _employee_access_security_session_hash(
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            user_id=session_user_id,
+        )
+    )
+
+    age = int(time.time()) - issued_at
+
+    identity_matches = bool(
+        record.get("spa_id") == spa_id
+        and record.get("business_unit_id")
+            == business_unit_id
+        and record.get("session_user_id")
+            == session_user_id
+        and owner_user_id > 0
+        and owner_employee_id > 0
+        and issued_at > 0
+        and 0 <= age
+            <= EMPLOYEE_ACCESS_OWNER_RECOVERY_SECONDS
+        and expected_security_session_hash
+        and secrets.compare_digest(
+            current_security_session_hash,
+            expected_security_session_hash,
+        )
+    )
+
+    if not identity_matches:
+        _clear_employee_access_owner_recovery()
+        return None
+
+    owner = _employee_access_owner_recovery_identity(
+        spa_id=spa_id,
+        business_unit_id=business_unit_id,
+        owner_user_id=owner_user_id,
+    )
+
+    if (
+        not owner
+        or owner["owner_employee_id"]
+            != owner_employee_id
+    ):
+        _clear_employee_access_owner_recovery()
+        return None
+
+    return {
+        "owner_user_id": owner_user_id,
+        "owner_employee_id": owner_employee_id,
+        "owner_display_name": owner[
+            "owner_display_name"
+        ],
+        "issued_at": issued_at,
+    }
+
+
+def _psp_access_settings_owner_authorized(
+    *,
+    spa_id,
+    business_unit_id,
+):
+    """
+    Authorize changes to workspace PSP Access Level requirements.
+
+    Solo Operator:
+        The authenticated workspace user must be organization_admin.
+
+    Other-users mode:
+        The currently verified acting employee must be the active
+        workspace Owner (Employee Role slot 1).
+
+    This check is intentionally separate from PSP Access Level itself.
+    Employee Verification identifies who is acting; the permanent
+    Owner role determines who may configure access requirements.
+    """
+
+    try:
+        spa_id = int(spa_id)
+        business_unit_id = int(business_unit_id)
+    except (TypeError, ValueError):
+        return False
+
+    if spa_id <= 0 or business_unit_id <= 0:
+        return False
+
+    if not _employee_access_required_for_business(spa_id):
+        return (
+            current_business_unit_membership_role_code()
+            == "organization_admin"
+        )
+
+    verification = g.get(
+        "psp_employee_access_verification"
+    )
+
+    if not isinstance(verification, dict):
+        return False
+
+    try:
+        employee_id = int(
+            verification.get("employee_id")
+        )
+    except (TypeError, ValueError):
+        return False
+
+    if employee_id <= 0:
+        return False
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT 1
+            FROM employee_business_unit_memberships ebum
+            JOIN employees e
+              ON e.spa_id = ebum.spa_id
+             AND e.employee_id = ebum.employee_id
+            JOIN employee_roles er
+              ON er.spa_id = e.spa_id
+             AND er.employee_role_id = e.employee_role_id
+            WHERE ebum.spa_id = %s
+              AND ebum.business_unit_id = %s
+              AND ebum.employee_id = %s
+              AND ebum.is_active = TRUE
+              AND e.is_active = TRUE
+              AND er.is_active = TRUE
+              AND er.role_slot = 1
+            LIMIT 1
+            """,
+            (
+                spa_id,
+                business_unit_id,
+                employee_id,
+            ),
+        )
+
+        return bool(cur.fetchone())
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def require_psp_access(area_key):
+    """
+    Require Employee Verification plus the configured hierarchical
+    PSP Access Level for one restricted PSP area.
+
+    Solo Operator businesses bypass Employee Verification and PSP
+    Access Level evaluation. All existing login, spa, workspace,
+    CSRF, and route-specific protections remain separate.
+    """
+
+    from functools import wraps
+
+    area_key = str(area_key or "").strip()
+
+    if area_key not in PSP_ACCESS_AREA_KEYS:
+        raise ValueError(
+            f"Unknown PSP Access Area: {area_key!r}"
+        )
+
+    area_label = PSP_ACCESS_AREA_LABELS[area_key]
+    page_scope = f"psp_access:{area_key}"
+
+    def decorator(view_function):
+
+        @wraps(view_function)
+        def wrapped_view(*args, **kwargs):
+            spa_id = current_spa_id()
+
+            # Business Access Setup is the master switch.
+            # Solo Operator skips this entire employee layer.
+            if not _employee_access_required_for_business(
+                spa_id
+            ):
+                return view_function(*args, **kwargs)
+
+            business_unit_id = current_business_unit_id()
+            user_id = session.get("user_id")
+
+            if (
+                business_unit_id is None
+                or user_id is None
+            ):
+                abort(403)
+
+            return_path = str(
+                request.full_path
+                or request.path
+                or ""
+            ).strip()
+
+            if return_path.endswith("?"):
+                return_path = return_path[:-1]
+
+            return_path = _employee_access_safe_return_path(
+                return_path,
+                fallback=request.path,
+            )
+
+            # Owner Verification Code recovery is intentionally narrow.
+            # It may open only Employee Verification & Access Settings
+            # and may submit only the existing Verification Code
+            # issue/reset action. It is NOT a general Business Security
+            # or PSP Access Level bypass.
+            recovery_endpoint_allowed = bool(
+                area_key == "business_security"
+                and (
+                    (
+                        view_function.__name__
+                        == "employee_access_codes_admin"
+                        and request.method in {"GET", "HEAD"}
+                    )
+                    or (
+                        view_function.__name__
+                        == "employee_access_code_issue"
+                        and request.method == "POST"
+                    )
+                )
+            )
+
+            if recovery_endpoint_allowed:
+                owner_recovery = (
+                    _employee_access_owner_recovery(
+                        spa_id=spa_id,
+                        business_unit_id=business_unit_id,
+                        session_user_id=user_id,
+                    )
+                )
+
+                if owner_recovery:
+                    g.psp_employee_access_owner_recovery = (
+                        owner_recovery
+                    )
+                    return view_function(*args, **kwargs)
+
+            verification = (
+                _employee_access_page_verification(
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    user_id=user_id,
+                    page_scope=page_scope,
+                    page_instance_id="",
+                )
+            )
+
+            if not verification:
+                # A verification challenge may safely begin only from
+                # a read request. Mutation requests must already have
+                # an active verified Employee Access Secure Session;
+                # never attempt to replay a POST after verification.
+                if request.method not in {"GET", "HEAD"}:
+                    abort(403)
+
+                challenge = (
+                    _new_employee_access_page_challenge(
+                        spa_id=spa_id,
+                        business_unit_id=business_unit_id,
+                        user_id=user_id,
+                        page_scope=page_scope,
+                    )
+                )
+
+                return render_template(
+                    "employee_access_verify.html",
+                    page_title=area_label,
+                    page_scope=page_scope,
+                    return_path=return_path,
+                    challenge_token=challenge[
+                        "challenge_token"
+                    ],
+                    page_instance_id=challenge[
+                        "page_instance_id"
+                    ],
+                    security_csrf_token=(
+                        _security_form_csrf_token()
+                    ),
+                )
+
+            # Mark this request as part of the verified Employee
+            # Access Secure Session. base.html uses this marker for
+            # the existing 15-second tab-presence heartbeat.
+            request.environ[
+                "psp_employee_access_secure_page"
+            ] = True
+
+            # Keep verified Employee Access context request-scoped so
+            # protected templates can share the existing verified-employee
+            # banner and End Current Session controls without duplicating
+            # route-level verification logic.
+            g.psp_employee_access_verification = verification
+            g.psp_employee_access_page_scope = page_scope
+            g.psp_employee_access_return_path = return_path
+            g.psp_employee_access_page_instance_id = ""
+
+            authorization = _psp_access_authorization(
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                employee_id=verification[
+                    "employee_id"
+                ],
+                area_key=area_key,
+            )
+
+            if not authorization["allowed"]:
+                return (
+                    render_template(
+                        "psp_access_denied.html",
+                        area_label=area_label,
+                        employee_display_name=(
+                            verification.get(
+                                "display_name"
+                            )
+                            or "Verified employee"
+                        ),
+                        employee_access_level=(
+                            authorization[
+                                "employee_access_level"
+                            ]
+                        ),
+                        required_access_level=(
+                            authorization[
+                                "required_access_level"
+                            ]
+                        ),
+                        security_csrf_token=(
+                            _security_form_csrf_token()
+                        ),
+                    ),
+                    403,
+                )
+
+            return view_function(*args, **kwargs)
+
+        return wrapped_view
+
+    return decorator
+
+
+@app.context_processor
+def inject_psp_employee_access_context():
+    """
+    Expose the current verified employee context to templates rendered
+    from routes protected by require_psp_access().
+    """
+    return {
+        "employee_access_verified": g.get(
+            "psp_employee_access_verification"
+        ),
+        "employee_access_page_scope": g.get(
+            "psp_employee_access_page_scope",
+            "",
+        ),
+        "employee_access_return_path": g.get(
+            "psp_employee_access_return_path",
+            "",
+        ),
+        "employee_access_page_instance_id": g.get(
+            "psp_employee_access_page_instance_id",
+            "",
+        ),
+        "employee_access_security_csrf_token": (
+            _security_form_csrf_token()
+            if g.get("psp_employee_access_verification")
+            else ""
+        ),
+    }
 
 
 def _employee_access_safe_return_path(
@@ -28685,8 +29390,43 @@ def log_audit(
     new_value=None,
     notes=None,
     business_unit_id=None,
-    verified_employee_id=None
+    verified_employee_id=None,
+    use_clock_timestamp=False,
 ):
+    if use_clock_timestamp:
+        cur.execute("""
+            INSERT INTO audit_log (
+                spa_id,
+                user_id,
+                action_type,
+                table_name,
+                record_id,
+                old_value,
+                new_value,
+                notes,
+                business_unit_id,
+                verified_employee_id,
+                created_at
+            )
+            VALUES (
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s,
+                clock_timestamp()
+            )
+        """, (
+            spa_id,
+            user_id,
+            action_type,
+            table_name,
+            record_id,
+            old_value,
+            new_value,
+            notes,
+            business_unit_id,
+            verified_employee_id,
+        ))
+        return
+
     cur.execute("""
         INSERT INTO audit_log (
             spa_id,
@@ -28714,7 +29454,7 @@ def log_audit(
         new_value,
         notes,
         business_unit_id,
-        verified_employee_id
+        verified_employee_id,
     ))
 
 
@@ -29318,6 +30058,63 @@ def require_workspace_permission(permission_name):
         return wrapped_view
 
     return decorator
+
+
+
+def require_employee_verification_settings_permission(
+    view_function
+):
+    """
+    Allow the normal Employee Verification settings permission, or
+    a valid narrow Owner-recovery grant for only the Verification
+    & Access Settings page and Verification Code issue/reset action.
+    """
+
+    from functools import wraps
+
+    @wraps(view_function)
+    def wrapped_view(*args, **kwargs):
+        access = current_workspace_access()
+
+        if access.get(
+            "can_manage_employee_access_codes",
+            False,
+        ):
+            return view_function(*args, **kwargs)
+
+        recovery_endpoint_allowed = bool(
+            (
+                view_function.__name__
+                == "employee_access_codes_admin"
+                and request.method in {"GET", "HEAD"}
+            )
+            or (
+                view_function.__name__
+                == "employee_access_code_issue"
+                and request.method == "POST"
+            )
+        )
+
+        if recovery_endpoint_allowed:
+            spa_id = current_spa_id()
+            business_unit_id = current_business_unit_id()
+            session_user_id = session.get("user_id")
+
+            if (
+                spa_id is not None
+                and business_unit_id is not None
+                and session_user_id is not None
+                and _employee_access_owner_recovery(
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    session_user_id=session_user_id,
+                )
+            ):
+                return view_function(*args, **kwargs)
+
+        abort(403)
+
+    return wrapped_view
 
 
 
@@ -30818,7 +31615,8 @@ DROPDOWN_CONFIG = {
         "label": "Role Name",
         "spa_scoped": True,
         "active_column": "is_active",
-        "order_by": "display_order, role_name"
+        "order_by": "display_order, role_name",
+        "fixed_role_slots": True
     },
 
 
@@ -31070,6 +31868,271 @@ def current_dropdown_spa_id():
     return current_spa_id()
 
 
+def _manage_employee_role_slots(spa_id, config):
+    """
+    Manage the five stable Employee Role slots for one business.
+
+    Slot 1 is permanently Owner.
+    Slots 2-5 are optional business-defined role names.
+
+    Employee Role does not determine PSP Access Level.
+    """
+
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    try:
+        # Slot 1 is a permanent PSP-required role.
+        cur.execute("""
+            SELECT employee_role_id
+            FROM employee_roles
+            WHERE spa_id = %s
+              AND role_slot = 1
+            LIMIT 1
+        """, (spa_id,))
+
+        owner_role = cur.fetchone()
+
+        if owner_role:
+            cur.execute("""
+                UPDATE employee_roles
+                SET role_name = 'Owner',
+                    is_active = TRUE,
+                    display_order = 10
+                WHERE spa_id = %s
+                  AND role_slot = 1
+            """, (spa_id,))
+        else:
+            cur.execute("""
+                INSERT INTO employee_roles (
+                    spa_id,
+                    role_name,
+                    is_active,
+                    display_order,
+                    role_slot
+                )
+                VALUES (%s, 'Owner', TRUE, 10, 1)
+            """, (spa_id,))
+
+        if request.method == "POST":
+            submitted_roles = {}
+
+            for slot in range(2, 6):
+                submitted_roles[slot] = (
+                    request.form.get(
+                        f"role_slot_{slot}",
+                        "",
+                    ).strip()
+                )
+
+            # Prevent duplicate active role names, including Owner.
+            normalized_names = {"owner"}
+
+            for slot in range(2, 6):
+                role_name = submitted_roles[slot]
+
+                if not role_name:
+                    continue
+
+                normalized = role_name.casefold()
+
+                if normalized in normalized_names:
+                    conn.rollback()
+                    flash(
+                        "Each Employee Role must have a unique name.",
+                        "error",
+                    )
+                    return redirect(
+                        url_for(
+                            "manage_dropdown",
+                            dropdown_key="employee_roles",
+                        )
+                    )
+
+                normalized_names.add(normalized)
+
+            cur.execute("""
+                SELECT
+                    employee_role_id,
+                    role_slot,
+                    role_name,
+                    is_active
+                FROM employee_roles
+                WHERE spa_id = %s
+                  AND role_slot BETWEEN 2 AND 5
+                ORDER BY role_slot
+                FOR UPDATE
+            """, (spa_id,))
+
+            existing_by_slot = {
+                int(row["role_slot"]): row
+                for row in cur.fetchall()
+            }
+
+            for slot in range(2, 6):
+                role_name = submitted_roles[slot]
+                existing = existing_by_slot.get(slot)
+
+                if role_name:
+                    if existing:
+                        cur.execute("""
+                            UPDATE employee_roles
+                            SET role_name = %s,
+                                is_active = TRUE,
+                                display_order = %s
+                            WHERE spa_id = %s
+                              AND employee_role_id = %s
+                              AND role_slot = %s
+                        """, (
+                            role_name,
+                            slot * 10,
+                            spa_id,
+                            existing["employee_role_id"],
+                            slot,
+                        ))
+                    else:
+                        cur.execute("""
+                            INSERT INTO employee_roles (
+                                spa_id,
+                                role_name,
+                                is_active,
+                                display_order,
+                                role_slot
+                            )
+                            VALUES (%s, %s, TRUE, %s, %s)
+                        """, (
+                            spa_id,
+                            role_name,
+                            slot * 10,
+                            slot,
+                        ))
+
+                    continue
+
+                if not existing or not existing["is_active"]:
+                    continue
+
+                cur.execute("""
+                    SELECT 1
+                    FROM employees
+                    WHERE spa_id = %s
+                      AND employee_role_id = %s
+                      AND is_active = TRUE
+                    LIMIT 1
+                """, (
+                    spa_id,
+                    existing["employee_role_id"],
+                ))
+
+                if cur.fetchone():
+                    conn.rollback()
+                    flash(
+                        (
+                            f"Role {slot} cannot be cleared while an "
+                            "active employee is assigned to it. "
+                            "Reassign the employee first."
+                        ),
+                        "error",
+                    )
+                    return redirect(
+                        url_for(
+                            "manage_dropdown",
+                            dropdown_key="employee_roles",
+                        )
+                    )
+
+                cur.execute("""
+                    UPDATE employee_roles
+                    SET is_active = FALSE
+                    WHERE spa_id = %s
+                      AND employee_role_id = %s
+                      AND role_slot = %s
+                """, (
+                    spa_id,
+                    existing["employee_role_id"],
+                    slot,
+                ))
+
+            conn.commit()
+
+            flash(
+                "Employee Roles updated successfully.",
+                "success",
+            )
+
+            return redirect(
+                url_for(
+                    "manage_dropdown",
+                    dropdown_key="employee_roles",
+                )
+            )
+
+        conn.commit()
+
+        cur.execute("""
+            SELECT
+                employee_role_id,
+                role_slot,
+                role_name,
+                is_active
+            FROM employee_roles
+            WHERE spa_id = %s
+              AND role_slot BETWEEN 1 AND 5
+            ORDER BY role_slot
+        """, (spa_id,))
+
+        role_rows = cur.fetchall()
+
+        roles_by_slot = {
+            int(row["role_slot"]): row
+            for row in role_rows
+        }
+
+        role_slots = []
+
+        for slot in range(1, 6):
+            row = roles_by_slot.get(slot)
+
+            role_slots.append({
+                "slot": slot,
+                "role_name": (
+                    "Owner"
+                    if slot == 1
+                    else (
+                        row["role_name"]
+                        if row and row["is_active"]
+                        else ""
+                    )
+                ),
+                "fixed": slot == 1,
+            })
+
+        return render_template(
+            "employee_role_slots.html",
+            config=config,
+            role_slots=role_slots,
+        )
+
+    except IntegrityError:
+        conn.rollback()
+
+        flash(
+            "Employee Roles could not be saved because one or more role names conflict.",
+            "error",
+        )
+
+        return redirect(
+            url_for(
+                "manage_dropdown",
+                dropdown_key="employee_roles",
+            )
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
 @app.route("/dropdowns/<dropdown_key>", methods=["GET", "POST"])
 @login_required
 @spa_required
@@ -31095,6 +32158,12 @@ def manage_dropdown(dropdown_key):
     extra_col = config.get("extra_value")
     active_col = config.get("active_column")
     spa_scoped = config.get("spa_scoped", True)
+
+    if config.get("fixed_role_slots"):
+        return _manage_employee_role_slots(
+            spa_id=spa_id,
+            config=config,
+        )
 
     conn = None
     cur = None
@@ -47849,6 +48918,7 @@ def privacy():
 @app.route("/finance_home")
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 
 def finance_home():
     return render_template("finance_home.html")
@@ -58400,6 +59470,7 @@ def add_spa():
 @login_required
 @spa_required
 @require_workspace_permission("can_manage_users")
+@require_psp_access("business_users")
 def business_users():
     # Business User Management is tenant/workspace-only.
     # Master Admin is deliberately outside this workflow.
@@ -58524,6 +59595,7 @@ def business_users():
 @login_required
 @spa_required
 @require_workspace_permission("can_manage_users")
+@require_psp_access("business_users")
 def add_user():
     # Business User Management is tenant/workspace-only.
     # Master Admin is deliberately outside this workflow.
@@ -58955,6 +60027,7 @@ def add_user():
 @login_required
 @spa_required
 @require_workspace_permission("can_manage_users")
+@require_psp_access("business_users")
 def edit_business_user(target_user_id):
     # Business User Management is tenant/workspace-only.
     # Master Admin is deliberately outside this workflow.
@@ -70188,6 +71261,7 @@ def disable_messaging_template(template_id):
 @app.route("/spa-management/business-goals", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_psp_access("business_goals")
 def business_goals():
     spa_id = current_spa_id()
 
@@ -72986,6 +74060,7 @@ def deactivate_inventory_product(product_id):
 @app.route("/loan_contributions/export/csv")
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def export_loan_contributions_csv():
     spa_id = current_spa_id()
 
@@ -73042,6 +74117,7 @@ def export_loan_contributions_csv():
 @app.route("/loan_contributions/export/excel")
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def export_loan_contributions_excel():
     spa_id = current_spa_id()
 
@@ -73135,6 +74211,7 @@ def export_loan_contributions_excel():
 @app.route("/funding")
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def funding_home():
     spa_id = current_spa_id()
     conn = get_db_connection()
@@ -73208,6 +74285,7 @@ def funding_home():
 @app.route("/owner_contributions/add", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def add_owner_contribution():
     spa_id = current_spa_id()
 
@@ -73260,6 +74338,7 @@ def add_owner_contribution():
 @app.route("/owner_reimbursements/add", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def add_owner_reimbursement():
     spa_id = current_spa_id()
 
@@ -73323,6 +74402,7 @@ def add_owner_reimbursement():
 @app.route("/loans")
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def loans_home():
     spa_id = current_spa_id()
     conn = get_db_connection()
@@ -73412,6 +74492,7 @@ def loans_home():
 @app.route("/business_loans/add", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def add_business_loan():
     spa_id = current_spa_id()
 
@@ -73478,6 +74559,7 @@ def add_business_loan():
 @app.route("/loan_payments/add", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def add_loan_payment():
     spa_id = current_spa_id()
     conn = get_db_connection()
@@ -73572,6 +74654,7 @@ def add_loan_payment():
 @app.route("/owner_contributions/edit/<int:owner_contribution_id>", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def edit_owner_contribution(owner_contribution_id):
     spa_id = current_spa_id()
     conn = get_db_connection()
@@ -73659,6 +74742,7 @@ def edit_owner_contribution(owner_contribution_id):
 @app.route("/owner_contributions/delete/<int:owner_contribution_id>", methods=["POST"])
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def delete_owner_contribution(owner_contribution_id):
     spa_id = current_spa_id()
     conn = get_db_connection()
@@ -73702,6 +74786,7 @@ def delete_owner_contribution(owner_contribution_id):
 @app.route("/owner_reimbursements/edit/<int:owner_reimbursement_id>", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def edit_owner_reimbursement(owner_reimbursement_id):
     spa_id = current_spa_id()
     conn = get_db_connection()
@@ -73787,6 +74872,7 @@ def edit_owner_reimbursement(owner_reimbursement_id):
 @app.route("/owner_reimbursements/delete/<int:owner_reimbursement_id>", methods=["POST"])
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def delete_owner_reimbursement(owner_reimbursement_id):
     spa_id = current_spa_id()
     conn = get_db_connection()
@@ -73827,6 +74913,7 @@ def delete_owner_reimbursement(owner_reimbursement_id):
 @app.route("/business_loans/edit/<int:loan_id>", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def edit_business_loan(loan_id):
     spa_id = current_spa_id()
     conn = get_db_connection()
@@ -73927,6 +75014,7 @@ def edit_business_loan(loan_id):
 @app.route("/business_loans/delete/<int:loan_id>", methods=["POST"])
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def delete_business_loan(loan_id):
     spa_id = current_spa_id()
     conn = get_db_connection()
@@ -74324,6 +75412,7 @@ def schedule_appointment_start():
 @app.route("/income")
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def income_home():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -76360,6 +77449,7 @@ def employee_pay_summary():
 @login_required
 @spa_required
 @require_workspace_permission("can_manage_employee_compensation")
+@require_psp_access("employees_compensation")
 def add_employee_compensation():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -76371,64 +77461,21 @@ def add_employee_compensation():
     ):
         abort(403)
 
-    page_scope = "add_employee_compensation"
-
-    page_instance_id = str(
-        request.values.get(
-            "employee_access_page_instance",
-            "",
-        )
-        or ""
-    ).strip()
-
-    return_path = url_for(
-        "add_employee_compensation"
+    verification = g.get(
+        "psp_employee_access_verification"
     )
-
-    employee_access_required = (
-        _employee_access_required_for_business(
-            spa_id
-        )
+    page_scope = g.get(
+        "psp_employee_access_page_scope",
+        "",
     )
-
-    verification = None
-
-    if employee_access_required:
-        verification = (
-            _employee_access_page_verification(
-                spa_id=spa_id,
-                business_unit_id=business_unit_id,
-                user_id=user_id,
-                page_scope=page_scope,
-                page_instance_id=page_instance_id,
-            )
-        )
-
-        if not verification:
-            challenge = (
-                _new_employee_access_page_challenge(
-                    spa_id=spa_id,
-                    business_unit_id=business_unit_id,
-                    user_id=user_id,
-                    page_scope=page_scope,
-                )
-            )
-
-            return render_template(
-                "employee_access_verify.html",
-                page_title="Add Employee Compensation",
-                page_scope=page_scope,
-                return_path=return_path,
-                challenge_token=challenge[
-                    "challenge_token"
-                ],
-                page_instance_id=challenge[
-                    "page_instance_id"
-                ],
-                security_csrf_token=(
-                    _security_form_csrf_token()
-                ),
-            )
+    return_path = g.get(
+        "psp_employee_access_return_path",
+        "",
+    )
+    page_instance_id = g.get(
+        "psp_employee_access_page_instance_id",
+        "",
+    )
 
     if request.method == "POST":
         submitted_csrf = request.form.get(
@@ -76795,7 +77842,7 @@ def employee_access_verify():
 
     if status == "locked":
         flash(
-            "Employee Access is temporarily locked after "
+            "Employee Verification is temporarily locked after "
             "too many unsuccessful verification attempts. "
             f"Please try again in "
             f"{EMPLOYEE_ACCESS_FAILURE_LOCK_MINUTES} minutes.",
@@ -76804,7 +77851,7 @@ def employee_access_verify():
 
     elif status == "unavailable":
         flash(
-            "Employee Access Codes are not available for "
+            "Employee Verification Codes are not available for "
             "this Provider Workspace. Please contact a "
             "Business Administrator.",
             "error",
@@ -76812,7 +77859,7 @@ def employee_access_verify():
 
     else:
         flash(
-            "Employee Access Code not recognized. "
+            "Employee Verification Code not recognized. "
             "Please try again.",
             "error",
         )
@@ -76873,14 +77920,445 @@ def employee_access_end():
 
 
 @app.route(
+    "/employee-access/owner-recovery",
+    methods=["GET", "POST"],
+)
+@login_required
+@spa_required
+def employee_access_owner_recovery_login():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    session_user_id = session.get("user_id")
+
+    if (
+        spa_id is None
+        or business_unit_id is None
+        or session_user_id is None
+    ):
+        abort(403)
+
+    recovery_csrf_purpose = (
+        "employee_access_owner_recovery:"
+        f"{int(spa_id)}:"
+        f"{int(business_unit_id)}:"
+        f"{int(session_user_id)}"
+    )
+
+    if request.method == "GET":
+        return _mfa_no_store(
+            render_template(
+                "employee_access_owner_recovery.html",
+                security_csrf_token=(
+                    _public_security_csrf_token(
+                        recovery_csrf_purpose
+                    )
+                ),
+            )
+        )
+
+    submitted_csrf = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _public_security_csrf_valid(
+        submitted_csrf,
+        recovery_csrf_purpose,
+    ):
+        abort(400)
+
+    # A failed new recovery attempt must never leave an older
+    # Owner Recovery grant active in this browser session.
+    _clear_employee_access_owner_recovery()
+
+    email = str(
+        request.form.get("email", "")
+        or ""
+    ).strip().lower()
+
+    password = request.form.get(
+        "password",
+        "",
+    )
+
+    generic_error = (
+        "Owner credentials could not be verified for "
+        "Employee Verification Code recovery."
+    )
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    authenticated_user = None
+    newly_locked = False
+    failure_reason = None
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                user_id,
+                spa_id,
+                password_hash,
+                login_locked_until,
+                NOW() AS login_now
+            FROM users
+            WHERE LOWER(email) = %s
+              AND spa_id = %s
+              AND active = TRUE
+            LIMIT 1
+            """,
+            (
+                email,
+                spa_id,
+            ),
+        )
+
+        authenticated_user = cur.fetchone()
+
+        if not authenticated_user:
+            failure_reason = "account_not_found"
+
+            log_audit(
+                cur,
+                spa_id=spa_id,
+                user_id=session_user_id,
+                action_type=(
+                    "employee_access_owner_recovery_auth_failed"
+                ),
+                table_name="users",
+                notes=(
+                    "Owner Recovery authentication failed for "
+                    "Employee Verification Code recovery. "
+                    "The submitted credentials did not identify "
+                    "an active PSP user in the current business. "
+                    "Password was not logged."
+                ),
+                business_unit_id=business_unit_id,
+            )
+
+            conn.commit()
+
+        else:
+            owner_user_id = int(
+                authenticated_user["user_id"]
+            )
+
+            login_locked_until = authenticated_user[
+                "login_locked_until"
+            ]
+            login_now = authenticated_user["login_now"]
+
+            if (
+                login_locked_until is not None
+                and login_locked_until > login_now
+            ):
+                failure_reason = "account_locked"
+
+                log_audit(
+                    cur,
+                    spa_id=spa_id,
+                    user_id=session_user_id,
+                    action_type=(
+                        "employee_access_owner_recovery_auth_failed"
+                    ),
+                    table_name="users",
+                    record_id=owner_user_id,
+                    notes=(
+                        "Owner Recovery authentication was "
+                        "blocked because the submitted PSP "
+                        "user account is temporarily locked. "
+                        "Password was not logged."
+                    ),
+                    business_unit_id=business_unit_id,
+                )
+
+                conn.commit()
+
+            elif not check_password_hash(
+                authenticated_user["password_hash"],
+                password,
+            ):
+                failure_reason = "invalid_password"
+
+                failure_cur = conn.cursor()
+
+                try:
+                    newly_locked = (
+                        _record_failed_business_login(
+                            failure_cur,
+                            owner_user_id,
+                            spa_id,
+                            factor="password",
+                        )
+                    )
+                finally:
+                    failure_cur.close()
+
+                log_audit(
+                    cur,
+                    spa_id=spa_id,
+                    user_id=session_user_id,
+                    action_type=(
+                        "employee_access_owner_recovery_auth_failed"
+                    ),
+                    table_name="users",
+                    record_id=owner_user_id,
+                    notes=(
+                        "Owner Recovery authentication failed "
+                        "because the submitted PSP password "
+                        "was invalid. Password was not logged."
+                    ),
+                    business_unit_id=business_unit_id,
+                )
+
+                conn.commit()
+
+            else:
+                owner_identity = (
+                    _employee_access_owner_recovery_identity(
+                        spa_id=spa_id,
+                        business_unit_id=business_unit_id,
+                        owner_user_id=owner_user_id,
+                    )
+                )
+
+                if not owner_identity:
+                    failure_reason = "not_authorized_owner"
+
+                    log_audit(
+                        cur,
+                        spa_id=spa_id,
+                        user_id=session_user_id,
+                        action_type=(
+                            "employee_access_owner_recovery_auth_failed"
+                        ),
+                        table_name="users",
+                        record_id=owner_user_id,
+                        notes=(
+                            "Owner Recovery authentication failed. "
+                            "The PSP credentials were valid, but "
+                            "the PSP user is not currently linked "
+                            "to an active Employee Role 1 Owner "
+                            "in this Provider Workspace. "
+                            "Password was not logged."
+                        ),
+                        business_unit_id=business_unit_id,
+                    )
+
+                    conn.commit()
+
+                else:
+                    _clear_failed_business_login_state(
+                        cur,
+                        owner_user_id,
+                    )
+
+                    conn.commit()
+
+    except Exception:
+        conn.rollback()
+
+        app.logger.exception(
+            "Owner Recovery credential verification failed "
+            "for spa_id=%s, business_unit_id=%s, "
+            "session_user_id=%s",
+            spa_id,
+            business_unit_id,
+            session_user_id,
+        )
+
+        log_security(
+            "Owner Recovery credential verification "
+            "encountered an internal error.",
+            severity="ERROR",
+            spa_id=spa_id,
+            related_type=(
+                "employee_access_owner_recovery"
+            ),
+            related_id=session_user_id,
+            created_by=session_user_id,
+        )
+
+        flash(
+            "Peach Suite Pro could not complete Owner "
+            "Recovery. Please try again.",
+            "error",
+        )
+
+        return redirect(
+            url_for(
+                "employee_access_owner_recovery_login"
+            )
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if failure_reason is not None:
+        severity = (
+            "ALERT"
+            if (
+                failure_reason == "account_locked"
+                or newly_locked
+            )
+            else "WARNING"
+        )
+
+        related_id = (
+            int(authenticated_user["user_id"])
+            if authenticated_user
+            else session_user_id
+        )
+
+        log_security(
+            "Owner Recovery authentication failed for "
+            "Employee Verification Code recovery. "
+            f"Reason={failure_reason}.",
+            severity=severity,
+            spa_id=spa_id,
+            related_type=(
+                "employee_access_owner_recovery"
+            ),
+            related_id=related_id,
+            created_by=session_user_id,
+        )
+
+        flash(
+            generic_error,
+            "error",
+        )
+
+        return redirect(
+            url_for(
+                "employee_access_owner_recovery_login"
+            )
+        )
+
+    owner_user_id = int(
+        authenticated_user["user_id"]
+    )
+
+    try:
+        owner_identity = (
+            _set_employee_access_owner_recovery(
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                session_user_id=session_user_id,
+                owner_user_id=owner_user_id,
+            )
+        )
+
+        # The recovery grant is not allowed to survive unless
+        # its successful issuance is also durably audit logged.
+        audit_conn = get_db_connection()
+        audit_conn.autocommit = False
+        audit_cur = audit_conn.cursor()
+
+        try:
+            log_audit(
+                audit_cur,
+                spa_id=spa_id,
+                user_id=session_user_id,
+                action_type=(
+                    "employee_access_owner_recovery_auth_succeeded"
+                ),
+                table_name="users",
+                record_id=owner_user_id,
+                notes=(
+                    "Owner Recovery authentication succeeded "
+                    "for Employee Verification Code recovery. "
+                    f"Authenticated Owner PSP user_id="
+                    f"{owner_user_id}; current session "
+                    f"user_id={session_user_id}. "
+                    "Recovery authorization is limited to "
+                    "Employee Verification & Access Settings "
+                    "and Verification Code generate/reset "
+                    "actions. Password was not logged."
+                ),
+                business_unit_id=business_unit_id,
+                verified_employee_id=owner_identity[
+                    "owner_employee_id"
+                ],
+            )
+
+            audit_conn.commit()
+
+        except Exception:
+            audit_conn.rollback()
+            _clear_employee_access_owner_recovery()
+            raise
+
+        finally:
+            audit_cur.close()
+            audit_conn.close()
+
+    except Exception:
+        _clear_employee_access_owner_recovery()
+
+        app.logger.exception(
+            "Owner Recovery grant creation failed for "
+            "spa_id=%s, business_unit_id=%s, "
+            "session_user_id=%s, owner_user_id=%s",
+            spa_id,
+            business_unit_id,
+            session_user_id,
+            owner_user_id,
+        )
+
+        log_security(
+            "Owner Recovery authorization could not be "
+            "issued after credential verification.",
+            severity="ERROR",
+            spa_id=spa_id,
+            related_type=(
+                "employee_access_owner_recovery"
+            ),
+            related_id=owner_user_id,
+            created_by=session_user_id,
+        )
+
+        flash(
+            "Peach Suite Pro could not complete Owner "
+            "Recovery. Please try again.",
+            "error",
+        )
+
+        return redirect(
+            url_for(
+                "employee_access_owner_recovery_login"
+            )
+        )
+
+    log_security(
+        "Owner Recovery authentication succeeded for "
+        "Employee Verification Code recovery. "
+        f"Authenticated Owner employee_id="
+        f"{owner_identity['owner_employee_id']}; "
+        f"Owner PSP user_id={owner_user_id}; "
+        f"current session user_id={session_user_id}.",
+        severity="INFO",
+        spa_id=spa_id,
+        related_type="employee_access_owner_recovery",
+        related_id=owner_user_id,
+        created_by=session_user_id,
+    )
+
+    return redirect(
+        url_for("employee_access_codes_admin")
+    )
+
+
+@app.route(
     "/employee-access-codes",
     methods=["GET", "POST"],
 )
 @login_required
 @spa_required
-@require_workspace_permission(
-    "can_manage_employee_access_codes"
-)
+@require_employee_verification_settings_permission
+@require_psp_access("business_security")
 def employee_access_codes_admin():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -76891,6 +78369,95 @@ def employee_access_codes_admin():
         or user_id is None
     ):
         abort(403)
+
+    owner_recovery = g.get(
+        "psp_employee_access_owner_recovery"
+    )
+
+    if (
+        request.method == "GET"
+        and isinstance(owner_recovery, dict)
+    ):
+        recovery_open_marker = session.get(
+            "_employee_access_owner_recovery_open_logged"
+        )
+
+        expected_open_marker = {
+            "spa_id": int(spa_id),
+            "business_unit_id": int(business_unit_id),
+            "session_user_id": int(user_id),
+            "owner_user_id": int(
+                owner_recovery["owner_user_id"]
+            ),
+            "owner_employee_id": int(
+                owner_recovery["owner_employee_id"]
+            ),
+            "issued_at": int(
+                owner_recovery["issued_at"]
+            ),
+        }
+
+        if recovery_open_marker != expected_open_marker:
+            audit_conn = get_db_connection()
+            audit_conn.autocommit = False
+            audit_cur = audit_conn.cursor()
+
+            try:
+                log_audit(
+                    audit_cur,
+                    spa_id=spa_id,
+                    user_id=user_id,
+                    action_type=(
+                        "employee_access_owner_recovery_settings_opened"
+                    ),
+                    table_name="business_unit_memberships",
+                    record_id=business_unit_id,
+                    notes=(
+                        "Employee Verification & Access Settings "
+                        "opened using Owner Recovery. "
+                        f"Authenticated Owner PSP user_id="
+                        f"{owner_recovery['owner_user_id']}; "
+                        f"current session user_id={user_id}."
+                    ),
+                    business_unit_id=business_unit_id,
+                    verified_employee_id=owner_recovery[
+                        "owner_employee_id"
+                    ],
+                )
+
+                audit_conn.commit()
+
+            except Exception:
+                audit_conn.rollback()
+                raise
+
+            finally:
+                audit_cur.close()
+                audit_conn.close()
+
+            log_security(
+                "Employee Verification & Access Settings opened "
+                "using Owner Recovery. "
+                f"Authenticated Owner employee_id="
+                f"{owner_recovery['owner_employee_id']}; "
+                f"Owner PSP user_id="
+                f"{owner_recovery['owner_user_id']}; "
+                f"current session user_id={user_id}.",
+                severity="INFO",
+                spa_id=spa_id,
+                related_type=(
+                    "employee_access_owner_recovery"
+                ),
+                related_id=owner_recovery[
+                    "owner_user_id"
+                ],
+                created_by=user_id,
+            )
+
+            session[
+                "_employee_access_owner_recovery_open_logged"
+            ] = expected_open_marker
+            session.modified = True
 
     if request.method == "POST":
         submitted_token = request.form.get(
@@ -76903,8 +78470,30 @@ def employee_access_codes_admin():
         ):
             abort(400)
 
+        requested_business_access_mode = str(
+            request.form.get(
+                "business_access_mode",
+                "",
+            )
+            or ""
+        ).strip().lower()
+
+        if requested_business_access_mode not in {
+            "solo",
+            "other_users",
+        }:
+            flash(
+                "Please select Solo Operator or "
+                "Other users will have access.",
+                "error",
+            )
+
+            return redirect(
+                url_for("employee_access_codes_admin")
+            )
+
         requested_is_enabled = (
-            request.form.get("is_enabled") == "1"
+            requested_business_access_mode == "other_users"
         )
 
         try:
@@ -76947,6 +78536,36 @@ def employee_access_codes_admin():
         if not workspace:
             abort(403)
 
+        cur.execute(
+            """
+            SELECT
+                s.organization_type_id,
+                ot.type_code
+            FROM spas s
+            LEFT JOIN organization_types ot
+              ON ot.organization_type_id =
+                    s.organization_type_id
+            WHERE s.spa_id = %s
+            LIMIT 1
+            """,
+            (spa_id,),
+        )
+
+        organization_row = cur.fetchone()
+
+        if not organization_row:
+            abort(403)
+
+        organization_type_code = str(
+            organization_row["type_code"] or ""
+        ).strip().lower()
+
+        business_access_mode = (
+            "solo"
+            if organization_type_code == "solo_owner"
+            else "other_users"
+        )
+
         if request.method == "POST":
             cur.execute("""
                 SELECT
@@ -76967,10 +78586,20 @@ def employee_access_codes_admin():
 
             cur.execute("""
                 SELECT COUNT(*) AS active_count
-                FROM employee_access_code_credentials
-                WHERE spa_id = %s
-                  AND business_unit_id = %s
-                  AND is_active = TRUE
+                FROM employee_access_code_credentials eacc
+                JOIN employee_business_unit_memberships ebum
+                  ON ebum.spa_id = eacc.spa_id
+                 AND ebum.business_unit_id =
+                        eacc.business_unit_id
+                 AND ebum.employee_id = eacc.employee_id
+                 AND ebum.is_active = TRUE
+                JOIN employees e
+                  ON e.spa_id = eacc.spa_id
+                 AND e.employee_id = eacc.employee_id
+                 AND e.is_active = TRUE
+                WHERE eacc.spa_id = %s
+                  AND eacc.business_unit_id = %s
+                  AND eacc.is_active = TRUE
             """, (
                 spa_id,
                 business_unit_id,
@@ -76979,6 +78608,110 @@ def employee_access_codes_admin():
             active_credential_count = int(
                 cur.fetchone()["active_count"] or 0
             )
+
+            if (
+                requested_is_enabled
+                and active_credential_count < 1
+            ):
+                conn.rollback()
+
+                flash(
+                    "Assign an Employee Verification Code to at least "
+                    "one active employee in this Provider Workspace "
+                    "before enabling Employee Verification Codes.",
+                    "error",
+                )
+
+                return redirect(
+                    url_for("employee_access_codes_admin")
+                )
+
+            if (
+                existing_settings
+                and existing_settings["is_enabled"]
+                and not requested_is_enabled
+                and current_business_unit_membership_role_code()
+                    != "organization_admin"
+            ):
+                conn.rollback()
+                abort(403)
+
+            target_organization_type_code = (
+                "solo_owner"
+                if requested_business_access_mode == "solo"
+                else (
+                    organization_type_code
+                    if organization_type_code in {
+                        "employees",
+                        "independent_providers",
+                        "mixed_team",
+                    }
+                    else "employees"
+                )
+            )
+
+            if (
+                target_organization_type_code
+                != organization_type_code
+            ):
+                cur.execute(
+                    """
+                    SELECT organization_type_id
+                    FROM organization_types
+                    WHERE type_code = %s
+                    LIMIT 1
+                    """,
+                    (target_organization_type_code,),
+                )
+
+                target_type_row = cur.fetchone()
+
+                if not target_type_row:
+                    raise RuntimeError(
+                        "Required organization type is unavailable."
+                    )
+
+                cur.execute(
+                    """
+                    UPDATE spas
+                    SET organization_type_id = %s
+                    WHERE spa_id = %s
+                    """,
+                    (
+                        target_type_row[
+                            "organization_type_id"
+                        ],
+                        spa_id,
+                    ),
+                )
+
+                log_audit(
+                    cur,
+                    spa_id=spa_id,
+                    user_id=user_id,
+                    action_type="business_access_mode_updated",
+                    table_name="spas",
+                    record_id=spa_id,
+                    old_value=organization_type_code or "unknown",
+                    new_value=target_organization_type_code,
+                    notes=(
+                        "Business Access Setup updated from "
+                        f"{organization_type_code or 'unknown'} "
+                        "to "
+                        f"{target_organization_type_code}."
+                    ),
+                    business_unit_id=business_unit_id,
+                )
+
+                organization_type_code = (
+                    target_organization_type_code
+                )
+
+                business_access_mode = (
+                    "solo"
+                    if organization_type_code == "solo_owner"
+                    else "other_users"
+                )
 
             old_code_length = (
                 existing_settings["code_length"]
@@ -77009,8 +78742,8 @@ def employee_access_codes_admin():
                 conn.rollback()
 
                 flash(
-                    "The Employee Access Code format cannot "
-                    "be changed while active employee codes "
+                    "The Employee Verification Code format cannot "
+                    "be changed while active verification codes "
                     "are assigned. Reset or revoke the active "
                     "codes first.",
                     "error",
@@ -77119,7 +78852,7 @@ def employee_access_codes_admin():
                 old_value=old_value,
                 new_value=new_value,
                 notes=(
-                    "Employee Access Code settings updated "
+                    "Employee Verification Code settings updated "
                     f"for Provider Workspace "
                     f"{workspace['unit_name']}."
                 ),
@@ -77129,7 +78862,7 @@ def employee_access_codes_admin():
             conn.commit()
 
             flash(
-                "Employee Access Code settings saved.",
+                "Employee Verification Code settings saved.",
                 "success",
             )
 
@@ -77173,14 +78906,69 @@ def employee_access_codes_admin():
                 ),
             })
 
+        cur.execute(
+            """
+            SELECT
+                psp_access_area_setting_id,
+                area_key,
+                required_access_level
+            FROM psp_access_area_settings
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+            """,
+            (
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        psp_access_rows = cur.fetchall()
+
+        psp_access_by_key = {
+            row["area_key"]: row
+            for row in psp_access_rows
+        }
+
+        if set(psp_access_by_key) != set(
+            PSP_ACCESS_AREA_KEYS
+        ):
+            raise RuntimeError(
+                "PSP Access Area settings are incomplete "
+                "for this workspace."
+            )
+
+        psp_access_levels = []
+
+        for area_key, area_label in (
+            PSP_ACCESS_AREA_LABELS.items()
+        ):
+            row = psp_access_by_key[area_key]
+
+            psp_access_levels.append({
+                "area_key": area_key,
+                "area_label": area_label,
+                "required_access_level": int(
+                    row["required_access_level"]
+                ),
+            })
+
+        can_manage_psp_access_levels = (
+            _psp_access_settings_owner_authorized(
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+            )
+        )
+
         cur.execute("""
             SELECT
                 e.employee_id,
                 e.first_name,
                 e.last_name,
                 e.employee_nickname,
+                er.role_name AS employee_role_name,
                 e.is_active AS employee_is_active,
                 ebum.is_active AS workspace_membership_is_active,
+                ebum.access_level AS psp_access_level,
                 eacc.employee_access_code_credential_id,
                 eacc.created_at AS credential_created_at,
                 eacc.last_used_at
@@ -77188,6 +78976,9 @@ def employee_access_codes_admin():
             JOIN employees e
               ON e.spa_id = ebum.spa_id
              AND e.employee_id = ebum.employee_id
+            LEFT JOIN employee_roles er
+              ON er.employee_role_id = e.employee_role_id
+             AND er.spa_id = e.spa_id
             LEFT JOIN employee_access_code_credentials eacc
               ON eacc.spa_id = ebum.spa_id
              AND eacc.business_unit_id = ebum.business_unit_id
@@ -77228,13 +79019,252 @@ def employee_access_codes_admin():
         "issued_at": int(time.time()),
     }
 
+    owner_recovery = g.get(
+        "psp_employee_access_owner_recovery"
+    )
+
     return render_template(
         "employee_access_codes.html",
         workspace=workspace,
         settings=settings,
+        business_access_mode=business_access_mode,
         employees=employees,
+        psp_access_levels=psp_access_levels,
+        can_manage_psp_access_levels=(
+            can_manage_psp_access_levels
+        ),
+        owner_recovery_mode=isinstance(
+            owner_recovery,
+            dict,
+        ),
+        owner_recovery=owner_recovery,
         security_csrf_token=_security_form_csrf_token(),
         action_nonce=action_nonce,
+    )
+
+
+
+@app.route(
+    "/employee-access-codes/psp-access-levels",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_employee_access_codes"
+)
+@require_psp_access("business_security")
+def save_psp_access_levels():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if (
+        spa_id is None
+        or business_unit_id is None
+        or user_id is None
+    ):
+        abort(403)
+
+    if not _psp_access_settings_owner_authorized(
+        spa_id=spa_id,
+        business_unit_id=business_unit_id,
+    ):
+        abort(403)
+
+    submitted_token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_token
+    ):
+        abort(400)
+
+    submitted_levels = {}
+
+    for area_key in PSP_ACCESS_AREA_LABELS:
+        raw_level = str(
+            request.form.get(
+                f"required_access_level_{area_key}",
+                "",
+            )
+            or ""
+        ).strip()
+
+        try:
+            required_level = int(raw_level)
+        except (TypeError, ValueError):
+            required_level = 0
+
+        if required_level not in {1, 2, 3, 4, 5}:
+            flash(
+                "Select a valid PSP Access Level for every "
+                "restricted area.",
+                "error",
+            )
+            return redirect(
+                url_for("employee_access_codes_admin")
+            )
+
+        submitted_levels[area_key] = required_level
+
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                psp_access_area_setting_id,
+                area_key,
+                required_access_level
+            FROM psp_access_area_settings
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+            FOR UPDATE
+            """,
+            (
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        existing_rows = cur.fetchall()
+
+        existing_by_key = {
+            row["area_key"]: row
+            for row in existing_rows
+        }
+
+        if set(existing_by_key) != set(
+            PSP_ACCESS_AREA_KEYS
+        ):
+            conn.rollback()
+            raise RuntimeError(
+                "PSP Access Area settings are incomplete "
+                "for this workspace."
+            )
+
+        changes = []
+
+        for area_key, required_level in (
+            submitted_levels.items()
+        ):
+            row = existing_by_key[area_key]
+            old_level = int(
+                row["required_access_level"]
+            )
+
+            if old_level == required_level:
+                continue
+
+            cur.execute(
+                """
+                UPDATE psp_access_area_settings
+                SET required_access_level = %s,
+                    updated_at = NOW(),
+                    updated_by = %s
+                WHERE psp_access_area_setting_id = %s
+                  AND spa_id = %s
+                  AND business_unit_id = %s
+                  AND area_key = %s
+                """,
+                (
+                    required_level,
+                    user_id,
+                    row[
+                        "psp_access_area_setting_id"
+                    ],
+                    spa_id,
+                    business_unit_id,
+                    area_key,
+                ),
+            )
+
+            if cur.rowcount != 1:
+                raise RuntimeError(
+                    "PSP Access Area setting update "
+                    "did not affect exactly one row."
+                )
+
+            changes.append(
+                (
+                    row[
+                        "psp_access_area_setting_id"
+                    ],
+                    area_key,
+                    old_level,
+                    required_level,
+                )
+            )
+
+        verification = g.get(
+            "psp_employee_access_verification"
+        )
+
+        acting_employee_id = (
+            verification.get("employee_id")
+            if isinstance(verification, dict)
+            else None
+        )
+
+        for (
+            setting_id,
+            area_key,
+            old_level,
+            new_level,
+        ) in changes:
+            log_audit(
+                cur,
+                spa_id=spa_id,
+                user_id=user_id,
+                action_type=(
+                    "psp_access_area_level_updated"
+                ),
+                table_name="psp_access_area_settings",
+                record_id=setting_id,
+                old_value=str(old_level),
+                new_value=str(new_level),
+                notes=(
+                    f"{PSP_ACCESS_AREA_LABELS[area_key]} "
+                    f"required PSP Access Level changed "
+                    f"from Level {old_level} to "
+                    f"Level {new_level}."
+                    + (
+                        " Acting Employee ID: "
+                        f"{acting_employee_id}."
+                        if acting_employee_id
+                        else ""
+                    )
+                ),
+                business_unit_id=business_unit_id,
+            )
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if changes:
+        flash(
+            "PSP Access Levels saved.",
+            "success",
+        )
+    else:
+        flash(
+            "PSP Access Levels are already up to date.",
+            "success",
+        )
+
+    return redirect(
+        url_for("employee_access_codes_admin")
     )
 
 
@@ -77244,9 +79274,8 @@ def employee_access_codes_admin():
 )
 @login_required
 @spa_required
-@require_workspace_permission(
-    "can_manage_employee_access_codes"
-)
+@require_employee_verification_settings_permission
+@require_psp_access("business_security")
 def employee_access_code_issue(employee_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -77360,15 +79389,12 @@ def employee_access_code_issue(employee_id):
 
         settings = cur.fetchone()
 
-        if (
-            not settings
-            or not settings["is_enabled"]
-        ):
+        if not settings:
             conn.rollback()
 
             flash(
-                "Employee Access Codes must be enabled "
-                "before employee codes can be assigned.",
+                "Save the Employee Verification Code settings "
+                "before verification codes can be assigned.",
                 "error",
             )
 
@@ -77390,8 +79416,8 @@ def employee_access_code_issue(employee_id):
             conn.rollback()
 
             flash(
-                "The Employee Access Code settings are "
-                "not valid. No employee code was changed.",
+                "The Employee Verification Code settings are "
+                "not valid. No verification code was changed.",
                 "error",
             )
 
@@ -77440,7 +79466,7 @@ def employee_access_code_issue(employee_id):
             conn.rollback()
 
             flash(
-                "Employee Access Codes can only be "
+                "Employee Verification Codes can only be "
                 "assigned to active employees in this "
                 "Provider Workspace.",
                 "error",
@@ -77484,27 +79510,106 @@ def employee_access_code_issue(employee_id):
 
         is_reset = bool(existing_credential)
 
-        if is_reset:
+        owner_recovery = g.get(
+            "psp_employee_access_owner_recovery"
+        )
+        verification = g.get(
+            "psp_employee_access_verification"
+        )
+
+        if isinstance(owner_recovery, dict):
+            request_authorization_source = "owner_recovery"
+            acting_employee_id = owner_recovery.get(
+                "owner_employee_id"
+            )
+            recovery_owner_user_id = owner_recovery.get(
+                "owner_user_id"
+            )
+        else:
+            request_authorization_source = (
+                "employee_verification"
+            )
+            acting_employee_id = (
+                verification.get("employee_id")
+                if isinstance(verification, dict)
+                else None
+            )
+            recovery_owner_user_id = None
+
+        request_action_type = (
+            "employee_access_code_reset_requested"
+            if is_reset
+            else "employee_access_code_assignment_requested"
+        )
+
+        request_description = (
+            "Employee Verification Code reset requested"
+            if is_reset
+            else "Employee Verification Code generation requested"
+        )
+
+        request_audit_conn = get_db_connection()
+        request_audit_conn.autocommit = False
+        request_audit_cur = request_audit_conn.cursor()
+
+        try:
             log_audit(
-                cur,
-                spa_id,
-                user_id,
-                "employee_access_code_reset_requested",
+                request_audit_cur,
+                spa_id=spa_id,
+                user_id=user_id,
+                action_type=request_action_type,
                 table_name=(
                     "employee_access_code_credentials"
                 ),
-                record_id=existing_credential[
-                    "employee_access_code_credential_id"
-                ],
+                record_id=(
+                    existing_credential[
+                        "employee_access_code_credential_id"
+                    ]
+                    if existing_credential
+                    else employee_id
+                ),
                 notes=(
-                    "Employee Access Code reset requested "
-                    f"for employee_id={employee_id} in "
+                    f"{request_description} for "
+                    f"employee_id={employee_id} in "
                     f"Provider Workspace "
-                    f"{workspace['unit_name']}."
+                    f"{workspace['unit_name']}. "
+                    f"Authorization source="
+                    f"{request_authorization_source}."
+                    + (
+                        " Recovery Owner PSP user_id="
+                        f"{recovery_owner_user_id}."
+                        if recovery_owner_user_id
+                        else ""
+                    )
+                    + " Plaintext code was not logged."
                 ),
                 business_unit_id=business_unit_id,
+                verified_employee_id=acting_employee_id,
+                use_clock_timestamp=True,
             )
 
+            request_audit_conn.commit()
+
+        except Exception:
+            request_audit_conn.rollback()
+            raise
+
+        finally:
+            request_audit_cur.close()
+            request_audit_conn.close()
+
+        log_security(
+            f"{request_description} for employee_id="
+            f"{employee_id}. Authorization source="
+            f"{request_authorization_source}.",
+            severity="INFO",
+            spa_id=spa_id,
+            related_type="employee_access_code_request",
+            related_id=employee_id,
+            created_by=user_id,
+        )
+
+        if is_reset:
             cur.execute("""
                 UPDATE employee_access_code_credentials
                 SET
@@ -77610,6 +79715,12 @@ def employee_access_code_issue(employee_id):
             else "employee_access_code_assigned"
         )
 
+        completion_description = (
+            "Employee Verification Code reset completed"
+            if is_reset
+            else "Employee Verification Code assigned"
+        )
+
         log_audit(
             cur,
             spa_id,
@@ -77637,20 +79748,39 @@ def employee_access_code_issue(employee_id):
                 "status=active"
             ),
             notes=(
-                (
-                    "Employee Access Code reset completed "
-                    if is_reset
-                    else "Employee Access Code assigned "
+                f"{completion_description} for "
+                f"employee_id={employee_id} in "
+                f"Provider Workspace "
+                f"{workspace['unit_name']}. "
+                f"Authorization source="
+                f"{request_authorization_source}."
+                + (
+                    " Recovery Owner PSP user_id="
+                    f"{recovery_owner_user_id}."
+                    if recovery_owner_user_id
+                    else ""
                 )
-                + f"for employee_id={employee_id} in "
-                + "Provider Workspace "
-                + f"{workspace['unit_name']}. "
-                + "Plaintext code was not logged."
+                + " Plaintext code was not logged."
             ),
             business_unit_id=business_unit_id,
+            verified_employee_id=acting_employee_id,
+            use_clock_timestamp=True,
         )
 
         conn.commit()
+
+        log_security(
+            f"{completion_description} for employee_id="
+            f"{employee_id}. Authorization source="
+            f"{request_authorization_source}.",
+            severity="INFO",
+            spa_id=spa_id,
+            related_type=(
+                "employee_access_code_credential"
+            ),
+            related_id=new_credential_id,
+            created_by=user_id,
+        )
 
         session.pop(
             "_security_form_csrf",
@@ -77687,7 +79817,7 @@ def employee_access_code_issue(employee_id):
 
         flash(
             "Peach Suite Pro could not create the "
-            "Employee Access Code. No code was changed.",
+            "Employee Verification Code. No code was changed.",
             "error",
         )
 
@@ -78006,6 +80136,7 @@ def toggle_compensation_type(compensation_type_id):
 @login_required
 @spa_required
 @require_workspace_permission("can_view_employee_compensation")
+@require_psp_access("employees_compensation")
 def employee_compensation_report():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -78017,71 +80148,21 @@ def employee_compensation_report():
     ):
         abort(403)
 
-    page_scope = "employee_compensation_report"
-
-    page_instance_id = str(
-        request.args.get(
-            "employee_access_page_instance",
-            "",
-        )
-        or ""
-    ).strip()
-
-    return_args = request.args.to_dict(flat=True)
-    return_args.pop(
-        "employee_access_page_instance",
-        None,
+    verification = g.get(
+        "psp_employee_access_verification"
     )
-
-    return_path = url_for(
-        "employee_compensation_report",
-        **return_args,
+    page_scope = g.get(
+        "psp_employee_access_page_scope",
+        "",
     )
-
-    employee_access_required = (
-        _employee_access_required_for_business(
-            spa_id
-        )
+    return_path = g.get(
+        "psp_employee_access_return_path",
+        "",
     )
-
-    verification = None
-
-    if employee_access_required:
-        verification = (
-            _employee_access_page_verification(
-                spa_id=spa_id,
-                business_unit_id=business_unit_id,
-                user_id=user_id,
-                page_scope=page_scope,
-                page_instance_id=page_instance_id,
-            )
-        )
-
-        if not verification:
-            challenge = (
-                _new_employee_access_page_challenge(
-                    spa_id=spa_id,
-                    business_unit_id=business_unit_id,
-                    user_id=user_id,
-                    page_scope=page_scope,
-                )
-            )
-
-            return render_template(
-                "employee_access_verify.html",
-                page_title="Employee Compensation Report",
-                page_scope=page_scope,
-                return_path=return_path,
-                challenge_token=challenge[
-                    "challenge_token"
-                ],
-                page_instance_id=challenge[
-                    "page_instance_id"
-                ],
-                security_csrf_token=(
-                    _security_form_csrf_token()
-                ),
-            )
+    page_instance_id = g.get(
+        "psp_employee_access_page_instance_id",
+        "",
+    )
 
     today = date.today()
     first_day = today.replace(day=1)
@@ -78288,6 +80369,7 @@ def employee_compensation_report():
 @login_required
 @spa_required
 @require_workspace_permission("can_view_employee_compensation")
+@require_psp_access("employees_compensation")
 def employee_compensation_history():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -78299,71 +80381,21 @@ def employee_compensation_history():
     ):
         abort(403)
 
-    page_scope = "employee_compensation_history"
-
-    page_instance_id = str(
-        request.args.get(
-            "employee_access_page_instance",
-            "",
-        )
-        or ""
-    ).strip()
-
-    return_args = request.args.to_dict(flat=True)
-    return_args.pop(
-        "employee_access_page_instance",
-        None,
+    verification = g.get(
+        "psp_employee_access_verification"
     )
-
-    return_path = url_for(
-        "employee_compensation_history",
-        **return_args,
+    page_scope = g.get(
+        "psp_employee_access_page_scope",
+        "",
     )
-
-    employee_access_required = (
-        _employee_access_required_for_business(
-            spa_id
-        )
+    return_path = g.get(
+        "psp_employee_access_return_path",
+        "",
     )
-
-    verification = None
-
-    if employee_access_required:
-        verification = (
-            _employee_access_page_verification(
-                spa_id=spa_id,
-                business_unit_id=business_unit_id,
-                user_id=user_id,
-                page_scope=page_scope,
-                page_instance_id=page_instance_id,
-            )
-        )
-
-        if not verification:
-            challenge = (
-                _new_employee_access_page_challenge(
-                    spa_id=spa_id,
-                    business_unit_id=business_unit_id,
-                    user_id=user_id,
-                    page_scope=page_scope,
-                )
-            )
-
-            return render_template(
-                "employee_access_verify.html",
-                page_title="Employee Compensation History",
-                page_scope=page_scope,
-                return_path=return_path,
-                challenge_token=challenge[
-                    "challenge_token"
-                ],
-                page_instance_id=challenge[
-                    "page_instance_id"
-                ],
-                security_csrf_token=(
-                    _security_form_csrf_token()
-                ),
-            )
+    page_instance_id = g.get(
+        "psp_employee_access_page_instance_id",
+        "",
+    )
 
     today = date.today()
     first_day = today.replace(day=1)
@@ -78442,6 +80474,7 @@ def employee_compensation_history():
 @login_required
 @spa_required
 @require_workspace_permission("can_manage_employee_compensation")
+@require_psp_access("employees_compensation")
 def delete_employee_compensation(compensation_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -78463,29 +80496,9 @@ def delete_employee_compensation(compensation_id):
     ):
         abort(400)
 
-    employee_access_required = (
-        _employee_access_required_for_business(
-            spa_id
-        )
+    verification = g.get(
+        "psp_employee_access_verification"
     )
-
-    verification = None
-
-    if employee_access_required:
-        verification = (
-            _employee_access_page_verification(
-                spa_id=spa_id,
-                business_unit_id=business_unit_id,
-                user_id=user_id,
-                page_scope=(
-                    "employee_compensation_history"
-                ),
-                page_instance_id="",
-            )
-        )
-
-        if not verification:
-            abort(403)
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -78579,6 +80592,7 @@ def delete_employee_compensation(compensation_id):
 @login_required
 @spa_required
 @require_workspace_permission("can_manage_employee_compensation")
+@require_psp_access("employees_compensation")
 def edit_employee_compensation(compensation_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -78590,68 +80604,21 @@ def edit_employee_compensation(compensation_id):
     ):
         abort(403)
 
-    page_scope = (
-        "edit_employee_compensation:"
-        f"{compensation_id}"
+    verification = g.get(
+        "psp_employee_access_verification"
     )
-
-    page_instance_id = str(
-        request.values.get(
-            "employee_access_page_instance",
-            "",
-        )
-        or ""
-    ).strip()
-
-    return_path = url_for(
-        "edit_employee_compensation",
-        compensation_id=compensation_id,
+    page_scope = g.get(
+        "psp_employee_access_page_scope",
+        "",
     )
-
-    employee_access_required = (
-        _employee_access_required_for_business(
-            spa_id
-        )
+    return_path = g.get(
+        "psp_employee_access_return_path",
+        "",
     )
-
-    verification = None
-
-    if employee_access_required:
-        verification = (
-            _employee_access_page_verification(
-                spa_id=spa_id,
-                business_unit_id=business_unit_id,
-                user_id=user_id,
-                page_scope=page_scope,
-                page_instance_id=page_instance_id,
-            )
-        )
-
-        if not verification:
-            challenge = (
-                _new_employee_access_page_challenge(
-                    spa_id=spa_id,
-                    business_unit_id=business_unit_id,
-                    user_id=user_id,
-                    page_scope=page_scope,
-                )
-            )
-
-            return render_template(
-                "employee_access_verify.html",
-                page_title="Edit Employee Compensation",
-                page_scope=page_scope,
-                return_path=return_path,
-                challenge_token=challenge[
-                    "challenge_token"
-                ],
-                page_instance_id=challenge[
-                    "page_instance_id"
-                ],
-                security_csrf_token=(
-                    _security_form_csrf_token()
-                ),
-            )
+    page_instance_id = g.get(
+        "psp_employee_access_page_instance_id",
+        "",
+    )
 
     if request.method == "POST":
         submitted_csrf = request.form.get(
@@ -79020,6 +80987,7 @@ def edit_employee_compensation(compensation_id):
 @login_required
 @spa_required
 @require_workspace_permission("can_view_employee_compensation")
+@require_psp_access("employees_compensation")
 def export_employee_compensation_history_csv():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -79038,36 +81006,6 @@ def export_employee_compensation_history_csv():
     start_date = request.args.get("start_date", first_day.strftime("%Y-%m-%d")).strip()
     end_date = request.args.get("end_date", today.strftime("%Y-%m-%d")).strip()
 
-    employee_access_required = (
-        _employee_access_required_for_business(
-            spa_id
-        )
-    )
-
-    verification = None
-
-    if employee_access_required:
-        verification = (
-            _employee_access_page_verification(
-                spa_id=spa_id,
-                business_unit_id=business_unit_id,
-                user_id=user_id,
-                page_scope=(
-                    "employee_compensation_history"
-                ),
-                page_instance_id="",
-            )
-        )
-
-        if not verification:
-            return redirect(
-                url_for(
-                    "employee_compensation_history",
-                    employee_id=employee_id,
-                    start_date=start_date,
-                    end_date=end_date,
-                )
-            )
 
     rows = get_employee_compensation_history_data(
         spa_id=spa_id,
@@ -79136,6 +81074,7 @@ def export_employee_compensation_history_csv():
 @login_required
 @spa_required
 @require_workspace_permission("can_view_employee_compensation")
+@require_psp_access("employees_compensation")
 def export_employee_compensation_history_excel():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -79154,36 +81093,6 @@ def export_employee_compensation_history_excel():
     start_date = request.args.get("start_date", first_day.strftime("%Y-%m-%d")).strip()
     end_date = request.args.get("end_date", today.strftime("%Y-%m-%d")).strip()
 
-    employee_access_required = (
-        _employee_access_required_for_business(
-            spa_id
-        )
-    )
-
-    verification = None
-
-    if employee_access_required:
-        verification = (
-            _employee_access_page_verification(
-                spa_id=spa_id,
-                business_unit_id=business_unit_id,
-                user_id=user_id,
-                page_scope=(
-                    "employee_compensation_history"
-                ),
-                page_instance_id="",
-            )
-        )
-
-        if not verification:
-            return redirect(
-                url_for(
-                    "employee_compensation_history",
-                    employee_id=employee_id,
-                    start_date=start_date,
-                    end_date=end_date,
-                )
-            )
 
     rows = get_employee_compensation_history_data(
         spa_id=spa_id,
@@ -79255,6 +81164,12 @@ def export_employee_compensation_history_excel():
 @require_workspace_permission("can_manage_employees")
 def add_employee():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if business_unit_id is None or user_id is None:
+        abort(403)
+
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -79282,9 +81197,73 @@ def add_employee():
         pay_rate = request.form.get("pay_rate")
         notes = request.form.get("notes")
         employee_nickname = request.form.get("employee_nickname", "").strip()
-        employee_role_id = request.form.get("employee_role_id")
+        employee_role_id_raw = request.form.get("employee_role_id")
         provider_color_code = request.form.get("provider_color_code", "").strip()
         is_active = request.form.get("is_active") == "on"
+
+        try:
+            employee_role_id = (
+                int(employee_role_id_raw)
+                if employee_role_id_raw
+                else None
+            )
+        except ValueError:
+            employee_role_id = None
+
+        if employee_role_id is None:
+            flash("Select a valid Employee Role.", "error")
+            cur.close()
+            conn.close()
+            return redirect(url_for("add_employee"))
+
+        cur.execute("""
+            SELECT role_slot
+            FROM employee_roles
+            WHERE employee_role_id = %s
+              AND spa_id = %s
+              AND is_active = TRUE
+            LIMIT 1
+        """, (
+            employee_role_id,
+            spa_id,
+        ))
+
+        role_row = cur.fetchone()
+
+        if not role_row:
+            flash("Select a valid Employee Role.", "error")
+            cur.close()
+            conn.close()
+            return redirect(url_for("add_employee"))
+
+        selected_role_slot = role_row[0]
+
+        access_level_raw = (
+            request.form.get("access_level", "").strip()
+        )
+
+        try:
+            access_level = (
+                int(access_level_raw)
+                if access_level_raw
+                else None
+            )
+        except ValueError:
+            access_level = -1
+
+        if access_level not in {None, 1, 2, 3, 4, 5}:
+            flash("Select a valid PSP Access Level.", "error")
+            cur.close()
+            conn.close()
+            return redirect(url_for("add_employee"))
+
+        owner_access_level_corrected = False
+
+        if selected_role_slot == 1:
+            if access_level != 1:
+                owner_access_level_corrected = True
+
+            access_level = 1
 
         if not first_name or not last_name:
             flash("First name and last name are required.", "error")
@@ -79330,6 +81309,7 @@ def add_employee():
                     %s, %s, %s, %s, %s,
                     %s, %s
             )
+            RETURNING employee_id
         """, (
             spa_id,
             first_name,
@@ -79360,11 +81340,45 @@ def add_employee():
             notes
         ))
 
+        employee_id = cur.fetchone()[0]
+
+        cur.execute("""
+            INSERT INTO employee_business_unit_memberships (
+                spa_id,
+                business_unit_id,
+                employee_id,
+                is_active,
+                assigned_by,
+                access_level
+            )
+            VALUES (%s, %s, %s, TRUE, %s, %s)
+        """, (
+            spa_id,
+            business_unit_id,
+            employee_id,
+            user_id,
+            access_level,
+        ))
+
         conn.commit()
         cur.close()
         conn.close()
 
-        flash("Employee added successfully.", "success")
+        if owner_access_level_corrected:
+            flash(
+                (
+                    "Employee added. The Owner role requires "
+                    "PSP Access Level 1 — Full Access, so the "
+                    "access level was set to Level 1."
+                ),
+                "success",
+            )
+        else:
+            flash(
+                "Employee added successfully.",
+                "success",
+            )
+
         return redirect(url_for("employees_home"))
 
     cur.execute("""
@@ -79418,7 +81432,11 @@ def add_employee():
 @require_workspace_permission("can_manage_employees")
 def edit_employee(employee_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
     security_csrf_token = _security_form_csrf_token()
+
+    if business_unit_id is None:
+        abort(403)
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -79439,9 +81457,98 @@ def edit_employee(employee_id):
         first_name = request.form.get("first_name")
         last_name = request.form.get("last_name")
         employee_nickname = request.form.get("employee_nickname", "").strip()
-        employee_role_id = request.form.get("employee_role_id")
+        employee_role_id_raw = request.form.get("employee_role_id")
         provider_color_code = request.form.get("provider_color_code", "").strip()
-        employee_role_id = int(employee_role_id) if employee_role_id else None
+
+        try:
+            employee_role_id = (
+                int(employee_role_id_raw)
+                if employee_role_id_raw
+                else None
+            )
+        except ValueError:
+            employee_role_id = None
+
+        if employee_role_id is None:
+            flash("Select a valid Employee Role.", "error")
+            cur.close()
+            conn.close()
+            return redirect(
+                url_for(
+                    "edit_employee",
+                    employee_id=employee_id,
+                )
+            )
+
+        cur.execute("""
+            SELECT er.role_slot
+            FROM employee_roles er
+            WHERE er.employee_role_id = %s
+              AND er.spa_id = %s
+              AND (
+                  er.is_active = TRUE
+                  OR er.employee_role_id = (
+                      SELECT e.employee_role_id
+                      FROM employees e
+                      WHERE e.employee_id = %s
+                        AND e.spa_id = %s
+                  )
+              )
+            LIMIT 1
+        """, (
+            employee_role_id,
+            spa_id,
+            employee_id,
+            spa_id,
+        ))
+
+        role_row = cur.fetchone()
+
+        if not role_row:
+            flash("Select a valid Employee Role.", "error")
+            cur.close()
+            conn.close()
+            return redirect(
+                url_for(
+                    "edit_employee",
+                    employee_id=employee_id,
+                )
+            )
+
+        selected_role_slot = role_row[0]
+
+        access_level_raw = (
+            request.form.get("access_level", "").strip()
+        )
+
+        try:
+            access_level = (
+                int(access_level_raw)
+                if access_level_raw
+                else None
+            )
+        except ValueError:
+            access_level = -1
+
+        if access_level not in {None, 1, 2, 3, 4, 5}:
+            flash("Select a valid PSP Access Level.", "error")
+            cur.close()
+            conn.close()
+            return redirect(
+                url_for(
+                    "edit_employee",
+                    employee_id=employee_id,
+                )
+            )
+
+        owner_access_level_corrected = False
+
+        if selected_role_slot == 1:
+            if access_level != 1:
+                owner_access_level_corrected = True
+
+            access_level = 1
+
         address_line1 = request.form.get("address_line1")
         address_line2 = request.form.get("address_line2")
         city = request.form.get("city")
@@ -79523,49 +81630,112 @@ def edit_employee(employee_id):
             spa_id
         ))
 
+        if cur.rowcount == 0:
+            conn.rollback()
+            cur.close()
+            conn.close()
+
+            flash(
+                "Employee not found or not authorized.",
+                "error",
+            )
+            return redirect(url_for("employees_home"))
+
+        cur.execute("""
+            UPDATE employee_business_unit_memberships
+            SET access_level = %s
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND employee_id = %s
+              AND is_active = TRUE
+        """, (
+            access_level,
+            spa_id,
+            business_unit_id,
+            employee_id,
+        ))
+
+        if cur.rowcount == 0:
+            conn.rollback()
+            cur.close()
+            conn.close()
+
+            flash(
+                (
+                    "This employee is not assigned to the "
+                    "current Provider Workspace."
+                ),
+                "error",
+            )
+            return redirect(url_for("employees_home"))
+
         conn.commit()
         cur.close()
         conn.close()
 
-        flash("Employee updated successfully.", "success")
+        if owner_access_level_corrected:
+            flash(
+                (
+                    "Employee updated. The Owner role requires "
+                    "PSP Access Level 1 — Full Access, so the "
+                    "access level was kept at Level 1."
+                ),
+                "success",
+            )
+        else:
+            flash(
+                "Employee updated successfully.",
+                "success",
+            )
+
         return redirect(url_for("employees_home"))
 
     cur = conn.cursor(cursor_factory=RealDictCursor)
 
     cur.execute("""
         SELECT
-            employee_id,                    -- 0
-            first_name,                     -- 1
-            last_name,                      -- 2
-            employee_nickname,              -- 3
-            employee_role_id,               -- 4
-            provider_color_code,            -- 5
-            is_active,                      -- 6
-            address_line1,                  -- 7
-            address_line2,                  -- 8
-            city,                           -- 9
-            state,                          -- 10
-            zip_code,                       -- 11
-            phone,                          -- 12
-            email,                          -- 13
-            job_title,                      -- 14
-            hire_date,                      -- 15
-            termination_date,               -- 16
-            status,                         -- 17
-            birthday,                       -- 18
-            ssn_on_file,                    -- 19
-            esthetician_license_number,     -- 20
-            license_expiration_date,        -- 21
-            year_graduated,                 -- 22
-            certifications,                 -- 23
-            pay_type,                       -- 24
-            pay_rate,                       -- 25
-            notes,                          -- 26
-            created_at                      -- 27
-        FROM employees
-        WHERE employee_id = %s
-        AND spa_id = %s
-    """, (employee_id, spa_id))
+            e.employee_id,                  -- 0
+            e.first_name,                   -- 1
+            e.last_name,                    -- 2
+            e.employee_nickname,            -- 3
+            e.employee_role_id,             -- 4
+            e.provider_color_code,          -- 5
+            e.is_active,                    -- 6
+            e.address_line1,                -- 7
+            e.address_line2,                -- 8
+            e.city,                         -- 9
+            e.state,                        -- 10
+            e.zip_code,                     -- 11
+            e.phone,                        -- 12
+            e.email,                        -- 13
+            e.job_title,                    -- 14
+            e.hire_date,                    -- 15
+            e.termination_date,             -- 16
+            e.status,                       -- 17
+            e.birthday,                     -- 18
+            e.ssn_on_file,                  -- 19
+            e.esthetician_license_number,   -- 20
+            e.license_expiration_date,      -- 21
+            e.year_graduated,               -- 22
+            e.certifications,               -- 23
+            e.pay_type,                     -- 24
+            e.pay_rate,                     -- 25
+            e.notes,                        -- 26
+            e.created_at,                   -- 27
+            ebum.access_level
+        FROM employees e
+        JOIN employee_business_unit_memberships ebum
+          ON ebum.spa_id = e.spa_id
+         AND ebum.employee_id = e.employee_id
+         AND ebum.business_unit_id = %s
+         AND ebum.is_active = TRUE
+        WHERE e.employee_id = %s
+          AND e.spa_id = %s
+    """, (
+        business_unit_id,
+        employee_id,
+        spa_id,
+    ))
     employee = cur.fetchone()
 
     if not employee:
@@ -79580,8 +81750,11 @@ def edit_employee(employee_id):
             role_name
         FROM employee_roles
         WHERE spa_id = %s
-        OR employee_role_id = %s
-        ORDER BY role_name
+          AND (
+              is_active = TRUE
+              OR employee_role_id = %s
+          )
+        ORDER BY display_order, role_name
     """, (
         spa_id,
         employee["employee_role_id"]
@@ -79748,7 +81921,7 @@ def archive_employee(employee_id):
                     "revocation_reason=employee_archived"
                 ),
                 notes=(
-                    "Employee Access Code revoked because "
+                    "Employee Verification Code revoked because "
                     f"{employee_name} was archived."
                 ),
                 business_unit_id=revoked_credential[
@@ -79963,6 +82136,10 @@ def reactivate_employee(employee_id):
 @require_workspace_permission("can_view_employees")
 def employee_command_center(employee_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        abort(403)
 
     access = current_workspace_access()
     can_view_compensation = bool(
@@ -80016,14 +82193,24 @@ def employee_command_center(employee_id):
             e.year_graduated,
             e.certifications,
             e.notes,
-            e.created_at
+            e.created_at,
+            ebum.access_level
         FROM employees e
+        JOIN employee_business_unit_memberships ebum
+          ON ebum.spa_id = e.spa_id
+         AND ebum.employee_id = e.employee_id
+         AND ebum.business_unit_id = %s
+         AND ebum.is_active = TRUE
         LEFT JOIN employee_roles er
-            ON er.employee_role_id = e.employee_role_id
-           AND er.spa_id = e.spa_id
+          ON er.employee_role_id = e.employee_role_id
+         AND er.spa_id = e.spa_id
         WHERE e.employee_id = %s
           AND e.spa_id = %s
-    """, (employee_id, spa_id))
+    """, (
+        business_unit_id,
+        employee_id,
+        spa_id,
+    ))
 
     employee = cur.fetchone()
 
@@ -80071,6 +82258,7 @@ def employee_command_center(employee_id):
 @app.route("/expenses")
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def expenses_home():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -80281,6 +82469,7 @@ def _validate_expense_lookup_values(
 @app.route("/expenses/add", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_psp_access("add_expense")
 def add_expense():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -80471,6 +82660,7 @@ def add_expense():
 )
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def expense_report():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -80716,6 +82906,7 @@ def expense_report():
 )
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def edit_expense(expense_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -80966,6 +83157,7 @@ def edit_expense(expense_id):
 @app.route("/expenses/delete/<int:expense_id>", methods=["POST"])
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def delete_expense(expense_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -81033,6 +83225,7 @@ import io
 @app.route("/export_expense_report_csv")
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def export_expense_report_csv():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -81140,6 +83333,7 @@ from collections import defaultdict
 @app.route("/export_expense_report_xlsx")
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def export_expense_report_xlsx():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -82093,6 +84287,7 @@ def skip_current_automatic_expense_payment(
 )
 @login_required
 @spa_required
+@require_psp_access("add_expense")
 def post_current_automatic_expense(automatic_expense_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -82170,6 +84365,7 @@ def post_current_automatic_expense(automatic_expense_id):
 )
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def skip_current_automatic_expense(automatic_expense_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -82257,6 +84453,7 @@ def skip_current_automatic_expense(automatic_expense_id):
 )
 @login_required
 @spa_required
+@require_psp_access("add_expense")
 def post_extra_automatic_expense(automatic_expense_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -82339,6 +84536,7 @@ def post_extra_automatic_expense(automatic_expense_id):
 )
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def archive_automatic_expense(automatic_expense_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -82424,6 +84622,7 @@ def archive_automatic_expense(automatic_expense_id):
 )
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def restore_automatic_expense(automatic_expense_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -82982,6 +85181,7 @@ def process_due_automatic_expenses_command(
 @app.route("/automatic-expenses")
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def automatic_expenses():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -83334,6 +85534,7 @@ def automatic_expenses():
 @app.route("/automatic-expenses/add", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def add_automatic_expense():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -83708,6 +85909,7 @@ def add_automatic_expense():
 )
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def edit_automatic_expense(automatic_expense_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -84934,6 +87136,7 @@ def resolve_service_recipient(appointment_id):
 @app.route("/add_income/<int:appointment_id>", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_psp_access("add_income")
 def add_income(appointment_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -87754,6 +89957,7 @@ def square_payment_preview_for_income(appointment_id):
 @app.route("/edit_income/<int:income_id>", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def edit_income(income_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -88105,6 +90309,7 @@ def edit_income(income_id):
 @app.route("/income_report/csv")
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def income_report_csv():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -88223,6 +90428,7 @@ def income_report_csv():
 @app.route("/income_report/excel")
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def income_report_excel():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -88343,6 +90549,7 @@ def income_report_excel():
 @app.route("/delete_income/<int:income_id>", methods=["POST"])
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def delete_income(income_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -88429,6 +90636,7 @@ from db import get_db_connection
 @app.route("/income_report")
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def income_report():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -88645,6 +90853,7 @@ def income_report():
 @app.route("/peachpos/income")
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def peachpos_income_report():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -88836,6 +91045,7 @@ def peachpos_income_report():
 @app.route("/peachpos/income/csv")
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def peachpos_income_csv():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -89011,6 +91221,7 @@ def peachpos_income_csv():
 @app.route("/peachpos/income/excel")
 @login_required
 @spa_required
+@require_psp_access("financial_management")
 def peachpos_income_excel():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -89198,6 +91409,7 @@ from db import get_db_connection
 @app.route("/add_general_income", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_psp_access("add_income")
 def add_general_income():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -93226,6 +95438,28 @@ def daily_briefing_birthdays_today():
 ##########################################
 
 
+def _normalize_business_profile_email(value, field_label):
+    normalized_email = str(value or "").strip().lower()
+
+    if not normalized_email:
+        return ""
+
+    if len(normalized_email) > 254:
+        raise ValueError(
+            f"{field_label} must contain no more than 254 characters."
+        )
+
+    if not re.fullmatch(
+        r"[^@\s]+@[^@\s]+\.[^@\s]+",
+        normalized_email,
+    ):
+        raise ValueError(
+            f"Please enter a valid {field_label.lower()}."
+        )
+
+    return normalized_email
+
+
 
 @app.route("/business-coach/profile", methods=["GET", "POST"])
 @login_required
@@ -93239,6 +95473,22 @@ def business_coach_profile():
     if request.method == "POST":
         business_type = request.form.get("business_type")
         business_description = request.form.get("business_description")
+
+        try:
+            business_email = _normalize_business_profile_email(
+                request.form.get("business_email"),
+                "Business Email",
+            )
+            personal_email = _normalize_business_profile_email(
+                request.form.get("personal_email"),
+                "Personal Email",
+            )
+        except ValueError as exc:
+            cur.close()
+            conn.close()
+            flash(str(exc), "error")
+            return redirect(url_for("business_coach_profile"))
+
         business_address = request.form.get("business_address")
         city = request.form.get("city")
         state = request.form.get("state")
@@ -93293,12 +95543,14 @@ def business_coach_profile():
                 has_promotional_banner,
                 has_signage,
                 primary_goal,
+                business_email,
+                personal_email,
                 updated_at
             )
             VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, NOW()
+                %s, %s, %s, %s, %s, %s, %s, NOW()
             )
             ON CONFLICT (spa_id)
             DO UPDATE SET
@@ -93326,6 +95578,8 @@ def business_coach_profile():
                 has_promotional_banner = EXCLUDED.has_promotional_banner,
                 has_signage = EXCLUDED.has_signage,
                 primary_goal = EXCLUDED.primary_goal,
+                business_email = EXCLUDED.business_email,
+                personal_email = EXCLUDED.personal_email,
                 updated_at = NOW()
         """, (
             spa_id,
@@ -93352,7 +95606,9 @@ def business_coach_profile():
             has_gift_certificates,
             has_promotional_banner,
             has_signage,
-            primary_goal
+            primary_goal,
+            business_email,
+            personal_email
         ))
 
         conn.commit()
@@ -102383,6 +104639,7 @@ def deactivate_provider_time_off(
 @require_workspace_permission(
     "can_manage_security_settings"
 )
+@require_psp_access("business_security")
 def login_security_settings():
     import hmac
 
