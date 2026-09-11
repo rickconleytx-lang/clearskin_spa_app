@@ -78891,8 +78891,8 @@ def employee_access_codes_admin():
 
         settings = {
             "is_enabled": False,
-            "code_length": None,
-            "code_character_set": None,
+            "code_length": 4,
+            "code_character_set": "numeric",
         }
 
         if settings_row:
@@ -79390,19 +79390,128 @@ def employee_access_code_issue(employee_id):
         settings = cur.fetchone()
 
         if not settings:
-            conn.rollback()
-
-            flash(
-                "Save the Employee Verification Code settings "
-                "before verification codes can be assigned.",
-                "error",
+            # First-code bootstrap:
+            # use a safe, predictable default format without ever
+            # creating a universal/default Verification Code.
+            #
+            # Solo Operator:
+            #   create the format row disabled; the Owner may generate
+            #   the first random code before switching to Other users.
+            #
+            # Multi-user business:
+            #   enable the settings row in the same transaction that
+            #   creates the first random code, avoiding a no-code
+            #   lockout during first-time setup or migration.
+            bootstrap_is_enabled = (
+                _employee_access_required_for_business(spa_id)
             )
 
-            return redirect(
-                url_for(
-                    "employee_access_codes_admin"
+            cur.execute(
+                """
+                INSERT INTO employee_access_code_settings (
+                    spa_id,
+                    business_unit_id,
+                    is_enabled,
+                    code_length,
+                    code_character_set,
+                    created_by,
+                    updated_at,
+                    updated_by
                 )
+                VALUES (
+                    %s,
+                    %s,
+                    %s,
+                    4,
+                    'numeric',
+                    %s,
+                    NOW(),
+                    %s
+                )
+                ON CONFLICT (
+                    spa_id,
+                    business_unit_id
+                )
+                DO NOTHING
+                RETURNING
+                    employee_access_code_setting_id,
+                    is_enabled,
+                    code_length,
+                    code_character_set
+                """,
+                (
+                    spa_id,
+                    business_unit_id,
+                    bootstrap_is_enabled,
+                    user_id,
+                    user_id,
+                ),
             )
+
+            settings = cur.fetchone()
+
+            if settings:
+                log_audit(
+                    cur,
+                    spa_id=spa_id,
+                    user_id=user_id,
+                    action_type=(
+                        "employee_access_settings_bootstrapped"
+                    ),
+                    table_name=(
+                        "employee_access_code_settings"
+                    ),
+                    record_id=settings[
+                        "employee_access_code_setting_id"
+                    ],
+                    new_value=(
+                        "is_enabled="
+                        + (
+                            "true"
+                            if bootstrap_is_enabled
+                            else "false"
+                        )
+                        + "; code_length=4"
+                        + "; code_character_set=numeric"
+                    ),
+                    notes=(
+                        "Employee Verification Code settings were "
+                        "created automatically during first-code "
+                        "setup. Default format=4-digit numeric. "
+                        "No default Verification Code was created."
+                    ),
+                    business_unit_id=business_unit_id,
+                )
+
+            else:
+                # A concurrent request may have created the row after
+                # our initial SELECT. Re-read and lock the authoritative
+                # workspace settings rather than overwriting them.
+                cur.execute(
+                    """
+                    SELECT
+                        employee_access_code_setting_id,
+                        is_enabled,
+                        code_length,
+                        code_character_set
+                    FROM employee_access_code_settings
+                    WHERE spa_id = %s
+                      AND business_unit_id = %s
+                    FOR UPDATE
+                    """,
+                    (
+                        spa_id,
+                        business_unit_id,
+                    ),
+                )
+
+                settings = cur.fetchone()
+
+                if not settings:
+                    raise RuntimeError(
+                        "Employee Verification Code settings "
+                        "could not be bootstrapped."
+                    )
 
         try:
             (
@@ -79525,15 +79634,19 @@ def employee_access_code_issue(employee_id):
             recovery_owner_user_id = owner_recovery.get(
                 "owner_user_id"
             )
-        else:
+        elif isinstance(verification, dict):
             request_authorization_source = (
                 "employee_verification"
             )
-            acting_employee_id = (
-                verification.get("employee_id")
-                if isinstance(verification, dict)
-                else None
+            acting_employee_id = verification.get(
+                "employee_id"
             )
+            recovery_owner_user_id = None
+        else:
+            # The only normal path here without Owner Recovery or
+            # Employee Verification is the Solo Operator bypass.
+            request_authorization_source = "solo_operator"
+            acting_employee_id = None
             recovery_owner_user_id = None
 
         request_action_type = (
