@@ -9518,6 +9518,662 @@ def master_admin_api_system_health():
 
 
 @app.route(
+    "/api/master-admin/notification-settings",
+    methods=["GET"],
+)
+@master_admin_api_required
+def master_admin_api_notification_settings():
+    api_context = g.master_admin_api
+
+    user_id = int(
+        api_context["master_admin_user_id"]
+    )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                spa_id,
+                email,
+                sms_phone,
+                role,
+                active
+            FROM users
+            WHERE user_id = %s
+            """,
+            (user_id,),
+        )
+
+        user = cur.fetchone()
+
+        if (
+            not user
+            or user[3] != "master_admin"
+            or not bool(user[4])
+        ):
+            return _mfa_no_store(
+                (
+                    jsonify({
+                        "success": False,
+                        "error": "session_invalid",
+                        "reason": "account_changed",
+                        "message": (
+                            "Your Master Admin session is no longer "
+                            "valid. Please sign in again."
+                        ),
+                    }),
+                    401,
+                )
+            )
+
+        login_email = str(
+            user[1] or ""
+        ).strip().lower()
+
+        personal_mobile = str(
+            user[2] or ""
+        ).strip()
+
+        settings = (
+            _master_admin_notification_settings_record(
+                cur,
+                user_id,
+            )
+        )
+
+        notification_email = str(
+            settings["notification_email"] or ""
+        ).strip().lower()
+
+        notification_phone = str(
+            settings["notification_phone"] or ""
+        ).strip()
+
+        effective_email = (
+            notification_email
+            or login_email
+        )
+
+        effective_phone = (
+            notification_phone
+            or personal_mobile
+        )
+
+        return _mfa_no_store(
+            jsonify({
+                "success": True,
+                "notification_settings": {
+                    "notification_email": (
+                        notification_email
+                    ),
+                    "notification_phone": (
+                        notification_phone
+                    ),
+                    "login_email": login_email,
+                    "personal_mobile": personal_mobile,
+                    "effective_email": effective_email,
+                    "effective_email_source": (
+                        "notification_email"
+                        if notification_email
+                        else (
+                            "login_email"
+                            if login_email
+                            else None
+                        )
+                    ),
+                    "effective_phone": effective_phone,
+                    "effective_phone_source": (
+                        "notification_phone"
+                        if notification_phone
+                        else (
+                            "personal_mobile"
+                            if personal_mobile
+                            else None
+                        )
+                    ),
+                    "email_alerts_enabled": bool(
+                        settings[
+                            "email_alerts_enabled"
+                        ]
+                    ),
+                    "sms_alerts_enabled": bool(
+                        settings[
+                            "sms_alerts_enabled"
+                        ]
+                    ),
+                    "security_alerts_enabled": bool(
+                        settings[
+                            "security_alerts_enabled"
+                        ]
+                    ),
+                    "system_integration_alerts_enabled": bool(
+                        settings[
+                            "system_integration_alerts_enabled"
+                        ]
+                    ),
+                    "account_lockout_alerts_enabled": bool(
+                        settings[
+                            "account_lockout_alerts_enabled"
+                        ]
+                    ),
+                    "system_health_alerts_enabled": bool(
+                        settings[
+                            "system_health_alerts_enabled"
+                        ]
+                    ),
+                },
+            })
+        )
+
+    except Exception:
+        app.logger.exception(
+            "Master Admin Notification Settings API request failed."
+        )
+
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "notification_settings_unavailable",
+                    "message": (
+                        "Notification Settings could not be loaded "
+                        "right now."
+                    ),
+                }),
+                503,
+            )
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route(
+    "/api/master-admin/notification-settings",
+    methods=["PUT"],
+)
+@master_admin_api_required
+def master_admin_api_update_notification_settings():
+    api_context = g.master_admin_api
+
+    data = request.get_json(silent=True)
+
+    if not isinstance(data, dict):
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "invalid_request",
+                    "message": "A valid JSON request is required.",
+                }),
+                400,
+            )
+        )
+
+    boolean_fields = (
+        "email_alerts_enabled",
+        "sms_alerts_enabled",
+        "security_alerts_enabled",
+        "system_integration_alerts_enabled",
+        "account_lockout_alerts_enabled",
+        "system_health_alerts_enabled",
+    )
+
+    missing_fields = [
+        field_name
+        for field_name in (
+            "notification_email",
+            "notification_phone",
+            *boolean_fields,
+        )
+        if field_name not in data
+    ]
+
+    if missing_fields:
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "invalid_request",
+                    "message": (
+                        "All notification settings are required."
+                    ),
+                }),
+                400,
+            )
+        )
+
+    if any(
+        not isinstance(data.get(field_name), bool)
+        for field_name in boolean_fields
+    ):
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "invalid_request",
+                    "message": (
+                        "Notification preference values must be "
+                        "true or false."
+                    ),
+                }),
+                400,
+            )
+        )
+
+    user_id = int(
+        api_context["master_admin_user_id"]
+    )
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                spa_id,
+                email,
+                sms_phone,
+                role,
+                active,
+                password_hash
+            FROM users
+            WHERE user_id = %s
+            FOR UPDATE
+            """,
+            (user_id,),
+        )
+
+        user = cur.fetchone()
+
+        if (
+            not user
+            or user[3] != "master_admin"
+            or not bool(user[4])
+        ):
+            conn.rollback()
+
+            return _mfa_no_store(
+                (
+                    jsonify({
+                        "success": False,
+                        "error": "session_invalid",
+                        "reason": "account_changed",
+                        "message": (
+                            "Your Master Admin session is no longer "
+                            "valid. Please sign in again."
+                        ),
+                    }),
+                    401,
+                )
+            )
+
+        (
+            spa_id,
+            login_email,
+            personal_mobile,
+            _role,
+            _active,
+            password_hash,
+        ) = user
+
+        login_email = str(
+            login_email or ""
+        ).strip().lower()
+
+        personal_mobile = str(
+            personal_mobile or ""
+        ).strip()
+
+        try:
+            notification_email = _normalize_user_email(
+                data.get("notification_email"),
+                "Notification Email",
+            )
+
+            notification_phone = (
+                _normalize_user_mobile_phone(
+                    data.get("notification_phone")
+                )
+            )
+
+        except ValueError as exc:
+            conn.rollback()
+
+            return _mfa_no_store(
+                (
+                    jsonify({
+                        "success": False,
+                        "error": "invalid_notification_destination",
+                        "message": str(exc),
+                    }),
+                    400,
+                )
+            )
+
+        if (
+            notification_email
+            and login_email
+            and notification_email == login_email
+        ):
+            notification_email = ""
+
+        if (
+            notification_phone
+            and personal_mobile
+            and notification_phone == personal_mobile
+        ):
+            notification_phone = ""
+
+        email_alerts_enabled = data[
+            "email_alerts_enabled"
+        ]
+
+        sms_alerts_enabled = data[
+            "sms_alerts_enabled"
+        ]
+
+        security_alerts_enabled = data[
+            "security_alerts_enabled"
+        ]
+
+        system_integration_alerts_enabled = data[
+            "system_integration_alerts_enabled"
+        ]
+
+        account_lockout_alerts_enabled = data[
+            "account_lockout_alerts_enabled"
+        ]
+
+        system_health_alerts_enabled = data[
+            "system_health_alerts_enabled"
+        ]
+
+        existing_settings = (
+            _master_admin_notification_settings_record(
+                cur,
+                user_id,
+            )
+        )
+
+        settings_changed = any((
+            notification_email
+            != existing_settings["notification_email"],
+            notification_phone
+            != existing_settings["notification_phone"],
+            email_alerts_enabled
+            != existing_settings["email_alerts_enabled"],
+            sms_alerts_enabled
+            != existing_settings["sms_alerts_enabled"],
+            security_alerts_enabled
+            != existing_settings["security_alerts_enabled"],
+            system_integration_alerts_enabled
+            != existing_settings[
+                "system_integration_alerts_enabled"
+            ],
+            account_lockout_alerts_enabled
+            != existing_settings[
+                "account_lockout_alerts_enabled"
+            ],
+            system_health_alerts_enabled
+            != existing_settings[
+                "system_health_alerts_enabled"
+            ],
+        ))
+
+        if settings_changed:
+            current_password = str(
+                data.get("current_password") or ""
+            )
+
+            if (
+                not current_password
+                or not check_password_hash(
+                    password_hash,
+                    current_password,
+                )
+            ):
+                log_audit(
+                    cur,
+                    spa_id=spa_id,
+                    user_id=user_id,
+                    action_type=(
+                        "master_admin_notification_change_failed"
+                    ),
+                    table_name="users",
+                    record_id=user_id,
+                    notes=(
+                        "Current password verification failed "
+                        "during Master Admin notification "
+                        "settings change."
+                    ),
+                )
+
+                conn.commit()
+
+                return _mfa_no_store(
+                    (
+                        jsonify({
+                            "success": False,
+                            "error": "current_password_incorrect",
+                            "message": (
+                                "Current password is incorrect."
+                            ),
+                        }),
+                        400,
+                    )
+                )
+
+            cur.execute(
+                """
+                INSERT INTO master_admin_notification_settings (
+                    user_id,
+                    notification_email,
+                    notification_phone,
+                    email_alerts_enabled,
+                    sms_alerts_enabled,
+                    security_alerts_enabled,
+                    system_integration_alerts_enabled,
+                    account_lockout_alerts_enabled,
+                    system_health_alerts_enabled,
+                    created_by,
+                    updated_by
+                )
+                VALUES (
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s
+                )
+                ON CONFLICT (user_id)
+                DO UPDATE SET
+                    notification_email = EXCLUDED.notification_email,
+                    notification_phone = EXCLUDED.notification_phone,
+                    notification_email_verified_at = (
+                        CASE
+                            WHEN
+                                master_admin_notification_settings
+                                    .notification_email
+                                IS DISTINCT FROM
+                                EXCLUDED.notification_email
+                            THEN NULL
+                            ELSE
+                                master_admin_notification_settings
+                                    .notification_email_verified_at
+                        END
+                    ),
+                    notification_phone_verified_at = (
+                        CASE
+                            WHEN
+                                master_admin_notification_settings
+                                    .notification_phone
+                                IS DISTINCT FROM
+                                EXCLUDED.notification_phone
+                            THEN NULL
+                            ELSE
+                                master_admin_notification_settings
+                                    .notification_phone_verified_at
+                        END
+                    ),
+                    email_alerts_enabled = EXCLUDED.email_alerts_enabled,
+                    sms_alerts_enabled = EXCLUDED.sms_alerts_enabled,
+                    security_alerts_enabled = EXCLUDED.security_alerts_enabled,
+                    system_integration_alerts_enabled = (
+                        EXCLUDED.system_integration_alerts_enabled
+                    ),
+                    account_lockout_alerts_enabled = (
+                        EXCLUDED.account_lockout_alerts_enabled
+                    ),
+                    system_health_alerts_enabled = (
+                        EXCLUDED.system_health_alerts_enabled
+                    ),
+                    updated_by = EXCLUDED.updated_by,
+                    updated_at = NOW()
+                RETURNING master_admin_notification_setting_id
+                """,
+                (
+                    user_id,
+                    notification_email or None,
+                    notification_phone or None,
+                    email_alerts_enabled,
+                    sms_alerts_enabled,
+                    security_alerts_enabled,
+                    system_integration_alerts_enabled,
+                    account_lockout_alerts_enabled,
+                    system_health_alerts_enabled,
+                    user_id,
+                    user_id,
+                ),
+            )
+
+            notification_setting_id = cur.fetchone()[0]
+
+            log_audit(
+                cur,
+                spa_id=spa_id,
+                user_id=user_id,
+                action_type=(
+                    "master_admin_notification_settings_updated"
+                ),
+                table_name=(
+                    "master_admin_notification_settings"
+                ),
+                record_id=notification_setting_id,
+                notes=(
+                    "Master Admin notification settings updated "
+                    "after current-password verification. "
+                    "Notification destination values were not "
+                    "written to the audit log."
+                ),
+            )
+
+        conn.commit()
+
+        effective_email = (
+            notification_email
+            or login_email
+        )
+
+        effective_phone = (
+            notification_phone
+            or personal_mobile
+        )
+
+        return _mfa_no_store(
+            jsonify({
+                "success": True,
+                "notification_settings": {
+                    "notification_email": (
+                        notification_email
+                    ),
+                    "notification_phone": (
+                        notification_phone
+                    ),
+                    "login_email": login_email,
+                    "personal_mobile": personal_mobile,
+                    "effective_email": effective_email,
+                    "effective_email_source": (
+                        "notification_email"
+                        if notification_email
+                        else (
+                            "login_email"
+                            if login_email
+                            else None
+                        )
+                    ),
+                    "effective_phone": effective_phone,
+                    "effective_phone_source": (
+                        "notification_phone"
+                        if notification_phone
+                        else (
+                            "personal_mobile"
+                            if personal_mobile
+                            else None
+                        )
+                    ),
+                    "email_alerts_enabled": (
+                        email_alerts_enabled
+                    ),
+                    "sms_alerts_enabled": (
+                        sms_alerts_enabled
+                    ),
+                    "security_alerts_enabled": (
+                        security_alerts_enabled
+                    ),
+                    "system_integration_alerts_enabled": (
+                        system_integration_alerts_enabled
+                    ),
+                    "account_lockout_alerts_enabled": (
+                        account_lockout_alerts_enabled
+                    ),
+                    "system_health_alerts_enabled": (
+                        system_health_alerts_enabled
+                    ),
+                },
+                "changed": settings_changed,
+            })
+        )
+
+    except Exception:
+        conn.rollback()
+
+        app.logger.exception(
+            "Master Admin Notification Settings API update failed."
+        )
+
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "notification_settings_update_unavailable",
+                    "message": (
+                        "Notification Settings could not be saved "
+                        "right now."
+                    ),
+                }),
+                503,
+            )
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route(
     "/api/master-admin/auth/logout",
     methods=["POST"],
 )
