@@ -9075,6 +9075,230 @@ def master_admin_api_security():
         conn.close()
 
 
+
+def _master_admin_alerts_overview(cur):
+
+    cur.execute(
+        """
+        SELECT
+            COUNT(*) FILTER (
+                WHERE reserved_at >= NOW() - INTERVAL '24 hours'
+                  AND COALESCE(source_related_type, '')
+                      NOT LIKE '%_test'
+            ) AS alerts_24h,
+            COUNT(*) FILTER (
+                WHERE reserved_at >= NOW() - INTERVAL '7 days'
+                  AND COALESCE(source_related_type, '')
+                      NOT LIKE '%_test'
+            ) AS alerts_7d
+        FROM master_admin_alert_events
+        """
+    )
+
+    summary_row = cur.fetchone()
+
+    cur.execute(
+        """
+        SELECT
+            COUNT(*) FILTER (
+                WHERE d.status = 'failed'
+            ) AS failed_deliveries_7d,
+            COUNT(*) FILTER (
+                WHERE d.status = 'uncertain'
+            ) AS uncertain_deliveries_7d
+        FROM master_admin_alert_deliveries d
+        JOIN master_admin_alert_events e
+          ON e.master_admin_alert_event_id =
+             d.master_admin_alert_event_id
+        WHERE e.reserved_at >= NOW() - INTERVAL '7 days'
+          AND COALESCE(e.source_related_type, '')
+              NOT LIKE '%_test'
+        """
+    )
+
+    delivery_summary_row = cur.fetchone()
+
+    cur.execute(
+        """
+        SELECT
+            master_admin_alert_event_id,
+            alert_category,
+            severity,
+            source_category,
+            source_related_type,
+            alert_title,
+            alert_message,
+            reserved_at,
+            completed_at
+        FROM master_admin_alert_events
+        WHERE reserved_at >= NOW() - INTERVAL '7 days'
+          AND COALESCE(source_related_type, '')
+              NOT LIKE '%_test'
+        ORDER BY
+            reserved_at DESC,
+            master_admin_alert_event_id DESC
+        LIMIT 10
+        """
+    )
+
+    event_rows = cur.fetchall()
+
+    event_ids = [
+        int(row["master_admin_alert_event_id"])
+        for row in event_rows
+    ]
+
+    deliveries_by_event = {
+        event_id: []
+        for event_id in event_ids
+    }
+
+    if event_ids:
+        cur.execute(
+            """
+            SELECT
+                master_admin_alert_event_id,
+                channel,
+                status,
+                destination_source,
+                attempted_at,
+                sent_at,
+                error_summary
+            FROM master_admin_alert_deliveries
+            WHERE master_admin_alert_event_id = ANY(%s)
+            ORDER BY
+                master_admin_alert_event_id DESC,
+                channel ASC
+            """,
+            (event_ids,),
+        )
+
+        for row in cur.fetchall():
+            event_id = int(
+                row["master_admin_alert_event_id"]
+            )
+
+            deliveries_by_event.setdefault(
+                event_id,
+                [],
+            ).append({
+                "channel": str(row["channel"] or ""),
+                "status": str(row["status"] or ""),
+                "destination_source": (
+                    row["destination_source"]
+                ),
+                "attempted_at": (
+                    row["attempted_at"].isoformat()
+                    if row["attempted_at"]
+                    else None
+                ),
+                "sent_at": (
+                    row["sent_at"].isoformat()
+                    if row["sent_at"]
+                    else None
+                ),
+                "error_summary": row["error_summary"],
+            })
+
+    recent_alerts = []
+
+    for row in event_rows:
+        event_id = int(
+            row["master_admin_alert_event_id"]
+        )
+
+        recent_alerts.append({
+            "alert_event_id": event_id,
+            "alert_category": str(
+                row["alert_category"] or ""
+            ),
+            "severity": str(row["severity"] or ""),
+            "source_category": row["source_category"],
+            "source_related_type": (
+                row["source_related_type"]
+            ),
+            "title": str(row["alert_title"] or ""),
+            "message": str(row["alert_message"] or ""),
+            "reserved_at": (
+                row["reserved_at"].isoformat()
+                if row["reserved_at"]
+                else None
+            ),
+            "completed_at": (
+                row["completed_at"].isoformat()
+                if row["completed_at"]
+                else None
+            ),
+            "deliveries": deliveries_by_event.get(
+                event_id,
+                [],
+            ),
+        })
+
+    return {
+        "alerts_24h": int(
+            summary_row["alerts_24h"] or 0
+        ),
+        "alerts_7d": int(
+            summary_row["alerts_7d"] or 0
+        ),
+        "failed_deliveries_7d": int(
+            delivery_summary_row[
+                "failed_deliveries_7d"
+            ] or 0
+        ),
+        "uncertain_deliveries_7d": int(
+            delivery_summary_row[
+                "uncertain_deliveries_7d"
+            ] or 0
+        ),
+        "recent_alerts": recent_alerts,
+    }
+
+
+@app.route(
+    "/api/master-admin/alerts",
+    methods=["GET"],
+)
+@master_admin_api_required
+def master_admin_api_alerts():
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    try:
+        alerts = _master_admin_alerts_overview(cur)
+
+        return _mfa_no_store(
+            jsonify({
+                "success": True,
+                "alerts": alerts,
+            })
+        )
+
+    except Exception:
+        app.logger.exception(
+            "Master Admin Alerts API request failed."
+        )
+
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "alerts_unavailable",
+                    "message": (
+                        "Master Admin alerts could not be loaded "
+                        "right now."
+                    ),
+                }),
+                503,
+            )
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
 @app.route(
     "/api/master-admin/system-health",
     methods=["GET"],
