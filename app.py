@@ -9299,6 +9299,178 @@ def master_admin_api_alerts():
         conn.close()
 
 
+def _master_admin_recent_activity_overview(cur):
+
+    cur.execute(
+        """
+        SELECT
+            COUNT(*) FILTER (
+                WHERE created_at >= NOW() - INTERVAL '24 hours'
+                  AND severity IN ('ALERT', 'ERROR')
+                  AND COALESCE(related_type, '') NOT LIKE '%_test'
+            ) AS attention_24h,
+            COUNT(*) FILTER (
+                WHERE created_at >= NOW() - INTERVAL '24 hours'
+                  AND severity = 'WARNING'
+                  AND COALESCE(related_type, '') NOT LIKE '%_test'
+            ) AS warnings_24h
+        FROM system_logs
+        """
+    )
+
+    summary_row = cur.fetchone()
+
+    cur.execute(
+        """
+        SELECT
+            MAX(log_id) AS log_id,
+            category,
+            severity,
+            message,
+            spa_id,
+            spa_name,
+            related_type,
+            related_id,
+            COUNT(*) AS occurrence_count,
+            MAX(created_at) AS latest_at
+        FROM (
+            SELECT
+                l.log_id,
+                l.category,
+                l.severity,
+                l.message,
+                l.spa_id,
+                s.spa_name,
+                l.related_type,
+                l.related_id,
+                l.created_at AT TIME ZONE
+                    current_setting('TIMEZONE') AS created_at
+            FROM system_logs l
+            LEFT JOIN spas s
+              ON s.spa_id = l.spa_id
+            WHERE l.created_at >= NOW() - INTERVAL '7 days'
+              AND l.severity IN ('WARNING', 'ERROR', 'ALERT')
+              AND COALESCE(l.related_type, '')
+                  NOT LIKE '%_test'
+        ) important_activity
+        GROUP BY
+            category,
+            severity,
+            message,
+            spa_id,
+            spa_name,
+            related_type,
+            related_id
+        ORDER BY
+            latest_at DESC,
+            log_id DESC
+        LIMIT 10
+        """
+    )
+
+    recent_rows = cur.fetchall()
+
+    recent_events = [
+        {
+            "log_id": int(row["log_id"]),
+            "category": str(row["category"] or ""),
+            "severity": str(row["severity"] or ""),
+            "message": str(row["message"] or ""),
+            "spa_id": (
+                int(row["spa_id"])
+                if row["spa_id"] is not None
+                else None
+            ),
+            "spa_name": row["spa_name"],
+            "related_type": row["related_type"],
+            "related_id": (
+                int(row["related_id"])
+                if row["related_id"] is not None
+                else None
+            ),
+            "occurrence_count": int(
+                row["occurrence_count"] or 0
+            ),
+            "created_at": (
+                row["latest_at"].isoformat()
+                if row["latest_at"]
+                else None
+            ),
+        }
+        for row in recent_rows
+    ]
+
+    attention_24h = int(
+        summary_row["attention_24h"] or 0
+    )
+    warnings_24h = int(
+        summary_row["warnings_24h"] or 0
+    )
+
+    if attention_24h > 0:
+        status = "red"
+        status_text = "Attention"
+    elif warnings_24h > 0:
+        status = "yellow"
+        status_text = "Review"
+    else:
+        status = "green"
+        status_text = "Normal"
+
+    return {
+        "status": status,
+        "status_text": status_text,
+        "attention_24h": attention_24h,
+        "warnings_24h": warnings_24h,
+        "recent_events": recent_events,
+    }
+
+
+@app.route(
+    "/api/master-admin/recent-activity",
+    methods=["GET"],
+)
+@master_admin_api_required
+def master_admin_api_recent_activity():
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    try:
+        recent_activity = (
+            _master_admin_recent_activity_overview(cur)
+        )
+
+        return _mfa_no_store(
+            jsonify({
+                "success": True,
+                "recent_activity": recent_activity,
+            })
+        )
+
+    except Exception:
+        app.logger.exception(
+            "Master Admin Recent Activity API request failed."
+        )
+
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "recent_activity_unavailable",
+                    "message": (
+                        "Recent Activity could not be loaded "
+                        "right now."
+                    ),
+                }),
+                503,
+            )
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
 @app.route(
     "/api/master-admin/system-health",
     methods=["GET"],
