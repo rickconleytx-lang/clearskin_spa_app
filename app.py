@@ -9,6 +9,7 @@ import click
 import secrets
 import hashlib
 import hmac
+import contextvars
 import ipaddress
 import cloudinary
 import cloudinary.uploader
@@ -600,23 +601,11 @@ def inject_navigation_access_context():
 
 
 
-def log_sms(message):
-    print(f"[SMS] {message}", flush=True)
 
-def log_email(message):
-    print(f"[EMAIL] {message}", flush=True)
 
-def log_godaddy(message):
-    print(f"[GODADDY] {message}", flush=True)
 
-def log_scheduler(message):
-    print(f"[SCHEDULER] {message}", flush=True)
 
-def log_reminder(message):
-    print(f"[REMINDER] {message}", flush=True)
 
-def log_ai(message):
-    print(f"[AI] {message}", flush=True)
 
 
 
@@ -628,12 +617,1516 @@ def log_ai(message):
 #
 ###################################
 
+
+
+_MASTER_ADMIN_ALERT_DELIVERY_ACTIVE = (
+    contextvars.ContextVar(
+        "master_admin_alert_delivery_active",
+        default=False,
+    )
+)
+
+
+_MASTER_ADMIN_ALERT_EXCLUDED_RELATED_TYPES = {
+    "sms_send_disabled",
+    "mfa_resend_security_alert_sms",
+    "mfa_resend_security_alert_email",
+    "mfa_resend_security_alert_audit",
+}
+
+
+def _master_admin_alert_classification(
+    *,
+    category,
+    severity,
+    spa_id=None,
+    related_type=None,
+    related_id=None,
+):
+
+    normalized_category = str(
+        category or ""
+    ).strip().upper()
+
+    normalized_severity = str(
+        severity or ""
+    ).strip().upper()
+
+    normalized_related_type = str(
+        related_type or ""
+    ).strip().lower()
+
+    if normalized_severity not in {
+        "ERROR",
+        "ALERT",
+    }:
+        return None
+
+    if _MASTER_ADMIN_ALERT_DELIVERY_ACTIVE.get():
+        return None
+
+    if (
+        normalized_related_type
+        in _MASTER_ADMIN_ALERT_EXCLUDED_RELATED_TYPES
+    ):
+        return None
+
+    if normalized_related_type.startswith(
+        "master_admin_alert"
+    ):
+        return None
+
+    alert_category = None
+    alert_key = None
+    cooldown_minutes = 60
+
+    if normalized_category == "SECURITY":
+
+        if (
+            normalized_severity == "ALERT"
+            and normalized_related_type in {
+                "business_login_user",
+                "business_switch_target",
+            }
+        ):
+            alert_category = "account_lockout"
+            alert_key = (
+                "account_lockout:"
+                + normalized_related_type
+            )
+            cooldown_minutes = 60
+
+        else:
+            alert_category = "security"
+            alert_key = (
+                "security:"
+                + (
+                    normalized_related_type
+                    or "general"
+                )
+            )
+            cooldown_minutes = 60
+
+    elif normalized_category in {
+        "SCHEDULER",
+        "SYSTEM",
+        "DATABASE",
+    }:
+        alert_category = "system_health"
+        alert_key = (
+            normalized_category.lower()
+            + ":"
+            + (
+                normalized_related_type
+                or "general"
+            )
+        )
+        cooldown_minutes = 60
+
+    else:
+        alert_category = "system_integration"
+        alert_key = (
+            normalized_category.lower()
+            + ":"
+            + (
+                normalized_related_type
+                or "general"
+            )
+        )
+        cooldown_minutes = 60
+
+    fingerprint_source = "|".join(
+        [
+            alert_category,
+            alert_key,
+            normalized_severity,
+            str(spa_id or ""),
+            normalized_related_type,
+            str(related_id or ""),
+        ]
+    )
+
+    fingerprint = hashlib.sha256(
+        fingerprint_source.encode("utf-8")
+    ).hexdigest()
+
+    return {
+        "alert_category": alert_category,
+        "alert_key": alert_key,
+        "fingerprint": fingerprint,
+        "severity": normalized_severity,
+        "source_category": normalized_category,
+        "source_related_type": (
+            normalized_related_type or None
+        ),
+        "cooldown_minutes": cooldown_minutes,
+    }
+
+
+def _master_admin_alert_context(
+    cur,
+    *,
+    spa_id=None,
+    related_type=None,
+    related_id=None,
+):
+
+    business_name = "Peach Suite Pro"
+    subject_name = None
+    subject_type = None
+
+    normalized_related_type = str(
+        related_type or ""
+    ).strip().lower()
+
+    if spa_id is not None:
+
+        cur.execute(
+            """
+            SELECT spa_name
+            FROM spas
+            WHERE spa_id = %s
+            """,
+            (spa_id,),
+        )
+
+        spa_row = cur.fetchone()
+
+        if spa_row and spa_row[0]:
+            business_name = str(
+                spa_row[0]
+            ).strip()
+
+    if related_id is None:
+        return {
+            "business_name": business_name,
+            "subject_name": None,
+            "subject_type": None,
+        }
+
+    if normalized_related_type in {
+        "business_login_user",
+        "employee_access_owner_recovery",
+    }:
+
+        cur.execute(
+            """
+            SELECT
+                first_name,
+                last_name
+            FROM users
+            WHERE user_id = %s
+              AND spa_id IS NOT DISTINCT FROM %s
+            """,
+            (
+                related_id,
+                spa_id,
+            ),
+        )
+
+        row = cur.fetchone()
+
+        if row:
+            subject_name = (
+                (
+                    str(row[0] or "").strip()
+                    + " "
+                    + str(row[1] or "").strip()
+                ).strip()
+                or None
+            )
+            subject_type = "user"
+
+    elif normalized_related_type == (
+        "employee_access_code_request"
+    ):
+
+        cur.execute(
+            """
+            SELECT
+                first_name,
+                last_name,
+                employee_nickname
+            FROM employees
+            WHERE employee_id = %s
+              AND spa_id = %s
+            """,
+            (
+                related_id,
+                spa_id,
+            ),
+        )
+
+        row = cur.fetchone()
+
+        if row:
+            subject_name = (
+                str(row[2] or "").strip()
+                or (
+                    (
+                        str(row[0] or "").strip()
+                        + " "
+                        + str(row[1] or "").strip()
+                    ).strip()
+                )
+                or None
+            )
+            subject_type = "employee"
+
+    elif normalized_related_type == (
+        "employee_access_code_credential"
+    ):
+
+        cur.execute(
+            """
+            SELECT
+                e.first_name,
+                e.last_name,
+                e.employee_nickname
+            FROM employee_access_code_credentials eacc
+            JOIN employees e
+              ON e.spa_id = eacc.spa_id
+             AND e.employee_id = eacc.employee_id
+            WHERE
+                eacc.employee_access_code_credential_id = %s
+              AND eacc.spa_id = %s
+            """,
+            (
+                related_id,
+                spa_id,
+            ),
+        )
+
+        row = cur.fetchone()
+
+        if row:
+            subject_name = (
+                str(row[2] or "").strip()
+                or (
+                    (
+                        str(row[0] or "").strip()
+                        + " "
+                        + str(row[1] or "").strip()
+                    ).strip()
+                )
+                or None
+            )
+            subject_type = "employee"
+
+    elif normalized_related_type == (
+        "mfa_account_recovery_request"
+    ):
+
+        cur.execute(
+            """
+            SELECT
+                u.first_name,
+                u.last_name
+            FROM mfa_account_recovery_requests r
+            JOIN users u
+              ON u.user_id = r.user_id
+            WHERE
+                r.mfa_account_recovery_request_id = %s
+              AND u.spa_id IS NOT DISTINCT FROM %s
+            """,
+            (
+                related_id,
+                spa_id,
+            ),
+        )
+
+        row = cur.fetchone()
+
+        if row:
+            subject_name = (
+                (
+                    str(row[0] or "").strip()
+                    + " "
+                    + str(row[1] or "").strip()
+                ).strip()
+                or None
+            )
+            subject_type = "user"
+
+    return {
+        "business_name": business_name,
+        "subject_name": subject_name,
+        "subject_type": subject_type,
+    }
+
+
+def _master_admin_alert_content(
+    *,
+    classification,
+    context,
+):
+    alert_category = classification["alert_category"]
+    source_category = str(
+        classification.get("source_category") or "SYSTEM"
+    ).strip().upper()
+
+    business_name = str(
+        context.get("business_name") or "Peach Suite Pro"
+    ).strip()
+
+    subject_name = str(
+        context.get("subject_name") or ""
+    ).strip()
+
+    source_label_map = {
+        "EMAIL": "Email",
+        "SMS": "SMS",
+        "SQUARE": "Square",
+        "SCHEDULER": "Scheduler",
+        "SECURITY": "Security",
+        "SYSTEM": "System",
+        "DATABASE": "Database",
+        "GODADDY": "GoDaddy",
+        "AI": "AI",
+    }
+
+    source_label = source_label_map.get(
+        source_category,
+        source_category.replace("_", " ").title(),
+    )
+
+    if alert_category == "account_lockout":
+        title = f"Account Lockout · {business_name}"
+
+        if subject_name:
+            message = (
+                f"{subject_name} has been temporarily locked out "
+                f"of {business_name} after repeated sign-in "
+                "failures. Review Master Admin System Activity "
+                "for details."
+            )
+        else:
+            message = (
+                f"An account has been temporarily locked out of "
+                f"{business_name} after repeated sign-in "
+                "failures. Review Master Admin System Activity "
+                "for details."
+            )
+
+    elif alert_category == "security":
+        title = f"Security Alert · {business_name}"
+
+        if subject_name:
+            message = (
+                f"A security event involving {subject_name} "
+                f"requires attention in {business_name}. "
+                "Review Master Admin System Activity for details."
+            )
+        else:
+            message = (
+                f"A security event requires attention in "
+                f"{business_name}. Review Master Admin System "
+                "Activity for details."
+            )
+
+    elif alert_category == "system_health":
+        title = f"System Health · {business_name}"
+        message = (
+            f"A {source_label} system-health error requires "
+            f"attention for {business_name}. Review Master Admin "
+            "System Activity for details."
+        )
+
+    else:
+        title = f"{source_label} Error · {business_name}"
+        message = (
+            f"A {source_label} integration or service error "
+            f"requires attention for {business_name}. Review "
+            "Master Admin System Activity for details."
+        )
+
+    return {
+        "title": title[:180],
+        "message": message,
+    }
+
+
+def _master_admin_alert_delivery_target(
+    cur,
+    *,
+    master_admin_user_id,
+    channel,
+    alert_category,
+):
+    normalized_channel = str(
+        channel or ""
+    ).strip().lower()
+
+    normalized_alert_category = str(
+        alert_category or ""
+    ).strip().lower()
+
+    category_columns = {
+        "security": "security_alerts_enabled",
+        "system_integration": (
+            "system_integration_alerts_enabled"
+        ),
+        "account_lockout": (
+            "account_lockout_alerts_enabled"
+        ),
+        "system_health": "system_health_alerts_enabled",
+    }
+
+    if normalized_channel not in {
+        "email",
+        "sms",
+    }:
+        return {
+            "status": "invalid_channel",
+            "destination": None,
+            "destination_source": None,
+        }
+
+    category_column = category_columns.get(
+        normalized_alert_category
+    )
+
+    if not category_column:
+        return {
+            "status": "invalid_alert_category",
+            "destination": None,
+            "destination_source": None,
+        }
+
+    cur.execute(
+        f"""
+        SELECT
+            u.role,
+            u.active,
+            NULLIF(TRIM(u.email), ''),
+            NULLIF(TRIM(u.sms_phone), ''),
+            NULLIF(TRIM(m.notification_email), ''),
+            NULLIF(TRIM(m.notification_phone), ''),
+            COALESCE(m.email_alerts_enabled, FALSE),
+            COALESCE(m.sms_alerts_enabled, FALSE),
+            COALESCE(m.{category_column}, TRUE)
+        FROM users u
+        LEFT JOIN master_admin_notification_settings m
+          ON m.user_id = u.user_id
+        WHERE u.user_id = %s
+        """,
+        (master_admin_user_id,),
+    )
+
+    row = cur.fetchone()
+
+    if not row:
+        return {
+            "status": "master_admin_not_found",
+            "destination": None,
+            "destination_source": None,
+        }
+
+    (
+        role,
+        active,
+        login_email,
+        personal_mobile,
+        notification_email,
+        notification_phone,
+        email_enabled,
+        sms_enabled,
+        category_enabled,
+    ) = row
+
+    if role != "master_admin" or not bool(active):
+        return {
+            "status": "master_admin_inactive",
+            "destination": None,
+            "destination_source": None,
+        }
+
+    if not bool(category_enabled):
+        return {
+            "status": "category_disabled",
+            "destination": None,
+            "destination_source": None,
+        }
+
+    if normalized_channel == "email":
+        if not bool(email_enabled):
+            return {
+                "status": "channel_disabled",
+                "destination": None,
+                "destination_source": None,
+            }
+
+        if notification_email:
+            return {
+                "status": "ready",
+                "destination": notification_email,
+                "destination_source": (
+                    "notification_email"
+                ),
+            }
+
+        if login_email:
+            return {
+                "status": "ready",
+                "destination": login_email,
+                "destination_source": "login_email",
+            }
+
+    else:
+        if not bool(sms_enabled):
+            return {
+                "status": "channel_disabled",
+                "destination": None,
+                "destination_source": None,
+            }
+
+        if notification_phone:
+            return {
+                "status": "ready",
+                "destination": notification_phone,
+                "destination_source": (
+                    "notification_phone"
+                ),
+            }
+
+        if personal_mobile:
+            return {
+                "status": "ready",
+                "destination": personal_mobile,
+                "destination_source": (
+                    "personal_mobile"
+                ),
+            }
+
+    return {
+        "status": "missing_destination",
+        "destination": None,
+        "destination_source": None,
+    }
+
+
+def _reserve_master_admin_alert(
+    *,
+    source_log_id,
+    classification,
+    spa_id=None,
+    related_type=None,
+    related_id=None,
+):
+    if not classification:
+        return {
+            "status": "not_eligible",
+        }
+
+    alert_category = classification.get(
+        "alert_category"
+    )
+
+    preference_index = {
+        "security": 2,
+        "system_integration": 3,
+        "account_lockout": 4,
+        "system_health": 5,
+    }
+
+    if alert_category not in preference_index:
+        return {
+            "status": "unknown_alert_category",
+        }
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        # Serialize reservations through the one active Master Admin
+        # account. This prevents two simultaneous errors from racing
+        # through the cooldown check.
+        cur.execute(
+            """
+            SELECT user_id
+            FROM users
+            WHERE role = 'master_admin'
+              AND active = TRUE
+            ORDER BY user_id
+            LIMIT 2
+            FOR UPDATE
+            """
+        )
+
+        master_admin_rows = cur.fetchall()
+
+        if not master_admin_rows:
+            conn.rollback()
+            return {
+                "status": "no_active_master_admin",
+            }
+
+        if len(master_admin_rows) != 1:
+            conn.rollback()
+            return {
+                "status": "multiple_active_master_admins",
+            }
+
+        master_admin_user_id = int(
+            master_admin_rows[0][0]
+        )
+
+        if source_log_id is not None:
+            cur.execute(
+                """
+                SELECT master_admin_alert_event_id
+                FROM master_admin_alert_events
+                WHERE source_log_id = %s
+                LIMIT 1
+                """,
+                (source_log_id,),
+            )
+
+            existing_source_event = cur.fetchone()
+
+            if existing_source_event:
+                conn.rollback()
+                return {
+                    "status": "already_reserved",
+                    "master_admin_user_id": (
+                        master_admin_user_id
+                    ),
+                    "existing_alert_event_id": int(
+                        existing_source_event[0]
+                    ),
+                }
+
+        cur.execute(
+            """
+            SELECT
+                email_alerts_enabled,
+                sms_alerts_enabled,
+                security_alerts_enabled,
+                system_integration_alerts_enabled,
+                account_lockout_alerts_enabled,
+                system_health_alerts_enabled
+            FROM master_admin_notification_settings
+            WHERE user_id = %s
+            """,
+            (master_admin_user_id,),
+        )
+
+        settings_row = cur.fetchone()
+
+        if settings_row:
+            settings = tuple(
+                bool(value)
+                for value in settings_row
+            )
+        else:
+            # Same safe defaults used by My Profile:
+            # delivery channels OFF, alert categories ON.
+            settings = (
+                False,
+                False,
+                True,
+                True,
+                True,
+                True,
+            )
+
+        category_enabled = settings[
+            preference_index[alert_category]
+        ]
+
+        if not category_enabled:
+            conn.rollback()
+            return {
+                "status": "category_disabled",
+                "master_admin_user_id": (
+                    master_admin_user_id
+                ),
+            }
+
+        channels = []
+
+        if settings[0]:
+            channels.append("email")
+
+        if settings[1]:
+            channels.append("sms")
+
+        if not channels:
+            conn.rollback()
+            return {
+                "status": "channels_disabled",
+                "master_admin_user_id": (
+                    master_admin_user_id
+                ),
+            }
+
+        cooldown_minutes = int(
+            classification.get(
+                "cooldown_minutes",
+                60,
+            )
+        )
+
+        cur.execute(
+            """
+            SELECT master_admin_alert_event_id
+            FROM master_admin_alert_events
+            WHERE master_admin_user_id = %s
+              AND fingerprint = %s
+              AND reserved_at >= (
+                    NOW()
+                    - (%s * INTERVAL '1 minute')
+              )
+            ORDER BY reserved_at DESC
+            LIMIT 1
+            """,
+            (
+                master_admin_user_id,
+                classification["fingerprint"],
+                cooldown_minutes,
+            ),
+        )
+
+        recent_event = cur.fetchone()
+
+        if recent_event:
+            conn.rollback()
+            return {
+                "status": "cooldown_active",
+                "master_admin_user_id": (
+                    master_admin_user_id
+                ),
+                "existing_alert_event_id": int(
+                    recent_event[0]
+                ),
+            }
+
+        context = _master_admin_alert_context(
+            cur,
+            spa_id=spa_id,
+            related_type=related_type,
+            related_id=related_id,
+        )
+
+        content = _master_admin_alert_content(
+            classification=classification,
+            context=context,
+        )
+
+        cur.execute(
+            """
+            INSERT INTO master_admin_alert_events (
+                master_admin_user_id,
+                source_log_id,
+                alert_category,
+                alert_key,
+                fingerprint,
+                severity,
+                source_category,
+                source_related_type,
+                alert_title,
+                alert_message,
+                cooldown_minutes
+            )
+            VALUES (
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s
+            )
+            RETURNING master_admin_alert_event_id
+            """,
+            (
+                master_admin_user_id,
+                source_log_id,
+                alert_category,
+                classification["alert_key"],
+                classification["fingerprint"],
+                classification["severity"],
+                classification["source_category"],
+                classification.get(
+                    "source_related_type"
+                ),
+                content["title"],
+                content["message"],
+                cooldown_minutes,
+            ),
+        )
+
+        alert_event_id = int(
+            cur.fetchone()[0]
+        )
+
+        for channel in channels:
+            cur.execute(
+                """
+                INSERT INTO master_admin_alert_deliveries (
+                    master_admin_alert_event_id,
+                    channel,
+                    status
+                )
+                VALUES (%s, %s, 'pending')
+                """,
+                (
+                    alert_event_id,
+                    channel,
+                ),
+            )
+
+        conn.commit()
+
+        return {
+            "status": "reserved",
+            "alert_event_id": alert_event_id,
+            "master_admin_user_id": (
+                master_admin_user_id
+            ),
+            "channels": channels,
+            "context": context,
+            "title": content["title"],
+            "message": content["message"],
+        }
+
+    except Exception as exc:
+        conn.rollback()
+
+        print(
+            "[MASTER ADMIN ALERT RESERVATION ERROR] "
+            + str(exc),
+            flush=True,
+        )
+
+        return {
+            "status": "error",
+        }
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _complete_master_admin_alert_if_terminal(
+    cur,
+    *,
+    alert_event_id,
+):
+    cur.execute(
+        """
+        UPDATE master_admin_alert_events e
+        SET
+            completed_at = COALESCE(
+                e.completed_at,
+                NOW()
+            ),
+            updated_at = NOW()
+        WHERE
+            e.master_admin_alert_event_id = %s
+          AND NOT EXISTS (
+                SELECT 1
+                FROM master_admin_alert_deliveries d
+                WHERE
+                    d.master_admin_alert_event_id =
+                        e.master_admin_alert_event_id
+                  AND d.status IN (
+                        'pending',
+                        'attempting'
+                  )
+          )
+        """,
+        (alert_event_id,),
+    )
+
+
+def _mark_stale_master_admin_alert_deliveries_uncertain(
+    *,
+    stale_after_minutes=10,
+):
+    try:
+        stale_after_minutes = int(
+            stale_after_minutes
+        )
+    except (TypeError, ValueError):
+        stale_after_minutes = 10
+
+    if stale_after_minutes < 1:
+        stale_after_minutes = 10
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            UPDATE master_admin_alert_deliveries
+            SET
+                status = 'uncertain',
+                error_summary = (
+                    'Delivery attempt became stale before PSP '
+                    'could confirm the provider result. '
+                    'Automatic retry is blocked to prevent '
+                    'duplicate notifications.'
+                ),
+                updated_at = NOW()
+            WHERE
+                status = 'attempting'
+              AND attempted_at IS NOT NULL
+              AND attempted_at <= (
+                    NOW()
+                    - (%s * INTERVAL '1 minute')
+              )
+            RETURNING
+                master_admin_alert_delivery_id,
+                master_admin_alert_event_id
+            """,
+            (stale_after_minutes,),
+        )
+
+        stale_rows = cur.fetchall()
+
+        alert_event_ids = sorted(
+            {
+                int(row[1])
+                for row in stale_rows
+            }
+        )
+
+        for alert_event_id in alert_event_ids:
+            _complete_master_admin_alert_if_terminal(
+                cur,
+                alert_event_id=alert_event_id,
+            )
+
+        conn.commit()
+
+        return {
+            "status": "ok",
+            "stale_after_minutes": (
+                stale_after_minutes
+            ),
+            "marked_uncertain_count": len(
+                stale_rows
+            ),
+            "delivery_ids": [
+                int(row[0])
+                for row in stale_rows
+            ],
+            "alert_event_ids": alert_event_ids,
+        }
+
+    except Exception as exc:
+        conn.rollback()
+
+        print(
+            "[MASTER ADMIN ALERT STALE RECOVERY ERROR] "
+            + type(exc).__name__,
+            flush=True,
+        )
+
+        return {
+            "status": "error",
+        }
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _process_master_admin_alert_delivery(
+    *,
+    delivery_id,
+):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                d.master_admin_alert_delivery_id,
+                d.master_admin_alert_event_id,
+                d.channel,
+                d.status,
+                e.master_admin_user_id,
+                e.alert_category,
+                e.alert_title,
+                e.alert_message
+            FROM master_admin_alert_deliveries d
+            JOIN master_admin_alert_events e
+              ON e.master_admin_alert_event_id =
+                 d.master_admin_alert_event_id
+            WHERE d.master_admin_alert_delivery_id = %s
+            FOR UPDATE OF d, e
+            """,
+            (delivery_id,),
+        )
+
+        row = cur.fetchone()
+
+        if not row:
+            conn.rollback()
+            return {
+                "status": "delivery_not_found",
+            }
+
+        (
+            delivery_id,
+            alert_event_id,
+            channel,
+            current_status,
+            master_admin_user_id,
+            alert_category,
+            alert_title,
+            alert_message,
+        ) = row
+
+        if current_status != "pending":
+            conn.rollback()
+            return {
+                "status": "not_pending",
+                "delivery_id": int(delivery_id),
+                "current_status": current_status,
+            }
+
+        target = _master_admin_alert_delivery_target(
+            cur,
+            master_admin_user_id=master_admin_user_id,
+            channel=channel,
+            alert_category=alert_category,
+        )
+
+        target_status = target["status"]
+
+        if target_status != "ready":
+            if target_status in {
+                "invalid_channel",
+                "invalid_alert_category",
+            }:
+                terminal_status = "failed"
+                error_summary = (
+                    "Alert delivery configuration is invalid."
+                )
+
+            elif target_status == "missing_destination":
+                terminal_status = "skipped"
+                error_summary = (
+                    "No configured destination is available."
+                )
+
+            elif target_status == "channel_disabled":
+                terminal_status = "skipped"
+                error_summary = (
+                    "This alert channel is disabled."
+                )
+
+            elif target_status == "category_disabled":
+                terminal_status = "skipped"
+                error_summary = (
+                    "This alert category is disabled."
+                )
+
+            elif target_status in {
+                "master_admin_inactive",
+                "master_admin_not_found",
+            }:
+                terminal_status = "skipped"
+                error_summary = (
+                    "No eligible active Master Admin destination "
+                    "is available."
+                )
+
+            else:
+                terminal_status = "failed"
+                error_summary = (
+                    "Alert delivery target could not be resolved."
+                )
+
+            cur.execute(
+                """
+                UPDATE master_admin_alert_deliveries
+                SET
+                    status = %s,
+                    destination_source = %s,
+                    error_summary = %s,
+                    updated_at = NOW()
+                WHERE
+                    master_admin_alert_delivery_id = %s
+                  AND status = 'pending'
+                """,
+                (
+                    terminal_status,
+                    target.get("destination_source"),
+                    error_summary,
+                    delivery_id,
+                ),
+            )
+
+            _complete_master_admin_alert_if_terminal(
+                cur,
+                alert_event_id=alert_event_id,
+            )
+
+            conn.commit()
+
+            return {
+                "status": terminal_status,
+                "delivery_id": int(delivery_id),
+                "channel": channel,
+                "reason": target_status,
+            }
+
+        destination = target["destination"]
+        destination_source = target[
+            "destination_source"
+        ]
+
+        cur.execute(
+            """
+            UPDATE master_admin_alert_deliveries
+            SET
+                status = 'attempting',
+                destination_source = %s,
+                attempted_at = NOW(),
+                error_summary = NULL,
+                updated_at = NOW()
+            WHERE
+                master_admin_alert_delivery_id = %s
+              AND status = 'pending'
+            """,
+            (
+                destination_source,
+                delivery_id,
+            ),
+        )
+
+        if cur.rowcount != 1:
+            conn.rollback()
+            return {
+                "status": "claim_lost",
+                "delivery_id": int(delivery_id),
+            }
+
+        conn.commit()
+
+    except Exception as exc:
+        conn.rollback()
+
+        print(
+            "[MASTER ADMIN ALERT CLAIM ERROR] "
+            + type(exc).__name__,
+            flush=True,
+        )
+
+        return {
+            "status": "claim_error",
+        }
+
+    finally:
+        cur.close()
+        conn.close()
+
+    final_status = "failed"
+    provider_message_id = None
+    error_summary = None
+
+    token = _MASTER_ADMIN_ALERT_DELIVERY_ACTIVE.set(
+        True
+    )
+
+    try:
+        if channel == "email":
+            try:
+                response = send_email(
+                    to=destination,
+                    subject=alert_title,
+                    body=alert_message,
+                    add_footer=False,
+                )
+
+                status_code = int(
+                    response.status_code
+                )
+
+                if 200 <= status_code < 300:
+                    final_status = "sent"
+
+                    try:
+                        response_data = response.json()
+
+                        if isinstance(
+                            response_data,
+                            dict,
+                        ):
+                            provider_message_id = (
+                                response_data.get("id")
+                            )
+                    except Exception:
+                        provider_message_id = None
+
+                else:
+                    final_status = "failed"
+                    error_summary = (
+                        "Mailgun returned HTTP "
+                        f"{status_code}."
+                    )
+
+            except Exception as exc:
+                final_status = "failed"
+                error_summary = (
+                    "Mailgun email send raised "
+                    f"{type(exc).__name__}."
+                )
+
+        elif channel == "sms":
+            try:
+                result = (
+                    send_peach_suite_platform_sms(
+                        recipient_phone=destination,
+                        message_body=alert_message,
+                        message_type="security_alert",
+                    )
+                )
+
+                if bool(result.get("success")):
+                    final_status = "sent"
+                    provider_message_id = result.get(
+                        "provider_message_id"
+                    )
+
+                elif result.get("status") == "logged":
+                    final_status = "skipped"
+                    error_summary = (
+                        "SMS sending is disabled by the "
+                        "Peach Suite Pro system switch."
+                    )
+
+                else:
+                    final_status = "failed"
+                    error_summary = (
+                        "Telnyx SMS send failed."
+                    )
+
+            except Exception as exc:
+                final_status = "failed"
+                error_summary = (
+                    "Platform SMS send raised "
+                    f"{type(exc).__name__}."
+                )
+
+        else:
+            final_status = "failed"
+            error_summary = (
+                "Unsupported alert delivery channel."
+            )
+
+    finally:
+        _MASTER_ADMIN_ALERT_DELIVERY_ACTIVE.reset(
+            token
+        )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            UPDATE master_admin_alert_deliveries
+            SET
+                status = %s,
+                provider_message_id = %s,
+                error_summary = %s,
+                sent_at = CASE
+                    WHEN %s = 'sent'
+                    THEN NOW()
+                    ELSE NULL
+                END,
+                updated_at = NOW()
+            WHERE
+                master_admin_alert_delivery_id = %s
+              AND status = 'attempting'
+            """,
+            (
+                final_status,
+                provider_message_id,
+                error_summary,
+                final_status,
+                delivery_id,
+            ),
+        )
+
+        if cur.rowcount != 1:
+            conn.rollback()
+
+            print(
+                "[MASTER ADMIN ALERT FINALIZE ERROR] "
+                "Delivery state was not 'attempting'.",
+                flush=True,
+            )
+
+            return {
+                "status": (
+                    "final_state_persist_failed"
+                ),
+                "delivery_id": int(delivery_id),
+            }
+
+        _complete_master_admin_alert_if_terminal(
+            cur,
+            alert_event_id=alert_event_id,
+        )
+
+        conn.commit()
+
+        return {
+            "status": final_status,
+            "delivery_id": int(delivery_id),
+            "channel": channel,
+            "destination_source": (
+                destination_source
+            ),
+            "provider_message_id": (
+                provider_message_id
+            ),
+        }
+
+    except Exception as exc:
+        conn.rollback()
+
+        print(
+            "[MASTER ADMIN ALERT FINALIZE ERROR] "
+            + type(exc).__name__,
+            flush=True,
+        )
+
+        return {
+            "status": "finalize_error",
+            "delivery_id": int(delivery_id),
+        }
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def process_pending_master_admin_alert_deliveries(
+    *,
+    batch_size=20,
+):
+    try:
+        batch_size = int(batch_size)
+    except (TypeError, ValueError):
+        batch_size = 20
+
+    batch_size = max(
+        1,
+        min(batch_size, 100),
+    )
+
+    stale_result = (
+        _mark_stale_master_admin_alert_deliveries_uncertain(
+            stale_after_minutes=10,
+        )
+    )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT master_admin_alert_delivery_id
+            FROM master_admin_alert_deliveries
+            WHERE status = 'pending'
+            ORDER BY
+                created_at ASC,
+                master_admin_alert_delivery_id ASC
+            LIMIT %s
+            """,
+            (batch_size,),
+        )
+
+        delivery_ids = [
+            int(row[0])
+            for row in cur.fetchall()
+        ]
+
+    finally:
+        cur.close()
+        conn.close()
+
+    results = []
+
+    for delivery_id in delivery_ids:
+        result = _process_master_admin_alert_delivery(
+            delivery_id=delivery_id,
+        )
+
+        results.append(result)
+
+    return {
+        "status": "ok",
+        "selected_count": len(delivery_ids),
+        "results": results,
+        "stale_recovery": stale_result,
+    }
+
+
+def _queue_master_admin_alert_for_system_log(
+    *,
+    source_log_id,
+    category,
+    severity,
+    spa_id=None,
+    related_type=None,
+    related_id=None,
+):
+    """
+    Classify and durably reserve a Master Admin alert after
+    the authoritative System Activity row has committed.
+
+    Delivery is intentionally asynchronous and is handled by
+    the background scheduler.
+    """
+
+    try:
+        classification = (
+            _master_admin_alert_classification(
+                category=category,
+                severity=severity,
+                spa_id=spa_id,
+                related_type=related_type,
+                related_id=related_id,
+            )
+        )
+
+        if not classification:
+            return {
+                "status": "not_eligible",
+            }
+
+        return _reserve_master_admin_alert(
+            source_log_id=source_log_id,
+            classification=classification,
+            spa_id=spa_id,
+            related_type=related_type,
+            related_id=related_id,
+        )
+
+    except Exception as exc:
+        # Master Admin alerting must never interfere with the
+        # original PSP operation or authoritative system log.
+        print(
+            "[MASTER ADMIN ALERT QUEUE ERROR] "
+            + type(exc).__name__,
+            flush=True,
+        )
+
+        return {
+            "status": "error",
+        }
 
 
 def log_event(category, message, severity="INFO", spa_id=None, related_type=None, related_id=None, created_by=None):
     print(f"[{category}] {severity}: {message}", flush=True)
 
-    save_system_activity(
+    log_id = save_system_activity(
         category=category,
         severity=severity,
         message=message,
@@ -642,6 +2135,20 @@ def log_event(category, message, severity="INFO", spa_id=None, related_type=None
         related_id=related_id,
         created_by=created_by
     )
+
+    if log_id is None:
+        return None
+
+    _queue_master_admin_alert_for_system_log(
+        source_log_id=log_id,
+        category=category,
+        severity=severity,
+        spa_id=spa_id,
+        related_type=related_type,
+        related_id=related_id,
+    )
+
+    return log_id
 
 def log_sms(message, severity="INFO", spa_id=None, related_type=None, related_id=None, created_by=None):
     log_event("SMS", message, severity, spa_id, related_type, related_id, created_by)
@@ -718,6 +2225,7 @@ def save_system_activity(
                 created_by
             )
             VALUES (%s, %s, %s, %s, %s, %s, %s)
+            RETURNING log_id
         """, (
             spa_id,
             category,
@@ -728,40 +2236,21 @@ def save_system_activity(
             created_by
         ))
 
+        log_id = cur.fetchone()[0]
+
         conn.commit()
         cur.close()
         conn.close()
 
+        return log_id
+
     except Exception as e:
         print(f"[SYSTEM LOGGING ERROR] {e}", flush=True)
+        return None
 
 
 
 
-
-
-
-
-########################################
-#LOG EVENT
-#LOGGING HELPER FUNCTION
-#################################
-
-
-
-
-def log_event(category, message, severity="INFO", spa_id=None, related_type=None, related_id=None, created_by=None):
-    print(f"[{category}] {severity}: {message}", flush=True)
-
-    save_system_activity(
-        category=category,
-        message=message,
-        severity=severity,
-        spa_id=spa_id,
-        related_type=related_type,
-        related_id=related_id,
-        created_by=created_by
-    )
 
 
 
@@ -5570,8 +7059,6 @@ def build_registration_number(spa_name, spa_id):
 ######################################
 
 
-def log_godaddy(message):
-    print(f"[GODADDY IMPORT] {message}", flush=True)
 
 
 
@@ -23869,6 +25356,32 @@ def _normalize_user_mobile_phone(value):
         )
 
     return "+1" + digits
+
+
+def _normalize_user_email(value, field_label="Email"):
+
+    normalized_email = str(
+        value or ""
+    ).strip().lower()
+
+    if not normalized_email:
+        return ""
+
+    if len(normalized_email) > 254:
+        raise ValueError(
+            f"{field_label} must contain no more than "
+            "254 characters."
+        )
+
+    if not re.fullmatch(
+        r"[^@\s]+@[^@\s]+\.[^@\s]+",
+        normalized_email,
+    ):
+        raise ValueError(
+            f"Please enter a valid {field_label.lower()}."
+        )
+
+    return normalized_email
 
 
 def _normalize_mfa_recovery_email(value):
@@ -53209,6 +54722,60 @@ def confirm_login_business_switch():
     )
 
 
+def _master_admin_notification_settings_record(
+    cur,
+    user_id,
+):
+
+    cur.execute(
+        """
+        SELECT
+            notification_email,
+            notification_phone,
+            notification_email_verified_at,
+            notification_phone_verified_at,
+            email_alerts_enabled,
+            sms_alerts_enabled,
+            security_alerts_enabled,
+            system_integration_alerts_enabled,
+            account_lockout_alerts_enabled,
+            system_health_alerts_enabled
+        FROM master_admin_notification_settings
+        WHERE user_id = %s
+        """,
+        (user_id,),
+    )
+
+    row = cur.fetchone()
+
+    if not row:
+        return {
+            "notification_email": "",
+            "notification_phone": "",
+            "notification_email_verified_at": None,
+            "notification_phone_verified_at": None,
+            "email_alerts_enabled": False,
+            "sms_alerts_enabled": False,
+            "security_alerts_enabled": True,
+            "system_integration_alerts_enabled": True,
+            "account_lockout_alerts_enabled": True,
+            "system_health_alerts_enabled": True,
+        }
+
+    return {
+        "notification_email": row[0] or "",
+        "notification_phone": row[1] or "",
+        "notification_email_verified_at": row[2],
+        "notification_phone_verified_at": row[3],
+        "email_alerts_enabled": bool(row[4]),
+        "sms_alerts_enabled": bool(row[5]),
+        "security_alerts_enabled": bool(row[6]),
+        "system_integration_alerts_enabled": bool(row[7]),
+        "account_lockout_alerts_enabled": bool(row[8]),
+        "system_health_alerts_enabled": bool(row[9]),
+    }
+
+
 @app.route(
     "/account/profile",
     methods=["GET", "POST"],
@@ -53268,6 +54835,19 @@ def my_profile():
                     session_ended="1",
                 )
             )
+
+        is_master_admin = (
+            session_role == "master_admin"
+        )
+
+        notification_settings = (
+            _master_admin_notification_settings_record(
+                cur,
+                user_id,
+            )
+            if is_master_admin
+            else None
+        )
 
         if request.method == "POST":
 
@@ -53358,7 +54938,224 @@ def my_profile():
                 != existing_mobile_phone
             )
 
-            if mobile_phone_changed:
+            notification_form_present = bool(
+                is_master_admin
+                and request.form.get(
+                    "master_admin_notification_form_present",
+                    "",
+                )
+                == "1"
+            )
+
+            if notification_form_present:
+
+                try:
+                    notification_email = (
+                        _normalize_user_email(
+                            request.form.get(
+                                "notification_email",
+                                "",
+                            ),
+                            "Notification Email",
+                        )
+                    )
+
+                    notification_phone = (
+                        _normalize_user_mobile_phone(
+                            request.form.get(
+                                "notification_phone",
+                                "",
+                            )
+                        )
+                    )
+
+                    login_email = str(
+                        user[3] or ""
+                    ).strip().lower()
+
+                    # Dedicated Master Admin alert destinations are
+                    # overrides only. If they match their normal
+                    # account fallback, store no redundant override.
+                    if (
+                        notification_email
+                        and login_email
+                        and notification_email == login_email
+                    ):
+                        notification_email = ""
+
+                    if (
+                        notification_phone
+                        and mobile_phone
+                        and notification_phone == mobile_phone
+                    ):
+                        notification_phone = ""
+
+                except ValueError as exc:
+                    conn.rollback()
+
+                    flash(
+                        str(exc),
+                        "error",
+                    )
+
+                    return redirect(
+                        url_for("my_profile")
+                    )
+
+                email_alerts_enabled = (
+                    "email_alerts_enabled"
+                    in request.form
+                )
+
+                sms_alerts_enabled = (
+                    "sms_alerts_enabled"
+                    in request.form
+                )
+
+                security_alerts_enabled = (
+                    "security_alerts_enabled"
+                    in request.form
+                )
+
+                system_integration_alerts_enabled = (
+                    "system_integration_alerts_enabled"
+                    in request.form
+                )
+
+                account_lockout_alerts_enabled = (
+                    "account_lockout_alerts_enabled"
+                    in request.form
+                )
+
+                system_health_alerts_enabled = (
+                    "system_health_alerts_enabled"
+                    in request.form
+                )
+
+            else:
+
+                notification_email = (
+                    notification_settings[
+                        "notification_email"
+                    ]
+                    if is_master_admin
+                    else ""
+                )
+
+                notification_phone = (
+                    notification_settings[
+                        "notification_phone"
+                    ]
+                    if is_master_admin
+                    else ""
+                )
+
+                email_alerts_enabled = (
+                    notification_settings[
+                        "email_alerts_enabled"
+                    ]
+                    if is_master_admin
+                    else False
+                )
+
+                sms_alerts_enabled = (
+                    notification_settings[
+                        "sms_alerts_enabled"
+                    ]
+                    if is_master_admin
+                    else False
+                )
+
+                security_alerts_enabled = (
+                    notification_settings[
+                        "security_alerts_enabled"
+                    ]
+                    if is_master_admin
+                    else True
+                )
+
+                system_integration_alerts_enabled = (
+                    notification_settings[
+                        "system_integration_alerts_enabled"
+                    ]
+                    if is_master_admin
+                    else True
+                )
+
+                account_lockout_alerts_enabled = (
+                    notification_settings[
+                        "account_lockout_alerts_enabled"
+                    ]
+                    if is_master_admin
+                    else True
+                )
+
+                system_health_alerts_enabled = (
+                    notification_settings[
+                        "system_health_alerts_enabled"
+                    ]
+                    if is_master_admin
+                    else True
+                )
+
+            notification_email_changed = bool(
+                is_master_admin
+                and notification_email
+                != notification_settings[
+                    "notification_email"
+                ]
+            )
+
+            notification_phone_changed = bool(
+                is_master_admin
+                and notification_phone
+                != notification_settings[
+                    "notification_phone"
+                ]
+            )
+
+            alert_preferences_changed = bool(
+                is_master_admin
+                and (
+                    email_alerts_enabled
+                    != notification_settings[
+                        "email_alerts_enabled"
+                    ]
+                    or sms_alerts_enabled
+                    != notification_settings[
+                        "sms_alerts_enabled"
+                    ]
+                    or security_alerts_enabled
+                    != notification_settings[
+                        "security_alerts_enabled"
+                    ]
+                    or system_integration_alerts_enabled
+                    != notification_settings[
+                        "system_integration_alerts_enabled"
+                    ]
+                    or account_lockout_alerts_enabled
+                    != notification_settings[
+                        "account_lockout_alerts_enabled"
+                    ]
+                    or system_health_alerts_enabled
+                    != notification_settings[
+                        "system_health_alerts_enabled"
+                    ]
+                )
+            )
+
+            notification_settings_changed = bool(
+                notification_email_changed
+                or notification_phone_changed
+                or alert_preferences_changed
+            )
+
+            sensitive_profile_change = bool(
+                mobile_phone_changed
+                or notification_settings_changed
+            )
+
+            if sensitive_profile_change:
 
                 current_password = request.form.get(
                     "current_password",
@@ -53377,14 +55174,22 @@ def my_profile():
                         spa_id=spa_id,
                         user_id=user_id,
                         action_type=(
-                            "user_profile_mobile_change_failed"
+                            "master_admin_notification_change_failed"
+                            if notification_settings_changed
+                            else "user_profile_mobile_change_failed"
                         ),
                         table_name="users",
                         record_id=user_id,
                         notes=(
-                            "Current password verification "
-                            "failed during personal mobile "
-                            "number change."
+                            "Current password verification failed "
+                            "during Master Admin notification "
+                            "settings change."
+                            if notification_settings_changed
+                            else (
+                                "Current password verification "
+                                "failed during personal mobile "
+                                "number change."
+                            )
                         ),
                     )
 
@@ -53417,6 +55222,122 @@ def my_profile():
                 ),
             )
 
+            if (
+                is_master_admin
+                and notification_form_present
+                and notification_settings_changed
+            ):
+
+                cur.execute(
+                    """
+                    INSERT INTO master_admin_notification_settings (
+                        user_id,
+                        notification_email,
+                        notification_phone,
+                        email_alerts_enabled,
+                        sms_alerts_enabled,
+                        security_alerts_enabled,
+                        system_integration_alerts_enabled,
+                        account_lockout_alerts_enabled,
+                        system_health_alerts_enabled,
+                        created_by,
+                        updated_by
+                    )
+                    VALUES (
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s
+                    )
+                    ON CONFLICT (user_id)
+                    DO UPDATE SET
+                        notification_email = EXCLUDED.notification_email,
+                        notification_phone = EXCLUDED.notification_phone,
+                        notification_email_verified_at = (
+                            CASE
+                                WHEN
+                                    master_admin_notification_settings
+                                        .notification_email
+                                    IS DISTINCT FROM
+                                    EXCLUDED.notification_email
+                                THEN NULL
+                                ELSE
+                                    master_admin_notification_settings
+                                        .notification_email_verified_at
+                            END
+                        ),
+                        notification_phone_verified_at = (
+                            CASE
+                                WHEN
+                                    master_admin_notification_settings
+                                        .notification_phone
+                                    IS DISTINCT FROM
+                                    EXCLUDED.notification_phone
+                                THEN NULL
+                                ELSE
+                                    master_admin_notification_settings
+                                        .notification_phone_verified_at
+                            END
+                        ),
+                        email_alerts_enabled = EXCLUDED.email_alerts_enabled,
+                        sms_alerts_enabled = EXCLUDED.sms_alerts_enabled,
+                        security_alerts_enabled = EXCLUDED.security_alerts_enabled,
+                        system_integration_alerts_enabled = (
+                            EXCLUDED.system_integration_alerts_enabled
+                        ),
+                        account_lockout_alerts_enabled = (
+                            EXCLUDED.account_lockout_alerts_enabled
+                        ),
+                        system_health_alerts_enabled = (
+                            EXCLUDED.system_health_alerts_enabled
+                        ),
+                        updated_by = EXCLUDED.updated_by,
+                        updated_at = NOW()
+                    RETURNING master_admin_notification_setting_id
+                    """,
+                    (
+                        user_id,
+                        notification_email or None,
+                        notification_phone or None,
+                        email_alerts_enabled,
+                        sms_alerts_enabled,
+                        security_alerts_enabled,
+                        system_integration_alerts_enabled,
+                        account_lockout_alerts_enabled,
+                        system_health_alerts_enabled,
+                        user_id,
+                        user_id,
+                    ),
+                )
+
+                notification_setting_id = cur.fetchone()[0]
+
+                log_audit(
+                    cur,
+                    spa_id=spa_id,
+                    user_id=user_id,
+                    action_type=(
+                        "master_admin_notification_settings_updated"
+                    ),
+                    table_name=(
+                        "master_admin_notification_settings"
+                    ),
+                    record_id=notification_setting_id,
+                    notes=(
+                        "Master Admin notification settings updated "
+                        "after current-password verification. "
+                        "Notification destination values were not "
+                        "written to the audit log."
+                    ),
+                )
+
             log_audit(
                 cur,
                 spa_id=spa_id,
@@ -53430,6 +55351,13 @@ def my_profile():
                         " Mobile number changed after "
                         "current-password verification."
                         if mobile_phone_changed
+                        else ""
+                    )
+                    + (
+                        " Master Admin notification settings "
+                        "changed after current-password "
+                        "verification."
+                        if notification_settings_changed
                         else ""
                     )
                 ),
@@ -53475,6 +55403,8 @@ def my_profile():
             username=user[4] or "",
             mobile_phone=user[5] or "",
             role=user[6] or "",
+            is_master_admin=is_master_admin,
+            notification_settings=notification_settings,
             security_csrf_token=(
                 security_csrf_token
             ),
@@ -115329,6 +117259,56 @@ def scheduled_process_due_automatic_expenses():
 
 
 
+def scheduled_process_master_admin_alerts():
+    """
+    Process reserved Master Admin alert deliveries.
+
+    Exceptions are contained so an alert-delivery problem cannot
+    stop the remaining Peach Suite Pro background jobs.
+    """
+
+    try:
+        summary = (
+            process_pending_master_admin_alert_deliveries(
+                batch_size=20,
+            )
+        )
+
+        selected_count = int(
+            summary.get("selected_count") or 0
+        )
+
+        stale_recovery = (
+            summary.get("stale_recovery") or {}
+        )
+
+        uncertain_count = int(
+            stale_recovery.get(
+                "marked_uncertain_count"
+            )
+            or 0
+        )
+
+        if selected_count > 0 or uncertain_count > 0:
+            print(
+                "[MASTER ADMIN ALERTS] "
+                f"Selected: {selected_count} | "
+                f"Marked uncertain: {uncertain_count}",
+                flush=True,
+            )
+
+    except Exception:
+        app.logger.exception(
+            "Scheduled Master Admin alert processing failed."
+        )
+
+        print(
+            "[MASTER ADMIN ALERTS] "
+            "Scheduled processing failed.",
+            flush=True,
+        )
+
+
 def scheduled_process_email_automation_queue():
     """
     Scheduled wrapper for the Email Automation Queue.
@@ -115474,6 +117454,17 @@ def start_scheduler():
         "interval",
         minutes=1,
         id="process_email_automation_queue_job",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=60
+    )
+
+    scheduler.add_job(
+        scheduled_process_master_admin_alerts,
+        "interval",
+        minutes=1,
+        id="process_master_admin_alerts_job",
         replace_existing=True,
         coalesce=True,
         max_instances=1,

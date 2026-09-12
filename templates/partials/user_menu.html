@@ -78,7 +78,13 @@
 
             <a href="{{ url_for('my_profile') }}">
                 <span aria-hidden="true">👤</span>
-                <span>My Profile</span>
+                <span>
+                    {% if session.get("role") == "master_admin" %}
+                        My Profile &amp; Notifications
+                    {% else %}
+                        My Profile
+                    {% endif %}
+                </span>
             </a>
 
             <a href="{{ url_for('my_login_security') }}">
