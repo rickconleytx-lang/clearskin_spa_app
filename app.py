@@ -8991,7 +8991,8 @@ def _master_admin_security_overview(cur):
             severity,
             message,
             related_type,
-            created_at
+            created_at AT TIME ZONE current_setting('TIMEZONE')
+                AS created_at
         FROM system_logs
         WHERE category = 'SECURITY'
           AND created_at >= NOW() - INTERVAL '7 days'
