@@ -8951,6 +8951,52 @@ def master_admin_api_session_status():
 
 
 @app.route(
+    "/api/master-admin/system-health",
+    methods=["GET"],
+)
+@master_admin_api_required
+def master_admin_api_system_health():
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    try:
+        system_health_cards = (
+            _master_admin_system_health_cards(cur)
+        )
+
+        return _mfa_no_store(
+            jsonify({
+                "success": True,
+                "system_health": {
+                    "cards": system_health_cards,
+                },
+            })
+        )
+
+    except Exception:
+        app.logger.exception(
+            "Master Admin System Health API request failed."
+        )
+
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "system_health_unavailable",
+                    "message": (
+                        "System Health could not be loaded right now."
+                    ),
+                }),
+                503,
+            )
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route(
     "/api/master-admin/auth/logout",
     methods=["POST"],
 )
@@ -34117,88 +34163,7 @@ def get_spa_timezone(spa_id):
 
 
 
-@app.route("/admin/system-activity")
-@login_required
-@master_admin_required
-def system_activity():
-    page = request.args.get("page", 1, type=int)
-    per_page = 100
-    offset = (page - 1) * per_page
-
-    category = request.args.get("category", "").strip()
-    severity = request.args.get("severity", "").strip()
-    date_filter = request.args.get("date_filter", "today").strip()
-    search = request.args.get("search", "").strip()
-
-    where_clauses = []
-    params = []
-
-    if category:
-        where_clauses.append("category = %s")
-        params.append(category)
-
-    if severity:
-        where_clauses.append("severity = %s")
-        params.append(severity)
-
-    if search:
-        where_clauses.append("message ILIKE %s")
-        params.append(f"%{search}%")
-
-    if date_filter == "today":
-        where_clauses.append("created_at::date = CURRENT_DATE")
-    elif date_filter == "yesterday":
-        where_clauses.append("created_at::date = CURRENT_DATE - INTERVAL '1 day'")
-    elif date_filter == "7":
-        where_clauses.append("created_at >= NOW() - INTERVAL '7 days'")
-    elif date_filter == "30":
-        where_clauses.append("created_at >= NOW() - INTERVAL '30 days'")
-
-    where_sql = ""
-    if where_clauses:
-        where_sql = "WHERE " + " AND ".join(where_clauses)
-
-    conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-
-    cur.execute(f"""
-        SELECT COUNT(*)
-        FROM system_logs
-        {where_sql}
-    """, params)
-
-    cur.execute(f"""
-        SELECT COUNT(*) AS total
-        FROM system_logs
-        {where_sql}
-    """, params)
-
-    total_logs = cur.fetchone()["total"]
-    total_pages = max((total_logs + per_page - 1) // per_page, 1)
-
-    cur.execute(f"""
-        SELECT
-            log_id,
-            category,
-            severity,
-            message,
-            created_at
-        FROM system_logs
-        {where_sql}
-        ORDER BY created_at DESC
-        LIMIT %s OFFSET %s
-    """, params + [per_page, offset])
-
-    logs = cur.fetchall()
-
-    cur.execute("""
-        SELECT DISTINCT category
-        FROM system_logs
-        WHERE category IS NOT NULL
-        ORDER BY category
-    """)
-    categories = [row["category"] for row in cur.fetchall()]
-
+def _master_admin_system_health_cards(cur):
     # -----------------------------------------------------
     # Master Admin at-a-glance operational status
     # -----------------------------------------------------
@@ -34456,6 +34421,92 @@ def system_activity():
             event_max_age=timedelta(hours=24),
         ),
     ]
+    return system_health_cards
+
+
+@app.route("/admin/system-activity")
+@login_required
+@master_admin_required
+def system_activity():
+    page = request.args.get("page", 1, type=int)
+    per_page = 100
+    offset = (page - 1) * per_page
+
+    category = request.args.get("category", "").strip()
+    severity = request.args.get("severity", "").strip()
+    date_filter = request.args.get("date_filter", "today").strip()
+    search = request.args.get("search", "").strip()
+
+    where_clauses = []
+    params = []
+
+    if category:
+        where_clauses.append("category = %s")
+        params.append(category)
+
+    if severity:
+        where_clauses.append("severity = %s")
+        params.append(severity)
+
+    if search:
+        where_clauses.append("message ILIKE %s")
+        params.append(f"%{search}%")
+
+    if date_filter == "today":
+        where_clauses.append("created_at::date = CURRENT_DATE")
+    elif date_filter == "yesterday":
+        where_clauses.append("created_at::date = CURRENT_DATE - INTERVAL '1 day'")
+    elif date_filter == "7":
+        where_clauses.append("created_at >= NOW() - INTERVAL '7 days'")
+    elif date_filter == "30":
+        where_clauses.append("created_at >= NOW() - INTERVAL '30 days'")
+
+    where_sql = ""
+    if where_clauses:
+        where_sql = "WHERE " + " AND ".join(where_clauses)
+
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    cur.execute(f"""
+        SELECT COUNT(*)
+        FROM system_logs
+        {where_sql}
+    """, params)
+
+    cur.execute(f"""
+        SELECT COUNT(*) AS total
+        FROM system_logs
+        {where_sql}
+    """, params)
+
+    total_logs = cur.fetchone()["total"]
+    total_pages = max((total_logs + per_page - 1) // per_page, 1)
+
+    cur.execute(f"""
+        SELECT
+            log_id,
+            category,
+            severity,
+            message,
+            created_at
+        FROM system_logs
+        {where_sql}
+        ORDER BY created_at DESC
+        LIMIT %s OFFSET %s
+    """, params + [per_page, offset])
+
+    logs = cur.fetchall()
+
+    cur.execute("""
+        SELECT DISTINCT category
+        FROM system_logs
+        WHERE category IS NOT NULL
+        ORDER BY category
+    """)
+    categories = [row["category"] for row in cur.fetchall()]
+
+    system_health_cards = _master_admin_system_health_cards(cur)
 
     cur.close()
     conn.close()
