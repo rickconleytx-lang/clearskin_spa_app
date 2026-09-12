@@ -380,6 +380,15 @@ BUSINESS_SESSION_POLICY_CACHE_SECONDS = 300
 
 
 # --------------------------------------------------
+# Master Admin native API session security
+# --------------------------------------------------
+
+MASTER_ADMIN_API_LOGIN_CHALLENGE_MINUTES = 10
+MASTER_ADMIN_API_SESSION_INACTIVITY_MINUTES = 60
+MASTER_ADMIN_API_SESSION_ABSOLUTE_HOURS = 10
+
+
+# --------------------------------------------------
 # Application Branding
 # --------------------------------------------------
 
@@ -7284,6 +7293,1762 @@ def _mfa_required_for_role(role):
         str(role or "").strip()
         in MFA_REQUIRED_ROLES
     )
+
+
+# --------------------------------------------------
+# Master Admin native API authentication helpers
+# --------------------------------------------------
+
+def _master_admin_api_token_hash(raw_token):
+    return hashlib.sha256(
+        str(raw_token or "").encode("utf-8")
+    ).hexdigest()
+
+
+def _master_admin_api_password_marker(
+    password_changed_at,
+):
+    return (
+        password_changed_at.isoformat()
+        if password_changed_at
+        else None
+    )
+
+
+def _reserve_master_admin_api_login_challenge(
+    user_id,
+):
+    try:
+        user_id = int(user_id)
+    except (TypeError, ValueError):
+        return {
+            "status": "invalid_account",
+        }
+
+    if user_id <= 0:
+        return {
+            "status": "invalid_account",
+        }
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                user_id,
+                spa_id,
+                role,
+                active,
+                password_changed_at,
+                security_session_version,
+                NOW()
+            FROM users
+            WHERE user_id = %s
+            FOR UPDATE
+            """,
+            (user_id,),
+        )
+
+        user = cur.fetchone()
+
+        if (
+            not user
+            or not user[3]
+            or str(user[2] or "").strip()
+                != "master_admin"
+        ):
+            conn.rollback()
+
+            return {
+                "status": "invalid_account",
+            }
+
+        security_session_version = int(
+            user[5] or 0
+        )
+
+        password_changed_at_marker = (
+            _master_admin_api_password_marker(
+                user[4]
+            )
+        )
+
+        # A newly verified password supersedes any older,
+        # still-unused native login challenge for this
+        # Master Admin account.
+        cur.execute(
+            """
+            UPDATE master_admin_api_login_challenges
+            SET revoked_at = NOW()
+            WHERE master_admin_user_id = %s
+              AND consumed_at IS NULL
+              AND revoked_at IS NULL
+            """,
+            (user_id,),
+        )
+
+        raw_token = secrets.token_urlsafe(32)
+        token_hash = _master_admin_api_token_hash(
+            raw_token
+        )
+
+        cur.execute(
+            """
+            INSERT INTO master_admin_api_login_challenges (
+                master_admin_user_id,
+                token_hash,
+                password_verified_at,
+                security_session_version,
+                password_changed_at_marker,
+                expires_at
+            )
+            VALUES (
+                %s,
+                %s,
+                NOW(),
+                %s,
+                %s,
+                NOW() + (
+                    %s * INTERVAL '1 minute'
+                )
+            )
+            RETURNING
+                master_admin_api_login_challenge_id,
+                expires_at
+            """,
+            (
+                user_id,
+                token_hash,
+                security_session_version,
+                password_changed_at_marker,
+                MASTER_ADMIN_API_LOGIN_CHALLENGE_MINUTES,
+            ),
+        )
+
+        challenge = cur.fetchone()
+
+        if not challenge:
+            raise RuntimeError(
+                "Master Admin native login challenge "
+                "reservation failed."
+            )
+
+        conn.commit()
+
+        return {
+            "status": "success",
+            "master_admin_api_login_challenge_id": (
+                challenge[0]
+            ),
+            "raw_token": raw_token,
+            "expires_at": challenge[1],
+            "target_user_id": user[0],
+            "target_spa_id": user[1],
+            "target_role": str(
+                user[2] or ""
+            ).strip(),
+            "security_session_version": (
+                security_session_version
+            ),
+            "password_changed_at_marker": (
+                password_changed_at_marker
+            ),
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _master_admin_api_login_challenge_context(
+    raw_token,
+):
+    raw_token = str(raw_token or "").strip()
+
+    if not raw_token:
+        return {
+            "status": "invalid",
+        }
+
+    token_hash = _master_admin_api_token_hash(
+        raw_token
+    )
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                c.master_admin_api_login_challenge_id,
+                c.master_admin_user_id,
+                c.password_verified_at,
+                c.security_session_version,
+                c.password_changed_at_marker,
+                c.expires_at,
+                c.consumed_at,
+                c.revoked_at,
+                c.created_at,
+                u.spa_id,
+                u.role,
+                u.active,
+                u.password_changed_at,
+                u.security_session_version,
+                NOW()
+            FROM master_admin_api_login_challenges c
+            JOIN users u
+              ON u.user_id = c.master_admin_user_id
+            WHERE c.token_hash = %s
+            FOR UPDATE OF c
+            """,
+            (token_hash,),
+        )
+
+        row = cur.fetchone()
+
+        if not row:
+            conn.rollback()
+
+            return {
+                "status": "invalid",
+            }
+
+        (
+            challenge_id,
+            user_id,
+            password_verified_at,
+            challenge_security_version,
+            challenge_password_marker,
+            expires_at,
+            consumed_at,
+            revoked_at,
+            created_at,
+            spa_id,
+            role,
+            active,
+            current_password_changed_at,
+            current_security_version,
+            now,
+        ) = row
+
+        if consumed_at is not None:
+            conn.rollback()
+
+            return {
+                "status": "consumed",
+            }
+
+        if revoked_at is not None:
+            conn.rollback()
+
+            return {
+                "status": "revoked",
+            }
+
+        if expires_at <= now:
+            conn.rollback()
+
+            return {
+                "status": "expired",
+            }
+
+        current_role = str(role or "").strip()
+
+        current_password_marker = (
+            _master_admin_api_password_marker(
+                current_password_changed_at
+            )
+        )
+
+        account_still_matches = bool(
+            active
+            and current_role == "master_admin"
+            and int(current_security_version or 0)
+                == int(challenge_security_version)
+            and current_password_marker
+                == challenge_password_marker
+        )
+
+        if not account_still_matches:
+            cur.execute(
+                """
+                UPDATE master_admin_api_login_challenges
+                SET revoked_at = NOW()
+                WHERE master_admin_api_login_challenge_id = %s
+                  AND consumed_at IS NULL
+                  AND revoked_at IS NULL
+                """,
+                (challenge_id,),
+            )
+
+            conn.commit()
+
+            return {
+                "status": "superseded",
+            }
+
+        conn.commit()
+
+        pending = {
+            "target_user_id": int(user_id),
+            "target_spa_id": spa_id,
+            "target_role": current_role,
+            "source_user_id": None,
+            "source_spa_id": None,
+            "issued_at": int(
+                created_at.timestamp()
+            ),
+            "password_verified_at_epoch": int(
+                password_verified_at.timestamp()
+            ),
+            "challenge_id": (
+                f"native:{int(challenge_id)}"
+            ),
+            "enrollment_authenticator_id": None,
+            "enrollment_verified_authenticator_id": None,
+            "mfa_method": "authenticator",
+            "mfa_verification_challenge_id": None,
+            "verification_resend_count": 0,
+            "mfa_setup_choice": None,
+        }
+
+        return {
+            "status": "success",
+            "master_admin_api_login_challenge_id": (
+                int(challenge_id)
+            ),
+            "token_hash": token_hash,
+            "pending": pending,
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _consume_master_admin_api_login_challenge(
+    challenge_id,
+    token_hash,
+):
+    try:
+        challenge_id = int(challenge_id)
+    except (TypeError, ValueError):
+        return False
+
+    token_hash = str(token_hash or "").strip()
+
+    if challenge_id <= 0 or not token_hash:
+        return False
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            UPDATE master_admin_api_login_challenges
+            SET consumed_at = NOW()
+            WHERE master_admin_api_login_challenge_id = %s
+              AND token_hash = %s
+              AND consumed_at IS NULL
+              AND revoked_at IS NULL
+              AND expires_at > NOW()
+            RETURNING master_admin_api_login_challenge_id
+            """,
+            (
+                challenge_id,
+                token_hash,
+            ),
+        )
+
+        consumed = cur.fetchone() is not None
+
+        if consumed:
+            conn.commit()
+        else:
+            conn.rollback()
+
+        return consumed
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _issue_master_admin_api_session(
+    *,
+    challenge_id,
+    challenge_token_hash,
+    verified_user_id,
+):
+    try:
+        challenge_id = int(challenge_id)
+        verified_user_id = int(verified_user_id)
+    except (TypeError, ValueError):
+        return {
+            "status": "invalid_state",
+        }
+
+    challenge_token_hash = str(
+        challenge_token_hash or ""
+    ).strip()
+
+    if (
+        challenge_id <= 0
+        or verified_user_id <= 0
+        or not challenge_token_hash
+    ):
+        return {
+            "status": "invalid_state",
+        }
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                c.master_admin_user_id,
+                c.security_session_version,
+                c.password_changed_at_marker,
+                c.expires_at,
+                c.consumed_at,
+                c.revoked_at,
+                u.role,
+                u.active,
+                u.password_changed_at,
+                u.must_change_password,
+                u.security_session_version,
+                NOW()
+            FROM master_admin_api_login_challenges c
+            JOIN users u
+              ON u.user_id = c.master_admin_user_id
+            WHERE
+                c.master_admin_api_login_challenge_id = %s
+                AND c.token_hash = %s
+            FOR UPDATE OF c, u
+            """,
+            (
+                challenge_id,
+                challenge_token_hash,
+            ),
+        )
+
+        row = cur.fetchone()
+
+        if not row:
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        (
+            user_id,
+            challenge_security_version,
+            challenge_password_marker,
+            challenge_expires_at,
+            consumed_at,
+            revoked_at,
+            role,
+            active,
+            password_changed_at,
+            must_change_password,
+            current_security_version,
+            now,
+        ) = row
+
+        if int(user_id) != verified_user_id:
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        if consumed_at is not None:
+            conn.rollback()
+
+            return {
+                "status": "consumed",
+            }
+
+        if revoked_at is not None:
+            conn.rollback()
+
+            return {
+                "status": "revoked",
+            }
+
+        if challenge_expires_at <= now:
+            conn.rollback()
+
+            return {
+                "status": "expired",
+            }
+
+        current_role = str(role or "").strip()
+
+        current_password_marker = (
+            _master_admin_api_password_marker(
+                password_changed_at
+            )
+        )
+
+        current_security_version = int(
+            current_security_version or 0
+        )
+
+        account_still_matches = bool(
+            active
+            and current_role == "master_admin"
+            and not bool(must_change_password)
+            and current_security_version
+                == int(challenge_security_version)
+            and current_password_marker
+                == challenge_password_marker
+        )
+
+        if not account_still_matches:
+            cur.execute(
+                """
+                UPDATE master_admin_api_login_challenges
+                SET revoked_at = NOW()
+                WHERE master_admin_api_login_challenge_id = %s
+                  AND consumed_at IS NULL
+                  AND revoked_at IS NULL
+                """,
+                (challenge_id,),
+            )
+
+            conn.commit()
+
+            return {
+                "status": (
+                    "password_change_required"
+                    if bool(must_change_password)
+                    else "superseded"
+                ),
+            }
+
+        raw_session_token = secrets.token_urlsafe(32)
+
+        session_token_hash = (
+            _master_admin_api_token_hash(
+                raw_session_token
+            )
+        )
+
+        cur.execute(
+            """
+            UPDATE master_admin_api_login_challenges
+            SET consumed_at = NOW()
+            WHERE master_admin_api_login_challenge_id = %s
+              AND token_hash = %s
+              AND consumed_at IS NULL
+              AND revoked_at IS NULL
+              AND expires_at > NOW()
+            RETURNING master_admin_api_login_challenge_id
+            """,
+            (
+                challenge_id,
+                challenge_token_hash,
+            ),
+        )
+
+        if not cur.fetchone():
+            conn.rollback()
+
+            return {
+                "status": "invalid_state",
+            }
+
+        cur.execute(
+            """
+            INSERT INTO master_admin_api_sessions (
+                master_admin_user_id,
+                token_hash,
+                security_session_version,
+                password_changed_at_marker,
+                issued_at,
+                last_activity_at,
+                absolute_expires_at
+            )
+            VALUES (
+                %s,
+                %s,
+                %s,
+                %s,
+                NOW(),
+                NOW(),
+                NOW() + (
+                    %s * INTERVAL '1 hour'
+                )
+            )
+            RETURNING
+                master_admin_api_session_id,
+                issued_at,
+                absolute_expires_at
+            """,
+            (
+                user_id,
+                session_token_hash,
+                current_security_version,
+                current_password_marker,
+                MASTER_ADMIN_API_SESSION_ABSOLUTE_HOURS,
+            ),
+        )
+
+        api_session = cur.fetchone()
+
+        if not api_session:
+            raise RuntimeError(
+                "Master Admin native API session "
+                "issuance failed."
+            )
+
+        conn.commit()
+
+        return {
+            "status": "success",
+            "master_admin_api_session_id": (
+                int(api_session[0])
+            ),
+            "raw_token": raw_session_token,
+            "issued_at": api_session[1],
+            "absolute_expires_at": api_session[2],
+            "master_admin_user_id": int(user_id),
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _master_admin_api_session_context(
+    raw_token,
+):
+    raw_token = str(raw_token or "").strip()
+
+    if not raw_token:
+        return {
+            "status": "invalid",
+        }
+
+    token_hash = _master_admin_api_token_hash(
+        raw_token
+    )
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                s.master_admin_api_session_id,
+                s.master_admin_user_id,
+                s.security_session_version,
+                s.password_changed_at_marker,
+                s.issued_at,
+                s.last_activity_at,
+                s.absolute_expires_at,
+                s.revoked_at,
+                s.revoked_reason,
+                u.first_name,
+                u.last_name,
+                u.email,
+                u.role,
+                u.active,
+                u.password_changed_at,
+                u.must_change_password,
+                u.security_session_version,
+                NOW()
+            FROM master_admin_api_sessions s
+            JOIN users u
+              ON u.user_id = s.master_admin_user_id
+            WHERE s.token_hash = %s
+            FOR UPDATE OF s
+            """,
+            (token_hash,),
+        )
+
+        row = cur.fetchone()
+
+        if not row:
+            conn.rollback()
+
+            return {
+                "status": "invalid",
+            }
+
+        (
+            api_session_id,
+            user_id,
+            session_security_version,
+            session_password_marker,
+            issued_at,
+            last_activity_at,
+            absolute_expires_at,
+            revoked_at,
+            revoked_reason,
+            first_name,
+            last_name,
+            email,
+            role,
+            active,
+            password_changed_at,
+            must_change_password,
+            current_security_version,
+            now,
+        ) = row
+
+        if revoked_at is not None:
+            conn.rollback()
+
+            return {
+                "status": "revoked",
+                "reason": revoked_reason,
+            }
+
+        if absolute_expires_at <= now:
+            cur.execute(
+                """
+                UPDATE master_admin_api_sessions
+                SET
+                    revoked_at = NOW(),
+                    revoked_reason = 'absolute_expired',
+                    updated_at = NOW()
+                WHERE master_admin_api_session_id = %s
+                  AND revoked_at IS NULL
+                """,
+                (api_session_id,),
+            )
+
+            conn.commit()
+
+            return {
+                "status": "expired",
+                "reason": "absolute_expired",
+            }
+
+        inactivity_cutoff = now - timedelta(
+            minutes=(
+                MASTER_ADMIN_API_SESSION_INACTIVITY_MINUTES
+            )
+        )
+
+        if last_activity_at <= inactivity_cutoff:
+            cur.execute(
+                """
+                UPDATE master_admin_api_sessions
+                SET
+                    revoked_at = NOW(),
+                    revoked_reason = 'inactivity_expired',
+                    updated_at = NOW()
+                WHERE master_admin_api_session_id = %s
+                  AND revoked_at IS NULL
+                """,
+                (api_session_id,),
+            )
+
+            conn.commit()
+
+            return {
+                "status": "expired",
+                "reason": "inactivity_expired",
+            }
+
+        current_role = str(role or "").strip()
+
+        current_password_marker = (
+            _master_admin_api_password_marker(
+                password_changed_at
+            )
+        )
+
+        current_security_version = int(
+            current_security_version or 0
+        )
+
+        account_still_matches = bool(
+            active
+            and current_role == "master_admin"
+            and not bool(must_change_password)
+            and current_security_version
+                == int(session_security_version)
+            and current_password_marker
+                == session_password_marker
+        )
+
+        if not account_still_matches:
+            if not active:
+                revoke_reason = "account_inactive"
+            elif current_role != "master_admin":
+                revoke_reason = "role_changed"
+            elif bool(must_change_password):
+                revoke_reason = "password_change_required"
+            elif (
+                current_security_version
+                != int(session_security_version)
+            ):
+                revoke_reason = "security_version_changed"
+            else:
+                revoke_reason = "password_changed"
+
+            cur.execute(
+                """
+                UPDATE master_admin_api_sessions
+                SET
+                    revoked_at = NOW(),
+                    revoked_reason = %s,
+                    updated_at = NOW()
+                WHERE master_admin_api_session_id = %s
+                  AND revoked_at IS NULL
+                """,
+                (
+                    revoke_reason,
+                    api_session_id,
+                ),
+            )
+
+            conn.commit()
+
+            return {
+                "status": "revoked",
+                "reason": revoke_reason,
+            }
+
+        cur.execute(
+            """
+            UPDATE master_admin_api_sessions
+            SET
+                last_activity_at = NOW(),
+                updated_at = NOW()
+            WHERE master_admin_api_session_id = %s
+              AND revoked_at IS NULL
+            """,
+            (api_session_id,),
+        )
+
+        conn.commit()
+
+        return {
+            "status": "success",
+            "master_admin_api_session_id": (
+                int(api_session_id)
+            ),
+            "master_admin_user_id": int(user_id),
+            "first_name": first_name,
+            "last_name": last_name,
+            "email": email,
+            "role": current_role,
+            "issued_at": issued_at,
+            "last_activity_at": now,
+            "absolute_expires_at": (
+                absolute_expires_at
+            ),
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _master_admin_api_bearer_token():
+    authorization = str(
+        request.headers.get("Authorization")
+        or ""
+    ).strip()
+
+    if not authorization:
+        return None
+
+    parts = authorization.split(None, 1)
+
+    if (
+        len(parts) != 2
+        or parts[0].lower() != "bearer"
+    ):
+        return None
+
+    token = str(parts[1] or "").strip()
+
+    return token or None
+
+
+def master_admin_api_required(view_function):
+    @wraps(view_function)
+    def wrapped_view(*args, **kwargs):
+        raw_token = _master_admin_api_bearer_token()
+
+        if not raw_token:
+            return _mfa_no_store(
+                (
+                    jsonify({
+                        "success": False,
+                        "error": "authentication_required",
+                        "message": (
+                            "Master Admin authentication is required."
+                        ),
+                    }),
+                    401,
+                )
+            )
+
+        try:
+            api_context = (
+                _master_admin_api_session_context(
+                    raw_token
+                )
+            )
+        except Exception:
+            app.logger.exception(
+                "Master Admin API session validation failed."
+            )
+
+            return _mfa_no_store(
+                (
+                    jsonify({
+                        "success": False,
+                        "error": "authentication_unavailable",
+                        "message": (
+                            "Authentication could not be verified "
+                            "right now."
+                        ),
+                    }),
+                    503,
+                )
+            )
+
+        status = str(
+            api_context.get("status")
+            or ""
+        ).strip().lower()
+
+        if status != "success":
+            reason = str(
+                api_context.get("reason")
+                or status
+                or "invalid"
+            ).strip()
+
+            return _mfa_no_store(
+                (
+                    jsonify({
+                        "success": False,
+                        "error": "session_invalid",
+                        "reason": reason,
+                        "message": (
+                            "Your Master Admin session is no longer "
+                            "valid. Please sign in again."
+                        ),
+                    }),
+                    401,
+                )
+            )
+
+        if api_context.get("role") != "master_admin":
+            return _mfa_no_store(
+                (
+                    jsonify({
+                        "success": False,
+                        "error": "forbidden",
+                        "message": (
+                            "Master Admin access is required."
+                        ),
+                    }),
+                    403,
+                )
+            )
+
+        g.master_admin_api = api_context
+
+        return view_function(*args, **kwargs)
+
+    return wrapped_view
+
+
+@app.route(
+    "/api/master-admin/auth/login",
+    methods=["POST"],
+)
+def master_admin_api_login():
+    data = request.get_json(silent=True)
+
+    if not isinstance(data, dict):
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "invalid_request",
+                    "message": (
+                        "A valid JSON request is required."
+                    ),
+                }),
+                400,
+            )
+        )
+
+    email = _normalize_user_email(
+        data.get("email")
+    )
+
+    password = str(
+        data.get("password")
+        or ""
+    )
+
+    if not email or not password:
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "invalid_credentials",
+                    "message": (
+                        "The email or password is invalid."
+                    ),
+                }),
+                401,
+            )
+        )
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                user_id,
+                spa_id,
+                first_name,
+                last_name,
+                email,
+                password_hash,
+                role,
+                password_changed_at,
+                must_change_password,
+                login_locked_until,
+                NOW()
+            FROM users
+            WHERE LOWER(email) = %s
+              AND active = TRUE
+              AND role = 'master_admin'
+            LIMIT 1
+            """,
+            (email,),
+        )
+
+        user = cur.fetchone()
+
+        if not user:
+            conn.rollback()
+
+            log_security(
+                "Native Master Admin login failed: "
+                "account not found.",
+                severity="WARNING",
+                related_type=(
+                    "master_admin_api_login"
+                ),
+            )
+
+            return _mfa_no_store(
+                (
+                    jsonify({
+                        "success": False,
+                        "error": "invalid_credentials",
+                        "message": (
+                            "The email or password is invalid."
+                        ),
+                    }),
+                    401,
+                )
+            )
+
+        remaining_minutes = (
+            _mfa_login_lock_remaining_minutes(
+                user
+            )
+        )
+
+        if remaining_minutes is not None:
+            conn.rollback()
+
+            log_security(
+                "Native Master Admin login blocked: "
+                "account temporarily locked.",
+                severity="ALERT",
+                spa_id=user[1],
+                related_type="business_login_user",
+                related_id=user[0],
+            )
+
+            return _mfa_no_store(
+                (
+                    jsonify({
+                        "success": False,
+                        "error": "account_locked",
+                        "remaining_minutes": (
+                            remaining_minutes
+                        ),
+                        "message": (
+                            "This account is temporarily "
+                            "locked. Please try again later."
+                        ),
+                    }),
+                    423,
+                )
+            )
+
+        password_match = check_password_hash(
+            user[5],
+            password,
+        )
+
+        if not password_match:
+            newly_locked = (
+                _record_failed_business_login(
+                    cur,
+                    user[0],
+                    user[1],
+                )
+            )
+
+            conn.commit()
+
+            if newly_locked:
+                log_security(
+                    "Native Master Admin login temporarily "
+                    "locked after repeated invalid passwords.",
+                    severity="ALERT",
+                    spa_id=user[1],
+                    related_type="business_login_user",
+                    related_id=user[0],
+                )
+
+                return _mfa_no_store(
+                    (
+                        jsonify({
+                            "success": False,
+                            "error": "account_locked",
+                            "remaining_minutes": (
+                                LOGIN_FAILURE_LOCK_MINUTES
+                            ),
+                            "message": (
+                                "This account is temporarily "
+                                "locked. Please try again later."
+                            ),
+                        }),
+                        423,
+                    )
+                )
+
+            log_security(
+                "Native Master Admin login failed: "
+                "invalid password.",
+                severity="WARNING",
+                spa_id=user[1],
+                related_type="business_login_user",
+                related_id=user[0],
+            )
+
+            return _mfa_no_store(
+                (
+                    jsonify({
+                        "success": False,
+                        "error": "invalid_credentials",
+                        "message": (
+                            "The email or password is invalid."
+                        ),
+                    }),
+                    401,
+                )
+            )
+
+        if bool(user[8]):
+            conn.rollback()
+
+            return _mfa_no_store(
+                (
+                    jsonify({
+                        "success": False,
+                        "error": "password_change_required",
+                        "message": (
+                            "A password change is required. "
+                            "Sign in to Peach Suite Pro on "
+                            "the web to update your password."
+                        ),
+                    }),
+                    403,
+                )
+            )
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+
+        app.logger.exception(
+            "Native Master Admin password "
+            "authentication failed."
+        )
+
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "authentication_unavailable",
+                    "message": (
+                        "Authentication could not be "
+                        "completed right now."
+                    ),
+                }),
+                503,
+            )
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    try:
+        challenge = (
+            _reserve_master_admin_api_login_challenge(
+                user[0]
+            )
+        )
+
+    except Exception:
+        app.logger.exception(
+            "Native Master Admin MFA challenge "
+            "reservation failed."
+        )
+
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "authentication_unavailable",
+                    "message": (
+                        "Authentication could not be "
+                        "completed right now."
+                    ),
+                }),
+                503,
+            )
+        )
+
+    if challenge.get("status") != "success":
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "authentication_unavailable",
+                    "message": (
+                        "Authentication could not be "
+                        "completed right now."
+                    ),
+                }),
+                503,
+            )
+        )
+
+    return _mfa_no_store(
+        jsonify({
+            "success": True,
+            "authentication": {
+                "status": "mfa_required",
+                "method": "authenticator",
+                "challenge_token": (
+                    challenge["raw_token"]
+                ),
+                "expires_at": (
+                    challenge["expires_at"].isoformat()
+                ),
+            },
+        })
+    )
+
+
+@app.route(
+    "/api/master-admin/auth/mfa",
+    methods=["POST"],
+)
+def master_admin_api_mfa():
+    data = request.get_json(silent=True)
+
+    if not isinstance(data, dict):
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "invalid_request",
+                    "message": (
+                        "A valid JSON request is required."
+                    ),
+                }),
+                400,
+            )
+        )
+
+    challenge_token = str(
+        data.get("challenge_token")
+        or ""
+    ).strip()
+
+    submitted_code = str(
+        data.get("code")
+        or ""
+    ).strip()
+
+    if not challenge_token or not submitted_code:
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "invalid_request",
+                    "message": (
+                        "The authentication challenge and "
+                        "Authenticator code are required."
+                    ),
+                }),
+                400,
+            )
+        )
+
+    try:
+        challenge_context = (
+            _master_admin_api_login_challenge_context(
+                challenge_token
+            )
+        )
+    except Exception:
+        app.logger.exception(
+            "Native Master Admin MFA challenge "
+            "validation failed."
+        )
+
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "authentication_unavailable",
+                    "message": (
+                        "Authentication could not be "
+                        "completed right now."
+                    ),
+                }),
+                503,
+            )
+        )
+
+    challenge_status = str(
+        challenge_context.get("status")
+        or ""
+    ).strip().lower()
+
+    if challenge_status != "success":
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "challenge_invalid",
+                    "reason": (
+                        challenge_status
+                        or "invalid"
+                    ),
+                    "message": (
+                        "This sign-in challenge is no longer "
+                        "valid. Please sign in again."
+                    ),
+                }),
+                401,
+            )
+        )
+
+    pending = challenge_context["pending"]
+
+    try:
+        result = _verify_mfa_totp_for_login(
+            pending,
+            submitted_code,
+        )
+    except Exception:
+        app.logger.exception(
+            "Native Master Admin Authenticator "
+            "verification failed unexpectedly."
+        )
+
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "authentication_unavailable",
+                    "message": (
+                        "Authentication could not be "
+                        "completed right now."
+                    ),
+                }),
+                503,
+            )
+        )
+
+    result_status = str(
+        result.get("status")
+        or ""
+    ).strip().lower()
+
+    if result_status == "locked":
+        user_id = (
+            (result.get("user") or [None])[0]
+            if result.get("user")
+            else pending.get("target_user_id")
+        )
+
+        log_security(
+            "Native Master Admin login temporarily locked "
+            "after repeated MFA verification failures.",
+            severity="ALERT",
+            spa_id=pending.get("target_spa_id"),
+            related_type="business_login_user",
+            related_id=user_id,
+        )
+
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "account_locked",
+                    "remaining_minutes": (
+                        result.get(
+                            "remaining_minutes"
+                        )
+                        or LOGIN_FAILURE_LOCK_MINUTES
+                    ),
+                    "message": (
+                        "This account is temporarily locked. "
+                        "Please try again later."
+                    ),
+                }),
+                423,
+            )
+        )
+
+    if result_status == "invalid":
+        log_security(
+            "Native Master Admin Authenticator "
+            "verification failed.",
+            severity="WARNING",
+            spa_id=pending.get("target_spa_id"),
+            related_type="business_login_user",
+            related_id=pending.get("target_user_id"),
+        )
+
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "invalid_mfa_code",
+                    "message": (
+                        "That Authenticator code could not "
+                        "be verified. Please try again."
+                    ),
+                }),
+                401,
+            )
+        )
+
+    if result_status != "success":
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "mfa_setup_required",
+                    "message": (
+                        "Authenticator verification is not "
+                        "available for this account. Sign in "
+                        "to Peach Suite Pro on the web to "
+                        "review Login Security."
+                    ),
+                }),
+                403,
+            )
+        )
+
+    verified_user = result.get("user")
+
+    if not verified_user:
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "authentication_unavailable",
+                    "message": (
+                        "Authentication could not be "
+                        "completed right now."
+                    ),
+                }),
+                503,
+            )
+        )
+
+    try:
+        api_session = _issue_master_admin_api_session(
+            challenge_id=(
+                challenge_context[
+                    "master_admin_api_login_challenge_id"
+                ]
+            ),
+            challenge_token_hash=(
+                challenge_context["token_hash"]
+            ),
+            verified_user_id=verified_user[0],
+        )
+    except Exception:
+        app.logger.exception(
+            "Native Master Admin API session "
+            "issuance failed after MFA."
+        )
+
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "authentication_unavailable",
+                    "message": (
+                        "Authentication could not be "
+                        "completed right now."
+                    ),
+                }),
+                503,
+            )
+        )
+
+    session_status = str(
+        api_session.get("status")
+        or ""
+    ).strip().lower()
+
+    if session_status != "success":
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "session_not_issued",
+                    "reason": (
+                        session_status
+                        or "invalid_state"
+                    ),
+                    "message": (
+                        "The sign-in session could not be "
+                        "created. Please sign in again."
+                    ),
+                }),
+                401,
+            )
+        )
+
+    return _mfa_no_store(
+        jsonify({
+            "success": True,
+            "authentication": {
+                "status": "authenticated",
+                "token_type": "Bearer",
+                "access_token": (
+                    api_session["raw_token"]
+                ),
+                "issued_at": (
+                    api_session["issued_at"].isoformat()
+                ),
+                "absolute_expires_at": (
+                    api_session[
+                        "absolute_expires_at"
+                    ].isoformat()
+                ),
+                "inactivity_minutes": (
+                    MASTER_ADMIN_API_SESSION_INACTIVITY_MINUTES
+                ),
+            },
+            "user": {
+                "user_id": int(verified_user[0]),
+                "first_name": verified_user[2],
+                "last_name": verified_user[3],
+                "email": verified_user[4],
+                "role": "master_admin",
+            },
+        })
+    )
+
+
+@app.route(
+    "/api/master-admin/auth/session",
+    methods=["GET"],
+)
+@master_admin_api_required
+def master_admin_api_session_status():
+    api_context = g.master_admin_api
+
+    return _mfa_no_store(
+        jsonify({
+            "success": True,
+            "authentication": {
+                "status": "authenticated",
+                "token_type": "Bearer",
+                "issued_at": (
+                    api_context["issued_at"].isoformat()
+                ),
+                "absolute_expires_at": (
+                    api_context[
+                        "absolute_expires_at"
+                    ].isoformat()
+                ),
+                "inactivity_minutes": (
+                    MASTER_ADMIN_API_SESSION_INACTIVITY_MINUTES
+                ),
+            },
+            "user": {
+                "user_id": (
+                    api_context["master_admin_user_id"]
+                ),
+                "first_name": api_context["first_name"],
+                "last_name": api_context["last_name"],
+                "email": api_context["email"],
+                "role": api_context["role"],
+            },
+        })
+    )
+
+
+@app.route(
+    "/api/master-admin/auth/logout",
+    methods=["POST"],
+)
+@master_admin_api_required
+def master_admin_api_logout():
+    api_context = g.master_admin_api
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            UPDATE master_admin_api_sessions
+            SET
+                revoked_at = NOW(),
+                revoked_reason = 'logout',
+                updated_at = NOW()
+            WHERE master_admin_api_session_id = %s
+              AND master_admin_user_id = %s
+              AND revoked_at IS NULL
+            RETURNING master_admin_api_session_id
+            """,
+            (
+                api_context[
+                    "master_admin_api_session_id"
+                ],
+                api_context["master_admin_user_id"],
+            ),
+        )
+
+        revoked = cur.fetchone()
+
+        if not revoked:
+            conn.rollback()
+
+            return _mfa_no_store(
+                (
+                    jsonify({
+                        "success": False,
+                        "error": "session_invalid",
+                        "reason": "revoked",
+                        "message": (
+                            "Your Master Admin session is no "
+                            "longer valid. Please sign in again."
+                        ),
+                    }),
+                    401,
+                )
+            )
+
+        conn.commit()
+
+        log_security(
+            "Native Master Admin session logged out.",
+            severity="INFO",
+            related_type="master_admin_api_session",
+            related_id=(
+                api_context[
+                    "master_admin_api_session_id"
+                ]
+            ),
+        )
+
+        return _mfa_no_store(
+            jsonify({
+                "success": True,
+                "authentication": {
+                    "status": "logged_out",
+                },
+            })
+        )
+
+    except Exception:
+        conn.rollback()
+
+        app.logger.exception(
+            "Native Master Admin API logout failed."
+        )
+
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "logout_unavailable",
+                    "message": (
+                        "Sign out could not be completed "
+                        "right now."
+                    ),
+                }),
+                503,
+            )
+        )
+
+    finally:
+        cur.close()
+        conn.close()
 
 
 def _mfa_no_store(response):
@@ -31826,6 +33591,15 @@ def _business_login_lifecycle_state(user_id):
 
 @app.before_request
 def load_spa():
+
+    # Native Master Admin API requests use their own
+    # Bearer-session lifecycle and must not be subjected
+    # to browser redirects or tab-presence heartbeat rules.
+    #
+    # Every protected /api/master-admin/ route must use
+    # master_admin_api_required.
+    if request.path.startswith("/api/master-admin/"):
+        return
 
     if request.endpoint in (
         "login",
