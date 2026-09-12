@@ -398,13 +398,13 @@
                         value="{{ notification_settings['notification_email'] }}"
                         maxlength="254"
                         autocomplete="off"
-                        placeholder="{{ email }}"
+                        placeholder="notifications@example.com"
                     >
 
                     <span class="my-profile-help">
-                        Leave blank to use your Login Email.
-                        A dedicated notification email will require
-                        verification before it becomes active.
+                        Used exclusively for Master Admin email alerts.
+                        This may be the same as or different from your
+                        Login Email.
                     </span>
 
                 </div>
@@ -422,13 +422,13 @@
                         value="{{ notification_settings['notification_phone'] }}"
                         maxlength="25"
                         autocomplete="off"
-                        placeholder="{{ mobile_phone or '(817) 555-1212' }}"
+                        placeholder="(817) 555-1212"
                     >
 
                     <span class="my-profile-help">
-                        Leave blank to use your Personal Mobile Phone.
-                        This number is for operational alerts only and
-                        does not change your MFA settings.
+                        Used exclusively for Master Admin SMS alerts.
+                        This may be the same as or different from your
+                        Personal Mobile Phone and does not change MFA.
                     </span>
 
                 </div>

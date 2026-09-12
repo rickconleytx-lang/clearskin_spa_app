@@ -1107,8 +1107,6 @@ def _master_admin_alert_delivery_target(
         SELECT
             u.role,
             u.active,
-            NULLIF(TRIM(u.email), ''),
-            NULLIF(TRIM(u.sms_phone), ''),
             NULLIF(TRIM(m.notification_email), ''),
             NULLIF(TRIM(m.notification_phone), ''),
             COALESCE(m.email_alerts_enabled, FALSE),
@@ -1134,8 +1132,6 @@ def _master_admin_alert_delivery_target(
     (
         role,
         active,
-        login_email,
-        personal_mobile,
         notification_email,
         notification_phone,
         email_enabled,
@@ -1174,12 +1170,6 @@ def _master_admin_alert_delivery_target(
                 ),
             }
 
-        if login_email:
-            return {
-                "status": "ready",
-                "destination": login_email,
-                "destination_source": "login_email",
-            }
 
     else:
         if not bool(sms_enabled):
@@ -1198,14 +1188,6 @@ def _master_admin_alert_delivery_target(
                 ),
             }
 
-        if personal_mobile:
-            return {
-                "status": "ready",
-                "destination": personal_mobile,
-                "destination_source": (
-                    "personal_mobile"
-                ),
-            }
 
     return {
         "status": "missing_destination",
@@ -9536,9 +9518,6 @@ def master_admin_api_notification_settings():
         cur.execute(
             """
             SELECT
-                spa_id,
-                email,
-                sms_phone,
                 role,
                 active
             FROM users
@@ -9551,8 +9530,8 @@ def master_admin_api_notification_settings():
 
         if (
             not user
-            or user[3] != "master_admin"
-            or not bool(user[4])
+            or user[0] != "master_admin"
+            or not bool(user[1])
         ):
             return _mfa_no_store(
                 (
@@ -9569,13 +9548,6 @@ def master_admin_api_notification_settings():
                 )
             )
 
-        login_email = str(
-            user[1] or ""
-        ).strip().lower()
-
-        personal_mobile = str(
-            user[2] or ""
-        ).strip()
 
         settings = (
             _master_admin_notification_settings_record(
@@ -9592,15 +9564,6 @@ def master_admin_api_notification_settings():
             settings["notification_phone"] or ""
         ).strip()
 
-        effective_email = (
-            notification_email
-            or login_email
-        )
-
-        effective_phone = (
-            notification_phone
-            or personal_mobile
-        )
 
         return _mfa_no_store(
             jsonify({
@@ -9612,28 +9575,7 @@ def master_admin_api_notification_settings():
                     "notification_phone": (
                         notification_phone
                     ),
-                    "login_email": login_email,
-                    "personal_mobile": personal_mobile,
-                    "effective_email": effective_email,
-                    "effective_email_source": (
-                        "notification_email"
-                        if notification_email
-                        else (
-                            "login_email"
-                            if login_email
-                            else None
-                        )
-                    ),
-                    "effective_phone": effective_phone,
-                    "effective_phone_source": (
-                        "notification_phone"
-                        if notification_phone
-                        else (
-                            "personal_mobile"
-                            if personal_mobile
-                            else None
-                        )
-                    ),
+
                     "email_alerts_enabled": bool(
                         settings[
                             "email_alerts_enabled"
@@ -9778,8 +9720,6 @@ def master_admin_api_update_notification_settings():
             """
             SELECT
                 spa_id,
-                email,
-                sms_phone,
                 role,
                 active,
                 password_hash
@@ -9794,8 +9734,8 @@ def master_admin_api_update_notification_settings():
 
         if (
             not user
-            or user[3] != "master_admin"
-            or not bool(user[4])
+            or user[1] != "master_admin"
+            or not bool(user[2])
         ):
             conn.rollback()
 
@@ -9816,20 +9756,10 @@ def master_admin_api_update_notification_settings():
 
         (
             spa_id,
-            login_email,
-            personal_mobile,
             _role,
             _active,
             password_hash,
         ) = user
-
-        login_email = str(
-            login_email or ""
-        ).strip().lower()
-
-        personal_mobile = str(
-            personal_mobile or ""
-        ).strip()
 
         try:
             notification_email = _normalize_user_email(
@@ -9857,19 +9787,6 @@ def master_admin_api_update_notification_settings():
                 )
             )
 
-        if (
-            notification_email
-            and login_email
-            and notification_email == login_email
-        ):
-            notification_email = ""
-
-        if (
-            notification_phone
-            and personal_mobile
-            and notification_phone == personal_mobile
-        ):
-            notification_phone = ""
 
         email_alerts_enabled = data[
             "email_alerts_enabled"
@@ -9894,6 +9811,40 @@ def master_admin_api_update_notification_settings():
         system_health_alerts_enabled = data[
             "system_health_alerts_enabled"
         ]
+
+        if email_alerts_enabled and not notification_email:
+            conn.rollback()
+
+            return _mfa_no_store(
+                (
+                    jsonify({
+                        "success": False,
+                        "error": "missing_notification_email",
+                        "message": (
+                            "Notification Email is required when "
+                            "Email Alerts are enabled."
+                        ),
+                    }),
+                    400,
+                )
+            )
+
+        if sms_alerts_enabled and not notification_phone:
+            conn.rollback()
+
+            return _mfa_no_store(
+                (
+                    jsonify({
+                        "success": False,
+                        "error": "missing_notification_phone",
+                        "message": (
+                            "Notification Phone is required when "
+                            "SMS Alerts are enabled."
+                        ),
+                    }),
+                    400,
+                )
+            )
 
         existing_settings = (
             _master_admin_notification_settings_record(
@@ -10082,15 +10033,6 @@ def master_admin_api_update_notification_settings():
 
         conn.commit()
 
-        effective_email = (
-            notification_email
-            or login_email
-        )
-
-        effective_phone = (
-            notification_phone
-            or personal_mobile
-        )
 
         return _mfa_no_store(
             jsonify({
@@ -10102,28 +10044,7 @@ def master_admin_api_update_notification_settings():
                     "notification_phone": (
                         notification_phone
                     ),
-                    "login_email": login_email,
-                    "personal_mobile": personal_mobile,
-                    "effective_email": effective_email,
-                    "effective_email_source": (
-                        "notification_email"
-                        if notification_email
-                        else (
-                            "login_email"
-                            if login_email
-                            else None
-                        )
-                    ),
-                    "effective_phone": effective_phone,
-                    "effective_phone_source": (
-                        "notification_phone"
-                        if notification_phone
-                        else (
-                            "personal_mobile"
-                            if personal_mobile
-                            else None
-                        )
-                    ),
+
                     "email_alerts_enabled": (
                         email_alerts_enabled
                     ),
@@ -57971,26 +57892,6 @@ def my_profile():
                         )
                     )
 
-                    login_email = str(
-                        user[3] or ""
-                    ).strip().lower()
-
-                    # Dedicated Master Admin alert destinations are
-                    # overrides only. If they match their normal
-                    # account fallback, store no redundant override.
-                    if (
-                        notification_email
-                        and login_email
-                        and notification_email == login_email
-                    ):
-                        notification_email = ""
-
-                    if (
-                        notification_phone
-                        and mobile_phone
-                        and notification_phone == mobile_phone
-                    ):
-                        notification_phone = ""
 
                 except ValueError as exc:
                     conn.rollback()
@@ -58013,6 +57914,32 @@ def my_profile():
                     "sms_alerts_enabled"
                     in request.form
                 )
+
+                if email_alerts_enabled and not notification_email:
+                    conn.rollback()
+
+                    flash(
+                        "Notification Email is required when "
+                        "Email Alerts are enabled.",
+                        "error",
+                    )
+
+                    return redirect(
+                        url_for("my_profile")
+                    )
+
+                if sms_alerts_enabled and not notification_phone:
+                    conn.rollback()
+
+                    flash(
+                        "Notification Phone is required when "
+                        "SMS Alerts are enabled.",
+                        "error",
+                    )
+
+                    return redirect(
+                        url_for("my_profile")
+                    )
 
                 security_alerts_enabled = (
                     "security_alerts_enabled"
