@@ -8932,24 +8932,58 @@ def master_admin_api_session_status():
     )
 
 
-def _master_admin_security_overview(cur):
+def _master_admin_acknowledged_at(
+    cur,
+    user_id,
+    acknowledgement_scope,
+):
+    cur.execute(
+        """
+        SELECT acknowledged_at
+        FROM master_admin_acknowledgements
+        WHERE user_id = %s
+          AND acknowledgement_scope = %s
+        """,
+        (
+            user_id,
+            acknowledgement_scope,
+        ),
+    )
+
+    row = cur.fetchone()
+
+    if not row:
+        return None
+
+    return row["acknowledged_at"]
+
+
+def _master_admin_security_overview(
+    cur,
+    user_id,
+):
+    acknowledged_at = _master_admin_acknowledged_at(
+        cur,
+        user_id,
+        "security",
+    )
 
     cur.execute(
         """
         SELECT
             COUNT(*) FILTER (
                 WHERE created_at >= NOW() - INTERVAL '24 hours'
-                  AND COALESCE(related_type, '') NOT LIKE '%_test'
+                  AND COALESCE(related_type, '') NOT LIKE '%%_test'
             ) AS events_24h,
             COUNT(*) FILTER (
                 WHERE created_at >= NOW() - INTERVAL '7 days'
                   AND severity IN ('ALERT', 'ERROR')
-                  AND COALESCE(related_type, '') NOT LIKE '%_test'
+                  AND COALESCE(related_type, '') NOT LIKE '%%_test'
             ) AS alerts_errors_7d,
             COUNT(*) FILTER (
                 WHERE created_at >= NOW() - INTERVAL '7 days'
                   AND severity = 'WARNING'
-                  AND COALESCE(related_type, '') NOT LIKE '%_test'
+                  AND COALESCE(related_type, '') NOT LIKE '%%_test'
             ) AS warnings_7d,
             COUNT(*) FILTER (
                 WHERE created_at >= NOW() - INTERVAL '7 days'
@@ -8958,10 +8992,32 @@ def _master_admin_security_overview(cur):
                       'business_login_user',
                       'business_switch_target'
                   )
-            ) AS lockout_alerts_7d
+            ) AS lockout_alerts_7d,
+            COUNT(*) FILTER (
+                WHERE created_at >= NOW() - INTERVAL '7 days'
+                  AND severity IN ('ALERT', 'ERROR')
+                  AND COALESCE(related_type, '') NOT LIKE '%%_test'
+                  AND created_at > COALESCE(
+                      %s,
+                      '-infinity'::timestamptz
+                  )
+            ) AS unacknowledged_alerts_errors_7d,
+            COUNT(*) FILTER (
+                WHERE created_at >= NOW() - INTERVAL '7 days'
+                  AND severity = 'WARNING'
+                  AND COALESCE(related_type, '') NOT LIKE '%%_test'
+                  AND created_at > COALESCE(
+                      %s,
+                      '-infinity'::timestamptz
+                  )
+            ) AS unacknowledged_warnings_7d
         FROM system_logs
         WHERE category = 'SECURITY'
-        """
+        """,
+        (
+            acknowledged_at,
+            acknowledged_at,
+        ),
     )
 
     summary_row = cur.fetchone()
@@ -9001,7 +9057,31 @@ def _master_admin_security_overview(cur):
         for row in recent_rows
     ]
 
+    unacknowledged_alerts_errors_7d = int(
+        summary_row["unacknowledged_alerts_errors_7d"] or 0
+    )
+    unacknowledged_warnings_7d = int(
+        summary_row["unacknowledged_warnings_7d"] or 0
+    )
+
+    if unacknowledged_alerts_errors_7d > 0:
+        status = "red"
+        status_text = "Attention"
+    elif unacknowledged_warnings_7d > 0:
+        status = "yellow"
+        status_text = "Review"
+    else:
+        status = "green"
+        status_text = "Normal"
+
     return {
+        "status": status,
+        "status_text": status_text,
+        "acknowledged_at": (
+            acknowledged_at.isoformat()
+            if acknowledged_at
+            else None
+        ),
         "events_24h": int(summary_row["events_24h"] or 0),
         "alerts_errors_7d": int(
             summary_row["alerts_errors_7d"] or 0
@@ -9009,6 +9089,12 @@ def _master_admin_security_overview(cur):
         "warnings_7d": int(summary_row["warnings_7d"] or 0),
         "lockout_alerts_7d": int(
             summary_row["lockout_alerts_7d"] or 0
+        ),
+        "unacknowledged_alerts_errors_7d": (
+            unacknowledged_alerts_errors_7d
+        ),
+        "unacknowledged_warnings_7d": (
+            unacknowledged_warnings_7d
         ),
         "recent_events": recent_events,
     }
@@ -9024,7 +9110,10 @@ def master_admin_api_security():
     cur = conn.cursor(cursor_factory=RealDictCursor)
 
     try:
-        security = _master_admin_security_overview(cur)
+        security = _master_admin_security_overview(
+            cur,
+            g.master_admin_api["master_admin_user_id"],
+        )
 
         return _mfa_no_store(
             jsonify({
@@ -9058,7 +9147,15 @@ def master_admin_api_security():
 
 
 
-def _master_admin_alerts_overview(cur):
+def _master_admin_alerts_overview(
+    cur,
+    user_id,
+):
+    acknowledged_at = _master_admin_acknowledged_at(
+        cur,
+        user_id,
+        "alerts",
+    )
 
     cur.execute(
         """
@@ -9066,15 +9163,37 @@ def _master_admin_alerts_overview(cur):
             COUNT(*) FILTER (
                 WHERE reserved_at >= NOW() - INTERVAL '24 hours'
                   AND COALESCE(source_related_type, '')
-                      NOT LIKE '%_test'
+                      NOT LIKE '%%_test'
             ) AS alerts_24h,
             COUNT(*) FILTER (
                 WHERE reserved_at >= NOW() - INTERVAL '7 days'
                   AND COALESCE(source_related_type, '')
-                      NOT LIKE '%_test'
-            ) AS alerts_7d
+                      NOT LIKE '%%_test'
+            ) AS alerts_7d,
+            COUNT(*) FILTER (
+                WHERE reserved_at >= NOW() - INTERVAL '24 hours'
+                  AND COALESCE(source_related_type, '')
+                      NOT LIKE '%%_test'
+                  AND reserved_at > COALESCE(
+                      %s,
+                      '-infinity'::timestamptz
+                  )
+            ) AS unacknowledged_alerts_24h,
+            COUNT(*) FILTER (
+                WHERE reserved_at >= NOW() - INTERVAL '7 days'
+                  AND COALESCE(source_related_type, '')
+                      NOT LIKE '%%_test'
+                  AND reserved_at > COALESCE(
+                      %s,
+                      '-infinity'::timestamptz
+                  )
+            ) AS unacknowledged_alerts_7d
         FROM master_admin_alert_events
-        """
+        """,
+        (
+            acknowledged_at,
+            acknowledged_at,
+        ),
     )
 
     summary_row = cur.fetchone()
@@ -9087,15 +9206,33 @@ def _master_admin_alerts_overview(cur):
             ) AS failed_deliveries_7d,
             COUNT(*) FILTER (
                 WHERE d.status = 'uncertain'
-            ) AS uncertain_deliveries_7d
+            ) AS uncertain_deliveries_7d,
+            COUNT(*) FILTER (
+                WHERE d.status = 'failed'
+                  AND d.updated_at > COALESCE(
+                      %s,
+                      '-infinity'::timestamptz
+                  )
+            ) AS unacknowledged_failed_deliveries_7d,
+            COUNT(*) FILTER (
+                WHERE d.status = 'uncertain'
+                  AND d.updated_at > COALESCE(
+                      %s,
+                      '-infinity'::timestamptz
+                  )
+            ) AS unacknowledged_uncertain_deliveries_7d
         FROM master_admin_alert_deliveries d
         JOIN master_admin_alert_events e
           ON e.master_admin_alert_event_id =
              d.master_admin_alert_event_id
         WHERE e.reserved_at >= NOW() - INTERVAL '7 days'
           AND COALESCE(e.source_related_type, '')
-              NOT LIKE '%_test'
-        """
+              NOT LIKE '%%_test'
+        """,
+        (
+            acknowledged_at,
+            acknowledged_at,
+        ),
     )
 
     delivery_summary_row = cur.fetchone()
@@ -9217,7 +9354,47 @@ def _master_admin_alerts_overview(cur):
             ),
         })
 
+    unacknowledged_alerts_24h = int(
+        summary_row["unacknowledged_alerts_24h"] or 0
+    )
+    unacknowledged_alerts_7d = int(
+        summary_row["unacknowledged_alerts_7d"] or 0
+    )
+    unacknowledged_failed_deliveries_7d = int(
+        delivery_summary_row[
+            "unacknowledged_failed_deliveries_7d"
+        ] or 0
+    )
+    unacknowledged_uncertain_deliveries_7d = int(
+        delivery_summary_row[
+            "unacknowledged_uncertain_deliveries_7d"
+        ] or 0
+    )
+
+    if (
+        unacknowledged_failed_deliveries_7d > 0
+        or unacknowledged_alerts_24h > 0
+    ):
+        status = "red"
+        status_text = "Attention"
+    elif (
+        unacknowledged_uncertain_deliveries_7d > 0
+        or unacknowledged_alerts_7d > 0
+    ):
+        status = "yellow"
+        status_text = "Review"
+    else:
+        status = "green"
+        status_text = "Normal"
+
     return {
+        "status": status,
+        "status_text": status_text,
+        "acknowledged_at": (
+            acknowledged_at.isoformat()
+            if acknowledged_at
+            else None
+        ),
         "alerts_24h": int(
             summary_row["alerts_24h"] or 0
         ),
@@ -9234,6 +9411,18 @@ def _master_admin_alerts_overview(cur):
                 "uncertain_deliveries_7d"
             ] or 0
         ),
+        "unacknowledged_alerts_24h": (
+            unacknowledged_alerts_24h
+        ),
+        "unacknowledged_alerts_7d": (
+            unacknowledged_alerts_7d
+        ),
+        "unacknowledged_failed_deliveries_7d": (
+            unacknowledged_failed_deliveries_7d
+        ),
+        "unacknowledged_uncertain_deliveries_7d": (
+            unacknowledged_uncertain_deliveries_7d
+        ),
         "recent_alerts": recent_alerts,
     }
 
@@ -9248,7 +9437,10 @@ def master_admin_api_alerts():
     cur = conn.cursor(cursor_factory=RealDictCursor)
 
     try:
-        alerts = _master_admin_alerts_overview(cur)
+        alerts = _master_admin_alerts_overview(
+            cur,
+            g.master_admin_api["master_admin_user_id"],
+        )
 
         return _mfa_no_store(
             jsonify({
@@ -9281,7 +9473,15 @@ def master_admin_api_alerts():
         conn.close()
 
 
-def _master_admin_recent_activity_overview(cur):
+def _master_admin_recent_activity_overview(
+    cur,
+    user_id,
+):
+    acknowledged_at = _master_admin_acknowledged_at(
+        cur,
+        user_id,
+        "recent_activity",
+    )
 
     cur.execute(
         """
@@ -9289,15 +9489,37 @@ def _master_admin_recent_activity_overview(cur):
             COUNT(*) FILTER (
                 WHERE created_at >= NOW() - INTERVAL '24 hours'
                   AND severity IN ('ALERT', 'ERROR')
-                  AND COALESCE(related_type, '') NOT LIKE '%_test'
+                  AND COALESCE(related_type, '') NOT LIKE '%%_test'
             ) AS attention_24h,
             COUNT(*) FILTER (
                 WHERE created_at >= NOW() - INTERVAL '24 hours'
                   AND severity = 'WARNING'
-                  AND COALESCE(related_type, '') NOT LIKE '%_test'
-            ) AS warnings_24h
+                  AND COALESCE(related_type, '') NOT LIKE '%%_test'
+            ) AS warnings_24h,
+            COUNT(*) FILTER (
+                WHERE created_at >= NOW() - INTERVAL '24 hours'
+                  AND severity IN ('ALERT', 'ERROR')
+                  AND COALESCE(related_type, '') NOT LIKE '%%_test'
+                  AND created_at > COALESCE(
+                      %s,
+                      '-infinity'::timestamptz
+                  )
+            ) AS unacknowledged_attention_24h,
+            COUNT(*) FILTER (
+                WHERE created_at >= NOW() - INTERVAL '24 hours'
+                  AND severity = 'WARNING'
+                  AND COALESCE(related_type, '') NOT LIKE '%%_test'
+                  AND created_at > COALESCE(
+                      %s,
+                      '-infinity'::timestamptz
+                  )
+            ) AS unacknowledged_warnings_24h
         FROM system_logs
-        """
+        """,
+        (
+            acknowledged_at,
+            acknowledged_at,
+        ),
     )
 
     summary_row = cur.fetchone()
@@ -9388,11 +9610,17 @@ def _master_admin_recent_activity_overview(cur):
     warnings_24h = int(
         summary_row["warnings_24h"] or 0
     )
+    unacknowledged_attention_24h = int(
+        summary_row["unacknowledged_attention_24h"] or 0
+    )
+    unacknowledged_warnings_24h = int(
+        summary_row["unacknowledged_warnings_24h"] or 0
+    )
 
-    if attention_24h > 0:
+    if unacknowledged_attention_24h > 0:
         status = "red"
         status_text = "Attention"
-    elif warnings_24h > 0:
+    elif unacknowledged_warnings_24h > 0:
         status = "yellow"
         status_text = "Review"
     else:
@@ -9402,8 +9630,19 @@ def _master_admin_recent_activity_overview(cur):
     return {
         "status": status,
         "status_text": status_text,
+        "acknowledged_at": (
+            acknowledged_at.isoformat()
+            if acknowledged_at
+            else None
+        ),
         "attention_24h": attention_24h,
         "warnings_24h": warnings_24h,
+        "unacknowledged_attention_24h": (
+            unacknowledged_attention_24h
+        ),
+        "unacknowledged_warnings_24h": (
+            unacknowledged_warnings_24h
+        ),
         "recent_events": recent_events,
     }
 
@@ -9419,7 +9658,10 @@ def master_admin_api_recent_activity():
 
     try:
         recent_activity = (
-            _master_admin_recent_activity_overview(cur)
+            _master_admin_recent_activity_overview(
+                cur,
+                g.master_admin_api["master_admin_user_id"],
+            )
         )
 
         return _mfa_no_store(
@@ -9442,6 +9684,217 @@ def master_admin_api_recent_activity():
                     "message": (
                         "Recent Activity could not be loaded "
                         "right now."
+                    ),
+                }),
+                503,
+            )
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route(
+    "/api/master-admin/acknowledgements",
+    methods=["POST"],
+)
+@master_admin_api_required
+def master_admin_api_acknowledgements():
+    api_context = g.master_admin_api
+
+    user_id = int(
+        api_context["master_admin_user_id"]
+    )
+
+    data = request.get_json(silent=True) or {}
+
+    requested_scope = str(
+        data.get("scope") or ""
+    ).strip().lower()
+
+    valid_scopes = (
+        "security",
+        "alerts",
+        "recent_activity",
+    )
+
+    if requested_scope == "all":
+        scopes = valid_scopes
+    elif requested_scope in valid_scopes:
+        scopes = (requested_scope,)
+    else:
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "invalid_acknowledgement_scope",
+                    "message": (
+                        "Acknowledgement scope must be security, "
+                        "alerts, recent_activity, or all."
+                    ),
+                }),
+                400,
+            )
+        )
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                spa_id,
+                role,
+                active
+            FROM users
+            WHERE user_id = %s
+            """,
+            (user_id,),
+        )
+
+        user = cur.fetchone()
+
+        if (
+            not user
+            or user["role"] != "master_admin"
+            or not bool(user["active"])
+        ):
+            conn.rollback()
+
+            return _mfa_no_store(
+                (
+                    jsonify({
+                        "success": False,
+                        "error": "session_invalid",
+                        "reason": "account_changed",
+                        "message": (
+                            "Your Master Admin session is no longer "
+                            "valid. Please sign in again."
+                        ),
+                    }),
+                    401,
+                )
+            )
+
+        spa_id = user["spa_id"]
+
+        cur.execute(
+            """
+            SELECT NOW() AS acknowledged_at
+            """
+        )
+
+        acknowledged_at = cur.fetchone()[
+            "acknowledged_at"
+        ]
+
+        acknowledgement_ids = {}
+
+        for scope in scopes:
+            cur.execute(
+                """
+                INSERT INTO master_admin_acknowledgements (
+                    user_id,
+                    acknowledgement_scope,
+                    acknowledged_at,
+                    created_by,
+                    updated_by
+                )
+                VALUES (
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s
+                )
+                ON CONFLICT (
+                    user_id,
+                    acknowledgement_scope
+                )
+                DO UPDATE SET
+                    acknowledged_at = EXCLUDED.acknowledged_at,
+                    updated_by = EXCLUDED.updated_by,
+                    updated_at = NOW()
+                RETURNING
+                    master_admin_acknowledgement_id
+                """,
+                (
+                    user_id,
+                    scope,
+                    acknowledged_at,
+                    user_id,
+                    user_id,
+                ),
+            )
+
+            acknowledgement_id = int(
+                cur.fetchone()[
+                    "master_admin_acknowledgement_id"
+                ]
+            )
+
+            acknowledgement_ids[
+                scope
+            ] = acknowledgement_id
+
+            log_audit(
+                cur,
+                spa_id=spa_id,
+                user_id=user_id,
+                action_type=(
+                    "master_admin_monitoring_acknowledged"
+                ),
+                table_name=(
+                    "master_admin_acknowledgements"
+                ),
+                record_id=acknowledgement_id,
+                notes=(
+                    "Master Admin acknowledged "
+                    f"{scope.replace('_', ' ')} monitoring."
+                ),
+            )
+
+        conn.commit()
+
+        return _mfa_no_store(
+            jsonify({
+                "success": True,
+                "scope": requested_scope,
+                "acknowledged_at": (
+                    acknowledged_at.isoformat()
+                ),
+                "acknowledgements": {
+                    scope: {
+                        "acknowledgement_id": (
+                            acknowledgement_ids[scope]
+                        ),
+                        "acknowledged_at": (
+                            acknowledged_at.isoformat()
+                        ),
+                    }
+                    for scope in scopes
+                },
+            })
+        )
+
+    except Exception:
+        conn.rollback()
+
+        app.logger.exception(
+            "Master Admin acknowledgement API request failed."
+        )
+
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "acknowledgement_unavailable",
+                    "message": (
+                        "Monitoring acknowledgement could not be "
+                        "saved right now."
                     ),
                 }),
                 503,
