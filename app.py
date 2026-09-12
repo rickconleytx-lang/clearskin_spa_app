@@ -8950,6 +8950,130 @@ def master_admin_api_session_status():
     )
 
 
+def _master_admin_security_overview(cur):
+
+    cur.execute(
+        """
+        SELECT
+            COUNT(*) FILTER (
+                WHERE created_at >= NOW() - INTERVAL '24 hours'
+                  AND COALESCE(related_type, '') NOT LIKE '%_test'
+            ) AS events_24h,
+            COUNT(*) FILTER (
+                WHERE created_at >= NOW() - INTERVAL '7 days'
+                  AND severity IN ('ALERT', 'ERROR')
+                  AND COALESCE(related_type, '') NOT LIKE '%_test'
+            ) AS alerts_errors_7d,
+            COUNT(*) FILTER (
+                WHERE created_at >= NOW() - INTERVAL '7 days'
+                  AND severity = 'WARNING'
+                  AND COALESCE(related_type, '') NOT LIKE '%_test'
+            ) AS warnings_7d,
+            COUNT(*) FILTER (
+                WHERE created_at >= NOW() - INTERVAL '7 days'
+                  AND severity = 'ALERT'
+                  AND related_type IN (
+                      'business_login_user',
+                      'business_switch_target'
+                  )
+            ) AS lockout_alerts_7d
+        FROM system_logs
+        WHERE category = 'SECURITY'
+        """
+    )
+
+    summary_row = cur.fetchone()
+
+    cur.execute(
+        """
+        SELECT
+            log_id,
+            severity,
+            message,
+            related_type,
+            created_at
+        FROM system_logs
+        WHERE category = 'SECURITY'
+          AND created_at >= NOW() - INTERVAL '7 days'
+          AND COALESCE(related_type, '') NOT LIKE '%_test'
+        ORDER BY created_at DESC
+        LIMIT 10
+        """
+    )
+
+    recent_rows = cur.fetchall()
+
+    recent_events = [
+        {
+            "log_id": int(row["log_id"]),
+            "severity": str(row["severity"] or ""),
+            "message": str(row["message"] or ""),
+            "related_type": row["related_type"],
+            "created_at": (
+                row["created_at"].isoformat()
+                if row["created_at"]
+                else None
+            ),
+        }
+        for row in recent_rows
+    ]
+
+    return {
+        "events_24h": int(summary_row["events_24h"] or 0),
+        "alerts_errors_7d": int(
+            summary_row["alerts_errors_7d"] or 0
+        ),
+        "warnings_7d": int(summary_row["warnings_7d"] or 0),
+        "lockout_alerts_7d": int(
+            summary_row["lockout_alerts_7d"] or 0
+        ),
+        "recent_events": recent_events,
+    }
+
+
+@app.route(
+    "/api/master-admin/security",
+    methods=["GET"],
+)
+@master_admin_api_required
+def master_admin_api_security():
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    try:
+        security = _master_admin_security_overview(cur)
+
+        return _mfa_no_store(
+            jsonify({
+                "success": True,
+                "security": security,
+            })
+        )
+
+    except Exception:
+        app.logger.exception(
+            "Master Admin Security API request failed."
+        )
+
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "security_unavailable",
+                    "message": (
+                        "Security monitoring could not be loaded "
+                        "right now."
+                    ),
+                }),
+                503,
+            )
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
 @app.route(
     "/api/master-admin/system-health",
     methods=["GET"],
