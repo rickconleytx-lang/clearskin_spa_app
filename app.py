@@ -21,6 +21,7 @@ from datetime import date, timedelta, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from email.header import decode_header
 from functools import wraps
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 from flask import (
@@ -9941,6 +9942,127 @@ def master_admin_api_system_health():
                     "error": "system_health_unavailable",
                     "message": (
                         "System Health could not be loaded right now."
+                    ),
+                }),
+                503,
+            )
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route(
+    "/api/master-admin/web-monitoring",
+    methods=["GET"],
+)
+@master_admin_api_required
+def master_admin_api_web_monitoring():
+    conn = get_db_connection()
+    cur = conn.cursor(
+        cursor_factory=RealDictCursor
+    )
+
+    try:
+        settings = (
+            _master_admin_monitoring_settings_record(cur)
+        )
+
+        cur.execute(
+            """
+            SELECT
+                monitor_key,
+                status,
+                status_text,
+                detail,
+                checked_url,
+                http_status,
+                response_ms,
+                consecutive_failures,
+                last_checked_at,
+                last_success_at,
+                last_failure_at
+            FROM master_admin_monitoring_status
+            WHERE monitor_key IN (
+                'peachweb',
+                'peachbook'
+            )
+            ORDER BY CASE monitor_key
+                WHEN 'peachweb' THEN 1
+                WHEN 'peachbook' THEN 2
+                ELSE 3
+            END
+            """
+        )
+
+        monitors = []
+
+        for row in cur.fetchall():
+            monitor_key = row["monitor_key"]
+
+            monitors.append({
+                "key": monitor_key,
+                "label": (
+                    "PeachWeb"
+                    if monitor_key == "peachweb"
+                    else "PeachBook"
+                ),
+                "status": row["status"],
+                "status_text": row["status_text"],
+                "detail": row["detail"],
+                "checked_url": row["checked_url"],
+                "http_status": row["http_status"],
+                "response_ms": row["response_ms"],
+                "consecutive_failures": (
+                    row["consecutive_failures"]
+                ),
+                "last_checked_at": (
+                    row["last_checked_at"].isoformat()
+                    if row["last_checked_at"]
+                    else None
+                ),
+                "last_success_at": (
+                    row["last_success_at"].isoformat()
+                    if row["last_success_at"]
+                    else None
+                ),
+                "last_failure_at": (
+                    row["last_failure_at"].isoformat()
+                    if row["last_failure_at"]
+                    else None
+                ),
+            })
+
+        return _mfa_no_store(
+            jsonify({
+                "success": True,
+                "web_monitoring": {
+                    "peachweb_monitor_url": (
+                        settings["peachweb_monitor_url"]
+                    ),
+                    "peachbook_monitor_url": (
+                        settings["peachbook_monitor_url"]
+                    ),
+                    "monitors": monitors,
+                },
+            })
+        )
+
+    except Exception:
+        app.logger.exception(
+            "Master Admin PeachWeb / PeachBook "
+            "monitoring API request failed."
+        )
+
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "web_monitoring_unavailable",
+                    "message": (
+                        "PeachWeb and PeachBook monitoring "
+                        "could not be loaded right now."
                     ),
                 }),
                 503,
@@ -35714,6 +35836,485 @@ def get_spa_timezone(spa_id):
 
 
 
+def _normalize_master_admin_monitor_url(value, label):
+    value = str(value or "").strip()
+
+    if not value:
+        return None
+
+    if len(value) > 2048:
+        raise ValueError(
+            f"{label} must be 2048 characters or fewer."
+        )
+
+    parsed = urlparse(value)
+
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+    ):
+        raise ValueError(
+            f"{label} must be a valid http:// or https:// URL."
+        )
+
+    hostname = parsed.hostname.lower()
+
+    local_hosts = {
+        "localhost",
+        "127.0.0.1",
+        "::1",
+    }
+
+    if (
+        parsed.scheme == "http"
+        and hostname not in local_hosts
+        and not hostname.endswith(".localhost")
+    ):
+        raise ValueError(
+            f"{label} must use https:// for non-local targets."
+        )
+
+    if parsed.username or parsed.password:
+        raise ValueError(
+            f"{label} cannot contain embedded credentials."
+        )
+
+    return value
+
+
+def _master_admin_monitoring_settings_record(cur):
+    cur.execute(
+        """
+        SELECT
+            master_admin_monitoring_setting_id,
+            peachweb_monitor_url,
+            peachbook_monitor_url,
+            created_by,
+            updated_by,
+            created_at,
+            updated_at
+        FROM master_admin_monitoring_settings
+        WHERE singleton_key = 1
+        LIMIT 1
+        """
+    )
+
+    row = cur.fetchone()
+
+    if not row:
+        return {
+            "master_admin_monitoring_setting_id": None,
+            "peachweb_monitor_url": None,
+            "peachbook_monitor_url": None,
+            "created_by": None,
+            "updated_by": None,
+            "created_at": None,
+            "updated_at": None,
+        }
+
+    return row
+
+
+def _probe_master_admin_public_monitor(
+    monitor_key,
+    monitor_url,
+):
+    label = (
+        "PeachWeb"
+        if monitor_key == "peachweb"
+        else "PeachBook"
+    )
+
+    headers = {
+        "User-Agent": (
+            "PeachSuitePro-MasterAdmin-Monitor/1.0"
+        )
+    }
+
+    first_failure_detail = None
+    last_http_status = None
+    last_response_ms = None
+
+    for attempt_number in (1, 2):
+        started_at = time.monotonic()
+
+        try:
+            response = requests.get(
+                monitor_url,
+                headers=headers,
+                timeout=10,
+                allow_redirects=True,
+            )
+
+            last_response_ms = max(
+                int(
+                    (
+                        time.monotonic()
+                        - started_at
+                    )
+                    * 1000
+                ),
+                0,
+            )
+
+            last_http_status = response.status_code
+
+            if not 200 <= response.status_code < 300:
+                failure_detail = (
+                    f"{label} returned HTTP "
+                    f"{response.status_code}."
+                )
+
+                if attempt_number == 1:
+                    first_failure_detail = failure_detail
+                    time.sleep(2)
+                    continue
+
+                return {
+                    "status": "red",
+                    "status_text": "Unavailable",
+                    "detail": (
+                        f"{label} remained unavailable "
+                        "after retry. "
+                        + failure_detail
+                    ),
+                    "http_status": last_http_status,
+                    "response_ms": last_response_ms,
+                    "consecutive_failures": 2,
+                    "success": False,
+                }
+
+            if monitor_key == "peachbook":
+                response_text = response.text or ""
+
+                if (
+                    "Online Booking Is Not Available"
+                    in response_text
+                    or "Online Booking Unavailable"
+                    in response_text
+                ):
+                    return {
+                        "status": "red",
+                        "status_text": "Booking Unavailable",
+                        "detail": (
+                            "PeachBook is reachable, but "
+                            "online booking is disabled."
+                        ),
+                        "http_status": last_http_status,
+                        "response_ms": last_response_ms,
+                        "consecutive_failures": 1,
+                        "success": False,
+                    }
+
+                if "No Services Available" in response_text:
+                    return {
+                        "status": "yellow",
+                        "status_text": "Configuration Concern",
+                        "detail": (
+                            "PeachBook is reachable, but "
+                            "no services are available for "
+                            "online booking."
+                        ),
+                        "http_status": last_http_status,
+                        "response_ms": last_response_ms,
+                        "consecutive_failures": 0,
+                        "success": True,
+                    }
+
+            if first_failure_detail:
+                return {
+                    "status": "yellow",
+                    "status_text": "Recovered on Retry",
+                    "detail": (
+                        f"{label} recovered on retry "
+                        "after a transient failure."
+                    ),
+                    "http_status": last_http_status,
+                    "response_ms": last_response_ms,
+                    "consecutive_failures": 0,
+                    "success": True,
+                }
+
+            return {
+                "status": "green",
+                "status_text": "Healthy",
+                "detail": (
+                    f"{label} responded successfully "
+                    f"with HTTP {response.status_code} "
+                    f"in {last_response_ms} ms."
+                ),
+                "http_status": last_http_status,
+                "response_ms": last_response_ms,
+                "consecutive_failures": 0,
+                "success": True,
+            }
+
+        except requests.RequestException as exc:
+            last_response_ms = max(
+                int(
+                    (
+                        time.monotonic()
+                        - started_at
+                    )
+                    * 1000
+                ),
+                0,
+            )
+
+            failure_detail = (
+                f"{label} request failed "
+                f"({type(exc).__name__})."
+            )
+
+            if attempt_number == 1:
+                first_failure_detail = failure_detail
+                time.sleep(2)
+                continue
+
+            return {
+                "status": "red",
+                "status_text": "Unavailable",
+                "detail": (
+                    f"{label} remained unavailable "
+                    "after retry. "
+                    + failure_detail
+                ),
+                "http_status": None,
+                "response_ms": last_response_ms,
+                "consecutive_failures": 2,
+                "success": False,
+            }
+
+    return {
+        "status": "red",
+        "status_text": "Unavailable",
+        "detail": (
+            f"{label} health check did not complete."
+        ),
+        "http_status": last_http_status,
+        "response_ms": last_response_ms,
+        "consecutive_failures": 2,
+        "success": False,
+    }
+
+
+def run_master_admin_public_web_health_checks():
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor(
+        cursor_factory=RealDictCursor
+    )
+
+    transition_events = []
+
+    try:
+        settings = (
+            _master_admin_monitoring_settings_record(cur)
+        )
+
+        targets = {
+            "peachweb": settings[
+                "peachweb_monitor_url"
+            ],
+            "peachbook": settings[
+                "peachbook_monitor_url"
+            ],
+        }
+
+        for monitor_key, monitor_url in targets.items():
+            label = (
+                "PeachWeb"
+                if monitor_key == "peachweb"
+                else "PeachBook"
+            )
+
+            cur.execute(
+                """
+                SELECT
+                    status,
+                    status_text
+                FROM master_admin_monitoring_status
+                WHERE monitor_key = %s
+                """,
+                (monitor_key,)
+            )
+
+            existing_row = cur.fetchone()
+            previous_status = (
+                existing_row["status"]
+                if existing_row
+                else "gray"
+            )
+
+            if not monitor_url:
+                result = {
+                    "status": "gray",
+                    "status_text": "Not Configured",
+                    "detail": (
+                        f"No {label} monitor target "
+                        "is configured."
+                    ),
+                    "http_status": None,
+                    "response_ms": None,
+                    "consecutive_failures": 0,
+                    "success": False,
+                }
+            else:
+                result = (
+                    _probe_master_admin_public_monitor(
+                        monitor_key,
+                        monitor_url,
+                    )
+                )
+
+            cur.execute(
+                """
+                INSERT INTO master_admin_monitoring_status (
+                    monitor_key,
+                    status,
+                    status_text,
+                    detail,
+                    checked_url,
+                    http_status,
+                    response_ms,
+                    consecutive_failures,
+                    last_checked_at,
+                    last_success_at,
+                    last_failure_at,
+                    updated_at
+                )
+                VALUES (
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    CASE
+                        WHEN %s IS NULL
+                        THEN NULL
+                        ELSE NOW()
+                    END,
+                    CASE
+                        WHEN %s
+                        THEN NOW()
+                        ELSE NULL
+                    END,
+                    CASE
+                        WHEN %s
+                        THEN NULL
+                        ELSE
+                            CASE
+                                WHEN %s IS NULL
+                                THEN NULL
+                                ELSE NOW()
+                            END
+                    END,
+                    NOW()
+                )
+                ON CONFLICT (monitor_key)
+                DO UPDATE SET
+                    status = EXCLUDED.status,
+                    status_text = EXCLUDED.status_text,
+                    detail = EXCLUDED.detail,
+                    checked_url = EXCLUDED.checked_url,
+                    http_status = EXCLUDED.http_status,
+                    response_ms = EXCLUDED.response_ms,
+                    consecutive_failures =
+                        EXCLUDED.consecutive_failures,
+                    last_checked_at =
+                        EXCLUDED.last_checked_at,
+                    last_success_at = CASE
+                        WHEN %s
+                        THEN NOW()
+                        ELSE
+                            master_admin_monitoring_status
+                                .last_success_at
+                    END,
+                    last_failure_at = CASE
+                        WHEN NOT %s
+                             AND %s IS NOT NULL
+                        THEN NOW()
+                        ELSE
+                            master_admin_monitoring_status
+                                .last_failure_at
+                    END,
+                    updated_at = NOW()
+                """,
+                (
+                    monitor_key,
+                    result["status"],
+                    result["status_text"],
+                    result["detail"],
+                    monitor_url,
+                    result["http_status"],
+                    result["response_ms"],
+                    result["consecutive_failures"],
+                    monitor_url,
+                    result["success"],
+                    result["success"],
+                    monitor_url,
+                    result["success"],
+                    result["success"],
+                    monitor_url,
+                )
+            )
+
+            if (
+                monitor_url
+                and result["status"]
+                != previous_status
+            ):
+                transition_events.append(
+                    {
+                        "monitor_key": monitor_key,
+                        "label": label,
+                        "status": result["status"],
+                        "detail": result["detail"],
+                    }
+                )
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    for event in transition_events:
+        status = event["status"]
+
+        if status == "red":
+            severity = "ERROR"
+        elif status == "yellow":
+            severity = "WARNING"
+        else:
+            severity = "INFO"
+
+        log_event(
+            "SYSTEM",
+            (
+                f"{event['label']} monitor: "
+                f"{event['detail']}"
+            ),
+            severity=severity,
+            related_type=(
+                event["monitor_key"]
+                + "_health"
+            ),
+        )
+
+    return {
+        "status": "ok",
+        "checked_count": 2,
+    }
+
+
 def _master_admin_system_health_cards(cur):
     # -----------------------------------------------------
     # Master Admin at-a-glance operational status
@@ -35934,6 +36535,81 @@ def _master_admin_system_health_cards(cur):
         if str(row["category"] or "").upper() == "EMAIL"
     ]
 
+    cur.execute(
+        """
+        SELECT
+            monitor_key,
+            status,
+            status_text,
+            detail,
+            checked_url,
+            http_status,
+            response_ms,
+            consecutive_failures,
+            last_checked_at,
+            last_success_at,
+            last_failure_at,
+            updated_at
+        FROM master_admin_monitoring_status
+        WHERE monitor_key IN (
+            'peachweb',
+            'peachbook'
+        )
+        """
+    )
+
+    monitoring_status_rows = {
+        row["monitor_key"]: row
+        for row in cur.fetchall()
+    }
+
+    def build_public_monitor_card(
+        monitor_key,
+        label,
+    ):
+        row = monitoring_status_rows.get(
+            monitor_key
+        )
+
+        if not row:
+            return {
+                "key": monitor_key,
+                "label": label,
+                "status": "gray",
+                "status_text": "Not Configured",
+                "detail": (
+                    f"No {label} monitoring status "
+                    "has been recorded."
+                ),
+            }
+
+        detail = row["detail"]
+
+        if not detail:
+            if row["status_text"] == "Not Configured":
+                detail = (
+                    f"No {label} monitor target "
+                    "is configured."
+                )
+            elif row["status_text"] == "Not Checked":
+                detail = (
+                    f"The {label} monitor target "
+                    "has not been checked yet."
+                )
+            else:
+                detail = (
+                    f"Latest {label} monitoring "
+                    "status."
+                )
+
+        return {
+            "key": monitor_key,
+            "label": label,
+            "status": row["status"],
+            "status_text": row["status_text"],
+            "detail": detail,
+        }
+
     system_health_cards = [
         build_system_health_card(
             "scheduler",
@@ -35970,6 +36646,14 @@ def _master_admin_system_health_cards(cur):
             email_logs,
             latest_event_drives=True,
             event_max_age=timedelta(hours=24),
+        ),
+        build_public_monitor_card(
+            "peachweb",
+            "PeachWeb",
+        ),
+        build_public_monitor_card(
+            "peachbook",
+            "PeachBook",
         ),
     ]
     return system_health_cards
@@ -36059,6 +36743,12 @@ def system_activity():
 
     system_health_cards = _master_admin_system_health_cards(cur)
 
+    monitoring_settings = (
+        _master_admin_monitoring_settings_record(cur)
+    )
+
+    security_csrf_token = _security_form_csrf_token()
+
     cur.close()
     conn.close()
 
@@ -36073,7 +36763,293 @@ def system_activity():
         severity=severity,
         date_filter=date_filter,
         search=search,
-        system_health_cards=system_health_cards
+        system_health_cards=system_health_cards,
+        monitoring_settings=monitoring_settings,
+        security_csrf_token=security_csrf_token
+    )
+
+
+@app.route(
+    "/admin/system-activity/monitoring-settings",
+    methods=["POST"]
+)
+@login_required
+@master_admin_required
+def update_master_admin_monitoring_settings():
+
+    submitted_csrf_token = request.form.get(
+        "security_csrf_token",
+        ""
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_csrf_token
+    ):
+        flash(
+            "Your security token expired or could not be verified. "
+            "Please try again.",
+            "error"
+        )
+
+        return redirect(
+            url_for("system_activity")
+        )
+
+    try:
+        peachweb_monitor_url = (
+            _normalize_master_admin_monitor_url(
+                request.form.get(
+                    "peachweb_monitor_url",
+                    ""
+                ),
+                "PeachWeb Monitor URL"
+            )
+        )
+
+        peachbook_monitor_url = (
+            _normalize_master_admin_monitor_url(
+                request.form.get(
+                    "peachbook_monitor_url",
+                    ""
+                ),
+                "PeachBook Monitor URL"
+            )
+        )
+
+    except ValueError as exc:
+        flash(
+            str(exc),
+            "error"
+        )
+
+        return redirect(
+            url_for("system_activity")
+        )
+
+    user_id = session.get("user_id")
+
+    if not user_id:
+        return redirect(
+            url_for("login")
+        )
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor(
+        cursor_factory=RealDictCursor
+    )
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                spa_id,
+                role,
+                active
+            FROM users
+            WHERE user_id = %s
+            FOR UPDATE
+            """,
+            (user_id,)
+        )
+
+        user = cur.fetchone()
+
+        if (
+            not user
+            or user["role"] != "master_admin"
+            or not bool(user["active"])
+        ):
+            conn.rollback()
+
+            flash(
+                "Your Master Admin session is no longer valid. "
+                "Please sign in again.",
+                "error"
+            )
+
+            return redirect(
+                url_for("logout")
+            )
+
+        spa_id = user["spa_id"]
+
+        existing_settings = (
+            _master_admin_monitoring_settings_record(cur)
+        )
+
+        peachweb_changed = (
+            peachweb_monitor_url
+            != existing_settings["peachweb_monitor_url"]
+        )
+
+        peachbook_changed = (
+            peachbook_monitor_url
+            != existing_settings["peachbook_monitor_url"]
+        )
+
+        settings_changed = (
+            peachweb_changed
+            or peachbook_changed
+        )
+
+        cur.execute(
+            """
+            INSERT INTO master_admin_monitoring_settings (
+                singleton_key,
+                peachweb_monitor_url,
+                peachbook_monitor_url,
+                created_by,
+                updated_by
+            )
+            VALUES (
+                1,
+                %s,
+                %s,
+                %s,
+                %s
+            )
+            ON CONFLICT (singleton_key)
+            DO UPDATE SET
+                peachweb_monitor_url =
+                    EXCLUDED.peachweb_monitor_url,
+                peachbook_monitor_url =
+                    EXCLUDED.peachbook_monitor_url,
+                created_by = COALESCE(
+                    master_admin_monitoring_settings.created_by,
+                    EXCLUDED.created_by
+                ),
+                updated_by = EXCLUDED.updated_by,
+                updated_at = NOW()
+            RETURNING
+                master_admin_monitoring_setting_id
+            """,
+            (
+                peachweb_monitor_url,
+                peachbook_monitor_url,
+                user_id,
+                user_id,
+            )
+        )
+
+        monitoring_setting_id = (
+            cur.fetchone()[
+                "master_admin_monitoring_setting_id"
+            ]
+        )
+
+        if peachweb_changed:
+            cur.execute(
+                """
+                UPDATE master_admin_monitoring_status
+                SET
+                    status = 'gray',
+                    status_text = %s,
+                    detail = NULL,
+                    checked_url = NULL,
+                    http_status = NULL,
+                    response_ms = NULL,
+                    consecutive_failures = 0,
+                    last_checked_at = NULL,
+                    last_success_at = NULL,
+                    last_failure_at = NULL,
+                    updated_at = NOW()
+                WHERE monitor_key = 'peachweb'
+                """,
+                (
+                    (
+                        "Not Checked"
+                        if peachweb_monitor_url
+                        else "Not Configured"
+                    ),
+                )
+            )
+
+        if peachbook_changed:
+            cur.execute(
+                """
+                UPDATE master_admin_monitoring_status
+                SET
+                    status = 'gray',
+                    status_text = %s,
+                    detail = NULL,
+                    checked_url = NULL,
+                    http_status = NULL,
+                    response_ms = NULL,
+                    consecutive_failures = 0,
+                    last_checked_at = NULL,
+                    last_success_at = NULL,
+                    last_failure_at = NULL,
+                    updated_at = NOW()
+                WHERE monitor_key = 'peachbook'
+                """,
+                (
+                    (
+                        "Not Checked"
+                        if peachbook_monitor_url
+                        else "Not Configured"
+                    ),
+                )
+            )
+
+        if settings_changed:
+            changed_targets = []
+
+            if peachweb_changed:
+                changed_targets.append("PeachWeb")
+
+            if peachbook_changed:
+                changed_targets.append("PeachBook")
+
+            log_audit(
+                cur,
+                spa_id=spa_id,
+                user_id=user_id,
+                action_type=(
+                    "master_admin_monitoring_settings_updated"
+                ),
+                table_name=(
+                    "master_admin_monitoring_settings"
+                ),
+                record_id=monitoring_setting_id,
+                notes=(
+                    "Master Admin monitoring targets updated: "
+                    + ", ".join(changed_targets)
+                    + ". URL values were not written to the "
+                    "audit log."
+                ),
+            )
+
+        conn.commit()
+
+        flash(
+            (
+                "PeachWeb and PeachBook monitoring settings "
+                "were updated."
+                if settings_changed
+                else "Monitoring settings were unchanged."
+            ),
+            "success"
+        )
+
+    except Exception:
+        conn.rollback()
+
+        app.logger.exception(
+            "Master Admin monitoring settings update failed."
+        )
+
+        flash(
+            "Monitoring settings could not be saved right now.",
+            "error"
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    return redirect(
+        url_for("system_activity")
     )
 
 
@@ -120641,6 +121617,37 @@ def scheduled_process_due_automatic_expenses():
 
 
 
+def scheduled_public_web_health_check():
+    """
+    Check the configured PeachWeb and PeachBook canary targets.
+
+    Exceptions are contained so public-web monitoring cannot stop
+    the remaining Peach Suite Pro background jobs.
+    """
+
+    try:
+        result = (
+            run_master_admin_public_web_health_checks()
+        )
+
+        print(
+            "[PUBLIC WEB HEALTH] "
+            f"Processed: {result['checked_count']} monitor targets.",
+            flush=True,
+        )
+
+    except Exception:
+        app.logger.exception(
+            "Scheduled PeachWeb / PeachBook health check failed."
+        )
+
+        print(
+            "[PUBLIC WEB HEALTH] "
+            "Scheduled health check failed.",
+            flush=True,
+        )
+
+
 def scheduled_process_master_admin_alerts():
     """
     Process reserved Master Admin alert deliveries.
@@ -120851,6 +121858,18 @@ def start_scheduler():
         coalesce=True,
         max_instances=1,
         misfire_grace_time=60
+    )
+
+    scheduler.add_job(
+        scheduled_public_web_health_check,
+        "interval",
+        minutes=15,
+        id="public_web_health_check_job",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=300,
+        next_run_time=datetime.now()
     )
 
     scheduler.add_job(

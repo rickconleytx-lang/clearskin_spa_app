@@ -75,6 +75,96 @@
     {% endfor %}
 </div>
 
+<form
+    method="post"
+    action="{{ url_for('update_master_admin_monitoring_settings') }}"
+    style="
+        margin:20px 0;
+        padding:16px;
+        border:1px solid #e5e5e5;
+        border-radius:10px;
+        background:#fafafa;
+    "
+>
+    <input
+        type="hidden"
+        name="security_csrf_token"
+        value="{{ security_csrf_token }}"
+    >
+
+    <div style="
+        display:flex;
+        gap:14px;
+        flex-wrap:wrap;
+        align-items:flex-end;
+    ">
+        <div style="flex:1; min-width:280px;">
+            <label
+                for="peachweb_monitor_url"
+                style="
+                    display:block;
+                    font-size:13px;
+                    font-weight:600;
+                    margin-bottom:6px;
+                "
+            >
+                PeachWeb Monitor URL
+            </label>
+
+            <input
+                id="peachweb_monitor_url"
+                name="peachweb_monitor_url"
+                type="url"
+                maxlength="2048"
+                autocomplete="off"
+                value="{{ monitoring_settings.peachweb_monitor_url or '' }}"
+                placeholder="https://business.peachsuitepro.com/"
+                style="width:100%;"
+            >
+        </div>
+
+        <div style="flex:1; min-width:280px;">
+            <label
+                for="peachbook_monitor_url"
+                style="
+                    display:block;
+                    font-size:13px;
+                    font-weight:600;
+                    margin-bottom:6px;
+                "
+            >
+                PeachBook Monitor URL
+            </label>
+
+            <input
+                id="peachbook_monitor_url"
+                name="peachbook_monitor_url"
+                type="url"
+                maxlength="2048"
+                autocomplete="off"
+                value="{{ monitoring_settings.peachbook_monitor_url or '' }}"
+                placeholder="https://app.peachsuitepro.com/book/business"
+                style="width:100%;"
+            >
+        </div>
+
+        <div>
+            <button type="submit" class="btn">
+                Save Monitoring Targets
+            </button>
+        </div>
+    </div>
+
+    <div style="
+        margin-top:8px;
+        font-size:12px;
+        color:#777;
+    ">
+        Peach Suite Pro will use these as the PeachWeb and PeachBook
+        canary targets for scheduled platform health checks.
+    </div>
+</form>
+
 <form method="get" style="margin:20px 0; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
 
     <select name="category">
