@@ -10669,6 +10669,459 @@ def master_admin_api_update_notification_settings():
         conn.close()
 
 
+
+@app.route(
+    "/api/master-admin/notification-settings/test",
+    methods=["POST"],
+)
+@master_admin_api_required
+def master_admin_api_test_notification():
+    api_context = g.master_admin_api
+
+    data = request.get_json(silent=True)
+
+    if not isinstance(data, dict):
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "invalid_request",
+                    "message": "A valid JSON request is required.",
+                }),
+                400,
+            )
+        )
+
+    channel = str(
+        data.get("channel") or ""
+    ).strip().lower()
+
+    if channel not in {
+        "email",
+        "sms",
+    }:
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "invalid_notification_test_channel",
+                    "message": (
+                        "Test Notification channel must be "
+                        "email or sms."
+                    ),
+                }),
+                400,
+            )
+        )
+
+    user_id = int(
+        api_context["master_admin_user_id"]
+    )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                spa_id,
+                role,
+                active
+            FROM users
+            WHERE user_id = %s
+            """,
+            (user_id,),
+        )
+
+        user = cur.fetchone()
+
+        if (
+            not user
+            or user[1] != "master_admin"
+            or not bool(user[2])
+        ):
+            return _mfa_no_store(
+                (
+                    jsonify({
+                        "success": False,
+                        "error": "session_invalid",
+                        "reason": "account_changed",
+                        "message": (
+                            "Your Master Admin session is no longer "
+                            "valid. Please sign in again."
+                        ),
+                    }),
+                    401,
+                )
+            )
+
+        spa_id = user[0]
+
+        settings = (
+            _master_admin_notification_settings_record(
+                cur,
+                user_id,
+            )
+        )
+
+        if channel == "email":
+            destination = str(
+                settings["notification_email"] or ""
+            ).strip()
+
+            missing_error = "missing_notification_email"
+            missing_message = (
+                "Save a Notification Email before sending "
+                "a test email."
+            )
+
+        else:
+            destination = str(
+                settings["notification_phone"] or ""
+            ).strip()
+
+            missing_error = "missing_notification_phone"
+            missing_message = (
+                "Save a Notification Phone before sending "
+                "a test SMS."
+            )
+
+        if not destination:
+            return _mfa_no_store(
+                (
+                    jsonify({
+                        "success": False,
+                        "error": missing_error,
+                        "message": missing_message,
+                    }),
+                    400,
+                )
+            )
+
+        related_type = (
+            "master_admin_notification_"
+            + channel
+            + "_test"
+        )
+
+        test_cooldown_seconds = 30
+
+        cur.execute(
+            """
+            SELECT
+                EXTRACT(
+                    EPOCH FROM (
+                        NOW() - MAX(created_at)
+                    )
+                )
+            FROM system_logs
+            WHERE related_type = %s
+            """,
+            (related_type,),
+        )
+
+        cooldown_row = cur.fetchone()
+
+        elapsed_seconds = (
+            float(cooldown_row[0])
+            if (
+                cooldown_row
+                and cooldown_row[0] is not None
+            )
+            else None
+        )
+
+        if (
+            elapsed_seconds is not None
+            and elapsed_seconds < test_cooldown_seconds
+        ):
+            retry_seconds = max(
+                1,
+                int(
+                    test_cooldown_seconds
+                    - elapsed_seconds
+                )
+                + 1,
+            )
+
+            return _mfa_no_store(
+                (
+                    jsonify({
+                        "success": False,
+                        "error": "notification_test_cooldown",
+                        "retry_seconds": retry_seconds,
+                        "message": (
+                            "Please wait "
+                            f"{retry_seconds} seconds before "
+                            "sending another test "
+                            f"{channel.upper() if channel == 'sms' else channel}."
+                        ),
+                    }),
+                    429,
+                )
+            )
+
+    except Exception:
+        app.logger.exception(
+            "Master Admin Test Notification setup failed."
+        )
+
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "notification_test_unavailable",
+                    "message": (
+                        "Test Notification could not be prepared "
+                        "right now."
+                    ),
+                }),
+                503,
+            )
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    token = _MASTER_ADMIN_ALERT_DELIVERY_ACTIVE.set(
+        True
+    )
+
+    try:
+        if channel == "email":
+            log_email(
+                "Master Admin test email requested.",
+                severity="INFO",
+                spa_id=spa_id,
+                related_type=related_type,
+                created_by=user_id,
+            )
+
+            response = send_email(
+                to=destination,
+                subject="Peach Suite Pro Test Notification",
+                body=(
+                    "This is a test email from the Peach Suite Pro "
+                    "Master Admin app. Your Notification Email and "
+                    "Mailgun delivery path are configured and "
+                    "reachable."
+                ),
+                add_footer=False,
+                log_related_type="mailgun_send_test",
+            )
+
+            status_code = int(
+                response.status_code
+            )
+
+            if not 200 <= status_code < 300:
+                log_email(
+                    (
+                        "Master Admin test email was rejected "
+                        "by Mailgun."
+                    ),
+                    severity="ERROR",
+                    spa_id=spa_id,
+                    related_type=related_type,
+                    created_by=user_id,
+                )
+
+                return _mfa_no_store(
+                    (
+                        jsonify({
+                            "success": False,
+                            "error": "notification_test_failed",
+                            "channel": channel,
+                            "provider": "mailgun",
+                            "message": (
+                                "Mailgun did not accept the test "
+                                "email."
+                            ),
+                        }),
+                        502,
+                    )
+                )
+
+            provider_message_id = None
+
+            try:
+                response_data = response.json()
+
+                if isinstance(
+                    response_data,
+                    dict,
+                ):
+                    provider_message_id = (
+                        response_data.get("id")
+                    )
+
+            except Exception:
+                provider_message_id = None
+
+            log_email(
+                "Master Admin test email accepted by Mailgun.",
+                severity="INFO",
+                spa_id=spa_id,
+                related_type=related_type,
+                created_by=user_id,
+            )
+
+            return _mfa_no_store(
+                jsonify({
+                    "success": True,
+                    "channel": channel,
+                    "provider": "mailgun",
+                    "provider_message_id": (
+                        provider_message_id
+                    ),
+                    "message": (
+                        "Test email sent to the saved "
+                        "Notification Email."
+                    ),
+                })
+            )
+
+        log_sms(
+            "Master Admin test SMS requested.",
+            severity="INFO",
+            spa_id=spa_id,
+            related_type=related_type,
+            created_by=user_id,
+        )
+
+        result = send_peach_suite_platform_sms(
+            recipient_phone=destination,
+            message_body=(
+                "Peach Suite Pro test notification: "
+                "your Master Admin Notification Phone and "
+                "Telnyx delivery path are configured."
+            ),
+            message_type="security_alert",
+            log_related_type="telnyx_send_test",
+        )
+
+        if bool(result.get("success")):
+            log_sms(
+                "Master Admin test SMS accepted by Telnyx.",
+                severity="INFO",
+                spa_id=spa_id,
+                related_type=related_type,
+                created_by=user_id,
+            )
+
+            return _mfa_no_store(
+                jsonify({
+                    "success": True,
+                    "channel": channel,
+                    "provider": "telnyx",
+                    "provider_message_id": (
+                        result.get(
+                            "provider_message_id"
+                        )
+                    ),
+                    "message": (
+                        "Test SMS sent to the saved "
+                        "Notification Phone."
+                    ),
+                })
+            )
+
+        if result.get("status") == "logged":
+            log_sms(
+                (
+                    "Master Admin test SMS was skipped because "
+                    "SMS sending is disabled."
+                ),
+                severity="WARNING",
+                spa_id=spa_id,
+                related_type=related_type,
+                created_by=user_id,
+            )
+
+            return _mfa_no_store(
+                (
+                    jsonify({
+                        "success": False,
+                        "error": "sms_sending_disabled",
+                        "channel": channel,
+                        "provider": "telnyx",
+                        "message": (
+                            "SMS sending is currently disabled "
+                            "by the Peach Suite Pro system switch."
+                        ),
+                    }),
+                    503,
+                )
+            )
+
+        log_sms(
+            "Master Admin test SMS failed.",
+            severity="ERROR",
+            spa_id=spa_id,
+            related_type=related_type,
+            created_by=user_id,
+        )
+
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "notification_test_failed",
+                    "channel": channel,
+                    "provider": "telnyx",
+                    "message": (
+                        "Telnyx did not accept the test SMS."
+                    ),
+                }),
+                502,
+            )
+        )
+
+    except Exception:
+        app.logger.exception(
+            "Master Admin Test Notification delivery failed."
+        )
+
+        if channel == "email":
+            log_email(
+                "Master Admin test email delivery failed.",
+                severity="ERROR",
+                spa_id=spa_id,
+                related_type=related_type,
+                created_by=user_id,
+            )
+        else:
+            log_sms(
+                "Master Admin test SMS delivery failed.",
+                severity="ERROR",
+                spa_id=spa_id,
+                related_type=related_type,
+                created_by=user_id,
+            )
+
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "notification_test_failed",
+                    "channel": channel,
+                    "message": (
+                        "The test notification could not be sent "
+                        "right now."
+                    ),
+                }),
+                502,
+            )
+        )
+
+    finally:
+        _MASTER_ADMIN_ALERT_DELIVERY_ACTIVE.reset(
+            token
+        )
+
+
 @app.route(
     "/api/master-admin/auth/logout",
     methods=["POST"],
@@ -32874,7 +33327,8 @@ def send_compliant_sms(
 def send_peach_suite_platform_sms(
     recipient_phone,
     message_body,
-    message_type="booking_notification"
+    message_type="booking_notification",
+    log_related_type="telnyx_send"
 ):
     """
     Send a Peach Suite Pro platform-originated SMS.
@@ -32926,7 +33380,8 @@ def send_peach_suite_platform_sms(
     result = send_sms_message(
         from_phone=from_phone,
         to_phone=recipient_phone,
-        message_body=message_body
+        message_body=message_body,
+        log_related_type=log_related_type,
     )
 
     if not isinstance(result, dict):
@@ -37138,7 +37593,8 @@ def send_email(
     subject,
     body,
     html_body=None,
-    add_footer=True
+    add_footer=True,
+    log_related_type="mailgun_send"
 ):
     if add_footer:
         final_body = add_email_footer(body)
@@ -37194,7 +37650,7 @@ def send_email(
         log_email(
             "Mailgun email send request failed.",
             severity="ERROR",
-            related_type="mailgun_send",
+            related_type=log_related_type,
         )
         raise
 
@@ -37202,7 +37658,7 @@ def send_email(
         log_email(
             "Mailgun accepted email send.",
             severity="INFO",
-            related_type="mailgun_send",
+            related_type=log_related_type,
         )
     else:
         log_email(
@@ -37211,7 +37667,7 @@ def send_email(
                 f"{response.status_code}."
             ),
             severity="ERROR",
-            related_type="mailgun_send",
+            related_type=log_related_type,
         )
 
     return response
@@ -70674,7 +71130,8 @@ def get_sms_template(spa_id, template_type):
 def send_sms_message(
     from_phone,
     to_phone,
-    message_body
+    message_body,
+    log_related_type="telnyx_send"
 ):
     """
     Low-level SMS delivery function.
@@ -70701,10 +71158,16 @@ def send_sms_message(
     final_message_body = message_body
 
     if not sms_enabled:
+        disabled_log_related_type = (
+            log_related_type
+            if str(log_related_type or "").endswith("_test")
+            else "sms_send_disabled"
+        )
+
         log_sms(
             "SMS send skipped because the system switch is disabled.",
             severity="WARNING",
-            related_type="sms_send_disabled",
+            related_type=disabled_log_related_type,
         )
 
         return {
@@ -70753,7 +71216,7 @@ def send_sms_message(
         log_sms(
             "Telnyx accepted SMS send.",
             severity="INFO",
-            related_type="telnyx_send",
+            related_type=log_related_type,
         )
 
         return {
@@ -70779,7 +71242,7 @@ def send_sms_message(
         log_sms(
             "Telnyx SMS send request failed.",
             severity="ERROR",
-            related_type="telnyx_send",
+            related_type=log_related_type,
         )
 
         return {
