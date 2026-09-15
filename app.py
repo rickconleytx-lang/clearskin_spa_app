@@ -36981,13 +36981,23 @@ def _master_admin_system_health_cards(cur):
     sms_logs = [
         row
         for row in recent_health_logs
-        if str(row["category"] or "").upper() == "SMS"
+        if (
+            str(row["category"] or "").upper() == "SMS"
+            and not str(
+                row["related_type"] or ""
+            ).endswith("_test")
+        )
     ]
 
     email_logs = [
         row
         for row in recent_health_logs
-        if str(row["category"] or "").upper() == "EMAIL"
+        if (
+            str(row["category"] or "").upper() == "EMAIL"
+            and not str(
+                row["related_type"] or ""
+            ).endswith("_test")
+        )
     ]
 
     cur.execute(
