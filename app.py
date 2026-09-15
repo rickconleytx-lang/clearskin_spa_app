@@ -9907,6 +9907,247 @@ def master_admin_api_acknowledgements():
         conn.close()
 
 
+
+def _master_admin_system_health_detail(
+    cur,
+    health_key,
+):
+    allowed_keys = {
+        "scheduler": "Scheduler",
+        "mfa": "MFA",
+        "login_security": "Login Security",
+        "password_reset": "Password Reset",
+        "sms": "SMS",
+        "email": "Email",
+        "peachweb": "PeachWeb",
+        "peachbook": "PeachBook",
+    }
+
+    if health_key not in allowed_keys:
+        return None
+
+    cards = _master_admin_system_health_cards(cur)
+    card = next(
+        (
+            item
+            for item in cards
+            if item["key"] == health_key
+        ),
+        None,
+    )
+
+    event_where = ""
+    event_params = []
+
+    if health_key == "scheduler":
+        event_where = """
+            category = 'SCHEDULER'
+        """
+
+    elif health_key == "mfa":
+        event_where = """
+            category = 'SECURITY'
+            AND (
+                COALESCE(related_type, '') LIKE 'mfa_%%'
+                OR COALESCE(message, '') LIKE '%%MFA%%'
+            )
+        """
+
+    elif health_key == "login_security":
+        event_where = """
+            category = 'SECURITY'
+            AND (
+                COALESCE(related_type, '') LIKE 'business_login%%'
+                OR COALESCE(related_type, '') LIKE 'business_switch%%'
+                OR COALESCE(message, '') LIKE 'Login %%'
+                OR COALESCE(message, '') LIKE 'Business switch %%'
+            )
+        """
+
+    elif health_key == "password_reset":
+        event_where = """
+            category = 'SECURITY'
+            AND COALESCE(related_type, '') LIKE 'password_reset%%'
+        """
+
+    elif health_key == "sms":
+        event_where = """
+            category = 'SMS'
+            AND COALESCE(related_type, '') NOT LIKE '%%_test'
+        """
+
+    elif health_key == "email":
+        event_where = """
+            category = 'EMAIL'
+            AND COALESCE(related_type, '') NOT LIKE '%%_test'
+        """
+
+    elif health_key in {"peachweb", "peachbook"}:
+        event_where = """
+            related_type = %s
+        """
+        event_params.append(
+            f"{health_key}_health"
+        )
+
+    cur.execute(
+        f"""
+        SELECT
+            log_id,
+            severity,
+            message,
+            related_type,
+            created_at AT TIME ZONE current_setting('TIMEZONE')
+                AS created_at
+        FROM system_logs
+        WHERE created_at >= NOW() - INTERVAL '7 days'
+          AND {event_where}
+        ORDER BY created_at DESC
+        LIMIT 20
+        """,
+        tuple(event_params),
+    )
+
+    recent_events = [
+        {
+            "log_id": int(row["log_id"]),
+            "severity": str(row["severity"] or ""),
+            "message": str(row["message"] or ""),
+            "related_type": row["related_type"],
+            "created_at": (
+                row["created_at"].isoformat()
+                if row["created_at"]
+                else None
+            ),
+        }
+        for row in cur.fetchall()
+    ]
+
+    monitor = None
+
+    if health_key in {"peachweb", "peachbook"}:
+        cur.execute(
+            """
+            SELECT
+                monitor_key,
+                status,
+                status_text,
+                detail,
+                checked_url,
+                http_status,
+                response_ms,
+                consecutive_failures,
+                last_checked_at,
+                last_success_at,
+                last_failure_at
+            FROM master_admin_monitoring_status
+            WHERE monitor_key = %s
+            """,
+            (health_key,),
+        )
+
+        row = cur.fetchone()
+
+        if row:
+            monitor = {
+                "key": row["monitor_key"],
+                "label": allowed_keys[health_key],
+                "status": row["status"],
+                "status_text": row["status_text"],
+                "detail": row["detail"],
+                "checked_url": row["checked_url"],
+                "http_status": row["http_status"],
+                "response_ms": row["response_ms"],
+                "consecutive_failures": int(
+                    row["consecutive_failures"] or 0
+                ),
+                "last_checked_at": (
+                    row["last_checked_at"].isoformat()
+                    if row["last_checked_at"]
+                    else None
+                ),
+                "last_success_at": (
+                    row["last_success_at"].isoformat()
+                    if row["last_success_at"]
+                    else None
+                ),
+                "last_failure_at": (
+                    row["last_failure_at"].isoformat()
+                    if row["last_failure_at"]
+                    else None
+                ),
+            }
+
+    return {
+        "key": health_key,
+        "label": allowed_keys[health_key],
+        "card": card,
+        "recent_events": recent_events,
+        "monitor": monitor,
+    }
+
+
+@app.route(
+    "/api/master-admin/system-health/<health_key>",
+    methods=["GET"],
+)
+@master_admin_api_required
+def master_admin_api_system_health_detail(health_key):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    try:
+        detail = _master_admin_system_health_detail(
+            cur,
+            str(health_key or "").strip().lower(),
+        )
+
+        if detail is None:
+            return _mfa_no_store(
+                (
+                    jsonify({
+                        "success": False,
+                        "error": "invalid_system_health_key",
+                        "message": (
+                            "The requested System Health check "
+                            "does not exist."
+                        ),
+                    }),
+                    404,
+                )
+            )
+
+        return _mfa_no_store(
+            jsonify({
+                "success": True,
+                "system_health_detail": detail,
+            })
+        )
+
+    except Exception:
+        app.logger.exception(
+            "Master Admin System Health detail API request failed."
+        )
+
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "system_health_detail_unavailable",
+                    "message": (
+                        "System Health details could not be loaded "
+                        "right now."
+                    ),
+                }),
+                503,
+            )
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
 @app.route(
     "/api/master-admin/system-health",
     methods=["GET"],
