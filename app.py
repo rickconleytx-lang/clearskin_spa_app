@@ -9942,6 +9942,8 @@ def _master_admin_system_health_detail(
     if health_key == "scheduler":
         event_where = """
             category = 'SCHEDULER'
+            AND COALESCE(message, '') <>
+                'System logging initialized.'
         """
 
     elif health_key == "mfa":
@@ -37333,6 +37335,8 @@ def _master_admin_system_health_cards(cur):
             "login_security",
             "Login Security",
             login_security_logs,
+            latest_event_drives=True,
+            event_max_age=timedelta(hours=24),
         ),
         build_system_health_card(
             "password_reset",
