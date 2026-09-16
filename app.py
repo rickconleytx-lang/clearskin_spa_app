@@ -2177,6 +2177,10 @@ def log_scheduler(message, severity="INFO", spa_id=None, related_type=None, rela
     log_event("SCHEDULER", message, severity, spa_id, related_type, related_id, created_by)
 
 
+def log_database(message, severity="INFO", spa_id=None, related_type=None, related_id=None, created_by=None):
+    log_event("DATABASE", message, severity, spa_id, related_type, related_id, created_by)
+
+
 def log_reminder(message, severity="INFO", spa_id=None, related_type=None, related_id=None, created_by=None):
     log_event("REMINDER", message, severity, spa_id, related_type, related_id, created_by)
 
@@ -9914,6 +9918,7 @@ def _master_admin_system_health_detail(
 ):
     allowed_keys = {
         "scheduler": "Scheduler",
+        "database": "Database",
         "mfa": "MFA",
         "login_security": "Login Security",
         "password_reset": "Password Reset",
@@ -9944,6 +9949,12 @@ def _master_admin_system_health_detail(
             category = 'SCHEDULER'
             AND COALESCE(message, '') <>
                 'System logging initialized.'
+        """
+
+    elif health_key == "database":
+        event_where = """
+            category = 'DATABASE'
+            AND COALESCE(related_type, '') = 'database_heartbeat'
         """
 
     elif health_key == "mfa":
@@ -37224,6 +37235,20 @@ def _master_admin_system_health_cards(cur):
         None,
     )
 
+    database_logs = [
+        row
+        for row in recent_health_logs
+        if (
+            str(row["category"] or "").upper() == "DATABASE"
+            and row["related_type"] == "database_heartbeat"
+        )
+    ]
+
+    database_heartbeat = next(
+        iter(database_logs),
+        None,
+    )
+
     security_logs = [
         row
         for row in recent_health_logs
@@ -37368,6 +37393,13 @@ def _master_admin_system_health_cards(cur):
             "Scheduler",
             scheduler_logs,
             positive_log=scheduler_heartbeat,
+            stale_after=timedelta(minutes=90),
+        ),
+        build_system_health_card(
+            "database",
+            "Database",
+            database_logs,
+            positive_log=database_heartbeat,
             stale_after=timedelta(minutes=90),
         ),
         build_system_health_card(
@@ -122509,6 +122541,88 @@ def scheduled_scheduler_heartbeat():
     )
 
 
+def scheduled_database_heartbeat():
+    """
+    Verify lightweight PostgreSQL connectivity and record
+    successful Database Health evidence.
+    """
+
+    first_failure = None
+
+    for attempt_number in (1, 2):
+        started_at = time.monotonic()
+        conn = None
+        cur = None
+
+        try:
+            conn = get_db_connection()
+            cur = conn.cursor()
+
+            cur.execute("SELECT 1")
+            row = cur.fetchone()
+
+            if not row or int(row[0]) != 1:
+                raise RuntimeError(
+                    "Database heartbeat returned an unexpected result."
+                )
+
+            response_ms = max(
+                int(
+                    (
+                        time.monotonic()
+                        - started_at
+                    )
+                    * 1000
+                ),
+                0,
+            )
+
+            if first_failure is not None:
+                message = (
+                    "Database heartbeat recovered on retry: "
+                    f"{response_ms} ms."
+                )
+            else:
+                message = (
+                    f"Database heartbeat healthy: {response_ms} ms."
+                )
+
+            log_database(
+                message,
+                severity="INFO",
+                related_type="database_heartbeat",
+            )
+
+            return
+
+        except Exception as exc:
+            if attempt_number == 1:
+                first_failure = type(exc).__name__
+                time.sleep(2)
+                continue
+
+            app.logger.exception(
+                "Scheduled database heartbeat failed after retry."
+            )
+
+            print(
+                "[DATABASE HEALTH] "
+                "Database heartbeat failed after retry. "
+                f"First failure: {first_failure}; "
+                f"final failure: {type(exc).__name__}.",
+                flush=True,
+            )
+
+            return
+
+        finally:
+            if cur is not None:
+                cur.close()
+
+            if conn is not None:
+                conn.close()
+
+
 def scheduled_purge_system_logs():
     """
     Apply Peach Suite Pro operational-log retention.
@@ -122675,6 +122789,18 @@ def start_scheduler():
         "interval",
         hours=1,
         id="scheduler_heartbeat_job",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=1800,
+        next_run_time=datetime.now()
+    )
+
+    scheduler.add_job(
+        scheduled_database_heartbeat,
+        "interval",
+        hours=1,
+        id="database_heartbeat_job",
         replace_existing=True,
         coalesce=True,
         max_instances=1,
