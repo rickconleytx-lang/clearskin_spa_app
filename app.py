@@ -9919,6 +9919,7 @@ def _master_admin_system_health_detail(
     allowed_keys = {
         "scheduler": "Scheduler",
         "database": "Database",
+        "square": "Square",
         "mfa": "MFA",
         "login_security": "Login Security",
         "password_reset": "Password Reset",
@@ -9955,6 +9956,12 @@ def _master_admin_system_health_detail(
         event_where = """
             category = 'DATABASE'
             AND COALESCE(related_type, '') = 'database_heartbeat'
+        """
+
+    elif health_key == "square":
+        event_where = """
+            category = 'SYSTEM'
+            AND COALESCE(related_type, '') = 'square_health'
         """
 
     elif health_key == "mfa":
@@ -10038,7 +10045,11 @@ def _master_admin_system_health_detail(
 
     monitor = None
 
-    if health_key in {"peachweb", "peachbook"}:
+    if health_key in {
+        "square",
+        "peachweb",
+        "peachbook",
+    }:
         cur.execute(
             """
             SELECT
@@ -37068,6 +37079,417 @@ def run_master_admin_public_web_health_checks():
     }
 
 
+
+def _probe_master_admin_square_connection(
+    connection,
+    environment,
+):
+    """
+    Perform a read-only Square API reachability check for one
+    connected workspace.
+
+    The probe never writes to Square and never enables outbound
+    synchronization.
+    """
+
+    last_error = None
+    last_response_ms = None
+
+    for attempt_number in (1, 2):
+        started_at = time.monotonic()
+
+        try:
+            access_token = _square_income_read_access_token(
+                environment=environment,
+                spa_id=connection["spa_id"],
+                business_unit_id=connection["business_unit_id"],
+                oauth_access_token_ciphertext=(
+                    connection["oauth_access_token_ciphertext"]
+                ),
+            )
+
+            locations = square_service.list_locations(
+                access_token=access_token,
+                environment=environment,
+            )
+
+            response_ms = max(
+                int(
+                    (
+                        time.monotonic()
+                        - started_at
+                    )
+                    * 1000
+                ),
+                0,
+            )
+
+            return {
+                "success": True,
+                "response_ms": response_ms,
+                "location_count": len(locations),
+                "error": None,
+            }
+
+        except Exception as exc:
+            last_response_ms = max(
+                int(
+                    (
+                        time.monotonic()
+                        - started_at
+                    )
+                    * 1000
+                ),
+                0,
+            )
+
+            last_error = (
+                str(exc).strip()
+                or type(exc).__name__
+            )
+
+            if attempt_number == 1:
+                time.sleep(2)
+
+    return {
+        "success": False,
+        "response_ms": last_response_ms,
+        "location_count": 0,
+        "error": last_error,
+    }
+
+
+def run_master_admin_square_health_check():
+    """
+    Check Square reachability for every connected workspace in
+    the Square environment used by this PSP runtime.
+
+    Local development checks Sandbox.
+    Render / live checks Production.
+
+    Current state is persisted in master_admin_monitoring_status.
+    System Activity receives an event only when the status changes.
+    """
+
+    environment = _square_income_read_environment()
+
+    environment_label = (
+        "Production"
+        if environment == "production"
+        else "Sandbox"
+    )
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor(
+        cursor_factory=RealDictCursor
+    )
+
+    transition_event = None
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                status,
+                consecutive_failures
+            FROM master_admin_monitoring_status
+            WHERE monitor_key = 'square'
+            """
+        )
+
+        existing_row = cur.fetchone()
+
+        previous_status = (
+            existing_row["status"]
+            if existing_row
+            else "gray"
+        )
+
+        previous_failures = int(
+            (
+                existing_row["consecutive_failures"]
+                if existing_row
+                else 0
+            )
+            or 0
+        )
+
+        cur.execute(
+            """
+            SELECT
+                square_connection_id,
+                spa_id,
+                business_unit_id,
+                environment,
+                oauth_access_token_ciphertext
+            FROM square_connections
+            WHERE environment = %s
+              AND connection_status = 'connected'
+            ORDER BY
+                spa_id,
+                business_unit_id,
+                square_connection_id
+            """,
+            (environment,),
+        )
+
+        connections = cur.fetchall()
+
+        if not connections:
+            result = {
+                "status": "gray",
+                "status_text": "Not Configured",
+                "detail": (
+                    f"No connected Square {environment_label} "
+                    "workspace is configured."
+                ),
+                "response_ms": None,
+                "configured": False,
+                "success": False,
+                "failure": False,
+                "checked_count": 0,
+                "successful_count": 0,
+            }
+
+        else:
+            probe_results = []
+
+            for connection in connections:
+                probe_results.append(
+                    _probe_master_admin_square_connection(
+                        connection,
+                        environment,
+                    )
+                )
+
+            checked_count = len(probe_results)
+
+            successful_count = sum(
+                1
+                for item in probe_results
+                if item["success"]
+            )
+
+            response_times = [
+                item["response_ms"]
+                for item in probe_results
+                if item["response_ms"] is not None
+            ]
+
+            response_ms = (
+                max(response_times)
+                if response_times
+                else None
+            )
+
+            first_error = next(
+                (
+                    item["error"]
+                    for item in probe_results
+                    if (
+                        not item["success"]
+                        and item["error"]
+                    )
+                ),
+                None,
+            )
+
+            if successful_count == checked_count:
+                status = "green"
+                status_text = "Healthy"
+                detail = (
+                    f"Square {environment_label} is reachable "
+                    f"for {checked_count} connected workspace"
+                    f"{'' if checked_count == 1 else 's'}."
+                )
+
+            elif successful_count > 0:
+                status = "yellow"
+                status_text = "Degraded"
+                detail = (
+                    f"Square {environment_label} is reachable "
+                    f"for {successful_count} of "
+                    f"{checked_count} connected workspaces."
+                )
+
+                if first_error:
+                    detail += (
+                        f" First failure: {first_error}"
+                    )
+
+            else:
+                status = "red"
+                status_text = "Unavailable"
+                detail = (
+                    f"Square {environment_label} health check "
+                    f"failed for {checked_count} connected "
+                    f"workspace"
+                    f"{'' if checked_count == 1 else 's'}."
+                )
+
+                if first_error:
+                    detail += (
+                        f" First failure: {first_error}"
+                    )
+
+            result = {
+                "status": status,
+                "status_text": status_text,
+                "detail": detail[:500],
+                "response_ms": response_ms,
+                "configured": True,
+                "success": status == "green",
+                "failure": status in {
+                    "yellow",
+                    "red",
+                },
+                "checked_count": checked_count,
+                "successful_count": successful_count,
+            }
+
+        consecutive_failures = (
+            previous_failures + 1
+            if result["failure"]
+            else 0
+        )
+
+        cur.execute(
+            """
+            INSERT INTO master_admin_monitoring_status (
+                monitor_key,
+                status,
+                status_text,
+                detail,
+                checked_url,
+                http_status,
+                response_ms,
+                consecutive_failures,
+                last_checked_at,
+                last_success_at,
+                last_failure_at,
+                updated_at
+            )
+            VALUES (
+                'square',
+                %s,
+                %s,
+                %s,
+                NULL,
+                NULL,
+                %s,
+                %s,
+                CASE
+                    WHEN %s
+                    THEN NOW()
+                    ELSE NULL
+                END,
+                CASE
+                    WHEN %s
+                    THEN NOW()
+                    ELSE NULL
+                END,
+                CASE
+                    WHEN %s
+                    THEN NOW()
+                    ELSE NULL
+                END,
+                NOW()
+            )
+            ON CONFLICT (monitor_key)
+            DO UPDATE SET
+                status = EXCLUDED.status,
+                status_text = EXCLUDED.status_text,
+                detail = EXCLUDED.detail,
+                checked_url = NULL,
+                http_status = NULL,
+                response_ms = EXCLUDED.response_ms,
+                consecutive_failures =
+                    EXCLUDED.consecutive_failures,
+                last_checked_at = CASE
+                    WHEN %s
+                    THEN NOW()
+                    ELSE
+                        master_admin_monitoring_status
+                            .last_checked_at
+                END,
+                last_success_at = CASE
+                    WHEN %s
+                    THEN NOW()
+                    ELSE
+                        master_admin_monitoring_status
+                            .last_success_at
+                END,
+                last_failure_at = CASE
+                    WHEN %s
+                    THEN NOW()
+                    ELSE
+                        master_admin_monitoring_status
+                            .last_failure_at
+                END,
+                updated_at = NOW()
+            """,
+            (
+                result["status"],
+                result["status_text"],
+                result["detail"],
+                result["response_ms"],
+                consecutive_failures,
+                result["configured"],
+                result["success"],
+                result["failure"],
+                result["configured"],
+                result["success"],
+                result["failure"],
+            ),
+        )
+
+        if result["status"] != previous_status:
+            transition_event = {
+                "status": result["status"],
+                "detail": result["detail"],
+            }
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if transition_event:
+        status = transition_event["status"]
+
+        if status == "red":
+            severity = "ERROR"
+        elif status == "yellow":
+            severity = "WARNING"
+        else:
+            severity = "INFO"
+
+        log_event(
+            "SYSTEM",
+            (
+                "Square monitor: "
+                f"{transition_event['detail']}"
+            ),
+            severity=severity,
+            related_type="square_health",
+        )
+
+    return {
+        "status": "ok",
+        "environment": environment,
+        "checked_count": result["checked_count"],
+        "successful_count": result["successful_count"],
+        "health_status": result["status"],
+    }
+
+
+
 def _master_admin_system_health_cards(cur):
     # -----------------------------------------------------
     # Master Admin at-a-glance operational status
@@ -37195,7 +37617,7 @@ def _master_admin_system_health_cards(cur):
                     "status": "yellow",
                     "status_text": "Heartbeat Late",
                     "detail": (
-                        "No recent scheduler heartbeat "
+                        f"No recent {label} health evidence "
                         "within the expected window."
                     ),
                 }
@@ -37329,6 +37751,7 @@ def _master_admin_system_health_cards(cur):
             updated_at
         FROM master_admin_monitoring_status
         WHERE monitor_key IN (
+            'square',
             'peachweb',
             'peachbook'
         )
@@ -37340,7 +37763,7 @@ def _master_admin_system_health_cards(cur):
         for row in cur.fetchall()
     }
 
-    def build_public_monitor_card(
+    def build_persisted_monitor_card(
         monitor_key,
         label,
     ):
@@ -37402,6 +37825,10 @@ def _master_admin_system_health_cards(cur):
             positive_log=database_heartbeat,
             stale_after=timedelta(minutes=90),
         ),
+        build_persisted_monitor_card(
+            "square",
+            "Square",
+        ),
         build_system_health_card(
             "mfa",
             "MFA",
@@ -37433,11 +37860,11 @@ def _master_admin_system_health_cards(cur):
             latest_event_drives=True,
             event_max_age=timedelta(hours=24),
         ),
-        build_public_monitor_card(
+        build_persisted_monitor_card(
             "peachweb",
             "PeachWeb",
         ),
-        build_public_monitor_card(
+        build_persisted_monitor_card(
             "peachbook",
             "PeachBook",
         ),
@@ -122442,6 +122869,41 @@ def scheduled_public_web_health_check():
         )
 
 
+
+def scheduled_square_health_check():
+    """
+    Check Square provider health for the environment used by
+    this PSP runtime.
+
+    Exceptions are contained so a Square monitoring problem
+    cannot stop the remaining Peach Suite Pro background jobs.
+    """
+
+    try:
+        result = run_master_admin_square_health_check()
+
+        print(
+            "[SQUARE HEALTH] "
+            f"Environment: {result['environment']} | "
+            f"Checked: {result['checked_count']} | "
+            f"Successful: {result['successful_count']} | "
+            f"Status: {result['health_status']}",
+            flush=True,
+        )
+
+    except Exception:
+        app.logger.exception(
+            "Scheduled Square health check failed."
+        )
+
+        print(
+            "[SQUARE HEALTH] "
+            "Scheduled health check failed.",
+            flush=True,
+        )
+
+
+
 def scheduled_process_master_admin_alerts():
     """
     Process reserved Master Admin alert deliveries.
@@ -122741,6 +123203,18 @@ def start_scheduler():
         "interval",
         minutes=15,
         id="public_web_health_check_job",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=300,
+        next_run_time=datetime.now()
+    )
+
+    scheduler.add_job(
+        scheduled_square_health_check,
+        "interval",
+        minutes=15,
+        id="square_health_check_job",
         replace_existing=True,
         coalesce=True,
         max_instances=1,
