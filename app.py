@@ -10318,6 +10318,50 @@ def master_admin_api_web_monitoring():
 
 
 @app.route(
+    "/api/master-admin/web-monitoring/run-checks",
+    methods=["POST"],
+)
+@master_admin_api_required
+def master_admin_api_run_web_monitoring_checks():
+    try:
+        result = run_master_admin_public_web_health_checks()
+
+        checked_count = int(
+            result.get("checked_count") or 0
+        )
+
+        return _mfa_no_store(
+            jsonify({
+                "success": True,
+                "checked_count": checked_count,
+                "message": (
+                    "PeachWeb and PeachBook checks completed."
+                ),
+            })
+        )
+
+    except Exception:
+        app.logger.exception(
+            "Master Admin manual PeachWeb / PeachBook "
+            "health check failed."
+        )
+
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "web_monitoring_check_failed",
+                    "message": (
+                        "PeachWeb and PeachBook checks could not "
+                        "be completed right now."
+                    ),
+                }),
+                503,
+            )
+        )
+
+
+@app.route(
     "/api/master-admin/notification-settings",
     methods=["GET"],
 )
