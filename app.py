@@ -9921,6 +9921,7 @@ def _master_admin_system_health_detail(
         "database": "Database",
         "square": "Square",
         "mailgun": "Mailgun",
+        "telnyx": "Telnyx",
         "mfa": "MFA",
         "login_security": "Login Security",
         "password_reset": "Password Reset",
@@ -9969,6 +9970,12 @@ def _master_admin_system_health_detail(
         event_where = """
             category = 'SYSTEM'
             AND COALESCE(related_type, '') = 'mailgun_health'
+        """
+
+    elif health_key == "telnyx":
+        event_where = """
+            category = 'SYSTEM'
+            AND COALESCE(related_type, '') = 'telnyx_health'
         """
 
     elif health_key == "mfa":
@@ -10055,6 +10062,7 @@ def _master_admin_system_health_detail(
     if health_key in {
         "square",
         "mailgun",
+        "telnyx",
         "peachweb",
         "peachbook",
     }:
@@ -37907,6 +37915,431 @@ def run_master_admin_mailgun_health_check():
 
 
 
+
+def _probe_master_admin_telnyx_account():
+    """
+    Perform a read-only Telnyx account API check.
+
+    This probe does not send SMS and does not modify Telnyx
+    or Peach Suite Pro configuration.
+    """
+
+    api_key = os.environ.get(
+        "TELNYX_API_KEY",
+        "",
+    ).strip()
+
+    if not api_key:
+        return {
+            "configured": False,
+            "success": False,
+            "response_valid": False,
+            "record_type": None,
+            "currency": None,
+            "response_ms": None,
+            "http_status": None,
+            "checked_url": None,
+            "detail": (
+                "Telnyx API key is not configured."
+            ),
+        }
+
+    checked_url = (
+        "https://api.telnyx.com/v2/balance"
+    )
+
+    last_error = None
+    last_response_ms = None
+    last_http_status = None
+
+    for attempt_number in (1, 2):
+        started_at = time.monotonic()
+
+        try:
+            response = requests.get(
+                checked_url,
+                headers={
+                    "Authorization": (
+                        f"Bearer {api_key}"
+                    ),
+                    "Accept": "application/json",
+                },
+                timeout=15,
+            )
+
+            last_response_ms = max(
+                int(
+                    (
+                        time.monotonic()
+                        - started_at
+                    )
+                    * 1000
+                ),
+                0,
+            )
+
+            last_http_status = int(
+                response.status_code
+            )
+
+            try:
+                data = response.json()
+            except ValueError:
+                data = {}
+
+            if not response.ok:
+                errors = (
+                    data.get("errors")
+                    if isinstance(data, dict)
+                    else None
+                ) or []
+
+                provider_message = ""
+
+                if errors:
+                    first_error = errors[0] or {}
+
+                    if isinstance(first_error, dict):
+                        provider_message = str(
+                            first_error.get("detail")
+                            or first_error.get("title")
+                            or first_error.get("code")
+                            or ""
+                        ).strip()
+
+                last_error = (
+                    provider_message
+                    or (
+                        "Telnyx account check returned "
+                        f"HTTP {response.status_code}."
+                    )
+                )
+
+                if attempt_number == 1:
+                    time.sleep(2)
+                    continue
+
+                break
+
+            balance_info = (
+                data.get("data")
+                if isinstance(data, dict)
+                else None
+            )
+
+            if not isinstance(
+                balance_info,
+                dict,
+            ):
+                last_error = (
+                    "Telnyx returned an invalid account "
+                    "status response."
+                )
+
+                if attempt_number == 1:
+                    time.sleep(2)
+                    continue
+
+                break
+
+            record_type = str(
+                balance_info.get("record_type")
+                or ""
+            ).strip().lower()
+
+            currency = str(
+                balance_info.get("currency")
+                or ""
+            ).strip().upper()
+
+            response_valid = (
+                record_type == "balance"
+                and bool(currency)
+            )
+
+            if not response_valid:
+                return {
+                    "configured": True,
+                    "success": False,
+                    "response_valid": False,
+                    "record_type": record_type or None,
+                    "currency": currency or None,
+                    "response_ms": last_response_ms,
+                    "http_status": last_http_status,
+                    "checked_url": checked_url,
+                    "detail": (
+                        "Telnyx is reachable, but the "
+                        "account status response was "
+                        "unexpected."
+                    ),
+                }
+
+            return {
+                "configured": True,
+                "success": True,
+                "response_valid": True,
+                "record_type": record_type,
+                "currency": currency,
+                "response_ms": last_response_ms,
+                "http_status": last_http_status,
+                "checked_url": checked_url,
+                "detail": (
+                    "Telnyx API is reachable and "
+                    f"authenticated. Currency: {currency}."
+                ),
+            }
+
+        except Exception as exc:
+            last_response_ms = max(
+                int(
+                    (
+                        time.monotonic()
+                        - started_at
+                    )
+                    * 1000
+                ),
+                0,
+            )
+
+            last_error = (
+                str(exc).strip()
+                or type(exc).__name__
+            )
+
+            if attempt_number == 1:
+                time.sleep(2)
+
+    return {
+        "configured": True,
+        "success": False,
+        "response_valid": False,
+        "record_type": None,
+        "currency": None,
+        "response_ms": last_response_ms,
+        "http_status": last_http_status,
+        "checked_url": checked_url,
+        "detail": (
+            "Telnyx account health check failed. "
+            f"{last_error or 'Unknown provider error.'}"
+        )[:500],
+    }
+
+
+def run_master_admin_telnyx_health_check():
+    """
+    Check Telnyx provider health without sending SMS.
+
+    Current state is persisted in master_admin_monitoring_status.
+    System Activity receives an event only when status changes.
+    """
+
+    probe = _probe_master_admin_telnyx_account()
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor(
+        cursor_factory=RealDictCursor
+    )
+
+    transition_event = None
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                status,
+                consecutive_failures
+            FROM master_admin_monitoring_status
+            WHERE monitor_key = 'telnyx'
+            """
+        )
+
+        existing_row = cur.fetchone()
+
+        previous_status = (
+            existing_row["status"]
+            if existing_row
+            else "gray"
+        )
+
+        previous_failures = int(
+            (
+                existing_row["consecutive_failures"]
+                if existing_row
+                else 0
+            )
+            or 0
+        )
+
+        if not probe["configured"]:
+            status = "gray"
+            status_text = "Not Configured"
+            failure = False
+
+        elif probe["success"]:
+            status = "green"
+            status_text = "Healthy"
+            failure = False
+
+        elif (
+            probe["http_status"] is not None
+            and 200 <= probe["http_status"] < 300
+        ):
+            status = "yellow"
+            status_text = "Needs Attention"
+            failure = True
+
+        else:
+            status = "red"
+            status_text = "Unavailable"
+            failure = True
+
+        consecutive_failures = (
+            previous_failures + 1
+            if failure
+            else 0
+        )
+
+        cur.execute(
+            """
+            INSERT INTO master_admin_monitoring_status (
+                monitor_key,
+                status,
+                status_text,
+                detail,
+                checked_url,
+                http_status,
+                response_ms,
+                consecutive_failures,
+                last_checked_at,
+                last_success_at,
+                last_failure_at,
+                updated_at
+            )
+            VALUES (
+                'telnyx',
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                CASE
+                    WHEN %s
+                    THEN NOW()
+                    ELSE NULL
+                END,
+                CASE
+                    WHEN %s
+                    THEN NOW()
+                    ELSE NULL
+                END,
+                CASE
+                    WHEN %s
+                    THEN NOW()
+                    ELSE NULL
+                END,
+                NOW()
+            )
+            ON CONFLICT (monitor_key)
+            DO UPDATE SET
+                status = EXCLUDED.status,
+                status_text = EXCLUDED.status_text,
+                detail = EXCLUDED.detail,
+                checked_url = EXCLUDED.checked_url,
+                http_status = EXCLUDED.http_status,
+                response_ms = EXCLUDED.response_ms,
+                consecutive_failures =
+                    EXCLUDED.consecutive_failures,
+                last_checked_at = CASE
+                    WHEN %s
+                    THEN NOW()
+                    ELSE
+                        master_admin_monitoring_status
+                            .last_checked_at
+                END,
+                last_success_at = CASE
+                    WHEN %s
+                    THEN NOW()
+                    ELSE
+                        master_admin_monitoring_status
+                            .last_success_at
+                END,
+                last_failure_at = CASE
+                    WHEN %s
+                    THEN NOW()
+                    ELSE
+                        master_admin_monitoring_status
+                            .last_failure_at
+                END,
+                updated_at = NOW()
+            """,
+            (
+                status,
+                status_text,
+                probe["detail"],
+                probe["checked_url"],
+                probe["http_status"],
+                probe["response_ms"],
+                consecutive_failures,
+                probe["configured"],
+                probe["success"],
+                failure,
+                probe["configured"],
+                probe["success"],
+                failure,
+            ),
+        )
+
+        if status != previous_status:
+            transition_event = {
+                "status": status,
+                "detail": probe["detail"],
+            }
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if transition_event:
+        status = transition_event["status"]
+
+        if status == "red":
+            severity = "ERROR"
+        elif status == "yellow":
+            severity = "WARNING"
+        else:
+            severity = "INFO"
+
+        log_event(
+            "SYSTEM",
+            (
+                "Telnyx monitor: "
+                f"{transition_event['detail']}"
+            ),
+            severity=severity,
+            related_type="telnyx_health",
+        )
+
+    return {
+        "status": "ok",
+        "configured": probe["configured"],
+        "health_status": status,
+        "record_type": probe["record_type"],
+        "currency": probe["currency"],
+        "response_ms": probe["response_ms"],
+        "http_status": probe["http_status"],
+    }
+
+
+
 def _master_admin_system_health_cards(cur):
     # -----------------------------------------------------
     # Master Admin at-a-glance operational status
@@ -38170,6 +38603,7 @@ def _master_admin_system_health_cards(cur):
         WHERE monitor_key IN (
             'square',
             'mailgun',
+            'telnyx',
             'peachweb',
             'peachbook'
         )
@@ -38281,6 +38715,10 @@ def _master_admin_system_health_cards(cur):
         build_persisted_monitor_card(
             "mailgun",
             "Mailgun",
+        ),
+        build_persisted_monitor_card(
+            "telnyx",
+            "Telnyx",
         ),
         build_persisted_monitor_card(
             "peachweb",
@@ -123293,6 +123731,40 @@ def scheduled_public_web_health_check():
 
 
 
+
+def scheduled_telnyx_health_check():
+    """
+    Check Telnyx provider health without sending SMS.
+
+    Exceptions are contained so a Telnyx monitoring problem
+    cannot stop the remaining Peach Suite Pro background jobs.
+    """
+
+    try:
+        result = run_master_admin_telnyx_health_check()
+
+        print(
+            "[TELNYX HEALTH] "
+            f"Record: {result['record_type']} | "
+            f"Currency: {result['currency']} | "
+            f"HTTP: {result['http_status']} | "
+            f"Status: {result['health_status']}",
+            flush=True,
+        )
+
+    except Exception:
+        app.logger.exception(
+            "Scheduled Telnyx health check failed."
+        )
+
+        print(
+            "[TELNYX HEALTH] "
+            "Scheduled health check failed.",
+            flush=True,
+        )
+
+
+
 def scheduled_mailgun_health_check():
     """
     Check Mailgun provider health without sending email.
@@ -123659,6 +124131,18 @@ def start_scheduler():
         "interval",
         minutes=15,
         id="public_web_health_check_job",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=300,
+        next_run_time=datetime.now()
+    )
+
+    scheduler.add_job(
+        scheduled_telnyx_health_check,
+        "interval",
+        minutes=15,
+        id="telnyx_health_check_job",
         replace_existing=True,
         coalesce=True,
         max_instances=1,
