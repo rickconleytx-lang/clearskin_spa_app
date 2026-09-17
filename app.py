@@ -11,6 +11,7 @@ import hashlib
 import hmac
 import contextvars
 import ipaddress
+import subprocess
 import cloudinary
 import cloudinary.uploader
 
@@ -8284,6 +8285,31 @@ def master_admin_api_required(view_function):
     return wrapped_view
 
 
+def _master_admin_request_is_loopback():
+    remote_addr = str(
+        request.remote_addr
+        or ""
+    ).strip()
+
+    if not remote_addr:
+        return False
+
+    try:
+        address = ipaddress.ip_address(remote_addr)
+    except ValueError:
+        return False
+
+    if address.is_loopback:
+        return True
+
+    mapped = getattr(address, "ipv4_mapped", None)
+
+    return bool(
+        mapped
+        and mapped.is_loopback
+    )
+
+
 @app.route(
     "/api/master-admin/auth/login",
     methods=["POST"],
@@ -10392,6 +10418,519 @@ def master_admin_api_run_web_monitoring_checks():
                     "message": (
                         "PeachWeb and PeachBook checks could not "
                         "be completed right now."
+                    ),
+                }),
+                503,
+            )
+        )
+
+
+def _master_admin_backup_file_record(file_path):
+    if not file_path or not os.path.isfile(file_path):
+        return None
+
+    modified_at = datetime.fromtimestamp(
+        os.path.getmtime(file_path),
+        tz=timezone.utc,
+    )
+
+    return {
+        "file_name": os.path.basename(file_path),
+        "path": file_path,
+        "modified_at": modified_at.isoformat(),
+        "size_bytes": int(os.path.getsize(file_path)),
+    }
+
+
+def _master_admin_latest_backup_file(folder, suffix=None):
+    if not os.path.isdir(folder):
+        return None
+
+    latest_path = None
+    latest_mtime = None
+
+    for entry in os.scandir(folder):
+        if not entry.is_file():
+            continue
+
+        if suffix and not entry.name.endswith(suffix):
+            continue
+
+        try:
+            modified = entry.stat().st_mtime
+        except OSError:
+            continue
+
+        if latest_mtime is None or modified > latest_mtime:
+            latest_mtime = modified
+            latest_path = entry.path
+
+    return _master_admin_backup_file_record(latest_path)
+
+
+def _master_admin_latest_recursive_backup_file(folder):
+    if not os.path.isdir(folder):
+        return None
+
+    latest_path = None
+    latest_mtime = None
+
+    for root, _, files in os.walk(folder):
+        for name in files:
+            if name.startswith("."):
+                continue
+
+            candidate = os.path.join(root, name)
+
+            try:
+                modified = os.path.getmtime(candidate)
+            except OSError:
+                continue
+
+            if latest_mtime is None or modified > latest_mtime:
+                latest_mtime = modified
+                latest_path = candidate
+
+    return _master_admin_backup_file_record(latest_path)
+
+
+def _master_admin_backup_health_payload():
+    home = os.path.expanduser("~")
+
+    log_dir = os.path.join(
+        home,
+        "PostgresBackups",
+        "Logs",
+    )
+
+    local_db_dir = os.path.join(
+        home,
+        "PostgresBackups",
+        "LocalDB",
+    )
+
+    render_db_dir = os.path.join(
+        home,
+        "PostgresBackups",
+        "RenderDB",
+    )
+
+    git_bundle_dir = os.path.join(
+        home,
+        "PostgresBackups",
+        "GitBundles",
+    )
+
+    success_file = os.path.join(
+        log_dir,
+        "last_core_backup_success",
+    )
+
+    peachvault_pending_file = os.path.join(
+        log_dir,
+        "peachvault_sync_pending",
+    )
+
+    backup_lock_dir = os.path.join(
+        log_dir,
+        "backup_scheduler.lock",
+    )
+
+    backup_lock_pid_file = os.path.join(
+        backup_lock_dir,
+        "pid",
+    )
+
+    peachvault_root = (
+        "/Volumes/PeachVault/Peach Suite Pro Backups"
+    )
+
+    icloud_root = os.path.join(
+        home,
+        "Library",
+        "Mobile Documents",
+        "com~apple~CloudDocs",
+        "Peach Suite Backups",
+    )
+
+    icloud_completion_file = os.path.join(
+        icloud_root,
+        "Last Backup.txt",
+    )
+
+    peachvault_completion_file = os.path.join(
+        peachvault_root,
+        "Last Backup.txt",
+    )
+
+    render_restore_root = os.path.join(
+        home,
+        "ClearSkin Database Backups",
+        "Render Database ",
+    )
+
+    now = datetime.now().astimezone()
+
+    latest_boundary = now.replace(
+        hour=22,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+
+    if now < latest_boundary:
+        latest_boundary -= timedelta(days=1)
+
+    last_core_success = (
+        _master_admin_backup_file_record(success_file)
+    )
+
+    core_current = False
+
+    if last_core_success:
+        success_mtime = os.path.getmtime(success_file)
+
+        core_current = (
+            success_mtime
+            >= latest_boundary.timestamp()
+        )
+
+    peachvault_mounted = os.path.isdir(
+        "/Volumes/PeachVault"
+    )
+
+    peachvault_sync_pending = os.path.isfile(
+        peachvault_pending_file
+    )
+
+    backup_running = False
+    backup_pid = None
+    backup_lock_stale = False
+
+    if os.path.isdir(backup_lock_dir):
+        try:
+            with open(
+                backup_lock_pid_file,
+                "r",
+                encoding="utf-8",
+            ) as lock_file:
+                raw_pid = lock_file.read().strip()
+
+            if raw_pid.isdigit():
+                backup_pid = int(raw_pid)
+
+                try:
+                    os.kill(backup_pid, 0)
+                    backup_running = True
+                except ProcessLookupError:
+                    backup_lock_stale = True
+                except PermissionError:
+                    backup_running = True
+            else:
+                backup_lock_stale = True
+
+        except OSError:
+            backup_lock_stale = True
+
+    icloud_completion = (
+        _master_admin_backup_file_record(
+            icloud_completion_file
+        )
+    )
+
+    peachvault_completion = (
+        _master_admin_backup_file_record(
+            peachvault_completion_file
+        )
+    )
+
+    local_database = _master_admin_latest_backup_file(
+        local_db_dir,
+        suffix=".backup",
+    )
+
+    render_database = _master_admin_latest_backup_file(
+        render_db_dir,
+        suffix=".backup",
+    )
+
+    git_bundles = []
+
+    if os.path.isdir(git_bundle_dir):
+        for entry in sorted(
+            os.scandir(git_bundle_dir),
+            key=lambda item: item.name.lower(),
+        ):
+            if (
+                entry.is_file()
+                and entry.name.endswith(".bundle")
+            ):
+                record = _master_admin_backup_file_record(
+                    entry.path
+                )
+
+                if record:
+                    git_bundles.append(record)
+
+    render_restore = (
+        _master_admin_latest_recursive_backup_file(
+            render_restore_root
+        )
+    )
+
+    if backup_running:
+        status = "blue"
+        status_text = "Backup Running"
+        detail = (
+            "A Peach Suite Pro backup is currently in progress."
+        )
+
+    elif not core_current:
+        status = "red"
+        status_text = "Backup Overdue"
+        detail = (
+            "No successful core backup is recorded after "
+            "the latest 10:00 PM backup boundary."
+        )
+
+    elif not icloud_completion:
+        status = "red"
+        status_text = "iCloud Backup Missing"
+        detail = (
+            "The core backup is current, but the iCloud "
+            "completion record is missing."
+        )
+
+    elif peachvault_sync_pending:
+        status = "yellow"
+        status_text = "PeachVault Sync Pending"
+        detail = (
+            "Core backup and iCloud are current. "
+            "PeachVault still needs to sync."
+        )
+
+    else:
+        status = "green"
+        status_text = "Healthy"
+        detail = (
+            "Core backup is current and iCloud is complete."
+        )
+
+    return {
+        "status": status,
+        "status_text": status_text,
+        "detail": detail,
+        "latest_required_boundary": (
+            latest_boundary.isoformat()
+        ),
+        "core_current": core_current,
+        "last_core_success": last_core_success,
+        "backup_running": backup_running,
+        "backup_pid": backup_pid,
+        "backup_lock_stale": backup_lock_stale,
+        "local_database": local_database,
+        "render_database": render_database,
+        "git_bundles": {
+            "expected_count": 4,
+            "verified_count": len(git_bundles),
+            "files": git_bundles,
+        },
+        "icloud": {
+            "root": icloud_root,
+            "completion": icloud_completion,
+        },
+        "peachvault": {
+            "root": peachvault_root,
+            "mounted": peachvault_mounted,
+            "sync_pending": peachvault_sync_pending,
+            "completion": peachvault_completion,
+        },
+        "render_restore": {
+            "root": render_restore_root,
+            "latest_file": render_restore,
+        },
+        "can_start_backup": not backup_running,
+    }
+
+
+@app.route(
+    "/api/master-admin/backup-health",
+    methods=["GET"],
+)
+@master_admin_api_required
+def master_admin_api_backup_health():
+    if not _master_admin_request_is_loopback():
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "local_backup_controls_required",
+                    "message": (
+                        "Backup controls are available only "
+                        "from the local Master Admin service."
+                    ),
+                }),
+                403,
+            )
+        )
+
+    try:
+        return _mfa_no_store(
+            jsonify({
+                "success": True,
+                "backup_health": (
+                    _master_admin_backup_health_payload()
+                ),
+            })
+        )
+
+    except Exception:
+        app.logger.exception(
+            "Master Admin Backup Health API request failed."
+        )
+
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "backup_health_unavailable",
+                    "message": (
+                        "Backup Health could not be loaded "
+                        "right now."
+                    ),
+                }),
+                503,
+            )
+        )
+
+
+@app.route(
+    "/api/master-admin/backup-health/start",
+    methods=["POST"],
+)
+@master_admin_api_required
+def master_admin_api_start_backup():
+    if not _master_admin_request_is_loopback():
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "local_backup_controls_required",
+                    "message": (
+                        "Backup controls are available only "
+                        "from the local Master Admin service."
+                    ),
+                }),
+                403,
+            )
+        )
+
+    try:
+        health = _master_admin_backup_health_payload()
+
+        if health.get("backup_running"):
+            return _mfa_no_store(
+                (
+                    jsonify({
+                        "success": False,
+                        "error": "backup_already_running",
+                        "message": (
+                            "A Peach Suite Pro backup is already "
+                            "running."
+                        ),
+                        "backup_health": health,
+                    }),
+                    409,
+                )
+            )
+
+        home = os.path.expanduser("~")
+
+        backup_script = os.path.join(
+            home,
+            "clearskin_spa_app",
+            "peach_suite_backup_due.sh",
+        )
+
+        if not (
+            os.path.isfile(backup_script)
+            and os.access(backup_script, os.X_OK)
+        ):
+            return _mfa_no_store(
+                (
+                    jsonify({
+                        "success": False,
+                        "error": "backup_script_unavailable",
+                        "message": (
+                            "The Peach Suite Pro backup script "
+                            "is not available."
+                        ),
+                    }),
+                    503,
+                )
+            )
+
+        log_dir = os.path.join(
+            home,
+            "PostgresBackups",
+            "Logs",
+        )
+
+        os.makedirs(
+            log_dir,
+            exist_ok=True,
+        )
+
+        launch_log_path = os.path.join(
+            log_dir,
+            "backup_manual_launch.log",
+        )
+
+        with open(
+            launch_log_path,
+            "ab",
+            buffering=0,
+        ) as launch_log:
+            process = subprocess.Popen(
+                [
+                    backup_script,
+                    "--force",
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=launch_log,
+                stderr=launch_log,
+                cwd=home,
+                start_new_session=True,
+                close_fds=True,
+            )
+
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": True,
+                    "started": True,
+                    "process_id": int(process.pid),
+                    "message": (
+                        "Peach Suite Pro full backup started."
+                    ),
+                }),
+                202,
+            )
+        )
+
+    except Exception:
+        app.logger.exception(
+            "Master Admin manual backup start failed."
+        )
+
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "backup_start_failed",
+                    "message": (
+                        "The Peach Suite Pro backup could not "
+                        "be started right now."
                     ),
                 }),
                 503,
