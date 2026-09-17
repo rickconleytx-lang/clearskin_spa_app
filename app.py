@@ -9920,6 +9920,7 @@ def _master_admin_system_health_detail(
         "scheduler": "Scheduler",
         "database": "Database",
         "square": "Square",
+        "mailgun": "Mailgun",
         "mfa": "MFA",
         "login_security": "Login Security",
         "password_reset": "Password Reset",
@@ -9962,6 +9963,12 @@ def _master_admin_system_health_detail(
         event_where = """
             category = 'SYSTEM'
             AND COALESCE(related_type, '') = 'square_health'
+        """
+
+    elif health_key == "mailgun":
+        event_where = """
+            category = 'SYSTEM'
+            AND COALESCE(related_type, '') = 'mailgun_health'
         """
 
     elif health_key == "mfa":
@@ -10047,6 +10054,7 @@ def _master_admin_system_health_detail(
 
     if health_key in {
         "square",
+        "mailgun",
         "peachweb",
         "peachbook",
     }:
@@ -37490,6 +37498,415 @@ def run_master_admin_square_health_check():
 
 
 
+
+def _probe_master_admin_mailgun_domain():
+    """
+    Perform a read-only Mailgun domain-status check.
+
+    This probe does not send email and does not modify Mailgun
+    or Peach Suite Pro configuration.
+    """
+
+    api_key = os.environ.get(
+        "MAILGUN_API_KEY",
+        "",
+    ).strip()
+
+    domain = os.environ.get(
+        "MAILGUN_DOMAIN",
+        "",
+    ).strip()
+
+    if not api_key or not domain:
+        return {
+            "configured": False,
+            "success": False,
+            "domain": domain or None,
+            "domain_state": None,
+            "response_ms": None,
+            "http_status": None,
+            "detail": (
+                "Mailgun API key and domain are not fully "
+                "configured."
+            ),
+        }
+
+    checked_url = (
+        "https://api.mailgun.net/v4/domains/"
+        f"{domain}"
+    )
+
+    last_error = None
+    last_response_ms = None
+    last_http_status = None
+
+    for attempt_number in (1, 2):
+        started_at = time.monotonic()
+
+        try:
+            response = requests.get(
+                checked_url,
+                auth=(
+                    "api",
+                    api_key,
+                ),
+                timeout=20,
+            )
+
+            last_response_ms = max(
+                int(
+                    (
+                        time.monotonic()
+                        - started_at
+                    )
+                    * 1000
+                ),
+                0,
+            )
+
+            last_http_status = int(
+                response.status_code
+            )
+
+            try:
+                data = response.json()
+            except ValueError:
+                data = {}
+
+            if not response.ok:
+                provider_message = str(
+                    data.get("message")
+                    or ""
+                ).strip()
+
+                last_error = (
+                    provider_message
+                    or (
+                        "Mailgun domain check returned "
+                        f"HTTP {response.status_code}."
+                    )
+                )
+
+                if attempt_number == 1:
+                    time.sleep(2)
+                    continue
+
+                break
+
+            domain_info = (
+                data.get("domain")
+                if isinstance(data, dict)
+                else None
+            )
+
+            if not isinstance(domain_info, dict):
+                last_error = (
+                    "Mailgun returned an invalid domain "
+                    "status response."
+                )
+
+                if attempt_number == 1:
+                    time.sleep(2)
+                    continue
+
+                break
+
+            returned_domain = str(
+                domain_info.get("name")
+                or ""
+            ).strip()
+
+            domain_state = str(
+                domain_info.get("state")
+                or ""
+            ).strip().lower()
+
+            if returned_domain != domain:
+                last_error = (
+                    "Mailgun returned a different domain "
+                    "than the configured PSP domain."
+                )
+
+                if attempt_number == 1:
+                    time.sleep(2)
+                    continue
+
+                break
+
+            if not domain_state:
+                last_error = (
+                    "Mailgun domain status did not include "
+                    "a state."
+                )
+
+                if attempt_number == 1:
+                    time.sleep(2)
+                    continue
+
+                break
+
+            return {
+                "configured": True,
+                "success": domain_state == "active",
+                "domain": returned_domain,
+                "domain_state": domain_state,
+                "response_ms": last_response_ms,
+                "http_status": last_http_status,
+                "checked_url": checked_url,
+                "detail": (
+                    f"Mailgun domain {returned_domain} is "
+                    f"{domain_state}."
+                ),
+            }
+
+        except Exception as exc:
+            last_response_ms = max(
+                int(
+                    (
+                        time.monotonic()
+                        - started_at
+                    )
+                    * 1000
+                ),
+                0,
+            )
+
+            last_error = (
+                str(exc).strip()
+                or type(exc).__name__
+            )
+
+            if attempt_number == 1:
+                time.sleep(2)
+
+    return {
+        "configured": True,
+        "success": False,
+        "domain": domain,
+        "domain_state": None,
+        "response_ms": last_response_ms,
+        "http_status": last_http_status,
+        "checked_url": checked_url,
+        "detail": (
+            "Mailgun domain health check failed. "
+            f"{last_error or 'Unknown provider error.'}"
+        )[:500],
+    }
+
+
+def run_master_admin_mailgun_health_check():
+    """
+    Check Mailgun provider health using the configured sending
+    domain without sending a message.
+
+    Current state is persisted in master_admin_monitoring_status.
+    System Activity receives an event only when status changes.
+    """
+
+    probe = _probe_master_admin_mailgun_domain()
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor(
+        cursor_factory=RealDictCursor
+    )
+
+    transition_event = None
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                status,
+                consecutive_failures
+            FROM master_admin_monitoring_status
+            WHERE monitor_key = 'mailgun'
+            """
+        )
+
+        existing_row = cur.fetchone()
+
+        previous_status = (
+            existing_row["status"]
+            if existing_row
+            else "gray"
+        )
+
+        previous_failures = int(
+            (
+                existing_row["consecutive_failures"]
+                if existing_row
+                else 0
+            )
+            or 0
+        )
+
+        if not probe["configured"]:
+            status = "gray"
+            status_text = "Not Configured"
+            failure = False
+
+        elif probe["success"]:
+            status = "green"
+            status_text = "Healthy"
+            failure = False
+
+        elif probe.get("domain_state"):
+            status = "yellow"
+            status_text = "Needs Attention"
+            failure = True
+
+        else:
+            status = "red"
+            status_text = "Unavailable"
+            failure = True
+
+        consecutive_failures = (
+            previous_failures + 1
+            if failure
+            else 0
+        )
+
+        cur.execute(
+            """
+            INSERT INTO master_admin_monitoring_status (
+                monitor_key,
+                status,
+                status_text,
+                detail,
+                checked_url,
+                http_status,
+                response_ms,
+                consecutive_failures,
+                last_checked_at,
+                last_success_at,
+                last_failure_at,
+                updated_at
+            )
+            VALUES (
+                'mailgun',
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                CASE
+                    WHEN %s
+                    THEN NOW()
+                    ELSE NULL
+                END,
+                CASE
+                    WHEN %s
+                    THEN NOW()
+                    ELSE NULL
+                END,
+                CASE
+                    WHEN %s
+                    THEN NOW()
+                    ELSE NULL
+                END,
+                NOW()
+            )
+            ON CONFLICT (monitor_key)
+            DO UPDATE SET
+                status = EXCLUDED.status,
+                status_text = EXCLUDED.status_text,
+                detail = EXCLUDED.detail,
+                checked_url = EXCLUDED.checked_url,
+                http_status = EXCLUDED.http_status,
+                response_ms = EXCLUDED.response_ms,
+                consecutive_failures =
+                    EXCLUDED.consecutive_failures,
+                last_checked_at = CASE
+                    WHEN %s
+                    THEN NOW()
+                    ELSE
+                        master_admin_monitoring_status
+                            .last_checked_at
+                END,
+                last_success_at = CASE
+                    WHEN %s
+                    THEN NOW()
+                    ELSE
+                        master_admin_monitoring_status
+                            .last_success_at
+                END,
+                last_failure_at = CASE
+                    WHEN %s
+                    THEN NOW()
+                    ELSE
+                        master_admin_monitoring_status
+                            .last_failure_at
+                END,
+                updated_at = NOW()
+            """,
+            (
+                status,
+                status_text,
+                probe["detail"],
+                probe.get("checked_url"),
+                probe["http_status"],
+                probe["response_ms"],
+                consecutive_failures,
+                probe["configured"],
+                probe["success"],
+                failure,
+                probe["configured"],
+                probe["success"],
+                failure,
+            ),
+        )
+
+        if status != previous_status:
+            transition_event = {
+                "status": status,
+                "detail": probe["detail"],
+            }
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if transition_event:
+        status = transition_event["status"]
+
+        if status == "red":
+            severity = "ERROR"
+        elif status == "yellow":
+            severity = "WARNING"
+        else:
+            severity = "INFO"
+
+        log_event(
+            "SYSTEM",
+            (
+                "Mailgun monitor: "
+                f"{transition_event['detail']}"
+            ),
+            severity=severity,
+            related_type="mailgun_health",
+        )
+
+    return {
+        "status": "ok",
+        "configured": probe["configured"],
+        "health_status": status,
+        "domain": probe["domain"],
+        "domain_state": probe["domain_state"],
+        "response_ms": probe["response_ms"],
+        "http_status": probe["http_status"],
+    }
+
+
+
 def _master_admin_system_health_cards(cur):
     # -----------------------------------------------------
     # Master Admin at-a-glance operational status
@@ -37752,6 +38169,7 @@ def _master_admin_system_health_cards(cur):
         FROM master_admin_monitoring_status
         WHERE monitor_key IN (
             'square',
+            'mailgun',
             'peachweb',
             'peachbook'
         )
@@ -37859,6 +38277,10 @@ def _master_admin_system_health_cards(cur):
             email_logs,
             latest_event_drives=True,
             event_max_age=timedelta(hours=24),
+        ),
+        build_persisted_monitor_card(
+            "mailgun",
+            "Mailgun",
         ),
         build_persisted_monitor_card(
             "peachweb",
@@ -122870,6 +123292,40 @@ def scheduled_public_web_health_check():
 
 
 
+
+def scheduled_mailgun_health_check():
+    """
+    Check Mailgun provider health without sending email.
+
+    Exceptions are contained so a Mailgun monitoring problem
+    cannot stop the remaining Peach Suite Pro background jobs.
+    """
+
+    try:
+        result = run_master_admin_mailgun_health_check()
+
+        print(
+            "[MAILGUN HEALTH] "
+            f"Domain: {result['domain']} | "
+            f"State: {result['domain_state']} | "
+            f"HTTP: {result['http_status']} | "
+            f"Status: {result['health_status']}",
+            flush=True,
+        )
+
+    except Exception:
+        app.logger.exception(
+            "Scheduled Mailgun health check failed."
+        )
+
+        print(
+            "[MAILGUN HEALTH] "
+            "Scheduled health check failed.",
+            flush=True,
+        )
+
+
+
 def scheduled_square_health_check():
     """
     Check Square provider health for the environment used by
@@ -123203,6 +123659,18 @@ def start_scheduler():
         "interval",
         minutes=15,
         id="public_web_health_check_job",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=300,
+        next_run_time=datetime.now()
+    )
+
+    scheduler.add_job(
+        scheduled_mailgun_health_check,
+        "interval",
+        minutes=15,
+        id="mailgun_health_check_job",
         replace_existing=True,
         coalesce=True,
         max_instances=1,
