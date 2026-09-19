@@ -370,36 +370,6 @@ def review_overdue_appointments(observations, dashboard):
     )
 
 
-    overdue_appointments = (
-        dashboard.get("overdue_appointments", [])
-        or []
-    )
-
-    
-
-    overdue_count = len(overdue_appointments)
-
-    if overdue_count == 0:
-        return
-
-    add_observation(
-        observations,
-        category="Overdue Appointments",
-        priority=100,
-        status="attention",
-        message=(
-            f"You have {overdue_count} past appointment"
-            f"{'' if overdue_count == 1 else 's'} "
-            "that are still marked as booked and need to be closed out."
-        ),
-        question=(
-            "Would you like to review "
-            f"{'this overdue appointment' if overdue_count == 1 else 'these overdue appointments'} "
-            "now?"
-        ),
-        action_url=None
-    )
-
 
 def review_today_schedule(
     observations,
@@ -1213,7 +1183,8 @@ def build_coach(
     business_schedule_upcoming=None,
     priority_actions=None,
     spa_now=None,
-    coach_session=None
+    coach_session=None,
+    appointments_enabled=True
 ):
 
     if spa_now is None:
@@ -1228,37 +1199,33 @@ def build_coach(
 
     is_return_visit = coach_open_count > 1
 
-    print(
-        "[COACH DEBUG] open_count:",
-        coach_open_count
-    )
-
     observations = []
 
     # ---------------------------------------------------------
     # Complete the business review
     # ---------------------------------------------------------
-    review_overdue_appointments(
-        observations,
-        dashboard=dashboard
-    )
+    if appointments_enabled:
+        review_overdue_appointments(
+            observations,
+            dashboard=dashboard
+        )
 
-    review_today_schedule(
-        observations,
-        dashboard=dashboard,
-        spa_now=spa_now
-    )
+        review_today_schedule(
+            observations,
+            dashboard=dashboard,
+            spa_now=spa_now
+        )
 
-    review_appointment_reminders(
-        observations,
-        dashboard=dashboard,
-        spa_now=spa_now
-    )
+        review_appointment_reminders(
+            observations,
+            dashboard=dashboard,
+            spa_now=spa_now
+        )
 
-    review_seven_day_outlook(
-        observations,
-        dashboard=dashboard
-    )
+        review_seven_day_outlook(
+            observations,
+            dashboard=dashboard
+        )
 
     review_business_schedule(
         observations,
@@ -1269,11 +1236,6 @@ def build_coach(
     review_recurring_expense_alerts(
         observations,
         dashboard=dashboard
-    )
-
-    review_priority_actions(
-        observations,
-        priority_actions=priority_actions
     )
 
     review_priority_actions(
@@ -1354,21 +1316,6 @@ def build_coach(
         auto_paused_categories.add(
             "Overdue Appointments"
         )
-
-    print(
-        "[COACH MENTION DEBUG]",
-        recommendation_mentions
-    )
-
-    print(
-        "[COACH AUTO PAUSED]",
-        auto_paused_categories
-    )
-
-    print(
-        "[COACH ACK DEBUG]",
-        acknowledged_categories
-    )
 
     recommendations = [
         item
@@ -1531,11 +1478,6 @@ def build_coach(
     review_intro = get_review_intro(
         spa_now,
         coach_open_count=coach_open_count
-    )
-
-    print(
-        "[COACH DEBUG] review_intro:",
-        review_intro
     )
 
     message_parts = [
@@ -1714,7 +1656,8 @@ def build_coach(
 
 def build_action_cards(
     dashboard,
-    priority_actions=None
+    priority_actions=None,
+    appointments_enabled=True
 ):
     """
     Build the four highest-priority action cards for
@@ -1741,100 +1684,108 @@ def build_action_cards(
             "url": action.get("url")
         })
 
-    # Overdue Appointments Card
-    overdue_appointments = dashboard.get(
-        "overdue_appointments",
-        []
-    )
+    if appointments_enabled:
+        # Overdue Appointments Card
+        overdue_appointments = dashboard.get(
+            "overdue_appointments",
+            []
+        )
 
-    overdue_count = len(overdue_appointments)
+        overdue_count = len(overdue_appointments)
 
-    if overdue_count > 0:
-        cards.append({
-            "priority": 100,
-            "icon": "⚠️",
-            "title": "Overdue Appointments",
-            "message": (
-                f"{overdue_count} appointment"
-                f"{'' if overdue_count == 1 else 's'} "
-                "require review."
-            ),
-            "button": "Review",
-            "url": "/appointments?filter=overdue&from_coach=1"
-        })
+        if overdue_count > 0:
+            cards.append({
+                "priority": 100,
+                "icon": "⚠️",
+                "title": "Overdue Appointments",
+                "message": (
+                    f"{overdue_count} appointment"
+                    f"{'' if overdue_count == 1 else 's'} "
+                    "require review."
+                ),
+                "button": "Review",
+                "url": "/appointments?filter=overdue&from_coach=1"
+            })
 
-    # Revenue Card
-    if dashboard["appointments_today"] > 0:
+        # Revenue Card
+        appointments_today = int(
+            dashboard.get("appointments_today", 0) or 0
+        )
 
-        cards.append({
-            "priority": 20,
-            "icon": "💰",
-            "title": "Today's Revenue",
-            "message": (
-                f"{dashboard['appointments_today']} appointment"
-                f"{'' if dashboard['appointments_today'] == 1 else 's'} • "
-                f"${dashboard['expected_revenue']:.2f} projected"
-            ),
-            "button": "View",
-            "url": "/reports"
-        })
-
-        # Seven-Day Outlook Card
-    seven_day_outlook = (
-        dashboard.get("seven_day_outlook") or {}
-    )
-
-    seven_day_appointments = int(
-        seven_day_outlook.get(
-            "total_appointments",
-            0
-        ) or 0
-    )
-
-    seven_day_revenue = float(
-        seven_day_outlook.get(
-            "projected_revenue",
-            0
-        ) or 0
-    )
-
-    seven_day_start = seven_day_outlook.get(
-        "start_date"
-    )
-
-    seven_day_end = seven_day_outlook.get(
-        "end_date"
-    )
-
-    appointments_tomorrow = int(
-        dashboard.get(
-            "appointments_tomorrow",
-            0
-        ) or 0
-    )
-
-    if (
-        seven_day_appointments > appointments_tomorrow
-        and seven_day_start
-        and seven_day_end
-    ):
-        cards.append({
-            "priority": 15,
-            "icon": "📅",
-            "title": "Next 7 Days",
-            "message": (
-                f"{seven_day_appointments} appointment"
-                f"{'' if seven_day_appointments == 1 else 's'} • "
-                f"${seven_day_revenue:,.2f} projected"
-            ),
-            "button": "View",
-            "url": (
-                "/appointments?"
-                f"start_date={seven_day_start.isoformat()}"
-                f"&end_date={seven_day_end.isoformat()}"
-                "&from_coach=1"
+        if appointments_today > 0:
+            expected_revenue = float(
+                dashboard.get("expected_revenue", 0) or 0
             )
-        })
+
+            cards.append({
+                "priority": 20,
+                "icon": "💰",
+                "title": "Today's Revenue",
+                "message": (
+                    f"{appointments_today} appointment"
+                    f"{'' if appointments_today == 1 else 's'} • "
+                    f"${expected_revenue:.2f} projected"
+                ),
+                "button": "View",
+                "url": "/reports"
+            })
+
+            # Seven-Day Outlook Card
+        seven_day_outlook = (
+            dashboard.get("seven_day_outlook") or {}
+        )
+
+        seven_day_appointments = int(
+            seven_day_outlook.get(
+                "total_appointments",
+                0
+            ) or 0
+        )
+
+        seven_day_revenue = float(
+            seven_day_outlook.get(
+                "projected_revenue",
+                0
+            ) or 0
+        )
+
+        seven_day_start = seven_day_outlook.get(
+            "start_date"
+        )
+
+        seven_day_end = seven_day_outlook.get(
+            "end_date"
+        )
+
+        appointments_tomorrow = int(
+            dashboard.get(
+                "appointments_tomorrow",
+                0
+            ) or 0
+        )
+
+        if (
+            seven_day_appointments > appointments_tomorrow
+            and seven_day_start
+            and seven_day_end
+        ):
+            cards.append({
+                "priority": 15,
+                "icon": "📅",
+                "title": "Next 7 Days",
+                "message": (
+                    f"{seven_day_appointments} appointment"
+                    f"{'' if seven_day_appointments == 1 else 's'} • "
+                    f"${seven_day_revenue:,.2f} projected"
+                ),
+                "button": "View",
+                "url": (
+                    "/appointments?"
+                    f"start_date={seven_day_start.isoformat()}"
+                    f"&end_date={seven_day_end.isoformat()}"
+                    "&from_coach=1"
+                )
+            })
 
 
 

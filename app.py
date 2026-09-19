@@ -579,6 +579,10 @@ def inject_navigation_access_context():
 
     navigation_access = current_workspace_access()
 
+    subscription_entitlements = (
+        current_subscription_entitlements()
+    )
+
     return {
         "current_workspace_role_code": role_code,
 
@@ -590,7 +594,11 @@ def inject_navigation_access_context():
             role_code == "organization_admin"
         ),
 
-        "nav_access": navigation_access
+        "nav_access": navigation_access,
+
+        "subscription_entitlements": (
+            subscription_entitlements
+        ),
     }
 
 
@@ -7098,6 +7106,154 @@ def current_spa_id():
         return None
 
     return getattr(g, "spa_id", None)
+
+
+def _subscription_entitlements_for_spa(spa_id):
+    """
+    Return active base subscription feature keys for one business.
+
+    Commercial entitlements are derived from the business's assigned
+    subscription tier. Missing or invalid subscription state fails
+    closed by returning an empty set.
+
+    This layer is intentionally separate from workspace permissions
+    and Employee Verification / PSP Access Levels.
+    """
+    try:
+        spa_id = int(spa_id)
+    except (TypeError, ValueError):
+        return frozenset()
+
+    if spa_id <= 0:
+        return frozenset()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT sf.feature_key
+            FROM spas s
+
+            JOIN subscription_tiers st
+              ON st.subscription_tier_id = s.subscription_tier_id
+             AND st.is_active = TRUE
+
+            JOIN subscription_tier_features stf
+              ON stf.subscription_tier_id = st.subscription_tier_id
+
+            JOIN subscription_features sf
+              ON sf.subscription_feature_id =
+                    stf.subscription_feature_id
+             AND sf.is_active = TRUE
+
+            WHERE s.spa_id = %s
+              AND s.active = TRUE
+            """,
+            (spa_id,),
+        )
+
+        return frozenset(
+            str(row[0] or "").strip().lower()
+            for row in cur.fetchall()
+            if row and row[0]
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def current_subscription_entitlements():
+    """
+    Return the current business's active subscription feature keys.
+
+    Cache the result only for the current request.
+    """
+    if "user_id" not in session:
+        return frozenset()
+
+    if is_master_admin():
+        return frozenset()
+
+    cached = getattr(
+        g,
+        "subscription_entitlements",
+        None,
+    )
+
+    if cached is not None:
+        return cached
+
+    spa_id = current_spa_id()
+
+    if spa_id is None:
+        entitlements = frozenset()
+    else:
+        entitlements = _subscription_entitlements_for_spa(
+            spa_id
+        )
+
+    g.subscription_entitlements = entitlements
+    return entitlements
+
+
+def has_subscription_feature(feature_key, *, spa_id=None):
+    """
+    Return whether a business is commercially entitled to one feature.
+
+    When spa_id is omitted, evaluate the current logged-in business.
+    Supplying spa_id supports public/background workflows that do not
+    have a normal business-user session.
+    """
+    feature_key = str(feature_key or "").strip().lower()
+
+    if not feature_key:
+        return False
+
+    if spa_id is None:
+        entitlements = current_subscription_entitlements()
+    else:
+        entitlements = _subscription_entitlements_for_spa(
+            spa_id
+        )
+
+    return feature_key in entitlements
+
+
+def require_subscription_feature(feature_key):
+    """
+    Require one commercial subscription feature on a business route.
+
+    Authorization order on protected business routes is:
+
+        subscription entitlement
+            -> workspace permission
+            -> Employee Verification / PSP Access where required
+    """
+    feature_key = str(feature_key or "").strip().lower()
+
+    if not feature_key:
+        raise ValueError(
+            "Subscription feature key is required."
+        )
+
+    def decorator(view_function):
+        @wraps(view_function)
+        def decorated_function(*args, **kwargs):
+            if is_master_admin():
+                return view_function(*args, **kwargs)
+
+            if not has_subscription_feature(feature_key):
+                abort(403)
+
+            return view_function(*args, **kwargs)
+
+        return decorated_function
+
+    return decorator
+
 
 #################################
 
@@ -34465,6 +34621,124 @@ def validate_sms_length(message_body):
 # Add new dashboard metrics here.
 # =======================================================
 
+def _get_peachpos_sales_summary(
+    cur,
+    *,
+    spa_id,
+    business_unit_id,
+    spa_now
+):
+    """
+    Return PeachPOS sales totals for the current workspace.
+
+    The summary is enabled only when the workspace uses
+    PeachPOS daily-sales processing mode.
+    """
+
+    summary = {
+        "enabled": False,
+        "sales_today": 0,
+        "sales_week": 0,
+        "sales_month": 0,
+        "sales_ytd": 0,
+    }
+
+    if business_unit_id is None:
+        return summary
+
+    workspace_settings = (
+        square_workspace_settings
+        .load_square_workspace_settings(
+            cur,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+        )
+    )
+
+    summary["enabled"] = (
+        workspace_settings["processing_mode"]
+        == square_workspace_settings
+        .PROCESSING_MODE_POS_DAILY_SALES
+    )
+
+    if not summary["enabled"]:
+        return summary
+
+    today = spa_now.date()
+    week_start = today - timedelta(days=today.weekday())
+    week_end = week_start + timedelta(days=6)
+    month_start = today.replace(day=1)
+    year_start = date(today.year, 1, 1)
+
+    if today.month == 12:
+        next_month_start = date(
+            today.year + 1,
+            1,
+            1,
+        )
+    else:
+        next_month_start = date(
+            today.year,
+            today.month + 1,
+            1,
+        )
+
+    cur.execute("""
+        SELECT
+            COALESCE(
+                SUM(pos_amount)
+                FILTER (WHERE income_date = %s),
+                0.00
+            ),
+            COALESCE(
+                SUM(pos_amount)
+                FILTER (
+                    WHERE income_date BETWEEN %s AND %s
+                ),
+                0.00
+            ),
+            COALESCE(
+                SUM(pos_amount)
+                FILTER (
+                    WHERE income_date >= %s
+                      AND income_date < %s
+                ),
+                0.00
+            ),
+            COALESCE(
+                SUM(pos_amount)
+                FILTER (
+                    WHERE income_date >= %s
+                      AND income_date <= %s
+                ),
+                0.00
+            )
+        FROM income
+        WHERE spa_id = %s
+          AND business_unit_id = %s
+          AND income_type = 'PeachPOS'
+    """, (
+        today,
+        week_start,
+        week_end,
+        month_start,
+        next_month_start,
+        year_start,
+        today,
+        spa_id,
+        business_unit_id,
+    ))
+
+    sales = cur.fetchone() or (0, 0, 0, 0)
+
+    summary["sales_today"] = sales[0] or 0
+    summary["sales_week"] = sales[1] or 0
+    summary["sales_month"] = sales[2] or 0
+    summary["sales_ytd"] = sales[3] or 0
+
+    return summary
+
+
 def get_dashboard_data(
     spa_id,
     business_unit_id,
@@ -45759,6 +46033,7 @@ def _square_live_redirect_uri_is_valid():
 )
 @login_required
 @spa_required
+@require_subscription_feature("square_integration")
 @require_workspace_permission(
     "can_view_business_management"
 )
@@ -45856,6 +46131,7 @@ def square_live_connect():
 )
 @login_required
 @spa_required
+@require_subscription_feature("square_integration")
 @require_workspace_permission(
     "can_view_business_management"
 )
@@ -46598,6 +46874,7 @@ def square_production_webhook():
 @app.route("/payment-integrations/square")
 @login_required
 @spa_required
+@require_subscription_feature("square_integration")
 @require_workspace_permission(
     "can_view_business_management"
 )
@@ -47074,6 +47351,7 @@ def square_control_center():
 )
 @login_required
 @spa_required
+@require_subscription_feature("square_integration")
 @require_workspace_permission(
     "can_view_business_management"
 )
@@ -48834,6 +49112,7 @@ def _build_square_reconciliation_priority_action(
 @app.route("/payment-integrations/square/reconcile")
 @login_required
 @spa_required
+@require_subscription_feature("square_integration")
 @require_workspace_permission(
     "can_view_business_management"
 )
@@ -48881,6 +49160,7 @@ def square_reconcile_payments():
 )
 @login_required
 @spa_required
+@require_subscription_feature("square_integration")
 @require_workspace_permission(
     "can_view_business_management"
 )
@@ -49636,6 +49916,7 @@ def square_reconcile_resolve_items():
 )
 @login_required
 @spa_required
+@require_subscription_feature("square_integration")
 @require_workspace_permission(
     "can_view_business_management"
 )
@@ -50481,6 +50762,7 @@ def square_reconcile_match_appointment():
 )
 @login_required
 @spa_required
+@require_subscription_feature("square_integration")
 @require_workspace_permission(
     "can_view_business_management"
 )
@@ -51153,6 +51435,7 @@ def square_reconcile_review_existing_income():
 )
 @login_required
 @spa_required
+@require_subscription_feature("square_integration")
 @require_workspace_permission(
     "can_view_business_management"
 )
@@ -52352,6 +52635,7 @@ def square_reconcile_link_existing_income():
 )
 @login_required
 @spa_required
+@require_subscription_feature("square_integration")
 @require_workspace_permission(
     "can_view_business_management"
 )
@@ -53044,6 +53328,7 @@ def square_reconcile_identify_client():
 )
 @login_required
 @spa_required
+@require_subscription_feature("square_integration")
 @require_workspace_permission(
     "can_view_business_management"
 )
@@ -53574,6 +53859,7 @@ def square_reconcile_confirm_client():
 )
 @login_required
 @spa_required
+@require_subscription_feature("square_integration")
 @require_workspace_permission(
     "can_view_business_management"
 )
@@ -54092,6 +54378,7 @@ def square_reconcile_confirm_client_manual():
 )
 @login_required
 @spa_required
+@require_subscription_feature("square_integration")
 @require_workspace_permission(
     "can_view_business_management"
 )
@@ -54203,6 +54490,7 @@ def square_enable_live_sync():
 )
 @login_required
 @spa_required
+@require_subscription_feature("square_integration")
 @require_workspace_permission(
     "can_view_business_management"
 )
@@ -54464,6 +54752,7 @@ def _load_square_sync_user_state(
 )
 @login_required
 @spa_required
+@require_subscription_feature("square_integration")
 @require_workspace_permission(
     "can_view_business_management"
 )
@@ -54523,6 +54812,7 @@ def square_sync_all_status():
 )
 @login_required
 @spa_required
+@require_subscription_feature("square_integration")
 @require_workspace_permission(
     "can_view_business_management"
 )
@@ -54961,6 +55251,7 @@ def square_sync_all():
 )
 @login_required
 @spa_required
+@require_subscription_feature("square_integration")
 @require_workspace_permission(
     "can_view_business_management"
 )
@@ -55056,6 +55347,7 @@ def square_sync_all_progress(run_id):
 )
 @login_required
 @spa_required
+@require_subscription_feature("square_integration")
 @require_workspace_permission(
     "can_view_business_management"
 )
@@ -55736,6 +56028,7 @@ def square_sync_all_packet(run_id):
 @app.route("/payment-integrations/square/sync-activity")
 @login_required
 @spa_required
+@require_subscription_feature("square_integration")
 @require_workspace_permission(
     "can_view_business_management"
 )
@@ -56029,6 +56322,7 @@ def square_sync_activity():
 )
 @login_required
 @spa_required
+@require_subscription_feature("square_integration")
 @require_workspace_permission(
     "can_view_business_management"
 )
@@ -56378,6 +56672,7 @@ def square_sync_activity_review_client(activity_id):
 )
 @login_required
 @spa_required
+@require_subscription_feature("square_integration")
 @require_workspace_permission(
     "can_view_business_management"
 )
@@ -68370,6 +68665,7 @@ def add_spa():
 @app.route("/users")
 @login_required
 @spa_required
+@require_subscription_feature("business_user_management")
 @require_workspace_permission("can_manage_users")
 @require_psp_access("business_users")
 def business_users():
@@ -68495,6 +68791,7 @@ def business_users():
 @app.route("/users/add", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_subscription_feature("business_user_management")
 @require_workspace_permission("can_manage_users")
 @require_psp_access("business_users")
 def add_user():
@@ -68927,6 +69224,7 @@ def add_user():
 )
 @login_required
 @spa_required
+@require_subscription_feature("business_user_management")
 @require_workspace_permission("can_manage_users")
 @require_psp_access("business_users")
 def edit_business_user(target_user_id):
@@ -83970,6 +84268,7 @@ def delete_business_loan(loan_id):
 @app.route("/client_management")
 @login_required
 @spa_required
+@require_subscription_feature("clients")
 def client_management():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -86200,6 +86499,7 @@ def mark_birthday_offer_sent_disabled():
 @app.route("/employees")
 @login_required
 @spa_required
+@require_subscription_feature("employees")
 @require_workspace_permission("can_view_employees")
 def employees_home():
     spa_id = current_spa_id()
@@ -86646,6 +86946,7 @@ def add_employee_compensation():
 @app.route("/employee_admin")
 @login_required
 @spa_required
+@require_subscription_feature("employees")
 @require_workspace_permission("can_manage_employees")
 def employee_admin():
     spa_id = current_spa_id()
@@ -90182,6 +90483,7 @@ def export_employee_compensation_history_excel():
 @app.route("/employees/add", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_subscription_feature("employees")
 @require_workspace_permission("can_manage_employees")
 def add_employee():
     spa_id = current_spa_id()
@@ -90450,6 +90752,7 @@ def add_employee():
 @app.route("/employees/edit/<int:employee_id>", methods=["GET", "POST"])
 @login_required
 @spa_required
+@require_subscription_feature("employees")
 @require_workspace_permission("can_manage_employees")
 def edit_employee(employee_id):
     spa_id = current_spa_id()
@@ -90814,6 +91117,7 @@ def edit_employee(employee_id):
 @app.route("/employees/archive/<int:employee_id>", methods=["POST"])
 @login_required
 @spa_required
+@require_subscription_feature("employees")
 @require_workspace_permission("can_manage_employees")
 def archive_employee(employee_id):
     spa_id = current_spa_id()
@@ -91005,6 +91309,7 @@ def archive_employee(employee_id):
 @app.route("/employees/reactivate/<int:employee_id>", methods=["POST"])
 @login_required
 @spa_required
+@require_subscription_feature("employees")
 @require_workspace_permission("can_manage_employees")
 def reactivate_employee(employee_id):
     spa_id = current_spa_id()
@@ -91154,6 +91459,7 @@ def reactivate_employee(employee_id):
 @app.route("/employees/<int:employee_id>")
 @login_required
 @spa_required
+@require_subscription_feature("employees")
 @require_workspace_permission("can_view_employees")
 def employee_command_center(employee_id):
     spa_id = current_spa_id()
@@ -100639,6 +100945,7 @@ from flask import render_template, request, redirect
 @app.route("/calendar")
 @login_required
 @spa_required
+@require_subscription_feature("appointments")
 def calendar_view():
     spa_id = current_spa_id()
     role = session.get("role")
@@ -101548,6 +101855,7 @@ def resolve_calendar_view_date():
 @app.route("/calendar/day")
 @login_required
 @spa_required
+@require_subscription_feature("appointments")
 def calendar_day_view():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -102024,6 +102332,7 @@ def calendar_day_view():
 @app.route("/calendar/month")
 @login_required
 @spa_required
+@require_subscription_feature("appointments")
 def calendar_month_view():
     import calendar as pycalendar
     from datetime import date, timedelta
@@ -102344,6 +102653,7 @@ def calendar_month_view():
 @app.route("/calendar/year")
 @login_required
 @spa_required
+@require_subscription_feature("appointments")
 def calendar_year_view():
     import calendar as pycalendar
     from datetime import date, timedelta
@@ -103332,16 +103642,35 @@ def morning_briefing():
     business_unit_id = current_business_unit_id()
     user_id = session["user_id"]
 
+    appointments_enabled = has_subscription_feature(
+        "appointments"
+    )
+    birthdays_enabled = has_subscription_feature(
+        "birthdays"
+    )
+    square_enabled = has_subscription_feature(
+        "square_integration"
+    )
+
     spa_now = get_spa_now(spa_id)
     today = spa_now.date()
     tomorrow = today + timedelta(days=1)
     now_time = spa_now.time()
 
-    dashboard = get_dashboard_data(
-        spa_id=spa_id,
-        business_unit_id=business_unit_id,
-        spa_now=spa_now
-    )
+    if appointments_enabled:
+        dashboard = get_dashboard_data(
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            spa_now=spa_now
+        )
+    else:
+        dashboard = {
+            "peachpos_summary_enabled": False,
+            "peachpos_sales_today": 0,
+            "peachpos_sales_week": 0,
+            "peachpos_sales_month": 0,
+            "peachpos_sales_ytd": 0,
+        }
 
     business_health = {
         "score": None,
@@ -103350,6 +103679,30 @@ def morning_briefing():
 
     conn = get_db_connection()
     cur = conn.cursor()
+
+    if not appointments_enabled and square_enabled:
+        peachpos_summary = _get_peachpos_sales_summary(
+            cur,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            spa_now=spa_now,
+        )
+
+        dashboard["peachpos_summary_enabled"] = (
+            peachpos_summary["enabled"]
+        )
+        dashboard["peachpos_sales_today"] = (
+            peachpos_summary["sales_today"]
+        )
+        dashboard["peachpos_sales_week"] = (
+            peachpos_summary["sales_week"]
+        )
+        dashboard["peachpos_sales_month"] = (
+            peachpos_summary["sales_month"]
+        )
+        dashboard["peachpos_sales_ytd"] = (
+            peachpos_summary["sales_ytd"]
+        )
 
 
     # ---------------------------------------------------------
@@ -103437,7 +103790,8 @@ def morning_briefing():
     workspace_access = current_workspace_access()
 
     if (
-        business_unit_id
+        square_enabled
+        and business_unit_id
         and workspace_access.get(
             "can_view_business_management",
             False
@@ -103464,7 +103818,10 @@ def morning_briefing():
                 square_priority_action
             )
 
-    if dashboard.get("birthdays_today", 0) > 0:
+    if (
+        birthdays_enabled
+        and dashboard.get("birthdays_today", 0) > 0
+    ):
         priority_actions.append({
             "icon": "🎂",
             "label": "Birthday today",
@@ -103477,7 +103834,10 @@ def morning_briefing():
             "priority": 80
         })
 
-    if dashboard.get("appointments_tomorrow", 0) > 0:
+    if (
+        appointments_enabled
+        and dashboard.get("appointments_tomorrow", 0) > 0
+    ):
         priority_actions.append({
             "icon": "📅",
             "label": "Appointments tomorrow",
@@ -103496,28 +103856,36 @@ def morning_briefing():
     # ---------------------------------------------------------
     # Overdue appointments awaiting closeout
     # ---------------------------------------------------------
-    cur.execute("""
-        SELECT
-            a.appointment_id,
-            a.appointment_date,
-            a.appointment_time,
-            a.status,
-            c.first_name,
-            c.last_name
-        FROM appointments a
-        LEFT JOIN clients c
-            ON c.client_id = a.client_id
-        WHERE a.spa_id = %s
-        AND a.appointment_date < %s
-        AND LOWER(COALESCE(a.status, '')) = 'booked'
-        ORDER BY
-            a.appointment_date ASC,
-            a.appointment_time ASC
-    """, (spa_id, today))
+    if appointments_enabled:
+        cur.execute("""
+            SELECT
+                a.appointment_id,
+                a.appointment_date,
+                a.appointment_time,
+                a.status,
+                c.first_name,
+                c.last_name
+            FROM appointments a
+            LEFT JOIN clients c
+                ON c.client_id = a.client_id
+               AND c.spa_id = a.spa_id
+               AND c.business_unit_id = a.business_unit_id
+            WHERE a.spa_id = %s
+              AND a.business_unit_id = %s
+              AND a.appointment_date < %s
+              AND LOWER(COALESCE(a.status, '')) = 'booked'
+            ORDER BY
+                a.appointment_date ASC,
+                a.appointment_time ASC
+        """, (
+            spa_id,
+            business_unit_id,
+            today
+        ))
 
-    overdue_appointments = cur.fetchall()
+        overdue_appointments = cur.fetchall()
 
-    dashboard["overdue_appointments"] = overdue_appointments
+        dashboard["overdue_appointments"] = overdue_appointments
 
 
     # ---------------------------------------------------------
@@ -103730,29 +104098,6 @@ def morning_briefing():
 
 
 
-    print(
-        "[BUSINESS HEALTH DEBUG]",
-        business_health,
-        flush=True
-    )
-
-    print(
-        "[TODAY BUSINESS DEBUG]",
-        {
-            key: value
-            for key, value in dashboard.items()
-            if any(
-                word in key.lower()
-                for word in (
-                    "today",
-                    "appointment",
-                    "revenue"
-                )
-            )
-        },
-        flush=True
-    )
-
 
     # ---------------------------------------------------------
     # Coach performs the review only after all data is collected
@@ -103781,7 +104126,8 @@ def morning_briefing():
         business_schedule_upcoming=business_schedule_upcoming,
         priority_actions=priority_actions,
         spa_now=spa_now,
-        coach_session=coach_session
+        coach_session=coach_session,
+        appointments_enabled=appointments_enabled
     )
 
 
@@ -103797,7 +104143,8 @@ def morning_briefing():
 
     action_cards = build_action_cards(
         dashboard=dashboard,
-        priority_actions=priority_actions
+        priority_actions=priority_actions,
+        appointments_enabled=appointments_enabled
     )
 
     conn.commit()
@@ -103824,6 +104171,7 @@ def morning_briefing():
     return render_template(
         "morning_briefing.html",
         dashboard=dashboard,
+        appointments_enabled=appointments_enabled,
         business_health=business_health,
         today=today,
         business_schedule_due=business_schedule_due,
@@ -104314,6 +104662,7 @@ def acknowledge_coach_recommendation():
 @app.route("/daily-briefing/today")
 @login_required
 @spa_required
+@require_subscription_feature("appointments")
 @require_workspace_permission("can_view_daily_briefing")
 def daily_briefing_today():
 
@@ -104387,6 +104736,7 @@ def daily_briefing_today():
 @app.route("/daily-briefing/birthdays-today")
 @login_required
 @spa_required
+@require_subscription_feature("birthdays")
 @require_workspace_permission("can_view_daily_briefing")
 def daily_briefing_birthdays_today():
 
@@ -105662,133 +106012,20 @@ def reports():
 
     # -------------------------------------------------
     # PeachPOS sales summary
-    #
-    # This is intentionally separate from the existing
-    # appointment/service Revenue metrics above. It is
-    # shown only for workspaces using PeachPOS.
     # -------------------------------------------------
 
-    peachpos_summary_enabled = False
-    peachpos_sales_today = 0
-    peachpos_sales_week = 0
-    peachpos_sales_month = 0
-    peachpos_sales_ytd = 0
-
-    peachpos_today = spa_now.date()
-    peachpos_week_start = (
-        peachpos_today
-        - timedelta(days=peachpos_today.weekday())
-    )
-    peachpos_week_end = (
-        peachpos_week_start + timedelta(days=6)
-    )
-    peachpos_month_start = (
-        peachpos_today.replace(day=1)
-    )
-    peachpos_year_start = date(
-        peachpos_today.year,
-        1,
-        1,
+    peachpos_summary = _get_peachpos_sales_summary(
+        cur,
+        spa_id=spa_id,
+        business_unit_id=business_unit_id,
+        spa_now=spa_now,
     )
 
-    if peachpos_today.month == 12:
-        peachpos_next_month_start = date(
-            peachpos_today.year + 1,
-            1,
-            1,
-        )
-    else:
-        peachpos_next_month_start = date(
-            peachpos_today.year,
-            peachpos_today.month + 1,
-            1,
-        )
-
-    if business_unit_id:
-        peachpos_workspace_settings = (
-            square_workspace_settings
-            .load_square_workspace_settings(
-                cur,
-                spa_id=spa_id,
-                business_unit_id=business_unit_id,
-            )
-        )
-
-        peachpos_summary_enabled = (
-            peachpos_workspace_settings[
-                "processing_mode"
-            ]
-            == square_workspace_settings
-            .PROCESSING_MODE_POS_DAILY_SALES
-        )
-
-        if peachpos_summary_enabled:
-            cur.execute("""
-                SELECT
-                    COALESCE(
-                        SUM(pos_amount)
-                        FILTER (
-                            WHERE income_date = %s
-                        ),
-                        0.00
-                    ) AS sales_today,
-                    COALESCE(
-                        SUM(pos_amount)
-                        FILTER (
-                            WHERE income_date
-                                BETWEEN %s AND %s
-                        ),
-                        0.00
-                    ) AS sales_week,
-                    COALESCE(
-                        SUM(pos_amount)
-                        FILTER (
-                            WHERE income_date >= %s
-                              AND income_date < %s
-                        ),
-                        0.00
-                    ) AS sales_month,
-                    COALESCE(
-                        SUM(pos_amount)
-                        FILTER (
-                            WHERE income_date >= %s
-                              AND income_date <= %s
-                        ),
-                        0.00
-                    ) AS sales_ytd
-                FROM income
-                WHERE spa_id = %s
-                  AND business_unit_id = %s
-                  AND income_type = 'PeachPOS'
-            """, (
-                peachpos_today,
-                peachpos_week_start,
-                peachpos_week_end,
-                peachpos_month_start,
-                peachpos_next_month_start,
-                peachpos_year_start,
-                peachpos_today,
-                spa_id,
-                business_unit_id,
-            ))
-
-            peachpos_sales = (
-                cur.fetchone()
-                or (0, 0, 0, 0)
-            )
-
-            peachpos_sales_today = (
-                peachpos_sales[0] or 0
-            )
-            peachpos_sales_week = (
-                peachpos_sales[1] or 0
-            )
-            peachpos_sales_month = (
-                peachpos_sales[2] or 0
-            )
-            peachpos_sales_ytd = (
-                peachpos_sales[3] or 0
-            )
+    peachpos_summary_enabled = peachpos_summary["enabled"]
+    peachpos_sales_today = peachpos_summary["sales_today"]
+    peachpos_sales_week = peachpos_summary["sales_week"]
+    peachpos_sales_month = peachpos_summary["sales_month"]
+    peachpos_sales_ytd = peachpos_summary["sales_ytd"]
 
 
     # Upcoming appointments - next 7 days

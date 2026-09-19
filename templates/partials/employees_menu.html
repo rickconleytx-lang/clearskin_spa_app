@@ -30,34 +30,41 @@
          style="display:none;">
 
 
-        <!-- Employees -->
-        <div class="app-menu-submenu-section">
+        {% if (
+            nav_access.can_view_employees
+            and "employees" in subscription_entitlements
+        ) %}
 
-            <div class="app-menu-submenu-heading">
-                👥 Employees
+            <!-- Employees -->
+            <div class="app-menu-submenu-section">
+
+                <div class="app-menu-submenu-heading">
+                    👥 Employees
+                </div>
+
+                <a href="{{ url_for('employees_home') }}">
+                    <span aria-hidden="true">🏠</span>
+                    <span>Employee Home</span>
+                </a>
+
+                {% if nav_access.can_manage_employees %}
+                    <a href="{{ url_for('add_employee') }}">
+                        <span aria-hidden="true">➕</span>
+                        <span>Add New Employee</span>
+                    </a>
+
+                    <a href="{{ url_for('employee_admin') }}">
+                        <span aria-hidden="true">⚙️</span>
+                        <span>Employee Administration</span>
+                    </a>
+                {% endif %}
+
             </div>
 
-            <a href="{{ url_for('employees_home') }}">
-                <span aria-hidden="true">🏠</span>
-                <span>Employee Home</span>
-            </a>
 
-            {% if nav_access.can_manage_employees %}
-                <a href="{{ url_for('add_employee') }}">
-                    <span aria-hidden="true">➕</span>
-                    <span>Add New Employee</span>
-                </a>
+            <div class="user-menu-divider"></div>
 
-                <a href="{{ url_for('employee_admin') }}">
-                    <span aria-hidden="true">⚙️</span>
-                    <span>Employee Administration</span>
-                </a>
-            {% endif %}
-
-        </div>
-
-
-        <div class="user-menu-divider"></div>
+        {% endif %}
 
 
         <!-- Compensation -->

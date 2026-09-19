@@ -485,7 +485,11 @@
             or nav_access.can_view_employees
             or nav_access.can_view_financials
             or nav_access.can_view_business_management
-            or nav_access.can_manage_users
+            or (
+                nav_access.can_manage_users
+                and "business_user_management"
+                    in subscription_entitlements
+            )
         ) %}
 
 
@@ -601,7 +605,11 @@
 
         {% if (
             nav_access.can_view_business_management
-            or nav_access.can_manage_users
+            or (
+                nav_access.can_manage_users
+                and "business_user_management"
+                    in subscription_entitlements
+            )
         ) %}
             {% include "partials/business_management_menu.html" %}
         {% endif %}

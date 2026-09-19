@@ -28,7 +28,7 @@
     <a href="{{ url_for('switch_spa', spa_id=1) }}" class="btn">Spa 1</a>
     <a href="{{ url_for('switch_spa', spa_id=2) }}" class="btn">Spa 2</a>
     <a href="{{ url_for('master_admin_add_business') }}" class="btn">Add Business</a>
-     <a href="{{ url_for('add_user') }}" class="btn">Add User</a>
+
 </div>
 
 <h3>Open Issues: {{ open_count }}</h3>
@@ -46,7 +46,7 @@
         </select>
     </div>
 
-    <div class="form-buttons">  
+    <div class="form-buttons">
         <label for="status">Filter by Status</label>
             <a href="{{ url_for('feedback_admin', status='open') }}" class="btn">Open</a>
             <a href="{{ url_for('feedback_admin', status='resolved') }}" class="btn">Resolved</a>

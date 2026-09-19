@@ -99,7 +99,11 @@
 
 
         {% if (
-            nav_access.can_manage_users
+            (
+                nav_access.can_manage_users
+                and "business_user_management"
+                    in subscription_entitlements
+            )
             or nav_access.can_manage_security_settings
             or nav_access.can_manage_employee_access_codes
         ) %}
@@ -112,7 +116,11 @@
                     🔐 Security
                 </div>
 
-                {% if nav_access.can_manage_users %}
+                {% if (
+                    nav_access.can_manage_users
+                    and "business_user_management"
+                        in subscription_entitlements
+                ) %}
 
                     <a href="{{ url_for('business_users') }}">
                         <span aria-hidden="true">👥</span>

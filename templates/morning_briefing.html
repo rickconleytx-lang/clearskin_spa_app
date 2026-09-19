@@ -155,12 +155,19 @@
 
 {% set today_projected_revenue =
     dashboard.get(
-        "projected_revenue_today",
+        "expected_revenue",
         dashboard.get(
-            "today_projected_revenue",
-            0
+            "projected_revenue_today",
+            dashboard.get(
+                "today_projected_revenue",
+                0
+            )
         )
     ) or 0
+%}
+
+{% set today_pos_sales =
+    dashboard.get("peachpos_sales_today", 0) or 0
 %}
 
 {% set attention_count =
@@ -202,11 +209,11 @@
     </div>
 
 
-        <!-- Business Health -->
+        <!-- Operational Health -->
     <div class="briefing-summary-card">
 
     
-                <!-- Business Health -->
+                <!-- Operational Health -->
         <button type="button"
                 id="business-health-card"
                 class="briefing-summary-card briefing-summary-card-button"
@@ -215,7 +222,7 @@
                 onclick="toggleBusinessHealthDetails()">
 
             <div class="briefing-card-title">
-                Business Health
+                Operational Health
             </div>
 
             <div class="briefing-card-value">
@@ -255,11 +262,11 @@
         <div class="business-health-details-header">
 
             <div>
-                <h2>🍑 Business Health Review</h2>
+                <h2>🍑 Operational Health Review</h2>
 
                 <p>
                     Coach Peach reviewed the operational areas
-                    currently included in your Business Health score.
+                    currently included in your Operational Health score.
                 </p>
             </div>
 
@@ -335,26 +342,47 @@
             Today’s Business
         </div>
 
-        <div class="briefing-card-value">
-            {{ today_appointment_count }}
-            {% if today_appointment_count == 1 %}
-                Appointment
-            {% else %}
-                Appointments
-            {% endif %}
-        </div>
+        {% if appointments_enabled %}
 
-        <div class="briefing-card-detail">
-            ${{ "{:,.2f}".format(today_projected_revenue) }}
-            Projected Revenue
-        </div>
+            <div class="briefing-card-value">
+                {{ today_appointment_count }}
+                {% if today_appointment_count == 1 %}
+                    Appointment
+                {% else %}
+                    Appointments
+                {% endif %}
+            </div>
 
-        <div style="margin-top:12px;">
-            <a href="{{ url_for('daily_briefing_today') }}"
-               class="tool-pill tool-pill-small">
-                View Details
-            </a>
-        </div>
+            <div class="briefing-card-detail">
+                ${{ "{:,.2f}".format(today_projected_revenue) }}
+                Projected Revenue
+            </div>
+
+            <div style="margin-top:12px;">
+                <a href="{{ url_for('daily_briefing_today') }}"
+                   class="tool-pill tool-pill-small">
+                    View Details
+                </a>
+            </div>
+
+        {% else %}
+
+            <div class="briefing-card-value">
+                ${{ "{:,.2f}".format(today_pos_sales) }}
+            </div>
+
+            <div class="briefing-card-detail">
+                Today’s PeachPOS Sales
+            </div>
+
+            <div style="margin-top:12px;">
+                <a href="{{ url_for('peachpos_income_report') }}"
+                   class="tool-pill tool-pill-small">
+                    View Details
+                </a>
+            </div>
+
+        {% endif %}
 
     </div>
 
