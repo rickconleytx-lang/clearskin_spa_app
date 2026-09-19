@@ -593,7 +593,10 @@
         {% endif %}
 
 
-        {% if nav_access.can_view_employees %}
+        {% if (
+            nav_access.can_view_employees
+            and "employees" in subscription_entitlements
+        ) %}
             {% include "partials/employees_menu.html" %}
         {% endif %}
 
