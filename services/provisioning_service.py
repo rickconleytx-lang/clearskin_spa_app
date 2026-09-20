@@ -666,12 +666,15 @@ def provision_new_business(
         """
         INSERT INTO business_onboarding (
             spa_id,
-            initial_administrator_user_id
+            account_opened_by_user_id,
+            primary_onboarding_user_id,
+            waiting_on_initial_activation
         )
-        VALUES (%s, %s)
+        VALUES (%s, %s, %s, FALSE)
         """,
         (
             spa_id,
+            actor_user_id,
             administrator_user_id,
         ),
     )

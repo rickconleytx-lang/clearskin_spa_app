@@ -36332,15 +36332,18 @@ def _business_onboarding_record(
         SELECT
             business_onboarding_id,
             spa_id,
-            initial_administrator_user_id,
+            primary_onboarding_user_id,
             contact_setup_completed_at,
             business_setup_completed_at,
             completed_at,
+            account_opened_by_user_id,
+            waiting_on_initial_activation,
             created_at,
             updated_at
         FROM business_onboarding
         WHERE spa_id = %s
-          AND initial_administrator_user_id = %s
+          AND primary_onboarding_user_id = %s
+          AND waiting_on_initial_activation = FALSE
         {lock_clause}
         """,
         (
@@ -57794,7 +57797,7 @@ def business_onboarding_contact_setup():
                 table_name="business_onboarding",
                 record_id=onboarding[0],
                 notes=(
-                    "Initial administrator confirmed login "
+                    "Primary onboarding user confirmed login "
                     "email and personal mobile number."
                 ),
             )
