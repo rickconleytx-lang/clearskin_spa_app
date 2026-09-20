@@ -29210,6 +29210,170 @@ def _invalidate_unsent_business_user_invitation(
 
 
 
+def _send_business_user_invitation(
+    *,
+    spa_id,
+    business_unit_id,
+    invited_first_name,
+    invited_last_name,
+    invited_email,
+    business_relationship_code,
+    membership_role_code,
+    employee_id=None,
+    is_primary_onboarding_invitation=False,
+    invited_by_user_id=None,
+):
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        reservation = _reserve_business_user_invitation(
+            cur,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            invited_first_name=invited_first_name,
+            invited_last_name=invited_last_name,
+            invited_email=invited_email,
+            business_relationship_code=(
+                business_relationship_code
+            ),
+            membership_role_code=membership_role_code,
+            employee_id=employee_id,
+            is_primary_onboarding_invitation=(
+                is_primary_onboarding_invitation
+            ),
+            invited_by_user_id=invited_by_user_id,
+        )
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    invitation_id = reservation[
+        "business_user_invitation_id"
+    ]
+    raw_token = reservation["raw_token"]
+    email = reservation["invited_email"]
+    first_name = str(
+        reservation.get("invited_first_name") or ""
+    ).strip()
+
+    activation_url = (
+        f"{_business_user_invitation_base_url()}"
+        f"/activate-account/{raw_token}"
+    )
+
+    greeting = (
+        f"Hi {first_name},"
+        if first_name
+        else "Hello,"
+    )
+
+    email_body = (
+        f"{greeting}\n\n"
+        "You have been invited to activate a "
+        "Peach Suite Pro account.\n\n"
+        "Use this secure link to create your permanent "
+        "password and activate your account:\n\n"
+        f"{activation_url}\n\n"
+        "This invitation expires in "
+        f"{BUSINESS_USER_INVITATION_TOKEN_HOURS} hours "
+        "and can be used only once.\n\n"
+        "If you were not expecting this invitation, "
+        "you can ignore this email."
+    )
+
+    mailgun_accepted = False
+
+    try:
+        response = send_email(
+            to=email,
+            subject="Activate your Peach Suite Pro account",
+            body=email_body,
+            add_footer=False,
+        )
+
+        mailgun_accepted = bool(
+            response is not None
+            and 200 <= int(response.status_code) < 300
+        )
+
+    except Exception:
+        app.logger.exception(
+            "Business invitation email delivery failed "
+            "for spa_id=%s invitation_id=%s.",
+            spa_id,
+            invitation_id,
+        )
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        if mailgun_accepted:
+            finalized = (
+                _finalize_business_user_invitation_email(
+                    cur,
+                    spa_id=spa_id,
+                    business_user_invitation_id=(
+                        invitation_id
+                    ),
+                )
+            )
+
+            conn.commit()
+
+            return {
+                "status": (
+                    "sent"
+                    if finalized
+                    else "superseded"
+                ),
+                "business_user_invitation_id": (
+                    invitation_id
+                ),
+                "invited_email": email,
+            }
+
+        _invalidate_unsent_business_user_invitation(
+            cur,
+            spa_id=spa_id,
+            business_user_invitation_id=invitation_id,
+        )
+
+        conn.commit()
+
+        return {
+            "status": "delivery_failed",
+            "business_user_invitation_id": invitation_id,
+            "invited_email": email,
+        }
+
+    except Exception:
+        conn.rollback()
+
+        app.logger.exception(
+            "Business invitation delivery finalization "
+            "failed for spa_id=%s invitation_id=%s.",
+            spa_id,
+            invitation_id,
+        )
+
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
 def _business_user_invitation_record(
     cur,
     raw_token,
@@ -29282,6 +29446,440 @@ def _business_user_invitation_usable(record):
         and business_active
         and workspace_active
     )
+
+
+def _accept_business_user_invitation(
+    cur,
+    *,
+    raw_token,
+    password,
+):
+    password_error = _password_policy_error(password)
+
+    if password_error:
+        raise ValueError(password_error)
+
+    password_hash = generate_password_hash(password)
+
+    invitation = _business_user_invitation_record(
+        cur,
+        raw_token,
+        for_update=True,
+    )
+
+    if not _business_user_invitation_usable(invitation):
+        raise ValueError(
+            "This invitation is no longer available."
+        )
+
+    (
+        business_user_invitation_id,
+        spa_id,
+        business_unit_id,
+        employee_id,
+        invited_first_name,
+        invited_last_name,
+        invited_email,
+        business_relationship_code,
+        membership_role_code,
+        is_primary_onboarding_invitation,
+        invited_by_user_id,
+        _email_sent_at,
+        _accepted_at,
+        _invalidated_at,
+        _expires_at,
+        _now,
+        _business_active,
+        _workspace_active,
+    ) = invitation
+
+    email = _normalize_user_email(
+        invited_email,
+        "Invitation Email",
+    )
+
+    if not email:
+        raise ValueError(
+            "The invitation does not contain a valid login email."
+        )
+
+    account_role = business_user_role_for_membership(
+        membership_role_code
+    )
+
+    if account_role is None:
+        raise ValueError(
+            "The invitation contains an unsupported access role."
+        )
+
+    is_primary = bool(
+        is_primary_onboarding_invitation
+    )
+
+    if is_primary and business_relationship_code != "owner":
+        raise ValueError(
+            "The primary onboarding invitation is invalid."
+        )
+
+    if business_relationship_code == "owner":
+        if (
+            employee_id is None
+            or membership_role_code
+            != "organization_admin"
+        ):
+            raise ValueError(
+                "The Owner invitation is no longer valid."
+            )
+
+    if employee_id is not None:
+        cur.execute(
+            """
+            SELECT
+                e.employee_id,
+                e.is_active,
+                er.role_slot,
+                er.is_active,
+                ebum.access_level,
+                ebum.is_active
+            FROM employees e
+            JOIN employee_roles er
+              ON er.spa_id = e.spa_id
+             AND er.employee_role_id = e.employee_role_id
+            JOIN employee_business_unit_memberships ebum
+              ON ebum.spa_id = e.spa_id
+             AND ebum.employee_id = e.employee_id
+             AND ebum.business_unit_id = %s
+            WHERE e.spa_id = %s
+              AND e.employee_id = %s
+            FOR UPDATE OF e, er, ebum
+            """,
+            (
+                business_unit_id,
+                spa_id,
+                employee_id,
+            ),
+        )
+
+        employee_record = cur.fetchone()
+
+        if not employee_record:
+            raise ValueError(
+                "The employee identity for this invitation "
+                "is no longer available."
+            )
+
+        (
+            _employee_id,
+            employee_is_active,
+            employee_role_slot,
+            employee_role_is_active,
+            employee_access_level,
+            employee_workspace_is_active,
+        ) = employee_record
+
+        if not (
+            employee_is_active
+            and employee_role_is_active
+            and employee_workspace_is_active
+        ):
+            raise ValueError(
+                "The employee identity for this invitation "
+                "is no longer active."
+            )
+
+        if business_relationship_code == "owner":
+            if (
+                employee_role_slot != 1
+                or employee_access_level != 1
+            ):
+                raise ValueError(
+                    "The Owner identity for this invitation "
+                    "no longer has Owner authority."
+                )
+
+        cur.execute(
+            """
+            SELECT business_unit_membership_id
+            FROM business_unit_memberships
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND employee_id = %s
+              AND is_active = TRUE
+            LIMIT 1
+            FOR UPDATE
+            """,
+            (
+                spa_id,
+                business_unit_id,
+                employee_id,
+            ),
+        )
+
+        if cur.fetchone():
+            raise ValueError(
+                "This employee identity already has an active "
+                "PSP login for this workspace."
+            )
+
+    cur.execute(
+        """
+        SELECT
+            user_id,
+            email,
+            username
+        FROM users
+        WHERE LOWER(email) = LOWER(%s)
+           OR (
+                spa_id = %s
+                AND LOWER(username) = LOWER(%s)
+           )
+        LIMIT 1
+        FOR UPDATE
+        """,
+        (
+            email,
+            spa_id,
+            email,
+        ),
+    )
+
+    if cur.fetchone():
+        raise ValueError(
+            "A PSP login already exists for this email."
+        )
+
+    cur.execute(
+        """
+        INSERT INTO users (
+            spa_id,
+            first_name,
+            last_name,
+            email,
+            username,
+            password_hash,
+            role,
+            active,
+            sms_phone,
+            must_change_password,
+            password_changed_at,
+            coach_welcome_seen_at
+        )
+        VALUES (
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            TRUE,
+            NULL,
+            FALSE,
+            NOW(),
+            CASE
+                WHEN %s THEN NULL
+                ELSE CURRENT_TIMESTAMP
+            END
+        )
+        RETURNING user_id
+        """,
+        (
+            spa_id,
+            invited_first_name,
+            invited_last_name,
+            email,
+            email,
+            password_hash,
+            account_role,
+            is_primary,
+        ),
+    )
+
+    new_user_id = cur.fetchone()[0]
+
+    cur.execute(
+        """
+        INSERT INTO business_unit_memberships (
+            spa_id,
+            business_unit_id,
+            user_id,
+            employee_id,
+            membership_role_code,
+            is_active,
+            granted_by
+        )
+        VALUES (
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            TRUE,
+            %s
+        )
+        RETURNING business_unit_membership_id
+        """,
+        (
+            spa_id,
+            business_unit_id,
+            new_user_id,
+            employee_id,
+            membership_role_code,
+            invited_by_user_id,
+        ),
+    )
+
+    business_unit_membership_id = cur.fetchone()[0]
+
+    if is_primary:
+        cur.execute(
+            """
+            UPDATE business_onboarding
+            SET primary_onboarding_user_id = %s,
+                waiting_on_initial_activation = FALSE,
+                updated_at = NOW()
+            WHERE spa_id = %s
+              AND waiting_on_initial_activation = TRUE
+              AND primary_onboarding_user_id IS NULL
+              AND completed_at IS NULL
+            RETURNING business_onboarding_id
+            """,
+            (
+                new_user_id,
+                spa_id,
+            ),
+        )
+
+        if not cur.fetchone():
+            raise ValueError(
+                "The business is no longer waiting for "
+                "initial Owner activation."
+            )
+
+    cur.execute(
+        """
+        UPDATE business_user_invitations
+        SET accepted_user_id = %s,
+            accepted_at = NOW()
+        WHERE business_user_invitation_id = %s
+          AND spa_id = %s
+          AND email_sent_at IS NOT NULL
+          AND accepted_at IS NULL
+          AND invalidated_at IS NULL
+          AND expires_at > NOW()
+        RETURNING business_user_invitation_id
+        """,
+        (
+            new_user_id,
+            business_user_invitation_id,
+            spa_id,
+        ),
+    )
+
+    if not cur.fetchone():
+        raise ValueError(
+            "This invitation is no longer available."
+        )
+
+    cur.execute(
+        """
+        UPDATE business_user_invitations
+        SET invalidated_at = NOW()
+        WHERE spa_id = %s
+          AND business_user_invitation_id <> %s
+          AND accepted_at IS NULL
+          AND invalidated_at IS NULL
+          AND (
+                (
+                    business_unit_id = %s
+                    AND LOWER(invited_email) = LOWER(%s)
+                )
+                OR (
+                    %s = TRUE
+                    AND is_primary_onboarding_invitation = TRUE
+                )
+          )
+        """,
+        (
+            spa_id,
+            business_user_invitation_id,
+            business_unit_id,
+            email,
+            is_primary,
+        ),
+    )
+
+    log_audit(
+        cur,
+        spa_id,
+        new_user_id,
+        "business_user_invitation_accepted",
+        table_name="business_user_invitations",
+        record_id=business_user_invitation_id,
+        old_value=None,
+        new_value=membership_role_code,
+        notes=(
+            "Business user invitation accepted and PSP "
+            "login activated."
+        ),
+        business_unit_id=business_unit_id,
+    )
+
+    return {
+        "business_user_invitation_id": (
+            business_user_invitation_id
+        ),
+        "user_id": new_user_id,
+        "spa_id": spa_id,
+        "business_unit_id": business_unit_id,
+        "business_unit_membership_id": (
+            business_unit_membership_id
+        ),
+        "employee_id": employee_id,
+        "membership_role_code": membership_role_code,
+        "business_relationship_code": (
+            business_relationship_code
+        ),
+        "is_primary_onboarding_invitation": is_primary,
+    }
+
+
+def _complete_business_user_invitation_acceptance(
+    raw_token,
+    password,
+):
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        try:
+            result = _accept_business_user_invitation(
+                cur,
+                raw_token=raw_token,
+                password=password,
+            )
+        except ValueError:
+            conn.rollback()
+
+            return {
+                "status": "invalid",
+            }
+
+        conn.commit()
+
+        return {
+            "status": "success",
+            **result,
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
 
 
 def _password_reset_request_limit_state(
@@ -36997,6 +37595,7 @@ def load_spa():
         "mfa_login_complete",
         "forgot_password",
         "reset_password",
+        "accept_business_invitation",
         "logout",
         "browser_session_state",
         "browser_session_activity",
@@ -61901,6 +62500,151 @@ def reset_password(token):
     return render_template(
         "reset_password.html",
         reset_available=True,
+        security_csrf_token=security_csrf_token,
+    )
+
+
+@app.route(
+    "/activate-account/<token>",
+    methods=["GET", "POST"],
+)
+def accept_business_invitation(token):
+    token = str(token or "").strip()
+
+    if not token:
+        abort(404)
+
+    csrf_purpose = (
+        "business_invitation:"
+        + _business_user_invitation_token_hash(token)
+    )
+
+    if request.method == "POST":
+        submitted_token = request.form.get(
+            "security_csrf_token",
+            "",
+        )
+
+        if not _public_security_csrf_valid(
+            submitted_token,
+            csrf_purpose,
+        ):
+            abort(400)
+
+        new_password = request.form.get(
+            "new_password",
+            "",
+        )
+
+        confirm_password = request.form.get(
+            "confirm_password",
+            "",
+        )
+
+        password_policy_error = (
+            _password_policy_error(
+                new_password
+            )
+        )
+
+        if password_policy_error:
+            flash(
+                password_policy_error,
+                "error",
+            )
+
+            return redirect(
+                url_for(
+                    "accept_business_invitation",
+                    token=token,
+                )
+            )
+
+        if new_password != confirm_password:
+            flash(
+                "The passwords do not match.",
+                "error",
+            )
+
+            return redirect(
+                url_for(
+                    "accept_business_invitation",
+                    token=token,
+                )
+            )
+
+        result = (
+            _complete_business_user_invitation_acceptance(
+                token,
+                new_password,
+            )
+        )
+
+        if result["status"] == "invalid":
+            session.pop(
+                "_public_security_csrf",
+                None,
+            )
+
+            return render_template(
+                "accept_business_invitation.html",
+                invitation_available=False,
+                invitation_email=None,
+            )
+
+        session.pop(
+            "_public_security_csrf",
+            None,
+        )
+
+        flash(
+            "Your Peach Suite Pro account was activated "
+            "successfully. Please sign in with your email "
+            "and password.",
+            "success",
+        )
+
+        return redirect(
+            url_for("login")
+        )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        invitation_record = (
+            _business_user_invitation_record(
+                cur,
+                token,
+                for_update=False,
+            )
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if not _business_user_invitation_usable(
+        invitation_record
+    ):
+        return render_template(
+            "accept_business_invitation.html",
+            invitation_available=False,
+            invitation_email=None,
+        )
+
+    invitation_email = invitation_record[6]
+
+    security_csrf_token = (
+        _public_security_csrf_token(
+            csrf_purpose
+        )
+    )
+
+    return render_template(
+        "accept_business_invitation.html",
+        invitation_available=True,
+        invitation_email=invitation_email,
         security_csrf_token=security_csrf_token,
     )
 
