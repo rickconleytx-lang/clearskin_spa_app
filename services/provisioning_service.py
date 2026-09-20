@@ -224,6 +224,63 @@ def seed_client_status_defaults(cursor, spa_id):
         )
 
 
+def ensure_owner_employee_role(cursor, spa_id):
+    """
+    Ensure the permanent Employee Role slot 1 exists for one business.
+
+    The caller owns the transaction boundary.
+    """
+    cursor.execute(
+        """
+        SELECT employee_role_id
+        FROM employee_roles
+        WHERE spa_id = %s
+          AND role_slot = 1
+        LIMIT 1
+        """,
+        (spa_id,),
+    )
+    row = cursor.fetchone()
+
+    if row:
+        employee_role_id = row[0]
+
+        cursor.execute(
+            """
+            UPDATE employee_roles
+            SET role_name = 'Owner',
+                is_active = TRUE,
+                display_order = 10
+            WHERE employee_role_id = %s
+              AND spa_id = %s
+              AND role_slot = 1
+            """,
+            (
+                employee_role_id,
+                spa_id,
+            ),
+        )
+
+        return employee_role_id
+
+    cursor.execute(
+        """
+        INSERT INTO employee_roles (
+            spa_id,
+            role_name,
+            is_active,
+            display_order,
+            role_slot
+        )
+        VALUES (%s, 'Owner', TRUE, 10, 1)
+        RETURNING employee_role_id
+        """,
+        (spa_id,),
+    )
+
+    return cursor.fetchone()[0]
+
+
 def provision_new_business_workspace_foundation(
     cursor,
     *,
@@ -608,6 +665,11 @@ def provision_new_business(
         ),
     )
     spa_id = cursor.fetchone()[0]
+
+    ensure_owner_employee_role(
+        cursor,
+        spa_id,
+    )
 
     seed_client_status_defaults(
         cursor,
