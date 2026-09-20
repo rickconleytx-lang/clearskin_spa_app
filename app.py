@@ -36315,6 +36315,70 @@ def _business_login_lifecycle_state(user_id):
         conn.close()
 
 
+def _business_onboarding_record(
+    cur,
+    spa_id,
+    user_id,
+    *,
+    for_update=False,
+):
+    lock_clause = (
+        " FOR UPDATE"
+        if for_update
+        else ""
+    )
+    cur.execute(
+        f"""
+        SELECT
+            business_onboarding_id,
+            spa_id,
+            initial_administrator_user_id,
+            contact_setup_completed_at,
+            business_setup_completed_at,
+            completed_at,
+            created_at,
+            updated_at
+        FROM business_onboarding
+        WHERE spa_id = %s
+          AND initial_administrator_user_id = %s
+        {lock_clause}
+        """,
+        (
+            spa_id,
+            user_id,
+        ),
+    )
+    return cur.fetchone()
+
+
+def _business_onboarding_contact_csrf_purpose(pending):
+    if not isinstance(pending, dict):
+        raise ValueError(
+            "Business onboarding login state is invalid."
+        )
+    try:
+        user_id = int(
+            pending.get("target_user_id")
+        )
+    except (TypeError, ValueError):
+        raise ValueError(
+            "Business onboarding login state is invalid."
+        )
+    challenge_id = str(
+        pending.get("challenge_id")
+        or ""
+    ).strip()
+    if user_id <= 0 or not challenge_id:
+        raise ValueError(
+            "Business onboarding login state is invalid."
+        )
+    return (
+        "business_onboarding:contact_setup:"
+        f"{user_id}:"
+        f"{challenge_id}"
+    )
+
+
 @app.before_request
 def load_spa():
 
@@ -36329,6 +36393,7 @@ def load_spa():
 
     if request.endpoint in (
         "login",
+        "business_onboarding_contact_setup",
         "mfa_login",
         "mfa_login_qr",
         "mfa_login_recovery",
@@ -57033,6 +57098,12 @@ def _continue_business_login_after_password(
     password_verified_at_epoch,
 ):
     role = str(user[6] or "").strip()
+    must_change_password = bool(user[8])
+
+    # Temporary-password users must replace that password
+    # before ordinary MFA enrollment or verification begins.
+    if must_change_password:
+        return _complete_business_login(user)
 
     if not _mfa_required_for_role(role):
         return _complete_business_login(user)
@@ -57068,6 +57139,24 @@ def _continue_business_login_after_password(
     cur = conn.cursor()
 
     try:
+        onboarding = _business_onboarding_record(
+            cur,
+            user[1],
+            user[0],
+        )
+
+        if (
+            onboarding
+            and onboarding[3] is None
+        ):
+            session["_pending_mfa_login"] = pending
+            session.pop("_pending_login_switch", None)
+            return redirect(
+                url_for(
+                    "business_onboarding_contact_setup"
+                )
+            )
+
         setting = _mfa_user_setting_record(
             cur,
             user[0],
@@ -57477,6 +57566,284 @@ def _mfa_account_recovery_locked_response(
             url_for("login")
         )
     )
+
+
+@app.route(
+    "/login/contact-setup",
+    methods=["GET", "POST"],
+)
+def business_onboarding_contact_setup():
+    pending = _pending_mfa_login()
+
+    if not pending:
+        return _mfa_login_restart_response()
+
+    csrf_purpose = (
+        _business_onboarding_contact_csrf_purpose(
+            pending
+        )
+    )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        user = _mfa_pending_user_record(
+            cur,
+            pending,
+            for_update=(request.method == "POST"),
+        )
+
+        if not user:
+            conn.rollback()
+            return _mfa_login_restart_response()
+
+        if bool(user[8]):
+            conn.rollback()
+            return _mfa_login_restart_response()
+
+        onboarding = _business_onboarding_record(
+            cur,
+            user[1],
+            user[0],
+            for_update=(request.method == "POST"),
+        )
+
+        if (
+            not onboarding
+            or onboarding[3] is not None
+        ):
+            conn.rollback()
+            return _mfa_no_store(
+                redirect(
+                    url_for("mfa_login")
+                )
+            )
+
+        if request.method == "POST":
+            submitted_token = request.form.get(
+                "security_csrf_token",
+                "",
+            )
+
+            if not _public_security_csrf_valid(
+                submitted_token,
+                csrf_purpose,
+            ):
+                conn.rollback()
+                abort(400)
+
+            try:
+                login_email = _normalize_user_email(
+                    request.form.get(
+                        "login_email",
+                        "",
+                    ),
+                    "Login Email",
+                )
+                mobile_phone = _normalize_user_mobile_phone(
+                    request.form.get(
+                        "mobile_phone",
+                        "",
+                    )
+                )
+            except ValueError as exc:
+                conn.rollback()
+                flash(str(exc), "error")
+                return _mfa_no_store(
+                    redirect(
+                        url_for(
+                            "business_onboarding_contact_setup"
+                        )
+                    )
+                )
+
+            if not login_email:
+                conn.rollback()
+                flash(
+                    "Login Email is required.",
+                    "error",
+                )
+                return _mfa_no_store(
+                    redirect(
+                        url_for(
+                            "business_onboarding_contact_setup"
+                        )
+                    )
+                )
+
+            if not mobile_phone:
+                conn.rollback()
+                flash(
+                    "Personal Mobile Number is required.",
+                    "error",
+                )
+                return _mfa_no_store(
+                    redirect(
+                        url_for(
+                            "business_onboarding_contact_setup"
+                        )
+                    )
+                )
+
+            cur.execute(
+                """
+                SELECT user_id
+                FROM users
+                WHERE user_id <> %s
+                  AND LOWER(email) = LOWER(%s)
+                LIMIT 1
+                """,
+                (
+                    user[0],
+                    login_email,
+                ),
+            )
+
+            if cur.fetchone():
+                conn.rollback()
+                flash(
+                    "That login email is already in use.",
+                    "error",
+                )
+                return _mfa_no_store(
+                    redirect(
+                        url_for(
+                            "business_onboarding_contact_setup"
+                        )
+                    )
+                )
+
+            cur.execute(
+                """
+                SELECT user_id
+                FROM users
+                WHERE user_id <> %s
+                  AND spa_id = %s
+                  AND LOWER(username) = LOWER(%s)
+                LIMIT 1
+                """,
+                (
+                    user[0],
+                    user[1],
+                    login_email,
+                ),
+            )
+
+            if cur.fetchone():
+                conn.rollback()
+                flash(
+                    "That login email is already in use.",
+                    "error",
+                )
+                return _mfa_no_store(
+                    redirect(
+                        url_for(
+                            "business_onboarding_contact_setup"
+                        )
+                    )
+                )
+
+            cur.execute(
+                """
+                UPDATE users
+                SET email = %s,
+                    username = %s,
+                    sms_phone = %s
+                WHERE user_id = %s
+                  AND spa_id = %s
+                  AND active = TRUE
+                """,
+                (
+                    login_email,
+                    login_email,
+                    mobile_phone,
+                    user[0],
+                    user[1],
+                ),
+            )
+
+            if cur.rowcount != 1:
+                raise RuntimeError(
+                    "Contact Setup user update did not affect "
+                    "exactly one active user."
+                )
+
+            cur.execute(
+                """
+                UPDATE business_onboarding
+                SET contact_setup_completed_at = NOW(),
+                    updated_at = NOW()
+                WHERE business_onboarding_id = %s
+                  AND contact_setup_completed_at IS NULL
+                """,
+                (onboarding[0],),
+            )
+
+            if cur.rowcount != 1:
+                raise RuntimeError(
+                    "Contact Setup onboarding update did not "
+                    "affect exactly one row."
+                )
+
+            log_audit(
+                cur,
+                user[1],
+                user[0],
+                "business_onboarding_contact_setup_completed",
+                table_name="business_onboarding",
+                record_id=onboarding[0],
+                notes=(
+                    "Initial administrator confirmed login "
+                    "email and personal mobile number."
+                ),
+            )
+
+            conn.commit()
+            session.pop("_public_security_csrf", None)
+
+            return _mfa_no_store(
+                redirect(
+                    url_for("mfa_login")
+                )
+            )
+
+        security_csrf_token = (
+            _public_security_csrf_token(
+                csrf_purpose
+            )
+        )
+
+        return _mfa_no_store(
+            render_template(
+                "business_onboarding_contact_setup.html",
+                login_email=str(user[4] or "").strip(),
+                mobile_phone=str(user[11] or "").strip(),
+                security_csrf_token=security_csrf_token,
+            )
+        )
+
+    except IntegrityError:
+        conn.rollback()
+        flash(
+            "That login email is already in use.",
+            "error",
+        )
+        return _mfa_no_store(
+            redirect(
+                url_for(
+                    "business_onboarding_contact_setup"
+                )
+            )
+        )
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
 
 
 @app.route(
@@ -65277,6 +65644,17 @@ def change_password():
             "_security_form_csrf",
             None,
         )
+
+        if must_change_password:
+            session.clear()
+            flash(
+                "Your password was changed successfully. "
+                "Sign in with your new password to continue.",
+                "success",
+            )
+            return redirect(
+                url_for("login")
+            )
 
         flash(
             "Your password was changed successfully.",

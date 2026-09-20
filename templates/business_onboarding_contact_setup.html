@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <meta
+        name="robots"
+        content="noindex, nofollow"
+    >
+
+    <meta
+        name="referrer"
+        content="no-referrer"
+    >
+
+    <title>
+        Contact Setup | Peach Suite Pro
+    </title>
+
+    <link
+        rel="icon"
+        type="image/png"
+        href="{{ url_for(
+            'static',
+            filename='peachsuite-icon.png'
+        ) }}?v=20260618"
+    >
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            margin: 0;
+            min-height: 100%;
+        }
+
+        body {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            font-family:
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                sans-serif;
+            background: #f8f6f2;
+            color: #2d2d2d;
+        }
+
+        .setup-shell {
+            width: min(480px, 100%);
+        }
+
+        .setup-card {
+            padding: 36px 32px;
+            background: #ffffff;
+            border: 1px solid #e7e2dc;
+            border-radius: 18px;
+            box-shadow:
+                0 18px 50px rgba(0, 0, 0, 0.08);
+        }
+
+        .setup-brand {
+            margin-bottom: 26px;
+            text-align: center;
+        }
+
+        .setup-brand img {
+            display: block;
+            width: min(280px, 100%);
+            height: auto;
+            margin: 0 auto 18px;
+        }
+
+        .setup-brand h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 700;
+        }
+
+        .setup-brand p {
+            margin: 8px 0 0;
+            color: #666666;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .setup-note {
+            margin-bottom: 20px;
+            padding: 12px 14px;
+            border-radius: 10px;
+            background: #f7f5f2;
+            color: #555555;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        .setup-flash {
+            margin-bottom: 18px;
+            padding: 12px 14px;
+            border-radius: 10px;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .setup-flash.error {
+            background: #fff0f0;
+            border: 1px solid #e5b5b5;
+            color: #7a2020;
+        }
+
+        .setup-flash.success {
+            background: #eef8ef;
+            border: 1px solid #b9d9bc;
+            color: #275c2d;
+        }
+
+        .setup-field {
+            margin-bottom: 18px;
+        }
+
+        .setup-field label {
+            display: block;
+            margin-bottom: 7px;
+            font-size: 14px;
+            font-weight: 650;
+        }
+
+        .setup-field input {
+            width: 100%;
+            min-height: 48px;
+            padding: 10px 12px;
+            border: 1px solid #cfc9c2;
+            border-radius: 9px;
+            background: #ffffff;
+            color: #222222;
+            font: inherit;
+            font-size: 16px;
+        }
+
+        .setup-field input:focus {
+            outline: 3px solid rgba(210, 141, 94, 0.18);
+            border-color: #b87345;
+        }
+
+        .setup-help {
+            margin: 7px 0 0;
+            color: #777777;
+            font-size: 12px;
+            line-height: 1.45;
+        }
+
+        .setup-button {
+            width: 100%;
+            min-height: 48px;
+            margin-top: 4px;
+            border: 0;
+            border-radius: 10px;
+            background: #2d2d2d;
+            color: #ffffff;
+            font: inherit;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .setup-button:hover {
+            background: #171717;
+        }
+
+        .setup-footer {
+            margin-top: 22px;
+            text-align: center;
+            color: #777777;
+            font-size: 12px;
+        }
+
+        @media (max-width: 520px) {
+            .setup-card {
+                padding: 30px 22px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <main class="setup-shell">
+        <section
+            class="setup-card"
+            aria-labelledby="setupTitle"
+        >
+            <div class="setup-brand">
+                <img
+                    src="{{ url_for(
+                        'static',
+                        filename='images/smallbanner.png'
+                    ) }}"
+                    alt="Peach Suite Pro"
+                >
+
+                <h1 id="setupTitle">
+                    Welcome to Peach Suite Pro
+                </h1>
+
+                <p>
+                    Before we secure your account, please confirm
+                    your contact information.
+                </p>
+            </div>
+
+            {% with messages =
+                get_flashed_messages(
+                    with_categories=true
+                )
+            %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div
+                            class="setup-flash {{ category }}"
+                            role="alert"
+                        >
+                            {{ message }}
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            <div class="setup-note">
+                Peach Suite Pro will use this information for
+                account security and sign-in verification.
+                You will choose your two-step verification
+                method on the next screen.
+            </div>
+
+            <form
+                method="POST"
+                action="{{ url_for(
+                    'business_onboarding_contact_setup'
+                ) }}"
+            >
+                <input
+                    type="hidden"
+                    name="security_csrf_token"
+                    value="{{ security_csrf_token }}"
+                >
+
+                <div class="setup-field">
+                    <label for="loginEmail">
+                        Login Email
+                    </label>
+
+                    <input
+                        type="email"
+                        id="loginEmail"
+                        name="login_email"
+                        value="{{ login_email }}"
+                        maxlength="254"
+                        autocomplete="email"
+                        required
+                        autofocus
+                    >
+
+                    <p class="setup-help">
+                        This is the email address you will use
+                        to sign in to Peach Suite Pro.
+                    </p>
+                </div>
+
+                <div class="setup-field">
+                    <label for="mobilePhone">
+                        Personal Mobile Number
+                    </label>
+
+                    <input
+                        type="tel"
+                        id="mobilePhone"
+                        name="mobile_phone"
+                        value="{{ mobile_phone }}"
+                        autocomplete="tel"
+                        inputmode="tel"
+                        required
+                    >
+
+                    <p class="setup-help">
+                        Enter your personal U.S. mobile number.
+                        It will be available if you choose Text
+                        Message for two-step verification.
+                    </p>
+                </div>
+
+                <button
+                    type="submit"
+                    class="setup-button"
+                >
+                    Continue to Two-Step Verification
+                </button>
+            </form>
+
+            <div class="setup-footer">
+                Peach Suite Pro
+            </div>
+        </section>
+    </main>
+</body>
+</html>

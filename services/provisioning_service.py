@@ -662,6 +662,20 @@ def provision_new_business(
     )
     administrator_user_id = cursor.fetchone()[0]
 
+    cursor.execute(
+        """
+        INSERT INTO business_onboarding (
+            spa_id,
+            initial_administrator_user_id
+        )
+        VALUES (%s, %s)
+        """,
+        (
+            spa_id,
+            administrator_user_id,
+        ),
+    )
+
     foundation = provision_new_business_workspace_foundation(
         cursor,
         spa_id=spa_id,
