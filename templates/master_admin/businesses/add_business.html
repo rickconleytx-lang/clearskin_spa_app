@@ -126,6 +126,58 @@ Add Business | Peach Suite Pro
         </div>
 
         <div class="form-group">
+            <label for="subscription_tier_code">
+                Subscription Plan
+                <span class="required">*</span>
+            </label>
+            <select id="subscription_tier_code"
+                    name="subscription_tier_code"
+                    required>
+                {% for tier in subscription_tiers %}
+                    <option value="{{ tier.code }}"
+                        {% if form_data.get(
+                            'subscription_tier_code',
+                            'solo'
+                        ) == tier.code %}
+                            selected
+                        {% endif %}>
+                        {{ tier.name }}
+                    </option>
+                {% endfor %}
+            </select>
+            <small>
+                Controls the Peach Suite Pro features included
+                for this business.
+            </small>
+        </div>
+
+        <div class="form-group">
+            <label for="organization_type_code">
+                Organization Type
+                <span class="required">*</span>
+            </label>
+            <select id="organization_type_code"
+                    name="organization_type_code"
+                    required>
+                {% for organization_type in organization_types %}
+                    <option value="{{ organization_type.code }}"
+                        {% if form_data.get(
+                            'organization_type_code',
+                            'solo_owner'
+                        ) == organization_type.code %}
+                            selected
+                        {% endif %}>
+                        {{ organization_type.name }}
+                    </option>
+                {% endfor %}
+            </select>
+            <small>
+                Describes how this business is organized.
+                This is separate from its subscription plan.
+            </small>
+        </div>
+
+        <div class="form-group">
             <label for="subscription_status">
                 Subscription Status
                 <span class="required">*</span>
