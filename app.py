@@ -28706,6 +28706,486 @@ def _business_user_invitation_token_hash(raw_token):
     ).hexdigest()
 
 
+
+def _reserve_business_user_invitation(
+    cur,
+    *,
+    spa_id,
+    business_unit_id,
+    invited_first_name,
+    invited_last_name,
+    invited_email,
+    business_relationship_code,
+    membership_role_code,
+    employee_id=None,
+    is_primary_onboarding_invitation=False,
+    invited_by_user_id=None,
+):
+    first_name = str(invited_first_name or "").strip()
+    last_name = str(invited_last_name or "").strip()
+    email = str(invited_email or "").strip().lower()
+    relationship_code = str(
+        business_relationship_code or ""
+    ).strip().lower()
+    role_code = str(
+        membership_role_code or ""
+    ).strip().lower()
+
+    if not first_name:
+        raise ValueError("Invitation first name is required.")
+
+    if not last_name:
+        raise ValueError("Invitation last name is required.")
+
+    if not email:
+        raise ValueError("Invitation email is required.")
+
+    allowed_relationships = {
+        "owner",
+        "manager_administrator",
+        "employee_provider",
+        "it_technical_administrator",
+        "other",
+    }
+
+    if relationship_code not in allowed_relationships:
+        raise ValueError(
+            "Invitation business relationship is invalid."
+        )
+
+    if role_code not in BUSINESS_MEMBERSHIP_ROLE_CODES:
+        raise ValueError(
+            "Invitation PSP workspace role is invalid."
+        )
+
+    is_primary = bool(
+        is_primary_onboarding_invitation
+    )
+
+    if is_primary and relationship_code != "owner":
+        raise ValueError(
+            "Only the Owner invitation may be the primary "
+            "onboarding invitation."
+        )
+
+    # Serialize invitation reservations for this business.
+    cur.execute(
+        """
+        SELECT spa_id
+        FROM spas
+        WHERE spa_id = %s
+          AND active = TRUE
+        FOR UPDATE
+        """,
+        (spa_id,),
+    )
+
+    if not cur.fetchone():
+        raise ValueError(
+            "The business is not available for invitations."
+        )
+
+    cur.execute(
+        """
+        SELECT business_unit_id
+        FROM business_units
+        WHERE spa_id = %s
+          AND business_unit_id = %s
+          AND is_active = TRUE
+        LIMIT 1
+        """,
+        (
+            spa_id,
+            business_unit_id,
+        ),
+    )
+
+    if not cur.fetchone():
+        raise ValueError(
+            "The business workspace is not available."
+        )
+
+    cur.execute(
+        """
+        SELECT user_id
+        FROM users
+        WHERE LOWER(email) = LOWER(%s)
+        LIMIT 1
+        """,
+        (email,),
+    )
+
+    if cur.fetchone():
+        raise ValueError(
+            "A Peach Suite Pro user with this email already exists."
+        )
+
+    normalized_employee_id = None
+
+    if employee_id is not None:
+        try:
+            normalized_employee_id = int(employee_id)
+        except (TypeError, ValueError):
+            raise ValueError(
+                "Invitation employee identity is invalid."
+            )
+
+        if normalized_employee_id <= 0:
+            raise ValueError(
+                "Invitation employee identity is invalid."
+            )
+
+        cur.execute(
+            """
+            SELECT
+                e.employee_id,
+                er.role_slot,
+                ebum.access_level
+            FROM employees e
+            JOIN employee_roles er
+              ON er.employee_role_id = e.employee_role_id
+             AND er.spa_id = e.spa_id
+            JOIN employee_business_unit_memberships ebum
+              ON ebum.spa_id = e.spa_id
+             AND ebum.employee_id = e.employee_id
+             AND ebum.business_unit_id = %s
+            WHERE e.spa_id = %s
+              AND e.employee_id = %s
+              AND e.is_active = TRUE
+              AND er.is_active = TRUE
+              AND ebum.is_active = TRUE
+            LIMIT 1
+            """,
+            (
+                business_unit_id,
+                spa_id,
+                normalized_employee_id,
+            ),
+        )
+
+        employee_row = cur.fetchone()
+
+        if not employee_row:
+            raise ValueError(
+                "The invited employee is not active in this workspace."
+            )
+
+        employee_role_slot = int(employee_row[1])
+        employee_access_level = employee_row[2]
+
+        if relationship_code == "owner":
+            if employee_role_slot != 1:
+                raise ValueError(
+                    "The Owner invitation must use the permanent "
+                    "Owner employee identity."
+                )
+
+            if employee_access_level != 1:
+                raise ValueError(
+                    "The Owner employee must have PSP Access "
+                    "Level 1 before invitation."
+                )
+
+    elif relationship_code == "owner":
+        raise ValueError(
+            "The Owner invitation requires an Owner employee identity."
+        )
+
+    if (
+        relationship_code == "owner"
+        and role_code != "organization_admin"
+    ):
+        raise ValueError(
+            "The Owner invitation requires Business Administrator "
+            "PSP workspace access."
+        )
+
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = _business_user_invitation_token_hash(
+        raw_token
+    )
+
+    cur.execute(
+        """
+        INSERT INTO business_user_invitations (
+            spa_id,
+            business_unit_id,
+            employee_id,
+            invited_first_name,
+            invited_last_name,
+            invited_email,
+            business_relationship_code,
+            membership_role_code,
+            is_primary_onboarding_invitation,
+            token_hash,
+            invited_by_user_id,
+            expires_at
+        )
+        VALUES (
+            %s, %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s,
+            NOW() + (%s * INTERVAL '1 hour')
+        )
+        RETURNING
+            business_user_invitation_id,
+            expires_at
+        """,
+        (
+            spa_id,
+            business_unit_id,
+            normalized_employee_id,
+            first_name,
+            last_name,
+            email,
+            relationship_code,
+            role_code,
+            is_primary,
+            token_hash,
+            invited_by_user_id,
+            BUSINESS_USER_INVITATION_TOKEN_HOURS,
+        ),
+    )
+
+    invitation_row = cur.fetchone()
+
+    if not invitation_row:
+        raise RuntimeError(
+            "Business user invitation reservation failed."
+        )
+
+    return {
+        "business_user_invitation_id": invitation_row[0],
+        "raw_token": raw_token,
+        "expires_at": invitation_row[1],
+        "invited_email": email,
+        "invited_first_name": first_name,
+        "invited_last_name": last_name,
+    }
+
+
+
+def _finalize_business_user_invitation_email(
+    cur,
+    *,
+    spa_id,
+    business_user_invitation_id,
+):
+    # Serialize invitation delivery finalization for this business.
+    cur.execute(
+        """
+        SELECT spa_id
+        FROM spas
+        WHERE spa_id = %s
+          AND active = TRUE
+        FOR UPDATE
+        """,
+        (spa_id,),
+    )
+
+    if not cur.fetchone():
+        raise RuntimeError(
+            "Invitation business is no longer available."
+        )
+
+    cur.execute(
+        """
+        SELECT
+            business_unit_id,
+            invited_email,
+            is_primary_onboarding_invitation,
+            email_sent_at,
+            accepted_at,
+            invalidated_at,
+            expires_at,
+            NOW()
+        FROM business_user_invitations
+        WHERE business_user_invitation_id = %s
+          AND spa_id = %s
+        FOR UPDATE
+        """,
+        (
+            business_user_invitation_id,
+            spa_id,
+        ),
+    )
+
+    invitation = cur.fetchone()
+
+    if not invitation:
+        raise RuntimeError(
+            "Business user invitation is no longer available."
+        )
+
+    business_unit_id = invitation[0]
+    invited_email = invitation[1]
+    is_primary = bool(invitation[2])
+    email_sent_at = invitation[3]
+    accepted_at = invitation[4]
+    invalidated_at = invitation[5]
+    expires_at = invitation[6]
+    now = invitation[7]
+
+    if (
+        email_sent_at is not None
+        or accepted_at is not None
+        or invalidated_at is not None
+        or expires_at <= now
+    ):
+        raise RuntimeError(
+            "Business user invitation cannot be finalized."
+        )
+
+    # A delayed provider response for an older reservation must not
+    # supersede a newer invitation that has already been delivered.
+    cur.execute(
+        """
+        SELECT EXISTS (
+            SELECT 1
+            FROM business_user_invitations
+            WHERE spa_id = %s
+              AND business_user_invitation_id > %s
+              AND email_sent_at IS NOT NULL
+              AND accepted_at IS NULL
+              AND invalidated_at IS NULL
+              AND (
+                    (
+                        business_unit_id = %s
+                        AND LOWER(BTRIM(invited_email))
+                            = LOWER(BTRIM(%s))
+                    )
+                    OR (
+                        %s = TRUE
+                        AND is_primary_onboarding_invitation = TRUE
+                    )
+              )
+        )
+        """,
+        (
+            spa_id,
+            business_user_invitation_id,
+            business_unit_id,
+            invited_email,
+            is_primary,
+        ),
+    )
+
+    newer_delivered_exists = bool(
+        cur.fetchone()[0]
+    )
+
+    if newer_delivered_exists:
+        cur.execute(
+            """
+            UPDATE business_user_invitations
+            SET
+                email_sent_at = NOW(),
+                invalidated_at = NOW()
+            WHERE business_user_invitation_id = %s
+              AND spa_id = %s
+              AND email_sent_at IS NULL
+              AND accepted_at IS NULL
+              AND invalidated_at IS NULL
+              AND expires_at > NOW()
+            RETURNING business_user_invitation_id
+            """,
+            (
+                business_user_invitation_id,
+                spa_id,
+            ),
+        )
+
+        if not cur.fetchone():
+            raise RuntimeError(
+                "Superseded business invitation could not "
+                "be finalized."
+            )
+
+        return False
+
+    # The replacement email was accepted. Revoke only older
+    # conflicting delivered links before activating this one.
+    cur.execute(
+        """
+        UPDATE business_user_invitations
+        SET invalidated_at = NOW()
+        WHERE spa_id = %s
+          AND business_user_invitation_id < %s
+          AND email_sent_at IS NOT NULL
+          AND accepted_at IS NULL
+          AND invalidated_at IS NULL
+          AND (
+                (
+                    business_unit_id = %s
+                    AND LOWER(BTRIM(invited_email))
+                        = LOWER(BTRIM(%s))
+                )
+                OR (
+                    %s = TRUE
+                    AND is_primary_onboarding_invitation = TRUE
+                )
+          )
+        """,
+        (
+            spa_id,
+            business_user_invitation_id,
+            business_unit_id,
+            invited_email,
+            is_primary,
+        ),
+    )
+
+    cur.execute(
+        """
+        UPDATE business_user_invitations
+        SET email_sent_at = NOW()
+        WHERE business_user_invitation_id = %s
+          AND spa_id = %s
+          AND email_sent_at IS NULL
+          AND accepted_at IS NULL
+          AND invalidated_at IS NULL
+          AND expires_at > NOW()
+        RETURNING business_user_invitation_id
+        """,
+        (
+            business_user_invitation_id,
+            spa_id,
+        ),
+    )
+
+    if not cur.fetchone():
+        raise RuntimeError(
+            "Business user invitation could not be finalized."
+        )
+
+    return True
+
+
+def _invalidate_unsent_business_user_invitation(
+    cur,
+    *,
+    spa_id,
+    business_user_invitation_id,
+):
+    cur.execute(
+        """
+        UPDATE business_user_invitations
+        SET invalidated_at = NOW()
+        WHERE business_user_invitation_id = %s
+          AND spa_id = %s
+          AND email_sent_at IS NULL
+          AND accepted_at IS NULL
+          AND invalidated_at IS NULL
+        RETURNING business_user_invitation_id
+        """,
+        (
+            business_user_invitation_id,
+            spa_id,
+        ),
+    )
+
+    return cur.fetchone() is not None
+
+
 def _password_reset_request_limit_state(
     cur,
     user_id,
