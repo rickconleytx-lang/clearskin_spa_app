@@ -6866,6 +6866,7 @@ PASSWORD_RESET_MAX_EMAILS_PER_HOUR = 3
 PASSWORD_RESET_SOURCE_MAX_REQUESTS = 5
 PASSWORD_RESET_SOURCE_WINDOW_MINUTES = 10
 PASSWORD_RESET_RESPONSE_FLOOR_SECONDS = 1.5
+BUSINESS_USER_INVITATION_TOKEN_HOURS = 72
 
 PASSWORD_RESET_PRODUCTION_BASE_URL = (
     "https://app.peachsuitepro.com"
@@ -28689,6 +28690,17 @@ def _password_reset_base_url():
 
 
 def _password_reset_token_hash(raw_token):
+    return hashlib.sha256(
+        str(raw_token or "").encode("utf-8")
+    ).hexdigest()
+
+
+
+def _business_user_invitation_base_url():
+    return _password_reset_base_url()
+
+
+def _business_user_invitation_token_hash(raw_token):
     return hashlib.sha256(
         str(raw_token or "").encode("utf-8")
     ).hexdigest()

@@ -168,7 +168,8 @@ ON business_user_invitations (
     business_unit_id,
     LOWER(BTRIM(invited_email))
 )
-WHERE accepted_at IS NULL
+WHERE email_sent_at IS NOT NULL
+  AND accepted_at IS NULL
   AND invalidated_at IS NULL;
 
 
@@ -178,6 +179,7 @@ ON business_user_invitations (
     spa_id
 )
 WHERE is_primary_onboarding_invitation = TRUE
+  AND email_sent_at IS NOT NULL
   AND accepted_at IS NULL
   AND invalidated_at IS NULL;
 
