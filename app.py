@@ -28723,7 +28723,10 @@ def _reserve_business_user_invitation(
 ):
     first_name = str(invited_first_name or "").strip()
     last_name = str(invited_last_name or "").strip()
-    email = str(invited_email or "").strip().lower()
+    email = _normalize_user_email(
+        invited_email,
+        "Invitation Email",
+    )
     relationship_code = str(
         business_relationship_code or ""
     ).strip().lower()
@@ -28804,6 +28807,26 @@ def _reserve_business_user_invitation(
         raise ValueError(
             "The business workspace is not available."
         )
+
+    if is_primary:
+        cur.execute(
+            """
+            SELECT business_onboarding_id
+            FROM business_onboarding
+            WHERE spa_id = %s
+              AND waiting_on_initial_activation = TRUE
+              AND primary_onboarding_user_id IS NULL
+              AND completed_at IS NULL
+            FOR UPDATE
+            """,
+            (spa_id,),
+        )
+
+        if not cur.fetchone():
+            raise ValueError(
+                "The business is not waiting for initial "
+                "Owner activation."
+            )
 
     cur.execute(
         """
@@ -29184,6 +29207,81 @@ def _invalidate_unsent_business_user_invitation(
     )
 
     return cur.fetchone() is not None
+
+
+
+def _business_user_invitation_record(
+    cur,
+    raw_token,
+    *,
+    for_update=False,
+):
+    token_hash = _business_user_invitation_token_hash(
+        raw_token
+    )
+
+    lock_clause = (
+        " FOR UPDATE OF bui, s, bu"
+        if for_update
+        else ""
+    )
+
+    cur.execute(
+        f"""
+        SELECT
+            bui.business_user_invitation_id,
+            bui.spa_id,
+            bui.business_unit_id,
+            bui.employee_id,
+            bui.invited_first_name,
+            bui.invited_last_name,
+            bui.invited_email,
+            bui.business_relationship_code,
+            bui.membership_role_code,
+            bui.is_primary_onboarding_invitation,
+            bui.invited_by_user_id,
+            bui.email_sent_at,
+            bui.accepted_at,
+            bui.invalidated_at,
+            bui.expires_at,
+            NOW(),
+            s.active,
+            bu.is_active
+        FROM business_user_invitations bui
+        JOIN spas s
+          ON s.spa_id = bui.spa_id
+        JOIN business_units bu
+          ON bu.spa_id = bui.spa_id
+         AND bu.business_unit_id = bui.business_unit_id
+        WHERE bui.token_hash = %s
+        {lock_clause}
+        """,
+        (token_hash,),
+    )
+
+    return cur.fetchone()
+
+
+def _business_user_invitation_usable(record):
+    if not record:
+        return False
+
+    email_sent_at = record[11]
+    accepted_at = record[12]
+    invalidated_at = record[13]
+    expires_at = record[14]
+    now = record[15]
+    business_active = bool(record[16])
+    workspace_active = bool(record[17])
+
+    return bool(
+        email_sent_at is not None
+        and accepted_at is None
+        and invalidated_at is None
+        and expires_at > now
+        and business_active
+        and workspace_active
+    )
 
 
 def _password_reset_request_limit_state(

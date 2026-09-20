@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS business_user_invitations (
 
     invited_last_name VARCHAR(100) NOT NULL,
 
-    invited_email VARCHAR(320) NOT NULL,
+    invited_email VARCHAR(254) NOT NULL,
 
     business_relationship_code VARCHAR(40) NOT NULL,
 
