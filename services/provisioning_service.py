@@ -281,21 +281,25 @@ def ensure_owner_employee_role(cursor, spa_id):
     return cursor.fetchone()[0]
 
 
-def provision_new_business_workspace_foundation(
+def _provision_new_business_workspace_foundation(
     cursor,
     *,
     spa_id,
-    administrator_user_id,
     business_name,
+    administrator_user_id=None,
     actor_user_id=None,
     contact_email="",
     contact_phone="",
 ):
     """
-    Provision the default workspace, administrator membership,
-    PeachBook foundation, and PeachWeb foundation.
+    Provision the default workspace plus PeachBook and PeachWeb
+    foundations.
 
-    This helper intentionally does not commit or roll back.
+    When administrator_user_id is supplied, also create the legacy
+    administrator workspace membership at the same point in the
+    provisioning sequence.
+
+    This private helper intentionally does not commit or roll back.
     The caller owns the transaction boundary.
     """
     defaults = PUBLIC_WEBSITE_DEFAULTS
@@ -331,32 +335,33 @@ def provision_new_business_workspace_foundation(
     )
     business_unit_id = cursor.fetchone()[0]
 
-    cursor.execute(
-        """
-        INSERT INTO business_unit_memberships (
-            spa_id,
-            business_unit_id,
-            user_id,
-            membership_role_code,
-            is_active,
-            granted_by
+    if administrator_user_id is not None:
+        cursor.execute(
+            """
+            INSERT INTO business_unit_memberships (
+                spa_id,
+                business_unit_id,
+                user_id,
+                membership_role_code,
+                is_active,
+                granted_by
+            )
+            VALUES (
+                %s,
+                %s,
+                %s,
+                'organization_admin',
+                TRUE,
+                %s
+            )
+            """,
+            (
+                spa_id,
+                business_unit_id,
+                administrator_user_id,
+                actor_user_id,
+            ),
         )
-        VALUES (
-            %s,
-            %s,
-            %s,
-            'organization_admin',
-            TRUE,
-            %s
-        )
-        """,
-        (
-            spa_id,
-            business_unit_id,
-            administrator_user_id,
-            actor_user_id,
-        ),
-    )
 
     public_slug = build_unique_workspace_public_slug(
         cursor,
@@ -502,6 +507,70 @@ def provision_new_business_workspace_foundation(
         "public_booking_slug": public_slug,
         "public_website_hostname": hostname,
     }
+
+
+def provision_new_business_workspace_without_user(
+    cursor,
+    *,
+    spa_id,
+    business_name,
+    actor_user_id=None,
+    contact_email="",
+    contact_phone="",
+):
+    """
+    Provision a new business workspace before any PSP user exists.
+
+    This is the delegated/invitation onboarding foundation. It creates
+    the workspace, PeachBook foundation, and PeachWeb foundation but
+    deliberately creates no business_unit_membership.
+
+    The caller owns the transaction boundary.
+    """
+    return _provision_new_business_workspace_foundation(
+        cursor,
+        spa_id=spa_id,
+        business_name=business_name,
+        administrator_user_id=None,
+        actor_user_id=actor_user_id,
+        contact_email=contact_email,
+        contact_phone=contact_phone,
+    )
+
+
+def provision_new_business_workspace_foundation(
+    cursor,
+    *,
+    spa_id,
+    administrator_user_id,
+    business_name,
+    actor_user_id=None,
+    contact_email="",
+    contact_phone="",
+):
+    """
+    Preserve the existing direct-provisioning workspace behavior.
+
+    The initial administrator receives an organization_admin
+    membership while the normal workspace, PeachBook, and PeachWeb
+    foundations are created.
+
+    The caller owns the transaction boundary.
+    """
+    if administrator_user_id is None:
+        raise ProvisioningError(
+            "Administrator user is required for direct provisioning."
+        )
+
+    return _provision_new_business_workspace_foundation(
+        cursor,
+        spa_id=spa_id,
+        business_name=business_name,
+        administrator_user_id=administrator_user_id,
+        actor_user_id=actor_user_id,
+        contact_email=contact_email,
+        contact_phone=contact_phone,
+    )
 
 
 def provision_new_business(
