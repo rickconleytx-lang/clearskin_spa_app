@@ -259,6 +259,41 @@ Businesses | Master Admin
                                 >
                                     SMS Compliance
                                 </a>
+
+                                    {% if business.waiting_on_owner_activation %}
+                                        <div class="owner-invitation-action">
+                                            <div class="owner-activation-status">
+                                                Owner Activation Pending
+                                            </div>
+                                            <div class="owner-activation-email">
+                                                {{ business.owner_email }}
+                                            </div>
+                                            <form
+                                                method="POST"
+                                                action="{{
+                                                    url_for(
+                                                        'master_admin_resend_owner_invitation',
+                                                        spa_id=business.spa_id
+                                                    )
+                                                }}"
+                                            >
+                                                <input
+                                                    type="hidden"
+                                                    name="security_csrf_token"
+                                                    value="{{ security_csrf_token }}"
+                                                >
+                                                <button
+                                                    type="submit"
+                                                    class="btn btn-small"
+                                                    onclick="return confirm(
+                                                        'Send a new Owner activation invitation?'
+                                                    )"
+                                                >
+                                                    Resend Owner Invitation
+                                                </button>
+                                            </form>
+                                        </div>
+                                    {% endif %}
                             </td>
 
                         </tr>
@@ -283,6 +318,27 @@ Businesses | Master Admin
 
 
 <style>
+
+.owner-invitation-action {
+    margin-top: 10px;
+}
+
+.owner-activation-status {
+    font-size: 0.78rem;
+    font-weight: 700;
+    line-height: 1.25;
+}
+
+.owner-activation-email {
+    margin: 3px 0 7px;
+    font-size: 0.78rem;
+    overflow-wrap: anywhere;
+}
+
+.owner-invitation-action form {
+    margin: 0;
+}
+
 .master-business-summary {
     display: grid;
     grid-template-columns: repeat(

@@ -6351,6 +6351,170 @@ def write_messaging_compliance_audit(
 
 
 
+@app.route(
+    "/master-admin/businesses/<int:spa_id>/resend-owner-invitation",
+    methods=["POST"]
+)
+@login_required
+@master_admin_required
+def master_admin_resend_owner_invitation(spa_id):
+    submitted_token = request.form.get(
+        "security_csrf_token",
+        ""
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_token
+    ):
+        flash(
+            (
+                "Your security token expired or could not be "
+                "verified. Please try again."
+            ),
+            "error"
+        )
+        return redirect(
+            url_for("master_admin_businesses")
+        )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                s.spa_name,
+                bu.business_unit_id,
+                e.employee_id,
+                e.first_name,
+                e.last_name,
+                e.email
+            FROM spas s
+            JOIN business_onboarding bo
+              ON bo.spa_id = s.spa_id
+             AND bo.waiting_on_initial_activation = TRUE
+             AND bo.primary_onboarding_user_id IS NULL
+             AND bo.completed_at IS NULL
+            JOIN business_units bu
+              ON bu.spa_id = s.spa_id
+             AND bu.is_default = TRUE
+             AND bu.is_active = TRUE
+            JOIN employees e
+              ON e.spa_id = s.spa_id
+             AND e.employee_id = bu.owner_employee_id
+             AND e.is_active = TRUE
+            WHERE s.spa_id = %s
+              AND s.active = TRUE
+            ORDER BY bu.business_unit_id
+            LIMIT 1
+            """,
+            (spa_id,)
+        )
+        owner_row = cur.fetchone()
+    finally:
+        cur.close()
+        conn.close()
+
+    if not owner_row:
+        flash(
+            (
+                "The Owner invitation was not resent because "
+                "this business is no longer waiting for initial "
+                "Owner activation."
+            ),
+            "error"
+        )
+        return redirect(
+            url_for("master_admin_businesses")
+        )
+
+    spa_name = owner_row[0]
+    business_unit_id = owner_row[1]
+    owner_employee_id = owner_row[2]
+    owner_first_name = owner_row[3]
+    owner_last_name = owner_row[4]
+    owner_email = owner_row[5]
+
+    try:
+        invitation_result = _send_business_user_invitation(
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            invited_first_name=owner_first_name,
+            invited_last_name=owner_last_name,
+            invited_email=owner_email,
+            business_relationship_code="owner",
+            membership_role_code="organization_admin",
+            employee_id=owner_employee_id,
+            is_primary_onboarding_invitation=True,
+            invited_by_user_id=session.get("user_id"),
+        )
+    except ValueError:
+        app.logger.warning(
+            "Owner invitation resend rejected for spa_id=%s.",
+            spa_id,
+        )
+        flash(
+            (
+                "The Owner invitation could not be resent because "
+                "the business or Owner activation state changed. "
+                "Refresh the Businesses page and try again."
+            ),
+            "error"
+        )
+        return redirect(
+            url_for("master_admin_businesses")
+        )
+    except Exception:
+        app.logger.exception(
+            "Owner invitation resend failed for spa_id=%s.",
+            spa_id,
+        )
+        flash(
+            (
+                "The Owner invitation could not be resent. "
+                "No existing delivered invitation was removed."
+            ),
+            "error"
+        )
+        return redirect(
+            url_for("master_admin_businesses")
+        )
+
+    invitation_status = invitation_result.get("status")
+
+    if invitation_status == "sent":
+        flash(
+            (
+                f"Owner invitation sent to {owner_email} "
+                f"for {spa_name}."
+            ),
+            "success"
+        )
+    elif invitation_status == "superseded":
+        flash(
+            (
+                f"A newer Owner invitation for {spa_name} "
+                "was already delivered. The newer invitation "
+                "remains active."
+            ),
+            "success"
+        )
+    else:
+        flash(
+            (
+                f"The Owner invitation for {spa_name} could not "
+                "be confirmed as delivered. Any previously "
+                "delivered invitation remains unchanged."
+            ),
+            "error"
+        )
+
+    return redirect(
+        url_for("master_admin_businesses")
+    )
+
+
 @app.route("/master-admin/businesses")
 @login_required
 @master_admin_required
@@ -6373,7 +6537,28 @@ def master_admin_businesses():
                 sms_number_assignment_status,        -- 7
                 sms_marketing_allowed,               -- 8
                 sms_service_suspended,               -- 9
-                sms_marketing_suspended              -- 10
+                sms_marketing_suspended,             -- 10
+                EXISTS (
+                    SELECT 1
+                    FROM business_onboarding bo
+                    WHERE bo.spa_id = spas.spa_id
+                      AND bo.waiting_on_initial_activation = TRUE
+                      AND bo.primary_onboarding_user_id IS NULL
+                      AND bo.completed_at IS NULL
+                ) AS waiting_on_owner_activation,    -- 11
+                (
+                    SELECT e.email
+                    FROM business_units bu
+                    JOIN employees e
+                      ON e.spa_id = bu.spa_id
+                     AND e.employee_id = bu.owner_employee_id
+                    WHERE bu.spa_id = spas.spa_id
+                      AND bu.is_default = TRUE
+                      AND bu.is_active = TRUE
+                      AND e.is_active = TRUE
+                    ORDER BY bu.business_unit_id
+                    LIMIT 1
+                ) AS owner_email                      -- 12
             FROM spas
             ORDER BY
                 spa_name
@@ -6428,6 +6613,8 @@ def master_admin_businesses():
                     "sms_marketing_allowed": bool(row[8]),
                     "sms_service_suspended": bool(row[9]),
                     "sms_marketing_suspended": bool(row[10]),
+                    "waiting_on_owner_activation": bool(row[11]),
+                    "owner_email": row[12] or "",
 
                     "sms_service_enabled": (
                         sms_service_enabled
@@ -6440,7 +6627,8 @@ def master_admin_businesses():
 
         return render_template(
             "master_admin/businesses/businesses.html",
-            businesses=businesses
+            businesses=businesses,
+            security_csrf_token=_security_form_csrf_token()
         )
 
     except Exception as error:
