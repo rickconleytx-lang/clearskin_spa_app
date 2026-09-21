@@ -509,6 +509,153 @@ def _provision_new_business_workspace_foundation(
     }
 
 
+def provision_new_business_owner_employee(
+    cursor,
+    *,
+    spa_id,
+    business_unit_id,
+    owner_first_name,
+    owner_last_name,
+    owner_email="",
+    owner_phone="",
+    actor_user_id=None,
+):
+    """
+    Create the permanent Owner employee identity for a new business.
+
+    The Owner employee always uses Employee Role slot 1 and PSP
+    Access Level 1. This helper creates no PSP user account.
+
+    The caller owns the transaction boundary.
+    """
+    owner_first_name = _required_text(
+        owner_first_name,
+        "Owner first name",
+    )
+    owner_last_name = _required_text(
+        owner_last_name,
+        "Owner last name",
+    )
+    owner_email = str(owner_email or "").strip().lower()
+    owner_phone = str(owner_phone or "").strip()
+
+    cursor.execute(
+        """
+        SELECT business_unit_id
+        FROM business_units
+        WHERE spa_id = %s
+          AND business_unit_id = %s
+          AND is_active = TRUE
+        LIMIT 1
+        """,
+        (
+            spa_id,
+            business_unit_id,
+        ),
+    )
+
+    if not cursor.fetchone():
+        raise ProvisioningError(
+            "The Owner workspace is unavailable."
+        )
+
+    owner_employee_role_id = ensure_owner_employee_role(
+        cursor,
+        spa_id,
+    )
+
+    cursor.execute(
+        """
+        INSERT INTO employees (
+            spa_id,
+            first_name,
+            last_name,
+            employee_role_id,
+            is_active,
+            phone,
+            email,
+            status,
+            created_by,
+            updated_by
+        )
+        VALUES (
+            %s,
+            %s,
+            %s,
+            %s,
+            TRUE,
+            %s,
+            %s,
+            NULL,
+            %s,
+            %s
+        )
+        RETURNING employee_id
+        """,
+        (
+            spa_id,
+            owner_first_name,
+            owner_last_name,
+            owner_employee_role_id,
+            owner_phone or None,
+            owner_email or None,
+            actor_user_id,
+            actor_user_id,
+        ),
+    )
+
+    owner_employee_id = cursor.fetchone()[0]
+
+    cursor.execute(
+        """
+        INSERT INTO employee_business_unit_memberships (
+            spa_id,
+            business_unit_id,
+            employee_id,
+            is_active,
+            assigned_by,
+            access_level
+        )
+        VALUES (%s, %s, %s, TRUE, %s, 1)
+        """,
+        (
+            spa_id,
+            business_unit_id,
+            owner_employee_id,
+            actor_user_id,
+        ),
+    )
+
+    cursor.execute(
+        """
+        UPDATE business_units
+        SET owner_employee_id = %s,
+            updated_by = %s,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE spa_id = %s
+          AND business_unit_id = %s
+          AND is_active = TRUE
+        """,
+        (
+            owner_employee_id,
+            actor_user_id,
+            spa_id,
+            business_unit_id,
+        ),
+    )
+
+    if cursor.rowcount != 1:
+        raise ProvisioningError(
+            "The Owner workspace could not be linked."
+        )
+
+    return {
+        "owner_employee_id": owner_employee_id,
+        "owner_employee_role_id": owner_employee_role_id,
+        "owner_access_level": 1,
+    }
+
+
 def provision_new_business_workspace_without_user(
     cursor,
     *,
