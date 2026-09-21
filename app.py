@@ -60543,11 +60543,15 @@ def mfa_login():
         )
 
     if enrollment_id:
+        candidate_authenticator = context[
+            "candidate_authenticator"
+        ]
+
         if (
-            not authenticator
-            or authenticator[0] != enrollment_id
-            or authenticator[4] is not None
-            or authenticator[5] is not None
+            not candidate_authenticator
+            or candidate_authenticator[0] != enrollment_id
+            or candidate_authenticator[4] is not None
+            or candidate_authenticator[5] is not None
         ):
             return _mfa_login_restart_response()
 
