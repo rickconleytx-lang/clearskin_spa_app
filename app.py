@@ -131,6 +131,7 @@ from services.provisioning_service import (
     PUBLIC_WEBSITE_DEFAULTS,
     ProvisioningError,
     provision_new_business,
+    provision_new_business_for_owner_invitation,
 )
 
 
@@ -57935,6 +57936,354 @@ def master_admin_settings():
         supported_languages=supported_languages,
         sms_email_terms_version=current_terms_version,
         security_csrf_token=security_csrf_token
+    )
+
+
+@app.route(
+    "/master-admin/businesses/add-invitation",
+    methods=["GET", "POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_add_business_invitation():
+    """
+    Parallel invitation-based business creation workflow.
+
+    Creates the business and permanent Owner employee identity first,
+    then sends the actual Owner a secure account-activation invitation.
+    No PSP user or temporary password is created by Master Admin.
+    """
+    security_csrf_token = _security_form_csrf_token()
+
+    choices_conn = get_db_connection()
+    choices_cur = choices_conn.cursor()
+
+    try:
+        choices_cur.execute(
+            """
+            SELECT tier_code, tier_name
+            FROM subscription_tiers
+            WHERE is_active = TRUE
+            ORDER BY display_order, tier_name
+            """
+        )
+        subscription_tiers = [
+            {
+                "code": row[0],
+                "name": row[1],
+            }
+            for row in choices_cur.fetchall()
+        ]
+
+        choices_cur.execute(
+            """
+            SELECT type_code, type_name
+            FROM organization_types
+            WHERE is_active = TRUE
+            ORDER BY display_order, type_name
+            """
+        )
+        organization_types = [
+            {
+                "code": row[0],
+                "name": row[1],
+            }
+            for row in choices_cur.fetchall()
+        ]
+
+    finally:
+        choices_cur.close()
+        choices_conn.close()
+
+    template_name = (
+        "master_admin/businesses/"
+        "add_business_invitation.html"
+    )
+
+    if request.method == "GET":
+        return render_template(
+            template_name,
+            security_csrf_token=security_csrf_token,
+            subscription_tiers=subscription_tiers,
+            organization_types=organization_types,
+            form_data={},
+            error_message=None,
+        )
+
+    submitted_token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_token
+    ):
+        abort(400)
+
+    form_data = request.form.to_dict()
+
+    spa_name = request.form.get(
+        "spa_name",
+        "",
+    ).strip()
+
+    owner_first_name = request.form.get(
+        "owner_first_name",
+        "",
+    ).strip()
+
+    owner_last_name = request.form.get(
+        "owner_last_name",
+        "",
+    ).strip()
+
+    owner_phone = request.form.get(
+        "owner_phone",
+        "",
+    ).strip()
+
+    owner_email_raw = request.form.get(
+        "owner_email",
+        "",
+    )
+
+    timezone_name = request.form.get(
+        "timezone_name",
+        "America/Chicago",
+    ).strip()
+
+    subscription_status = request.form.get(
+        "subscription_status",
+        "Trial",
+    ).strip()
+
+    subscription_tier_code = request.form.get(
+        "subscription_tier_code",
+        "solo",
+    ).strip().lower()
+
+    organization_type_code = request.form.get(
+        "organization_type_code",
+        "solo_owner",
+    ).strip().lower()
+
+    if not spa_name:
+        return render_template(
+            template_name,
+            security_csrf_token=security_csrf_token,
+            subscription_tiers=subscription_tiers,
+            organization_types=organization_types,
+            form_data=form_data,
+            error_message="Business name is required.",
+        )
+
+    if len(spa_name) > 150:
+        return render_template(
+            template_name,
+            security_csrf_token=security_csrf_token,
+            subscription_tiers=subscription_tiers,
+            organization_types=organization_types,
+            form_data=form_data,
+            error_message=(
+                "Business name must be 150 characters or fewer."
+            ),
+        )
+
+    if not owner_first_name or not owner_last_name:
+        return render_template(
+            template_name,
+            security_csrf_token=security_csrf_token,
+            subscription_tiers=subscription_tiers,
+            organization_types=organization_types,
+            form_data=form_data,
+            error_message=(
+                "Business Owner first and last name are required."
+            ),
+        )
+
+    if (
+        len(owner_first_name) > 100
+        or len(owner_last_name) > 100
+    ):
+        return render_template(
+            template_name,
+            security_csrf_token=security_csrf_token,
+            subscription_tiers=subscription_tiers,
+            organization_types=organization_types,
+            form_data=form_data,
+            error_message=(
+                "Business Owner names must be "
+                "100 characters or fewer."
+            ),
+        )
+
+    if len(owner_phone) > 30:
+        return render_template(
+            template_name,
+            security_csrf_token=security_csrf_token,
+            subscription_tiers=subscription_tiers,
+            organization_types=organization_types,
+            form_data=form_data,
+            error_message=(
+                "Owner phone must be 30 characters or fewer."
+            ),
+        )
+
+    try:
+        owner_email = _normalize_user_email(
+            owner_email_raw,
+            "Owner Email",
+        )
+    except ValueError as error:
+        return render_template(
+            template_name,
+            security_csrf_token=security_csrf_token,
+            subscription_tiers=subscription_tiers,
+            organization_types=organization_types,
+            form_data=form_data,
+            error_message=str(error),
+        )
+
+    if not owner_email:
+        return render_template(
+            template_name,
+            security_csrf_token=security_csrf_token,
+            subscription_tiers=subscription_tiers,
+            organization_types=organization_types,
+            form_data=form_data,
+            error_message="Business Owner email is required.",
+        )
+
+    # Preserve normalized email if validation later returns the form.
+    form_data["owner_email"] = owner_email
+
+    actor_user_id = session.get("user_id")
+    conn = None
+    cur = None
+
+    try:
+        conn = get_db_connection()
+        conn.autocommit = False
+        cur = conn.cursor()
+
+        provisioned = (
+            provision_new_business_for_owner_invitation(
+                cur,
+                business_name=spa_name,
+                owner_first_name=owner_first_name,
+                owner_last_name=owner_last_name,
+                owner_email=owner_email,
+                subscription_tier_code=(
+                    subscription_tier_code
+                ),
+                organization_type_code=(
+                    organization_type_code
+                ),
+                subscription_status=subscription_status,
+                timezone_name=timezone_name,
+                owner_phone=owner_phone,
+                actor_user_id=actor_user_id,
+            )
+        )
+
+        conn.commit()
+
+    except ProvisioningError as error:
+        if conn:
+            conn.rollback()
+
+        return render_template(
+            template_name,
+            security_csrf_token=security_csrf_token,
+            subscription_tiers=subscription_tiers,
+            organization_types=organization_types,
+            form_data=form_data,
+            error_message=str(error),
+        )
+
+    except Exception:
+        if conn:
+            conn.rollback()
+
+        app.logger.exception(
+            "Delegated Master Admin business creation failed."
+        )
+
+        return render_template(
+            template_name,
+            security_csrf_token=security_csrf_token,
+            subscription_tiers=subscription_tiers,
+            organization_types=organization_types,
+            form_data=form_data,
+            error_message=(
+                "The business could not be created. "
+                "No changes were saved."
+            ),
+        )
+
+    finally:
+        if cur:
+            cur.close()
+
+        if conn:
+            conn.close()
+
+    invitation_status = "delivery_failed"
+
+    try:
+        invitation_result = _send_business_user_invitation(
+            spa_id=provisioned["spa_id"],
+            business_unit_id=provisioned[
+                "business_unit_id"
+            ],
+            invited_first_name=owner_first_name,
+            invited_last_name=owner_last_name,
+            invited_email=owner_email,
+            business_relationship_code="owner",
+            membership_role_code="organization_admin",
+            employee_id=provisioned["owner_employee_id"],
+            is_primary_onboarding_invitation=True,
+            invited_by_user_id=actor_user_id,
+        )
+
+        invitation_status = str(
+            invitation_result.get("status") or ""
+        ).strip().lower()
+
+    except Exception:
+        app.logger.exception(
+            "Owner invitation send failed after business "
+            "provisioning for spa_id=%s.",
+            provisioned["spa_id"],
+        )
+
+    if invitation_status == "sent":
+        flash(
+            (
+                f"{spa_name} was created successfully. "
+                f"Registration Number: "
+                f"{provisioned['registration_number']}. "
+                f"Business ID: {provisioned['spa_id']}. "
+                f"Workspace ID: "
+                f"{provisioned['business_unit_id']}. "
+                f"Owner invitation sent to {owner_email}."
+            ),
+            "success",
+        )
+
+    else:
+        flash(
+            (
+                f"{spa_name} was created successfully, but "
+                "the Owner invitation could not be confirmed "
+                f"as delivered to {owner_email}. "
+                "The Owner account has not been activated."
+            ),
+            "error",
+        )
+
+    return redirect(
+        url_for("master_admin_home")
     )
 
 

@@ -1,0 +1,293 @@
+{% extends "base.html" %}
+
+{% block title %}
+Add Business | Peach Suite Pro
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+    <div>
+        <h1>Add Business</h1>
+
+        <p>
+            Create a new Peach Suite Pro business workspace
+            and invite the actual Business Owner to activate their account.
+        </p>
+    </div>
+</div>
+
+{% if error_message %}
+    <div class="alert alert-error">
+        {{ error_message }}
+    </div>
+{% endif %}
+
+<form method="POST"
+      action=""
+      class="standard-form">
+
+    <input type="hidden"
+           name="security_csrf_token"
+           value="{{ security_csrf_token }}">
+
+    <section class="form-card">
+        <h2>Business Information</h2>
+
+        <div class="form-group">
+            <label for="spa_name">
+                Business Name
+                <span class="required">*</span>
+            </label>
+
+            <input type="text"
+                   id="spa_name"
+                   name="spa_name"
+                   value="{{ form_data.get('spa_name', '') }}"
+                   maxlength="150"
+                   required
+                   autofocus>
+        </div>
+
+        <div class="form-group">
+            <label for="owner_phone">
+                Owner Phone
+            </label>
+
+            <input type="tel"
+                   id="owner_phone"
+                   name="owner_phone"
+                   value="{{ form_data.get('owner_phone', '') }}"
+                   maxlength="30">
+        </div>
+
+        <div class="form-group">
+            <label for="timezone_name">
+                Business Time Zone
+                <span class="required">*</span>
+            </label>
+
+            <select id="timezone_name"
+                    name="timezone_name"
+                    required>
+
+                <option value="America/New_York"
+                    {% if form_data.get('timezone_name') == 'America/New_York' %}
+                        selected
+                    {% endif %}>
+                    Eastern Time
+                </option>
+
+                <option value="America/Chicago"
+                    {% if form_data.get(
+                        'timezone_name',
+                        'America/Chicago'
+                    ) == 'America/Chicago' %}
+                        selected
+                    {% endif %}>
+                    Central Time
+                </option>
+
+                <option value="America/Denver"
+                    {% if form_data.get('timezone_name') == 'America/Denver' %}
+                        selected
+                    {% endif %}>
+                    Mountain Time
+                </option>
+
+                <option value="America/Phoenix"
+                    {% if form_data.get('timezone_name') == 'America/Phoenix' %}
+                        selected
+                    {% endif %}>
+                    Arizona Time
+                </option>
+
+                <option value="America/Los_Angeles"
+                    {% if form_data.get('timezone_name') == 'America/Los_Angeles' %}
+                        selected
+                    {% endif %}>
+                    Pacific Time
+                </option>
+
+                <option value="America/Anchorage"
+                    {% if form_data.get('timezone_name') == 'America/Anchorage' %}
+                        selected
+                    {% endif %}>
+                    Alaska Time
+                </option>
+
+                <option value="Pacific/Honolulu"
+                    {% if form_data.get('timezone_name') == 'Pacific/Honolulu' %}
+                        selected
+                    {% endif %}>
+                    Hawaii Time
+                </option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="subscription_tier_code">
+                Subscription Plan
+                <span class="required">*</span>
+            </label>
+            <select id="subscription_tier_code"
+                    name="subscription_tier_code"
+                    required>
+                {% for tier in subscription_tiers %}
+                    <option value="{{ tier.code }}"
+                        {% if form_data.get(
+                            'subscription_tier_code',
+                            'solo'
+                        ) == tier.code %}
+                            selected
+                        {% endif %}>
+                        {{ tier.name }}
+                    </option>
+                {% endfor %}
+            </select>
+            <small>
+                Controls the Peach Suite Pro features included
+                for this business.
+            </small>
+        </div>
+
+        <div class="form-group">
+            <label for="organization_type_code">
+                Organization Type
+                <span class="required">*</span>
+            </label>
+            <select id="organization_type_code"
+                    name="organization_type_code"
+                    required>
+                {% for organization_type in organization_types %}
+                    <option value="{{ organization_type.code }}"
+                        {% if form_data.get(
+                            'organization_type_code',
+                            'solo_owner'
+                        ) == organization_type.code %}
+                            selected
+                        {% endif %}>
+                        {{ organization_type.name }}
+                    </option>
+                {% endfor %}
+            </select>
+            <small>
+                Describes how this business is organized.
+                This is separate from its subscription plan.
+            </small>
+        </div>
+
+        <div class="form-group">
+            <label for="subscription_status">
+                Subscription Status
+                <span class="required">*</span>
+            </label>
+
+            <select id="subscription_status"
+                    name="subscription_status"
+                    required>
+
+                <option value="Trial"
+                    {% if form_data.get(
+                        'subscription_status',
+                        'Trial'
+                    ) == 'Trial' %}
+                        selected
+                    {% endif %}>
+                    Trial
+                </option>
+
+                <option value="Active"
+                    {% if form_data.get('subscription_status') == 'Active' %}
+                        selected
+                    {% endif %}>
+                    Active
+                </option>
+
+                <option value="Complimentary"
+                    {% if form_data.get('subscription_status') == 'Complimentary' %}
+                        selected
+                    {% endif %}>
+                    Complimentary
+                </option>
+            </select>
+        </div>
+    </section>
+
+    <section class="form-card">
+        <h2>Business Owner</h2>
+        <p>
+            Enter the actual Business Owner. Peach Suite Pro
+            will create the Owner employee identity now and
+            send this person a secure invitation to create
+            their own login.
+        </p>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label for="owner_first_name">
+                    First Name
+                    <span class="required">*</span>
+                </label>
+
+                <input type="text"
+                       id="owner_first_name"
+                       name="owner_first_name"
+                       value="{{ form_data.get('owner_first_name', '') }}"
+                       maxlength="100"
+                       required>
+            </div>
+
+            <div class="form-group">
+                <label for="owner_last_name">
+                    Last Name
+                    <span class="required">*</span>
+                </label>
+
+                <input type="text"
+                       id="owner_last_name"
+                       name="owner_last_name"
+                       value="{{ form_data.get('owner_last_name', '') }}"
+                       maxlength="100"
+                       required>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="owner_email">
+                Owner Email
+                <span class="required">*</span>
+            </label>
+
+            <input type="email"
+                   id="owner_email"
+                   name="owner_email"
+                   value="{{ form_data.get('owner_email', '') }}"
+                   maxlength="255"
+                   autocomplete="email"
+                   required>
+
+            <small>
+                A secure account-activation invitation will be sent
+                to this address. The Owner will create their own
+                permanent password.
+            </small>
+        </div>
+    </section>
+
+    <div class="form-actions">
+        <button type="submit"
+                class="btn">
+            Create Business &amp; Send Owner Invitation
+        </button>
+
+        <button type="button"
+                class="btn btn-secondary"
+                onclick="history.back()">
+            Cancel
+        </button>
+    </div>
+
+</form>
+
+{% endblock %}
