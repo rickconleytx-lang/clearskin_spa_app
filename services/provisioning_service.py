@@ -720,6 +720,288 @@ def provision_new_business_workspace_foundation(
     )
 
 
+def _provision_new_business_record(
+    cursor,
+    *,
+    business_name,
+    owner_first_name,
+    owner_last_name,
+    owner_email,
+    subscription_tier_code,
+    organization_type_code,
+    subscription_status,
+    timezone_name,
+    owner_phone="",
+):
+    """
+    Create the tenant-level business record and shared defaults.
+
+    Inputs are expected to be normalized and validated by the public
+    provisioning workflow. The caller owns the transaction boundary.
+    """
+    cursor.execute(
+        """
+        SELECT spa_id
+        FROM spas
+        WHERE LOWER(spa_name) = LOWER(%s)
+        LIMIT 1
+        """,
+        (business_name,),
+    )
+
+    if cursor.fetchone():
+        raise ProvisioningError(
+            "A business with this name already exists."
+        )
+
+    cursor.execute(
+        """
+        SELECT user_id
+        FROM users
+        WHERE LOWER(email) = LOWER(%s)
+           OR LOWER(username) = LOWER(%s)
+        LIMIT 1
+        """,
+        (
+            owner_email,
+            owner_email,
+        ),
+    )
+
+    if cursor.fetchone():
+        raise ProvisioningError(
+            "A user with this email address already exists."
+        )
+
+    cursor.execute(
+        """
+        SELECT subscription_tier_id
+        FROM subscription_tiers
+        WHERE tier_code = %s
+          AND is_active = TRUE
+        LIMIT 1
+        """,
+        (subscription_tier_code,),
+    )
+
+    tier_row = cursor.fetchone()
+
+    if not tier_row:
+        raise ProvisioningError(
+            "The selected subscription tier is unavailable."
+        )
+
+    subscription_tier_id = tier_row[0]
+
+    cursor.execute(
+        """
+        SELECT organization_type_id
+        FROM organization_types
+        WHERE type_code = %s
+          AND is_active = TRUE
+        LIMIT 1
+        """,
+        (organization_type_code,),
+    )
+
+    organization_row = cursor.fetchone()
+
+    if not organization_row:
+        raise ProvisioningError(
+            "The selected organization type is unavailable."
+        )
+
+    organization_type_id = organization_row[0]
+
+    cursor.execute(
+        """
+        INSERT INTO spas (
+            spa_name,
+            owner_first_name,
+            owner_last_name,
+            owner_phone,
+            owner_email,
+            timezone_name,
+            subscription_status,
+            subscription_tier_id,
+            organization_type_id,
+            active
+        )
+        VALUES (
+            %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, TRUE
+        )
+        RETURNING spa_id
+        """,
+        (
+            business_name,
+            owner_first_name,
+            owner_last_name,
+            owner_phone or None,
+            owner_email,
+            timezone_name,
+            subscription_status,
+            subscription_tier_id,
+            organization_type_id,
+        ),
+    )
+
+    spa_id = cursor.fetchone()[0]
+
+    ensure_owner_employee_role(
+        cursor,
+        spa_id,
+    )
+
+    seed_client_status_defaults(
+        cursor,
+        spa_id,
+    )
+
+    registration_number = build_registration_number(
+        business_name,
+        spa_id,
+    )
+
+    cursor.execute(
+        """
+        UPDATE spas
+        SET registration_number = %s
+        WHERE spa_id = %s
+        """,
+        (
+            registration_number,
+            spa_id,
+        ),
+    )
+
+    return {
+        "spa_id": spa_id,
+        "registration_number": registration_number,
+    }
+
+
+def provision_new_business_for_owner_invitation(
+    cursor,
+    *,
+    business_name,
+    owner_first_name,
+    owner_last_name,
+    owner_email,
+    subscription_tier_code,
+    organization_type_code,
+    subscription_status,
+    timezone_name="America/Chicago",
+    owner_phone="",
+    actor_user_id=None,
+):
+    """
+    Provision a business that is waiting for its Owner to activate.
+
+    The actual Owner receives a permanent employee identity and
+    workspace Access Level 1, but no PSP user is created. The Owner's
+    PSP account will be created only when the invitation is accepted.
+
+    This function intentionally does not commit or roll back.
+    """
+    business_name = _required_text(
+        business_name,
+        "Business name",
+    )
+    owner_first_name = _required_text(
+        owner_first_name,
+        "Owner first name",
+    )
+    owner_last_name = _required_text(
+        owner_last_name,
+        "Owner last name",
+    )
+    owner_email = _required_text(
+        owner_email,
+        "Owner email",
+    ).lower()
+    subscription_tier_code = _required_text(
+        subscription_tier_code,
+        "Subscription tier",
+    ).lower()
+    organization_type_code = _required_text(
+        organization_type_code,
+        "Organization type",
+    ).lower()
+    subscription_status = _required_text(
+        subscription_status,
+        "Subscription status",
+    )
+    timezone_name = _required_text(
+        timezone_name,
+        "Business time zone",
+    )
+    owner_phone = str(owner_phone or "").strip()
+
+    business_record = _provision_new_business_record(
+        cursor,
+        business_name=business_name,
+        owner_first_name=owner_first_name,
+        owner_last_name=owner_last_name,
+        owner_email=owner_email,
+        subscription_tier_code=subscription_tier_code,
+        organization_type_code=organization_type_code,
+        subscription_status=subscription_status,
+        timezone_name=timezone_name,
+        owner_phone=owner_phone,
+    )
+
+    spa_id = business_record["spa_id"]
+
+    foundation = provision_new_business_workspace_without_user(
+        cursor,
+        spa_id=spa_id,
+        business_name=business_name,
+        actor_user_id=actor_user_id,
+        contact_email=owner_email,
+        contact_phone=owner_phone,
+    )
+
+    owner = provision_new_business_owner_employee(
+        cursor,
+        spa_id=spa_id,
+        business_unit_id=foundation["business_unit_id"],
+        owner_first_name=owner_first_name,
+        owner_last_name=owner_last_name,
+        owner_email=owner_email,
+        owner_phone=owner_phone,
+        actor_user_id=actor_user_id,
+    )
+
+    cursor.execute(
+        """
+        INSERT INTO business_onboarding (
+            spa_id,
+            account_opened_by_user_id,
+            primary_onboarding_user_id,
+            waiting_on_initial_activation
+        )
+        VALUES (%s, %s, NULL, TRUE)
+        """,
+        (
+            spa_id,
+            actor_user_id,
+        ),
+    )
+
+    return {
+        "spa_id": spa_id,
+        "owner_employee_id": owner["owner_employee_id"],
+        "registration_number": business_record[
+            "registration_number"
+        ],
+        "subscription_tier_code": subscription_tier_code,
+        "organization_type_code": organization_type_code,
+        "waiting_on_initial_activation": True,
+        **foundation,
+    }
+
+
 def provision_new_business(
     cursor,
     *,
@@ -782,132 +1064,23 @@ def provision_new_business(
     )
     owner_phone = str(owner_phone or "").strip()
 
-    cursor.execute(
-        """
-        SELECT spa_id
-        FROM spas
-        WHERE LOWER(spa_name) = LOWER(%s)
-        LIMIT 1
-        """,
-        (business_name,),
-    )
-    if cursor.fetchone():
-        raise ProvisioningError(
-            "A business with this name already exists."
-        )
-
-    cursor.execute(
-        """
-        SELECT user_id
-        FROM users
-        WHERE LOWER(email) = LOWER(%s)
-           OR LOWER(username) = LOWER(%s)
-        LIMIT 1
-        """,
-        (
-            owner_email,
-            owner_email,
-        ),
-    )
-    if cursor.fetchone():
-        raise ProvisioningError(
-            "A user with this email address already exists."
-        )
-
-    cursor.execute(
-        """
-        SELECT subscription_tier_id
-        FROM subscription_tiers
-        WHERE tier_code = %s
-          AND is_active = TRUE
-        LIMIT 1
-        """,
-        (subscription_tier_code,),
-    )
-    tier_row = cursor.fetchone()
-    if not tier_row:
-        raise ProvisioningError(
-            "The selected subscription tier is unavailable."
-        )
-    subscription_tier_id = tier_row[0]
-
-    cursor.execute(
-        """
-        SELECT organization_type_id
-        FROM organization_types
-        WHERE type_code = %s
-          AND is_active = TRUE
-        LIMIT 1
-        """,
-        (organization_type_code,),
-    )
-    organization_row = cursor.fetchone()
-    if not organization_row:
-        raise ProvisioningError(
-            "The selected organization type is unavailable."
-        )
-    organization_type_id = organization_row[0]
-
-    cursor.execute(
-        """
-        INSERT INTO spas (
-            spa_name,
-            owner_first_name,
-            owner_last_name,
-            owner_phone,
-            owner_email,
-            timezone_name,
-            subscription_status,
-            subscription_tier_id,
-            organization_type_id,
-            active
-        )
-        VALUES (
-            %s, %s, %s, %s, %s,
-            %s, %s, %s, %s, TRUE
-        )
-        RETURNING spa_id
-        """,
-        (
-            business_name,
-            owner_first_name,
-            owner_last_name,
-            owner_phone or None,
-            owner_email,
-            timezone_name,
-            subscription_status,
-            subscription_tier_id,
-            organization_type_id,
-        ),
-    )
-    spa_id = cursor.fetchone()[0]
-
-    ensure_owner_employee_role(
+    business_record = _provision_new_business_record(
         cursor,
-        spa_id,
+        business_name=business_name,
+        owner_first_name=owner_first_name,
+        owner_last_name=owner_last_name,
+        owner_email=owner_email,
+        subscription_tier_code=subscription_tier_code,
+        organization_type_code=organization_type_code,
+        subscription_status=subscription_status,
+        timezone_name=timezone_name,
+        owner_phone=owner_phone,
     )
 
-    seed_client_status_defaults(
-        cursor,
-        spa_id,
-    )
-
-    registration_number = build_registration_number(
-        business_name,
-        spa_id,
-    )
-
-    cursor.execute(
-        """
-        UPDATE spas
-        SET registration_number = %s
-        WHERE spa_id = %s
-        """,
-        (
-            registration_number,
-            spa_id,
-        ),
-    )
+    spa_id = business_record["spa_id"]
+    registration_number = business_record[
+        "registration_number"
+    ]
 
     cursor.execute(
         """
