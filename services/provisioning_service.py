@@ -66,6 +66,17 @@ DEFAULT_CLIENT_STATUSES = (
 )
 
 
+DEFAULT_PSP_ACCESS_AREA_LEVELS = (
+    ("employees_compensation", 1),
+    ("financial_management", 1),
+    ("add_income", 1),
+    ("add_expense", 1),
+    ("business_goals", 1),
+    ("business_users", 1),
+    ("business_security", 1),
+)
+
+
 def _required_text(value, field_name):
     value = str(value or "").strip()
     if not value:
@@ -281,6 +292,50 @@ def ensure_owner_employee_role(cursor, spa_id):
     return cursor.fetchone()[0]
 
 
+def seed_psp_access_area_defaults(
+    cursor,
+    *,
+    spa_id,
+    business_unit_id,
+):
+    """
+    Seed the seven restricted PSP Access Areas for one workspace.
+
+    New workspaces begin conservatively at Access Level 1, matching
+    the original psp_access_levels_v1 migration. The operation is
+    idempotent so it is safe to call during provisioning.
+    """
+    cursor.executemany(
+        """
+        INSERT INTO psp_access_area_settings (
+            spa_id,
+            business_unit_id,
+            area_key,
+            required_access_level
+        )
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (
+            spa_id,
+            business_unit_id,
+            area_key
+        )
+        DO NOTHING
+        """,
+        [
+            (
+                spa_id,
+                business_unit_id,
+                area_key,
+                required_access_level,
+            )
+            for (
+                area_key,
+                required_access_level,
+            ) in DEFAULT_PSP_ACCESS_AREA_LEVELS
+        ],
+    )
+
+
 def _provision_new_business_workspace_foundation(
     cursor,
     *,
@@ -334,6 +389,12 @@ def _provision_new_business_workspace_foundation(
         ),
     )
     business_unit_id = cursor.fetchone()[0]
+
+    seed_psp_access_area_defaults(
+        cursor,
+        spa_id=spa_id,
+        business_unit_id=business_unit_id,
+    )
 
     if administrator_user_id is not None:
         cursor.execute(
