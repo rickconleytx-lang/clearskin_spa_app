@@ -70,58 +70,23 @@ Add Business | Peach Suite Pro
             <select id="timezone_name"
                     name="timezone_name"
                     required>
-
-                <option value="America/New_York"
-                    {% if form_data.get('timezone_name') == 'America/New_York' %}
-                        selected
-                    {% endif %}>
-                    Eastern Time
-                </option>
-
-                <option value="America/Chicago"
-                    {% if form_data.get(
-                        'timezone_name',
-                        'America/Chicago'
-                    ) == 'America/Chicago' %}
-                        selected
-                    {% endif %}>
-                    Central Time
-                </option>
-
-                <option value="America/Denver"
-                    {% if form_data.get('timezone_name') == 'America/Denver' %}
-                        selected
-                    {% endif %}>
-                    Mountain Time
-                </option>
-
-                <option value="America/Phoenix"
-                    {% if form_data.get('timezone_name') == 'America/Phoenix' %}
-                        selected
-                    {% endif %}>
-                    Arizona Time
-                </option>
-
-                <option value="America/Los_Angeles"
-                    {% if form_data.get('timezone_name') == 'America/Los_Angeles' %}
-                        selected
-                    {% endif %}>
-                    Pacific Time
-                </option>
-
-                <option value="America/Anchorage"
-                    {% if form_data.get('timezone_name') == 'America/Anchorage' %}
-                        selected
-                    {% endif %}>
-                    Alaska Time
-                </option>
-
-                <option value="Pacific/Honolulu"
-                    {% if form_data.get('timezone_name') == 'Pacific/Honolulu' %}
-                        selected
-                    {% endif %}>
-                    Hawaii Time
-                </option>
+                {% for group_label, options in timezone_options %}
+                    <optgroup label="{{ group_label }}">
+                        {% for timezone_value, timezone_label in options %}
+                            <option
+                                value="{{ timezone_value }}"
+                                {% if form_data.get(
+                                    'timezone_name',
+                                    'America/Chicago'
+                                ) == timezone_value %}
+                                    selected
+                                {% endif %}
+                            >
+                                {{ timezone_label }}
+                            </option>
+                        {% endfor %}
+                    </optgroup>
+                {% endfor %}
             </select>
         </div>
 

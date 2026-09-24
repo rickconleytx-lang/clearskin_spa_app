@@ -1184,7 +1184,8 @@ def build_coach(
     priority_actions=None,
     spa_now=None,
     coach_session=None,
-    appointments_enabled=True
+    appointments_enabled=True,
+    setup_progress=None
 ):
 
     if spa_now is None:
@@ -1498,6 +1499,41 @@ def build_coach(
         for part in message_parts
         if part and part.strip()
     )
+
+    # While initial business setup is still in progress, keep the
+    # normal Coach engine intact but replace its main message with
+    # onboarding guidance.
+    if (
+        isinstance(setup_progress, dict)
+        and not setup_progress.get("is_complete", False)
+    ):
+        completed_count = int(
+            setup_progress.get("completed_count") or 0
+        )
+        total_count = int(
+            setup_progress.get("total_count") or 0
+        )
+        next_step = setup_progress.get("next_step") or {}
+        next_step_title = next_step.get("title")
+
+        if next_step_title:
+            if completed_count == 0:
+                message = (
+                    f"{greeting} Your Peach Suite Pro workspace is ready. "
+                    f"Your first setup step is {next_step_title}. "
+                    "Use the Onboarding / Setup Checklist below to get "
+                    "started. I’ll guide you through each remaining "
+                    "setup step."
+                )
+            else:
+                message = (
+                    f"{greeting} Your Peach Suite Pro setup is "
+                    f"{completed_count} of {total_count} steps complete. "
+                    f"Your next setup step is {next_step_title}. "
+                    "Use the Onboarding / Setup Checklist below to "
+                    "continue. I’ll guide you through each remaining "
+                    "setup step."
+                )
 
     # ---------------------------------------------------------
     # Build the opening Coach interaction

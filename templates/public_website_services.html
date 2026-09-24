@@ -111,15 +111,24 @@ Website Services | Peach Suite Pro
 
 
     <div class="page-title">
-        <h1>Website Services</h1>
+        <h1>
+            {% if onboarding_requested %}
+                Online Website and Booking Services
+            {% else %}
+                Website Services
+            {% endif %}
+        </h1>
     </div>
 
 
     <p>
         Choose which active services from the shared Service Catalog
-        appear on this workspace's public website. Website descriptions
-        and display order are managed here without changing appointment
-        pricing or duration.
+        are available online. This setup is required for
+        <strong>PeachBook</strong>, even if your business does not
+        use PeachWeb. If you use PeachWeb, enabled services can also
+        appear on your public website. Descriptions and display order
+        are managed here without changing appointment pricing or
+        duration.
     </p>
 
 
@@ -144,6 +153,12 @@ Website Services | Peach Suite Pro
             href="{{
                 url_for(
                     'public_website_services',
+                    status='shown',
+                    onboarding=1
+                )
+                if onboarding_requested
+                else url_for(
+                    'public_website_services',
                     status='shown'
                 )
             }}"
@@ -155,6 +170,12 @@ Website Services | Peach Suite Pro
         <a
             href="{{
                 url_for(
+                    'public_website_services',
+                    status='hidden',
+                    onboarding=1
+                )
+                if onboarding_requested
+                else url_for(
                     'public_website_services',
                     status='hidden'
                 )
@@ -168,6 +189,12 @@ Website Services | Peach Suite Pro
             href="{{
                 url_for(
                     'public_website_services',
+                    status='all',
+                    onboarding=1
+                )
+                if onboarding_requested
+                else url_for(
+                    'public_website_services',
                     status='all'
                 )
             }}"
@@ -180,10 +207,12 @@ Website Services | Peach Suite Pro
 
 
     <div class="website-services-reminder">
-        <strong>Website visibility reminder:</strong>
-        A service appears on your public website only when
-        <strong>Show on Website</strong> is enabled and at least one
-        active provider is assigned and marked
+        <strong>Online booking visibility reminder:</strong>
+        A service must be enabled here before it can be offered
+        through <strong>PeachBook</strong>. This is required even
+        if your business does not use PeachWeb. For the service to
+        become publicly bookable, at least one active provider must
+        also be assigned and marked
         <strong>Publicly Bookable</strong>.
     </div>
 
@@ -305,6 +334,12 @@ Website Services | Peach Suite Pro
                                         href="{{
                                             url_for(
                                                 'edit_public_website_service',
+                                                service_type_id=service[0],
+                                                onboarding=1
+                                            )
+                                            if onboarding_requested
+                                            else url_for(
+                                                'edit_public_website_service',
                                                 service_type_id=service[0]
                                             )
                                         }}"
@@ -334,6 +369,77 @@ Website Services | Peach Suite Pro
 
         <div class="empty-state">
             No active services match this view.
+        </div>
+
+    {% endif %}
+
+
+    {% if onboarding_requested %}
+
+        <div
+            class="dashboard-card"
+            style="margin-top: 24px;"
+        >
+
+            <h2>
+                🍑 Coach Peach Setup —
+                Online Website and Booking Services
+            </h2>
+
+            <p>
+                Select which services clients can find and book
+                online. This setup is required for PeachBook even
+                if your business does not use PeachWeb.
+            </p>
+
+            <p>
+                Enable at least one active service here. Provider
+                assignment and the
+                <strong>Publicly Bookable</strong> setting will be
+                completed later in setup.
+            </p>
+
+            {% if shown_count > 0 %}
+
+                <form
+                    method="POST"
+                    action="{{ url_for(
+                        'complete_website_services_onboarding'
+                    ) }}"
+                    style="margin: 0;"
+                >
+
+                    <input
+                        type="hidden"
+                        name="security_csrf_token"
+                        value="{{ security_csrf_token }}"
+                    >
+
+                    <button
+                        type="submit"
+                        class="btn"
+                    >
+                        Continue with Setup
+                    </button>
+
+                </form>
+
+            {% else %}
+
+                <p>
+                    <strong>
+                        Enable at least one active service for online
+                        booking before continuing with setup.
+                    </strong>
+                </p>
+
+                <p style="margin-bottom: 0;">
+                    Use <strong>Edit Website Display</strong> above
+                    to enable a service, then return here to continue.
+                </p>
+
+            {% endif %}
+
         </div>
 
     {% endif %}

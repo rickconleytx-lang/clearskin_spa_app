@@ -3083,6 +3083,17 @@ document.addEventListener(
 
             <div class="peach-help-footer-actions">
 
+                <a
+                    id="peachHelpWebSupportLink"
+                    class="tool-pill tool-pill-small"
+                    href="#"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    hidden
+                >
+                    🌐 Open on Web Support Center
+                </a>
+
                 <button
                     type="button"
                     id="peachHelpAskCoachButton"
@@ -3763,6 +3774,10 @@ async function loadPeachHelpArticle(pageKey) {
         "peachHelpAskCoachButton"
     );
 
+    const webSupportLink = document.getElementById(
+        "peachHelpWebSupportLink"
+    );
+
     if (
         !topicView
         || !articleView
@@ -3774,6 +3789,11 @@ async function loadPeachHelpArticle(pageKey) {
     }
 
     peachHelpCurrentArticle = null;
+
+    if (webSupportLink) {
+        webSupportLink.hidden = true;
+        webSupportLink.removeAttribute("href");
+    }
 
     topicView.hidden = true;
     articleView.hidden = false;
@@ -3792,7 +3812,7 @@ async function loadPeachHelpArticle(pageKey) {
     if (coachButton) {
         coachButton.disabled = true;
         coachButton.title =
-            "Available wiwth Coach Peach AI";
+            "Available with Coach Peach AI";
     }
 
     try {
@@ -3827,6 +3847,15 @@ async function loadPeachHelpArticle(pageKey) {
         const article = data.article;
 
         peachHelpCurrentArticle = article;
+
+        if (
+            webSupportLink
+            && article.public_support_url
+        ) {
+            webSupportLink.href =
+                article.public_support_url;
+            webSupportLink.hidden = false;
+        }
 
         if (titleElement) {
             titleElement.textContent =

@@ -1040,13 +1040,15 @@ def provision_new_business_for_owner_invitation(
             spa_id,
             account_opened_by_user_id,
             primary_onboarding_user_id,
-            waiting_on_initial_activation
+            waiting_on_initial_activation,
+            initial_business_unit_id
         )
-        VALUES (%s, %s, NULL, TRUE)
+        VALUES (%s, %s, NULL, TRUE, %s)
         """,
         (
             spa_id,
             actor_user_id,
+            foundation["business_unit_id"],
         ),
     )
 
@@ -1199,6 +1201,21 @@ def provision_new_business(
         actor_user_id=actor_user_id,
         contact_email=owner_email,
         contact_phone=owner_phone,
+    )
+
+    cursor.execute(
+        """
+        UPDATE business_onboarding
+        SET
+            initial_business_unit_id = %s,
+            updated_at = NOW()
+        WHERE spa_id = %s
+          AND initial_business_unit_id IS NULL
+        """,
+        (
+            foundation["business_unit_id"],
+            spa_id,
+        ),
     )
 
     return {

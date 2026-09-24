@@ -10,6 +10,12 @@
 
 {% block content %}
 
+{% set service_catalog_url =
+    url_for('service_types', onboarding=1)
+    if onboarding_requested
+    else url_for('service_types')
+%}
+
 <style>
     .service-form-page {
         max-width: 720px;
@@ -102,7 +108,7 @@
     <div class="page-tool-pills">
 
         <a
-            href="{{ url_for('service_types') }}"
+            href="{{ service_catalog_url }}"
             class="tool-pill tool-pill-small"
         >
             Service Catalog
@@ -143,6 +149,14 @@
     <div class="service-form-card">
 
         <form method="POST">
+
+            {% if onboarding_requested %}
+                <input
+                    type="hidden"
+                    name="onboarding"
+                    value="1"
+                >
+            {% endif %}
 
             <div class="service-form-field">
 
@@ -285,7 +299,7 @@
                 </button>
 
                 <a
-                    href="{{ url_for('service_types') }}"
+                    href="{{ service_catalog_url }}"
                     class="btn"
                 >
                     Cancel

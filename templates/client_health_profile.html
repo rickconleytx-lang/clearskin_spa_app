@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
-<h1>Client Health Profile</h1>
+<h1>Client Information</h1>
 
 {% if client %}
     <h2>{{ client[1] }} {{ client[2] }}</h2>
@@ -25,157 +25,594 @@
     <input type="hidden" name="appointment_id" value="{{ appointment_id or '' }}">
     <input type="hidden" name="date" value="{{ selected_date or '' }}">
 
-    <h3>Basic Information</h3>
+    <!-- CLIENT INFORMATION SECTION 1 -->
 
-    <div>
-        <label for="sex">Sex</label><br>
-        <select id="sex" name="sex">
-            <option value="">-- Select --</option>
-            {% for row in sex_options %}
-                <option value="{{ row[1] }}" {% if profile and profile[2] == row[1] %}selected{% endif %}>
-                    {{ row[1] }}
-                </option>
-            {% endfor %}
-        </select>
-    </div>
+    <div style="
+        border:1px solid #ccc;
+        padding:15px;
+        margin-bottom:20px;
+        border-radius:8px;
+    ">
 
-    <div>
-        <label for="skin_type_id">Skin Type</label><br>
-        <select id="skin_type_id" name="skin_type_id">
-            <option value="">-- Select Skin Type --</option>
-            {% for row in skin_types %}
-                <option value="{{ row[0] }}" {% if profile and profile[3] == row[0] %}selected{% endif %}>
-                    {{ row[1] }}
-                </option>
-            {% endfor %}
-        </select>
-    </div>
+        <h3>
+            {{ client_information_labels.get(
+                "section_information",
+                "User Def Section 1"
+            ) }}
+        </h3>
 
-    <div>
-        <label for="fitzpatrick_id">Fitzpatrick Type</label><br>
-        <select id="fitzpatrick_id" name="fitzpatrick_id">
-            <option value="">-- Select Fitzpatrick Type --</option>
-            {% for row in fitzpatrick_types %}
-                <option value="{{ row[0] }}" {% if profile and profile[4] == row[0] %}selected{% endif %}>
-                    {% if row[2] %}
-                        {{ row[1] }} - {{ row[2] }}
-                    {% else %}
+        <!-- Sex remains a fixed PSP field. -->
+        <div>
+            <label for="sex">Sex</label><br>
+
+            <select id="sex" name="sex">
+                <option value="">-- Select --</option>
+
+                {% for row in sex_options %}
+                    <option
+                        value="{{ row[1] }}"
+                        {% if profile and profile[2] == row[1] %}
+                            selected
+                        {% endif %}
+                    >
                         {{ row[1] }}
+                    </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <br>
+
+        <div>
+            <label for="skin_type_id">
+                {{ client_information_labels.get(
+                    "skin_type_id",
+                    "User Def 1"
+                ) }}
+            </label><br>
+
+            <select id="skin_type_id" name="skin_type_id">
+                <option value="">-- Select --</option>
+
+                {% for row in skin_types %}
+                    <option
+                        value="{{ row[0] }}"
+                        {% if profile and profile[3] == row[0] %}
+                            selected
+                        {% endif %}
+                    >
+                        {{ row[1] }}
+                    </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <br>
+
+        <div>
+            <label for="fitzpatrick_id">
+                {{ client_information_labels.get(
+                    "fitzpatrick_id",
+                    "User Def 2"
+                ) }}
+            </label><br>
+
+            <select id="fitzpatrick_id" name="fitzpatrick_id">
+                <option value="">-- Select --</option>
+
+                {% for row in fitzpatrick_types %}
+                    <option
+                        value="{{ row[0] }}"
+                        {% if profile and profile[4] == row[0] %}
+                            selected
+                        {% endif %}
+                    >
+                        {% if row[2] %}
+                            {{ row[1] }} - {{ row[2] }}
+                        {% else %}
+                            {{ row[1] }}
+                        {% endif %}
+                    </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <br>
+
+        <div>
+            <label for="skin_concerns">
+                {{ client_information_labels.get(
+                    "skin_concerns",
+                    "User Def 3"
+                ) }}
+            </label><br>
+
+            <textarea
+                id="skin_concerns"
+                name="skin_concerns"
+                rows="3"
+            >{{ profile[5] if profile else '' }}</textarea>
+        </div>
+
+        <br>
+
+        <div>
+            <label for="skin_conditions">
+                {{ client_information_labels.get(
+                    "skin_conditions",
+                    "User Def 4"
+                ) }}
+            </label><br>
+
+            <textarea
+                id="skin_conditions"
+                name="skin_conditions"
+                rows="3"
+            >{{ profile[6] if profile else '' }}</textarea>
+        </div>
+
+        <br>
+
+        <div>
+            <label for="allergies">
+                {{ client_information_labels.get(
+                    "allergies",
+                    "User Def 5"
+                ) }}
+            </label><br>
+
+            <textarea
+                id="allergies"
+                name="allergies"
+                rows="3"
+            >{{ profile[7] if profile else '' }}</textarea>
+        </div>
+
+        <br>
+
+        <div>
+            <label for="medications">
+                {{ client_information_labels.get(
+                    "medications",
+                    "User Def 6"
+                ) }}
+            </label><br>
+
+            <textarea
+                id="medications"
+                name="medications"
+                rows="3"
+            >{{ profile[8] if profile else '' }}</textarea>
+        </div>
+
+        <br>
+
+        <div>
+            <label for="current_medical_conditions">
+                {{ client_information_labels.get(
+                    "current_medical_conditions",
+                    "User Def 7"
+                ) }}
+            </label><br>
+
+            <textarea
+                id="current_medical_conditions"
+                name="current_medical_conditions"
+                rows="3"
+            >{{ profile[9] if profile else '' }}</textarea>
+        </div>
+
+        <br>
+
+        <div>
+            <label for="past_medical_treatments">
+                {{ client_information_labels.get(
+                    "past_medical_treatments",
+                    "User Def 8"
+                ) }}
+            </label><br>
+
+            <textarea
+                id="past_medical_treatments"
+                name="past_medical_treatments"
+                rows="3"
+            >{{ profile[10] if profile else '' }}</textarea>
+        </div>
+
+    </div>
+
+
+    <div style="margin:20px 0;">
+        <button type="submit" class="btn">
+            Save Client Information
+        </button>
+
+        <a
+            href="{{ url_for('client_history', client_id=client[0]) }}"
+            class="btn btn-secondary"
+        >
+            Cancel
+        </a>
+    </div>
+
+
+    <!-- CLIENT INFORMATION SECTION 2 -->
+
+    <div style="
+        border:1px solid #ccc;
+        padding:15px;
+        margin-bottom:20px;
+        border-radius:8px;
+    ">
+
+        <h3>
+            {{ client_information_labels.get(
+                "section_treatment_conditions",
+                "User Def Section 2"
+            ) }}
+        </h3>
+
+        <div>
+            <label for="recent_injections">
+                {{ client_information_labels.get(
+                    "recent_injections",
+                    "User Def 9"
+                ) }}
+            </label><br>
+
+            <select id="recent_injections" name="recent_injections">
+                <option
+                    value=""
+                    {% if profile and profile[11] is none %}
+                        selected
                     {% endif %}
+                >
+                    -- Select --
                 </option>
-            {% endfor %}
-        </select>
+
+                <option
+                    value="true"
+                    {% if profile and profile[11] == True %}
+                        selected
+                    {% endif %}
+                >
+                    Yes
+                </option>
+
+                <option
+                    value="false"
+                    {% if profile and profile[11] == False %}
+                        selected
+                    {% endif %}
+                >
+                    No
+                </option>
+            </select>
+        </div>
+
+        <div>
+            <label for="recent_laser">
+                {{ client_information_labels.get(
+                    "recent_laser",
+                    "User Def 10"
+                ) }}
+            </label><br>
+
+            <select id="recent_laser" name="recent_laser">
+                <option
+                    value=""
+                    {% if profile and profile[12] is none %}
+                        selected
+                    {% endif %}
+                >
+                    -- Select --
+                </option>
+
+                <option
+                    value="true"
+                    {% if profile and profile[12] == True %}
+                        selected
+                    {% endif %}
+                >
+                    Yes
+                </option>
+
+                <option
+                    value="false"
+                    {% if profile and profile[12] == False %}
+                        selected
+                    {% endif %}
+                >
+                    No
+                </option>
+            </select>
+        </div>
+
+        <div>
+            <label for="pregnant">
+                {{ client_information_labels.get(
+                    "pregnant",
+                    "User Def 11"
+                ) }}
+            </label><br>
+
+            <select id="pregnant" name="pregnant">
+                <option
+                    value=""
+                    {% if profile and profile[13] is none %}
+                        selected
+                    {% endif %}
+                >
+                    -- Select --
+                </option>
+
+                <option
+                    value="true"
+                    {% if profile and profile[13] == True %}
+                        selected
+                    {% endif %}
+                >
+                    Yes
+                </option>
+
+                <option
+                    value="false"
+                    {% if profile and profile[13] == False %}
+                        selected
+                    {% endif %}
+                >
+                    No
+                </option>
+            </select>
+        </div>
+
+        <div>
+            <label for="nursing">
+                {{ client_information_labels.get(
+                    "nursing",
+                    "User Def 12"
+                ) }}
+            </label><br>
+
+            <select id="nursing" name="nursing">
+                <option
+                    value=""
+                    {% if profile and profile[14] is none %}
+                        selected
+                    {% endif %}
+                >
+                    -- Select --
+                </option>
+
+                <option
+                    value="true"
+                    {% if profile and profile[14] == True %}
+                        selected
+                    {% endif %}
+                >
+                    Yes
+                </option>
+
+                <option
+                    value="false"
+                    {% if profile and profile[14] == False %}
+                        selected
+                    {% endif %}
+                >
+                    No
+                </option>
+            </select>
+        </div>
+
+        <div>
+            <label for="using_retinol">
+                {{ client_information_labels.get(
+                    "using_retinol",
+                    "User Def 13"
+                ) }}
+            </label><br>
+
+            <select id="using_retinol" name="using_retinol">
+                <option
+                    value=""
+                    {% if profile and profile[15] is none %}
+                        selected
+                    {% endif %}
+                >
+                    -- Select --
+                </option>
+
+                <option
+                    value="true"
+                    {% if profile and profile[15] == True %}
+                        selected
+                    {% endif %}
+                >
+                    Yes
+                </option>
+
+                <option
+                    value="false"
+                    {% if profile and profile[15] == False %}
+                        selected
+                    {% endif %}
+                >
+                    No
+                </option>
+            </select>
+        </div>
+
+        <div>
+            <label for="using_accutane">
+                {{ client_information_labels.get(
+                    "using_accutane",
+                    "User Def 14"
+                ) }}
+            </label><br>
+
+            <select id="using_accutane" name="using_accutane">
+                <option
+                    value=""
+                    {% if profile and profile[16] is none %}
+                        selected
+                    {% endif %}
+                >
+                    -- Select --
+                </option>
+
+                <option
+                    value="true"
+                    {% if profile and profile[16] == True %}
+                        selected
+                    {% endif %}
+                >
+                    Yes
+                </option>
+
+                <option
+                    value="false"
+                    {% if profile and profile[16] == False %}
+                        selected
+                    {% endif %}
+                >
+                    No
+                </option>
+            </select>
+        </div>
+
     </div>
 
-    <br>
-    <br>
 
-    <h3>Skin / Medical Information</h3>
+    <div style="margin:20px 0;">
+        <button type="submit" class="btn">
+            Save Client Information
+        </button>
 
-    <button type="submit" class="btn">Save Health Profile</button>
-    <a href="{{ url_for('client_history', client_id=client[0]) }}" class="btn btn-secondary">
-        Cancel
-    </a>
-
-    <div>
-        <label for="skin_concerns">Skin Concerns</label><br>
-        <textarea id="skin_concerns" name="skin_concerns" rows="3">{{ profile[5] if profile else '' }}</textarea>
+        <a
+            href="{{ url_for('client_history', client_id=client[0]) }}"
+            class="btn btn-secondary"
+        >
+            Cancel
+        </a>
     </div>
 
-    <div>
-        <label for="skin_conditions">Skin Conditions</label><br>
-        <textarea id="skin_conditions" name="skin_conditions" rows="3">{{ profile[6] if profile else '' }}</textarea>
+
+    <!-- CLIENT INFORMATION SECTION 3 -->
+
+    <div style="
+        border:1px solid #ccc;
+        padding:15px;
+        margin-bottom:20px;
+        border-radius:8px;
+    ">
+
+        <h3>
+            {{ client_information_labels.get(
+                "section_additional_information",
+                "User Def Section 3"
+            ) }}
+        </h3>
+
+        <div>
+            <label for="sun_exposure_level">
+                {{ client_information_labels.get(
+                    "sun_exposure_level",
+                    "User Def 15"
+                ) }}
+            </label><br>
+
+            <input
+                type="text"
+                id="sun_exposure_level"
+                name="sun_exposure_level"
+                value="{{ profile[17] if profile else '' }}"
+            >
+        </div>
+
+        <br>
+
+        <div>
+            <label for="last_facial_date">
+                {{ client_information_labels.get(
+                    "last_facial_date",
+                    "User Def 16"
+                ) }}
+            </label><br>
+
+            <input
+                type="date"
+                id="last_facial_date"
+                name="last_facial_date"
+                value="{{ profile[18] if profile and profile[18] else '' }}"
+            >
+        </div>
+
+        <br>
+
+        <div>
+            <label for="notes1">
+                {{ client_information_labels.get(
+                    "notes1",
+                    "User Def 17"
+                ) }}
+            </label><br>
+
+            <textarea
+                id="notes1"
+                name="notes1"
+                rows="3"
+            >{{ profile[19] if profile else '' }}</textarea>
+        </div>
+
+        <br>
+
+        <div>
+            <label for="notes2">
+                {{ client_information_labels.get(
+                    "notes2",
+                    "User Def 18"
+                ) }}
+            </label><br>
+
+            <textarea
+                id="notes2"
+                name="notes2"
+                rows="3"
+            >{{ profile[20] if profile else '' }}</textarea>
+        </div>
+
+        <br>
+
+        <div>
+            <label for="notes3">
+                {{ client_information_labels.get(
+                    "notes3",
+                    "User Def 19"
+                ) }}
+            </label><br>
+
+            <textarea
+                id="notes3"
+                name="notes3"
+                rows="3"
+            >{{ profile[21] if profile else '' }}</textarea>
+        </div>
+
     </div>
 
-    <div>
-        <label for="allergies">Allergies</label><br>
-        <textarea id="allergies" name="allergies" rows="3">{{ profile[7] if profile else '' }}</textarea>
+
+    <div style="margin:20px 0;">
+        <button type="submit" class="btn">
+            Save Client Information
+        </button>
+
+        <a
+            href="{{ url_for('client_history', client_id=client[0]) }}"
+            class="btn btn-secondary"
+        >
+            Cancel
+        </a>
     </div>
-
-    <div>
-        <label for="medications">Medications</label><br>
-        <textarea id="medications" name="medications" rows="3">{{ profile[8] if profile else '' }}</textarea>
-    </div>
-
-    <div>
-        <label for="current_medical_conditions">Current Medical Conditions</label><br>
-        <textarea id="current_medical_conditions" name="current_medical_conditions" rows="3">{{ profile[9] if profile else '' }}</textarea>
-    </div>
-
-    <div>
-        <label for="past_medical_treatments">Past Medical Treatments</label><br>
-        <textarea id="past_medical_treatments" name="past_medical_treatments" rows="3">{{ profile[10] if profile else '' }}</textarea>
-    </div>
-
-    <br>
-    <br>
-
-    <button type="submit" class="btn">Save Health Profile</button>
-    <a href="{{ url_for('client_history', client_id=client[0]) }}" class="btn btn-secondary">
-        Cancel
-    </a>
-
-    <br>
-    <br>
-
-    <h3>Treatment Contraindications</h3>
-
-    <div>
-        <label><input type="checkbox" name="recent_injections" {% if profile and profile[11] %}checked{% endif %}> Recent Injections</label>
-    </div>
-
-    <div>
-        <label><input type="checkbox" name="recent_laser" {% if profile and profile[12] %}checked{% endif %}> Recent Laser</label>
-    </div>
-
-    <div>
-        <label><input type="checkbox" name="pregnant" {% if profile and profile[13] %}checked{% endif %}> Pregnant</label>
-    </div>
-
-    <div>
-        <label><input type="checkbox" name="nursing" {% if profile and profile[14] %}checked{% endif %}> Nursing</label>
-    </div>
-
-    <div>
-        <label><input type="checkbox" name="using_retinol" {% if profile and profile[15] %}checked{% endif %}> Using Retinol</label>
-    </div>
-
-    <div>
-        <label><input type="checkbox" name="using_accutane" {% if profile and profile[16] %}checked{% endif %}> Using Accutane</label>
-    </div>
-
-    <h3>Additional Information</h3>
-
-    <div>
-        <label for="sun_exposure_level">Sun Exposure Level</label><br>
-        <input type="text" id="sun_exposure_level" name="sun_exposure_level" value="{{ profile[17] if profile else '' }}">
-    </div>
-
-    <div>
-        <label for="last_facial_date">Last Facial Date</label><br>
-        <input type="date" id="last_facial_date" name="last_facial_date" value="{{ profile[18] if profile and profile[18] else '' }}">
-    </div>
-
-    <div>
-        <label for="notes1">Notes 1</label><br>
-        <textarea id="notes1" name="notes1" rows="3">{{ profile[19] if profile else '' }}</textarea>
-    </div>
-
-    <div>
-        <label for="notes2">Notes 2</label><br>
-        <textarea id="notes2" name="notes2" rows="3">{{ profile[20] if profile else '' }}</textarea>
-    </div>
-
-    <div>
-        <label for="notes3">Notes 3</label><br>
-        <textarea id="notes3" name="notes3" rows="3">{{ profile[21] if profile else '' }}</textarea>
-    </div>
-
-    <br>
-    <button type="submit" class="btn">Save Health Profile</button>
-    <a href="{{ url_for('client_history', client_id=client[0]) }}" class="btn btn-secondary">
-        Cancel
-    </a>
 
 </form>
 {% endblock %}

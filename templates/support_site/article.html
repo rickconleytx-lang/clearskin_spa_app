@@ -140,6 +140,21 @@
 
         </header>
 
+        <div class="support-article-actions no-print">
+            <button
+                type="button"
+                class="support-print-button"
+                onclick="window.print()"
+            >
+                🖨️
+                {% if support_language == 'ES' %}
+                    Imprimir / Guardar PDF
+                {% else %}
+                    Print / Save PDF
+                {% endif %}
+            </button>
+        </div>
+
 
         {% if article.video_embed_url %}
 

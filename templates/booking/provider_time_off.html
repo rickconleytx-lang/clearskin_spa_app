@@ -167,6 +167,61 @@
 
     </div>
 
+    {% if onboarding_requested %}
+
+        <div
+            class="dashboard-card"
+            style="margin-bottom: 24px;"
+        >
+            <h2>🍑 Coach Peach Setup — Provider Time Off</h2>
+
+            <p>
+                Provider Time Off is where you block vacations,
+                personal time, meetings, appointments, and other
+                periods when a provider will not be available.
+            </p>
+
+            <p>
+                <strong>
+                    Any time a provider will not be available during
+                    hours they would normally work, add that time here.
+                </strong>
+                This prevents PeachBook from allowing clients to book
+                the provider during that unavailable period.
+            </p>
+
+            <p>
+                No time-off entry is required to complete setup.
+                If there is nothing to block right now, you can
+                continue and return here whenever a provider has
+                unavailable time.
+            </p>
+
+            <form
+                method="POST"
+                action="{{ url_for(
+                    'complete_provider_time_off_onboarding'
+                ) }}"
+                style="margin: 0;"
+            >
+                <input
+                    type="hidden"
+                    name="security_csrf_token"
+                    value="{{ security_csrf_token }}"
+                >
+
+                <button
+                    type="submit"
+                    class="btn"
+                >
+                    Continue with Setup
+                </button>
+            </form>
+        </div>
+
+    {% endif %}
+
+
 
     {% if providers %}
 
@@ -182,6 +237,15 @@
 
 
             <form method="POST">
+
+                {% if onboarding_requested %}
+                    <input
+                        type="hidden"
+                        name="onboarding"
+                        value="1"
+                    >
+                {% endif %}
+
 
                 {% if editing_time_off %}
 
@@ -457,6 +521,7 @@
                         <a
                             href="{{ url_for(
                                 'booking_provider_time_off',
+                                onboarding=onboarding_requested|int,
                                 provider_employee_id=form_data.provider_employee_id,
                                 filter_provider_id=filter_provider_id,
                                 view=view_filter
@@ -489,6 +554,7 @@
             <a
                 href="{{ url_for(
                     'booking_provider_time_off',
+                    onboarding=onboarding_requested|int,
                     provider_employee_id=selected_provider_id,
                     filter_provider_id=filter_provider_id,
                     view='upcoming'
@@ -505,6 +571,7 @@
             <a
                 href="{{ url_for(
                     'booking_provider_time_off',
+                    onboarding=onboarding_requested|int,
                     provider_employee_id=selected_provider_id,
                     filter_provider_id=filter_provider_id,
                     view='history'
@@ -521,6 +588,7 @@
             <a
                 href="{{ url_for(
                     'booking_provider_time_off',
+                    onboarding=onboarding_requested|int,
                     provider_employee_id=selected_provider_id,
                     filter_provider_id=filter_provider_id,
                     view='all'
@@ -544,6 +612,15 @@
             ) }}"
             class="service-filter-row"
         >
+
+            {% if onboarding_requested %}
+                <input
+                    type="hidden"
+                    name="onboarding"
+                    value="1"
+                >
+            {% endif %}
+
 
             <input
                 type="hidden"
@@ -676,6 +753,7 @@
                                             <a
                                                 href="{{ url_for(
                                                     'booking_provider_time_off',
+                                                    onboarding=onboarding_requested|int,
                                                     provider_employee_id=record.provider_employee_id,
                                                     edit_id=record.provider_time_off_id,
                                                     view=view_filter,
@@ -699,6 +777,15 @@
                                                     );
                                                 "
                                             >
+
+                                                {% if onboarding_requested %}
+                                                    <input
+                                                        type="hidden"
+                                                        name="onboarding"
+                                                        value="1"
+                                                    >
+                                                {% endif %}
+
 
                                                 <button
                                                     type="submit"

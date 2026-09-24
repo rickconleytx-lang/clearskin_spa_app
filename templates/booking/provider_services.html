@@ -193,6 +193,89 @@
 
     </div>
 
+    {% if onboarding_requested %}
+
+        <div
+            class="dashboard-card"
+            style="margin-bottom: 24px;"
+        >
+            <h2>🍑 Coach Peach Setup — Provider Services</h2>
+
+            <p>
+                Provider Services determines which services each
+                provider performs. These assignments supply the
+                provider-specific service choices used throughout
+                Peach Suite Pro.
+            </p>
+
+            <p>
+                <strong>
+                    At least one active provider must be assigned
+                    at least one service during setup.
+                </strong>
+            </p>
+
+            <p>
+                Select <strong>Provider Offers Service</strong> for
+                each service the selected provider performs.
+                Duration, price, and buffer overrides are optional.
+            </p>
+
+            <p>
+                <strong>Available for Public Online Booking</strong>
+                is optional. Select it for provider/service
+                combinations that you want clients to be able to
+                book through PeachBook.
+            </p>
+
+            {% if active_provider_service_count > 0 %}
+
+                <p>
+                    <strong>
+                        At least one Provider Service assignment
+                        has been saved.
+                    </strong>
+                    You can return later to add or change
+                    assignments for other providers.
+                </p>
+
+                <form
+                    method="POST"
+                    action="{{ url_for(
+                        'complete_provider_services_onboarding'
+                    ) }}"
+                    style="margin: 0;"
+                >
+                    <input
+                        type="hidden"
+                        name="security_csrf_token"
+                        value="{{ security_csrf_token }}"
+                    >
+
+                    <button
+                        type="submit"
+                        class="btn"
+                    >
+                        Continue with Setup
+                    </button>
+                </form>
+
+            {% else %}
+
+                <p style="margin-bottom: 0;">
+                    Select at least one
+                    <strong>Provider Offers Service</strong>
+                    checkbox below and save Provider Services.
+                    Once the assignment is saved, you can continue
+                    to the next setup step.
+                </p>
+
+            {% endif %}
+        </div>
+
+    {% endif %}
+
+
 
     {% if providers %}
 
@@ -202,6 +285,15 @@
                 method="GET"
                 action="{{ url_for('booking_provider_services') }}"
             >
+
+                {% if onboarding_requested %}
+                    <input
+                        type="hidden"
+                        name="onboarding"
+                        value="1"
+                    >
+                {% endif %}
+
 
                 <label for="provider_employee_id">
                     Select Provider
@@ -245,6 +337,15 @@
         {% if services and selected_provider_id %}
 
             <form method="POST">
+
+                {% if onboarding_requested %}
+                    <input
+                        type="hidden"
+                        name="onboarding"
+                        value="1"
+                    >
+                {% endif %}
+
 
                 <input
                     type="hidden"

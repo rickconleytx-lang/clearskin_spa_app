@@ -544,7 +544,11 @@
                 </p>
 
                 <a
-                    href="{{ url_for('add_service_type') }}"
+                    href="{{
+                        url_for('add_service_type', onboarding=1)
+                        if onboarding_requested
+                        else url_for('add_service_type')
+                    }}"
                     class="btn"
                 >
                     Add Service
@@ -562,6 +566,76 @@
 
         </div>
 
+    {% endif %}
+
+    {% if onboarding_setup %}
+        <div
+            class="dashboard-card"
+            style="margin-top: 24px;"
+        >
+            <h2>🍑 Coach Peach Setup — Service Catalog</h2>
+
+            <p>
+                Review the services your business offers. Each active
+                service should have the correct service name, standard
+                appointment duration, and standard price.
+            </p>
+
+            <p>
+                You can add or edit services above. When your starting
+                services are ready, continue with setup.
+            </p>
+
+            {% if active_count > 0 %}
+                <form
+                    method="POST"
+                    action="{{ url_for(
+                        'complete_service_catalog_onboarding'
+                    ) }}"
+                    style="margin: 0;"
+                >
+                    <input
+                        type="hidden"
+                        name="security_csrf_token"
+                        value="{{ security_csrf_token }}"
+                    >
+
+                    <button
+                        type="submit"
+                        class="btn"
+                    >
+                        Continue with Setup
+                    </button>
+                </form>
+            {% else %}
+                <p>
+                    <strong>
+                        Add at least one active service before continuing
+                        with setup.
+                    </strong>
+                </p>
+
+                <a
+                    href="{{ url_for(
+                        'add_service_type',
+                        onboarding=1
+                    ) }}"
+                    class="btn"
+                >
+                    Add Your First Service
+                </a>
+
+                <p style="margin-top: 14px; margin-bottom: 0;">
+                    <a
+                        href="{{ url_for(
+                            'morning_briefing'
+                        ) }}#onboarding-setup"
+                    >
+                        Return to Setup Checklist
+                    </a>
+                </p>
+            {% endif %}
+        </div>
     {% endif %}
 
 </div>

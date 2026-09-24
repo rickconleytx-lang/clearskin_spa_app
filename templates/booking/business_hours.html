@@ -116,7 +116,87 @@
     </div>
 
 
+    {% if onboarding_requested %}
+
+        <div
+            class="dashboard-card"
+            style="margin-bottom: 24px;"
+        >
+            <h2>🍑 Coach Peach Setup — Business Hours</h2>
+
+            <p>
+                Business Hours define when your business is normally
+                open. PeachBook uses these hours as part of determining
+                when appointments can be offered.
+            </p>
+
+            <p>
+                Add your normal operating hours below. You can leave
+                closed days empty and add multiple periods when you
+                close for lunch or use a split schedule.
+            </p>
+
+            {% if active_period_count > 0 %}
+
+                <p>
+                    <strong>
+                        Your Business Hours have been saved.
+                    </strong>
+                    You can return later if you need to change them.
+                </p>
+
+                <form
+                    method="POST"
+                    action="{{ url_for(
+                        'complete_business_hours_onboarding'
+                    ) }}"
+                    style="margin: 0;"
+                >
+                    <input
+                        type="hidden"
+                        name="security_csrf_token"
+                        value="{{ security_csrf_token }}"
+                    >
+
+                    <button
+                        type="submit"
+                        class="btn"
+                    >
+                        Continue with Setup
+                    </button>
+                </form>
+
+            {% else %}
+
+                <p>
+                    <strong>
+                        At least one operating period is required
+                        during setup.
+                    </strong>
+                </p>
+
+                <p style="margin-bottom: 0;">
+                    Add at least one period below, then select
+                    <strong>Save Business Hours</strong>. Once the
+                    hours are saved, you can continue to the next
+                    setup step.
+                </p>
+
+            {% endif %}
+        </div>
+
+    {% endif %}
+
+
     <form method="POST">
+
+        {% if onboarding_requested %}
+            <input
+                type="hidden"
+                name="onboarding"
+                value="1"
+            >
+        {% endif %}
 
         <div class="booking-hours-grid">
 

@@ -47,95 +47,154 @@
     <h1>🌅 Daily Briefing</h1>
 </div>
 
-{% if show_coach_welcome %}
+{% if (
+    show_coach_welcome
+    and (
+        not setup_progress
+        or not setup_progress.is_complete
+    )
+) %}
+
     <div class="card" style="margin-bottom: 20px;">
         <div class="card-body">
 
-            <h2>
-                Welcome to Peach Suite Pro! 🍑
-            </h2>
+            {% if (
+                setup_progress
+                and not setup_progress.is_complete
+                and setup_progress.completed_count > 0
+            ) %}
 
-            <p>
-                Hi! I’m Coach Peach, your business operations coach.
-            </p>
+                <h2>Welcome back! 🍑</h2>
 
-            <p>
-                Your new workspace is ready. It may look a little
-                empty right now, but that is exactly where we should
-                begin.
-            </p>
+                <p>
+                    Your Peach Suite Pro setup is in progress.
+                    You’ve completed
+                    <strong>
+                        {{ setup_progress.completed_count }}
+                        of
+                        {{ setup_progress.total_count }}
+                        setup steps.
+                    </strong>
+                </p>
 
-            <p>
-                I’ll help you set up your business, keep important
-                work from falling through the cracks, and provide
-                clear recommendations as your business grows.
-            </p>
+                {% if setup_progress.next_step %}
+                    <p>
+                        Your next setup step is
+                        <strong>
+                            {{ setup_progress.next_step.title }}
+                        </strong>.
+                        Continue where you left off and Coach Peach
+                        will guide you through the remaining steps.
+                    </p>
 
-            <h3>A good place to start:</h3>
+                    <div style="
+                        display: flex;
+                        gap: 10px;
+                        flex-wrap: wrap;
+                        margin-top: 18px;
+                    ">
+                        <a
+                            href="{{ setup_progress.next_step.url }}"
+                            class="btn"
+                        >
+                            Continue Setup
+                        </a>
+                    </div>
+                {% endif %}
 
-            <ol>
-                <li>Review your Business Information.</li>
-                <li>Add your services and standard pricing.</li>
-                <li>Add employees or providers.</li>
-                <li>
-                    Set up your business dropdowns and preferences.
-                </li>
-                <li>Add your first client or appointment.</li>
-            </ol>
+            {% else %}
 
-            <p>
-                As activity is added, I’ll begin helping you monitor
-                appointments, revenue, expenses, reminders, overdue
-                work, and other important business needs.
-            </p>
+                <h2>
+                    Welcome to Peach Suite Pro! 🍑
+                </h2>
 
-            <p>
-                <strong>
-                    Welcome aboard. Let’s get your business set up
-                    for success.
-                </strong>
-            </p>
+                <p>
+                    Hi! I’m Coach Peach, your business operations coach.
+                </p>
 
-            <p>
-                — Coach Peach
-            </p>
+                <p>
+                    Your new workspace is ready. It may look a little
+                    empty right now, but that is exactly where we should
+                    begin.
+                </p>
 
-            <div style="
-                display: flex;
-                gap: 10px;
-                flex-wrap: wrap;
-                margin-top: 18px;
-            ">
-                <form
-                    method="POST"
-                    action="{{
-                        url_for('coach_welcome_get_started')
-                    }}"
-                    style="margin: 0;"
-                >
-                    <button type="submit" class="btn">
-                        Get Started
-                    </button>
-                </form>
+                <p>
+                    I’ll help you set up your business, keep important
+                    work from falling through the cracks, and provide
+                    clear recommendations as your business grows.
+                </p>
 
-                <form
-                    method="POST"
-                    action="{{
-                        url_for('coach_welcome_remind_later')
-                    }}"
-                    style="margin: 0;"
-                >
-                    <button
-                        type="submit"
-                        class="btn btn-secondary"
+                <h3>Your guided setup is ready.</h3>
+
+                <p>
+                    I’ve prepared an Onboarding / Setup Checklist for
+                    your new workspace. It will guide you through each
+                    required setup area using the actual Peach Suite Pro
+                    pages where that information belongs.
+                </p>
+
+                <p>
+                    You can complete the setup over time, and I’ll keep
+                    the checklist available on your Daily Briefing until
+                    everything is finished.
+                </p>
+
+                <p>
+                    As activity is added, I’ll begin helping you monitor
+                    appointments, revenue, expenses, reminders, overdue
+                    work, and other important business needs.
+                </p>
+
+                <p>
+                    <strong>
+                        Welcome aboard. Let’s get your business set up
+                        for success.
+                    </strong>
+                </p>
+
+                <p>
+                    — Coach Peach
+                </p>
+
+                <div style="
+                    display: flex;
+                    gap: 10px;
+                    flex-wrap: wrap;
+                    margin-top: 18px;
+                ">
+                    <form
+                        method="POST"
+                        action="{{
+                            url_for('coach_welcome_get_started')
+                        }}"
+                        style="margin: 0;"
                     >
-                        Remind Me Later
-                    </button>
-                </form>
-            </div>
+                        <button type="submit" class="btn">
+                            Get Started
+                        </button>
+                    </form>
+
+                    <form
+                        method="POST"
+                        action="{{
+                            url_for('coach_welcome_remind_later')
+                        }}"
+                        style="margin: 0;"
+                    >
+                        <button
+                            type="submit"
+                            class="btn btn-secondary"
+                        >
+                            Remind Me Later
+                        </button>
+                    </form>
+                </div>
+
+            {% endif %}
 
         </div>
     </div>
+
 {% endif %}
 
 <p style="color:#777; margin-top:4px;">
@@ -644,6 +703,72 @@
 
 
 <br><br>
+
+
+{% if setup_progress and not setup_progress.is_complete %}
+<section id="onboarding-setup"
+         style="scroll-margin-top:20px;">
+    <div class="dashboard-card">
+        <h2>🍑 Onboarding / Setup Checklist</h2>
+
+        <p>
+            Coach Peach will guide you through the essential setup
+            for your new workspace.
+        </p>
+
+        <p>
+            <strong>
+                {{ setup_progress.completed_count }}
+                of
+                {{ setup_progress.total_count }}
+                setup steps complete
+            </strong>
+        </p>
+
+        {% if setup_progress.next_step %}
+            <div style="
+                margin: 16px 0 20px 0;
+                padding: 14px;
+                border: 1px solid #ddd;
+                border-radius: 10px;
+            ">
+                <div style="margin-bottom: 10px;">
+                    <strong>Next Setup Step:</strong>
+                    {{ setup_progress.next_step.title }}
+                </div>
+
+                <a href="{{ setup_progress.next_step.url }}"
+                   class="btn">
+                    Continue Setup
+                </a>
+            </div>
+        {% endif %}
+
+        <ol style="margin-bottom: 0;">
+            {% for step in setup_progress.steps %}
+                <li style="margin-bottom: 10px;">
+                    {% if step.completed %}
+                        <span aria-hidden="true">✅</span>
+                        <strong>{{ step.title }}</strong>
+                        <span> — Complete</span>
+                    {% else %}
+                        <span aria-hidden="true">⬜</span>
+                        <a href="{{ step.url }}">
+                            {{ step.title }}
+                        </a>
+                        {% if step.reviewed %}
+                            <span> — Reviewed</span>
+                        {% endif %}
+                    {% endif %}
+                </li>
+            {% endfor %}
+        </ol>
+    </div>
+</section>
+
+
+<br><br>
+{% endif %}
 
 
 <section id="coach-recommendations"
@@ -1275,5 +1400,29 @@ document.addEventListener("DOMContentLoaded", function () {
     );
 });
 </script>
+
+
+{% if show_setup_complete_welcome %}
+<script>
+    (() => {
+        const url = new URL(window.location.href);
+
+        if (url.searchParams.has("setup_complete")) {
+            url.searchParams.delete("setup_complete");
+
+            const cleanUrl =
+                url.pathname
+                + (url.search ? url.search : "")
+                + url.hash;
+
+            window.history.replaceState(
+                {},
+                document.title,
+                cleanUrl
+            );
+        }
+    })();
+</script>
+{% endif %}
 
 {% endblock %}

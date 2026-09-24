@@ -12,7 +12,7 @@
 
     <a class="btn" href="{{ url_for('client_management') }}">Client Management</a>
     {% if client %}
-        <a class="btn" href="{{ url_for('client_health_profile', client_id=client[0]) }}">Health Profile</a>
+        <a class="btn" href="{{ url_for('client_health_profile', client_id=client[0]) }}">Client Information</a>
     {% endif %}
 </div>
 
@@ -37,10 +37,30 @@
                 <th>Room</th>
                 <th>Status</th>
                 <th>Appointment Notes</th>
-                <th>Treatment Notes</th>
-                <th>Products Used</th>
-                <th>Home Care Advice</th>
-                <th>Provider Notes</th>
+                <th>
+                    {{ post_appointment_labels.get(
+                        "treatment_notes",
+                        "Treatment Notes"
+                    ) }}
+                </th>
+                <th>
+                    {{ post_appointment_labels.get(
+                        "products_used",
+                        "Products Used"
+                    ) }}
+                </th>
+                <th>
+                    {{ post_appointment_labels.get(
+                        "home_care_advice",
+                        "Home Care Advice"
+                    ) }}
+                </th>
+                <th>
+                    {{ post_appointment_labels.get(
+                        "provider_notes",
+                        "Provider Notes"
+                    ) }}
+                </th>
             </tr>
         </thead>
         <tbody>

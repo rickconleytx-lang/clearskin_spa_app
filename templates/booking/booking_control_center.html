@@ -404,6 +404,60 @@
     </div>
 
 
+    {% if onboarding_requested %}
+
+        <div
+            class="dashboard-card"
+            style="margin-bottom: 24px;"
+        >
+            <h2>🍑 Coach Peach Setup — Booking Control Center</h2>
+
+            <p>
+                The Booking Control Center is your central place for
+                managing PeachBook, booking rules, availability,
+                notifications, and provider scheduling.
+            </p>
+
+            <p>
+                <strong>No changes are required on this page during
+                this setup step.</strong>
+                We’ll guide you through the important scheduling and
+                provider setup next.
+            </p>
+
+            <p>
+                <strong>Provider Services</strong> is where you assign
+                the services each provider can perform. Those
+                assignments are used for provider-specific service
+                choices in Peach Suite Pro and for services offered
+                through PeachBook.
+            </p>
+
+            <form
+                method="POST"
+                action="{{ url_for(
+                    'complete_booking_control_center_onboarding'
+                ) }}"
+                style="margin: 0;"
+            >
+                <input
+                    type="hidden"
+                    name="security_csrf_token"
+                    value="{{ security_csrf_token }}"
+                >
+
+                <button
+                    type="submit"
+                    class="btn"
+                >
+                    Continue with Setup
+                </button>
+            </form>
+        </div>
+
+    {% endif %}
+
+
     <div class="booking-status-panel">
 
         <section class="booking-card booking-status-card">

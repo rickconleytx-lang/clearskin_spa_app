@@ -29,6 +29,10 @@
        class="tool-pill tool-pill-small">
         Client History
     </a>
+    <a href="{{ url_for('client_information_labels') }}"
+       class="tool-pill tool-pill-small">
+        Client Information Labels
+    </a>
 </div>
 
 <div style="display:flex; flex-direction:row; justify-content:space-between; align-items:flex-start; gap:25px; width:100%;">
@@ -49,7 +53,7 @@
 
         <p>
             Please search for Client's Name, then use an Action Button
-            (Add Appointment, Health / Intake, Forms, Visit Summaries, Full Record, Edit) 
+            (Add Appointment, Client Information, Forms, Visit Summaries, Client Record, Edit Client)
             next to their record.
         </p>
 
@@ -208,7 +212,7 @@
 
                     <a href="{{ url_for('client_health_profile', client_id=row[0]) }}"
                     class="tool-pill tool-pill-small">
-                        Health-Intake
+                        Client Information
                     </a>
 
                     <a href="{{ url_for('client_history_detail', client_id=row[0]) }}"
@@ -218,12 +222,12 @@
 
                     <a href="{{ url_for('edit_client', client_id=row[0]) }}"
                     class="tool-pill tool-pill-small">
-                        Full Summary-Edit
+                        Edit Client
                     </a>
 
                     <a href="{{ url_for('edit_client_full', client_id=row[0]) }}"
                     class="tool-pill tool-pill-small">
-                        Full Record
+                        Client Record
                     </a>
 
                     <a href="{{ url_for('client_forms', client_id=row[0]) }}"

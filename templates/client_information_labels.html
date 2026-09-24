@@ -1,0 +1,420 @@
+{% extends "base.html" %}
+
+{% block title %}Client Information Labels | Peach Suite Pro{% endblock %}
+
+{% block content %}
+
+<div style="max-width: 1050px; margin: 0 auto;">
+
+    <h1>Client Information Labels</h1>
+
+    <p>
+        Customize the Client Information labels used throughout
+        Peach Suite Pro.
+    </p>
+
+    <p style="margin-bottom: 20px;">
+        Only the labels displayed to users are changed. The underlying
+        Client Information fields and database structure never change.
+    </p>
+
+    <div class="page-tool-pills"
+         style="margin: 0 0 22px;">
+
+        <a href="{{ url_for('client_management') }}"
+           class="tool-pill tool-pill-small">
+            Back to Client Management
+        </a>
+
+        <a href="{{ url_for('client_full_record_preview') }}"
+           class="tool-pill tool-pill-small"
+           target="_blank"
+           rel="noopener">
+            Preview Client Record
+        </a>
+
+    </div>
+
+    <div style="
+        margin: 0 0 24px;
+        color: #666;
+        font-size: 0.95rem;
+    ">
+        <strong>Preview Client Record</strong> opens a blank,
+        read-only copy of the actual Client Record form in a new tab.
+        Save label changes first to see them in the preview.
+    </div>
+
+    <form method="POST"
+          id="client-information-label-form">
+
+        <input
+            type="hidden"
+            name="security_csrf_token"
+            value="{{ security_csrf_token }}"
+        >
+
+
+        <!-- ==================================================
+             EDITABLE SECTIONS + THEIR FIELDS
+             ================================================== -->
+
+        {% for section in label_definitions %}
+            {% if section.label_type == "section" %}
+
+                <div style="
+                    border:1px solid #d7d7d7;
+                    border-radius:12px;
+                    padding:22px;
+                    margin-bottom:24px;
+                ">
+
+                    <div style="margin-bottom:22px;">
+
+                        <div style="
+                            font-size:1.15rem;
+                            font-weight:700;
+                            margin-bottom:7px;
+                        ">
+                            Section Title:
+                            {{ section.default_label }}
+                        </div>
+
+                        <input
+                            type="text"
+                            id="{{ section.field_key }}"
+                            name="{{ section.field_key }}"
+                            value="{{ client_information_labels.get(
+                                section.field_key,
+                                section.default_label
+                            ) }}"
+                            maxlength="100"
+                            data-default-label="{{ section.default_label }}"
+                            data-label-key="{{ section.field_key }}"
+                            style="
+                                width:100%;
+                                max-width:600px;
+                            "
+                        >
+
+                        <div style="
+                            margin-top:7px;
+                            font-size:0.9rem;
+                            color:#666;
+                        ">
+                            Original PSP section:
+                            <strong>{{ section.legacy_label }}</strong>
+                        </div>
+
+                    </div>
+
+
+                    <div style="
+                        font-size:1.05rem;
+                        font-weight:700;
+                        margin:20px 0 12px;
+                    ">
+                        Fields
+                    </div>
+
+
+                    {% for definition in label_definitions %}
+                        {% if
+                            definition.label_type != "section"
+                            and definition.section_key == section.field_key
+                        %}
+
+                            <div style="
+                                display:grid;
+                                grid-template-columns:
+                                    minmax(105px, 135px)
+                                    minmax(220px, 1fr)
+                                    minmax(180px, 280px);
+                                gap:14px;
+                                align-items:center;
+                                padding:14px 0;
+                                border-bottom:1px solid #ececec;
+                            ">
+
+                                <div style="font-weight:700;">
+                                    {{ definition.default_label }}
+                                </div>
+
+                                <div>
+                                    <input
+                                        type="text"
+                                        id="{{ definition.field_key }}"
+                                        name="{{ definition.field_key }}"
+                                        value="{{ client_information_labels.get(
+                                            definition.field_key,
+                                            definition.default_label
+                                        ) }}"
+                                        maxlength="100"
+                                        data-default-label="{{ definition.default_label }}"
+                                        data-label-key="{{ definition.field_key }}"
+                                        style="width:100%;"
+                                    >
+                                </div>
+
+                                <div style="
+                                    font-size:0.9rem;
+                                    color:#666;
+                                ">
+                                    Original PSP use:
+                                    <strong>
+                                        {{ definition.legacy_label }}
+                                    </strong>
+
+                                    <br>
+
+                                    {% if definition.label_type == "dropdown" %}
+                                        Dropdown field
+                                    {% elif definition.label_type == "boolean" %}
+                                        Yes / No field
+                                    {% elif definition.label_type == "date" %}
+                                        Date field
+                                    {% elif definition.label_type == "textarea" %}
+                                        Long text field
+                                    {% else %}
+                                        Text field
+                                    {% endif %}
+                                </div>
+
+                            </div>
+
+                        {% endif %}
+                    {% endfor %}
+
+                </div>
+
+            {% endif %}
+        {% endfor %}
+
+
+        <!-- CLIENT RECORD NOTES LABELS -->
+
+        <div style="
+            border:1px solid #d7d7d7;
+            border-radius:12px;
+            padding:22px;
+            margin-bottom:24px;
+        ">
+
+            <div style="
+                font-size:1.15rem;
+                font-weight:700;
+                margin-bottom:7px;
+            ">
+                Client Record Notes Labels
+            </div>
+
+            <p style="
+                margin:0 0 20px;
+                color:#666;
+            ">
+                Customize the three general note-box titles shown
+                on the Client Record. These are client-level notes
+                and are separate from User Def 17-19 and
+                Post Appointment Wrap-Up notes.
+            </p>
+
+            {% for definition in client_record_note_definitions %}
+
+                <div style="
+                    display:grid;
+                    grid-template-columns:
+                        minmax(160px, 220px)
+                        minmax(220px, 1fr)
+                        minmax(180px, 280px);
+                    gap:14px;
+                    align-items:center;
+                    padding:14px 0;
+                    border-bottom:1px solid #ececec;
+                ">
+
+                    <div style="font-weight:700;">
+                        {{ definition.default_label }}
+                    </div>
+
+                    <div>
+                        <input
+                            type="text"
+                            id="record_note_{{ definition.field_key }}"
+                            name="{{ definition.field_key }}"
+                            value="{{ client_record_note_labels.get(
+                                definition.field_key,
+                                definition.default_label
+                            ) }}"
+                            maxlength="100"
+                            data-default-label="{{ definition.default_label }}"
+                            style="width:100%;"
+                        >
+                    </div>
+
+                    <div style="
+                        font-size:0.9rem;
+                        color:#666;
+                    ">
+                        Original PSP use:
+                        <strong>
+                            {{ definition.legacy_label }}
+                        </strong>
+                        <br>
+                        Long text field
+                    </div>
+
+                </div>
+
+            {% endfor %}
+
+        </div>
+
+
+                <!-- POST APPOINTMENT WRAP-UP LABELS -->
+
+        <div style="
+            border:1px solid #d7d7d7;
+            border-radius:12px;
+            padding:22px;
+            margin-bottom:24px;
+        ">
+
+            <div style="
+                font-size:1.15rem;
+                font-weight:700;
+                margin-bottom:7px;
+            ">
+                Post Appointment Wrap-Up Labels
+            </div>
+
+            <p style="
+                margin:0 0 20px;
+                color:#666;
+            ">
+                Customize the four text-box titles used during
+                Post Appointment Wrap-Up. These remain appointment
+                notes; only the user-facing titles change.
+            </p>
+
+            {% for definition in post_appointment_definitions %}
+
+                <div style="
+                    display:grid;
+                    grid-template-columns:
+                        minmax(160px, 220px)
+                        minmax(220px, 1fr)
+                        minmax(180px, 280px);
+                    gap:14px;
+                    align-items:center;
+                    padding:14px 0;
+                    border-bottom:1px solid #ececec;
+                ">
+
+                    <div style="font-weight:700;">
+                        {{ definition.default_label }}
+                    </div>
+
+                    <div>
+                        <input
+                            type="text"
+                            id="post_{{ definition.field_key }}"
+                            name="{{ definition.field_key }}"
+                            value="{{ post_appointment_labels.get(
+                                definition.field_key,
+                                definition.default_label
+                            ) }}"
+                            maxlength="100"
+                            data-default-label="{{ definition.default_label }}"
+                            style="width:100%;"
+                        >
+                    </div>
+
+                    <div style="
+                        font-size:0.9rem;
+                        color:#666;
+                    ">
+                        Original PSP label:
+                        <strong>
+                            {{ definition.legacy_label }}
+                        </strong>
+                        <br>
+                        Long text field
+                    </div>
+
+                </div>
+
+            {% endfor %}
+
+        </div>
+
+
+<div style="
+            display:flex;
+            flex-wrap:wrap;
+            gap:10px;
+            align-items:center;
+            margin-bottom:30px;
+        ">
+
+            <button type="submit"
+                    class="btn btn-primary">
+                Save Labels
+            </button>
+
+            <button type="button"
+                    class="btn"
+                    id="reset-client-information-labels">
+                Reset to PSP Defaults
+            </button>
+
+            <a href="{{ url_for('client_management') }}"
+               class="btn">
+                Cancel
+            </a>
+
+        </div>
+
+    </form>
+
+</div>
+
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+
+    const resetButton = document.getElementById(
+        "reset-client-information-labels"
+    );
+
+    if (resetButton) {
+        resetButton.addEventListener("click", function () {
+
+            const confirmed = window.confirm(
+                "Reset all Client Information, Client Record Notes, and " +
+                "Post Appointment labels " +
+                "to the Peach Suite Pro defaults? Click Save Labels " +
+                "afterward to keep the reset."
+            );
+
+            if (!confirmed) {
+                return;
+            }
+
+            document
+                .querySelectorAll(
+                    "#client-information-label-form " +
+                    "[data-default-label]"
+                )
+                .forEach(function (input) {
+                    input.value = (
+                        input.dataset.defaultLabel
+                        || ""
+                    );
+                });
+        });
+    }
+
+});
+</script>
+
+{% endblock %}

@@ -6481,3 +6481,8 @@ html[data-psp-theme] .app-nested-menu-pane {
     font-size: 0.75rem;
     line-height: 1.35;
 }
+
+/* Keep conditional Help footer actions truly hidden. */
+.peach-help-footer-actions [hidden] {
+    display: none !important;
+}

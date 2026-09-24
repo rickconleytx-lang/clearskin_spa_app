@@ -118,6 +118,56 @@ Website Links | Peach Suite Pro
         parent organization, or another useful destination.
     </p>
 
+    {% if onboarding_requested %}
+
+        <div
+            class="dashboard-card"
+            style="margin-bottom: 24px;"
+        >
+            <h2>🍑 Coach Peach Setup — Website Links</h2>
+
+            <p>
+                This is your final setup step.
+            </p>
+
+            <p>
+                Website Links are optional. Use them to add helpful
+                destinations to your public website, such as social
+                media pages, gift cards, an online store, forms,
+                policies, a parent organization, or another website.
+            </p>
+
+            <p>
+                If you have links you want clients to see, you can
+                add them now. Otherwise, you can finish setup and
+                return here anytime later.
+            </p>
+
+            <form
+                method="POST"
+                action="{{ url_for(
+                    'complete_website_links_onboarding'
+                ) }}"
+                style="margin: 0;"
+            >
+                <input
+                    type="hidden"
+                    name="security_csrf_token"
+                    value="{{ security_csrf_token }}"
+                >
+
+                <button
+                    type="submit"
+                    class="btn"
+                >
+                    Finish Setup
+                </button>
+            </form>
+        </div>
+
+    {% endif %}
+
+
 
     <div class="website-links-summary-grid">
 
@@ -137,7 +187,10 @@ Website Links | Peach Suite Pro
     <div class="page-tool-pills">
 
         <a
-            href="{{ url_for('add_public_website_link') }}"
+            href="{{ url_for(
+                'add_public_website_link',
+                onboarding=(1 if onboarding_requested else none)
+            ) }}"
             class="tool-pill tool-pill-small"
         >
             Add Website Link
@@ -152,6 +205,7 @@ Website Links | Peach Suite Pro
             href="{{
                 url_for(
                     'public_website_links',
+                    onboarding=(1 if onboarding_requested else none),
                     status='active'
                 )
             }}"
@@ -164,6 +218,7 @@ Website Links | Peach Suite Pro
             href="{{
                 url_for(
                     'public_website_links',
+                    onboarding=(1 if onboarding_requested else none),
                     status='hidden'
                 )
             }}"
@@ -176,6 +231,7 @@ Website Links | Peach Suite Pro
             href="{{
                 url_for(
                     'public_website_links',
+                    onboarding=(1 if onboarding_requested else none),
                     status='all'
                 )
             }}"
@@ -271,7 +327,8 @@ Website Links | Peach Suite Pro
                                         href="{{
                                             url_for(
                                                 'edit_public_website_link',
-                                                public_website_link_id=item[0]
+                                                onboarding=(1 if onboarding_requested else none),
+                                                    public_website_link_id=item[0]
                                             )
                                         }}"
                                         class="
@@ -292,6 +349,15 @@ Website Links | Peach Suite Pro
                                         }}"
                                         style="margin:0;"
                                     >
+
+                                        {% if onboarding_requested %}
+                                            <input
+                                                type="hidden"
+                                                name="onboarding"
+                                                value="1"
+                                            >
+                                        {% endif %}
+
                                         <button
                                             type="submit"
                                             class="

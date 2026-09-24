@@ -159,6 +159,79 @@
 
     </div>
 
+    {% if onboarding_requested %}
+
+        <div
+            class="dashboard-card"
+            style="margin-bottom: 24px;"
+        >
+            <h2>🍑 Coach Peach Setup — Provider Hours</h2>
+
+            <p>
+                Provider Hours define when each provider is normally
+                available to work and accept appointments.
+            </p>
+
+            <p>
+                Provider Hours must fall within the Business Hours
+                you established in the previous step.
+            </p>
+
+            {% if active_provider_period_count > 0 %}
+
+                <p>
+                    <strong>
+                        Provider Hours have been saved for at least
+                        one active provider.
+                    </strong>
+                    You can return later to add or adjust hours for
+                    additional providers.
+                </p>
+
+                <form
+                    method="POST"
+                    action="{{ url_for(
+                        'complete_provider_hours_onboarding'
+                    ) }}"
+                    style="margin: 0;"
+                >
+                    <input
+                        type="hidden"
+                        name="security_csrf_token"
+                        value="{{ security_csrf_token }}"
+                    >
+
+                    <button
+                        type="submit"
+                        class="btn"
+                    >
+                        Continue with Setup
+                    </button>
+                </form>
+
+            {% else %}
+
+                <p>
+                    <strong>
+                        At least one active provider must have one
+                        saved working period during setup.
+                    </strong>
+                </p>
+
+                <p style="margin-bottom: 0;">
+                    Select a provider below and add their regular
+                    working hours. If the provider normally works
+                    the same schedule as the business, use
+                    <strong>Works Business Hours</strong> as a
+                    shortcut. Then save the Provider Hours.
+                </p>
+
+            {% endif %}
+        </div>
+
+    {% endif %}
+
+
 
     {% if providers %}
 
@@ -168,6 +241,15 @@
                 method="GET"
                 action="{{ url_for('booking_provider_hours') }}"
             >
+
+                {% if onboarding_requested %}
+                    <input
+                        type="hidden"
+                        name="onboarding"
+                        value="1"
+                    >
+                {% endif %}
+
 
                 <label for="provider_employee_id">
                     Select Provider
@@ -211,6 +293,15 @@
         {% if selected_provider_id %}
 
             <form method="POST">
+
+                {% if onboarding_requested %}
+                    <input
+                        type="hidden"
+                        name="onboarding"
+                        value="1"
+                    >
+                {% endif %}
+
 
                 <input
                     type="hidden"

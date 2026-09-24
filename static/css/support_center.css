@@ -948,3 +948,141 @@ input {
         flex-basis: auto;
     }
 }
+
+/* =========================================================
+   SUPPORT ARTICLE PRINT / SAVE PDF
+========================================================= */
+
+.support-article-actions {
+    margin-top: 22px;
+}
+
+.support-print-button {
+    min-height: 42px;
+    padding: 9px 16px;
+    border: 1px solid var(--support-border);
+    border-radius: 9px;
+    color: var(--support-navy);
+    background: var(--support-white);
+    font: inherit;
+    font-size: 0.9rem;
+    font-weight: 800;
+    cursor: pointer;
+    box-shadow: 0 2px 7px rgba(25, 44, 62, 0.06);
+}
+
+.support-print-button:hover {
+    border-color: #c8d0d8;
+    box-shadow: 0 4px 14px rgba(25, 44, 62, 0.10);
+}
+
+.support-print-button:focus-visible {
+    outline: 3px solid rgba(185, 109, 61, 0.28);
+    outline-offset: 2px;
+}
+
+@media print {
+
+    .no-print,
+    .skip-link,
+    .support-header,
+    .support-breadcrumbs,
+    .support-web-preview-banner,
+    .support-video-section,
+    .support-article-actions,
+    .support-article-footer,
+    .support-footer {
+        display: none !important;
+    }
+
+    html,
+    body {
+        background: #ffffff !important;
+    }
+
+    body {
+        margin: 0;
+        padding: 0;
+        color: #000000 !important;
+        font-size: 11pt;
+    }
+
+    main {
+        display: block;
+    }
+
+    .support-page-shell,
+    .support-article-shell {
+        width: 100%;
+        max-width: none;
+        margin: 0;
+        padding: 0;
+    }
+
+    .support-article {
+        margin: 0;
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+        background: #ffffff;
+    }
+
+    .support-article-header {
+        padding: 0 0 18px;
+        border-bottom: 1px solid #999999;
+    }
+
+    .support-article-header h1,
+    .support-article-body h1,
+    .support-article-body h2,
+    .support-article-body h3,
+    .support-article-body h4,
+    .support-article-body h5,
+    .support-article-body h6 {
+        color: #000000 !important;
+    }
+
+    .support-article-header h1 {
+        font-size: 24pt;
+    }
+
+    .support-article-type,
+    .support-article-summary,
+    .support-article-updated,
+    .support-article-body {
+        color: #000000 !important;
+    }
+
+    .support-article-body {
+        padding: 20px 0 0;
+        overflow: visible;
+    }
+
+    .support-article-body a {
+        color: #000000 !important;
+        text-decoration: underline;
+    }
+
+    .support-article-body img {
+        max-width: 100% !important;
+        page-break-inside: avoid;
+    }
+
+    .support-article-body table {
+        page-break-inside: auto;
+    }
+
+    .support-article-body tr,
+    .support-article-body pre,
+    .support-article-body blockquote {
+        page-break-inside: avoid;
+    }
+
+    .support-article-body h1,
+    .support-article-body h2,
+    .support-article-body h3 {
+        break-after: avoid-page;
+        page-break-after: avoid;
+    }
+}

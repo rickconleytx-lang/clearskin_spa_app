@@ -121,6 +121,28 @@ from services.square_client_sync import (
     confirm_square_customer_mapping,
     try_sync_client_to_square,
 )
+from services.client_service import (
+    find_possible_client_duplicates,
+)
+from services.client_information_labels import (
+    get_client_information_label_definitions,
+    get_client_information_labels,
+    get_client_record_note_label_definitions,
+    get_client_record_note_labels,
+    get_post_appointment_label_definitions,
+    get_post_appointment_labels,
+    save_client_information_labels,
+    save_client_record_note_labels,
+    save_post_appointment_labels,
+)
+from services.import_service import (
+    ImportServiceError,
+    analyze_import_run,
+    create_import_run,
+    get_import_run_mapping_data,
+    process_client_import_packet,
+)
+
 from services.square_service_sync import (
     try_sync_service_to_square,
 )
@@ -2843,7 +2865,8 @@ def help_page_api(page_key):
                 page_key,
                 title,
                 content,
-                language_code
+                language_code,
+                public_slug
             FROM help_pages
             WHERE page_key = %s
               AND spa_id IS NULL
@@ -2874,17 +2897,39 @@ def help_page_api(page_key):
                 "message": "The help article was not found."
             }), 404
 
+        public_support_url = None
+
+        public_slug = str(
+            help_page[4] or ""
+        ).strip()
+
+        if public_slug:
+            public_article = (
+                _load_public_support_article(
+                    public_slug,
+                    help_page[3],
+                )
+            )
+
+            if public_article:
+                public_support_url = (
+                    "https://support.peachsuitepro.com"
+                    "/article/"
+                    + public_article["public_slug"]
+                    + "?lang="
+                    + help_page[3]
+                )
+
         return jsonify({
             "success": True,
-
-
-        "article": {
-            "page_key": help_page[0],
-            "title": help_page[1],
-            "content": help_page[2],
-            "language_code": help_page[3]
-        }
-    })
+            "article": {
+                "page_key": help_page[0],
+                "title": help_page[1],
+                "content": help_page[2],
+                "language_code": help_page[3],
+                "public_support_url": public_support_url,
+            }
+        })
 
     except Exception:
 
@@ -31016,8 +31061,6 @@ def _security_form_csrf_token():
             token
             and record_user_id == user_id
             and issued_at > 0
-            and now - issued_at
-                <= SECURITY_FORM_CSRF_MAX_AGE_SECONDS
         ):
             return token
 
@@ -31055,8 +31098,6 @@ def _security_form_csrf_valid(submitted_token):
         or not submitted_token
         or record.get("user_id") != user_id
         or issued_at <= 0
-        or int(time.time()) - issued_at
-            > SECURITY_FORM_CSRF_MAX_AGE_SECONDS
     ):
         return False
 
@@ -37716,7 +37757,8 @@ def _business_onboarding_record(
             account_opened_by_user_id,
             waiting_on_initial_activation,
             created_at,
-            updated_at
+            updated_at,
+            initial_business_unit_id
         FROM business_onboarding
         WHERE spa_id = %s
           AND primary_onboarding_user_id = %s
@@ -37729,6 +37771,223 @@ def _business_onboarding_record(
         ),
     )
     return cur.fetchone()
+
+
+BUSINESS_ONBOARDING_SETUP_STEPS = (
+    {
+        "key": "service_catalog",
+        "title": "Service Catalog",
+        "endpoint": "service_types",
+    },
+    {
+        "key": "website_services",
+        "title": "Online Website and Booking Services",
+        "endpoint": "public_website_services",
+    },
+    {
+        "key": "public_website_settings",
+        "title": "Public Website Settings",
+        "endpoint": "public_website_settings",
+    },
+    {
+        "key": "booking_control_center",
+        "title": "Booking Control Center",
+        "endpoint": "booking_control_center",
+    },
+    {
+        "key": "business_hours",
+        "title": "Business Hours",
+        "endpoint": "booking_business_hours",
+    },
+    {
+        "key": "provider_hours",
+        "title": "Provider Hours",
+        "endpoint": "booking_provider_hours",
+    },
+    {
+        "key": "provider_services",
+        "title": "Provider Services",
+        "endpoint": "booking_provider_services",
+    },
+    {
+        "key": "provider_time_off",
+        "title": "Provider Time Off",
+        "endpoint": "booking_provider_time_off",
+    },
+    {
+        "key": "website_links",
+        "title": "Website Links",
+        "endpoint": "public_website_links",
+    },
+)
+
+
+def _business_onboarding_setup_progress(
+    cur,
+    *,
+    spa_id,
+    user_id,
+    business_unit_id,
+):
+    onboarding = _business_onboarding_record(
+        cur,
+        spa_id,
+        user_id,
+    )
+
+    if not onboarding:
+        return None
+
+    initial_business_unit_id = onboarding[10]
+
+    if (
+        initial_business_unit_id is None
+        or business_unit_id is None
+        or int(initial_business_unit_id) != int(business_unit_id)
+    ):
+        return None
+
+    cur.execute(
+        """
+        SELECT
+            step_key,
+            reviewed_at,
+            completed_at
+        FROM business_onboarding_steps
+        WHERE business_onboarding_id = %s
+        """,
+        (onboarding[0],),
+    )
+
+    stored_steps = {
+        row[0]: {
+            "reviewed_at": row[1],
+            "completed_at": row[2],
+        }
+        for row in cur.fetchall()
+    }
+
+    steps = []
+
+    for position, definition in enumerate(
+        BUSINESS_ONBOARDING_SETUP_STEPS,
+        start=1,
+    ):
+        stored = stored_steps.get(
+            definition["key"],
+            {},
+        )
+
+        completed_at = stored.get("completed_at")
+        reviewed_at = stored.get("reviewed_at")
+
+        steps.append({
+            "position": position,
+            "key": definition["key"],
+            "title": definition["title"],
+            "url": url_for(
+                definition["endpoint"],
+                onboarding=1,
+            ),
+            "reviewed": reviewed_at is not None,
+            "reviewed_at": reviewed_at,
+            "completed": completed_at is not None,
+            "completed_at": completed_at,
+        })
+
+    completed_count = sum(
+        1
+        for step in steps
+        if step["completed"]
+    )
+
+    next_step = next(
+        (
+            step
+            for step in steps
+            if not step["completed"]
+        ),
+        None,
+    )
+
+    return {
+        "business_onboarding_id": onboarding[0],
+        "business_unit_id": initial_business_unit_id,
+        "steps": steps,
+        "completed_count": completed_count,
+        "total_count": len(steps),
+        "is_complete": completed_count == len(steps),
+        "next_step": next_step,
+    }
+
+
+def _complete_business_onboarding_step(
+    cur,
+    *,
+    business_onboarding_id,
+    step_key,
+    user_id,
+):
+    valid_step_keys = {
+        step["key"]
+        for step in BUSINESS_ONBOARDING_SETUP_STEPS
+    }
+
+    if step_key not in valid_step_keys:
+        raise ValueError(
+            "Invalid business onboarding setup step."
+        )
+
+    cur.execute(
+        """
+        INSERT INTO business_onboarding_steps (
+            business_onboarding_id,
+            step_key,
+            reviewed_at,
+            reviewed_by_user_id,
+            completed_at,
+            completed_by_user_id,
+            updated_at
+        )
+        VALUES (
+            %s,
+            %s,
+            NOW(),
+            %s,
+            NOW(),
+            %s,
+            NOW()
+        )
+        ON CONFLICT (
+            business_onboarding_id,
+            step_key
+        )
+        DO UPDATE SET
+            reviewed_at = COALESCE(
+                business_onboarding_steps.reviewed_at,
+                EXCLUDED.reviewed_at
+            ),
+            reviewed_by_user_id = COALESCE(
+                business_onboarding_steps.reviewed_by_user_id,
+                EXCLUDED.reviewed_by_user_id
+            ),
+            completed_at = COALESCE(
+                business_onboarding_steps.completed_at,
+                EXCLUDED.completed_at
+            ),
+            completed_by_user_id = COALESCE(
+                business_onboarding_steps.completed_by_user_id,
+                EXCLUDED.completed_by_user_id
+            ),
+            updated_at = NOW()
+        """,
+        (
+            business_onboarding_id,
+            step_key,
+            user_id,
+            user_id,
+        ),
+    )
 
 
 def _business_onboarding_contact_csrf_purpose(pending):
@@ -38189,60 +38448,97 @@ def internal_server_error(error):
 #  -------------------------
 
 
+BUSINESS_TIMEZONE_OPTIONS = (
+    (
+        "United States",
+        (
+            ("America/New_York", "Eastern Time"),
+            ("America/Chicago", "Central Time"),
+            ("America/Denver", "Mountain Time"),
+            ("America/Phoenix", "Arizona Time"),
+            ("America/Los_Angeles", "Pacific Time"),
+            ("America/Anchorage", "Alaska Time"),
+            ("Pacific/Honolulu", "Hawaii Time"),
+        ),
+    ),
+    (
+        "Canada",
+        (
+            ("America/Toronto", "Toronto"),
+            ("America/Vancouver", "Vancouver"),
+            ("America/Edmonton", "Edmonton"),
+            ("America/Halifax", "Halifax"),
+        ),
+    ),
+    (
+        "Europe",
+        (
+            ("Europe/London", "London"),
+            ("Europe/Dublin", "Dublin"),
+            ("Europe/Paris", "Paris"),
+            ("Europe/Berlin", "Berlin"),
+            ("Europe/Madrid", "Madrid"),
+            ("Europe/Rome", "Rome"),
+        ),
+    ),
+    (
+        "Australia / Asia",
+        (
+            ("Australia/Sydney", "Sydney"),
+            ("Australia/Perth", "Perth"),
+            ("Asia/Tokyo", "Tokyo"),
+            ("Asia/Singapore", "Singapore"),
+            ("Asia/Dubai", "Dubai"),
+        ),
+    ),
+)
+
+BUSINESS_TIMEZONE_NAMES = frozenset(
+    timezone_name
+    for _group_label, options in BUSINESS_TIMEZONE_OPTIONS
+    for timezone_name, _display_label in options
+)
+
+
 @app.route("/save_time_settings", methods=["POST"])
 @login_required
 @spa_required
-
 def save_time_settings():
     spa_id = current_spa_id()
 
-    timezone_name = request.form.get("timezone_name", "").strip()
+    timezone_name = request.form.get(
+        "timezone_name",
+        "",
+    ).strip()
 
-    allowed_timezones = {
-        "America/New_York",
-        "America/Chicago",
-        "America/Denver",
-        "America/Los_Angeles",
-        "America/Anchorage",
-        "Pacific/Honolulu",
-        "America/Toronto",
-        "America/Vancouver",
-        "America/Edmonton",
-        "America/Halifax",
-        "Europe/London",
-        "Europe/Dublin",
-        "Europe/Paris",
-        "Europe/Berlin",
-        "Europe/Madrid",
-        "Europe/Rome",
-        "Australia/Sydney",
-        "Australia/Perth",
-        "Asia/Tokyo",
-        "Asia/Singapore",
-        "Asia/Dubai"
-    }
-
-    if timezone_name not in allowed_timezones:
+    if timezone_name not in BUSINESS_TIMEZONE_NAMES:
         flash("Invalid timezone selected.", "error")
         return redirect(url_for("admin"))
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute("""
+    cur.execute(
+        """
         UPDATE spas
         SET timezone_name = %s
         WHERE spa_id = %s
-    """, (timezone_name, spa_id))
+        """,
+        (
+            timezone_name,
+            spa_id,
+        ),
+    )
 
     conn.commit()
     cur.close()
     conn.close()
 
-    flash("Time settings updated successfully.", "success")
+    flash(
+        "Time settings updated successfully.",
+        "success",
+    )
     return redirect(url_for("admin"))
-
-
 
 
 ######################################
@@ -42530,6 +42826,11 @@ def public_website_settings():
     if not business_unit_id:
         abort(403)
 
+    onboarding_requested = (
+        request.args.get("onboarding") == "1"
+        or request.form.get("onboarding") == "1"
+    )
+
     public_website_url = (
         _get_public_website_url_for_workspace(
             spa_id,
@@ -43631,7 +43932,13 @@ def public_website_settings():
     return render_template(
         "public_website_settings.html",
         settings=settings,
-        public_website_url=public_website_url
+        public_website_url=public_website_url,
+        onboarding_requested=onboarding_requested,
+        security_csrf_token=(
+            _security_form_csrf_token()
+            if onboarding_requested
+            else ""
+        )
     )
 
 
@@ -43644,6 +43951,89 @@ def public_website_settings():
 
 
 
+
+
+############################################
+#
+#   PUBLIC WEBSITE SETTINGS - ONBOARDING COMPLETE
+#
+############################################
+
+@app.route(
+    "/public-website-settings/onboarding/complete",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def complete_public_website_settings_onboarding():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if not business_unit_id or not user_id:
+        abort(403)
+
+    submitted_token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_token
+    ):
+        abort(400)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        onboarding = _business_onboarding_record(
+            cur,
+            spa_id,
+            user_id,
+            for_update=True,
+        )
+
+        if (
+            not onboarding
+            or onboarding[10] is None
+            or int(onboarding[10]) != int(business_unit_id)
+        ):
+            conn.rollback()
+            abort(403)
+
+        _complete_business_onboarding_step(
+            cur,
+            business_onboarding_id=onboarding[0],
+            step_key="public_website_settings",
+            user_id=user_id,
+        )
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    flash(
+        "Public Website Settings reviewed. "
+        "You can return anytime to customize them.",
+        "success",
+    )
+
+    return redirect(
+        url_for(
+            "booking_control_center",
+            onboarding=1,
+        )
+    )
 
 
 ############################################
@@ -44334,6 +44724,10 @@ def public_website_links():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
 
+    onboarding_requested = (
+        request.args.get("onboarding") == "1"
+    )
+
     if not business_unit_id:
         abort(403)
 
@@ -44437,7 +44831,90 @@ def public_website_links():
         status_filter=status_filter,
         active_count=active_count,
         hidden_count=hidden_count,
-        public_website_url=public_website_url
+        public_website_url=public_website_url,
+        onboarding_requested=onboarding_requested,
+        security_csrf_token=(
+            _security_form_csrf_token()
+            if onboarding_requested
+            else ""
+        )
+    )
+
+
+@app.route(
+    "/public-website-links/onboarding/complete",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def complete_website_links_onboarding():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if not business_unit_id or not user_id:
+        abort(403)
+
+    submitted_token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_token
+    ):
+        abort(400)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        onboarding = _business_onboarding_record(
+            cur,
+            spa_id,
+            user_id,
+            for_update=True,
+        )
+
+        if (
+            not onboarding
+            or onboarding[10] is None
+            or int(onboarding[10]) != int(business_unit_id)
+        ):
+            conn.rollback()
+            abort(403)
+
+        _complete_business_onboarding_step(
+            cur,
+            business_onboarding_id=onboarding[0],
+            step_key="website_links",
+            user_id=user_id,
+        )
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    flash(
+        "Peach Suite Pro setup complete. "
+        "Your workspace is ready to use.",
+        "success",
+    )
+
+    return redirect(
+        url_for(
+            "morning_briefing",
+            setup_complete=1,
+        )
     )
 
 
@@ -44453,6 +44930,11 @@ def public_website_links():
 def add_public_website_link():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
+
+    onboarding_requested = (
+        request.args.get("onboarding") == "1"
+        or request.form.get("onboarding") == "1"
+    )
 
     if not business_unit_id:
         abort(403)
@@ -44487,6 +44969,7 @@ def add_public_website_link():
                 "public_website_link_form.html",
                 website_link=None,
                 submitted=request.form,
+                onboarding_requested=onboarding_requested,
                 form_title="Add Website Link"
             )
 
@@ -44503,6 +44986,7 @@ def add_public_website_link():
                 "public_website_link_form.html",
                 website_link=None,
                 submitted=request.form,
+                onboarding_requested=onboarding_requested,
                 form_title="Add Website Link"
             )
 
@@ -44522,6 +45006,7 @@ def add_public_website_link():
                 "public_website_link_form.html",
                 website_link=None,
                 submitted=request.form,
+                onboarding_requested=onboarding_requested,
                 form_title="Add Website Link"
             )
 
@@ -44538,6 +45023,7 @@ def add_public_website_link():
                 "public_website_link_form.html",
                 website_link=None,
                 submitted=request.form,
+                onboarding_requested=onboarding_requested,
                 form_title="Add Website Link"
             )
 
@@ -44561,6 +45047,7 @@ def add_public_website_link():
                     "public_website_link_form.html",
                     website_link=None,
                     submitted=request.form,
+                    onboarding_requested=onboarding_requested,
                     form_title="Add Website Link"
                 )
 
@@ -44577,6 +45064,7 @@ def add_public_website_link():
                     "public_website_link_form.html",
                     website_link=None,
                     submitted=request.form,
+                    onboarding_requested=onboarding_requested,
                     form_title="Add Website Link"
                 )
 
@@ -44622,13 +45110,21 @@ def add_public_website_link():
         )
 
         return redirect(
-            url_for("public_website_links")
+            (
+                    url_for(
+                        "public_website_links",
+                        onboarding=1,
+                    )
+                    if onboarding_requested
+                    else url_for("public_website_links")
+                )
         )
 
     return render_template(
         "public_website_link_form.html",
         website_link=None,
         submitted=None,
+        onboarding_requested=onboarding_requested,
         form_title="Add Website Link"
     )
 
@@ -44648,6 +45144,11 @@ def edit_public_website_link(
 ):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
+
+    onboarding_requested = (
+        request.args.get("onboarding") == "1"
+        or request.form.get("onboarding") == "1"
+    )
 
     if not business_unit_id:
         abort(403)
@@ -44686,7 +45187,14 @@ def edit_public_website_link(
             )
 
             return redirect(
-                url_for("public_website_links")
+                (
+                    url_for(
+                        "public_website_links",
+                        onboarding=1,
+                    )
+                    if onboarding_requested
+                    else url_for("public_website_links")
+                )
             )
 
         if request.method == "POST":
@@ -44719,6 +45227,7 @@ def edit_public_website_link(
                     "public_website_link_form.html",
                     website_link=website_link,
                     submitted=request.form,
+                    onboarding_requested=onboarding_requested,
                     form_title="Edit Website Link"
                 )
 
@@ -44735,6 +45244,7 @@ def edit_public_website_link(
                     "public_website_link_form.html",
                     website_link=website_link,
                     submitted=request.form,
+                    onboarding_requested=onboarding_requested,
                     form_title="Edit Website Link"
                 )
 
@@ -44754,6 +45264,7 @@ def edit_public_website_link(
                     "public_website_link_form.html",
                     website_link=website_link,
                     submitted=request.form,
+                    onboarding_requested=onboarding_requested,
                     form_title="Edit Website Link"
                 )
 
@@ -44770,6 +45281,7 @@ def edit_public_website_link(
                     "public_website_link_form.html",
                     website_link=website_link,
                     submitted=request.form,
+                    onboarding_requested=onboarding_requested,
                     form_title="Edit Website Link"
                 )
 
@@ -44793,6 +45305,7 @@ def edit_public_website_link(
                         "public_website_link_form.html",
                         website_link=website_link,
                         submitted=request.form,
+                        onboarding_requested=onboarding_requested,
                         form_title="Edit Website Link"
                     )
 
@@ -44809,6 +45322,7 @@ def edit_public_website_link(
                         "public_website_link_form.html",
                         website_link=website_link,
                         submitted=request.form,
+                        onboarding_requested=onboarding_requested,
                         form_title="Edit Website Link"
                     )
 
@@ -44843,13 +45357,21 @@ def edit_public_website_link(
             )
 
             return redirect(
-                url_for("public_website_links")
+                (
+                    url_for(
+                        "public_website_links",
+                        onboarding=1,
+                    )
+                    if onboarding_requested
+                    else url_for("public_website_links")
+                )
             )
 
         return render_template(
             "public_website_link_form.html",
             website_link=website_link,
             submitted=None,
+            onboarding_requested=onboarding_requested,
             form_title="Edit Website Link"
         )
 
@@ -44873,6 +45395,10 @@ def toggle_public_website_link(
 ):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
+
+    onboarding_requested = (
+        request.form.get("onboarding") == "1"
+    )
 
     if not business_unit_id:
         abort(403)
@@ -44906,7 +45432,14 @@ def toggle_public_website_link(
             )
 
             return redirect(
-                url_for("public_website_links")
+                (
+                    url_for(
+                        "public_website_links",
+                        onboarding=1,
+                    )
+                    if onboarding_requested
+                    else url_for("public_website_links")
+                )
             )
 
         new_status = not bool(row[1])
@@ -44943,7 +45476,14 @@ def toggle_public_website_link(
         conn.close()
 
     return redirect(
-        url_for("public_website_links")
+        (
+                    url_for(
+                        "public_website_links",
+                        onboarding=1,
+                    )
+                    if onboarding_requested
+                    else url_for("public_website_links")
+                )
     )
 
 
@@ -44965,6 +45505,10 @@ def public_website_services():
 
     if not business_unit_id:
         abort(403)
+
+    onboarding_requested = (
+        request.args.get("onboarding") == "1"
+    )
 
     status_filter = (
         request.args.get("status")
@@ -45122,7 +45666,13 @@ def public_website_services():
         status_filter=status_filter,
         shown_count=shown_count,
         hidden_count=hidden_count,
-        public_services_url=public_services_url
+        public_services_url=public_services_url,
+        onboarding_requested=onboarding_requested,
+        security_csrf_token=(
+            _security_form_csrf_token()
+            if onboarding_requested
+            else ""
+        )
     )
 
 
@@ -45144,6 +45694,11 @@ def edit_public_website_service(
 
     if not business_unit_id:
         abort(403)
+
+    onboarding_requested = (
+        request.args.get("onboarding") == "1"
+        or request.form.get("onboarding") == "1"
+    )
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -45199,6 +45754,11 @@ def edit_public_website_service(
 
             return redirect(
                 url_for(
+                    "public_website_services",
+                    onboarding=1
+                )
+                if onboarding_requested
+                else url_for(
                     "public_website_services"
                 )
             )
@@ -45289,7 +45849,8 @@ def edit_public_website_service(
                     service=service,
                     submitted=request.form,
                     services_two_label=services_two_label,
-                    services_three_label=services_three_label
+                    services_three_label=services_three_label,
+                    onboarding_requested=onboarding_requested
                 )
 
             if len(public_description) > 500:
@@ -45306,7 +45867,8 @@ def edit_public_website_service(
                     service=service,
                     submitted=request.form,
                     services_two_label=services_two_label,
-                    services_three_label=services_three_label
+                    services_three_label=services_three_label,
+                    onboarding_requested=onboarding_requested
                 )
 
             website_sort_order = None
@@ -45333,7 +45895,8 @@ def edit_public_website_service(
                         service=service,
                         submitted=request.form,
                     services_two_label=services_two_label,
-                    services_three_label=services_three_label
+                    services_three_label=services_three_label,
+                    onboarding_requested=onboarding_requested
                     )
 
                 if not 1 <= website_sort_order <= 999:
@@ -45350,7 +45913,8 @@ def edit_public_website_service(
                         service=service,
                         submitted=request.form,
                     services_two_label=services_two_label,
-                    services_three_label=services_three_label
+                    services_three_label=services_three_label,
+                    onboarding_requested=onboarding_requested
                     )
 
             cur.execute("""
@@ -45408,6 +45972,11 @@ def edit_public_website_service(
 
             return redirect(
                 url_for(
+                    "public_website_services",
+                    onboarding=1
+                )
+                if onboarding_requested
+                else url_for(
                     "public_website_services"
                 )
             )
@@ -45417,7 +45986,8 @@ def edit_public_website_service(
             service=service,
             submitted=None,
             services_two_label=services_two_label,
-            services_three_label=services_three_label
+            services_three_label=services_three_label,
+            onboarding_requested=onboarding_requested
         )
 
     finally:
@@ -45441,9 +46011,14 @@ def edit_public_website_service(
 def service_types():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
 
     if not business_unit_id:
         abort(403)
+
+    onboarding_requested = (
+        request.args.get("onboarding") == "1"
+    )
 
     status_filter = (
         request.args.get("status")
@@ -45508,6 +46083,8 @@ def service_types():
     conn = get_db_connection()
     cur = conn.cursor()
 
+    onboarding_setup = None
+
     try:
         cur.execute(
             query,
@@ -45563,6 +46140,17 @@ def service_types():
         active_count = count_row[0] or 0
         archived_count = count_row[1] or 0
 
+        onboarding_setup = None
+        if onboarding_requested:
+            onboarding_setup = (
+                _business_onboarding_setup_progress(
+                    cur,
+                    spa_id=spa_id,
+                    user_id=user_id,
+                    business_unit_id=business_unit_id,
+                )
+            )
+
     finally:
         cur.close()
         conn.close()
@@ -45592,10 +46180,255 @@ def service_types():
         ),
         square_sync_statuses=square_sync_statuses,
         square_sync_environment=_square_income_read_environment(),
+        onboarding_setup=onboarding_setup,
+        onboarding_requested=onboarding_requested,
+        security_csrf_token=(
+            _security_form_csrf_token()
+            if onboarding_setup
+            else ""
+        ),
     )
 
 
 
+
+
+############################################
+#
+#   SERVICE CATALOG - ONBOARDING COMPLETE
+#
+############################################
+
+@app.route(
+    "/service-types/onboarding/complete",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def complete_service_catalog_onboarding():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if not business_unit_id or not user_id:
+        abort(403)
+
+    submitted_token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_token
+    ):
+        abort(400)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        onboarding = _business_onboarding_record(
+            cur,
+            spa_id,
+            user_id,
+            for_update=True,
+        )
+
+        if (
+            not onboarding
+            or onboarding[10] is None
+            or int(onboarding[10]) != int(business_unit_id)
+        ):
+            conn.rollback()
+            abort(403)
+
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM service_name_types
+            WHERE spa_id = %s
+              AND is_active = TRUE
+              AND NULLIF(
+                    BTRIM(service_name),
+                    ''
+                  ) IS NOT NULL
+              AND default_duration_minutes > 0
+              AND default_price >= 0
+            """,
+            (spa_id,),
+        )
+
+        valid_service_count = int(
+            cur.fetchone()[0] or 0
+        )
+
+        if valid_service_count < 1:
+            conn.rollback()
+            flash(
+                "Add at least one active service with a "
+                "name, duration, and price before completing "
+                "Service Catalog setup.",
+                "error",
+            )
+            return redirect(
+                url_for(
+                    "service_types",
+                    onboarding=1,
+                )
+            )
+
+        _complete_business_onboarding_step(
+            cur,
+            business_onboarding_id=onboarding[0],
+            step_key="service_catalog",
+            user_id=user_id,
+        )
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    flash(
+        "Service Catalog setup complete. "
+        "Next, review your Website Services.",
+        "success",
+    )
+
+    return redirect(
+        url_for(
+            "public_website_services",
+            onboarding=1,
+        )
+    )
+
+
+############################################
+#
+#   ONLINE WEBSITE / BOOKING SERVICES - ONBOARDING COMPLETE
+#
+############################################
+
+@app.route(
+    "/public-website-services/onboarding/complete",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def complete_website_services_onboarding():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if not business_unit_id or not user_id:
+        abort(403)
+
+    submitted_token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_token
+    ):
+        abort(400)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        onboarding = _business_onboarding_record(
+            cur,
+            spa_id,
+            user_id,
+            for_update=True,
+        )
+
+        if (
+            not onboarding
+            or onboarding[10] is None
+            or int(onboarding[10]) != int(business_unit_id)
+        ):
+            conn.rollback()
+            abort(403)
+
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM public_website_services pws
+            JOIN service_name_types snt
+              ON snt.service_type_id = pws.service_type_id
+             AND snt.spa_id = pws.spa_id
+            WHERE pws.spa_id = %s
+              AND pws.business_unit_id = %s
+              AND pws.show_on_public_website = TRUE
+              AND snt.is_active = TRUE
+            """,
+            (
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        enabled_service_count = int(
+            cur.fetchone()[0] or 0
+        )
+
+        if enabled_service_count < 1:
+            conn.rollback()
+            flash(
+                "Enable at least one active service for online "
+                "website and booking visibility before continuing "
+                "setup.",
+                "error",
+            )
+            return redirect(
+                url_for(
+                    "public_website_services",
+                    onboarding=1,
+                )
+            )
+
+        _complete_business_onboarding_step(
+            cur,
+            business_onboarding_id=onboarding[0],
+            step_key="website_services",
+            user_id=user_id,
+        )
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    flash(
+        "Online Website and Booking Services setup complete. "
+        "Next, review your Public Website Settings.",
+        "success",
+    )
+
+    return redirect(
+        url_for(
+            "public_website_settings",
+            onboarding=1,
+        )
+    )
 
 
 ############################################
@@ -46193,6 +47026,29 @@ def add_service_type():
     if not business_unit_id:
         abort(403)
 
+    onboarding_requested = (
+        request.args.get("onboarding") == "1"
+        or request.form.get("onboarding") == "1"
+    )
+
+    add_service_type_url = (
+        url_for(
+            "add_service_type",
+            onboarding=1,
+        )
+        if onboarding_requested
+        else url_for("add_service_type")
+    )
+
+    service_catalog_url = (
+        url_for(
+            "service_types",
+            onboarding=1,
+        )
+        if onboarding_requested
+        else url_for("service_types")
+    )
+
     if request.method == "POST":
         service_name = (
             request.form.get("service_name") or ""
@@ -46208,27 +47064,27 @@ def add_service_type():
 
         if not service_name:
             flash("Service name is required.", "error")
-            return redirect(url_for("add_service_type"))
+            return redirect(add_service_type_url)
 
         try:
             default_duration_minutes = int(duration_raw)
         except (TypeError, ValueError):
             flash("Default session length must be entered in minutes.", "error")
-            return redirect(url_for("add_service_type"))
+            return redirect(add_service_type_url)
 
         if default_duration_minutes <= 0:
             flash("Default session length must be greater than zero.", "error")
-            return redirect(url_for("add_service_type"))
+            return redirect(add_service_type_url)
 
         try:
             default_price = float(price_raw)
         except (TypeError, ValueError):
             flash("Default service price must be valid.", "error")
-            return redirect(url_for("add_service_type"))
+            return redirect(add_service_type_url)
 
         if default_price < 0:
             flash("Default service price cannot be negative.", "error")
-            return redirect(url_for("add_service_type"))
+            return redirect(add_service_type_url)
 
         conn = get_db_connection()
         cur = conn.cursor()
@@ -46270,11 +47126,12 @@ def add_service_type():
         )
 
         flash("Service added successfully.", "success")
-        return redirect(url_for("service_types"))
+        return redirect(service_catalog_url)
 
     return render_template(
         "service_type_form.html",
-        service=None
+        service=None,
+        onboarding_requested=onboarding_requested,
     )
 
 
@@ -46310,6 +47167,33 @@ def edit_service_type(service_type_id):
     if not business_unit_id:
         abort(403)
 
+    onboarding_requested = (
+        request.args.get("onboarding") == "1"
+        or request.form.get("onboarding") == "1"
+    )
+
+    edit_service_type_url = (
+        url_for(
+            "edit_service_type",
+            service_type_id=service_type_id,
+            onboarding=1,
+        )
+        if onboarding_requested
+        else url_for(
+            "edit_service_type",
+            service_type_id=service_type_id,
+        )
+    )
+
+    service_catalog_url = (
+        url_for(
+            "service_types",
+            onboarding=1,
+        )
+        if onboarding_requested
+        else url_for("service_types")
+    )
+
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -46334,10 +47218,7 @@ def edit_service_type(service_type_id):
             flash("Service name is required.", "error")
             cur.close()
             conn.close()
-            return redirect(url_for(
-                "edit_service_type",
-                service_type_id=service_type_id
-            ))
+            return redirect(edit_service_type_url)
 
         try:
             default_duration_minutes = int(duration_raw)
@@ -46346,19 +47227,13 @@ def edit_service_type(service_type_id):
             flash("Duration and price must be valid.", "error")
             cur.close()
             conn.close()
-            return redirect(url_for(
-                "edit_service_type",
-                service_type_id=service_type_id
-            ))
+            return redirect(edit_service_type_url)
 
         if default_duration_minutes <= 0 or default_price < 0:
             flash("Duration and price values are invalid.", "error")
             cur.close()
             conn.close()
-            return redirect(url_for(
-                "edit_service_type",
-                service_type_id=service_type_id
-            ))
+            return redirect(edit_service_type_url)
 
         if len(public_description) > 500:
             flash(
@@ -46370,10 +47245,7 @@ def edit_service_type(service_type_id):
             )
             cur.close()
             conn.close()
-            return redirect(url_for(
-                "edit_service_type",
-                service_type_id=service_type_id
-            ))
+            return redirect(edit_service_type_url)
 
         cur.execute("""
             UPDATE service_name_types
@@ -46434,7 +47306,7 @@ def edit_service_type(service_type_id):
         )
 
         flash("Service updated successfully.", "success")
-        return redirect(url_for("service_types"))
+        return redirect(service_catalog_url)
 
     cur.execute("""
         SELECT
@@ -46472,11 +47344,12 @@ def edit_service_type(service_type_id):
 
     if not service:
         flash("Service type not found.", "error")
-        return redirect(url_for("service_types"))
+        return redirect(service_catalog_url)
 
     return render_template(
         "service_type_form.html",
-        service=service
+        service=service,
+        onboarding_requested=onboarding_requested,
     )
 
 
@@ -58194,6 +59067,7 @@ def master_admin_add_business_invitation():
             security_csrf_token=security_csrf_token,
             subscription_tiers=subscription_tiers,
             organization_types=organization_types,
+            timezone_options=BUSINESS_TIMEZONE_OPTIONS,
             form_data={},
             error_message=None,
         )
@@ -58261,6 +59135,7 @@ def master_admin_add_business_invitation():
             security_csrf_token=security_csrf_token,
             subscription_tiers=subscription_tiers,
             organization_types=organization_types,
+            timezone_options=BUSINESS_TIMEZONE_OPTIONS,
             form_data=form_data,
             error_message="Business name is required.",
         )
@@ -58271,6 +59146,7 @@ def master_admin_add_business_invitation():
             security_csrf_token=security_csrf_token,
             subscription_tiers=subscription_tiers,
             organization_types=organization_types,
+            timezone_options=BUSINESS_TIMEZONE_OPTIONS,
             form_data=form_data,
             error_message=(
                 "Business name must be 150 characters or fewer."
@@ -58283,6 +59159,7 @@ def master_admin_add_business_invitation():
             security_csrf_token=security_csrf_token,
             subscription_tiers=subscription_tiers,
             organization_types=organization_types,
+            timezone_options=BUSINESS_TIMEZONE_OPTIONS,
             form_data=form_data,
             error_message=(
                 "Business Owner first and last name are required."
@@ -58298,6 +59175,7 @@ def master_admin_add_business_invitation():
             security_csrf_token=security_csrf_token,
             subscription_tiers=subscription_tiers,
             organization_types=organization_types,
+            timezone_options=BUSINESS_TIMEZONE_OPTIONS,
             form_data=form_data,
             error_message=(
                 "Business Owner names must be "
@@ -58311,6 +59189,7 @@ def master_admin_add_business_invitation():
             security_csrf_token=security_csrf_token,
             subscription_tiers=subscription_tiers,
             organization_types=organization_types,
+            timezone_options=BUSINESS_TIMEZONE_OPTIONS,
             form_data=form_data,
             error_message=(
                 "Owner phone must be 30 characters or fewer."
@@ -58328,6 +59207,7 @@ def master_admin_add_business_invitation():
             security_csrf_token=security_csrf_token,
             subscription_tiers=subscription_tiers,
             organization_types=organization_types,
+            timezone_options=BUSINESS_TIMEZONE_OPTIONS,
             form_data=form_data,
             error_message=str(error),
         )
@@ -58338,6 +59218,7 @@ def master_admin_add_business_invitation():
             security_csrf_token=security_csrf_token,
             subscription_tiers=subscription_tiers,
             organization_types=organization_types,
+            timezone_options=BUSINESS_TIMEZONE_OPTIONS,
             form_data=form_data,
             error_message="Business Owner email is required.",
         )
@@ -58385,6 +59266,7 @@ def master_admin_add_business_invitation():
             security_csrf_token=security_csrf_token,
             subscription_tiers=subscription_tiers,
             organization_types=organization_types,
+            timezone_options=BUSINESS_TIMEZONE_OPTIONS,
             form_data=form_data,
             error_message=str(error),
         )
@@ -58402,6 +59284,7 @@ def master_admin_add_business_invitation():
             security_csrf_token=security_csrf_token,
             subscription_tiers=subscription_tiers,
             organization_types=organization_types,
+            timezone_options=BUSINESS_TIMEZONE_OPTIONS,
             form_data=form_data,
             error_message=(
                 "The business could not be created. "
@@ -58532,6 +59415,7 @@ def master_admin_add_business():
             security_csrf_token=security_csrf_token,
             subscription_tiers=subscription_tiers,
             organization_types=organization_types,
+            timezone_options=BUSINESS_TIMEZONE_OPTIONS,
             form_data={},
             error_message=None
         )
@@ -58612,6 +59496,7 @@ def master_admin_add_business():
             security_csrf_token=security_csrf_token,
             subscription_tiers=subscription_tiers,
             organization_types=organization_types,
+            timezone_options=BUSINESS_TIMEZONE_OPTIONS,
             form_data=form_data,
             error_message="Business name is required."
         )
@@ -58622,6 +59507,7 @@ def master_admin_add_business():
             security_csrf_token=security_csrf_token,
             subscription_tiers=subscription_tiers,
             organization_types=organization_types,
+            timezone_options=BUSINESS_TIMEZONE_OPTIONS,
             form_data=form_data,
             error_message=(
                 "Administrator first and last name are required."
@@ -58634,6 +59520,7 @@ def master_admin_add_business():
             security_csrf_token=security_csrf_token,
             subscription_tiers=subscription_tiers,
             organization_types=organization_types,
+            timezone_options=BUSINESS_TIMEZONE_OPTIONS,
             form_data=form_data,
             error_message="Administrator email is required."
         )
@@ -58648,6 +59535,7 @@ def master_admin_add_business():
             security_csrf_token=security_csrf_token,
             subscription_tiers=subscription_tiers,
             organization_types=organization_types,
+            timezone_options=BUSINESS_TIMEZONE_OPTIONS,
             form_data=form_data,
             error_message=password_policy_error
         )
@@ -58658,6 +59546,7 @@ def master_admin_add_business():
             security_csrf_token=security_csrf_token,
             subscription_tiers=subscription_tiers,
             organization_types=organization_types,
+            timezone_options=BUSINESS_TIMEZONE_OPTIONS,
             form_data=form_data,
             error_message="The temporary passwords do not match."
         )
@@ -58717,6 +59606,7 @@ def master_admin_add_business():
             security_csrf_token=security_csrf_token,
             subscription_tiers=subscription_tiers,
             organization_types=organization_types,
+            timezone_options=BUSINESS_TIMEZONE_OPTIONS,
             form_data=form_data,
             error_message=str(error)
         )
@@ -58735,6 +59625,7 @@ def master_admin_add_business():
             security_csrf_token=security_csrf_token,
             subscription_tiers=subscription_tiers,
             organization_types=organization_types,
+            timezone_options=BUSINESS_TIMEZONE_OPTIONS,
             form_data=form_data,
             error_message=(
                 "The business could not be created. "
@@ -69794,7 +70685,7 @@ def preview_messaging_template_by_id(template_id):
         "appointment_date": "June 20, 2026",
         "appointment_time": "2:00 PM",
         "service_name": "Signature Facial",
-        "spa_name": "Clear Skin Esthetics",
+        "spa_name": get_spa_name(spa_id) or "Your Business",
         "spa_phone": "(817) 555-1234",
         "spa_website": "https://peachsuitepro.com",
         "spa_address": "123 Main Street",
@@ -80533,6 +81424,7 @@ def reminder_queue():
 
 def generate_appointment_reminders():
     spa_id = current_spa_id()
+    spa_name = get_spa_name(spa_id) or "Your Business"
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -80602,12 +81494,13 @@ def generate_appointment_reminders():
                 continue
 
             message_body = apply_sms_placeholders(
-                "Hi {first_name}, this is Clear Skin Esthetics. This is a reminder of your appointment on {appointment_date} at {appointment_time}. Reply STOP to opt out.",
+                "Hi {first_name}, this is {spa_name}. This is a reminder of your appointment on {appointment_date} at {appointment_time}. Reply STOP to opt out.",
                 {
                     "first_name": first_name,
                     "last_name": last_name,
                     "appointment_date": appointment_date,
-                    "appointment_time": appointment_time
+                    "appointment_time": appointment_time,
+                    "spa_name": spa_name
                 }
             )
 
@@ -81257,6 +82150,7 @@ def prepare_appointment_reminder(appointment_id):
 
 def generate_after_appointment_followups():
     spa_id = current_spa_id()
+    spa_name = get_spa_name(spa_id) or "Your Business"
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -81320,12 +82214,13 @@ def generate_after_appointment_followups():
                 continue
 
             message_body = apply_sms_placeholders(
-                "Hi {first_name}, thank you for visiting Clear Skin Esthetics. We hope you enjoyed your appointment. Please contact us if you have any questions about your aftercare. Reply STOP to opt out.",
+                "Hi {first_name}, thank you for visiting {spa_name}. We hope you enjoyed your appointment. Please contact us if you have any questions about your aftercare. Reply STOP to opt out.",
                 {
                     "first_name": first_name,
                     "last_name": last_name,
                     "appointment_date": appointment_date,
-                    "appointment_time": appointment_time
+                    "appointment_time": appointment_time,
+                    "spa_name": spa_name
                 }
             )
 
@@ -86033,6 +86928,248 @@ def client_management():
 
 
 
+
+# --------------------------------------
+#
+# CLIENT INFORMATION LABELS
+#
+# Workspace-level display configuration.
+# Backend Client Health Profile fields
+# remain unchanged.
+#
+# --------------------------------------
+
+@app.route(
+    "/client_information_labels",
+    methods=["GET", "POST"],
+)
+@login_required
+@spa_required
+@require_subscription_feature("clients")
+def client_information_labels():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to manage Client Information labels.",
+            "error",
+        )
+        return redirect(
+            url_for("client_management")
+        )
+
+    definitions = (
+        get_client_information_label_definitions()
+    )
+
+    note_definitions = (
+        get_client_record_note_label_definitions()
+    )
+
+    post_definitions = (
+        get_post_appointment_label_definitions()
+    )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        if request.method == "POST":
+            submitted_token = request.form.get(
+                "security_csrf_token",
+                "",
+            )
+
+            if not _security_form_csrf_valid(
+                submitted_token
+            ):
+                abort(400)
+
+            submitted_labels = {
+                definition["field_key"]: (
+                    request.form.get(
+                        definition["field_key"],
+                        "",
+                    )
+                    or ""
+                ).strip()
+                for definition in definitions
+            }
+
+            submitted_note_labels = {
+                definition["field_key"]: (
+                    request.form.get(
+                        definition["field_key"],
+                        "",
+                    )
+                    or ""
+                ).strip()
+                for definition in note_definitions
+            }
+
+            submitted_post_labels = {
+                definition["field_key"]: (
+                    request.form.get(
+                        definition["field_key"],
+                        "",
+                    )
+                    or ""
+                ).strip()
+                for definition in post_definitions
+            }
+
+            try:
+                save_client_information_labels(
+                    cur,
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    labels=submitted_labels,
+                    updated_by=session.get("user_id"),
+                )
+
+                save_client_record_note_labels(
+                    cur,
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    labels=submitted_note_labels,
+                    updated_by=session.get("user_id"),
+                )
+
+                save_post_appointment_labels(
+                    cur,
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    labels=submitted_post_labels,
+                    updated_by=session.get("user_id"),
+                )
+
+                conn.commit()
+
+            except ValueError as exc:
+                conn.rollback()
+
+                flash(
+                    str(exc),
+                    "error",
+                )
+
+                resolved_labels = {
+                    definition["field_key"]: (
+                        submitted_labels.get(
+                            definition["field_key"],
+                            "",
+                        )
+                        or definition["default_label"]
+                    )
+                    for definition in definitions
+                }
+
+                resolved_note_labels = {
+                    definition["field_key"]: (
+                        submitted_note_labels.get(
+                            definition["field_key"],
+                            "",
+                        )
+                        or definition["default_label"]
+                    )
+                    for definition in note_definitions
+                }
+
+                resolved_post_labels = {
+                    definition["field_key"]: (
+                        submitted_post_labels.get(
+                            definition["field_key"],
+                            "",
+                        )
+                        or definition["default_label"]
+                    )
+                    for definition in post_definitions
+                }
+
+                return render_template(
+                    "client_information_labels.html",
+                    label_definitions=definitions,
+                    client_information_labels=(
+                        resolved_labels
+                    ),
+                    client_record_note_definitions=(
+                        note_definitions
+                    ),
+                    client_record_note_labels=(
+                        resolved_note_labels
+                    ),
+                    post_appointment_definitions=post_definitions,
+                    post_appointment_labels=(
+                        resolved_post_labels
+                    ),
+                    security_csrf_token=(
+                        _security_form_csrf_token()
+                    ),
+                )
+
+            flash(
+                "Client Information labels updated.",
+                "success",
+            )
+
+            return redirect(
+                url_for(
+                    "client_information_labels"
+                )
+            )
+
+        resolved_labels = (
+            get_client_information_labels(
+                cur,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+            )
+        )
+
+        resolved_note_labels = (
+            get_client_record_note_labels(
+                cur,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+            )
+        )
+
+        resolved_post_labels = (
+            get_post_appointment_labels(
+                cur,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+            )
+        )
+
+        return render_template(
+            "client_information_labels.html",
+            label_definitions=definitions,
+            client_information_labels=(
+                resolved_labels
+            ),
+            client_record_note_definitions=(
+                note_definitions
+            ),
+            client_record_note_labels=(
+                resolved_note_labels
+            ),
+            post_appointment_definitions=post_definitions,
+            post_appointment_labels=(
+                resolved_post_labels
+            ),
+            security_csrf_token=(
+                _security_form_csrf_token()
+            ),
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
 @app.route(
     "/schedule_appointment_start",
     methods=["GET", "POST"]
@@ -87227,6 +88364,120 @@ from datetime import date
 
 
 
+
+@app.route("/client-full-record-preview")
+@login_required
+@spa_required
+@require_subscription_feature("clients")
+def client_full_record_preview():
+    """
+    Read-only blank preview of the actual Client Full Record form.
+
+    No Client record is required and no Client data can be saved.
+    """
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to preview the Client Record.",
+            "error",
+        )
+        return redirect(
+            url_for("client_information_labels")
+        )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                sex_type_id,
+                sex_type
+            FROM sex
+            ORDER BY sex_type
+        """)
+        sex_options = cur.fetchall()
+
+        cur.execute("""
+            SELECT
+                skin_type_id,
+                skin_type_name
+            FROM skin_types
+            WHERE spa_id = %s
+              AND is_active = TRUE
+            ORDER BY skin_type_name
+        """, (
+            spa_id,
+        ))
+        skin_types = cur.fetchall()
+
+        cur.execute("""
+            SELECT
+                fitzpatrick_id,
+                fitzpatrick_level
+            FROM fitzpatrick_types
+            WHERE spa_id = %s
+              AND is_active = TRUE
+            ORDER BY fitzpatrick_id
+        """, (
+            spa_id,
+        ))
+        fitzpatrick_types = cur.fetchall()
+
+        cur.execute("""
+            SELECT
+                referral_source_id,
+                referral_source_name
+            FROM referral_sources
+            WHERE spa_id = %s
+            ORDER BY referral_source_name
+        """, (
+            spa_id,
+        ))
+        referral_sources = cur.fetchall()
+
+        client_information_labels = (
+            get_client_information_labels(
+                cur,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+            )
+        )
+
+        client_record_note_labels = (
+            get_client_record_note_labels(
+                cur,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+            )
+        )
+
+        return render_template(
+            "edit_client_full.html",
+            client=None,
+            health=None,
+            sex_options=sex_options,
+            skin_types=skin_types,
+            fitzpatrick_types=fitzpatrick_types,
+            referral_sources=referral_sources,
+            duplicate_matches=[],
+            preview_mode=True,
+            client_information_labels=(
+                client_information_labels
+            ),
+            client_record_note_labels=(
+                client_record_note_labels
+            ),
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
 @app.route("/edit-client-full/<int:client_id>", methods=["GET", "POST"])
 @login_required
 @spa_required
@@ -87319,6 +88570,22 @@ def edit_client_full(client_id):
 
         health = cur.fetchone()
         duplicate_matches = []
+
+        client_information_labels = (
+            get_client_information_labels(
+                cur,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+            )
+        )
+
+        client_record_note_labels = (
+            get_client_record_note_labels(
+                cur,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+            )
+        )
 
         def load_full_client_options():
             cur.execute("""
@@ -87552,6 +88819,12 @@ def edit_client_full(client_id):
 
                 return render_template(
                     "edit_client_full.html",
+            client_information_labels=(
+                client_information_labels
+            ),
+            client_record_note_labels=(
+                client_record_note_labels
+            ),
                     client=client,
                     health=health,
                     sex_options=sex_options,
@@ -87748,7 +89021,7 @@ def edit_client_full(client_id):
             )
 
             flash(
-                "Client full record updated successfully.",
+                "Client record updated successfully.",
                 "success"
             )
             return redirect(url_for("client_management"))
@@ -87764,6 +89037,12 @@ def edit_client_full(client_id):
 
         return render_template(
             "edit_client_full.html",
+            client_information_labels=(
+                client_information_labels
+            ),
+            client_record_note_labels=(
+                client_record_note_labels
+            ),
             client=client,
             health=health,
             sex_options=sex_options,
@@ -97930,7 +99209,7 @@ def resolve_service_recipient(appointment_id):
                 "preferred_location_id": "",
                 "client_status": "Current",
                 "preferred_language": "",
-                "ok_to_call": True,
+                "ok_to_call": False,
                 "ok_to_text": False,
                 "ok_to_email": False,
                 "preferred_contact_method": ""
@@ -105253,6 +106532,13 @@ def morning_briefing():
     conn = get_db_connection()
     cur = conn.cursor()
 
+    setup_progress = _business_onboarding_setup_progress(
+        cur,
+        spa_id=spa_id,
+        user_id=user_id,
+        business_unit_id=business_unit_id,
+    )
+
     if not appointments_enabled and square_enabled:
         peachpos_summary = _get_peachpos_sales_summary(
             cur,
@@ -105700,8 +106986,26 @@ def morning_briefing():
         priority_actions=priority_actions,
         spa_now=spa_now,
         coach_session=coach_session,
-        appointments_enabled=appointments_enabled
+        appointments_enabled=appointments_enabled,
+        setup_progress=setup_progress
     )
+
+
+    show_setup_complete_welcome = (
+        request.args.get("setup_complete") == "1"
+        and isinstance(setup_progress, dict)
+        and setup_progress.get("is_complete", False)
+    )
+
+    if show_setup_complete_welcome:
+        coach["message"] = (
+            "Welcome to Peach Suite Pro! 🍑 "
+            "Your initial setup is complete and your workspace is ready. "
+            "Take a look around and enjoy your Peach Suite Pro experience. "
+            "I’ll be here on your Daily Briefing to help you keep an eye "
+            "on your business, surface anything that needs attention, "
+            "and guide you along the way."
+        )
 
 
     record_coach_interaction(
@@ -105754,7 +107058,11 @@ def morning_briefing():
         coach_session=coach_session,
         spa_now=spa_now,
         action_cards=action_cards,
+        setup_progress=setup_progress,
         show_coach_welcome=show_coach_welcome,
+        show_setup_complete_welcome=(
+            show_setup_complete_welcome
+        ),
         show_login_splash=show_login_splash
     )
 
@@ -106045,7 +107353,7 @@ def coach_welcome_get_started():
             "error"
         )
 
-        return redirect(url_for("daily_briefing"))
+        return redirect(url_for("morning_briefing"))
 
     finally:
         cur.close()
@@ -106053,7 +107361,10 @@ def coach_welcome_get_started():
 
     session.pop("coach_welcome_dismissed", None)
 
-    return redirect(url_for("business_coach_profile"))
+    return redirect(
+        url_for("morning_briefing")
+        + "#onboarding-setup"
+    )
 
 ################################################################
 
@@ -106066,7 +107377,7 @@ def coach_welcome_get_started():
 def coach_welcome_remind_later():
     session["coach_welcome_dismissed"] = True
 
-    return redirect(url_for("daily_briefing"))
+    return redirect(url_for("morning_briefing"))
 
 
 
@@ -108194,12 +109505,24 @@ def client_health_profile(client_id):
         current_medical_conditions = request.form.get("current_medical_conditions")
         past_medical_treatments = request.form.get("past_medical_treatments")
 
-        recent_injections = "recent_injections" in request.form
-        recent_laser = "recent_laser" in request.form
-        pregnant = "pregnant" in request.form
-        nursing = "nursing" in request.form
-        using_retinol = "using_retinol" in request.form
-        using_accutane = "using_accutane" in request.form
+        recent_injections = parse_bool(
+            request.form.get("recent_injections")
+        )
+        recent_laser = parse_bool(
+            request.form.get("recent_laser")
+        )
+        pregnant = parse_bool(
+            request.form.get("pregnant")
+        )
+        nursing = parse_bool(
+            request.form.get("nursing")
+        )
+        using_retinol = parse_bool(
+            request.form.get("using_retinol")
+        )
+        using_accutane = parse_bool(
+            request.form.get("using_accutane")
+        )
 
         sun_exposure_level = request.form.get("sun_exposure_level")
         last_facial_date = request.form.get("last_facial_date") or None
@@ -108335,6 +109658,14 @@ def client_health_profile(client_id):
 
     profile = cur.fetchone()
 
+    client_information_labels = (
+        get_client_information_labels(
+            cur,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+        )
+    )
+
     cur.close()
     conn.close()
 
@@ -108346,7 +109677,10 @@ def client_health_profile(client_id):
         profile=profile,
         sex_options=sex_options,
         skin_types=skin_types,
-        fitzpatrick_types=fitzpatrick_types
+        fitzpatrick_types=fitzpatrick_types,
+        client_information_labels=(
+            client_information_labels
+        )
     )
 
 
@@ -110258,6 +111592,14 @@ def post_appointment_wrap_up(appointment_id):
 
     wrap_up = cur.fetchone()
 
+    post_appointment_labels = (
+        get_post_appointment_labels(
+            cur,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+        )
+    )
+
     cur.close()
     conn.close()
 
@@ -110265,7 +111607,10 @@ def post_appointment_wrap_up(appointment_id):
         "post_appointment_wrap_up.html",
         appointment=appointment,
         wrap_up=wrap_up,
-        selected_date=selected_date
+        selected_date=selected_date,
+        post_appointment_labels=(
+            post_appointment_labels
+        )
     )
 
 
@@ -110627,13 +111972,24 @@ def client_history_detail(client_id):
 
     rows = cur.fetchall()
 
+    post_appointment_labels = (
+        get_post_appointment_labels(
+            cur,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+        )
+    )
+
     cur.close()
     conn.close()
 
     return render_template(
         "client_history_detail.html",
         rows=rows,
-        client=client
+        client=client,
+        post_appointment_labels=(
+            post_appointment_labels
+        )
     )
 
 
@@ -110853,287 +112209,6 @@ def _sync_saved_client_to_square_after_commit(
 # =========================================================
 
 
-def find_possible_client_duplicates(
-    cur,
-    spa_id,
-    business_unit_id,
-    first_name,
-    last_name,
-    phone,
-    email,
-    exclude_client_id=None
-):
-    """
-    Return possible duplicate clients for the current workspace.
-
-    Strong matches:
-    - Exact normalized email
-    - Exact normalized phone
-
-    Warning match:
-    - Exact normalized first and last name
-
-    Active and archived clients are both included.
-    """
-    import re
-
-    def normalize_name(value):
-        return " ".join(
-            str(value or "")
-            .strip()
-            .lower()
-            .split()
-        )
-
-    def normalize_email(value):
-        return str(value or "").strip().lower()
-
-    def normalize_phone(value):
-        digits = re.sub(
-            r"[^0-9]",
-            "",
-            str(value or "")
-        )
-
-        if (
-            len(digits) == 11
-            and digits.startswith("1")
-        ):
-            digits = digits[1:]
-
-        return digits
-
-    submitted_first_name = normalize_name(
-        first_name
-    )
-
-    submitted_last_name = normalize_name(
-        last_name
-    )
-
-    submitted_email = normalize_email(
-        email
-    )
-
-    submitted_phone = normalize_phone(
-        phone
-    )
-
-    match_conditions = []
-    params = [
-        spa_id,
-        business_unit_id
-    ]
-
-    if (
-        submitted_first_name
-        and submitted_last_name
-    ):
-        match_conditions.append("""
-            (
-                LOWER(
-                    REGEXP_REPLACE(
-                        TRIM(
-                            COALESCE(first_name, '')
-                        ),
-                        '\\s+',
-                        ' ',
-                        'g'
-                    )
-                ) = %s
-
-                AND LOWER(
-                    REGEXP_REPLACE(
-                        TRIM(
-                            COALESCE(last_name, '')
-                        ),
-                        '\\s+',
-                        ' ',
-                        'g'
-                    )
-                ) = %s
-            )
-        """)
-
-        params.extend([
-            submitted_first_name,
-            submitted_last_name
-        ])
-
-    if submitted_email:
-        match_conditions.append("""
-            LOWER(
-                TRIM(
-                    COALESCE(email, '')
-                )
-            ) = %s
-        """)
-
-        params.append(
-            submitted_email
-        )
-
-    if submitted_phone:
-        match_conditions.append("""
-            REGEXP_REPLACE(
-                COALESCE(phone, ''),
-                '[^0-9]',
-                '',
-                'g'
-            ) IN (%s, %s)
-        """)
-
-        params.extend([
-            submitted_phone,
-            "1" + submitted_phone
-        ])
-
-    if not match_conditions:
-        return []
-
-    query = """
-        SELECT
-            client_id,
-            first_name,
-            last_name,
-            phone,
-            email,
-            active_client
-        FROM clients
-        WHERE spa_id = %s
-          AND business_unit_id = %s
-          AND (
-    """
-
-    query += "\n OR ".join(
-        match_conditions
-    )
-
-    query += """
-          )
-    """
-
-    if exclude_client_id is not None:
-        query += """
-          AND client_id <> %s
-        """
-
-        params.append(
-            exclude_client_id
-        )
-
-    query += """
-        ORDER BY
-            active_client DESC,
-            last_name,
-            first_name,
-            client_id
-    """
-
-    cur.execute(
-        query,
-        tuple(params)
-    )
-
-    duplicates = []
-
-    for row in cur.fetchall():
-        (
-            client_id,
-            existing_first_name,
-            existing_last_name,
-            existing_phone,
-            existing_email,
-            active_client
-        ) = row
-
-        reasons = []
-
-        existing_first_normalized = (
-            normalize_name(existing_first_name)
-        )
-
-        existing_last_normalized = (
-            normalize_name(existing_last_name)
-        )
-
-        existing_email_normalized = (
-            normalize_email(existing_email)
-        )
-
-        existing_phone_normalized = (
-            normalize_phone(existing_phone)
-        )
-
-        if (
-            submitted_first_name
-            and submitted_last_name
-            and submitted_first_name
-                == existing_first_normalized
-            and submitted_last_name
-                == existing_last_normalized
-        ):
-            reasons.append(
-                "Name"
-            )
-
-        if (
-            submitted_email
-            and submitted_email
-                == existing_email_normalized
-        ):
-            reasons.append(
-                "Email"
-            )
-
-        if (
-            submitted_phone
-            and submitted_phone
-                == existing_phone_normalized
-        ):
-            reasons.append(
-                "Phone"
-            )
-
-        strong_match = (
-            "Email" in reasons
-            or "Phone" in reasons
-        )
-
-        duplicates.append({
-            "client_id": client_id,
-
-            "first_name": existing_first_name or "",
-            "last_name": existing_last_name or "",
-
-            "client_name": (
-                f"{existing_first_name or ''} "
-                f"{existing_last_name or ''}"
-            ).strip()
-            or f"Client {client_id}",
-
-            "phone": existing_phone or "",
-            "email": existing_email or "",
-
-            "active_client":
-                bool(active_client),
-
-            "status_label": (
-                "Active"
-                if active_client
-                else "Archived"
-            ),
-
-            "match_reasons": reasons,
-
-            "match_reason_display":
-                ", ".join(reasons),
-
-            "strong_match":
-                strong_match
-        })
-
-    return duplicates
 
 
 #  ---------------------------------
@@ -111248,7 +112323,7 @@ def add_new_client():
             "preferred_location_id": request.form.get("preferred_location_id") or "",
             "client_status": request.form.get("client_status", "Current").strip(),
             "preferred_language": request.form.get("preferred_language", "").strip(),
-            "ok_to_call": True,
+            "ok_to_call": False,
             "ok_to_text": "ok_to_text" in request.form,
             "ok_to_email": "ok_to_email" in request.form,
             "preferred_contact_method": request.form.get("preferred_contact_method", "").strip()
@@ -111477,9 +112552,9 @@ def add_new_client():
                     step1_data.get("preferred_location_id") or None,
                     step1_data.get("client_status", "Current"),
                     step1_data.get("preferred_language") or None,
-                    step1_data.get("ok_to_call", True),
-                    step1_data.get("ok_to_text", True),
-                    step1_data.get("ok_to_email", True),
+                    step1_data.get("ok_to_call", False),
+                    step1_data.get("ok_to_text", False),
+                    step1_data.get("ok_to_email", False),
                     step1_data.get("preferred_contact_method") or None,
                     "",
                     "",
@@ -111869,9 +112944,9 @@ def add_new_client_step2():
                     step1.get("preferred_location_id") or None,
                     step1.get("client_status", "Current"),
                     step1.get("preferred_language") or None,
-                    step1.get("ok_to_call", True),
-                    step1.get("ok_to_text", True),
-                    step1.get("ok_to_email", True),
+                    step1.get("ok_to_call", False),
+                    step1.get("ok_to_text", False),
+                    step1.get("ok_to_email", False),
                     step1.get("preferred_contact_method") or None,
                     step2.get("emergency_contact_name", ""),
                     step2.get("emergency_contact_phone", ""),
@@ -112709,6 +113784,11 @@ def booking_business_hours():
     business_unit_id = current_business_unit_id()
     user_id = session.get("user_id")
 
+    onboarding_requested = (
+        request.args.get("onboarding") == "1"
+        or request.form.get("onboarding") == "1"
+    )
+
     if business_unit_id is None:
         flash(
             "A valid Provider Workspace is required "
@@ -112852,7 +113932,12 @@ def booking_business_hours():
                 flash(error_message, "error")
 
             return redirect(
-                url_for("booking_business_hours")
+                url_for(
+                    "booking_business_hours",
+                    onboarding=1
+                )
+                if onboarding_requested
+                else url_for("booking_business_hours")
             )
 
         conn = get_db_connection()
@@ -112881,8 +113966,6 @@ def booking_business_hours():
                         updated_by
                     )
                     VALUES (
-                        %s,
-                        %s,
                         %s,
                         %s,
                         %s,
@@ -112923,7 +114006,12 @@ def booking_business_hours():
             conn.close()
 
         return redirect(
-            url_for("booking_business_hours")
+            url_for(
+                "booking_business_hours",
+                onboarding=1
+            )
+            if onboarding_requested
+            else url_for("booking_business_hours")
         )
 
     conn = get_db_connection()
@@ -113033,7 +114121,129 @@ def booking_business_hours():
         "booking/business_hours.html",
         day_names=day_names,
         hours_by_day=hours_by_day,
-        workspace_name=workspace_name
+        workspace_name=workspace_name,
+        active_period_count=len(hour_rows),
+        onboarding_requested=onboarding_requested,
+        security_csrf_token=(
+            _security_form_csrf_token()
+            if onboarding_requested
+            else ""
+        )
+    )
+
+
+############################################
+#
+#   BUSINESS HOURS - ONBOARDING COMPLETE
+#
+############################################
+
+@app.route(
+    "/booking/business-hours/onboarding/complete",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def complete_business_hours_onboarding():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if not business_unit_id or not user_id:
+        abort(403)
+
+    submitted_token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_token
+    ):
+        abort(400)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        onboarding = _business_onboarding_record(
+            cur,
+            spa_id,
+            user_id,
+            for_update=True,
+        )
+
+        if (
+            not onboarding
+            or onboarding[10] is None
+            or int(onboarding[10]) != int(business_unit_id)
+        ):
+            conn.rollback()
+            abort(403)
+
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM booking_business_hours
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND is_active = TRUE
+            """,
+            (
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        active_period_count = int(
+            cur.fetchone()[0] or 0
+        )
+
+        if active_period_count < 1:
+            conn.rollback()
+            flash(
+                "Add and save at least one business-hours "
+                "period before continuing setup.",
+                "error",
+            )
+            return redirect(
+                url_for(
+                    "booking_business_hours",
+                    onboarding=1,
+                )
+            )
+
+        _complete_business_onboarding_step(
+            cur,
+            business_onboarding_id=onboarding[0],
+            step_key="business_hours",
+            user_id=user_id,
+        )
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    flash(
+        "Business Hours setup complete. "
+        "Next, set your Provider Hours.",
+        "success",
+    )
+
+    return redirect(
+        url_for(
+            "booking_provider_hours",
+            onboarding=1,
+        )
     )
 
 
@@ -113059,6 +114269,11 @@ def booking_provider_hours():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
     user_id = session.get("user_id")
+
+    onboarding_requested = (
+        request.args.get("onboarding") == "1"
+        or request.form.get("onboarding") == "1"
+    )
 
     if business_unit_id is None:
         flash(
@@ -113193,7 +114408,12 @@ def booking_provider_hours():
                 "error"
             )
             return redirect(
-                url_for("booking_provider_hours")
+                url_for(
+                    "booking_provider_hours",
+                    onboarding=1
+                )
+                if onboarding_requested
+                else url_for("booking_provider_hours")
             )
 
         selected_provider_id = (
@@ -113381,6 +114601,14 @@ def booking_provider_hours():
                     "booking_provider_hours",
                     provider_employee_id=(
                         selected_provider_id
+                    ),
+                    onboarding=1
+                )
+                if onboarding_requested
+                else url_for(
+                    "booking_provider_hours",
+                    provider_employee_id=(
+                        selected_provider_id
                     )
                 )
             )
@@ -113471,6 +114699,14 @@ def booking_provider_hours():
                 "booking_provider_hours",
                 provider_employee_id=(
                     selected_provider_id
+                ),
+                onboarding=1
+            )
+            if onboarding_requested
+            else url_for(
+                "booking_provider_hours",
+                provider_employee_id=(
+                    selected_provider_id
                 )
             )
         )
@@ -113507,6 +114743,36 @@ def booking_provider_hours():
         finally:
             cur.close()
             conn.close()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM provider_booking_hours pbh
+            JOIN employees e
+              ON e.employee_id = pbh.provider_employee_id
+             AND e.spa_id = pbh.spa_id
+            WHERE pbh.spa_id = %s
+              AND pbh.business_unit_id = %s
+              AND pbh.is_active = TRUE
+              AND e.is_active = TRUE
+            """,
+            (
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        active_provider_period_count = int(
+            cur.fetchone()[0] or 0
+        )
+
+    finally:
+        cur.close()
+        conn.close()
 
     provider_hours_by_day = {
         day_index: []
@@ -113603,6 +114869,134 @@ def booking_provider_hours():
         ),
         business_hours_by_day=(
             business_hours_by_day
+        ),
+        active_provider_period_count=(
+            active_provider_period_count
+        ),
+        onboarding_requested=onboarding_requested,
+        security_csrf_token=(
+            _security_form_csrf_token()
+            if onboarding_requested
+            else ""
+        )
+    )
+
+
+############################################
+#
+#   PROVIDER HOURS - ONBOARDING COMPLETE
+#
+############################################
+
+@app.route(
+    "/booking/provider-hours/onboarding/complete",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def complete_provider_hours_onboarding():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if not business_unit_id or not user_id:
+        abort(403)
+
+    submitted_token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_token
+    ):
+        abort(400)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        onboarding = _business_onboarding_record(
+            cur,
+            spa_id,
+            user_id,
+            for_update=True,
+        )
+
+        if (
+            not onboarding
+            or onboarding[10] is None
+            or int(onboarding[10]) != int(business_unit_id)
+        ):
+            conn.rollback()
+            abort(403)
+
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM provider_booking_hours pbh
+            JOIN employees e
+              ON e.employee_id = pbh.provider_employee_id
+             AND e.spa_id = pbh.spa_id
+            WHERE pbh.spa_id = %s
+              AND pbh.business_unit_id = %s
+              AND pbh.is_active = TRUE
+              AND e.is_active = TRUE
+            """,
+            (
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        active_provider_period_count = int(
+            cur.fetchone()[0] or 0
+        )
+
+        if active_provider_period_count < 1:
+            conn.rollback()
+            flash(
+                "Add and save at least one Provider Hours "
+                "period before continuing setup.",
+                "error",
+            )
+            return redirect(
+                url_for(
+                    "booking_provider_hours",
+                    onboarding=1,
+                )
+            )
+
+        _complete_business_onboarding_step(
+            cur,
+            business_onboarding_id=onboarding[0],
+            step_key="provider_hours",
+            user_id=user_id,
+        )
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    flash(
+        "Provider Hours setup complete. "
+        "Next, assign your Provider Services.",
+        "success",
+    )
+
+    return redirect(
+        url_for(
+            "booking_provider_services",
+            onboarding=1,
         )
     )
 
@@ -113629,6 +115023,11 @@ def booking_provider_services():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
     user_id = session.get("user_id")
+
+    onboarding_requested = (
+        request.args.get("onboarding") == "1"
+        or request.form.get("onboarding") == "1"
+    )
 
     if business_unit_id is None:
         flash(
@@ -113749,7 +115148,12 @@ def booking_provider_services():
             )
 
             return redirect(
-                url_for("booking_provider_services")
+                url_for(
+                    "booking_provider_services",
+                    onboarding=1
+                )
+                if onboarding_requested
+                else url_for("booking_provider_services")
             )
 
         selected_provider_id = (
@@ -113967,6 +115371,14 @@ def booking_provider_services():
                     "booking_provider_services",
                     provider_employee_id=(
                         selected_provider_id
+                    ),
+                    onboarding=1
+                )
+                if onboarding_requested
+                else url_for(
+                    "booking_provider_services",
+                    provider_employee_id=(
+                        selected_provider_id
                     )
                 )
             )
@@ -114060,6 +115472,14 @@ def booking_provider_services():
 
         return redirect(
             url_for(
+                "booking_provider_services",
+                provider_employee_id=(
+                    selected_provider_id
+                ),
+                onboarding=1
+            )
+            if onboarding_requested
+            else url_for(
                 "booking_provider_services",
                 provider_employee_id=(
                     selected_provider_id
@@ -114306,11 +115726,177 @@ def booking_provider_services():
             )
         })
 
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM provider_service_types pst
+            JOIN employees e
+              ON e.employee_id = pst.provider_employee_id
+             AND e.spa_id = pst.spa_id
+            JOIN service_name_types snt
+              ON snt.service_type_id = pst.service_type_id
+             AND snt.spa_id = pst.spa_id
+            WHERE pst.spa_id = %s
+              AND pst.business_unit_id = %s
+              AND pst.is_active = TRUE
+              AND e.is_active = TRUE
+              AND snt.is_active = TRUE
+            """,
+            (
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        active_provider_service_count = int(
+            cur.fetchone()[0] or 0
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
     return render_template(
         "booking/provider_services.html",
         providers=providers,
         selected_provider_id=selected_provider_id,
-        services=services
+        services=services,
+        active_provider_service_count=(
+            active_provider_service_count
+        ),
+        onboarding_requested=onboarding_requested,
+        security_csrf_token=(
+            _security_form_csrf_token()
+            if onboarding_requested
+            else ""
+        )
+    )
+
+
+############################################
+#
+#   PROVIDER SERVICES - ONBOARDING COMPLETE
+#
+############################################
+
+@app.route(
+    "/booking/provider-services/onboarding/complete",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def complete_provider_services_onboarding():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if not business_unit_id or not user_id:
+        abort(403)
+
+    submitted_token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_token
+    ):
+        abort(400)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        onboarding = _business_onboarding_record(
+            cur,
+            spa_id,
+            user_id,
+            for_update=True,
+        )
+
+        if (
+            not onboarding
+            or onboarding[10] is None
+            or int(onboarding[10]) != int(business_unit_id)
+        ):
+            conn.rollback()
+            abort(403)
+
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM provider_service_types pst
+            JOIN employees e
+              ON e.employee_id = pst.provider_employee_id
+             AND e.spa_id = pst.spa_id
+            JOIN service_name_types snt
+              ON snt.service_type_id = pst.service_type_id
+             AND snt.spa_id = pst.spa_id
+            WHERE pst.spa_id = %s
+              AND pst.business_unit_id = %s
+              AND pst.is_active = TRUE
+              AND e.is_active = TRUE
+              AND snt.is_active = TRUE
+            """,
+            (
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        active_provider_service_count = int(
+            cur.fetchone()[0] or 0
+        )
+
+        if active_provider_service_count < 1:
+            conn.rollback()
+            flash(
+                "Assign and save at least one service to an active "
+                "provider before continuing setup.",
+                "error",
+            )
+            return redirect(
+                url_for(
+                    "booking_provider_services",
+                    onboarding=1,
+                )
+            )
+
+        _complete_business_onboarding_step(
+            cur,
+            business_onboarding_id=onboarding[0],
+            step_key="provider_services",
+            user_id=user_id,
+        )
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    flash(
+        "Provider Services setup complete. "
+        "Next, review Provider Time Off.",
+        "success",
+    )
+
+    return redirect(
+        url_for(
+            "booking_provider_time_off",
+            onboarding=1,
+        )
     )
 
 
@@ -114336,6 +115922,11 @@ def booking_provider_time_off():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
     user_id = session.get("user_id")
+
+    onboarding_requested = (
+        request.args.get("onboarding") == "1"
+        or request.form.get("onboarding") == "1"
+    )
 
     if business_unit_id is None:
         flash(
@@ -114776,6 +116367,9 @@ def booking_provider_time_off():
                 "view": view_filter
             }
 
+            if onboarding_requested:
+                redirect_values["onboarding"] = 1
+
             if provider_time_off_id is not None:
                 redirect_values["edit_id"] = (
                     provider_time_off_id
@@ -114922,6 +116516,9 @@ def booking_provider_time_off():
             "view": "upcoming"
         }
 
+        if onboarding_requested:
+            redirect_values["onboarding"] = 1
+
         if filter_provider_id is not None:
             redirect_values["filter_provider_id"] = (
                 filter_provider_id
@@ -114991,6 +116588,12 @@ def booking_provider_time_off():
             return redirect(
                 url_for(
                     "booking_provider_time_off",
+                    view=view_filter,
+                    onboarding=1
+                )
+                if onboarding_requested
+                else url_for(
+                    "booking_provider_time_off",
                     view=view_filter
                 )
             )
@@ -115005,6 +116608,12 @@ def booking_provider_time_off():
             return redirect(
                 url_for(
                     "booking_provider_time_off",
+                    view="history",
+                    onboarding=1
+                )
+                if onboarding_requested
+                else url_for(
+                    "booking_provider_time_off",
                     view="history"
                 )
             )
@@ -115017,6 +116626,12 @@ def booking_provider_time_off():
 
             return redirect(
                 url_for(
+                    "booking_provider_time_off",
+                    view="history",
+                    onboarding=1
+                )
+                if onboarding_requested
+                else url_for(
                     "booking_provider_time_off",
                     view="history"
                 )
@@ -115321,7 +116936,96 @@ def booking_provider_time_off():
         selected_provider_id=selected_provider_id,
         filter_provider_id=filter_provider_id,
         time_off_records=time_off_records,
-        view_filter=view_filter
+        view_filter=view_filter,
+        onboarding_requested=onboarding_requested,
+        security_csrf_token=(
+            _security_form_csrf_token()
+            if onboarding_requested
+            else ""
+        )
+    )
+
+
+############################################
+#
+#   PROVIDER TIME OFF - ONBOARDING COMPLETE
+#
+############################################
+
+@app.route(
+    "/booking/provider-time-off/onboarding/complete",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def complete_provider_time_off_onboarding():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if not business_unit_id or not user_id:
+        abort(403)
+
+    submitted_token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_token
+    ):
+        abort(400)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        onboarding = _business_onboarding_record(
+            cur,
+            spa_id,
+            user_id,
+            for_update=True,
+        )
+
+        if (
+            not onboarding
+            or onboarding[10] is None
+            or int(onboarding[10]) != int(business_unit_id)
+        ):
+            conn.rollback()
+            abort(403)
+
+        _complete_business_onboarding_step(
+            cur,
+            business_onboarding_id=onboarding[0],
+            step_key="provider_time_off",
+            user_id=user_id,
+        )
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    flash(
+        "Provider Time Off setup reviewed. "
+        "Next, review your Website Links.",
+        "success",
+    )
+
+    return redirect(
+        url_for(
+            "public_website_links",
+            onboarding=1,
+        )
     )
 
 
@@ -115348,6 +117052,10 @@ def deactivate_provider_time_off(
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
     user_id = session.get("user_id")
+
+    onboarding_requested = (
+        request.form.get("onboarding") == "1"
+    )
 
     if business_unit_id is None:
         flash(
@@ -115445,6 +117153,15 @@ def deactivate_provider_time_off(
 
     return redirect(
         url_for(
+            "booking_provider_time_off",
+            provider_employee_id=(
+                selected_provider_id
+            ),
+            view="upcoming",
+            onboarding=1
+        )
+        if onboarding_requested
+        else url_for(
             "booking_provider_time_off",
             provider_employee_id=(
                 selected_provider_id
@@ -115785,6 +117502,7 @@ def admin():
     return render_template(
         "admin.html",
         current_timezone=current_timezone,
+        timezone_options=BUSINESS_TIMEZONE_OPTIONS,
         utc_now=utc_now,
         spa_now=spa_now,
         dropdown_labels=dropdown_labels
@@ -123261,6 +124979,11 @@ def booking_control_center():
     )
     user_id = session.get("user_id")
 
+    onboarding_requested = (
+        request.args.get("onboarding") == "1"
+        or request.form.get("onboarding") == "1"
+    )
+
     if business_unit_id is None:
         flash(
             "A valid Provider Workspace is required "
@@ -123704,6 +125427,11 @@ def booking_control_center():
 
                 return redirect(
                     url_for(
+                        "booking_control_center",
+                        onboarding=1
+                    )
+                    if onboarding_requested
+                    else url_for(
                         "booking_control_center"
                     )
                 )
@@ -123840,12 +125568,102 @@ def booking_control_center():
             settings=settings,
             readiness=readiness,
             public_booking_url=
-                public_booking_url
+                public_booking_url,
+            onboarding_requested=
+                onboarding_requested,
+            security_csrf_token=(
+                _security_form_csrf_token()
+                if onboarding_requested
+                else ""
+            )
         )
 
     finally:
         cur.close()
         conn.close()
+
+
+############################################
+#
+#   BOOKING CONTROL CENTER - ONBOARDING COMPLETE
+#
+############################################
+
+@app.route(
+    "/booking/control-center/onboarding/complete",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_workspace_permission(
+    "can_manage_online_booking"
+)
+def complete_booking_control_center_onboarding():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if not business_unit_id or not user_id:
+        abort(403)
+
+    submitted_token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_token
+    ):
+        abort(400)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        onboarding = _business_onboarding_record(
+            cur,
+            spa_id,
+            user_id,
+            for_update=True,
+        )
+
+        if (
+            not onboarding
+            or onboarding[10] is None
+            or int(onboarding[10]) != int(business_unit_id)
+        ):
+            conn.rollback()
+            abort(403)
+
+        _complete_business_onboarding_step(
+            cur,
+            business_onboarding_id=onboarding[0],
+            step_key="booking_control_center",
+            user_id=user_id,
+        )
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    flash(
+        "Booking Control Center reviewed. "
+        "You can return anytime to adjust booking settings.",
+        "success",
+    )
+
+    return redirect(
+        url_for(
+            "booking_business_hours",
+            onboarding=1,
+        )
+    )
 
 
 @app.route(

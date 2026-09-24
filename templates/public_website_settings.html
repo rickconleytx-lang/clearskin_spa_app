@@ -233,9 +233,61 @@
     </div>
 
 
+    {% if onboarding_requested %}
+
+        <div
+            class="dashboard-card"
+            style="margin-bottom: 24px;"
+        >
+            <h2>🍑 Coach Peach Setup — Public Website Settings</h2>
+
+            <p>
+                Your public website already has default settings.
+                <strong>No changes are required on this page during setup.</strong>
+            </p>
+
+            <p>
+                You can return to this page at your convenience to review
+                and customize your website colors, headings, descriptions,
+                and other settings.
+            </p>
+
+            <form
+                method="POST"
+                action="{{ url_for(
+                    'complete_public_website_settings_onboarding'
+                ) }}"
+                style="margin: 0;"
+            >
+                <input
+                    type="hidden"
+                    name="security_csrf_token"
+                    value="{{ security_csrf_token }}"
+                >
+
+                <button
+                    type="submit"
+                    class="btn"
+                >
+                    Continue with Setup
+                </button>
+            </form>
+        </div>
+
+    {% endif %}
+
+
     <div class="website-settings-card">
 
         <form method="POST">
+
+            {% if onboarding_requested %}
+                <input
+                    type="hidden"
+                    name="onboarding"
+                    value="1"
+                >
+            {% endif %}
 
             <section class="website-settings-section">
 
