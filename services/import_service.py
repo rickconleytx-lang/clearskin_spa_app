@@ -3,6 +3,7 @@ import hashlib
 import io
 import re
 from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from openpyxl import load_workbook
@@ -15,6 +16,12 @@ from services.client_information_labels import (
     get_client_information_labels,
     get_client_record_note_label_definitions,
     get_client_record_note_labels,
+)
+
+
+from services.peachpos_processor_labels import (
+    get_peachpos_processor_field_definitions,
+    get_peachpos_processor_field_labels,
 )
 
 
@@ -535,6 +542,186 @@ CLIENT_IMPORT_FIELDS = (
 )
 
 
+# =========================================================
+# PEACHPOS INCOME IMPORT PROFILE
+# =========================================================
+
+
+PEACHPOS_PROCESSOR_IMPORT_FIELDS = tuple(
+    {
+        "key": definition["field_key"],
+        "label": definition["default_label"],
+        "required": False,
+        "aliases": (),
+        "field_type": definition["label_type"],
+    }
+    for definition in get_peachpos_processor_field_definitions()
+)
+
+
+PEACHPOS_INCOME_IMPORT_FIELDS = (
+    {
+        "key": "transaction_at",
+        "label": "Transaction Date / Time",
+        "required": True,
+        "aliases": (
+            "transaction date",
+            "transaction datetime",
+            "transaction date time",
+            "date time",
+            "datetime",
+            "sale date",
+            "created at",
+            "created_at",
+        ),
+    },
+    {
+        "key": "transaction_time",
+        "label": "Transaction Time",
+        "required": False,
+        "aliases": (
+            "transaction time",
+            "time",
+            "sale time",
+            "payment time",
+            "created time",
+        ),
+    },
+    {
+        "key": "processor_payment_id",
+        "label": "Processor Transaction ID",
+        "required": True,
+        "aliases": (
+            "transaction id",
+            "transaction_id",
+            "payment id",
+            "payment_id",
+            "processor transaction id",
+            "processor payment id",
+            "reference id",
+            "reference number",
+            "transaction number",
+        ),
+    },
+    {
+        "key": "merchant_account_identifier",
+        "label": "Merchant ID / Account ID",
+        "required": True,
+        "aliases": (
+            "merchant id",
+            "merchant_id",
+            "merchant account id",
+            "merchant account",
+            "merchant account identifier",
+            "mid",
+            "account id",
+            "account_id",
+            "processor account id",
+        ),
+    },
+    {
+        "key": "pos_amount",
+        "label": "Sales",
+        "required": True,
+        "aliases": (
+            "sales",
+            "sale amount",
+            "sales amount",
+            "subtotal",
+            "pre tax sales",
+            "pre-tax sales",
+            "net sales before tax",
+        ),
+    },
+    {
+        "key": "tax_amount",
+        "label": "Tax",
+        "required": False,
+        "aliases": (
+            "tax",
+            "tax amount",
+            "sales tax",
+            "tax collected",
+        ),
+    },
+    {
+        "key": "tip_amount",
+        "label": "Tips",
+        "required": False,
+        "aliases": (
+            "tip",
+            "tips",
+            "tip amount",
+            "tips collected",
+            "gratuity",
+        ),
+    },
+    {
+        "key": "total_amount",
+        "label": "Gross Collected",
+        "required": False,
+        "aliases": (
+            "total",
+            "total amount",
+            "gross",
+            "gross amount",
+            "gross collected",
+            "amount",
+            "payment amount",
+        ),
+    },
+    {
+        "key": "processing_fee_amount",
+        "label": "Processor Fees",
+        "required": False,
+        "aliases": (
+            "fee",
+            "fees",
+            "processing fee",
+            "processing fees",
+            "processor fee",
+            "processor fees",
+        ),
+    },
+    {
+        "key": "net_received",
+        "label": "Net Received",
+        "required": False,
+        "aliases": (
+            "net",
+            "net amount",
+            "net received",
+            "deposit amount",
+            "settlement amount",
+        ),
+    },
+    {
+        "key": "payment_method",
+        "label": "Payment Method",
+        "required": False,
+        "aliases": (
+            "payment method",
+            "payment type",
+            "tender",
+            "tender type",
+            "card type",
+        ),
+    },
+    {
+        "key": "processor_status",
+        "label": "Processor Status",
+        "required": False,
+        "aliases": (
+            "status",
+            "payment status",
+            "transaction status",
+            "processor status",
+        ),
+    },
+    *PEACHPOS_PROCESSOR_IMPORT_FIELDS,
+)
+
+
 def normalize_import_header(value):
     """
     Normalize a source column heading only for matching purposes.
@@ -570,6 +757,14 @@ def get_import_profile(entity_type):
             },
         }
 
+    if entity_type == "peachpos_income":
+        return {
+            "entity_type": "peachpos_income",
+            "display_name": "PeachPOS Income",
+            "fields": PEACHPOS_INCOME_IMPORT_FIELDS,
+            "defaults": {},
+        }
+
     raise ImportServiceError(
         f"Unsupported import type: {entity_type or 'unknown'}."
     )
@@ -582,6 +777,7 @@ def get_workspace_import_profile(
     spa_id,
     business_unit_id,
     entity_type,
+    options=None,
 ):
     """
     Return a workspace-aware copy of an Import Engine profile.
@@ -601,6 +797,69 @@ def get_workspace_import_profile(
             for field in base_profile["fields"]
         ],
     }
+
+    if profile["entity_type"] == "peachpos_income":
+        options_payload = dict(options or {})
+        credit_processor_id = options_payload.get(
+            "credit_processor_id"
+        )
+
+        try:
+            credit_processor_id = int(
+                credit_processor_id
+            )
+        except (TypeError, ValueError):
+            raise ImportServiceError(
+                "Choose a credit processor before importing "
+                "PeachPOS Income."
+            )
+
+        if credit_processor_id <= 0:
+            raise ImportServiceError(
+                "Choose a credit processor before importing "
+                "PeachPOS Income."
+            )
+
+        try:
+            resolved_processor_labels = (
+                get_peachpos_processor_field_labels(
+                    cur,
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    credit_processor_id=credit_processor_id,
+                    require_active=True,
+                )
+            )
+        except ValueError as exc:
+            raise ImportServiceError(str(exc)) from exc
+
+        processor_definitions = {
+            definition["field_key"]: definition
+            for definition
+            in get_peachpos_processor_field_definitions()
+        }
+
+        for field in profile["fields"]:
+            field_key = field["key"]
+            definition = processor_definitions.get(
+                field_key
+            )
+            if not definition:
+                continue
+
+            current_label = (
+                resolved_processor_labels.get(
+                    field_key
+                )
+                or definition["default_label"]
+            )
+            field["label"] = current_label
+            field["workspace_match_labels"] = (
+                current_label,
+                definition["default_label"],
+            )
+
+        return profile
 
     if profile["entity_type"] != "clients":
         return profile
@@ -830,6 +1089,137 @@ def _is_valid_import_email(value):
             character.isspace()
             for character in value
         )
+    )
+
+
+def _parse_import_money(value, *, default=None):
+    """
+    Normalize common processor-export currency values.
+    Returns Decimal for nonblank values.
+    Blank values return the supplied default.
+    """
+    if value is None:
+        return default
+
+    if isinstance(value, Decimal):
+        return value
+
+    raw = str(value).strip()
+    if not raw:
+        return default
+
+    negative_parentheses = (
+        raw.startswith("(")
+        and raw.endswith(")")
+    )
+
+    if negative_parentheses:
+        raw = raw[1:-1].strip()
+
+    raw = (
+        raw.replace(",", "")
+        .replace("$", "")
+        .strip()
+    )
+
+    try:
+        amount = Decimal(raw)
+    except (InvalidOperation, ValueError):
+        raise ImportServiceError(
+            f"Amount '{value}' is not a valid monetary value."
+        )
+
+    if negative_parentheses:
+        amount = -abs(amount)
+
+    return amount.quantize(Decimal("0.01"))
+
+
+def _parse_import_transaction_datetime(
+    value,
+    *,
+    time_value=None,
+):
+    """
+    Normalize a processor transaction date/time.
+
+    Supports either one combined timestamp or a separate
+    date column plus time column. Naive timestamps remain
+    naive here; posting later applies the workspace timezone.
+    PSP does not invent a missing transaction time.
+    """
+    raw = str(value or "").strip()
+    raw_time = str(time_value or "").strip()
+
+    if not raw:
+        raise ImportServiceError(
+            "Transaction Date / Time is required."
+        )
+
+    if raw_time:
+        raw = f"{raw} {raw_time}"
+
+    iso_candidate = raw
+    if iso_candidate.endswith("Z"):
+        iso_candidate = iso_candidate[:-1] + "+00:00"
+
+    try:
+        parsed = datetime.fromisoformat(iso_candidate)
+        if isinstance(parsed, datetime):
+            return parsed.isoformat()
+    except ValueError:
+        pass
+
+    datetime_formats = (
+        "%m/%d/%Y %I:%M:%S %p",
+        "%m/%d/%Y %I:%M %p",
+        "%m/%d/%y %I:%M:%S %p",
+        "%m/%d/%y %I:%M %p",
+        "%m-%d-%Y %I:%M:%S %p",
+        "%m-%d-%Y %I:%M %p",
+        "%m/%d/%Y %H:%M:%S",
+        "%m/%d/%Y %H:%M",
+        "%m/%d/%y %H:%M:%S",
+        "%m/%d/%y %H:%M",
+        "%m-%d-%Y %H:%M:%S",
+        "%m-%d-%Y %H:%M",
+        "%Y-%m-%d %I:%M:%S %p",
+        "%Y-%m-%d %I:%M %p",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+    )
+
+    for date_format in datetime_formats:
+        try:
+            parsed = datetime.strptime(
+                raw,
+                date_format,
+            )
+            return parsed.isoformat()
+        except ValueError:
+            continue
+
+    date_only_formats = (
+        "%Y-%m-%d",
+        "%m/%d/%Y",
+        "%m/%d/%y",
+        "%m-%d-%Y",
+        "%m-%d-%y",
+    )
+
+    for date_format in date_only_formats:
+        try:
+            datetime.strptime(raw, date_format)
+        except ValueError:
+            continue
+        raise ImportServiceError(
+            "Transaction time is missing. Map the processor "
+            "time column or use a combined Date / Time column."
+        )
+
+    raise ImportServiceError(
+        f"Transaction Date / Time '{raw}' is not in a "
+        "supported format."
     )
 
 
@@ -1160,6 +1550,336 @@ def validate_client_import_row(
     }
 
 
+def validate_peachpos_income_import_row(
+    row_data,
+):
+    """
+    Normalize and validate one mapped PeachPOS Income row.
+
+    Data-integrity policy:
+      - PSP never invents missing processor data
+      - transaction date/time, transaction ID, and Sales
+        are required
+      - optional monetary values remain blank when absent
+      - supplied accounting values are verified when enough
+        source values exist to perform the check
+      - no missing Total, Fees, Net, Tax, or Tips are derived
+    """
+    normalized = {
+        key: str(value or "").strip()
+        for key, value in row_data.items()
+    }
+    errors = []
+
+    # -------------------------------------------------
+    # Processor transaction timestamp
+    # -------------------------------------------------
+    transaction_value = normalized.get(
+        "transaction_at",
+        "",
+    )
+    transaction_time = normalized.get(
+        "transaction_time",
+        "",
+    )
+
+    try:
+        normalized["transaction_at"] = (
+            _parse_import_transaction_datetime(
+                transaction_value,
+                time_value=transaction_time,
+            )
+        )
+    except ImportServiceError as exc:
+        errors.append(str(exc))
+        normalized["transaction_at"] = transaction_value
+
+    # transaction_time is an import-only helper. The original
+    # source value remains preserved in source_data.
+    normalized.pop("transaction_time", None)
+
+    # -------------------------------------------------
+    # Processor transaction identity
+    # -------------------------------------------------
+    processor_payment_id = normalized.get(
+        "processor_payment_id",
+        "",
+    )
+    if not processor_payment_id:
+        errors.append(
+            "Processor Transaction ID is required."
+        )
+
+    merchant_account_identifier = normalized.get(
+        "merchant_account_identifier",
+        "",
+    )
+    if not merchant_account_identifier:
+        errors.append(
+            "Merchant ID / Account ID is required."
+        )
+
+    # -------------------------------------------------
+    # Monetary values
+    # -------------------------------------------------
+    money_fields = (
+        ("pos_amount", "Sales"),
+        ("tax_amount", "Tax"),
+        ("tip_amount", "Tips"),
+        ("total_amount", "Gross Collected"),
+        ("processing_fee_amount", "Processor Fees"),
+        ("net_received", "Net Received"),
+    )
+
+    parsed_money = {}
+
+    for field_key, field_label in money_fields:
+        raw_value = normalized.get(field_key, "")
+
+        if field_key == "pos_amount" and not raw_value:
+            errors.append(
+                "Sales is required."
+            )
+            continue
+
+        if not raw_value:
+            # Never infer zero or calculate a missing value.
+            continue
+
+        try:
+            amount = _parse_import_money(raw_value)
+        except ImportServiceError as exc:
+            errors.append(
+                f"{field_label}: {exc}"
+            )
+            continue
+
+        parsed_money[field_key] = amount
+        normalized[field_key] = format(amount, ".2f")
+
+    # PeachPOS represents positive completed sales. Refunds,
+    # voids, and other lifecycle cases require separate review.
+    pos_amount = parsed_money.get("pos_amount")
+    if pos_amount is not None and pos_amount <= Decimal("0.00"):
+        errors.append(
+            "Sales must be greater than zero for a PeachPOS sale."
+        )
+
+    tax_amount = parsed_money.get("tax_amount")
+    if tax_amount is not None and tax_amount < Decimal("0.00"):
+        errors.append(
+            "Tax cannot be negative for a PeachPOS sale."
+        )
+
+    tip_amount = parsed_money.get("tip_amount")
+    if tip_amount is not None and tip_amount < Decimal("0.00"):
+        errors.append(
+            "Tips cannot be negative for a PeachPOS sale."
+        )
+
+    total_amount = parsed_money.get("total_amount")
+    if total_amount is not None and total_amount <= Decimal("0.00"):
+        errors.append(
+            "Gross Collected must be greater than zero when supplied."
+        )
+
+    processing_fee = parsed_money.get("processing_fee_amount")
+    if processing_fee is not None and processing_fee < Decimal("0.00"):
+        errors.append(
+            "Processor Fees cannot be negative in PSP. "
+            "Review the processor export fee convention."
+        )
+
+    net_received = parsed_money.get("net_received")
+    if net_received is not None and net_received < Decimal("0.00"):
+        errors.append(
+            "Net Received cannot be negative for a PeachPOS sale."
+        )
+
+    # -------------------------------------------------
+    # Verify supplied accounting relationships.
+    # Never fill a missing component.
+    # -------------------------------------------------
+    if all(
+        key in parsed_money
+        for key in (
+            "pos_amount",
+            "tax_amount",
+            "tip_amount",
+            "total_amount",
+        )
+    ):
+        expected_total = (
+            parsed_money["pos_amount"]
+            + parsed_money["tax_amount"]
+            + parsed_money["tip_amount"]
+        ).quantize(Decimal("0.01"))
+
+        if expected_total != parsed_money["total_amount"]:
+            errors.append(
+                "Sales + Tax + Tips does not equal "
+                "Gross Collected."
+            )
+
+    if all(
+        key in parsed_money
+        for key in (
+            "total_amount",
+            "processing_fee_amount",
+            "net_received",
+        )
+    ):
+        expected_net = (
+            parsed_money["total_amount"]
+            - parsed_money["processing_fee_amount"]
+        ).quantize(Decimal("0.01"))
+
+        if expected_net != parsed_money["net_received"]:
+            errors.append(
+                "Gross Collected - Processor Fees does not "
+                "equal Net Received."
+            )
+
+    return {
+        "valid": not errors,
+        "data": normalized,
+        "errors": errors,
+    }
+
+
+
+def verify_peachpos_import_merchant_identity(
+    cur,
+    *,
+    spa_id,
+    business_unit_id,
+    credit_processor_id,
+    prepared_rows,
+):
+    """
+    Hard safety gate for generic non-Square PeachPOS imports.
+
+    The uploaded file must contain exactly one Merchant ID /
+    Account ID, and it must exactly match the identifier saved
+    for the selected processor account.
+
+    Square uses PSP's native Square integration and is not
+    permitted through the generic processor-file importer.
+    """
+    try:
+        credit_processor_id = int(
+            credit_processor_id
+        )
+    except (TypeError, ValueError):
+        raise ImportServiceError(
+            "Choose a processor before importing "
+            "PeachPOS Income."
+        )
+
+    cur.execute(
+        """
+        SELECT
+            credit_processor_name,
+            merchant_account_identifier
+        FROM credit_processors
+        WHERE credit_processor_id = %s
+          AND spa_id = %s
+          AND business_unit_id = %s
+        LIMIT 1
+        """,
+        (
+            credit_processor_id,
+            spa_id,
+            business_unit_id,
+        ),
+    )
+    processor = cur.fetchone()
+
+    if not processor:
+        raise ImportServiceError(
+            "The selected processor was not found in this "
+            "Provider Workspace."
+        )
+
+    processor_name = str(
+        processor[0] or ""
+    ).strip()
+
+    if processor_name.lower() == "square":
+        raise ImportServiceError(
+            "Square transactions use PSP's native Square "
+            "integration and cannot be imported through the "
+            "generic PeachPOS Income Import."
+        )
+
+    configured_identifier = str(
+        processor[1] or ""
+    ).strip()
+
+    if not configured_identifier:
+        raise ImportServiceError(
+            "Merchant ID / Account ID is not configured for "
+            f"{processor_name or 'this processor'}. "
+            "Enter it in Processor Company Setup before "
+            "importing."
+        )
+
+    detected_identifiers = set()
+    missing_rows = []
+
+    for row in prepared_rows:
+        data = row.get("data") or {}
+        identifier = str(
+            data.get(
+                "merchant_account_identifier"
+            )
+            or ""
+        ).strip()
+
+        if not identifier:
+            missing_rows.append(
+                row.get("row_number")
+            )
+            continue
+
+        detected_identifiers.add(
+            identifier
+        )
+
+    if missing_rows:
+        raise ImportServiceError(
+            "Merchant ID / Account ID is missing from one "
+            "or more rows in the uploaded processor file. "
+            "Import is blocked."
+        )
+
+    if len(detected_identifiers) != 1:
+        raise ImportServiceError(
+            "The uploaded processor file contains multiple "
+            "Merchant ID / Account ID values. "
+            "Import is blocked."
+        )
+
+    detected_identifier = next(
+        iter(detected_identifiers)
+    )
+
+    if detected_identifier != configured_identifier:
+        raise ImportServiceError(
+            "Merchant ID / Account ID in the uploaded file "
+            "does not match Processor Company Setup. "
+            "Import is blocked."
+        )
+
+    return {
+        "processor_company": processor_name,
+        "detected_identifier": detected_identifier,
+        "configured_identifier_at_verification": (
+            configured_identifier
+        ),
+        "verified": True,
+    }
+
 def _normalize_import_dropdown_value(value):
     return " ".join(
         str(value or "")
@@ -1337,6 +2057,12 @@ def prepare_import_rows(
         if entity_type == "clients":
             validation = (
                 validate_client_import_row(
+                    mapped
+                )
+            )
+        elif entity_type == "peachpos_income":
+            validation = (
+                validate_peachpos_income_import_row(
                     mapped
                 )
             )
@@ -1643,6 +2369,169 @@ def annotate_client_import_existing_duplicates(
     return annotated_rows
 
 
+
+def annotate_peachpos_import_file_duplicates(
+    prepared_rows,
+):
+    """
+    Detect repeated processor transaction IDs inside one
+    PeachPOS import file.
+
+    Every Import Run belongs to one selected processor, so
+    an exact repeated Processor Transaction ID is a strong
+    duplicate within that file.
+    """
+    seen_payment_ids = {}
+    annotated_rows = []
+
+    for row in prepared_rows:
+        result = dict(row)
+        result["duplicate_type"] = None
+        result["duplicate_reasons"] = []
+        result["duplicate_row_numbers"] = []
+
+        if not result.get("valid"):
+            annotated_rows.append(result)
+            continue
+
+        data = result.get("data") or {}
+        processor_payment_id = str(
+            data.get("processor_payment_id") or ""
+        ).strip()
+        row_number = result.get("row_number")
+
+        if (
+            processor_payment_id
+            and processor_payment_id in seen_payment_ids
+        ):
+            result["duplicate_type"] = "strong"
+            result["duplicate_reasons"] = [
+                "Processor Transaction ID"
+            ]
+            result["duplicate_row_numbers"] = [
+                seen_payment_ids[processor_payment_id]
+            ]
+
+        annotated_rows.append(result)
+
+        if processor_payment_id:
+            seen_payment_ids.setdefault(
+                processor_payment_id,
+                row_number,
+            )
+
+    return annotated_rows
+
+
+def annotate_peachpos_import_existing_duplicates(
+    cur,
+    *,
+    spa_id,
+    business_unit_id,
+    credit_processor_id,
+    prepared_rows,
+):
+    """
+    Compare PeachPOS rows against already-posted Income.
+
+    Strong duplicate identity:
+      workspace + processor + Processor Transaction ID
+
+    Transaction IDs belonging to a different processor do
+    not collide.
+    """
+    try:
+        credit_processor_id = int(credit_processor_id)
+    except (TypeError, ValueError):
+        raise ImportServiceError(
+            "A valid credit processor is required for "
+            "PeachPOS duplicate detection."
+        )
+
+    payment_ids = sorted({
+        str(
+            (row.get("data") or {}).get(
+                "processor_payment_id"
+            )
+            or ""
+        ).strip()
+        for row in prepared_rows
+        if row.get("valid")
+        and str(
+            (row.get("data") or {}).get(
+                "processor_payment_id"
+            )
+            or ""
+        ).strip()
+    })
+
+    existing_by_payment_id = {}
+
+    if payment_ids:
+        cur.execute(
+            """
+            SELECT
+                income_id,
+                processor_payment_id
+            FROM income
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND income_type = 'PeachPOS'
+              AND credit_processor_id = %s
+              AND processor_payment_id = ANY(%s)
+            """,
+            (
+                spa_id,
+                business_unit_id,
+                credit_processor_id,
+                payment_ids,
+            ),
+        )
+
+        for income_id, processor_payment_id in cur.fetchall():
+            payment_id = str(
+                processor_payment_id or ""
+            ).strip()
+            if not payment_id:
+                continue
+            existing_by_payment_id.setdefault(
+                payment_id,
+                [],
+            ).append({
+                "income_id": income_id,
+                "processor_payment_id": payment_id,
+            })
+
+    annotated_rows = []
+
+    for row in prepared_rows:
+        result = dict(row)
+        result["existing_duplicate_type"] = None
+        result["existing_duplicate_matches"] = []
+
+        if not result.get("valid"):
+            annotated_rows.append(result)
+            continue
+
+        data = result.get("data") or {}
+        processor_payment_id = str(
+            data.get("processor_payment_id") or ""
+        ).strip()
+
+        matches = existing_by_payment_id.get(
+            processor_payment_id,
+            [],
+        )
+
+        if matches:
+            result["existing_duplicate_type"] = "strong"
+            result["existing_duplicate_matches"] = matches
+
+        annotated_rows.append(result)
+
+    return annotated_rows
+
+
 # =========================================================
 # DURABLE IMPORT RUN STAGING
 # =========================================================
@@ -1655,6 +2544,7 @@ def create_import_run(
     entity_type,
     requested_by=None,
     allow_repeat=False,
+    options=None,
 ):
     """
     Create one durable Import Engine run and stage its source rows.
@@ -1670,6 +2560,10 @@ def create_import_run(
 
     profile = get_import_profile(
         entity_type
+    )
+
+    options_payload = dict(
+        options or {}
     )
 
     parsed = parse_import_upload(
@@ -1700,6 +2594,7 @@ def create_import_run(
             spa_id=spa_id,
             business_unit_id=business_unit_id,
             entity_type=entity_type,
+            options=options_payload,
         )
 
         mapping = suggest_import_mapping(
@@ -1763,12 +2658,13 @@ def create_import_run(
                 source_size_bytes,
                 source_sha256,
                 mapping_json,
+                options_json,
                 total_rows,
                 requested_by
             )
             VALUES (
                 %s, %s, %s, 'mapping',
-                %s, %s, %s, %s, %s, %s, %s
+                %s, %s, %s, %s, %s, %s, %s, %s
             )
             RETURNING import_run_id
             """,
@@ -1781,6 +2677,7 @@ def create_import_run(
                 source_size_bytes,
                 source_sha256,
                 Json(mapping_payload),
+                Json(options_payload),
                 parsed["row_count"],
                 requested_by,
             ),
@@ -1828,6 +2725,7 @@ def create_import_run(
             "source_sha256": source_sha256,
             "headers": parsed["headers"],
             "mapping": mapping,
+            "options": options_payload,
             "row_count": parsed["row_count"],
             "run_status": "mapping",
         }
@@ -1874,7 +2772,8 @@ def analyze_import_run(
             SELECT
                 entity_type,
                 run_status,
-                mapping_json
+                mapping_json,
+                options_json
             FROM import_runs
             WHERE import_run_id = %s
               AND spa_id = %s
@@ -1906,6 +2805,12 @@ def analyze_import_run(
         existing_mapping_json = (
             run[2]
             if isinstance(run[2], dict)
+            else {}
+        )
+
+        options_payload = (
+            run[3]
+            if isinstance(run[3], dict)
             else {}
         )
 
@@ -2038,6 +2943,12 @@ def analyze_import_run(
                         mapped
                     )
                 )
+            elif entity_type == "peachpos_income":
+                validation = (
+                    validate_peachpos_income_import_row(
+                        mapped
+                    )
+                )
             else:
                 raise ImportServiceError(
                     f"Unsupported import type: {entity_type}."
@@ -2075,6 +2986,38 @@ def analyze_import_run(
                 )
             )
 
+        elif entity_type == "peachpos_income":
+            merchant_verification = (
+                verify_peachpos_import_merchant_identity(
+                    cur,
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    credit_processor_id=(
+                        options_payload.get(
+                            "credit_processor_id"
+                        )
+                    ),
+                    prepared_rows=prepared_rows,
+                )
+            )
+            prepared_rows = (
+                annotate_peachpos_import_file_duplicates(
+                    prepared_rows
+                )
+            )
+            prepared_rows = (
+                annotate_peachpos_import_existing_duplicates(
+                    cur,
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    credit_processor_id=(
+                        options_payload.get(
+                            "credit_processor_id"
+                        )
+                    ),
+                    prepared_rows=prepared_rows,
+                )
+            )
         valid_rows = 0
         invalid_rows = 0
         strong_duplicate_rows = 0
@@ -2138,6 +3081,15 @@ def analyze_import_run(
                 },
             }
 
+            review_decision = None
+            if entity_type == "peachpos_income":
+                review_decision = (
+                    "approved"
+                    if validation_status == "valid"
+                    and duplicate_status == "none"
+                    else "needs_review"
+                )
+
             cur.execute(
                 """
                 UPDATE import_run_rows
@@ -2146,6 +3098,7 @@ def analyze_import_run(
                     validation_errors = %s,
                     duplicate_status = %s,
                     duplicate_details = %s,
+                    review_decision = %s,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE import_run_id = %s
                   AND spa_id = %s
@@ -2170,6 +3123,7 @@ def analyze_import_run(
                     Json(
                         duplicate_details
                     ),
+                    review_decision,
                     import_run_id,
                     spa_id,
                     business_unit_id,
@@ -2202,10 +3156,19 @@ def analyze_import_run(
             "selected"
         ] = mapping
 
+        updated_options_json = dict(
+            options_payload
+        )
+        if entity_type == "peachpos_income":
+            updated_options_json[
+                "merchant_verification"
+            ] = merchant_verification
+
         cur.execute(
             """
             UPDATE import_runs
             SET mapping_json = %s,
+                options_json = %s,
                 run_status = %s,
                 valid_rows = %s,
                 invalid_rows = %s,
@@ -2220,6 +3183,9 @@ def analyze_import_run(
             (
                 Json(
                     updated_mapping_json
+                ),
+                Json(
+                    updated_options_json
                 ),
                 next_status,
                 valid_rows,
@@ -2266,8 +3232,544 @@ def analyze_import_run(
 
 
 # =========================================================
+# IMPORT RUN RECORDS
+# =========================================================
+
+def get_import_run_records(
+    import_run_id,
+    *,
+    spa_id,
+    business_unit_id,
+):
+    """
+    Load the complete durable transaction/review view for one
+    Import Run.
+
+    Returns the batch header and every staged source row with:
+      - original source data
+      - mapped data
+      - validation state/errors
+      - duplicate state/details
+      - review decision
+      - import/posting state
+      - resulting Income record ID when posted
+
+    This is read-only and strictly workspace scoped.
+    """
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                entity_type,
+                run_status,
+                source_filename,
+                source_extension,
+                source_size_bytes,
+                options_json,
+                total_rows,
+                valid_rows,
+                invalid_rows,
+                strong_duplicate_rows,
+                possible_duplicate_rows,
+                imported_rows,
+                skipped_rows,
+                error_rows,
+                requested_at,
+                started_at,
+                completed_at,
+                failure_message
+            FROM import_runs
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            LIMIT 1
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        run = cur.fetchone()
+
+        if not run:
+            raise ImportServiceError(
+                "Import Run was not found in this workspace."
+            )
+
+        entity_type = str(
+            run[0] or ""
+        ).strip().lower()
+
+        options_payload = (
+            run[5]
+            if isinstance(run[5], dict)
+            else {}
+        )
+
+        profile = get_workspace_import_profile(
+            cur,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            entity_type=entity_type,
+            options=options_payload,
+        )
+
+        credit_processor_name = None
+
+        if entity_type == "peachpos_income":
+            credit_processor_id = options_payload.get(
+                "credit_processor_id"
+            )
+
+            try:
+                credit_processor_id = int(
+                    credit_processor_id
+                )
+            except (TypeError, ValueError):
+                credit_processor_id = None
+
+            if credit_processor_id:
+                cur.execute(
+                    """
+                    SELECT credit_processor_name
+                    FROM credit_processors
+                    WHERE credit_processor_id = %s
+                      AND spa_id = %s
+                      AND business_unit_id = %s
+                    LIMIT 1
+                    """,
+                    (
+                        credit_processor_id,
+                        spa_id,
+                        business_unit_id,
+                    ),
+                )
+                processor_row = cur.fetchone()
+
+                if processor_row:
+                    credit_processor_name = (
+                        str(
+                            processor_row[0] or ""
+                        ).strip()
+                        or None
+                    )
+
+        cur.execute(
+            """
+            SELECT
+                import_run_row_id,
+                source_row_number,
+                source_data,
+                mapped_data,
+                validation_status,
+                validation_errors,
+                duplicate_status,
+                duplicate_details,
+                review_decision,
+                import_status,
+                imported_record_id,
+                error_message
+            FROM import_run_rows
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            ORDER BY source_row_number
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        records = []
+
+        for (
+            import_run_row_id,
+            source_row_number,
+            source_data,
+            mapped_data,
+            validation_status,
+            validation_errors,
+            duplicate_status,
+            duplicate_details,
+            review_decision,
+            import_status,
+            imported_record_id,
+            error_message,
+        ) in cur.fetchall():
+
+            source_data = (
+                source_data
+                if isinstance(source_data, dict)
+                else {}
+            )
+
+            mapped_data = (
+                mapped_data
+                if isinstance(mapped_data, dict)
+                else {}
+            )
+
+            validation_errors = (
+                validation_errors
+                if isinstance(validation_errors, list)
+                else []
+            )
+
+            duplicate_details = (
+                duplicate_details
+                if isinstance(duplicate_details, dict)
+                else {}
+            )
+
+            records.append({
+                "import_run_row_id": import_run_row_id,
+                "source_row_number": source_row_number,
+                "source_values": source_data.get(
+                    "values",
+                    [],
+                ),
+                "mapped_data": mapped_data,
+                "validation_status": validation_status,
+                "validation_errors": validation_errors,
+                "duplicate_status": duplicate_status,
+                "duplicate_details": duplicate_details,
+                "review_decision": review_decision,
+                "import_status": import_status,
+                "imported_record_id": imported_record_id,
+                "error_message": error_message,
+            })
+
+        approved_rows = sum(
+            1
+            for record in records
+            if record.get("review_decision") == "approved"
+        )
+
+        needs_review_rows = sum(
+            1
+            for record in records
+            if record.get("review_decision") == "needs_review"
+        )
+
+        hold_rows = sum(
+            1
+            for record in records
+            if record.get("review_decision") == "hold"
+        )
+
+        discard_rows = sum(
+            1
+            for record in records
+            if record.get("review_decision") == "discard"
+        )
+
+        financial_summary = {
+            "transactions": 0,
+            "sales": Decimal("0.00"),
+            "tax": Decimal("0.00"),
+            "tips": Decimal("0.00"),
+            "gross": Decimal("0.00"),
+            "processor_fees": Decimal("0.00"),
+            "net_received": Decimal("0.00"),
+        }
+
+        financial_field_map = (
+            ("pos_amount", "sales"),
+            ("tax_amount", "tax"),
+            ("tip_amount", "tips"),
+            ("total_amount", "gross"),
+            (
+                "processing_fee_amount",
+                "processor_fees",
+            ),
+            ("net_received", "net_received"),
+        )
+
+        for record in records:
+            if (
+                record.get("review_decision")
+                != "approved"
+            ):
+                continue
+
+            financial_summary[
+                "transactions"
+            ] += 1
+
+            data = record.get("mapped_data") or {}
+
+            for field_key, summary_key in (
+                financial_field_map
+            ):
+                raw_value = str(
+                    data.get(field_key) or ""
+                ).strip()
+
+                if not raw_value:
+                    continue
+
+                try:
+                    amount = Decimal(
+                        raw_value
+                    ).quantize(
+                        Decimal("0.01")
+                    )
+                except (
+                    InvalidOperation,
+                    ValueError,
+                ):
+                    continue
+
+                financial_summary[
+                    summary_key
+                ] += amount
+
+        total_gross = financial_summary["gross"]
+        total_net = financial_summary[
+            "net_received"
+        ]
+
+        return {
+            "import_run_id": import_run_id,
+            "entity_type": entity_type,
+            "display_name": profile["display_name"],
+            "run_status": run[1],
+            "filename": run[2],
+            "extension": run[3],
+            "source_size_bytes": run[4],
+            "options": options_payload,
+            "credit_processor_name": credit_processor_name,
+            "fields": [
+                {
+                    "key": field["key"],
+                    "label": field["label"],
+                    "required": bool(
+                        field.get("required")
+                    ),
+                }
+                for field in profile["fields"]
+            ],
+            "total_rows": run[6],
+            "valid_rows": run[7],
+            "approved_rows": approved_rows,
+            "needs_review_rows": needs_review_rows,
+            "hold_rows": hold_rows,
+            "discard_rows": discard_rows,
+            "financial_summary": financial_summary,
+            "total_gross": total_gross,
+            "total_net": total_net,
+            "invalid_rows": run[8],
+            "strong_duplicate_rows": run[9],
+            "possible_duplicate_rows": run[10],
+            "imported_rows": run[11],
+            "skipped_rows": run[12],
+            "error_rows": run[13],
+            "requested_at": run[14],
+            "started_at": run[15],
+            "completed_at": run[16],
+            "failure_message": run[17],
+            "records": records,
+        }
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+# =========================================================
+# IMPORT RUN RECORD DETAILS
+# =========================================================
+
+def get_import_run_record_details(
+    import_run_id,
+    import_run_row_id,
+    *,
+    spa_id,
+    business_unit_id,
+):
+    """
+    Load one durable PeachPOS Import Run transaction for a
+    read-only transaction-details view.
+
+    Returns standard imported transaction data plus all 12
+    processor-specific fields using the processor's current
+    workspace-configured display labels.
+
+    No writes are performed.
+    """
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                r.entity_type,
+                r.options_json,
+                rr.import_run_row_id,
+                rr.source_row_number,
+                rr.source_data,
+                rr.mapped_data,
+                rr.validation_status,
+                rr.validation_errors,
+                rr.duplicate_status,
+                rr.duplicate_details,
+                rr.review_decision,
+                rr.import_status,
+                rr.imported_record_id,
+                rr.error_message
+            FROM import_runs r
+            JOIN import_run_rows rr
+              ON rr.import_run_id = r.import_run_id
+             AND rr.spa_id = r.spa_id
+             AND rr.business_unit_id = r.business_unit_id
+            WHERE r.import_run_id = %s
+              AND r.spa_id = %s
+              AND r.business_unit_id = %s
+              AND rr.import_run_row_id = %s
+            LIMIT 1
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+                import_run_row_id,
+            ),
+        )
+
+        row = cur.fetchone()
+
+        if not row:
+            raise ImportServiceError(
+                "Import Record was not found in this workspace."
+            )
+
+        entity_type = str(
+            row[0] or ""
+        ).strip().lower()
+
+        if entity_type != "peachpos_income":
+            raise ImportServiceError(
+                "This transaction details view is available "
+                "for PeachPOS Income imports only."
+            )
+
+        options_payload = (
+            row[1]
+            if isinstance(row[1], dict)
+            else {}
+        )
+
+        credit_processor_id = options_payload.get(
+            "credit_processor_id"
+        )
+
+        try:
+            credit_processor_id = int(
+                credit_processor_id
+            )
+        except (TypeError, ValueError):
+            raise ImportServiceError(
+                "This PeachPOS Import Run does not have a valid "
+                "credit processor."
+            )
+
+        processor_labels = (
+            get_peachpos_processor_field_labels(
+                cur,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                credit_processor_id=credit_processor_id,
+            )
+        )
+
+        processor_definitions = (
+            get_peachpos_processor_field_definitions()
+        )
+
+        source_data = (
+            row[4]
+            if isinstance(row[4], dict)
+            else {}
+        )
+
+        mapped_data = (
+            row[5]
+            if isinstance(row[5], dict)
+            else {}
+        )
+
+        validation_errors = (
+            row[7]
+            if isinstance(row[7], list)
+            else []
+        )
+
+        duplicate_details = (
+            row[9]
+            if isinstance(row[9], dict)
+            else {}
+        )
+
+        processor_fields = []
+
+        for definition in processor_definitions:
+            field_key = definition["field_key"]
+
+            processor_fields.append({
+                "field_key": field_key,
+                "label": (
+                    processor_labels.get(field_key)
+                    or definition["default_label"]
+                ),
+                "default_label": definition[
+                    "default_label"
+                ],
+                "value": mapped_data.get(
+                    field_key
+                ),
+            })
+
+        return {
+            "import_run_id": import_run_id,
+            "import_run_row_id": row[2],
+            "source_row_number": row[3],
+            "source_values": source_data.get(
+                "values",
+                [],
+            ),
+            "mapped_data": mapped_data,
+            "validation_status": row[6],
+            "validation_errors": validation_errors,
+            "duplicate_status": row[8],
+            "duplicate_details": duplicate_details,
+            "review_decision": row[10],
+            "import_status": row[11],
+            "imported_record_id": row[12],
+            "error_message": row[13],
+            "options": options_payload,
+            "credit_processor_id": credit_processor_id,
+            "processor_fields": processor_fields,
+        }
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+# =========================================================
 # CLIENT IMPORT EXECUTION
 # =========================================================
+
+PEACHPOS_INCOME_IMPORT_PACKET_SIZE = 50
+PEACHPOS_INCOME_IMPORT_PACKET_MAX_ROWS = 50
 
 CLIENT_IMPORT_PACKET_SIZE = 50
 CLIENT_IMPORT_PACKET_MAX_ROWS = 50
@@ -2860,6 +4362,799 @@ def process_client_import_packet(
         conn.close()
 
 
+
+# =========================================================
+# PEACHPOS INCOME IMPORT POSTING
+# =========================================================
+
+def process_peachpos_income_import_packet(
+    import_run_id,
+    *,
+    spa_id,
+    business_unit_id,
+    packet_size=PEACHPOS_INCOME_IMPORT_PACKET_SIZE,
+):
+    """
+    Post one bounded packet of approved PeachPOS Income rows.
+
+    Safety rules:
+      - only READY / already-IMPORTING PeachPOS Income runs execute
+      - only valid, non-duplicate, approved, pending rows post
+      - held / needs-review rows remain staged and unposted
+      - discarded rows are marked skipped and never post
+      - each Income insert and staged-row update are atomic
+      - Processor Fields 1-8 are the active imported custom fields
+      - repeated calls are safe; imported rows are never reinserted
+      - database uniqueness protects processor transaction identity
+    """
+    try:
+        packet_size = int(packet_size)
+    except (TypeError, ValueError):
+        raise ImportServiceError(
+            "Import packet size must be a whole number."
+        )
+
+    if (
+        packet_size < 1
+        or packet_size > PEACHPOS_INCOME_IMPORT_PACKET_MAX_ROWS
+    ):
+        raise ImportServiceError(
+            "Import packet size must be between 1 and "
+            f"{PEACHPOS_INCOME_IMPORT_PACKET_MAX_ROWS}."
+        )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        # Lock the run so two requests cannot post the same packet
+        # at the same time.
+        cur.execute(
+            """
+            SELECT
+                entity_type,
+                run_status,
+                options_json
+            FROM import_runs
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            FOR UPDATE
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+        run = cur.fetchone()
+
+        if not run:
+            raise ImportServiceError(
+                "Import Run was not found in this workspace."
+            )
+
+        entity_type = str(run[0] or "").strip().lower()
+        run_status = str(run[1] or "").strip().lower()
+        options = (
+            run[2]
+            if isinstance(run[2], dict)
+            else {}
+        )
+
+        if entity_type != "peachpos_income":
+            raise ImportServiceError(
+                "This importer executes PeachPOS Income runs only."
+            )
+
+        if run_status == "completed":
+            cur.execute(
+                """
+                SELECT
+                    total_rows,
+                    imported_rows,
+                    skipped_rows,
+                    error_rows
+                FROM import_runs
+                WHERE import_run_id = %s
+                """,
+                (import_run_id,),
+            )
+            counts = cur.fetchone()
+            conn.rollback()
+
+            return {
+                "import_run_id": import_run_id,
+                "run_status": "completed",
+                "total_rows": counts[0],
+                "imported_rows": counts[1],
+                "skipped_rows": counts[2],
+                "error_rows": counts[3],
+                "processed_this_packet": 0,
+                "remaining_rows": 0,
+            }
+
+        if run_status not in {
+            "ready",
+            "importing",
+        }:
+            raise ImportServiceError(
+                "This PeachPOS Import Run is not ready to post."
+            )
+
+        credit_processor_id = options.get(
+            "credit_processor_id"
+        )
+        try:
+            credit_processor_id = int(
+                credit_processor_id
+            )
+        except (TypeError, ValueError):
+            raise ImportServiceError(
+                "This PeachPOS Import Run does not have a valid "
+                "credit processor."
+            )
+
+        event_name = str(
+            options.get("event_name") or ""
+        ).strip() or None
+
+        # Verify that the selected processor belongs to this exact
+        # Provider Workspace. Historical/inactive processors remain
+        # valid for durable import history.
+        cur.execute(
+            """
+            SELECT
+                credit_processor_name,
+                percentage_fee,
+                flat_fee,
+                additional_fee,
+                merchant_account_identifier
+            FROM credit_processors
+            WHERE credit_processor_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            """,
+            (
+                credit_processor_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+        processor = cur.fetchone()
+
+        if not processor:
+            raise ImportServiceError(
+                "The selected credit processor was not found in "
+                "this workspace."
+            )
+
+        processor_name = str(
+            processor[0] or ""
+        ).strip()
+
+        if not processor_name:
+            raise ImportServiceError(
+                "The selected credit processor does not have a "
+                "valid name."
+            )
+
+        # -------------------------------------------------
+        # Defense-in-depth Merchant ID posting gate.
+        #
+        # Analysis must have already verified one Merchant ID
+        # from the uploaded file against Processor Company Setup.
+        # Recheck that durable verification snapshot here before
+        # any Income row can be created.
+        # -------------------------------------------------
+
+        if processor_name.lower() == "square":
+            raise ImportServiceError(
+                "Square transactions use PSP's native Square "
+                "integration and cannot be posted through the "
+                "generic PeachPOS Income Import."
+            )
+
+        merchant_verification = options.get(
+            "merchant_verification"
+        )
+        if not isinstance(
+            merchant_verification,
+            dict,
+        ):
+            raise ImportServiceError(
+                "This PeachPOS Import Run does not have a "
+                "Merchant ID / Account ID verification. "
+                "Re-analyze the import before posting."
+            )
+
+        if merchant_verification.get("verified") is not True:
+            raise ImportServiceError(
+                "Merchant ID / Account ID verification was not "
+                "successful. Import posting is blocked."
+            )
+
+        detected_identifier = str(
+            merchant_verification.get(
+                "detected_identifier"
+            )
+            or ""
+        ).strip()
+
+        verified_configured_identifier = str(
+            merchant_verification.get(
+                "configured_identifier_at_verification"
+            )
+            or ""
+        ).strip()
+
+        verified_processor_company = str(
+            merchant_verification.get(
+                "processor_company"
+            )
+            or ""
+        ).strip()
+
+        current_configured_identifier = str(
+            processor[4] or ""
+        ).strip()
+
+        if (
+            not detected_identifier
+            or not verified_configured_identifier
+            or detected_identifier
+                != verified_configured_identifier
+        ):
+            raise ImportServiceError(
+                "This PeachPOS Import Run has an invalid "
+                "Merchant ID / Account ID verification record. "
+                "Posting is blocked."
+            )
+
+        if (
+            verified_processor_company
+            and verified_processor_company != processor_name
+        ):
+            raise ImportServiceError(
+                "The processor company changed after Merchant "
+                "ID verification. Re-analyze the import before "
+                "posting."
+            )
+
+        if not current_configured_identifier:
+            raise ImportServiceError(
+                "Merchant ID / Account ID is no longer "
+                "configured for this processor. "
+                "Posting is blocked."
+            )
+
+        if (
+            current_configured_identifier
+            != verified_configured_identifier
+        ):
+            raise ImportServiceError(
+                "Merchant ID / Account ID in Processor Company "
+                "Setup changed after this import was verified. "
+                "Re-analyze the import before posting."
+            )
+
+        processor_percentage_fee = (
+            processor[1]
+            if processor[1] is not None
+            else Decimal("0")
+        )
+        processor_flat_fee = (
+            processor[2]
+            if processor[2] is not None
+            else Decimal("0")
+        )
+        processor_additional_fee = (
+            processor[3]
+            if processor[3] is not None
+            else Decimal("0")
+        )
+
+        # A row cannot be posted merely because somebody marked it
+        # approved. It must also have passed validation and duplicate
+        # analysis.
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM import_run_rows
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND import_status = 'pending'
+              AND review_decision = 'approved'
+              AND (
+                    validation_status <> 'valid'
+                    OR duplicate_status <> 'none'
+              )
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+        unsafe_approved_rows = cur.fetchone()[0]
+
+        if unsafe_approved_rows:
+            raise ImportServiceError(
+                "One or more approved PeachPOS rows still require "
+                "validation or duplicate review."
+            )
+
+        # Discard is a terminal review decision. Mark those rows
+        # skipped so they remain in the Import Record but can never
+        # accidentally post later.
+        cur.execute(
+            """
+            UPDATE import_run_rows
+            SET import_status = 'skipped',
+                imported_record_id = NULL,
+                error_message = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND import_status = 'pending'
+              AND review_decision = 'discard'
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        cur.execute(
+            """
+            UPDATE import_runs
+            SET run_status = 'importing',
+                started_at = COALESCE(
+                    started_at,
+                    CURRENT_TIMESTAMP
+                ),
+                last_activity_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        cur.execute(
+            """
+            SELECT
+                import_run_row_id,
+                source_row_number,
+                mapped_data
+            FROM import_run_rows
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND validation_status = 'valid'
+              AND duplicate_status = 'none'
+              AND review_decision = 'approved'
+              AND import_status = 'pending'
+            ORDER BY source_row_number
+            LIMIT %s
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+                packet_size,
+            ),
+        )
+        packet_rows = cur.fetchall()
+        processed_this_packet = 0
+
+        for (
+            import_run_row_id,
+            source_row_number,
+            mapped_data,
+        ) in packet_rows:
+            data = (
+                mapped_data
+                if isinstance(mapped_data, dict)
+                else {}
+            )
+
+            cur.execute(
+                "SAVEPOINT peachpos_income_import_row"
+            )
+
+            try:
+                transaction_at_raw = str(
+                    data.get("transaction_at") or ""
+                ).strip()
+
+                if not transaction_at_raw:
+                    raise ImportServiceError(
+                        "Transaction Date/Time is required."
+                    )
+
+                try:
+                    transaction_at = datetime.fromisoformat(
+                        transaction_at_raw
+                    )
+                except ValueError:
+                    raise ImportServiceError(
+                        "Transaction Date/Time is invalid."
+                    )
+
+                processor_payment_id = str(
+                    data.get("processor_payment_id") or ""
+                ).strip()
+
+                if not processor_payment_id:
+                    raise ImportServiceError(
+                        "Processor Transaction ID is required."
+                    )
+
+                def money_value(key, *, required=False):
+                    raw = data.get(key)
+
+                    if raw is None or str(raw).strip() == "":
+                        if required:
+                            raise ImportServiceError(
+                                f"{key} is required."
+                            )
+                        return Decimal("0.00")
+
+                    try:
+                        return Decimal(str(raw))
+                    except (InvalidOperation, ValueError):
+                        raise ImportServiceError(
+                            f"{key} is not a valid money amount."
+                        )
+
+                pos_amount = money_value(
+                    "pos_amount",
+                    required=True,
+                )
+                tax_amount = money_value("tax_amount")
+                tip_amount = money_value("tip_amount")
+                total_amount = money_value("total_amount")
+                processing_fee_amount = money_value(
+                    "processing_fee_amount"
+                )
+                net_received = money_value("net_received")
+
+                # Income accounting columns are historically NOT NULL.
+                # Preserve whether each optional amount was actually
+                # supplied by the processor so a compatibility 0.00 is
+                # never mistaken for processor-reported zero.
+                optional_money_fields = (
+                    "tax_amount",
+                    "tip_amount",
+                    "total_amount",
+                    "processing_fee_amount",
+                    "net_received",
+                )
+                processor_import_data = {
+                    "source_presence": {
+                        key: (
+                            data.get(key) is not None
+                            and str(data.get(key)).strip() != ""
+                        )
+                        for key in optional_money_fields
+                    }
+                }
+
+                payment_method = str(
+                    data.get("payment_method") or ""
+                ).strip() or None
+
+                processor_status = str(
+                    data.get("processor_status") or ""
+                ).strip() or None
+
+                processor_fields = [
+                    (
+                        str(
+                            data.get(
+                                f"processor_field_{number}"
+                            )
+                            or ""
+                        ).strip()
+                        or None
+                    )
+                    for number in range(1, 9)
+                ]
+
+                description = (
+                    f"PeachPOS {processor_name} Sale"
+                )
+
+                cur.execute(
+                    """
+                    INSERT INTO income (
+                        income_date,
+                        income_type,
+                        description,
+                        service_amount,
+                        retail_amount,
+                        pos_amount,
+                        tax_amount,
+                        tip_amount,
+                        total_amount,
+                        payment_method,
+                        processor_payment_id,
+                        spa_id,
+                        credit_processor_id,
+                        processing_fee_amount,
+                        net_received,
+                        processor_percentage_fee,
+                        processor_flat_fee,
+                        processor_additional_fee,
+                        business_unit_id,
+                        transaction_at,
+                        event_name,
+                        processor_status,
+                        processor_import_data,
+                        processor_field_1,
+                        processor_field_2,
+                        processor_field_3,
+                        processor_field_4,
+                        processor_field_5,
+                        processor_field_6,
+                        processor_field_7,
+                        processor_field_8
+                    )
+                    VALUES (
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s,
+                        %s
+                    )
+                    RETURNING income_id
+                    """,
+                    (
+                        transaction_at.date(),
+                        "PeachPOS",
+                        description,
+                        Decimal("0.00"),
+                        Decimal("0.00"),
+                        pos_amount,
+                        tax_amount,
+                        tip_amount,
+                        total_amount,
+                        payment_method,
+                        processor_payment_id,
+                        spa_id,
+                        credit_processor_id,
+                        processing_fee_amount,
+                        net_received,
+                        processor_percentage_fee,
+                        processor_flat_fee,
+                        processor_additional_fee,
+                        business_unit_id,
+                        transaction_at,
+                        event_name,
+                        processor_status,
+                        Json(processor_import_data),
+                        *processor_fields,
+                    ),
+                )
+                income_id = cur.fetchone()[0]
+
+                cur.execute(
+                    """
+                    UPDATE import_run_rows
+                    SET import_status = 'imported',
+                        imported_record_id = %s,
+                        error_message = NULL,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE import_run_row_id = %s
+                      AND import_run_id = %s
+                      AND spa_id = %s
+                      AND business_unit_id = %s
+                      AND review_decision = 'approved'
+                      AND import_status = 'pending'
+                    """,
+                    (
+                        income_id,
+                        import_run_row_id,
+                        import_run_id,
+                        spa_id,
+                        business_unit_id,
+                    ),
+                )
+
+                if cur.rowcount != 1:
+                    raise ImportServiceError(
+                        "The staged PeachPOS row changed while "
+                        "it was being posted."
+                    )
+
+                cur.execute(
+                    "RELEASE SAVEPOINT "
+                    "peachpos_income_import_row"
+                )
+                processed_this_packet += 1
+
+            except Exception as exc:
+                cur.execute(
+                    "ROLLBACK TO SAVEPOINT "
+                    "peachpos_income_import_row"
+                )
+                cur.execute(
+                    "RELEASE SAVEPOINT "
+                    "peachpos_income_import_row"
+                )
+
+                cur.execute(
+                    """
+                    UPDATE import_run_rows
+                    SET import_status = 'error',
+                        imported_record_id = NULL,
+                        error_message = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE import_run_row_id = %s
+                      AND import_run_id = %s
+                      AND spa_id = %s
+                      AND business_unit_id = %s
+                    """,
+                    (
+                        str(exc)[:1000],
+                        import_run_row_id,
+                        import_run_id,
+                        spa_id,
+                        business_unit_id,
+                    ),
+                )
+
+        # Durable counters are always recalculated from staged row
+        # state so retries remain deterministic.
+        cur.execute(
+            """
+            SELECT
+                COUNT(*) FILTER (
+                    WHERE import_status = 'imported'
+                ),
+                COUNT(*) FILTER (
+                    WHERE import_status = 'skipped'
+                ),
+                COUNT(*) FILTER (
+                    WHERE import_status = 'error'
+                )
+            FROM import_run_rows
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+        (
+            imported_rows,
+            skipped_rows,
+            error_rows,
+        ) = cur.fetchone()
+
+        # Only approved, still-pending rows are remaining posting
+        # work. Hold and needs_review deliberately remain staged.
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM import_run_rows
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND review_decision = 'approved'
+              AND import_status = 'pending'
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+        remaining_rows = cur.fetchone()[0]
+
+        # Hold and needs_review rows are intentionally unresolved.
+        # Keep the run open so they can be reviewed, approved, and
+        # posted later instead of being stranded by a completed run.
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM import_run_rows
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND review_decision IN ('hold', 'needs_review')
+              AND import_status = 'pending'
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+        unresolved_review_rows = cur.fetchone()[0]
+
+        if remaining_rows > 0:
+            next_status = "importing"
+            failure_message = None
+            completed_at_sql = "completed_at"
+        elif error_rows > 0:
+            next_status = "failed"
+            failure_message = (
+                "One or more PeachPOS transactions could not "
+                "be posted."
+            )
+            completed_at_sql = "CURRENT_TIMESTAMP"
+        elif unresolved_review_rows > 0:
+            next_status = "ready"
+            failure_message = None
+            completed_at_sql = "NULL"
+        else:
+            next_status = "completed"
+            failure_message = None
+            completed_at_sql = "CURRENT_TIMESTAMP"
+
+        cur.execute(
+            f"""
+            UPDATE import_runs
+            SET run_status = %s,
+                imported_rows = %s,
+                skipped_rows = %s,
+                error_rows = %s,
+                failure_message = %s,
+                completed_at = {completed_at_sql},
+                last_activity_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            """,
+            (
+                next_status,
+                imported_rows,
+                skipped_rows,
+                error_rows,
+                failure_message,
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        conn.commit()
+
+        return {
+            "import_run_id": import_run_id,
+            "run_status": next_status,
+            "imported_rows": imported_rows,
+            "skipped_rows": skipped_rows,
+            "error_rows": error_rows,
+            "processed_this_packet": processed_this_packet,
+            "remaining_rows": remaining_rows,
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
 # =========================================================
 # IMPORT RUN MAPPING DATA
 # =========================================================
@@ -2910,6 +5205,7 @@ def get_import_run_mapping_data(
                 source_extension,
                 source_size_bytes,
                 mapping_json,
+                options_json,
                 total_rows,
                 valid_rows,
                 invalid_rows,
@@ -2943,11 +5239,18 @@ def get_import_run_mapping_data(
             run[0] or ""
         ).strip().lower()
 
+        options_payload = (
+            run[6]
+            if isinstance(run[6], dict)
+            else {}
+        )
+
         profile = get_workspace_import_profile(
             cur,
             spa_id=spa_id,
             business_unit_id=business_unit_id,
             entity_type=entity_type,
+            options=options_payload,
         )
 
         mapping_json = (
@@ -3017,6 +5320,7 @@ def get_import_run_mapping_data(
             "source_size_bytes": run[4],
             "headers": headers,
             "mapping": mapping,
+            "options": options_payload,
             "fields": [
                 {
                     "key": field["key"],
@@ -3028,15 +5332,15 @@ def get_import_run_mapping_data(
                 for field in profile["fields"]
             ],
             "preview_rows": preview_rows,
-            "total_rows": run[6],
-            "valid_rows": run[7],
-            "invalid_rows": run[8],
-            "strong_duplicate_rows": run[9],
-            "possible_duplicate_rows": run[10],
-            "imported_rows": run[11],
-            "skipped_rows": run[12],
-            "error_rows": run[13],
-            "requested_at": run[14],
+            "total_rows": run[7],
+            "valid_rows": run[8],
+            "invalid_rows": run[9],
+            "strong_duplicate_rows": run[10],
+            "possible_duplicate_rows": run[11],
+            "imported_rows": run[12],
+            "skipped_rows": run[13],
+            "error_rows": run[14],
+            "requested_at": run[15],
         }
 
     finally:

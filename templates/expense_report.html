@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-{% from "components/cards.html" import section_card %}
 
 
 {% block title %}Expense Report{% endblock %}
@@ -7,166 +6,302 @@
 {% block content %}
 
 
-<h1>Expense Report</h1>
+<div class="report-page">
 
-<div class="narrow-cards">
-    {{ section_card("Accounting Department", " ",  url_for('accounting_home')) }}
+    <a
+        href="{{ url_for('accounting_home') }}"
+        class="tool-pill tool-pill-small"
+    >
+        Accounting Home
+    </a>
 
-    {{ section_card("Back to Expenses", "",  url_for('expenses_home')) }}
+    <a
+        href="{{ url_for('expenses_home') }}"
+        class="tool-pill tool-pill-small"
+    >
+        Back to Expenses
+    </a>
 
-    {{ section_card("Export to CSV", "", 
-            url_for('export_expense_report_csv',
-            start_date=start_date,
-            end_date=end_date,
-            category=category,
-            vendor_name=vendor_name)) }}
-            
+    <div class="report-header">
+        <div>
+            <h1>Expense Report</h1>
+            <p class="report-subtitle">
+                Expense summary and detailed business transactions
+            </p>
+        </div>
 
-    {{ section_card("Export to Excel (xlsx)", "", url_for('export_expense_report_xlsx',
-            start_date=start_date,
-            end_date=end_date,
-            category=category,
-            vendor_name=vendor_name)) }}
-
-
-</div>
-
-
-
-
-<form method="GET" action="{{ url_for('expense_report') }}">
-    <div class="form-group">
-        <label for="start_date">Start Date</label>
-        <input type="date" id="start_date" name="start_date" value="{{ start_date or '' }}">
+        <div class="report-actions no-print">
+            <button
+                type="button"
+                class="btn btn-print"
+                onclick="window.print()"
+            >
+                🖨️ Print Report
+            </button>
+        </div>
     </div>
 
-    <div class="form-group">
-        <label for="end_date">End Date</label>
-        <input type="date" id="end_date" name="end_date" value="{{ end_date or '' }}">
-    </div>
-
-    <div class="form-group">
-        <label for="category">Category</label>
-        <select id="category" name="category">
-            <option value="">All Categories</option>
-            {% for item in category_options %}
-                <option value="{{ item[1] }}"
-                    {% if category == item[1] %}selected{% endif %}>
-                    {{ item[1] }}
-                </option>
-            {% endfor %}
-        </select>
-    </div>
-
-    <div class="form-group">
-        <label for="vendor_name">Vendor</label>
-
-        <select
-            id="vendor_name"
-            name="vendor_name"
-            autocomplete="off"
+    <div class="report-filter-card no-print">
+        <form
+            method="GET"
+            action="{{ url_for('expense_report') }}"
+            class="report-filter-form"
         >
-            <option value="">
-                All Vendors
-            </option>
-
-            {% for item in vendor_options %}
-                <option
-                    value="{{ item[1] }}"
-                    {% if vendor_name == item[1] %}
-                        selected
-                    {% endif %}
+            <div class="filter-group">
+                <label for="start_date">Start Date</label>
+                <input
+                    type="date"
+                    id="start_date"
+                    name="start_date"
+                    value="{{ start_date }}"
                 >
-                    {{ item[1] }}
-                </option>
-            {% endfor %}
-        </select>
+            </div>
+
+            <div class="filter-group">
+                <label for="end_date">End Date</label>
+                <input
+                    type="date"
+                    id="end_date"
+                    name="end_date"
+                    value="{{ end_date }}"
+                >
+            </div>
+
+            <div class="filter-group">
+                <label for="category">Category</label>
+                <select id="category" name="category">
+                    <option value="">All Categories</option>
+                    {% for item in category_options %}
+                        <option
+                            value="{{ item[1] }}"
+                            {% if category == item[1] %}selected{% endif %}
+                        >
+                            {{ item[1] }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="filter-group">
+                <label for="vendor_name">Vendor</label>
+                <select
+                    id="vendor_name"
+                    name="vendor_name"
+                    autocomplete="off"
+                >
+                    <option value="">All Vendors</option>
+                    {% for item in vendor_options %}
+                        <option
+                            value="{{ item[1] }}"
+                            {% if vendor_name == item[1] %}selected{% endif %}
+                        >
+                            {{ item[1] }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div
+                class="page-tool-pills"
+                style="margin-top: 15px; gap: 6px; flex-wrap: wrap;"
+            >
+                <button
+                    type="submit"
+                    class="tool-pill tool-pill-small"
+                >
+                    Run Report
+                </button>
+
+                <a
+                    href="{{ url_for('expense_report') }}"
+                    class="tool-pill tool-pill-small"
+                >
+                    Reset
+                </a>
+
+                <a
+                    href="{{ url_for('export_expense_report_csv',
+                        start_date=start_date,
+                        end_date=end_date,
+                        category=category,
+                        vendor_name=vendor_name) }}"
+                    class="tool-pill tool-pill-small"
+                >
+                    Export to CSV
+                </a>
+
+                <a
+                    href="{{ url_for('export_expense_report_xlsx',
+                        start_date=start_date,
+                        end_date=end_date,
+                        category=category,
+                        vendor_name=vendor_name) }}"
+                    class="tool-pill tool-pill-small"
+                >
+                    Export to Excel
+                </a>
+            </div>
+        </form>
     </div>
 
-    <br>
+    <div class="report-period">
+        <strong>Reporting Period:</strong>
+        {{ start_date }} through {{ end_date }}
+    </div>
 
-<div class="report-actions no-print">
+    <div class="summary-cards">
+        <div class="summary-card">
+            <h3>Total Expenses</h3>
+            <p>{{ report_total|currency }}</p>
+        </div>
 
-    <button type="submit" class="btn">Run Report</button>
-    <a class="btn" href="{{ url_for('expense_report') }}">Reset</a>
+        <div class="summary-card">
+            <h3>Transactions</h3>
+            <p>{{ expenses|length }}</p>
+        </div>
 
-    <button type="button" class="btn" onclick="window.print()">
-        🖨️ Print Report
-    </button>
+        <div class="summary-card">
+            <h3>Processor Fees</h3>
+            <p>{{ processor_fee_total|currency }}</p>
+            <small>Tracked separately from recorded expenses</small>
+        </div>
+    </div>
+
+<div class="report-grid">
+        <div class="report-section">
+            <h2>Category Breakdown</h2>
+
+            <div class="table-wrap">
+                <table class="styled-report-table compact-table">
+                    <thead>
+                        <tr>
+                            <th>Category</th>
+                            <th>Transactions</th>
+                            <th>Total</th>
+                            <th>% of Expenses</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for category_name, data in category_totals.items() %}
+                        <tr>
+                            <td>{{ category_name }}</td>
+                            <td>{{ data.transaction_count }}</td>
+                            <td>{{ data.total|currency }}</td>
+                            <td>{{ '%.1f'|format(data.percentage) }}%</td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="4" class="no-data">
+                                No category data found for this date range.
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="report-section">
+            <h2>Vendor Breakdown</h2>
+
+            <div class="table-wrap">
+                <table class="styled-report-table compact-table">
+                    <thead>
+                        <tr>
+                            <th>Vendor</th>
+                            <th>Transactions</th>
+                            <th>Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in vendor_totals %}
+                        <tr>
+                            <td>{{ row[0] }}</td>
+                            <td>{{ row[1] }}</td>
+                            <td>{{ row[2]|currency }}</td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="3" class="no-data">
+                                No vendor data found for this date range.
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="report-section">
+        <h2>Expense Transactions</h2>
+
+        <div class="table-wrap">
+            <table class="styled-report-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Vendor</th>
+                        <th>Category</th>
+                        <th>Description</th>
+                        <th>Amount</th>
+                        <th>Payment Method</th>
+                        <th>Receipt</th>
+                        <th>Notes</th>
+                        <th class="no-print">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in expenses %}
+                    <tr>
+                        <td>
+                            {{ row[1].strftime('%m/%d/%Y') if row[1] else '' }}
+                        </td>
+                        <td>{{ row[2] or '' }}</td>
+                        <td>{{ row[3] or '' }}</td>
+                        <td>{{ row[4] or '' }}</td>
+                        <td>{{ row[5]|currency }}</td>
+                        <td>{{ row[6] or '' }}</td>
+                        <td>{{ row[7] or '' }}</td>
+                        <td>{{ row[8] or '' }}</td>
+                        <td class="no-print">
+                            <a
+                                class="btn"
+                                href="{{ url_for(
+                                    'edit_expense',
+                                    expense_id=row[0]
+                                ) }}"
+                            >
+                                Edit
+                            </a>
+
+                            <form
+                                method="POST"
+                                action="{{ url_for(
+                                    'delete_expense',
+                                    expense_id=row[0]
+                                ) }}"
+                                style="display:inline;"
+                                onsubmit="return confirm('Delete this expense?');"
+                            >
+                                <button type="submit" class="btn">
+                                    Delete
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="9" class="no-data">
+                            No expenses found for this report.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
 
 </div>
-
-</form>
-
-
-<h3>Total: {{ report_total|currency }}</h3>
-
-<table>
-    <thead>
-        <tr>
-            <th>Date</th>
-            <th>Vendor</th>
-            <th>Category</th>
-            <th>Description</th>
-            <th>Amount</th>
-            <th>Payment Method</th>
-            <th>Receipt</th>
-            <th>Notes</th>
-            <th class="no-print">Actions</th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for row in expenses %}
-        <tr>
-            <td>{{ row[1].strftime('%m/%d/%Y') if row[1] else '' }}</td>
-            <td>{{ row[2] or '' }}</td>
-            <td>{{ row[3] or '' }}</td>
-            <td>{{ row[4] or '' }}</td>
-            <td>{{ row[5]|currency }}</td>
-            <td>{{ row[6] or '' }}</td>
-            <td>{{ row[7] or '' }}</td>
-            <td>{{ row[8] or '' }}</td>
-            <td class="no-print">
-                <a class="btn" href="{{ url_for('edit_expense', expense_id=row[0]) }}">Edit</a>
-
-                <form method="POST"
-                      action="{{ url_for('delete_expense', expense_id=row[0]) }}"
-                      style="display:inline;"
-                      onsubmit="return confirm('Delete this expense?');">
-                    <button type="submit" class="btn">Delete</button>
-                </form>
-            </td>
-        </tr>
-        {% else %}
-        <tr>
-            <td colspan="9">No expenses found for this report.</td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
-
-<br>
-
-<h3>Category Totals</h3>
-<table>
-    <thead>
-        <tr>
-            <th>Category</th>
-            <th>Total</th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for category_name, total in category_totals.items() %}
-        <tr>
-            <td>{{ category_name }}</td>
-            <td>${{ '%.2f'|format(total or 0) }}</td>
-        </tr>
-        {% else %}
-        <tr>
-            <td colspan="2">No category totals available.</td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
 
 {% endblock %}

@@ -1,0 +1,365 @@
+{% extends "base.html" %}
+
+{% block title %}Import Record Details | Peach Suite Pro{% endblock %}
+
+{% block content %}
+
+<div class="report-page import-record-details-page">
+
+    <div class="report-header">
+
+        <div>
+            <h1>Import Record Details</h1>
+
+            <p class="report-subtitle">
+                Transaction details from the imported processor file.
+            </p>
+        </div>
+
+        <div class="report-actions no-print">
+
+            <a
+                href="{{ url_for(
+                    'import_run_records',
+                    import_run_id=record_data.import_run_id
+                ) }}"
+                class="btn"
+            >
+                ← Back to Import Records
+            </a>
+
+            <button
+                type="button"
+                class="btn btn-print"
+                onclick="window.print()"
+            >
+                🖨️ Print Details
+            </button>
+
+        </div>
+
+    </div>
+
+
+    <div class="import-detail-header">
+
+        <div>
+
+            <h2>
+                {{ record_data.options.get("event_name")
+                   or "Imported Transaction" }}
+            </h2>
+
+            <div class="import-detail-meta">
+
+                <span>
+                    <strong>Import Run:</strong>
+                    #{{ record_data.import_run_id }}
+                </span>
+
+                <span>
+                    <strong>Source Row:</strong>
+                    {{ record_data.source_row_number }}
+                </span>
+
+                {% if record_data.credit_processor_id %}
+                    <span>
+                        <strong>Processor ID:</strong>
+                        {{ record_data.credit_processor_id }}
+                    </span>
+                {% endif %}
+
+            </div>
+
+        </div>
+
+        <div class="import-detail-statuses">
+
+            {% if record_data.review_decision == "approved" %}
+                <span class="import-status-badge import-status-approved">
+                    Approved
+                </span>
+            {% elif record_data.review_decision == "needs_review" %}
+                <span class="import-status-badge import-status-review">
+                    Needs Review
+                </span>
+            {% elif record_data.review_decision == "hold" %}
+                <span class="import-status-badge import-status-hold">
+                    Hold
+                </span>
+            {% elif record_data.review_decision == "discard" %}
+                <span class="import-status-badge import-status-discard">
+                    Discard
+                </span>
+            {% endif %}
+
+            {% if record_data.import_status == "imported" %}
+                <span class="import-status-badge import-status-posted">
+                    Posted
+                </span>
+            {% elif record_data.import_status == "skipped" %}
+                <span class="import-status-badge import-status-skipped">
+                    Skipped
+                </span>
+            {% elif record_data.import_status == "error" %}
+                <span class="import-status-badge import-status-error">
+                    Error
+                </span>
+            {% else %}
+                <span class="muted-text">
+                    Not Posted
+                </span>
+            {% endif %}
+
+        </div>
+
+    </div>
+
+
+    <div class="report-section">
+
+        <h2>Transaction Information</h2>
+
+        <div class="import-detail-grid">
+
+            <div class="import-detail-card">
+                <span>Transaction Date / Time</span>
+                <strong>
+                    {{ record_data.mapped_data.get("transaction_at") or "—" }}
+                </strong>
+            </div>
+
+            <div class="import-detail-card">
+                <span>Processor Transaction ID</span>
+                <strong>
+                    {{ record_data.mapped_data.get("processor_payment_id") or "—" }}
+                </strong>
+            </div>
+
+            <div class="import-detail-card">
+                <span>Sales</span>
+                <strong>
+                    {% if record_data.mapped_data.get("pos_amount") is not none %}
+                        {{ record_data.mapped_data.get("pos_amount")|currency }}
+                    {% else %}
+                        —
+                    {% endif %}
+                </strong>
+            </div>
+
+            <div class="import-detail-card">
+                <span>Tax</span>
+                <strong>
+                    {% if record_data.mapped_data.get("tax_amount") is not none %}
+                        {{ record_data.mapped_data.get("tax_amount")|currency }}
+                    {% else %}
+                        —
+                    {% endif %}
+                </strong>
+            </div>
+
+            <div class="import-detail-card">
+                <span>Tips</span>
+                <strong>
+                    {% if record_data.mapped_data.get("tip_amount") is not none %}
+                        {{ record_data.mapped_data.get("tip_amount")|currency }}
+                    {% else %}
+                        —
+                    {% endif %}
+                </strong>
+            </div>
+
+            <div class="import-detail-card">
+                <span>Gross Collected</span>
+                <strong>
+                    {% if record_data.mapped_data.get("total_amount") is not none %}
+                        {{ record_data.mapped_data.get("total_amount")|currency }}
+                    {% else %}
+                        —
+                    {% endif %}
+                </strong>
+            </div>
+
+            <div class="import-detail-card">
+                <span>Processor Fees</span>
+                <strong>
+                    {% if record_data.mapped_data.get("processing_fee_amount") is not none %}
+                        {{ record_data.mapped_data.get("processing_fee_amount")|currency }}
+                    {% else %}
+                        —
+                    {% endif %}
+                </strong>
+            </div>
+
+            <div class="import-detail-card">
+                <span>Processor Net Received</span>
+                <strong>
+                    {% if record_data.mapped_data.get("net_received") is not none %}
+                        {{ record_data.mapped_data.get("net_received")|currency }}
+                    {% else %}
+                        —
+                    {% endif %}
+                </strong>
+            </div>
+
+            <div class="import-detail-card">
+                <span>Payment Method</span>
+                <strong>
+                    {{ record_data.mapped_data.get("payment_method") or "—" }}
+                </strong>
+            </div>
+
+            <div class="import-detail-card">
+                <span>Processor Status</span>
+                <strong>
+                    {{ record_data.mapped_data.get("processor_status") or "—" }}
+                </strong>
+            </div>
+
+            <div class="import-detail-card">
+                <span>Source Row</span>
+                <strong>
+                    {{ record_data.source_row_number }}
+                </strong>
+            </div>
+
+            {% if record_data.imported_record_id %}
+
+                <div class="import-detail-card">
+                    <span>Income Record</span>
+                    <strong>
+                        Income #{{ record_data.imported_record_id }}
+                    </strong>
+                </div>
+
+            {% endif %}
+
+        </div>
+
+    </div>
+
+
+    <div class="report-section">
+
+        <h2>Processor Data</h2>
+
+        <div class="table-wrap">
+
+            <table class="styled-report-table">
+
+                <thead>
+
+                    <tr>
+                        <th>PSP Field</th>
+                        <th>Processor Label</th>
+                        <th>Imported Value</th>
+                    </tr>
+
+                </thead>
+
+                <tbody>
+
+                    {% for field in record_data.processor_fields %}
+
+                        <tr>
+
+                            <td>
+                                {{ field.field_key }}
+                            </td>
+
+                            <td>
+                                {{ field.label }}
+                            </td>
+
+                            <td>
+                                {{ field.value if field.value is not none and field.value != "" else "—" }}
+                            </td>
+
+                        </tr>
+
+                    {% endfor %}
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+    </div>
+
+
+    {% if record_data.validation_errors
+       or record_data.duplicate_status != "none"
+       or record_data.error_message %}
+
+        <div class="report-section">
+
+            <h2>Review Information</h2>
+
+            <div class="import-review-detail">
+
+                {% if record_data.validation_errors %}
+
+                    <div class="import-detail-block">
+
+                        <strong>Validation:</strong>
+
+                        <ul>
+
+                            {% for error in record_data.validation_errors %}
+
+                                <li>{{ error }}</li>
+
+                            {% endfor %}
+
+                        </ul>
+
+                    </div>
+
+                {% endif %}
+
+
+                {% if record_data.duplicate_status == "strong" %}
+
+                    <div class="import-detail-block">
+
+                        <strong>Strong Duplicate:</strong>
+
+                        Processor Transaction ID already exists for this processor in this Provider Workspace.
+
+                    </div>
+
+                {% elif record_data.duplicate_status == "possible" %}
+
+                    <div class="import-detail-block">
+
+                        <strong>Possible Duplicate:</strong>
+
+                        This transaction requires review before posting.
+
+                    </div>
+
+                {% endif %}
+
+
+                {% if record_data.error_message %}
+
+                    <div class="import-detail-block">
+
+                        <strong>Posting Error:</strong>
+
+                        {{ record_data.error_message }}
+
+                    </div>
+
+                {% endif %}
+
+            </div>
+
+        </div>
+
+    {% endif %}
+
+</div>
+
+{% endblock %}

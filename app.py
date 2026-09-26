@@ -140,6 +140,8 @@ from services.import_service import (
     analyze_import_run,
     create_import_run,
     get_import_run_mapping_data,
+    get_import_run_records,
+    get_import_run_record_details,
     process_client_import_packet,
 )
 
@@ -75306,28 +75308,30 @@ def reopen_feedback(feedback_id):
 @app.route("/credit_processors")
 @login_required
 @spa_required
-
 def credit_processors():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
 
     conn = get_db_connection()
     cur = conn.cursor()
-
     cur.execute("""
         SELECT
             credit_processor_id,
             credit_processor_name,
+            merchant_account_identifier,
             percentage_fee,
             flat_fee,
             additional_fee,
             is_active
         FROM credit_processors
         WHERE spa_id = %s
+          AND business_unit_id = %s
         ORDER BY credit_processor_name
-    """, (spa_id,))
-
+    """, (
+        spa_id,
+        business_unit_id,
+    ))
     processors = cur.fetchall()
-
     cur.close()
     conn.close()
 
@@ -75337,13 +75341,10 @@ def credit_processors():
     )
 
 
-
-
 #   -----------------------
 #
 #      ADD CREDIT PROCESSORS
 #
-#       spa_id good
 #  ----------------------
 
 
@@ -75352,16 +75353,42 @@ def credit_processors():
 @spa_required
 def add_credit_processor():
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
 
     if request.method == "POST":
-        credit_processor_name = request.form.get("credit_processor_name", "").strip()
-        percentage_fee = float(request.form.get("percentage_fee") or 0)
+        credit_processor_name = request.form.get(
+            "credit_processor_name",
+            ""
+        ).strip()
+        merchant_account_identifier = request.form.get(
+            "merchant_account_identifier",
+            ""
+        ).strip()
+        percentage_fee = float(
+            request.form.get("percentage_fee") or 0
+        )
         flat_fee = float(request.form.get("flat_fee") or 0)
-        additional_fee = float(request.form.get("additional_fee") or 0)
+        additional_fee = float(
+            request.form.get("additional_fee") or 0
+        )
 
         if not credit_processor_name:
-            flash("Processor name is required.", "error")
+            flash("Processor Company is required.", "error")
             return redirect(url_for("add_credit_processor"))
+
+        if (
+            credit_processor_name.lower() != "square"
+            and not merchant_account_identifier
+        ):
+            flash(
+                "Merchant ID / Account ID is required for "
+                "non-Square processors.",
+                "error"
+            )
+            return redirect(url_for("add_credit_processor"))
+
+        if credit_processor_name.lower() == "square":
+            merchant_account_identifier = None
 
         conn = get_db_connection()
         cur = conn.cursor()
@@ -75370,28 +75397,35 @@ def add_credit_processor():
             cur.execute("""
                 INSERT INTO credit_processors (
                     spa_id,
+                    business_unit_id,
                     credit_processor_name,
+                    merchant_account_identifier,
                     percentage_fee,
                     flat_fee,
                     additional_fee,
                     is_active
                 )
-                VALUES (%s, %s, %s, %s, %s, TRUE)
+                VALUES (
+                    %s, %s, %s, %s,
+                    %s, %s, %s, TRUE
+                )
             """, (
                 spa_id,
+                business_unit_id,
                 credit_processor_name,
+                merchant_account_identifier,
                 percentage_fee,
                 flat_fee,
-                additional_fee
+                additional_fee,
             ))
-
             conn.commit()
-            flash("Credit processor added successfully.", "success")
-
+            flash(
+                "Processor Company Setup saved successfully.",
+                "success"
+            )
         except Exception as e:
             conn.rollback()
             flash(f"Error adding processor: {e}", "error")
-
         finally:
             cur.close()
             conn.close()
@@ -75401,67 +75435,118 @@ def add_credit_processor():
     return render_template("add_credit_processor.html")
 
 
-
-
-
 #   ----------------------------
 #
 #     EDIT CREDIT PROCESSOR
 #
-#     spa_id good
 #  ----------------------------
 
 
-
-@app.route("/credit_processors/edit/<int:credit_processor_id>", methods=["GET", "POST"])
+@app.route(
+    "/credit_processors/edit/<int:credit_processor_id>",
+    methods=["GET", "POST"]
+)
 @login_required
 @spa_required
 def edit_credit_processor(credit_processor_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
 
     conn = get_db_connection()
     cur = conn.cursor()
 
     if request.method == "POST":
-        credit_processor_name = request.form.get("credit_processor_name", "").strip()
-        percentage_fee = request.form.get("percentage_fee") or 0
+        credit_processor_name = request.form.get(
+            "credit_processor_name",
+            ""
+        ).strip()
+        merchant_account_identifier = request.form.get(
+            "merchant_account_identifier",
+            ""
+        ).strip()
+        percentage_fee = request.form.get(
+            "percentage_fee"
+        ) or 0
         flat_fee = request.form.get("flat_fee") or 0
-        additional_fee = request.form.get("additional_fee") or 0
+        additional_fee = request.form.get(
+            "additional_fee"
+        ) or 0
 
         if not credit_processor_name:
             cur.close()
             conn.close()
-            flash("Processor name is required.", "error")
-            return redirect(url_for("edit_credit_processor", credit_processor_id=credit_processor_id))
+            flash("Processor Company is required.", "error")
+            return redirect(
+                url_for(
+                    "edit_credit_processor",
+                    credit_processor_id=credit_processor_id
+                )
+            )
+
+        if (
+            credit_processor_name.lower() != "square"
+            and not merchant_account_identifier
+        ):
+            cur.close()
+            conn.close()
+            flash(
+                "Merchant ID / Account ID is required for "
+                "non-Square processors.",
+                "error"
+            )
+            return redirect(
+                url_for(
+                    "edit_credit_processor",
+                    credit_processor_id=credit_processor_id
+                )
+            )
+
+        if credit_processor_name.lower() == "square":
+            merchant_account_identifier = None
 
         cur.execute("""
             UPDATE credit_processors
             SET credit_processor_name = %s,
+                merchant_account_identifier = %s,
                 percentage_fee = %s,
                 flat_fee = %s,
                 additional_fee = %s
             WHERE credit_processor_id = %s
               AND spa_id = %s
+              AND business_unit_id = %s
         """, (
             credit_processor_name,
+            merchant_account_identifier,
             percentage_fee,
             flat_fee,
             additional_fee,
             credit_processor_id,
-            spa_id
+            spa_id,
+            business_unit_id,
         ))
+
+        if cur.rowcount != 1:
+            conn.rollback()
+            cur.close()
+            conn.close()
+            flash("Credit processor not found.", "error")
+            return redirect(url_for("credit_processors"))
 
         conn.commit()
         cur.close()
         conn.close()
 
-        flash("Credit processor updated successfully.", "success")
+        flash(
+            "Processor Company Setup updated successfully.",
+            "success"
+        )
         return redirect(url_for("credit_processors"))
 
     cur.execute("""
         SELECT
             credit_processor_id,
             credit_processor_name,
+            merchant_account_identifier,
             percentage_fee,
             flat_fee,
             additional_fee,
@@ -75469,8 +75554,12 @@ def edit_credit_processor(credit_processor_id):
         FROM credit_processors
         WHERE credit_processor_id = %s
           AND spa_id = %s
-    """, (credit_processor_id, spa_id))
-
+          AND business_unit_id = %s
+    """, (
+        credit_processor_id,
+        spa_id,
+        business_unit_id,
+    ))
     processor = cur.fetchone()
 
     cur.close()
@@ -75486,21 +75575,22 @@ def edit_credit_processor(credit_processor_id):
     )
 
 
-
-
 #   ------------------------------
 #     TOGGLE ACTIVE/DEACTIVATE
 #     CREDIT PROCESSORS
 #
-#     spa_id good
 #  ------------------------------
 
 
-@app.route("/credit_processors/toggle/<int:credit_processor_id>", methods=["POST"])
+@app.route(
+    "/credit_processors/toggle/<int:credit_processor_id>",
+    methods=["POST"]
+)
 @login_required
 @spa_required
 def toggle_credit_processor(credit_processor_id):
     spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -75510,7 +75600,19 @@ def toggle_credit_processor(credit_processor_id):
         SET is_active = NOT is_active
         WHERE credit_processor_id = %s
           AND spa_id = %s
-    """, (credit_processor_id, spa_id))
+          AND business_unit_id = %s
+    """, (
+        credit_processor_id,
+        spa_id,
+        business_unit_id,
+    ))
+
+    if cur.rowcount != 1:
+        conn.rollback()
+        cur.close()
+        conn.close()
+        flash("Credit processor not found.", "error")
+        return redirect(url_for("credit_processors"))
 
     conn.commit()
     cur.close()
@@ -75518,16 +75620,6 @@ def toggle_credit_processor(credit_processor_id):
 
     flash("Credit processor status updated.", "success")
     return redirect(url_for("credit_processors"))
-
-
-
-
-
-
-
-
-
-
 
 
 #   -----------------------
@@ -94828,6 +94920,91 @@ def add_expense():
 
 
 #  ------------------------------------------
+#      PEACH SUITE PRO IMPORT RECORDS
+#  ------------------------------------------
+
+@app.route(
+    "/imports/records/<int:import_run_id>/record/<int:import_run_row_id>",
+    methods=["GET"],
+)
+@login_required
+@spa_required
+@require_psp_access("financial_management")
+def import_run_record_details(
+    import_run_id,
+    import_run_row_id,
+):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to view Import Record Details.",
+            "error",
+        )
+        return redirect(url_for("dashboard"))
+
+    try:
+        record_data = get_import_run_record_details(
+            import_run_id,
+            import_run_row_id,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+        )
+    except ImportServiceError as exc:
+        flash(str(exc), "error")
+        return redirect(
+            url_for(
+                "import_run_records",
+                import_run_id=import_run_id,
+            )
+        )
+
+    return render_template(
+        "import_run_record_details.html",
+        record_data=record_data,
+    )
+
+
+
+@app.route(
+    "/imports/records/<int:import_run_id>",
+    methods=["GET"],
+)
+@login_required
+@spa_required
+@require_psp_access("financial_management")
+def import_run_records(import_run_id):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to view Import Records.",
+            "error",
+        )
+        return redirect(url_for("dashboard"))
+
+    try:
+        import_data = get_import_run_records(
+            import_run_id,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+        )
+    except ImportServiceError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("dashboard"))
+
+    return render_template(
+        "import_run_records.html",
+        import_data=import_data,
+    )
+
+
+
+#  ------------------------------------------
 #      EXPENSE REPORT
 #  good 4/27
 #  ------------------------------------------
@@ -94852,14 +95029,17 @@ def expense_report():
         )
         return redirect(url_for("dashboard"))
 
+    today = date.today()
+    first_day = today.replace(day=1)
+
     start_date = (
-        request.args.get("start_date", "")
-        or ""
+        request.args.get("start_date")
+        or first_day.strftime("%Y-%m-%d")
     ).strip()
 
     end_date = (
-        request.args.get("end_date", "")
-        or ""
+        request.args.get("end_date")
+        or today.strftime("%Y-%m-%d")
     ).strip()
 
     category = (
@@ -94982,7 +95162,8 @@ def expense_report():
     category_totals_query = """
         SELECT
             category,
-            COALESCE(SUM(amount), 0)
+            COUNT(*) AS transaction_count,
+            COALESCE(SUM(amount), 0) AS category_total
         FROM expenses
         WHERE spa_id = %s
           AND business_unit_id = %s
@@ -95049,11 +95230,113 @@ def expense_report():
             if row[0]
             else "Uncategorized"
         )
+        transaction_count = row[1]
+        category_total = row[2]
+        percentage = (
+            (category_total / report_total) * 100
+            if report_total
+            else 0
+        )
 
-        category_totals[
-            category_name
-        ] = row[1]
+        category_totals[category_name] = {
+            "transaction_count": transaction_count,
+            "total": category_total,
+            "percentage": percentage,
+        }
 
+
+    vendor_totals_query = """
+        SELECT
+            COALESCE(NULLIF(BTRIM(vendor_name), ''), 'Unassigned'),
+            COUNT(*) AS transaction_count,
+            COALESCE(SUM(amount), 0) AS vendor_total
+        FROM expenses
+        WHERE spa_id = %s
+          AND business_unit_id = %s
+    """
+
+    vendor_totals_params = [
+        spa_id,
+        business_unit_id
+    ]
+
+    if start_date:
+        vendor_totals_query += " AND expense_date >= %s"
+        vendor_totals_params.append(start_date)
+
+    if end_date:
+        vendor_totals_query += " AND expense_date <= %s"
+        vendor_totals_params.append(end_date)
+
+    if category:
+        vendor_totals_query += " AND category = %s"
+        vendor_totals_params.append(category)
+
+    if vendor_name:
+        vendor_totals_query += " AND vendor_name = %s"
+        vendor_totals_params.append(vendor_name)
+
+    vendor_totals_query += """
+        GROUP BY
+            COALESCE(NULLIF(BTRIM(vendor_name), ''), 'Unassigned')
+        ORDER BY vendor_total DESC
+    """
+
+    cur.execute(
+        vendor_totals_query,
+        tuple(vendor_totals_params)
+    )
+
+    vendor_totals = cur.fetchall()
+
+
+    # Processor fees are recorded on Income as part of
+    # the underlying payment transaction. Report them here
+    # as an expense metric without creating duplicate
+    # expense records.
+    processor_fee_query = """
+        SELECT
+            COALESCE(cp.credit_processor_name, 'Unassigned'),
+            COUNT(*),
+            COALESCE(SUM(i.processing_fee_amount), 0)
+        FROM income i
+        LEFT JOIN credit_processors cp
+            ON cp.credit_processor_id = i.credit_processor_id
+        WHERE i.spa_id = %s
+        AND i.business_unit_id = %s
+        AND COALESCE(i.processing_fee_amount, 0) <> 0
+"""
+
+    processor_fee_params = [
+        spa_id,
+        business_unit_id
+    ]
+
+    if start_date:
+        processor_fee_query += " AND i.income_date >= %s"
+        processor_fee_params.append(start_date)
+
+    if end_date:
+        processor_fee_query += " AND i.income_date <= %s"
+        processor_fee_params.append(end_date)
+
+    processor_fee_query += """
+        GROUP BY
+            COALESCE(cp.credit_processor_name, 'Unassigned')
+        ORDER BY
+            COALESCE(cp.credit_processor_name, 'Unassigned')
+"""
+
+    cur.execute(
+        processor_fee_query,
+        tuple(processor_fee_params)
+    )
+    processor_fee_breakdown = cur.fetchall()
+
+    processor_fee_total = sum(
+        (row[2] or 0)
+        for row in processor_fee_breakdown
+    )
     cur.close()
     conn.close()
 
@@ -95067,7 +95350,10 @@ def expense_report():
         vendor_options=vendor_options,
         expenses=expenses,
         report_total=report_total,
-        category_totals=category_totals
+        processor_fee_total=processor_fee_total,
+        processor_fee_breakdown=processor_fee_breakdown,
+        category_totals=category_totals,
+        vendor_totals=vendor_totals
     )
 
 
@@ -102959,26 +103245,50 @@ def income_report():
     processor_breakdown = cur.fetchall()
 
     # Detailed report rows
+    #
+    # Income posted through a PeachPOS processor Import Run is
+    # summarized by Import Run for report presentation only.
+    # The underlying Income records remain individual and intact.
+    #
+    # Native SquarePOS and ordinary Income do not have an
+    # Import Run linkage and therefore remain individual rows.
     cur.execute(f"""
         SELECT
             i.income_id,
             i.income_date,
-            COALESCE(c.first_name || ' ' || c.last_name, 'No Client') AS client_name,
-            COALESCE(e.first_name || ' ' || e.last_name, 'Unassigned') AS employee_name,
+            COALESCE(
+                c.first_name || ' ' || c.last_name,
+                'No Client'
+            ) AS client_name,
+            COALESCE(
+                e.first_name || ' ' || e.last_name,
+                'Unassigned'
+            ) AS employee_name,
             COALESCE(i.income_type, '') AS income_type,
             COALESCE(i.description, '') AS description,
             COALESCE(i.payment_method, '') AS payment_method,
-            COALESCE(cp.credit_processor_name, '') AS credit_processor_name,
-            COALESCE(i.processor_payment_id, '') AS processor_payment_id,
+            COALESCE(
+                cp.credit_processor_name,
+                ''
+            ) AS credit_processor_name,
+            COALESCE(
+                i.processor_payment_id,
+                ''
+            ) AS processor_payment_id,
             COALESCE(i.service_amount, 0.00) AS service_amount,
             COALESCE(i.tip_amount, 0.00) AS tip_amount,
             COALESCE(i.retail_amount, 0.00) AS retail_amount,
             COALESCE(i.pos_amount, 0.00) AS pos_amount,
             COALESCE(i.tax_amount, 0.00) AS tax_amount,
             COALESCE(i.total_amount, 0.00) AS total_amount,
-            COALESCE(i.processing_fee_amount, 0.00) AS processing_fee_amount,
+            COALESCE(
+                i.processing_fee_amount,
+                0.00
+            ) AS processing_fee_amount,
             COALESCE(i.net_received, 0.00) AS net_received,
-            COALESCE(i.notes, '') AS notes
+            COALESCE(i.notes, '') AS notes,
+            COALESCE(i.event_name, '') AS event_name,
+            imp.import_run_id
         FROM income i
         LEFT JOIN clients c
             ON i.client_id = c.client_id
@@ -102990,10 +103300,168 @@ def income_report():
         LEFT JOIN credit_processors cp
             ON i.credit_processor_id = cp.credit_processor_id
            AND i.spa_id = cp.spa_id
+           AND i.business_unit_id = cp.business_unit_id
+        LEFT JOIN LATERAL (
+            SELECT
+                rr.import_run_id
+            FROM import_run_rows rr
+            JOIN import_runs ir
+              ON ir.import_run_id = rr.import_run_id
+             AND ir.spa_id = rr.spa_id
+             AND ir.business_unit_id = rr.business_unit_id
+            WHERE rr.imported_record_id = i.income_id
+              AND rr.spa_id = i.spa_id
+              AND rr.business_unit_id = i.business_unit_id
+              AND ir.entity_type = 'peachpos_income'
+            ORDER BY rr.import_run_row_id DESC
+            LIMIT 1
+        ) imp ON TRUE
         {filter_sql_i}
         ORDER BY i.income_date DESC, i.income_id DESC
     """, params_i)
-    income_rows = cur.fetchall()
+
+    raw_income_rows = cur.fetchall()
+
+    income_rows = []
+    import_summaries = {}
+
+    for row in raw_income_rows:
+        import_run_id = row[19]
+
+        if import_run_id is None:
+            income_rows.append({
+                "row_type": "income",
+                "income_id": row[0],
+                "income_date": row[1],
+                "client_name": row[2],
+                "employee_name": row[3],
+                "income_type": row[4],
+                "description": row[5],
+                "payment_method": row[6],
+                "credit_processor_name": row[7],
+                "processor_payment_id": row[8],
+                "service_amount": row[9],
+                "tip_amount": row[10],
+                "retail_amount": row[11],
+                "pos_amount": row[12],
+                "tax_amount": row[13],
+                "total_amount": row[14],
+                "processing_fee_amount": row[15],
+                "net_received": row[16],
+                "notes": row[17],
+                "import_run_id": None,
+            })
+            continue
+
+        summary = import_summaries.get(
+            import_run_id
+        )
+
+        if summary is None:
+            payment_methods = set()
+            if row[6]:
+                payment_methods.add(row[6])
+
+            summary = {
+                "row_type": "import_summary",
+                "income_id": None,
+                "income_date": row[1],
+                "first_date": row[1],
+                "last_date": row[1],
+                "client_name": "—",
+                "employee_name": "—",
+                "income_type": row[4],
+                "description": "",
+                "payment_method": "",
+                "_payment_methods": payment_methods,
+                "credit_processor_name": row[7],
+                "processor_payment_id": "",
+                "service_amount": row[9],
+                "tip_amount": row[10],
+                "retail_amount": row[11],
+                "pos_amount": row[12],
+                "tax_amount": row[13],
+                "total_amount": row[14],
+                "processing_fee_amount": row[15],
+                "net_received": row[16],
+                "notes": row[18] or row[17],
+                "import_run_id": import_run_id,
+                "transaction_count": 1,
+            }
+
+            import_summaries[
+                import_run_id
+            ] = summary
+
+            # Because the query is ordered newest first, placing
+            # the summary at the first matching transaction keeps
+            # the report in the expected chronological position.
+            income_rows.append(summary)
+            continue
+
+        summary["transaction_count"] += 1
+
+        if row[1]:
+            if (
+                summary["first_date"] is None
+                or row[1] < summary["first_date"]
+            ):
+                summary["first_date"] = row[1]
+
+            if (
+                summary["last_date"] is None
+                or row[1] > summary["last_date"]
+            ):
+                summary["last_date"] = row[1]
+
+        if row[6]:
+            summary[
+                "_payment_methods"
+            ].add(row[6])
+
+        for key, index in (
+            ("service_amount", 9),
+            ("tip_amount", 10),
+            ("retail_amount", 11),
+            ("pos_amount", 12),
+            ("tax_amount", 13),
+            ("total_amount", 14),
+            ("processing_fee_amount", 15),
+            ("net_received", 16),
+        ):
+            summary[key] += row[index]
+
+        if not summary["notes"]:
+            summary["notes"] = row[18] or row[17]
+
+    for summary in import_summaries.values():
+        transaction_count = summary[
+            "transaction_count"
+        ]
+
+        summary["description"] = (
+            f"{transaction_count} Imported "
+            + (
+                "Transaction"
+                if transaction_count == 1
+                else "Transactions"
+            )
+        )
+
+        payment_methods = sorted(
+            summary.pop(
+                "_payment_methods"
+            )
+        )
+
+        if len(payment_methods) == 1:
+            summary[
+                "payment_method"
+            ] = payment_methods[0]
+        elif len(payment_methods) > 1:
+            summary["payment_method"] = "Mixed"
+        else:
+            summary["payment_method"] = "—"
 
     cur.close()
     conn.close()

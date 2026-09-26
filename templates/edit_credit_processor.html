@@ -1,31 +1,43 @@
 {% extends "base.html" %}
 
 {% block content %}
-<h1>Edit Credit Processor</h1>
+<h1>Edit Processor Company Setup</h1>
 
 <form method="POST">
     <div class="form-group">
-        <label for="credit_processor_name">Processor Name</label>
+        <label for="credit_processor_name">Processor Company</label>
         <input type="text" id="credit_processor_name" name="credit_processor_name"
                value="{{ processor[1] or '' }}" required>
     </div>
 
     <div class="form-group">
+        <label for="merchant_account_identifier">Merchant ID / Account ID</label>
+        <input type="text"
+               id="merchant_account_identifier"
+               name="merchant_account_identifier"
+               value="{{ processor[2] or '' }}">
+        <small class="muted-text">
+            Required for non-Square processors.
+            Square uses the native Square connection.
+        </small>
+    </div>
+
+    <div class="form-group">
         <label for="percentage_fee">Percentage Fee</label>
         <input type="number" step="0.0001" id="percentage_fee" name="percentage_fee"
-               value="{{ processor[2] or 0 }}">
+               value="{{ processor[3] or 0 }}">
     </div>
 
     <div class="form-group">
         <label for="flat_fee">Flat Fee</label>
         <input type="number" step="0.01" id="flat_fee" name="flat_fee"
-               value="{{ processor[3] or 0 }}">
+               value="{{ processor[4] or 0 }}">
     </div>
 
     <div class="form-group">
         <label for="additional_fee">Additional Fee</label>
         <input type="number" step="0.01" id="additional_fee" name="additional_fee"
-               value="{{ processor[4] or 0 }}">
+               value="{{ processor[5] or 0 }}">
     </div>
 
     <div class="form-buttons">

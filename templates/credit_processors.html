@@ -4,18 +4,19 @@
 
 
 
-<h1>Credit Processors</h1>
+<h1>Processor Company Setup</h1>
 
 <div class="page-tool-pills"></div>
     <a href="{{ url_for('spa_management') }}" class=" tool-pill tool-pill-large">Back to Spa Management</a>
-    <a href="{{ url_for('add_credit_processor') }}" class="tool-pill tool-pill-large">Add Credit Processor</a>
+    <a href="{{ url_for('add_credit_processor') }}" class="tool-pill tool-pill-large">Enter Processor Company</a>
 </div>
 
 {% if processors %}
     <table>
         <thead>
             <tr>
-                <th>Processor Name</th>
+                <th>Processor Company</th>
+                <th>Merchant ID / Account ID</th>
                 <th>% Fee</th>
                 <th>Flat Fee</th>
                 <th>Additional Fee</th>
@@ -27,12 +28,13 @@
         {% for row in processors %}
             <tr>
                 <td>{{ row[1] }}</td>
-                <td>{{ "%.4f"|format(row[2] or 0) }}</td>
-                <td>${{ "%.2f"|format(row[3] or 0) }}</td>
+                <td>{{ row[2] or 'Not Set' }}</td>
+                <td>{{ "%.4f"|format(row[3] or 0) }}</td>
                 <td>${{ "%.2f"|format(row[4] or 0) }}</td>
+                <td>${{ "%.2f"|format(row[5] or 0) }}</td>
 
                 <td>
-                    {% if row[5] %}
+                    {% if row[6] %}
                         Active
                     {% else %}
                         Inactive
@@ -49,7 +51,7 @@
                           style="display:inline;"
                           onsubmit="return confirm('Are you sure you want to change this processor status?');">
                         <button type="submit" class="btn btn-small">
-                            {% if row[5] %}Deactivate{% else %}Activate{% endif %}
+                            {% if row[6] %}Deactivate{% else %}Activate{% endif %}
                         </button>
                     </form>
                 </td>
@@ -58,7 +60,7 @@
         </tbody>
     </table>
 {% else %}
-    <p>No credit processors found yet.</p>
+    <p>No processor companies have been configured yet.</p>
 {% endif %}
 
 {% endblock %}

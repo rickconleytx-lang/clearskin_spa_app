@@ -297,60 +297,166 @@
                     </tr>
                 </thead>
                 <tbody>
+
                     {% if income_rows %}
+
                         {% for row in income_rows %}
+
                         <tr>
-                            <td>{{ row[1].strftime('%Y-%m-%d') if row[1] else '' }}</td>
-                            <td>{{ row[2] }}</td>
-                            <td>{{ row[3] }}</td>
-                            <td>{{ row[4] or '—' }}</td>
-                            <td>{{ row[5] or '—' }}</td>
-                            <td>{{ row[6] or '—' }}</td>
-                            <td>{{ row[7] or '—' }}</td>
+
                             <td>
-                                {% if row[8] %}
-                                    {{ row[8] }}
+                                {% if row.row_type == "import_summary" %}
+                                    {% if row.first_date == row.last_date %}
+                                        {{ row.first_date.strftime('%Y-%m-%d') if row.first_date else '' }}
+                                    {% else %}
+                                        {{ row.first_date.strftime('%Y-%m-%d') if row.first_date else '' }}
+                                        –
+                                        {{ row.last_date.strftime('%Y-%m-%d') if row.last_date else '' }}
+                                    {% endif %}
+                                {% else %}
+                                    {{ row.income_date.strftime('%Y-%m-%d') if row.income_date else '' }}
+                                {% endif %}
+                            </td>
+
+                            <td>{{ row.client_name or '—' }}</td>
+
+                            <td>{{ row.employee_name or '—' }}</td>
+
+                            <td>{{ row.income_type or '—' }}</td>
+
+                            <td>{{ row.description or '—' }}</td>
+
+                            <td>{{ row.payment_method or '—' }}</td>
+
+                            <td>
+                                {{ row.credit_processor_name or '—' }}
+                            </td>
+
+                            <td>
+                                {% if row.row_type == "import_summary" %}
+                                    <span class="muted-text">—</span>
+                                {% elif row.processor_payment_id %}
+                                    {{ row.processor_payment_id }}
                                 {% else %}
                                     <span class="muted-text">—</span>
                                 {% endif %}
                             </td>
-                            <td class="amount-cell">{{ row[9]|currency }}</td>
-                            <td class="amount-cell">{{ row[10]|currency }}</td>
-                            <td class="amount-cell">{{ row[11]|currency }}</td>
-                            <td class="amount-cell">{{ row[12]|currency }}</td>
-                            <td class="amount-cell">{{ row[13]|currency }}</td>
-                            <td class="amount-cell total-highlight">{{ row[14]|currency }}</td>
-                            <td class="amount-cell">{{ row[15]|currency }}</td>
-                            <td class="amount-cell">{{ row[16]|currency }}</td>
+
+                            <td class="amount-cell">
+                                {{ row.service_amount|currency }}
+                            </td>
+
+                            <td class="amount-cell">
+                                {{ row.tip_amount|currency }}
+                            </td>
+
+                            <td class="amount-cell">
+                                {{ row.retail_amount|currency }}
+                            </td>
+
+                            <td class="amount-cell">
+                                {{ row.pos_amount|currency }}
+                            </td>
+
+                            <td class="amount-cell">
+                                {{ row.tax_amount|currency }}
+                            </td>
+
+                            <td class="amount-cell total-highlight">
+                                {{ row.total_amount|currency }}
+                            </td>
+
+                            <td class="amount-cell">
+                                {{ row.processing_fee_amount|currency }}
+                            </td>
+
+                            <td class="amount-cell">
+                                {{ row.net_received|currency }}
+                            </td>
+
                             <td>
-                                {% if row[17] %}
-                                    {{ row[17] }}
+                                {% if row.notes %}
+                                    {{ row.notes }}
                                 {% else %}
                                     <span class="muted-text">—</span>
                                 {% endif %}
                             </td>
+
                             <td>
-                                <a href="{{ url_for('edit_income', income_id=row[0]) }}" class="btn btn-small">Edit</a>
+                                {% if row.row_type == "import_summary" %}
 
-                                <form method="POST"
-                                      action="{{ url_for('delete_income', income_id=row[0]) }}"
-                                      style="display:inline;"
-                                      onsubmit="return confirm('Are you sure you want to delete this income record?');">
+                                    <a
+                                        href="{{ url_for(
+                                            'import_run_records',
+                                            import_run_id=row.import_run_id
+                                        ) }}"
+                                        class="btn btn-small"
+                                    >
+                                        View Import
+                                    </a>
 
-                                    <input type="hidden" name="start_date" value="{{ start_date }}">
-                                    <input type="hidden" name="end_date" value="{{ end_date }}">
-                                    <input type="hidden" name="income_type" value="{{ income_type }}">
+                                {% else %}
 
-                                    <button type="submit" class="btn btn-small">Delete</button>
-                                </form>
+                                    <a
+                                        href="{{ url_for(
+                                            'edit_income',
+                                            income_id=row.income_id
+                                        ) }}"
+                                        class="btn btn-small"
+                                    >
+                                        Edit
+                                    </a>
+
+                                    <form
+                                        method="POST"
+                                        action="{{ url_for(
+                                            'delete_income',
+                                            income_id=row.income_id
+                                        ) }}"
+                                        style="display:inline;"
+                                        onsubmit="return confirm('Are you sure you want to delete this income record?');"
+                                    >
+                                        <input
+                                            type="hidden"
+                                            name="start_date"
+                                            value="{{ start_date }}"
+                                        >
+                                        <input
+                                            type="hidden"
+                                            name="end_date"
+                                            value="{{ end_date }}"
+                                        >
+                                        <input
+                                            type="hidden"
+                                            name="income_type"
+                                            value="{{ income_type }}"
+                                        >
+
+                                        <button
+                                            type="submit"
+                                            class="btn btn-small"
+                                        >
+                                            Delete
+                                        </button>
+                                    </form>
+
+                                {% endif %}
                             </td>
+
                         </tr>
+
                         {% endfor %}
+
                     {% else %}
+
                         <tr>
-                            <td colspan="18" class="no-data">No income records found for the selected date range.</td>
+                            <td colspan="18" class="no-data">
+                                No income records found for the selected date range.
+                            </td>
                         </tr>
+
                     {% endif %}
+
                 </tbody>
             </table>
         </div>
