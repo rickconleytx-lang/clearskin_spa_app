@@ -143,6 +143,12 @@ from services.import_service import (
     get_import_run_records,
     get_import_run_record_details,
     process_client_import_packet,
+    process_peachpos_income_import_packet,
+)
+from services.peachpos_processor_labels import (
+    get_peachpos_processor_field_definitions,
+    get_peachpos_processor_field_labels,
+    save_peachpos_processor_field_labels,
 )
 
 from services.square_service_sync import (
@@ -75575,6 +75581,156 @@ def edit_credit_processor(credit_processor_id):
     )
 
 
+
+#   ------------------------------------
+#
+#     PROCESSOR IMPORT FIELD NAMES
+#
+#   ------------------------------------
+
+@app.route(
+    "/credit_processors/<int:credit_processor_id>/import-field-names",
+    methods=["GET", "POST"],
+)
+@login_required
+@spa_required
+def peachpos_processor_field_names(credit_processor_id):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to manage processor import field names.",
+            "error",
+        )
+        return redirect(url_for("credit_processors"))
+
+    definitions = get_peachpos_processor_field_definitions()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                credit_processor_id,
+                credit_processor_name,
+                merchant_account_identifier,
+                is_active
+            FROM credit_processors
+            WHERE credit_processor_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            LIMIT 1
+            """,
+            (
+                credit_processor_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+        processor = cur.fetchone()
+
+        if not processor:
+            flash("Credit processor not found.", "error")
+            return redirect(url_for("credit_processors"))
+
+        if str(processor[1] or "").strip().lower() == "square":
+            flash(
+                "Square uses the native Square connection and does "
+                "not use processor import field names.",
+                "error",
+            )
+            return redirect(url_for("credit_processors"))
+
+        if request.method == "POST":
+            submitted_token = request.form.get(
+                "security_csrf_token",
+                "",
+            )
+            if not _security_form_csrf_valid(submitted_token):
+                abort(400)
+
+            submitted_labels = {
+                definition["field_key"]: (
+                    request.form.get(
+                        definition["field_key"],
+                        "",
+                    )
+                    or ""
+                ).strip()
+                for definition in definitions
+            }
+
+            try:
+                save_peachpos_processor_field_labels(
+                    cur,
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    credit_processor_id=credit_processor_id,
+                    labels=submitted_labels,
+                    updated_by=session.get("user_id"),
+                )
+                conn.commit()
+            except ValueError as exc:
+                conn.rollback()
+                flash(str(exc), "error")
+
+                resolved_labels = {
+                    definition["field_key"]: (
+                        submitted_labels.get(
+                            definition["field_key"],
+                            "",
+                        )
+                        or definition["default_label"]
+                    )
+                    for definition in definitions
+                }
+
+                return render_template(
+                    "peachpos_processor_field_names.html",
+                    processor=processor,
+                    field_definitions=definitions,
+                    processor_field_labels=resolved_labels,
+                    editing=True,
+                    security_csrf_token=(
+                        _security_form_csrf_token()
+                    ),
+                )
+
+            flash(
+                "Processor import field names updated.",
+                "success",
+            )
+            return redirect(
+                url_for(
+                    "peachpos_processor_field_names",
+                    credit_processor_id=credit_processor_id,
+                )
+            )
+
+        resolved_labels = get_peachpos_processor_field_labels(
+            cur,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            credit_processor_id=credit_processor_id,
+        )
+
+        return render_template(
+            "peachpos_processor_field_names.html",
+            processor=processor,
+            field_definitions=definitions,
+            processor_field_labels=resolved_labels,
+            editing=(request.args.get("edit") == "1"),
+            security_csrf_token=_security_form_csrf_token(),
+        )
+    finally:
+        cur.close()
+        conn.close()
+
+
 #   ------------------------------
 #     TOGGLE ACTIVE/DEACTIVATE
 #     CREDIT PROCESSORS
@@ -94920,6 +95076,185 @@ def add_expense():
 
 
 #  ------------------------------------------
+#      PEACH SUITE PRO IMPORT CENTER
+#  ------------------------------------------
+
+@app.route("/imports")
+@login_required
+@spa_required
+@require_subscription_feature("import_export")
+def import_center():
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to use Import Center.",
+            "error",
+        )
+        return redirect(url_for("dashboard"))
+
+    return render_template("import_center.html")
+
+
+#  ------------------------------------------
+#      CLIENT IMPORT
+#  ------------------------------------------
+
+@app.route(
+    "/imports/clients",
+    methods=["GET", "POST"],
+)
+@login_required
+@spa_required
+@require_subscription_feature("import_export")
+@require_subscription_feature("clients")
+def client_import_upload():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to import Clients.",
+            "error",
+        )
+        return redirect(url_for("import_center"))
+
+    if request.method == "POST":
+        submitted_token = request.form.get(
+            "security_csrf_token",
+            "",
+        )
+        if not _security_form_csrf_valid(submitted_token):
+            abort(400)
+
+        uploaded_file = request.files.get("import_file")
+
+        try:
+            import_run = create_import_run(
+                uploaded_file,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                entity_type="clients",
+                requested_by=session.get("user_id"),
+            )
+        except ImportServiceError as exc:
+            flash(str(exc), "error")
+        else:
+            return redirect(
+                url_for(
+                    "client_import_mapping",
+                    import_run_id=import_run["import_run_id"],
+                )
+            )
+
+    return render_template(
+        "import_upload.html",
+        import_title="Import Clients",
+        import_description=(
+            "Upload a CSV or Excel file containing the "
+            "client records you want to bring into Peach Suite Pro."
+        ),
+        setup_message=(
+            "Before uploading, make sure your Client Information "
+            "Labels are configured the way you want them displayed. "
+            "Those labels will appear on the mapping screen."
+        ),
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
+@app.route(
+    "/imports/clients/<int:import_run_id>/mapping",
+    methods=["GET", "POST"],
+)
+@login_required
+@spa_required
+@require_subscription_feature("import_export")
+@require_subscription_feature("clients")
+def client_import_mapping(import_run_id):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to map a Client import.",
+            "error",
+        )
+        return redirect(url_for("import_center"))
+
+    try:
+        import_data = get_import_run_mapping_data(
+            import_run_id,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+        )
+    except ImportServiceError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("import_center"))
+
+    if import_data.get("entity_type") != "clients":
+        flash(
+            "This Import Run is not a Client import.",
+            "error",
+        )
+        return redirect(url_for("import_center"))
+
+    if request.method == "POST":
+        submitted_token = request.form.get(
+            "security_csrf_token",
+            "",
+        )
+        if not _security_form_csrf_valid(submitted_token):
+            abort(400)
+
+        mapping = []
+
+        for source_index, source_header in enumerate(
+            import_data["headers"]
+        ):
+            target_key = (
+                request.form.get(
+                    f"target_{source_index}",
+                    "",
+                )
+                or ""
+            ).strip()
+
+            mapping.append({
+                "source_index": source_index,
+                "source_header": source_header,
+                "target_key": target_key or None,
+            })
+
+        try:
+            analyze_import_run(
+                import_run_id,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                mapping=mapping,
+            )
+        except ImportServiceError as exc:
+            flash(str(exc), "error")
+            import_data["mapping"] = mapping
+        else:
+            return redirect(
+                url_for(
+                    "import_run_records",
+                    import_run_id=import_run_id,
+                )
+            )
+
+    return render_template(
+        "import_mapping.html",
+        import_data=import_data,
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
+#  ------------------------------------------
 #      PEACH SUITE PRO IMPORT RECORDS
 #  ------------------------------------------
 
@@ -94997,8 +95332,13 @@ def import_run_records(import_run_id):
         flash(str(exc), "error")
         return redirect(url_for("dashboard"))
 
+    if import_data.get("entity_type") == "clients":
+        template_name = "import_run_clients.html"
+    else:
+        template_name = "import_run_records.html"
+
     return render_template(
-        "import_run_records.html",
+        template_name,
         import_data=import_data,
     )
 

@@ -46,6 +46,13 @@
                         Edit
                     </a>
 
+                    {% if row[1]|lower != 'square' %}
+                        <a href="{{ url_for('peachpos_processor_field_names', credit_processor_id=row[0]) }}"
+                           class="btn btn-small">
+                            Import Field Names
+                        </a>
+                    {% endif %}
+
                     <form method="POST"
                           action="{{ url_for('toggle_credit_processor', credit_processor_id=row[0]) }}"
                           style="display:inline;"

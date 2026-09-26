@@ -1,0 +1,207 @@
+{% extends "base.html" %}
+
+{% block title %}Client Import Records | Peach Suite Pro{% endblock %}
+
+{% block content %}
+
+<div class="report-page import-records-page">
+
+    <div class="report-header">
+        <div>
+            <h1>Client Import Records</h1>
+            <p class="report-subtitle">
+                Review client records before they are added to Client Management.
+            </p>
+        </div>
+
+        <div class="report-actions no-print">
+            <a href="{{ url_for('import_center') }}" class="btn">
+                ← Import Center
+            </a>
+
+            <button
+                type="button"
+                class="btn btn-print"
+                onclick="window.print()"
+            >
+                🖨️ Print Import Records
+            </button>
+        </div>
+    </div>
+
+    <div class="import-batch-header">
+        <div class="import-batch-title">
+            <h2>Clients Import</h2>
+
+            <div class="import-batch-meta">
+                <span>
+                    <strong>File:</strong>
+                    {{ import_data.filename }}
+                </span>
+
+                <span>
+                    <strong>Uploaded:</strong>
+                    {{ import_data.requested_at.strftime('%m/%d/%Y %I:%M %p')
+                       if import_data.requested_at else '—' }}
+                </span>
+
+                <span>
+                    <strong>Status:</strong>
+                    {{ import_data.run_status|replace('_', ' ')|title }}
+                </span>
+            </div>
+        </div>
+
+        <div class="import-batch-stats">
+            <div class="import-stat-card">
+                <span>Total Records</span>
+                <strong>{{ import_data.total_rows }}</strong>
+            </div>
+
+            <div class="import-stat-card">
+                <span>Valid</span>
+                <strong>{{ import_data.valid_rows }}</strong>
+            </div>
+
+            <div class="import-stat-card">
+                <span>Invalid</span>
+                <strong>{{ import_data.invalid_rows }}</strong>
+            </div>
+
+            <div class="import-stat-card">
+                <span>Strong Duplicates</span>
+                <strong>{{ import_data.strong_duplicate_rows }}</strong>
+            </div>
+
+            <div class="import-stat-card">
+                <span>Possible Duplicates</span>
+                <strong>{{ import_data.possible_duplicate_rows }}</strong>
+            </div>
+
+            <div class="import-stat-card">
+                <span>Imported</span>
+                <strong>{{ import_data.imported_rows }}</strong>
+            </div>
+
+            <div class="import-stat-card">
+                <span>Skipped</span>
+                <strong>{{ import_data.skipped_rows }}</strong>
+            </div>
+
+            <div class="import-stat-card">
+                <span>Errors</span>
+                <strong>{{ import_data.error_rows }}</strong>
+            </div>
+        </div>
+    </div>
+
+    {% if import_data.failure_message %}
+        <div class="import-message import-message-error">
+            <strong>Import Error:</strong>
+            {{ import_data.failure_message }}
+        </div>
+    {% endif %}
+
+    <div class="report-section">
+        <h2>Imported Clients</h2>
+
+        <div class="table-wrap">
+            <table class="styled-report-table wide-report-table">
+                <thead>
+                    <tr>
+                        <th>Row</th>
+                        <th>First Name</th>
+                        <th>Last Name</th>
+                        <th>Phone</th>
+                        <th>Email</th>
+                        <th>Client Status</th>
+                        <th>Validation</th>
+                        <th>Duplicate</th>
+                        <th>Import Status</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+                    {% if import_data.records %}
+                        {% for record in import_data.records %}
+                            {% set data = record.mapped_data or {} %}
+
+                            <tr>
+                                <td>{{ record.source_row_number }}</td>
+
+                                <td>{{ data.get("first_name") or "—" }}</td>
+
+                                <td>{{ data.get("last_name") or "—" }}</td>
+
+                                <td>{{ data.get("phone") or "—" }}</td>
+
+                                <td>{{ data.get("email") or "—" }}</td>
+
+                                <td>
+                                    {{ data.get("client_status") or "Current" }}
+                                </td>
+
+                                <td>
+                                    {% if record.validation_status == "valid" %}
+                                        <strong>Valid</strong>
+                                    {% elif record.validation_status == "invalid" %}
+                                        <strong>Invalid</strong>
+                                    {% else %}
+                                        —
+                                    {% endif %}
+
+                                    {% if record.validation_errors %}
+                                        <div class="muted-text" style="margin-top:5px;">
+                                            {{ record.validation_errors|join("; ") }}
+                                        </div>
+                                    {% endif %}
+                                </td>
+
+                                <td>
+                                    {% if record.duplicate_status == "strong" %}
+                                        <strong>Strong Duplicate</strong>
+                                    {% elif record.duplicate_status == "possible" %}
+                                        <strong>Possible Duplicate</strong>
+                                    {% else %}
+                                        None
+                                    {% endif %}
+                                </td>
+
+                                <td>
+                                    {% if record.import_status == "imported" %}
+                                        <strong>Imported</strong>
+                                        {% if record.imported_record_id %}
+                                            <div class="muted-text">
+                                                Client #{{ record.imported_record_id }}
+                                            </div>
+                                        {% endif %}
+                                    {% elif record.import_status == "skipped" %}
+                                        Skipped
+                                    {% elif record.import_status == "error" %}
+                                        Error
+                                        {% if record.error_message %}
+                                            <div class="muted-text">
+                                                {{ record.error_message }}
+                                            </div>
+                                        {% endif %}
+                                    {% else %}
+                                        Pending
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="9">
+                                No staged client records were found.
+                            </td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+{% endblock %}

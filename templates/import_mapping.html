@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block title %}Map Import Columns | Peach Suite Pro{% endblock %}
+
+{% block content %}
+
+<div class="page-title">
+    <h1>Map Import Columns</h1>
+</div>
+
+<p class="muted-text" style="max-width:900px;">
+    Match each column from <strong>{{ import_data.filename }}</strong>
+    to the correct Peach Suite Pro field.
+    PSP has suggested matches where it could identify them safely.
+</p>
+
+<div style="
+    max-width:1100px;
+    border:1px solid #d9d9d9;
+    border-radius:10px;
+    padding:16px 18px;
+    margin:20px 0;
+    background:#fafafa;
+">
+    <strong>{{ import_data.display_name }} Import</strong>
+    <div class="muted-text" style="margin-top:5px;">
+        {{ import_data.total_rows }} data rows detected.
+        Fields marked Required must be mapped before continuing.
+    </div>
+</div>
+
+<form method="POST">
+    <input
+        type="hidden"
+        name="security_csrf_token"
+        value="{{ security_csrf_token }}"
+    >
+
+    <div class="table-wrap">
+        <table class="styled-report-table">
+            <thead>
+                <tr>
+                    <th>File Column</th>
+                    <th>Map to PSP Field</th>
+                </tr>
+            </thead>
+
+            <tbody>
+                {% for item in import_data.mapping %}
+                    <tr>
+                        <td>
+                            <strong>{{ item.source_header }}</strong>
+                        </td>
+
+                        <td>
+                            <select
+                                name="target_{{ item.source_index }}"
+                                style="min-width:320px;"
+                            >
+                                <option value="">
+                                    — Do Not Import —
+                                </option>
+
+                                {% for field in import_data.fields %}
+                                    <option
+                                        value="{{ field.key }}"
+                                        {% if item.target_key == field.key %}
+                                            selected
+                                        {% endif %}
+                                    >
+                                        {{ field.label }}
+                                        {% if field.required %}
+                                            — Required
+                                        {% endif %}
+                                    </option>
+                                {% endfor %}
+                            </select>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="form-buttons" style="margin-top:22px;">
+        <button type="submit" class="btn">
+            Validate and Review
+        </button>
+
+        <a href="{{ url_for('import_center') }}" class="btn">
+            Cancel
+        </a>
+    </div>
+</form>
+
+{% endblock %}

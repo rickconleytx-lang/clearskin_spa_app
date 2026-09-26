@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+
+{% block title %}Import Center | Peach Suite Pro{% endblock %}
+
+{% block content %}
+
+<div class="page-title">
+    <h1>Import Center</h1>
+</div>
+
+<p class="muted-text" style="max-width:950px;">
+    Import existing business data from CSV or Excel files.
+    Review your PSP field names before uploading so mapping uses the
+    labels familiar to your business.
+</p>
+
+<div style="
+    max-width:1000px;
+    border:1px solid #d9d9d9;
+    border-radius:10px;
+    padding:20px;
+    margin:20px 0 28px 0;
+    background:#fafafa;
+">
+    <h3 style="margin-top:0;">Before You Import</h3>
+
+    <p style="margin-bottom:8px;">
+        <strong>1.</strong> Review field names and required setup.
+    </p>
+    <p style="margin-bottom:8px;">
+        <strong>2.</strong> Upload your file and map its columns.
+    </p>
+    <p style="margin-bottom:0;">
+        <strong>3.</strong> Review the results and import approved records.
+    </p>
+</div>
+
+<div class="dashboard-cards">
+
+    <div class="dashboard-card">
+        <h2>Clients</h2>
+
+        <p style="font-size:1rem; font-weight:400; line-height:1.5;">
+            Import client records from a CSV or Excel file.
+        </p>
+
+        <p class="muted-text" style="font-size:0.95rem; font-weight:400; line-height:1.5;">
+            Review Client Information Labels first so the mapping screen
+            uses your current field names.
+        </p>
+
+        <div style="margin-top:18px;">
+            <a
+                href="{{ url_for('client_information_labels') }}"
+                class="btn"
+            >
+                Manage Client Information Labels
+            </a>
+        </div>
+
+        <div style="margin-top:12px;">
+            <button
+                type="button"
+                class="btn"
+                disabled
+                title="Import workflow is being connected."
+            >
+                Start Client Import
+            </button>
+        </div>
+    </div>
+
+    <div class="dashboard-card">
+        <h2>Processor Transactions</h2>
+
+        <p style="font-size:1rem; font-weight:400; line-height:1.5;">
+            Import PeachPOS transactions from non-Square payment processors.
+        </p>
+
+        <p class="muted-text" style="font-size:0.95rem; font-weight:400; line-height:1.5;">
+            Configure the processor, Merchant ID / Account ID, and optional
+            Import Field Names before uploading.
+        </p>
+
+        <div style="margin-top:18px;">
+            <a
+                href="{{ url_for('credit_processors') }}"
+                class="btn"
+            >
+                Processor Company Setup
+            </a>
+        </div>
+
+        <p class="muted-text" style="margin-top:10px; font-size:0.9rem;">
+            Import Field Names are managed from Processor Company Setup.
+        </p>
+
+        <div style="margin-top:12px;">
+            <button
+                type="button"
+                class="btn"
+                disabled
+                title="Import workflow is being connected."
+            >
+                Start Processor Import
+            </button>
+        </div>
+
+        <div style="
+            margin-top:18px;
+            padding:12px 14px;
+            border:1px solid #d9d9d9;
+            border-radius:8px;
+            background:#fafafa;
+        ">
+            <strong>Using Square?</strong>
+            <div class="muted-text" style="margin-top:4px;">
+                Square transactions use Peach Suite Pro's native Square
+                integration. Do not upload Square transaction files here.
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<br>
+<hr>
+
+<h3>Import History</h3>
+
+<p class="muted-text">
+    Recent Client and Processor Transaction imports will appear here as
+    we connect the upload and review workflow.
+</p>
+
+{% endblock %}

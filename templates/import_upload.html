@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block title %}{{ import_title }} | Peach Suite Pro{% endblock %}
+
+{% block content %}
+
+<div class="page-title">
+    <h1>{{ import_title }}</h1>
+</div>
+
+<p class="muted-text" style="max-width:850px;">
+    {{ import_description }}
+</p>
+
+{% if setup_message %}
+    <div style="
+        max-width:850px;
+        border:1px solid #d9d9d9;
+        border-radius:10px;
+        padding:16px 18px;
+        margin:20px 0;
+        background:#fafafa;
+    ">
+        {{ setup_message }}
+    </div>
+{% endif %}
+
+<div style="max-width:700px; margin-top:24px;">
+    <form method="POST" enctype="multipart/form-data">
+        <input
+            type="hidden"
+            name="security_csrf_token"
+            value="{{ security_csrf_token }}"
+        >
+
+        <div class="form-group">
+            <label for="import_file">Choose Import File</label>
+            <input
+                type="file"
+                id="import_file"
+                name="import_file"
+                accept=".csv,.xlsx"
+                required
+            >
+
+            <small class="muted-text">
+                CSV (.csv) or Excel (.xlsx), 10 MB maximum.
+                The first row must contain column headings.
+            </small>
+        </div>
+
+        <div class="form-buttons" style="margin-top:22px;">
+            <button type="submit" class="btn">
+                Upload and Continue
+            </button>
+
+            <a href="{{ url_for('import_center') }}" class="btn">
+                Cancel
+            </a>
+        </div>
+    </form>
+</div>
+
+{% endblock %}

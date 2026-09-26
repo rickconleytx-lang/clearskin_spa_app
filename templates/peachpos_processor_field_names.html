@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+
+{% block title %}Processor Import Field Names | Peach Suite Pro{% endblock %}
+
+{% block content %}
+
+<div class="page-title">
+    <h1>Processor Import Field Names</h1>
+</div>
+
+<p class="muted-text" style="max-width:850px;">
+    Configure the optional field names used by
+    <strong>{{ processor[1] }}</strong>
+    transaction exports.
+    These names will appear in Peach Suite Pro when mapping an import file
+    and when viewing the processor-specific information saved with an
+    imported transaction.
+</p>
+
+<p class="muted-text" style="max-width:850px;">
+    Rename only the fields you expect to use.
+    Leaving a field unchanged keeps the standard Peach Suite Pro name.
+    Changing a field name later changes only the displayed label and does
+    not change previously imported transaction data.
+</p>
+
+<div style="margin:20px 0;">
+    <a href="{{ url_for('credit_processors') }}" class="btn">
+        ← Processor Company Setup
+    </a>
+
+    {% if not editing %}
+        <a href="{{ url_for(
+            'peachpos_processor_field_names',
+            credit_processor_id=processor[0],
+            edit=1
+        ) }}" class="btn">
+            Edit Field Names
+        </a>
+    {% endif %}
+</div>
+
+<hr>
+
+<h3>{{ processor[1] }} Import Fields</h3>
+
+{% if editing %}
+
+<form method="POST">
+    <input
+        type="hidden"
+        name="security_csrf_token"
+        value="{{ security_csrf_token }}"
+    >
+
+    {% for definition in field_definitions %}
+        <div class="form-group">
+            <label for="{{ definition.field_key }}">
+                {{ definition.default_label }}
+            </label>
+
+            <input
+                type="text"
+                id="{{ definition.field_key }}"
+                name="{{ definition.field_key }}"
+                maxlength="100"
+                value="{{ processor_field_labels.get(
+                    definition.field_key,
+                    definition.default_label
+                ) }}"
+            >
+        </div>
+    {% endfor %}
+
+    <div class="form-buttons">
+        <button type="submit" class="btn">
+            Save Field Names
+        </button>
+
+        <a href="{{ url_for(
+            'peachpos_processor_field_names',
+            credit_processor_id=processor[0]
+        ) }}" class="btn">
+            Cancel
+        </a>
+    </div>
+</form>
+
+{% else %}
+
+<table style="max-width:850px;">
+    <thead>
+        <tr>
+            <th>PSP Field</th>
+            <th>Display Name</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for definition in field_definitions %}
+            <tr>
+                <td>{{ definition.default_label }}</td>
+                <td>
+                    <strong>
+                        {{ processor_field_labels.get(
+                            definition.field_key,
+                            definition.default_label
+                        ) }}
+                    </strong>
+                </td>
+            </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% endif %}
+
+<br>
+
+<hr>
+
+<h3>Where Your Field Names Appear</h3>
+
+<p class="muted-text" style="max-width:1000px;">
+    Each imported processor transaction uses two rows in the Import Records
+    report. The first row shows the standard transaction information. The
+    second row contains your eight optional processor fields.
+</p>
+
+<p class="muted-text" style="max-width:1000px;">
+    Use the layout below to decide what information from your processor file
+    you want displayed in each Processor Field position.
+</p>
+
+<div style="
+    overflow-x:auto;
+    border:1px solid #d9d9d9;
+    border-radius:10px;
+    margin-top:18px;
+">
+
+    <table style="margin:0; min-width:1500px; width:100%;">
+        <thead>
+            <tr>
+                <th>Row</th>
+                <th>Transaction Date / Time</th>
+                <th>Processor Transaction ID</th>
+                <th>Sales</th>
+                <th>Tax</th>
+                <th>Tips</th>
+                <th>Gross</th>
+                <th>Fees</th>
+                <th>Payment Method</th>
+                <th>Processor Status</th>
+                <th>Review</th>
+                <th>Posted</th>
+            </tr>
+        </thead>
+
+        <tbody>
+            <tr>
+                <td>2</td>
+                <td>2026-09-25T09:00:00</td>
+                <td>TXN-00001</td>
+                <td>$125.00</td>
+                <td>$10.31</td>
+                <td>$15.00</td>
+                <td>$150.31</td>
+                <td>$4.35</td>
+                <td>Card</td>
+                <td>Completed</td>
+                <td>Approved</td>
+                <td>Posted</td>
+            </tr>
+
+            <tr style="background:#f6f8fa;">
+                <td>&nbsp;</td>
+                <td>&nbsp;</td>
+
+                {% for definition in field_definitions %}
+                    <td>
+                        <strong style="color:#b42318;">
+                            {{ processor_field_labels.get(
+                                definition.field_key,
+                                definition.default_label
+                            ) }}
+                        </strong>
+                        <div class="muted-text" style="margin-top:4px;">
+                            Processor Field {{ loop.index }}
+                        </div>
+                    </td>
+                {% endfor %}
+
+                <td>&nbsp;</td>
+                <td>&nbsp;</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+<p class="muted-text" style="max-width:1000px; margin-top:12px;">
+    Layout example only. Actual transaction values come from the processor
+    file you import.
+</p>
+
+{% endblock %}
