@@ -264,7 +264,7 @@ CREATE TABLE IF NOT EXISTS peachpos_processor_field_labels (
                 'processor_field_5',
                 'processor_field_6',
                 'processor_field_7',
-                'processor_field_8',
+                'processor_field_8'
             )
         ),
 
