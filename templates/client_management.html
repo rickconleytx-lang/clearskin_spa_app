@@ -33,6 +33,16 @@
        class="tool-pill tool-pill-small">
         Client Information Labels
     </a>
+
+    <a href="{{ url_for('export_clients_csv') }}"
+       class="tool-pill tool-pill-small">
+        Export CSV
+    </a>
+
+    <a href="{{ url_for('export_clients_excel') }}"
+       class="tool-pill tool-pill-small">
+        Export Excel
+    </a>
 </div>
 
 <div style="display:flex; flex-direction:row; justify-content:space-between; align-items:flex-start; gap:25px; width:100%;">

@@ -142,6 +142,9 @@ from services.import_service import (
     get_import_run_mapping_data,
     get_import_run_records,
     get_import_run_record_details,
+    get_workspace_import_profile,
+    update_client_import_review_decision,
+    discard_client_import_review_rows,
     process_client_import_packet,
     process_peachpos_income_import_packet,
 )
@@ -86969,6 +86972,322 @@ def delete_business_loan(loan_id):
 #   --------------------------------
 
 
+
+#  ------------------------------------
+#   CLIENT EXPORT
+#  ------------------------------------
+
+def _load_client_export_rows(
+    *,
+    spa_id,
+    business_unit_id,
+):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        profile = get_workspace_import_profile(
+            cur,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            entity_type="clients",
+        )
+
+        cur.execute(
+            """
+            SELECT
+                c.first_name,
+                c.last_name,
+                c.phone,
+                c.email,
+                c.birth_date,
+                c.address,
+                c.city,
+                c.state,
+                c.zip,
+                c.emergency_contact_name,
+                c.emergency_contact_phone,
+                c.client_status,
+                c.preferred_language,
+                c.preferred_contact_method,
+                c.notes_one,
+                c.notes_two,
+                c.notes_three,
+                c.active_client,
+                c.referred_by,
+
+                chp.sex,
+                st.skin_type_name,
+                ft.fitzpatrick_level,
+                chp.skin_concerns,
+                chp.skin_conditions,
+                chp.allergies,
+                chp.medications,
+                chp.current_medical_conditions,
+                chp.past_medical_treatments,
+                chp.recent_injections,
+                chp.recent_laser,
+                chp.pregnant,
+                chp.nursing,
+                chp.using_retinol,
+                chp.using_accutane,
+                chp.sun_exposure_level,
+                chp.last_facial_date,
+                chp.notes1,
+                chp.notes2,
+                chp.notes3
+
+            FROM clients c
+
+            LEFT JOIN client_health_profile chp
+              ON chp.client_id = c.client_id
+             AND chp.spa_id = c.spa_id
+
+            LEFT JOIN skin_types st
+              ON st.skin_type_id = chp.skin_type_id
+             AND st.spa_id = c.spa_id
+
+            LEFT JOIN fitzpatrick_types ft
+              ON ft.fitzpatrick_id = chp.fitzpatrick_id
+             AND ft.spa_id = c.spa_id
+
+            WHERE c.spa_id = %s
+              AND c.business_unit_id = %s
+
+            ORDER BY
+                c.last_name,
+                c.first_name,
+                c.client_id
+            """,
+            (
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        rows = cur.fetchall()
+
+        headers = [
+            field["label"]
+            for field in profile["fields"]
+        ]
+
+        return headers, rows
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _client_export_row_values(row):
+    (
+        first_name,
+        last_name,
+        phone,
+        email,
+        birth_date,
+        address,
+        city,
+        state,
+        zip_code,
+        emergency_contact_name,
+        emergency_contact_phone,
+        client_status,
+        preferred_language,
+        preferred_contact_method,
+        notes_one,
+        notes_two,
+        notes_three,
+        active_client,
+        referred_by,
+        sex,
+        skin_type_name,
+        fitzpatrick_level,
+        skin_concerns,
+        skin_conditions,
+        allergies,
+        medications,
+        current_medical_conditions,
+        past_medical_treatments,
+        recent_injections,
+        recent_laser,
+        pregnant,
+        nursing,
+        using_retinol,
+        using_accutane,
+        sun_exposure_level,
+        last_facial_date,
+        notes1,
+        notes2,
+        notes3,
+    ) = row
+
+    def yes_no(value):
+        if value is True:
+            return "Yes"
+        if value is False:
+            return "No"
+        return ""
+
+    return [
+        first_name or "",
+        last_name or "",
+        phone or "",
+        email or "",
+        birth_date.strftime("%Y-%m-%d") if birth_date else "",
+        address or "",
+        city or "",
+        state or "",
+        zip_code or "",
+        emergency_contact_name or "",
+        emergency_contact_phone or "",
+        client_status or "",
+        preferred_language or "",
+        preferred_contact_method or "",
+        referred_by or "",
+        sex or "",
+        notes_one or "",
+        notes_two or "",
+        notes_three or "",
+        yes_no(active_client),
+
+        skin_type_name or "",
+        fitzpatrick_level or "",
+        skin_concerns or "",
+        skin_conditions or "",
+        allergies or "",
+        medications or "",
+        current_medical_conditions or "",
+        past_medical_treatments or "",
+        yes_no(recent_injections),
+        yes_no(recent_laser),
+        yes_no(pregnant),
+        yes_no(nursing),
+        yes_no(using_retinol),
+        yes_no(using_accutane),
+        sun_exposure_level or "",
+        (
+            last_facial_date.strftime("%Y-%m-%d")
+            if last_facial_date
+            else ""
+        ),
+        notes1 or "",
+        notes2 or "",
+        notes3 or "",
+    ]
+
+
+@app.route("/clients/export/csv")
+@login_required
+@spa_required
+@require_subscription_feature("clients")
+@require_subscription_feature("import_export")
+def export_clients_csv():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to export clients.",
+            "error",
+        )
+        return redirect(url_for("client_management"))
+
+    headers, rows = _load_client_export_rows(
+        spa_id=spa_id,
+        business_unit_id=business_unit_id,
+    )
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(headers)
+
+    for row in rows:
+        writer.writerow(
+            _client_export_row_values(row)
+        )
+
+    csv_data = output.getvalue()
+    output.close()
+
+    return Response(
+        csv_data,
+        mimetype="text/csv",
+        headers={
+            "Content-Disposition":
+                "attachment; filename=clients_export.csv"
+        },
+    )
+
+
+@app.route("/clients/export/excel")
+@login_required
+@spa_required
+@require_subscription_feature("clients")
+@require_subscription_feature("import_export")
+def export_clients_excel():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to export clients.",
+            "error",
+        )
+        return redirect(url_for("client_management"))
+
+    headers, rows = _load_client_export_rows(
+        spa_id=spa_id,
+        business_unit_id=business_unit_id,
+    )
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Clients"
+
+    ws.append(headers)
+
+    for row in rows:
+        ws.append(
+            _client_export_row_values(row)
+        )
+
+    for column in ws.columns:
+        max_length = 0
+        column_letter = column[0].column_letter
+
+        for cell in column:
+            value = (
+                ""
+                if cell.value is None
+                else str(cell.value)
+            )
+            max_length = max(
+                max_length,
+                len(value),
+            )
+
+        ws.column_dimensions[
+            column_letter
+        ].width = min(max_length + 2, 60)
+
+    file_data = io.BytesIO()
+    wb.save(file_data)
+    file_data.seek(0)
+
+    return send_file(
+        file_data,
+        as_attachment=True,
+        download_name="clients_export.xlsx",
+        mimetype=(
+            "application/vnd.openxmlformats-officedocument."
+            "spreadsheetml.sheet"
+        ),
+    )
+
+
 @app.route("/client_management")
 @login_required
 @spa_required
@@ -95264,6 +95583,7 @@ def client_import_mapping(import_run_id):
 )
 @login_required
 @spa_required
+@require_subscription_feature("import_export")
 @require_psp_access("financial_management")
 def import_run_record_details(
     import_run_id,
@@ -95309,7 +95629,7 @@ def import_run_record_details(
 )
 @login_required
 @spa_required
-@require_psp_access("financial_management")
+@require_subscription_feature("import_export")
 def import_run_records(import_run_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -95333,6 +95653,9 @@ def import_run_records(import_run_id):
         return redirect(url_for("dashboard"))
 
     if import_data.get("entity_type") == "clients":
+        if not has_subscription_feature("clients"):
+            abort(403)
+
         template_name = "import_run_clients.html"
     else:
         template_name = "import_run_records.html"
@@ -95340,6 +95663,7 @@ def import_run_records(import_run_id):
     return render_template(
         template_name,
         import_data=import_data,
+        security_csrf_token=_security_form_csrf_token(),
     )
 
 
@@ -95348,6 +95672,256 @@ def import_run_records(import_run_id):
 #      EXPENSE REPORT
 #  good 4/27
 #  ------------------------------------------
+
+
+@app.route(
+    "/imports/clients/<int:import_run_id>/import-approved",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_subscription_feature("import_export")
+@require_subscription_feature("clients")
+def client_import_approved_rows(import_run_id):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to import Clients.",
+            "error",
+        )
+        return redirect(url_for("dashboard"))
+
+    submitted_csrf_token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_csrf_token
+    ):
+        flash(
+            "Your security token expired or could not be verified. "
+            "Please try again.",
+            "error",
+        )
+        return redirect(
+            url_for(
+                "import_run_records",
+                import_run_id=import_run_id,
+            )
+        )
+
+    try:
+        result = process_client_import_packet(
+            import_run_id,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+        )
+
+    except ImportServiceError as exc:
+        flash(str(exc), "error")
+
+    else:
+        if result["run_status"] == "completed":
+            flash(
+                "Client import completed successfully.",
+                "success",
+            )
+
+        elif result["run_status"] == "failed":
+            flash(
+                "Client import finished with one or more errors. "
+                "Review the affected rows below.",
+                "error",
+            )
+
+        else:
+            flash(
+                f"Imported {result['processed_this_packet']} "
+                "Client records in this packet. "
+                f"{result['remaining_rows']} remain.",
+                "success",
+            )
+
+    return redirect(
+        url_for(
+            "import_run_records",
+            import_run_id=import_run_id,
+        )
+    )
+
+
+@app.route(
+    "/imports/clients/<int:import_run_id>/review/bulk",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_subscription_feature("import_export")
+@require_subscription_feature("clients")
+def client_import_bulk_review(import_run_id):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to review Client imports.",
+            "error",
+        )
+        return redirect(url_for("dashboard"))
+
+    submitted_csrf_token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_csrf_token
+    ):
+        flash(
+            "Your security token expired or could not be verified. "
+            "Please try again.",
+            "error",
+        )
+        return redirect(
+            url_for(
+                "import_run_records",
+                import_run_id=import_run_id,
+            )
+        )
+
+    action = (
+        request.form.get("bulk_action", "")
+        or ""
+    ).strip().lower()
+
+    try:
+        if action == "discard_all_remaining":
+            result = discard_client_import_review_rows(
+                import_run_id,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                import_run_row_ids=None,
+            )
+
+        elif action == "discard_selected":
+            selected_row_ids = request.form.getlist(
+                "selected_row_ids"
+            )
+
+            result = discard_client_import_review_rows(
+                import_run_id,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                import_run_row_ids=selected_row_ids,
+            )
+
+        else:
+            raise ImportServiceError(
+                "Choose a valid bulk Client review action."
+            )
+
+    except ImportServiceError as exc:
+        flash(str(exc), "error")
+
+    else:
+        flash(
+            f"Discarded {result['discarded_rows']} "
+            "Client import rows.",
+            "success",
+        )
+
+    return redirect(
+        url_for(
+            "import_run_records",
+            import_run_id=import_run_id,
+        )
+    )
+
+
+@app.route(
+    "/imports/clients/<int:import_run_id>/rows/"
+    "<int:import_run_row_id>/review",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_subscription_feature("import_export")
+@require_subscription_feature("clients")
+def client_import_review_row(
+    import_run_id,
+    import_run_row_id,
+):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to review Client imports.",
+            "error",
+        )
+        return redirect(url_for("dashboard"))
+
+    submitted_csrf_token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_csrf_token
+    ):
+        flash(
+            "Your security token expired or could not be verified. "
+            "Please try again.",
+            "error",
+        )
+        return redirect(
+            url_for(
+                "import_run_records",
+                import_run_id=import_run_id,
+            )
+        )
+
+    decision = (
+        request.form.get("decision", "")
+        or ""
+    ).strip().lower()
+
+    try:
+        result = update_client_import_review_decision(
+            import_run_id,
+            import_run_row_id,
+            decision=decision,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+        )
+
+    except ImportServiceError as exc:
+        flash(str(exc), "error")
+
+    else:
+        if result["review_decision"] == "approved":
+            flash(
+                "Client row approved for import.",
+                "success",
+            )
+        else:
+            flash(
+                "Client row discarded from this import.",
+                "success",
+            )
+
+    return redirect(
+        url_for(
+            "import_run_records",
+            import_run_id=import_run_id,
+        )
+    )
 
 
 @app.route(

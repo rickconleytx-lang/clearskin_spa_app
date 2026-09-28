@@ -6486,3 +6486,109 @@ html[data-psp-theme] .app-nested-menu-pane {
 .peach-help-footer-actions [hidden] {
     display: none !important;
 }
+
+/* ---------------------------------------------------------
+   IMPORT REVIEW STATUS + ROW STATES
+--------------------------------------------------------- */
+
+.import-status-badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.import-status-approved,
+.import-status-posted {
+    background: #e8f5e9;
+    color: #1b5e20;
+    border: 1px solid #a5d6a7;
+}
+
+.import-status-review {
+    background: #fff3e0;
+    color: #9a4d00;
+    border: 1px solid #ffcc80;
+}
+
+.import-status-strong-duplicate {
+    background: #fdecea;
+    color: #a33216;
+    border: 1px solid #e9a08d;
+}
+
+.import-status-error {
+    background: #fdecec;
+    color: #a61b1b;
+    border: 1px solid #ef9a9a;
+}
+
+.import-status-hold {
+    background: #fff8e1;
+    color: #7a5b00;
+    border: 1px solid #ffe082;
+}
+
+.import-status-discard,
+.import-status-skipped {
+    background: #eeeeee;
+    color: #555555;
+    border: 1px solid #cccccc;
+}
+
+.import-row-invalid {
+    background: #fff5f5;
+    box-shadow: inset 4px 0 0 #d32f2f;
+}
+
+.import-row-strong-duplicate {
+    background: #fff7f2;
+    box-shadow: inset 4px 0 0 #d95d20;
+}
+
+.import-row-warning {
+    background: #fffaf0;
+    box-shadow: inset 4px 0 0 #f0a000;
+}
+
+.import-row-approved {
+    box-shadow: inset 4px 0 0 #2e7d32;
+}
+
+.import-row-discarded {
+    background: #f5f5f5;
+    box-shadow: inset 4px 0 0 #888888;
+}
+
+.import-detail-row td {
+    background: inherit;
+}
+
+
+/* Import review row states must override global zebra striping. */
+.import-records-page tr.import-row-invalid,
+.import-records-page tr.import-row-invalid:nth-child(even) {
+    background: #fff5f5;
+}
+
+.import-records-page tr.import-row-strong-duplicate,
+.import-records-page tr.import-row-strong-duplicate:nth-child(even) {
+    background: #fff7f2;
+}
+
+.import-records-page tr.import-row-warning,
+.import-records-page tr.import-row-warning:nth-child(even) {
+    background: #fffaf0;
+}
+
+.import-records-page tr.import-row-approved,
+.import-records-page tr.import-row-approved:nth-child(even) {
+    background: #f7fcf7;
+}
+
+.import-records-page tr.import-row-discarded,
+.import-records-page tr.import-row-discarded:nth-child(even) {
+    background: #f5f5f5;
+}

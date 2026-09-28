@@ -493,6 +493,25 @@ CLIENT_IMPORT_FIELDS = (
         ),
     },
     {
+        "key": "referred_by",
+        "label": "Referred By",
+        "required": False,
+        "aliases": (
+            "referred by",
+            "referral",
+            "referral source",
+        ),
+    },
+    {
+        "key": "sex",
+        "label": "Sex",
+        "required": False,
+        "aliases": (
+            "sex",
+            "gender",
+        ),
+    },
+    {
         "key": "notes_one",
         "label": "Notes One",
         "required": False,
@@ -3081,14 +3100,12 @@ def analyze_import_run(
                 },
             }
 
-            review_decision = None
-            if entity_type == "peachpos_income":
-                review_decision = (
-                    "approved"
-                    if validation_status == "valid"
-                    and duplicate_status == "none"
-                    else "needs_review"
-                )
+            review_decision = (
+                "approved"
+                if validation_status == "valid"
+                and duplicate_status == "none"
+                else "needs_review"
+            )
 
             cur.execute(
                 """
@@ -3470,6 +3487,16 @@ def get_import_run_records(
             if record.get("review_decision") == "discard"
         )
 
+        unresolved_review_rows = sum(
+            1
+            for record in records
+            if (
+                record.get("import_status") == "pending"
+                and record.get("review_decision")
+                not in {"approved", "discard"}
+            )
+        )
+
         financial_summary = {
             "transactions": 0,
             "sales": Decimal("0.00"),
@@ -3562,6 +3589,7 @@ def get_import_run_records(
             "needs_review_rows": needs_review_rows,
             "hold_rows": hold_rows,
             "discard_rows": discard_rows,
+            "unresolved_review_rows": unresolved_review_rows,
             "financial_summary": financial_summary,
             "total_gross": total_gross,
             "total_net": total_net,
@@ -3581,6 +3609,454 @@ def get_import_run_records(
     finally:
         cur.close()
         conn.close()
+
+
+
+def update_client_import_review_decision(
+    import_run_id,
+    import_run_row_id,
+    *,
+    decision,
+    spa_id,
+    business_unit_id,
+):
+    """
+    Apply one durable Client Import review decision.
+
+    Client review policy:
+      - clean valid rows may be approved
+      - possible duplicates may be explicitly approved
+      - invalid rows may never be approved
+      - strong duplicates may never be approved
+      - any still-pending row may be discarded
+      - duplicate/validation evidence is preserved
+      - the Import Run becomes ready only when no unresolved
+        pending review decisions remain
+    """
+    decision = str(decision or "").strip().lower()
+
+    if decision not in {"approved", "discard"}:
+        raise ImportServiceError(
+            "Client review decision must be Approve or Discard."
+        )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                entity_type,
+                run_status
+            FROM import_runs
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            FOR UPDATE
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        run = cur.fetchone()
+
+        if not run:
+            raise ImportServiceError(
+                "Import Run was not found in this workspace."
+            )
+
+        entity_type = str(run[0] or "").strip().lower()
+        run_status = str(run[1] or "").strip().lower()
+
+        if entity_type != "clients":
+            raise ImportServiceError(
+                "This review action is available for Client imports only."
+            )
+
+        if run_status in {"completed", "failed"}:
+            raise ImportServiceError(
+                "This Client Import Run can no longer be reviewed."
+            )
+
+        cur.execute(
+            """
+            SELECT
+                validation_status,
+                duplicate_status,
+                review_decision,
+                import_status
+            FROM import_run_rows
+            WHERE import_run_row_id = %s
+              AND import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            FOR UPDATE
+            """,
+            (
+                import_run_row_id,
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        row = cur.fetchone()
+
+        if not row:
+            raise ImportServiceError(
+                "Client Import row was not found in this workspace."
+            )
+
+        validation_status = str(
+            row[0] or ""
+        ).strip().lower()
+
+        duplicate_status = str(
+            row[1] or "none"
+        ).strip().lower()
+
+        import_status = str(
+            row[3] or ""
+        ).strip().lower()
+
+        if import_status != "pending":
+            raise ImportServiceError(
+                "Only pending Client Import rows can be reviewed."
+            )
+
+        if decision == "approved":
+            if validation_status != "valid":
+                raise ImportServiceError(
+                    "Invalid Client rows cannot be approved. "
+                    "Correct the source data and re-import, or discard the row."
+                )
+
+            if duplicate_status == "strong":
+                raise ImportServiceError(
+                    "Strong duplicate Client rows cannot be approved. "
+                    "Discard the row or correct the source data and re-import."
+                )
+
+            if duplicate_status not in {"none", "possible"}:
+                raise ImportServiceError(
+                    "This Client row has an unresolved duplicate state."
+                )
+
+        cur.execute(
+            """
+            UPDATE import_run_rows
+            SET review_decision = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE import_run_row_id = %s
+              AND import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND import_status = 'pending'
+            """,
+            (
+                decision,
+                import_run_row_id,
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        if cur.rowcount != 1:
+            raise ImportServiceError(
+                "The Client Import row changed while it was being reviewed."
+            )
+
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM import_run_rows
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND import_status = 'pending'
+              AND (
+                  review_decision IS NULL
+                  OR review_decision NOT IN ('approved', 'discard')
+              )
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        unresolved_review_rows = cur.fetchone()[0]
+
+        next_status = (
+            "review"
+            if unresolved_review_rows > 0
+            else "ready"
+        )
+
+        cur.execute(
+            """
+            UPDATE import_runs
+            SET run_status = %s,
+                failure_message = NULL,
+                completed_at = NULL,
+                last_activity_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            """,
+            (
+                next_status,
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        conn.commit()
+
+        return {
+            "import_run_id": import_run_id,
+            "import_run_row_id": import_run_row_id,
+            "review_decision": decision,
+            "run_status": next_status,
+            "unresolved_review_rows": unresolved_review_rows,
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
+def discard_client_import_review_rows(
+    import_run_id,
+    *,
+    spa_id,
+    business_unit_id,
+    import_run_row_ids=None,
+):
+    """
+    Bulk-discard unresolved Client Import review rows.
+
+    If import_run_row_ids is None, every unresolved pending row
+    in the run is discarded.
+
+    If row IDs are supplied, only those unresolved pending rows
+    are discarded.
+
+    Already-approved rows are deliberately protected from this
+    bulk action. Validation and duplicate evidence is preserved.
+    """
+    discard_all_remaining = import_run_row_ids is None
+
+    selected_row_ids = None
+
+    if not discard_all_remaining:
+        try:
+            selected_row_ids = sorted({
+                int(row_id)
+                for row_id in import_run_row_ids
+            })
+        except (TypeError, ValueError):
+            raise ImportServiceError(
+                "One or more selected Client rows are invalid."
+            )
+
+        if not selected_row_ids:
+            raise ImportServiceError(
+                "Select at least one Client row to discard."
+            )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                entity_type,
+                run_status
+            FROM import_runs
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            FOR UPDATE
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        run = cur.fetchone()
+
+        if not run:
+            raise ImportServiceError(
+                "Import Run was not found in this workspace."
+            )
+
+        entity_type = str(
+            run[0] or ""
+        ).strip().lower()
+
+        run_status = str(
+            run[1] or ""
+        ).strip().lower()
+
+        if entity_type != "clients":
+            raise ImportServiceError(
+                "This bulk review action is available "
+                "for Client imports only."
+            )
+
+        if run_status in {"completed", "failed"}:
+            raise ImportServiceError(
+                "This Client Import Run can no longer be reviewed."
+            )
+
+        if discard_all_remaining:
+            cur.execute(
+                """
+                UPDATE import_run_rows
+                SET review_decision = 'discard',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE import_run_id = %s
+                  AND spa_id = %s
+                  AND business_unit_id = %s
+                  AND import_status = 'pending'
+                  AND (
+                      review_decision IS NULL
+                      OR review_decision NOT IN (
+                          'approved',
+                          'discard'
+                      )
+                  )
+                """,
+                (
+                    import_run_id,
+                    spa_id,
+                    business_unit_id,
+                ),
+            )
+
+        else:
+            cur.execute(
+                """
+                UPDATE import_run_rows
+                SET review_decision = 'discard',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE import_run_id = %s
+                  AND spa_id = %s
+                  AND business_unit_id = %s
+                  AND import_run_row_id = ANY(%s)
+                  AND import_status = 'pending'
+                  AND (
+                      review_decision IS NULL
+                      OR review_decision NOT IN (
+                          'approved',
+                          'discard'
+                      )
+                  )
+                """,
+                (
+                    import_run_id,
+                    spa_id,
+                    business_unit_id,
+                    selected_row_ids,
+                ),
+            )
+
+        discarded_rows = cur.rowcount
+
+        if (
+            not discard_all_remaining
+            and discarded_rows == 0
+        ):
+            raise ImportServiceError(
+                "None of the selected Client rows still require review."
+            )
+
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM import_run_rows
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND import_status = 'pending'
+              AND (
+                  review_decision IS NULL
+                  OR review_decision NOT IN (
+                      'approved',
+                      'discard'
+                  )
+              )
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        unresolved_review_rows = cur.fetchone()[0]
+
+        next_status = (
+            "review"
+            if unresolved_review_rows > 0
+            else "ready"
+        )
+
+        cur.execute(
+            """
+            UPDATE import_runs
+            SET run_status = %s,
+                failure_message = NULL,
+                completed_at = NULL,
+                last_activity_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            """,
+            (
+                next_status,
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        conn.commit()
+
+        return {
+            "import_run_id": import_run_id,
+            "discarded_rows": discarded_rows,
+            "run_status": next_status,
+            "unresolved_review_rows": unresolved_review_rows,
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
 
 
 # =========================================================
@@ -3787,7 +4263,11 @@ def process_client_import_packet(
 
     Safety rules:
       - only READY / already-IMPORTING Client runs may execute
-      - only valid, non-duplicate, still-pending rows are imported
+      - only explicitly approved, valid rows may be imported
+      - possible duplicates may import only after explicit approval
+      - strong duplicates and invalid rows may never import
+      - discarded rows become permanently skipped
+      - duplicate/validation evidence remains preserved
       - each Client insert and row-state update are atomic
       - communication permissions are explicitly conservative
       - no Square synchronization occurs here
@@ -3893,8 +4373,9 @@ def process_client_import_packet(
                 "Complete its review first."
             )
 
-        # READY must mean every still-pending row is fully valid
-        # and has no unresolved duplicate warning.
+        # Approval never overrides validation or a strong duplicate.
+        # A possible duplicate may proceed only because the user
+        # explicitly approved that warning during review.
         cur.execute(
             """
             SELECT COUNT(*)
@@ -3903,9 +4384,10 @@ def process_client_import_packet(
               AND spa_id = %s
               AND business_unit_id = %s
               AND import_status = 'pending'
+              AND review_decision = 'approved'
               AND (
                   validation_status <> 'valid'
-                  OR duplicate_status <> 'none'
+                  OR duplicate_status NOT IN ('none', 'possible')
               )
             """,
             (
@@ -3915,12 +4397,63 @@ def process_client_import_packet(
             ),
         )
 
-        unresolved_rows = cur.fetchone()[0]
+        unsafe_approved_rows = cur.fetchone()[0]
 
-        if unresolved_rows:
+        if unsafe_approved_rows:
+            raise ImportServiceError(
+                "One or more approved Client rows still require "
+                "validation or duplicate review."
+            )
+
+        # A READY Client run must not contain unresolved review rows.
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM import_run_rows
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND import_status = 'pending'
+              AND (
+                  review_decision IS NULL
+                  OR review_decision NOT IN ('approved', 'discard')
+              )
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        unresolved_review_rows = cur.fetchone()[0]
+
+        if unresolved_review_rows:
             raise ImportServiceError(
                 "This Import Run still has rows requiring review."
             )
+
+        # Discard is terminal. Preserve the staged row for history,
+        # but make sure it can never be imported later.
+        cur.execute(
+            """
+            UPDATE import_run_rows
+            SET import_status = 'skipped',
+                imported_record_id = NULL,
+                error_message = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND import_status = 'pending'
+              AND review_decision = 'discard'
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
 
         cur.execute(
             """
@@ -3954,7 +4487,8 @@ def process_client_import_packet(
               AND spa_id = %s
               AND business_unit_id = %s
               AND validation_status = 'valid'
-              AND duplicate_status = 'none'
+              AND duplicate_status IN ('none', 'possible')
+              AND review_decision = 'approved'
               AND import_status = 'pending'
             ORDER BY source_row_number
             LIMIT %s
@@ -4073,7 +4607,7 @@ def process_client_import_packet(
                             "emergency_contact_phone",
                             "",
                         ),
-                        None,
+                        data.get("referred_by") or None,
                         data.get("notes_one", ""),
                         data.get("notes_two", ""),
                         data.get("notes_three", ""),
@@ -4117,6 +4651,11 @@ def process_client_import_packet(
                     for field in CLIENT_INFORMATION_IMPORT_FIELDS
                 )
 
+                client_information_presence_keys = (
+                    "sex",
+                    *client_information_keys,
+                )
+
                 has_client_information_data = any(
                     (
                         data.get(field_key) is not None
@@ -4130,7 +4669,7 @@ def process_client_import_packet(
                             )
                         )
                     )
-                    for field_key in client_information_keys
+                    for field_key in client_information_presence_keys
                     if field_key in data
                 )
 
@@ -4140,6 +4679,7 @@ def process_client_import_packet(
                         INSERT INTO client_health_profile (
                             spa_id,
                             client_id,
+                            sex,
                             skin_type_id,
                             fitzpatrick_id,
                             skin_concerns,
@@ -4163,12 +4703,14 @@ def process_client_import_packet(
                         VALUES (
                             %s, %s, %s, %s, %s, %s, %s,
                             %s, %s, %s, %s, %s, %s, %s,
-                            %s, %s, %s, %s, %s, %s, %s
+                            %s, %s, %s, %s, %s, %s, %s,
+                            %s
                         )
                         """,
                         (
                             spa_id,
                             client_id,
+                            data.get("sex") or None,
                             data.get("skin_type_id") or None,
                             data.get("fitzpatrick_id") or None,
                             data.get("skin_concerns") or None,
@@ -4206,6 +4748,7 @@ def process_client_import_packet(
                       AND import_run_id = %s
                       AND spa_id = %s
                       AND business_unit_id = %s
+                      AND review_decision = 'approved'
                       AND import_status = 'pending'
                     """,
                     (

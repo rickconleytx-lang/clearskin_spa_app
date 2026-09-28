@@ -95,6 +95,98 @@
         </div>
     </div>
 
+    <div class="report-section no-print">
+        <h2>Review Progress</h2>
+
+        <div class="import-batch-stats">
+            <div class="import-stat-card">
+                <span>Approved</span>
+                <strong>{{ import_data.approved_rows }}</strong>
+            </div>
+
+            <div class="import-stat-card">
+                <span>Needs Review</span>
+                <strong>{{ import_data.unresolved_review_rows }}</strong>
+            </div>
+
+            <div class="import-stat-card">
+                <span>Discarded</span>
+                <strong>{{ import_data.discard_rows }}</strong>
+            </div>
+        </div>
+
+        {% if import_data.unresolved_review_rows > 0 %}
+            <div class="import-message import-message-warning" style="margin-top:14px;">
+                <strong>Review required:</strong>
+                Resolve all remaining rows before importing approved Clients.
+            </div>
+
+            <form
+                id="client-bulk-review-form"
+                method="POST"
+                action="{{ url_for(
+                    'client_import_bulk_review',
+                    import_run_id=import_data.import_run_id
+                ) }}"
+                style="margin-top:14px;"
+            >
+                <input
+                    type="hidden"
+                    name="security_csrf_token"
+                    value="{{ security_csrf_token }}"
+                >
+
+                <button
+                    type="submit"
+                    name="bulk_action"
+                    value="discard_selected"
+                    class="btn"
+                >
+                    Discard Selected
+                </button>
+
+                <button
+                    type="submit"
+                    name="bulk_action"
+                    value="discard_all_remaining"
+                    class="btn"
+                    style="margin-left:8px;"
+                    onclick="return confirm(
+                        'Discard all remaining unresolved Client rows? '
+                        + 'Already approved rows will NOT be discarded.'
+                    );"
+                >
+                    Discard All Remaining
+                </button>
+            </form>
+
+        {% elif import_data.run_status in ["ready", "importing"] %}
+            <div style="margin-top:14px;">
+                <form
+                    method="POST"
+                    action="{{ url_for(
+                        'client_import_approved_rows',
+                        import_run_id=import_data.import_run_id
+                    ) }}"
+                >
+                    <input
+                        type="hidden"
+                        name="security_csrf_token"
+                        value="{{ security_csrf_token }}"
+                    >
+
+                    <button type="submit" class="btn">
+                        {% if import_data.approved_rows > 0 %}
+                            Import Approved Clients
+                        {% else %}
+                            Finalize Client Import
+                        {% endif %}
+                    </button>
+                </form>
+            </div>
+        {% endif %}
+    </div>
+
     {% if import_data.failure_message %}
         <div class="import-message import-message-error">
             <strong>Import Error:</strong>
@@ -103,12 +195,21 @@
     {% endif %}
 
     <div class="report-section">
-        <h2>Imported Clients</h2>
+        <h2>Client Import Records</h2>
 
         <div class="table-wrap">
             <table class="styled-report-table wide-report-table">
                 <thead>
                     <tr>
+                        <th>
+                            {% if import_data.unresolved_review_rows > 0 %}
+                                <input
+                                    type="checkbox"
+                                    id="client-review-select-all"
+                                    aria-label="Select all unresolved Client rows"
+                                >
+                            {% endif %}
+                        </th>
                         <th>Row</th>
                         <th>First Name</th>
                         <th>Last Name</th>
@@ -118,6 +219,7 @@
                         <th>Validation</th>
                         <th>Duplicate</th>
                         <th>Import Status</th>
+                        <th>Review</th>
                     </tr>
                 </thead>
 
@@ -126,7 +228,38 @@
                         {% for record in import_data.records %}
                             {% set data = record.mapped_data or {} %}
 
-                            <tr>
+                            {% set row_class = "" %}
+                            {% if record.import_status == "skipped" %}
+                                {% set row_class = "import-row-discarded" %}
+                            {% elif record.review_decision == "discard" %}
+                                {% set row_class = "import-row-discarded" %}
+                            {% elif record.import_status == "error" %}
+                                {% set row_class = "import-row-invalid" %}
+                            {% elif record.validation_status == "invalid" %}
+                                {% set row_class = "import-row-invalid" %}
+                            {% elif record.duplicate_status == "strong" %}
+                                {% set row_class = "import-row-strong-duplicate" %}
+                            {% elif record.duplicate_status == "possible" %}
+                                {% set row_class = "import-row-warning" %}
+                            {% elif record.review_decision == "approved" %}
+                                {% set row_class = "import-row-approved" %}
+                            {% endif %}
+
+                            <tr class="{{ row_class }}">
+                                <td>
+                                    {% if record.import_status == "pending"
+                                        and record.review_decision not in ["approved", "discard"] %}
+                                        <input
+                                            type="checkbox"
+                                            name="selected_row_ids"
+                                            value="{{ record.import_run_row_id }}"
+                                            class="client-review-row-checkbox"
+                                            form="client-bulk-review-form"
+                                            aria-label="Select source row {{ record.source_row_number }}"
+                                        >
+                                    {% endif %}
+                                </td>
+
                                 <td>{{ record.source_row_number }}</td>
 
                                 <td>{{ data.get("first_name") or "—" }}</td>
@@ -143,9 +276,13 @@
 
                                 <td>
                                     {% if record.validation_status == "valid" %}
-                                        <strong>Valid</strong>
+                                        <span class="import-status-badge import-status-approved">
+                                            Valid
+                                        </span>
                                     {% elif record.validation_status == "invalid" %}
-                                        <strong>Invalid</strong>
+                                        <span class="import-status-badge import-status-error">
+                                            Invalid
+                                        </span>
                                     {% else %}
                                         —
                                     {% endif %}
@@ -159,26 +296,38 @@
 
                                 <td>
                                     {% if record.duplicate_status == "strong" %}
-                                        <strong>Strong Duplicate</strong>
+                                        <span class="import-status-badge import-status-strong-duplicate">
+                                            Strong Duplicate
+                                        </span>
                                     {% elif record.duplicate_status == "possible" %}
-                                        <strong>Possible Duplicate</strong>
+                                        <span class="import-status-badge import-status-review">
+                                            Possible Duplicate
+                                        </span>
                                     {% else %}
-                                        None
+                                        <span class="import-status-badge import-status-approved">
+                                            None
+                                        </span>
                                     {% endif %}
                                 </td>
 
                                 <td>
                                     {% if record.import_status == "imported" %}
-                                        <strong>Imported</strong>
+                                        <span class="import-status-badge import-status-posted">
+                                            Imported
+                                        </span>
                                         {% if record.imported_record_id %}
                                             <div class="muted-text">
                                                 Client #{{ record.imported_record_id }}
                                             </div>
                                         {% endif %}
                                     {% elif record.import_status == "skipped" %}
-                                        Skipped
+                                        <span class="import-status-badge import-status-skipped">
+                                            Skipped
+                                        </span>
                                     {% elif record.import_status == "error" %}
-                                        Error
+                                        <span class="import-status-badge import-status-error">
+                                            Error
+                                        </span>
                                         {% if record.error_message %}
                                             <div class="muted-text">
                                                 {{ record.error_message }}
@@ -188,11 +337,117 @@
                                         Pending
                                     {% endif %}
                                 </td>
+
+                                <td>
+                                    {% if record.import_status == "imported" %}
+                                        <span class="import-status-badge import-status-posted">
+                                            Complete
+                                        </span>
+
+                                    {% elif record.import_status == "skipped"
+                                        or record.review_decision == "discard" %}
+                                        <span class="import-status-badge import-status-discard">
+                                            Discarded
+                                        </span>
+
+                                    {% elif record.import_status == "error" %}
+                                        <span class="import-status-badge import-status-error">
+                                            Error
+                                        </span>
+
+                                    {% elif record.review_decision == "approved" %}
+                                        <span class="import-status-badge import-status-approved">
+                                            Approved
+                                        </span>
+
+                                        {% if record.import_status == "pending" %}
+                                            <form
+                                                method="POST"
+                                                action="{{ url_for(
+                                                    'client_import_review_row',
+                                                    import_run_id=import_data.import_run_id,
+                                                    import_run_row_id=record.import_run_row_id
+                                                ) }}"
+                                                style="display:inline-block; margin-left:6px;"
+                                            >
+                                                <input
+                                                    type="hidden"
+                                                    name="security_csrf_token"
+                                                    value="{{ security_csrf_token }}"
+                                                >
+                                                <button
+                                                    type="submit"
+                                                    name="decision"
+                                                    value="discard"
+                                                    class="btn"
+                                                >
+                                                    Discard
+                                                </button>
+                                            </form>
+                                        {% endif %}
+
+                                    {% else %}
+                                        <span class="import-status-badge import-status-review">
+                                            Needs Review
+                                        </span>
+
+                                        {% if record.validation_status == "valid"
+                                            and record.duplicate_status != "strong" %}
+                                            <form
+                                                method="POST"
+                                                action="{{ url_for(
+                                                    'client_import_review_row',
+                                                    import_run_id=import_data.import_run_id,
+                                                    import_run_row_id=record.import_run_row_id
+                                                ) }}"
+                                                style="display:inline-block; margin-left:6px;"
+                                            >
+                                                <input
+                                                    type="hidden"
+                                                    name="security_csrf_token"
+                                                    value="{{ security_csrf_token }}"
+                                                >
+                                                <button
+                                                    type="submit"
+                                                    name="decision"
+                                                    value="approved"
+                                                    class="btn"
+                                                >
+                                                    Approve
+                                                </button>
+                                            </form>
+                                        {% endif %}
+
+                                        <form
+                                            method="POST"
+                                            action="{{ url_for(
+                                                'client_import_review_row',
+                                                import_run_id=import_data.import_run_id,
+                                                import_run_row_id=record.import_run_row_id
+                                            ) }}"
+                                            style="display:inline-block; margin-left:6px;"
+                                        >
+                                            <input
+                                                type="hidden"
+                                                name="security_csrf_token"
+                                                value="{{ security_csrf_token }}"
+                                            >
+                                            <button
+                                                type="submit"
+                                                name="decision"
+                                                value="discard"
+                                                class="btn"
+                                            >
+                                                Discard
+                                            </button>
+                                        </form>
+                                    {% endif %}
+                                </td>
                             </tr>
                         {% endfor %}
                     {% else %}
                         <tr>
-                            <td colspan="9">
+                            <td colspan="11">
                                 No staged client records were found.
                             </td>
                         </tr>
@@ -203,5 +458,47 @@
     </div>
 
 </div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const selectAll = document.getElementById(
+        "client-review-select-all"
+    );
+
+    if (!selectAll) {
+        return;
+    }
+
+    const rowCheckboxes = Array.from(
+        document.querySelectorAll(
+            ".client-review-row-checkbox"
+        )
+    );
+
+    selectAll.addEventListener("change", function () {
+        rowCheckboxes.forEach(function (checkbox) {
+            checkbox.checked = selectAll.checked;
+        });
+    });
+
+    rowCheckboxes.forEach(function (checkbox) {
+        checkbox.addEventListener("change", function () {
+            selectAll.checked = (
+                rowCheckboxes.length > 0
+                && rowCheckboxes.every(function (item) {
+                    return item.checked;
+                })
+            );
+
+            selectAll.indeterminate = (
+                !selectAll.checked
+                && rowCheckboxes.some(function (item) {
+                    return item.checked;
+                })
+            );
+        });
+    });
+});
+</script>
 
 {% endblock %}
