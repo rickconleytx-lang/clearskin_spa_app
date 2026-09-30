@@ -4144,6 +4144,44 @@ def create_stripe_checkout_session(
                 **checkout_params
             )
         )
+
+    except stripe.InvalidRequestError:
+        # Stripe caches validation failures under an idempotency key.
+        # A definite InvalidRequestError means no Checkout Session was
+        # created, so it is safe to retry once with a fresh key. This
+        # allows a corrected external Stripe configuration issue to be
+        # retried while preserving the stable key for ambiguous/network
+        # failures where duplicate protection is still required.
+        retry_token = secrets.token_hex(12)
+
+        retry_params = dict(checkout_params)
+
+        retry_params["idempotency_key"] = (
+            (
+                "psp-checkout-replacement-retry-v1-"
+                f"{environment}-{signup_id}-"
+                f"{replacement_of_checkout_session_id}-"
+                f"{retry_token}"
+            )
+            if replacement_of_checkout_session_id
+            else (
+                "psp-checkout-signup-retry-v1-"
+                f"{environment}-{signup_id}-"
+                f"{retry_token}"
+            )
+        )
+
+        try:
+            checkout_session = (
+                stripe.checkout.Session.create(
+                    **retry_params
+                )
+            )
+        except Exception as exc:
+            raise StripeServiceError(
+                "Stripe Checkout Session could not be created."
+            ) from exc
+
     except Exception as exc:
         raise StripeServiceError(
             "Stripe Checkout Session could not be created."
