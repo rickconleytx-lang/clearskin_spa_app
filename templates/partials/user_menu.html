@@ -92,6 +92,13 @@
                 <span>Security</span>
             </a>
 
+            {% if is_organization_admin %}
+                <a href="{{ url_for('manage_subscription') }}">
+                    <span aria-hidden="true">💳</span>
+                    <span>Manage Subscription</span>
+                </a>
+            {% endif %}
+
         </div>
 
 

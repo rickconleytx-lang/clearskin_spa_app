@@ -69,6 +69,28 @@ from services.coach import (
     build_action_cards
 )
 from services.sms_service import send_sms_telnyx
+from services.contact_security import normalize_user_mobile_phone
+from services.stripe_signup_security import (
+    SIGNUP_PHONE_VERIFICATION_CODE_MINUTES,
+    StripeSignupSecurityError,
+    finalize_signup_phone_verification_delivery,
+    invalidate_unsent_signup_phone_verification_challenge,
+    reserve_signup_phone_verification_challenge,
+    verify_signup_phone_verification_challenge,
+)
+from services.stripe_service import (
+    StripeServiceError,
+    construct_stripe_webhook_event,
+    create_stripe_checkout_session,
+    create_stripe_checkout_signup,
+    get_business_subscription_summary,
+    schedule_business_subscription_cancellation,
+    resume_business_subscription_renewal,
+    get_stripe_checkout_signup,
+    get_stripe_environment,
+    process_recorded_stripe_webhook_event,
+    record_verified_stripe_event,
+)
 from services.help_html import sanitize_help_html
 from services.mfa_security import (
     MFAError,
@@ -7112,6 +7134,7 @@ PASSWORD_RESET_SOURCE_MAX_REQUESTS = 5
 PASSWORD_RESET_SOURCE_WINDOW_MINUTES = 10
 PASSWORD_RESET_RESPONSE_FLOOR_SECONDS = 1.5
 BUSINESS_USER_INVITATION_TOKEN_HOURS = 72
+BUSINESS_USER_INVITATION_DELIVERY_STALE_MINUTES = 10
 
 PASSWORD_RESET_PRODUCTION_BASE_URL = (
     "https://app.peachsuitepro.com"
@@ -29168,6 +29191,83 @@ def _reserve_business_user_invitation(
             "PSP workspace access."
         )
 
+    # The business row above serializes reservations for this spa.
+    # Prevent overlapping provider deliveries for the same invitee
+    # or primary Owner. A crashed reservation becomes replaceable
+    # after a short stale window.
+    cur.execute(
+        """
+        UPDATE business_user_invitations
+        SET invalidated_at = NOW()
+        WHERE spa_id = %s
+          AND email_sent_at IS NULL
+          AND accepted_at IS NULL
+          AND invalidated_at IS NULL
+          AND created_at <= (
+              NOW()
+              - (%s * INTERVAL '1 minute')
+          )
+          AND (
+                (
+                    business_unit_id = %s
+                    AND LOWER(BTRIM(invited_email))
+                        = LOWER(BTRIM(%s))
+                )
+                OR (
+                    %s = TRUE
+                    AND is_primary_onboarding_invitation = TRUE
+                )
+          )
+        """,
+        (
+            spa_id,
+            BUSINESS_USER_INVITATION_DELIVERY_STALE_MINUTES,
+            business_unit_id,
+            email,
+            is_primary,
+        ),
+    )
+
+    cur.execute(
+        """
+        SELECT EXISTS (
+            SELECT 1
+            FROM business_user_invitations
+            WHERE spa_id = %s
+              AND email_sent_at IS NULL
+              AND accepted_at IS NULL
+              AND invalidated_at IS NULL
+              AND created_at > (
+                  NOW()
+                  - (%s * INTERVAL '1 minute')
+              )
+              AND (
+                    (
+                        business_unit_id = %s
+                        AND LOWER(BTRIM(invited_email))
+                            = LOWER(BTRIM(%s))
+                    )
+                    OR (
+                        %s = TRUE
+                        AND is_primary_onboarding_invitation = TRUE
+                    )
+              )
+        )
+        """,
+        (
+            spa_id,
+            BUSINESS_USER_INVITATION_DELIVERY_STALE_MINUTES,
+            business_unit_id,
+            email,
+            is_primary,
+        ),
+    )
+
+    if bool(cur.fetchone()[0]):
+        raise RuntimeError(
+            "Business invitation delivery is already in progress."
+        )
+
     raw_token = secrets.token_urlsafe(32)
     token_hash = _business_user_invitation_token_hash(
         raw_token
@@ -29617,6 +29717,210 @@ def _send_business_user_invitation(
     finally:
         cur.close()
         conn.close()
+
+
+
+def _ensure_primary_owner_invitation_delivery(
+    *,
+    spa_id,
+):
+    """
+    Ensure a provisioned business that is still waiting for initial
+    Owner activation has a current, delivered primary Owner invitation.
+
+    A matching usable delivered invitation is reused. Otherwise a new
+    invitation is sent through the existing invitation delivery flow.
+    """
+    try:
+        normalized_spa_id = int(spa_id)
+    except (TypeError, ValueError):
+        raise ValueError("Invitation business identity is invalid.")
+
+    if normalized_spa_id <= 0:
+        raise ValueError("Invitation business identity is invalid.")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                s.spa_name,
+                bo.waiting_on_initial_activation,
+                bo.primary_onboarding_user_id,
+                bo.completed_at
+            FROM spas s
+            JOIN business_onboarding bo
+              ON bo.spa_id = s.spa_id
+            WHERE s.spa_id = %s
+              AND s.active = TRUE
+            LIMIT 1
+            """,
+            (normalized_spa_id,),
+        )
+
+        onboarding_row = cur.fetchone()
+
+        if not onboarding_row:
+            raise RuntimeError(
+                "Provisioned business onboarding state "
+                "could not be resolved."
+            )
+
+        spa_name = onboarding_row[0]
+        waiting_on_initial_activation = bool(
+            onboarding_row[1]
+        )
+        primary_onboarding_user_id = onboarding_row[2]
+        onboarding_completed_at = onboarding_row[3]
+
+        if (
+            not waiting_on_initial_activation
+            or primary_onboarding_user_id is not None
+            or onboarding_completed_at is not None
+        ):
+            return {
+                "status": "already_activated",
+                "spa_id": normalized_spa_id,
+                "spa_name": spa_name,
+            }
+
+        cur.execute(
+            """
+            SELECT
+                bu.business_unit_id,
+                e.employee_id,
+                e.first_name,
+                e.last_name,
+                e.email
+            FROM business_units bu
+            JOIN employees e
+              ON e.spa_id = bu.spa_id
+             AND e.employee_id = bu.owner_employee_id
+             AND e.is_active = TRUE
+            WHERE bu.spa_id = %s
+              AND bu.is_default = TRUE
+              AND bu.is_active = TRUE
+            ORDER BY bu.business_unit_id
+            LIMIT 1
+            """,
+            (normalized_spa_id,),
+        )
+
+        owner_row = cur.fetchone()
+
+        if not owner_row:
+            raise RuntimeError(
+                "Provisioned business Owner identity "
+                "could not be resolved."
+            )
+
+        business_unit_id = owner_row[0]
+        owner_employee_id = owner_row[1]
+        owner_first_name = str(
+            owner_row[2] or ""
+        ).strip()
+        owner_last_name = str(
+            owner_row[3] or ""
+        ).strip()
+        owner_email = str(
+            owner_row[4] or ""
+        ).strip()
+
+        cur.execute(
+            """
+            SELECT
+                business_user_invitation_id,
+                expires_at
+            FROM business_user_invitations
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND employee_id = %s
+              AND business_relationship_code = 'owner'
+              AND membership_role_code = 'organization_admin'
+              AND is_primary_onboarding_invitation = TRUE
+              AND LOWER(BTRIM(invited_first_name))
+                    = LOWER(BTRIM(%s))
+              AND LOWER(BTRIM(invited_last_name))
+                    = LOWER(BTRIM(%s))
+              AND LOWER(BTRIM(invited_email))
+                    = LOWER(BTRIM(%s))
+              AND email_sent_at IS NOT NULL
+              AND accepted_at IS NULL
+              AND invalidated_at IS NULL
+              AND expires_at > NOW()
+            ORDER BY business_user_invitation_id DESC
+            LIMIT 1
+            """,
+            (
+                normalized_spa_id,
+                business_unit_id,
+                owner_employee_id,
+                owner_first_name,
+                owner_last_name,
+                owner_email,
+            ),
+        )
+
+        delivered_row = cur.fetchone()
+
+        if delivered_row:
+            return {
+                "status": "already_sent",
+                "spa_id": normalized_spa_id,
+                "spa_name": spa_name,
+                "business_unit_id": business_unit_id,
+                "owner_employee_id": owner_employee_id,
+                "owner_email": owner_email,
+                "business_user_invitation_id": (
+                    delivered_row[0]
+                ),
+                "expires_at": delivered_row[1],
+            }
+
+    finally:
+        cur.close()
+        conn.close()
+
+    try:
+        invitation_result = _send_business_user_invitation(
+            spa_id=normalized_spa_id,
+            business_unit_id=business_unit_id,
+            invited_first_name=owner_first_name,
+            invited_last_name=owner_last_name,
+            invited_email=owner_email,
+            business_relationship_code="owner",
+            membership_role_code="organization_admin",
+            employee_id=owner_employee_id,
+            is_primary_onboarding_invitation=True,
+            invited_by_user_id=None,
+        )
+
+    except RuntimeError as exc:
+        if (
+            str(exc).strip()
+            == "Business invitation delivery is already in progress."
+        ):
+            return {
+                "status": "delivery_in_progress",
+                "spa_id": normalized_spa_id,
+                "spa_name": spa_name,
+                "business_unit_id": business_unit_id,
+                "owner_employee_id": owner_employee_id,
+                "owner_email": owner_email,
+            }
+
+        raise
+
+    return {
+        **invitation_result,
+        "spa_id": normalized_spa_id,
+        "spa_name": spa_name,
+        "business_unit_id": business_unit_id,
+        "owner_employee_id": owner_employee_id,
+        "owner_email": owner_email,
+    }
 
 
 def _business_user_invitation_record(
@@ -31157,48 +31461,11 @@ def _password_policy_error(password):
 
 
 def _normalize_user_mobile_phone(value):
-
-    raw_value = str(value or "").strip()
-
-    if not raw_value:
-        return ""
-
-    allowed_format_characters = {
-        " ",
-        "+",
-        "(",
-        ")",
-        "-",
-        ".",
-    }
-
-    if any(
-        not character.isdigit()
-        and character not in allowed_format_characters
-        for character in raw_value
-    ):
-        raise ValueError(
-            "Please enter a valid U.S. mobile number."
-        )
-
-    digits = "".join(
-        character
-        for character in raw_value
-        if character.isdigit()
-    )
-
-    if (
-        len(digits) == 11
-        and digits.startswith("1")
-    ):
-        digits = digits[1:]
-
-    if len(digits) != 10:
-        raise ValueError(
-            "Please enter a valid 10-digit U.S. mobile number."
-        )
-
-    return "+1" + digits
+    """
+    Compatibility wrapper around PSP's shared mobile-number
+    normalization service.
+    """
+    return normalize_user_mobile_phone(value)
 
 
 def _normalize_user_email(value, field_label="Email"):
@@ -35264,6 +35531,166 @@ def send_peach_suite_platform_sms(
     return result
 
 
+
+def _send_stripe_signup_phone_verification_code(
+    *,
+    stripe_checkout_signup_id,
+):
+    """
+    Reserve, deliver, and activate one pre-Checkout signup
+    phone-verification code.
+
+    Transaction boundaries intentionally mirror PSP MFA:
+      1. reserve and commit the challenge;
+      2. call the SMS provider outside the DB transaction;
+      3. finalize only after provider acceptance, otherwise
+         invalidate the unsent challenge in a new transaction.
+    """
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        reservation = (
+            reserve_signup_phone_verification_challenge(
+                cur,
+                stripe_checkout_signup_id=(
+                    stripe_checkout_signup_id
+                ),
+            )
+        )
+
+        if not reservation["allowed"]:
+            conn.rollback()
+
+            return {
+                "status": reservation["reason"],
+                "retry_seconds": reservation.get(
+                    "retry_seconds",
+                    0,
+                ),
+            }
+
+        challenge_id = reservation[
+            "stripe_checkout_phone_verification_challenge_id"
+        ]
+
+        raw_code = reservation["raw_code"]
+        expires_at = reservation["expires_at"]
+        destination = reservation["phone_number"]
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    message_body = (
+        "Your Peach Suite Pro verification code is "
+        f"{raw_code}. It expires in "
+        f"{SIGNUP_PHONE_VERIFICATION_CODE_MINUTES} minutes. "
+        "Do not share this code."
+    )
+
+    delivery_accepted = False
+
+    try:
+        sms_result = send_peach_suite_platform_sms(
+            recipient_phone=destination,
+            message_body=message_body,
+            message_type="security_verification",
+            log_related_type=(
+                "stripe_signup_phone_verification"
+            ),
+        )
+
+        delivery_accepted = bool(
+            isinstance(sms_result, dict)
+            and sms_result.get("success")
+        )
+
+        if isinstance(sms_result, dict):
+            sms_result.pop(
+                "final_message_body",
+                None,
+            )
+
+    except Exception:
+        delivery_accepted = False
+
+    # The raw code must not survive beyond the provider call.
+    raw_code = None
+    message_body = None
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        if delivery_accepted:
+            usable = (
+                finalize_signup_phone_verification_delivery(
+                    cur,
+                    stripe_checkout_signup_id=(
+                        stripe_checkout_signup_id
+                    ),
+                    stripe_checkout_phone_verification_challenge_id=(
+                        challenge_id
+                    ),
+                )
+            )
+
+            conn.commit()
+
+            return {
+                "status": (
+                    "sent"
+                    if usable
+                    else "superseded"
+                ),
+                "retry_seconds": 0,
+                "expires_at": expires_at,
+                "stripe_checkout_phone_verification_challenge_id": (
+                    challenge_id
+                    if usable
+                    else None
+                ),
+            }
+
+        invalidate_unsent_signup_phone_verification_challenge(
+            cur,
+            stripe_checkout_signup_id=(
+                stripe_checkout_signup_id
+            ),
+            stripe_checkout_phone_verification_challenge_id=(
+                challenge_id
+            ),
+        )
+
+        conn.commit()
+
+        return {
+            "status": "delivery_failed",
+            "retry_seconds": 0,
+        }
+
+    except Exception:
+        conn.rollback()
+
+        return {
+            "status": "delivery_failed",
+            "retry_seconds": 0,
+        }
+
+    finally:
+        cur.close()
+        conn.close()
+
+
 #####################################################################
 #   >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 #
@@ -38064,6 +38491,12 @@ def load_spa():
         "static",
         "telnyx_sms_webhook",
         "square_production_webhook",
+        "stripe_signup",
+        "stripe_signup_send_phone_code",
+        "stripe_signup_verify_phone",
+        "stripe_signup_checkout",
+        "stripe_signup_success",
+        "stripe_webhook",
         "public_booking",
         "public_booking_confirm",
         "tenant_booking_policy",
@@ -38295,6 +38728,1041 @@ def current_sms_email_terms_version():
     version = str(version or "").strip()
 
     return version or SMS_EMAIL_TERMS_DEFAULT_VERSION
+
+
+
+SUBSCRIPTION_TERMS_SETTING_KEY = "subscription_terms_version"
+SUBSCRIPTION_TERMS_DEFAULT_VERSION = "v1.0"
+
+
+def current_subscription_terms_version():
+    version = get_system_setting(
+        SUBSCRIPTION_TERMS_SETTING_KEY,
+        SUBSCRIPTION_TERMS_DEFAULT_VERSION
+    )
+
+    version = str(version or "").strip()
+
+    return version or SUBSCRIPTION_TERMS_DEFAULT_VERSION
+
+
+
+_STRIPE_SIGNUP_SESSION_KEY = "_stripe_checkout_signup"
+_STRIPE_SIGNUP_CSRF_PURPOSE = "stripe_checkout_signup"
+
+
+def _set_stripe_signup_session(
+    stripe_checkout_signup_id,
+):
+    try:
+        signup_id = int(
+            stripe_checkout_signup_id
+        )
+    except (TypeError, ValueError):
+        raise ValueError(
+            "Stripe checkout signup is invalid."
+        )
+
+    if signup_id <= 0:
+        raise ValueError(
+            "Stripe checkout signup is invalid."
+        )
+
+    # Keep public signup PII out of the signed browser session.
+    # Only the server-side database identifier is retained.
+    session[_STRIPE_SIGNUP_SESSION_KEY] = {
+        "stripe_checkout_signup_id": signup_id,
+    }
+
+
+def _stripe_signup_session_id():
+    state = session.get(
+        _STRIPE_SIGNUP_SESSION_KEY
+    )
+
+    if not isinstance(state, dict):
+        return None
+
+    try:
+        signup_id = int(
+            state.get(
+                "stripe_checkout_signup_id"
+            )
+        )
+    except (TypeError, ValueError):
+        session.pop(
+            _STRIPE_SIGNUP_SESSION_KEY,
+            None,
+        )
+        return None
+
+    if signup_id <= 0:
+        session.pop(
+            _STRIPE_SIGNUP_SESSION_KEY,
+            None,
+        )
+        return None
+
+    return signup_id
+
+
+def _clear_stripe_signup_session():
+    session.pop(
+        _STRIPE_SIGNUP_SESSION_KEY,
+        None,
+    )
+
+
+def _mask_signup_phone(phone_number):
+    phone = str(
+        phone_number or ""
+    ).strip()
+
+    digits = "".join(
+        character
+        for character in phone
+        if character.isdigit()
+    )
+
+    if len(digits) >= 4:
+        return f"(***) ***-{digits[-4:]}"
+
+    return "your mobile number"
+
+
+
+
+def _render_stripe_signup(
+    *,
+    signup_stage="signup",
+    signup_record=None,
+    form_values=None,
+    error_message=None,
+    success_message=None,
+):
+    form_values = dict(
+        form_values or {}
+    )
+
+    signup_record = dict(
+        signup_record or {}
+    )
+
+    masked_phone = ""
+
+    if signup_record:
+        masked_phone = _mask_signup_phone(
+            signup_record.get("owner_phone")
+        )
+
+    return render_template(
+        "signup/solo_signup.html",
+        signup_stage=signup_stage,
+        signup_record=signup_record,
+        form_values=form_values,
+        masked_phone=masked_phone,
+        error_message=error_message,
+        success_message=success_message,
+        subscription_terms_version=(
+            current_subscription_terms_version()
+        ),
+        csrf_token=_public_security_csrf_token(
+            _STRIPE_SIGNUP_CSRF_PURPOSE
+        ),
+    )
+
+
+def _load_current_stripe_signup():
+    signup_id = _stripe_signup_session_id()
+
+    if signup_id is None:
+        return None
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        signup_record = get_stripe_checkout_signup(
+            cur,
+            stripe_checkout_signup_id=signup_id,
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if not signup_record:
+        _clear_stripe_signup_session()
+        return None
+
+    return signup_record
+
+
+@app.route(
+    "/signup/solo",
+    methods=["GET", "POST"],
+)
+def stripe_signup():
+    existing_signup = (
+        _load_current_stripe_signup()
+    )
+
+    if request.method == "GET":
+        if existing_signup:
+            if (
+                existing_signup["signup_status"]
+                not in {
+                    "pending",
+                    "checkout_created",
+                }
+            ):
+                _clear_stripe_signup_session()
+
+            elif existing_signup["phone_verified_at"]:
+                return _render_stripe_signup(
+                    signup_stage="phone_verified",
+                    signup_record=existing_signup,
+                )
+
+            else:
+                return _render_stripe_signup(
+                    signup_stage="verify_phone",
+                    signup_record=existing_signup,
+                )
+
+        return _render_stripe_signup(
+            signup_stage="signup",
+            form_values={
+                "billing_interval": "month",
+                "timezone_name": "America/Chicago",
+            },
+        )
+
+    submitted_token = request.form.get(
+        "csrf_token",
+        "",
+    )
+
+    if not _public_security_csrf_valid(
+        submitted_token,
+        _STRIPE_SIGNUP_CSRF_PURPOSE,
+    ):
+        abort(400)
+
+    # Do not create duplicate pending signups from repeated
+    # form submissions within the same browser session.
+    if (
+        existing_signup
+        and existing_signup["signup_status"] == "pending"
+    ):
+        return redirect(
+            url_for("stripe_signup")
+        )
+
+    form_values = {
+        "business_name": str(
+            request.form.get(
+                "business_name",
+                "",
+            )
+            or ""
+        ).strip(),
+        "owner_first_name": str(
+            request.form.get(
+                "owner_first_name",
+                "",
+            )
+            or ""
+        ).strip(),
+        "owner_last_name": str(
+            request.form.get(
+                "owner_last_name",
+                "",
+            )
+            or ""
+        ).strip(),
+        "owner_email": str(
+            request.form.get(
+                "owner_email",
+                "",
+            )
+            or ""
+        ).strip(),
+        "owner_phone": str(
+            request.form.get(
+                "owner_phone",
+                "",
+            )
+            or ""
+        ).strip(),
+        "timezone_name": str(
+            request.form.get(
+                "timezone_name",
+                "",
+            )
+            or ""
+        ).strip(),
+        "billing_interval": str(
+            request.form.get(
+                "billing_interval",
+                "",
+            )
+            or ""
+        ).strip(),
+        "discount_code": str(
+            request.form.get(
+                "discount_code",
+                "",
+            )
+            or ""
+        ).strip(),
+        "sms_addon_selected": bool(
+            request.form.get(
+                "sms_addon_selected"
+            )
+        ),
+        "ten_dlc_assistance_selected": bool(
+            request.form.get(
+                "ten_dlc_assistance_selected"
+            )
+        ),
+    }
+
+    terms_accepted = bool(
+        request.form.get(
+            "terms_accepted"
+        )
+    )
+
+    try:
+        normalized_email = _normalize_user_email(
+            form_values["owner_email"],
+            field_label="Owner email",
+        )
+
+        if not normalized_email:
+            raise ValueError(
+                "Owner email is required."
+            )
+
+        form_values["owner_email"] = (
+            normalized_email
+        )
+
+        terms_version = (
+            current_subscription_terms_version()
+        )
+
+        conn = get_db_connection()
+        conn.autocommit = False
+        cur = conn.cursor()
+
+        try:
+            signup = create_stripe_checkout_signup(
+                cur,
+                business_name=(
+                    form_values["business_name"]
+                ),
+                owner_first_name=(
+                    form_values["owner_first_name"]
+                ),
+                owner_last_name=(
+                    form_values["owner_last_name"]
+                ),
+                owner_email=(
+                    form_values["owner_email"]
+                ),
+                owner_phone=(
+                    form_values["owner_phone"]
+                ),
+                timezone_name=(
+                    form_values["timezone_name"]
+                ),
+                billing_interval=(
+                    form_values["billing_interval"]
+                ),
+                submitted_discount_code=(
+                    form_values["discount_code"]
+                ),
+                sms_addon_selected=(
+                    form_values["sms_addon_selected"]
+                ),
+                ten_dlc_assistance_selected=(
+                    form_values[
+                        "ten_dlc_assistance_selected"
+                    ]
+                ),
+                terms_version=terms_version,
+                terms_accepted=terms_accepted,
+                tier_code="solo",
+            )
+
+            conn.commit()
+
+        except Exception:
+            conn.rollback()
+            raise
+
+        finally:
+            cur.close()
+            conn.close()
+
+    except (
+        ValueError,
+        StripeServiceError,
+    ) as exc:
+        return _render_stripe_signup(
+            signup_stage="signup",
+            form_values=form_values,
+            error_message=str(exc),
+        ), 400
+
+    _set_stripe_signup_session(
+        signup["stripe_checkout_signup_id"]
+    )
+
+    delivery = (
+        _send_stripe_signup_phone_verification_code(
+            stripe_checkout_signup_id=(
+                signup[
+                    "stripe_checkout_signup_id"
+                ]
+            ),
+        )
+    )
+
+    signup_record = (
+        _load_current_stripe_signup()
+    )
+
+    if delivery["status"] == "sent":
+        return _render_stripe_signup(
+            signup_stage="verify_phone",
+            signup_record=signup_record,
+            success_message=(
+                "We sent a verification code to "
+                "your mobile number."
+            ),
+        )
+
+    if delivery["status"] in {
+        "cooldown",
+        "hourly_limit",
+        "locked",
+    }:
+        return _render_stripe_signup(
+            signup_stage="verify_phone",
+            signup_record=signup_record,
+            error_message=(
+                "A verification code cannot be sent "
+                "again yet. Please wait and try again."
+            ),
+        ), 429
+
+    return _render_stripe_signup(
+        signup_stage="verify_phone",
+        signup_record=signup_record,
+        error_message=(
+            "We could not send the verification code. "
+            "Please try again."
+        ),
+    ), 503
+
+
+@app.route(
+    "/signup/solo/send-phone-code",
+    methods=["POST"],
+)
+def stripe_signup_send_phone_code():
+    submitted_token = request.form.get(
+        "csrf_token",
+        "",
+    )
+
+    if not _public_security_csrf_valid(
+        submitted_token,
+        _STRIPE_SIGNUP_CSRF_PURPOSE,
+    ):
+        abort(400)
+
+    signup_record = (
+        _load_current_stripe_signup()
+    )
+
+    if not signup_record:
+        return redirect(
+            url_for("stripe_signup")
+        )
+
+    if signup_record["signup_status"] != "pending":
+        _clear_stripe_signup_session()
+
+        return redirect(
+            url_for("stripe_signup")
+        )
+
+    if signup_record["phone_verified_at"]:
+        return redirect(
+            url_for("stripe_signup")
+        )
+
+    delivery = (
+        _send_stripe_signup_phone_verification_code(
+            stripe_checkout_signup_id=(
+                signup_record[
+                    "stripe_checkout_signup_id"
+                ]
+            ),
+        )
+    )
+
+    signup_record = (
+        _load_current_stripe_signup()
+    )
+
+    if delivery["status"] == "sent":
+        return _render_stripe_signup(
+            signup_stage="verify_phone",
+            signup_record=signup_record,
+            success_message=(
+                "A new verification code was sent."
+            ),
+        )
+
+    if delivery["status"] == "cooldown":
+        retry_seconds = int(
+            delivery.get(
+                "retry_seconds",
+                0,
+            )
+            or 0
+        )
+
+        return _render_stripe_signup(
+            signup_stage="verify_phone",
+            signup_record=signup_record,
+            error_message=(
+                "Please wait "
+                f"{retry_seconds} seconds before "
+                "requesting another code."
+            ),
+        ), 429
+
+    if delivery["status"] == "hourly_limit":
+        return _render_stripe_signup(
+            signup_stage="verify_phone",
+            signup_record=signup_record,
+            error_message=(
+                "The verification-code delivery limit "
+                "has been reached. Please try again later."
+            ),
+        ), 429
+
+    if delivery["status"] == "locked":
+        return _render_stripe_signup(
+            signup_stage="verify_phone",
+            signup_record=signup_record,
+            error_message=(
+                "Phone verification is temporarily locked. "
+                "Please try again later."
+            ),
+        ), 429
+
+    if delivery["status"] == "already_verified":
+        return redirect(
+            url_for("stripe_signup")
+        )
+
+    return _render_stripe_signup(
+        signup_stage="verify_phone",
+        signup_record=signup_record,
+        error_message=(
+            "We could not send the verification code. "
+            "Please try again."
+        ),
+    ), 503
+
+
+@app.route(
+    "/signup/solo/verify-phone",
+    methods=["POST"],
+)
+def stripe_signup_verify_phone():
+    submitted_token = request.form.get(
+        "csrf_token",
+        "",
+    )
+
+    if not _public_security_csrf_valid(
+        submitted_token,
+        _STRIPE_SIGNUP_CSRF_PURPOSE,
+    ):
+        abort(400)
+
+    signup_record = (
+        _load_current_stripe_signup()
+    )
+
+    if not signup_record:
+        return redirect(
+            url_for("stripe_signup")
+        )
+
+    if signup_record["signup_status"] != "pending":
+        _clear_stripe_signup_session()
+
+        return redirect(
+            url_for("stripe_signup")
+        )
+
+    if signup_record["phone_verified_at"]:
+        return redirect(
+            url_for("stripe_signup")
+        )
+
+    verification_code = str(
+        request.form.get(
+            "verification_code",
+            "",
+        )
+        or ""
+    ).strip()
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        verification = (
+            verify_signup_phone_verification_challenge(
+                cur,
+                stripe_checkout_signup_id=(
+                    signup_record[
+                        "stripe_checkout_signup_id"
+                    ]
+                ),
+                verification_code=verification_code,
+            )
+        )
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    signup_record = (
+        _load_current_stripe_signup()
+    )
+
+    if verification["verified"]:
+        return redirect(
+            url_for("stripe_signup")
+        )
+
+    reason = verification.get(
+        "reason"
+    )
+
+    if reason == "invalid_code":
+        attempts_remaining = int(
+            verification.get(
+                "attempts_remaining",
+                0,
+            )
+            or 0
+        )
+
+        return _render_stripe_signup(
+            signup_stage="verify_phone",
+            signup_record=signup_record,
+            error_message=(
+                "That verification code is not valid. "
+                f"{attempts_remaining} "
+                "attempt"
+                + (
+                    ""
+                    if attempts_remaining == 1
+                    else "s"
+                )
+                + " remaining."
+            ),
+        ), 400
+
+    if reason == "locked":
+        return _render_stripe_signup(
+            signup_stage="verify_phone",
+            signup_record=signup_record,
+            error_message=(
+                "Phone verification is temporarily locked "
+                "after too many unsuccessful attempts. "
+                "Please try again later."
+            ),
+        ), 429
+
+    if reason == "challenge_unavailable":
+        return _render_stripe_signup(
+            signup_stage="verify_phone",
+            signup_record=signup_record,
+            error_message=(
+                "That verification code is no longer "
+                "available. Please request a new code."
+            ),
+        ), 400
+
+    return _render_stripe_signup(
+        signup_stage="verify_phone",
+        signup_record=signup_record,
+        error_message=(
+            "Phone verification could not be completed. "
+            "Please try again."
+        ),
+    ), 400
+
+
+
+@app.route(
+    "/signup/solo/checkout",
+    methods=["POST"],
+)
+def stripe_signup_checkout():
+    submitted_token = request.form.get(
+        "csrf_token",
+        "",
+    )
+
+    if not _public_security_csrf_valid(
+        submitted_token,
+        _STRIPE_SIGNUP_CSRF_PURPOSE,
+    ):
+        abort(400)
+
+    signup_record = (
+        _load_current_stripe_signup()
+    )
+
+    if not signup_record:
+        return redirect(
+            url_for("stripe_signup")
+        )
+
+    if signup_record["signup_status"] not in {
+        "pending",
+        "checkout_created",
+    }:
+        _clear_stripe_signup_session()
+
+        return redirect(
+            url_for("stripe_signup")
+        )
+
+    if not signup_record["phone_verified_at"]:
+        return redirect(
+            url_for("stripe_signup")
+        )
+
+    base_url = _password_reset_base_url()
+
+    success_url = (
+        f"{base_url}/signup/solo/success"
+    )
+
+    cancel_url = (
+        f"{base_url}/signup/solo"
+    )
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        checkout = create_stripe_checkout_session(
+            cur,
+            stripe_checkout_signup_id=(
+                signup_record[
+                    "stripe_checkout_signup_id"
+                ]
+            ),
+            success_url=success_url,
+            cancel_url=cancel_url,
+        )
+
+        conn.commit()
+
+    except StripeServiceError:
+        conn.rollback()
+
+        return _render_stripe_signup(
+            signup_stage="phone_verified",
+            signup_record=signup_record,
+            error_message=(
+                "Secure checkout could not be started. "
+                "Please try again."
+            ),
+        ), 503
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    checkout_url = str(
+        checkout.get("checkout_url")
+        or ""
+    ).strip()
+
+    if not checkout_url:
+        return _render_stripe_signup(
+            signup_stage="phone_verified",
+            signup_record=signup_record,
+            error_message=(
+                "Secure checkout could not be started. "
+                "Please try again."
+            ),
+        ), 503
+
+    return redirect(checkout_url)
+
+
+
+@app.route(
+    "/webhooks/stripe",
+    methods=["POST"],
+)
+def stripe_webhook():
+    raw_body = request.get_data(
+        cache=True,
+        as_text=False,
+    )
+
+    signature_header = request.headers.get(
+        "Stripe-Signature",
+        "",
+    )
+
+    try:
+        environment = get_stripe_environment()
+
+        event = construct_stripe_webhook_event(
+            raw_body,
+            signature_header,
+            environment=environment,
+        )
+
+    except ValueError:
+        return jsonify({
+            "success": False,
+            "error": "Stripe webhook is not configured.",
+        }), 503
+
+    except StripeServiceError:
+        return jsonify({
+            "success": False,
+            "error": "Invalid Stripe webhook.",
+        }), 400
+
+    # First transaction: durably preserve the authenticated Stripe
+    # event before attempting any business-state processing.
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        recorded = record_verified_stripe_event(
+            cur,
+            event,
+            environment=environment,
+        )
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    # Second transaction: process only the durable event record.
+    # A failure here must never erase the authenticated event above.
+    process_conn = get_db_connection()
+    process_conn.autocommit = False
+    process_cur = process_conn.cursor()
+
+    try:
+        processed = process_recorded_stripe_webhook_event(
+            process_cur,
+            recorded["stripe_webhook_event_id"],
+            environment=environment,
+        )
+
+        process_conn.commit()
+
+    except Exception:
+        process_conn.rollback()
+        raise
+
+    finally:
+        process_cur.close()
+        process_conn.close()
+
+    if processed["processing_status"] == "error":
+        return jsonify({
+            "success": False,
+            "received": True,
+            "duplicate": bool(
+                recorded["duplicate"]
+            ),
+            "processing_status": "error",
+        }), 500
+
+    invitation_status = None
+
+    if (
+        processed["processing_status"] == "processed"
+        and processed["event_type"]
+            == "checkout.session.completed"
+    ):
+        provisioning_result = (
+            processed.get("provisioning_result")
+            or {}
+        )
+
+        invitation_spa_id = (
+            provisioning_result.get("spa_id")
+            or recorded.get("spa_id")
+        )
+
+        if invitation_spa_id is None:
+            app.logger.error(
+                "Processed Stripe Checkout webhook has no "
+                "provisioned spa_id for event_id=%s.",
+                processed.get("stripe_event_id"),
+            )
+
+            return jsonify({
+                "success": False,
+                "received": True,
+                "duplicate": bool(
+                    recorded["duplicate"]
+                ),
+                "processing_status": (
+                    processed["processing_status"]
+                ),
+                "invitation_status": "spa_unresolved",
+            }), 500
+
+        try:
+            invitation_result = (
+                _ensure_primary_owner_invitation_delivery(
+                    spa_id=invitation_spa_id,
+                )
+            )
+
+            invitation_status = str(
+                invitation_result.get("status")
+                or ""
+            ).strip().lower()
+
+        except Exception:
+            app.logger.exception(
+                "Stripe-provisioned Owner invitation "
+                "delivery failed for spa_id=%s "
+                "event_id=%s.",
+                invitation_spa_id,
+                processed.get("stripe_event_id"),
+            )
+
+            return jsonify({
+                "success": False,
+                "received": True,
+                "duplicate": bool(
+                    recorded["duplicate"]
+                ),
+                "processing_status": (
+                    processed["processing_status"]
+                ),
+                "invitation_status": "error",
+            }), 500
+
+        successful_invitation_states = {
+            "sent",
+            "superseded",
+            "already_sent",
+            "already_activated",
+        }
+
+        if (
+            invitation_status
+            not in successful_invitation_states
+        ):
+            app.logger.warning(
+                "Stripe-provisioned Owner invitation "
+                "was not confirmed delivered for "
+                "spa_id=%s event_id=%s status=%s.",
+                invitation_spa_id,
+                processed.get("stripe_event_id"),
+                invitation_status,
+            )
+
+            return jsonify({
+                "success": False,
+                "received": True,
+                "duplicate": bool(
+                    recorded["duplicate"]
+                ),
+                "processing_status": (
+                    processed["processing_status"]
+                ),
+                "invitation_status": (
+                    invitation_status
+                    or "delivery_failed"
+                ),
+            }), 500
+
+    return jsonify({
+        "success": True,
+        "received": True,
+        "duplicate": bool(
+            recorded["duplicate"]
+        ),
+        "processing_status": (
+            processed["processing_status"]
+        ),
+        "invitation_status": invitation_status,
+    }), 200
+
+
+@app.route(
+    "/signup/solo/success",
+    methods=["GET"],
+)
+def stripe_signup_success():
+    signup_record = (
+        _load_current_stripe_signup()
+    )
+
+    # Stripe Checkout has returned control to PSP. Keep the
+    # signup snapshot available for this confirmation page, but
+    # release the browser session from the completed Checkout
+    # attempt so a later visit to /signup/solo starts cleanly.
+    #
+    # Backend duplicate protection remains authoritative and will
+    # reject another active signup for the same owner email.
+    _clear_stripe_signup_session()
+
+    return _render_stripe_signup(
+        signup_stage="checkout_returned",
+        signup_record=signup_record,
+    )
 
 
 def sms_email_terms_accepted(spa_id):
@@ -58726,6 +60194,320 @@ def my_settings():
 
 
 
+##############################################
+#
+#   MANAGE SUBSCRIPTION
+#
+##############################################
+
+
+@app.route("/account/subscription")
+@login_required
+@spa_required
+def manage_subscription():
+    if (
+        current_business_unit_membership_role_code()
+        != "organization_admin"
+    ):
+        abort(403)
+
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        subscription_summary = (
+            get_business_subscription_summary(
+                cur,
+                spa_id=spa_id,
+            )
+        )
+    finally:
+        cur.close()
+        conn.close()
+
+    return render_template(
+        "manage_subscription.html",
+        subscription_summary=subscription_summary,
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
+
+@app.route(
+    "/account/subscription/cancel",
+    methods=["GET", "POST"],
+)
+@login_required
+@spa_required
+def cancel_subscription():
+    if (
+        current_business_unit_membership_role_code()
+        != "organization_admin"
+    ):
+        abort(403)
+
+    spa_id = current_spa_id()
+
+    if request.method == "POST":
+        submitted_csrf_token = request.form.get(
+            "security_csrf_token",
+            ""
+        )
+
+        if not _security_form_csrf_valid(
+            submitted_csrf_token
+        ):
+            flash(
+                "Your security token expired or could not be verified. "
+                "Please try again.",
+                "error"
+            )
+
+            return redirect(
+                url_for("manage_subscription")
+            )
+
+        conn = get_db_connection()
+        conn.autocommit = False
+        cur = conn.cursor()
+
+        try:
+            subscription_summary = (
+                get_business_subscription_summary(
+                    cur,
+                    spa_id=spa_id,
+                )
+            )
+
+            if not subscription_summary[
+                "stripe_billing_account_id"
+            ]:
+                conn.rollback()
+
+                flash(
+                    "No Stripe-managed subscription is available "
+                    "to cancel.",
+                    "error"
+                )
+
+                return redirect(
+                    url_for("manage_subscription")
+                )
+
+            if subscription_summary[
+                "cancel_at_period_end"
+            ]:
+                conn.rollback()
+
+                flash(
+                    "Your subscription cancellation is already "
+                    "scheduled.",
+                    "success"
+                )
+
+                return redirect(
+                    url_for("manage_subscription")
+                )
+
+            schedule_business_subscription_cancellation(
+                cur,
+                spa_id=spa_id,
+            )
+
+            conn.commit()
+
+        except StripeServiceError:
+            conn.rollback()
+
+            flash(
+                "Your subscription cancellation could not be "
+                "scheduled. Please try again.",
+                "error"
+            )
+
+            return redirect(
+                url_for("manage_subscription")
+            )
+
+        except Exception:
+            conn.rollback()
+            raise
+
+        finally:
+            cur.close()
+            conn.close()
+
+        flash(
+            "Your subscription is scheduled to cancel at the end "
+            "of the current subscription period.",
+            "success"
+        )
+
+        return redirect(
+            url_for("manage_subscription")
+        )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        subscription_summary = (
+            get_business_subscription_summary(
+                cur,
+                spa_id=spa_id,
+            )
+        )
+    finally:
+        cur.close()
+        conn.close()
+
+    if not subscription_summary[
+        "stripe_billing_account_id"
+    ]:
+        flash(
+            "No Stripe-managed subscription is available to cancel.",
+            "error"
+        )
+
+        return redirect(
+            url_for("manage_subscription")
+        )
+
+    if subscription_summary[
+        "cancel_at_period_end"
+    ]:
+        flash(
+            "Your subscription cancellation is already scheduled.",
+            "success"
+        )
+
+        return redirect(
+            url_for("manage_subscription")
+        )
+
+    return render_template(
+        "cancel_subscription.html",
+        subscription_summary=subscription_summary,
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
+
+
+@app.route(
+    "/account/subscription/keep",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+def keep_subscription():
+    if (
+        current_business_unit_membership_role_code()
+        != "organization_admin"
+    ):
+        abort(403)
+
+    submitted_csrf_token = request.form.get(
+        "security_csrf_token",
+        ""
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_csrf_token
+    ):
+        flash(
+            "Your security token expired or could not be verified. "
+            "Please try again.",
+            "error"
+        )
+
+        return redirect(
+            url_for("manage_subscription")
+        )
+
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        subscription_summary = (
+            get_business_subscription_summary(
+                cur,
+                spa_id=spa_id,
+            )
+        )
+
+        if not subscription_summary[
+            "stripe_billing_account_id"
+        ]:
+            conn.rollback()
+
+            flash(
+                "No Stripe-managed subscription is available.",
+                "error"
+            )
+
+            return redirect(
+                url_for("manage_subscription")
+            )
+
+        if not subscription_summary[
+            "cancel_at_period_end"
+        ]:
+            conn.rollback()
+
+            flash(
+                "Your subscription is already set to renew.",
+                "success"
+            )
+
+            return redirect(
+                url_for("manage_subscription")
+            )
+
+        resume_business_subscription_renewal(
+            cur,
+            spa_id=spa_id,
+        )
+
+        conn.commit()
+
+    except StripeServiceError:
+        conn.rollback()
+
+        flash(
+            "Your subscription renewal could not be restored. "
+            "Please try again.",
+            "error"
+        )
+
+        return redirect(
+            url_for("manage_subscription")
+        )
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    flash(
+        "Your subscription will continue and renew normally.",
+        "success"
+    )
+
+    return redirect(
+        url_for("manage_subscription")
+    )
+
+
+
 ####################################
 #   COMMUNICATIONS HOME
 ###################################
@@ -58864,8 +60646,12 @@ def master_admin_settings():
 
     security_csrf_token = _security_form_csrf_token()
 
-    current_terms_version = (
+    sms_email_terms_version = (
         current_sms_email_terms_version()
+    )
+
+    subscription_terms_version = (
+        current_subscription_terms_version()
     )
 
     if request.method == "POST":
@@ -58888,12 +60674,55 @@ def master_admin_settings():
             or ""
         ).strip()
 
-        if settings_action != "sms_email_terms_version":
+        if settings_action == "sms_email_terms_version":
+            form_field = "sms_email_terms_version"
+            setting_key = SMS_EMAIL_TERMS_SETTING_KEY
+            default_version = SMS_EMAIL_TERMS_DEFAULT_VERSION
+            setting_label = (
+                "Current SMS & Email Terms Version"
+            )
+            setting_group = "messaging"
+            audit_action = (
+                "sms_email_terms_version_changed"
+            )
+            display_label = "SMS & Email Terms"
+            audit_notes = (
+                "Master Admin changed the required "
+                "SMS & Email Terms version. Businesses "
+                "with an older accepted version must "
+                "accept the current version before "
+                "messaging access is considered current."
+            )
+
+        elif settings_action == "subscription_terms_version":
+            form_field = "subscription_terms_version"
+            setting_key = SUBSCRIPTION_TERMS_SETTING_KEY
+            default_version = (
+                SUBSCRIPTION_TERMS_DEFAULT_VERSION
+            )
+            setting_label = (
+                "Current Subscription Terms Version"
+            )
+            setting_group = "subscriptions"
+            audit_action = (
+                "subscription_terms_version_changed"
+            )
+            display_label = (
+                "Peach Suite Pro Subscription Terms"
+            )
+            audit_notes = (
+                "Master Admin changed the current "
+                "Peach Suite Pro Subscription Terms "
+                "version used for new subscription "
+                "signup acceptance."
+            )
+
+        else:
             abort(400)
 
         new_terms_version = str(
             request.form.get(
-                "sms_email_terms_version",
+                form_field,
                 ""
             )
             or ""
@@ -58925,7 +60754,7 @@ def master_admin_settings():
                 WHERE setting_key = %s
                 FOR UPDATE
                 """,
-                (SMS_EMAIL_TERMS_SETTING_KEY,)
+                (setting_key,)
             )
 
             row = cur.fetchone()
@@ -58933,17 +60762,15 @@ def master_admin_settings():
             old_terms_version = (
                 str(row[0] or "").strip()
                 if row
-                else SMS_EMAIL_TERMS_DEFAULT_VERSION
+                else default_version
             )
 
             set_system_setting(
                 cur,
-                SMS_EMAIL_TERMS_SETTING_KEY,
+                setting_key,
                 new_terms_version,
-                setting_label=(
-                    "Current SMS & Email Terms Version"
-                ),
-                setting_group="messaging"
+                setting_label=setting_label,
+                setting_group=setting_group
             )
 
             if (
@@ -58954,19 +60781,11 @@ def master_admin_settings():
                     cur,
                     spa_id=None,
                     user_id=session.get("user_id"),
-                    action_type=(
-                        "sms_email_terms_version_changed"
-                    ),
+                    action_type=audit_action,
                     table_name="system_settings",
                     old_value=old_terms_version,
                     new_value=new_terms_version,
-                    notes=(
-                        "Master Admin changed the required "
-                        "SMS & Email Terms version. Businesses "
-                        "with an older accepted version must "
-                        "accept the current version before "
-                        "messaging access is considered current."
-                    )
+                    notes=audit_notes
                 )
 
             conn.commit()
@@ -58984,13 +60803,13 @@ def master_admin_settings():
             == old_terms_version
         ):
             flash(
-                "SMS & Email Terms version saved. "
+                f"{display_label} version saved. "
                 "The required version did not change.",
                 "success"
             )
         else:
             flash(
-                "SMS & Email Terms version updated to "
+                f"{display_label} version updated to "
                 f"{new_terms_version}.",
                 "success"
             )
@@ -59006,7 +60825,12 @@ def master_admin_settings():
     return render_template(
         "master_admin_settings.html",
         supported_languages=supported_languages,
-        sms_email_terms_version=current_terms_version,
+        sms_email_terms_version=(
+            sms_email_terms_version
+        ),
+        subscription_terms_version=(
+            subscription_terms_version
+        ),
         security_csrf_token=security_csrf_token
     )
 
@@ -60439,6 +62263,47 @@ def business_onboarding_contact_setup():
                 )
             )
 
+        mobile_phone_value = str(
+            user[11] or ""
+        ).strip()
+
+        # A newly activated primary Owner may not have users.sms_phone
+        # populated yet. The provisioning/activation flow already carries
+        # the verified signup mobile number onto the linked Owner employee,
+        # so use that value as the Contact Setup prefill. The Owner must
+        # still submit this page before PSP writes users.sms_phone or marks
+        # Contact Setup complete.
+        if not mobile_phone_value:
+            cur.execute(
+                """
+                SELECT e.phone
+                FROM business_unit_memberships bum
+                JOIN employees e
+                  ON e.employee_id = bum.employee_id
+                 AND e.spa_id = bum.spa_id
+                WHERE bum.spa_id = %s
+                  AND bum.business_unit_id = %s
+                  AND bum.user_id = %s
+                  AND bum.is_active = TRUE
+                  AND bum.revoked_at IS NULL
+                  AND e.is_active = TRUE
+                ORDER BY bum.business_unit_membership_id
+                LIMIT 1
+                """,
+                (
+                    user[1],
+                    onboarding[10],
+                    user[0],
+                ),
+            )
+
+            owner_employee = cur.fetchone()
+
+            if owner_employee:
+                mobile_phone_value = str(
+                    owner_employee[0] or ""
+                ).strip()
+
         security_csrf_token = (
             _public_security_csrf_token(
                 csrf_purpose
@@ -60449,7 +62314,7 @@ def business_onboarding_contact_setup():
             render_template(
                 "business_onboarding_contact_setup.html",
                 login_email=str(user[4] or "").strip(),
-                mobile_phone=str(user[11] or "").strip(),
+                mobile_phone=mobile_phone_value,
                 security_csrf_token=security_csrf_token,
             )
         )
@@ -107921,6 +109786,14 @@ def morning_briefing():
         business_unit_id=business_unit_id,
     )
 
+    subscription_summary = (
+        get_business_subscription_summary(
+            cur,
+            spa_id=spa_id,
+            as_of=spa_now,
+        )
+    )
+
     if not appointments_enabled and square_enabled:
         peachpos_summary = _get_peachpos_sales_summary(
             cur,
@@ -108441,6 +110314,7 @@ def morning_briefing():
         spa_now=spa_now,
         action_cards=action_cards,
         setup_progress=setup_progress,
+        subscription_summary=subscription_summary,
         show_coach_welcome=show_coach_welcome,
         show_setup_complete_welcome=(
             show_setup_complete_welcome
@@ -108706,10 +110580,29 @@ def record_coach_recommendation_mention(
 ########################################
 
 
-@app.route("/coach/welcome/get-started", methods=["POST"])
-@login_required
-def coach_welcome_get_started():
-    user_id = session.get("user_id")
+def _send_onboarding_started_master_admin_notice(
+    *,
+    spa_id,
+    user_id,
+):
+    """
+    Best-effort internal notice that a new Stripe-backed business
+    deliberately started PSP onboarding.
+
+    This notification is operational only. Failure must never block
+    or roll back the customer's onboarding experience.
+    """
+    if (
+        parse_bool(
+            os.environ.get(
+                "NEW_SUBSCRIBER_EMAIL_NOTICES_ENABLED"
+            )
+        )
+        is not True
+    ):
+        return {
+            "status": "disabled",
+        }
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -108717,12 +110610,340 @@ def coach_welcome_get_started():
     try:
         cur.execute(
             """
+            SELECT
+                bo.business_onboarding_id,
+                bo.onboarding_started_at,
+                bo.onboarding_started_notice_sent_at,
+                s.spa_name,
+                e.first_name,
+                e.last_name,
+                e.email
+            FROM business_onboarding bo
+            JOIN spas s
+              ON s.spa_id = bo.spa_id
+            JOIN business_units bu
+              ON bu.spa_id = bo.spa_id
+             AND bu.business_unit_id =
+                    bo.initial_business_unit_id
+             AND bu.is_active = TRUE
+            JOIN employees e
+              ON e.spa_id = bu.spa_id
+             AND e.employee_id = bu.owner_employee_id
+             AND e.is_active = TRUE
+            WHERE bo.spa_id = %s
+              AND bo.primary_onboarding_user_id = %s
+              AND bo.waiting_on_initial_activation = FALSE
+            LIMIT 1
+            """,
+            (
+                spa_id,
+                user_id,
+            ),
+        )
+
+        onboarding_row = cur.fetchone()
+
+        if not onboarding_row:
+            return {
+                "status": "onboarding_not_found",
+            }
+
+        (
+            business_onboarding_id,
+            onboarding_started_at,
+            notice_sent_at,
+            spa_name,
+            owner_first_name,
+            owner_last_name,
+            owner_email,
+        ) = onboarding_row
+
+        if onboarding_started_at is None:
+            return {
+                "status": "not_started",
+            }
+
+        if notice_sent_at is not None:
+            return {
+                "status": "already_sent",
+            }
+
+        subscription_summary = (
+            get_business_subscription_summary(
+                cur,
+                spa_id=spa_id,
+            )
+        )
+
+        if not subscription_summary.get(
+            "stripe_billing_account_id"
+        ):
+            return {
+                "status": "not_stripe_subscriber",
+            }
+
+        cur.execute(
+            """
+            SELECT
+                u.user_id,
+                NULLIF(TRIM(m.notification_email), ''),
+                COALESCE(m.email_alerts_enabled, FALSE)
+            FROM users u
+            LEFT JOIN master_admin_notification_settings m
+              ON m.user_id = u.user_id
+            WHERE u.role = 'master_admin'
+              AND u.active = TRUE
+            ORDER BY u.user_id
+            LIMIT 2
+            """
+        )
+
+        master_admin_rows = cur.fetchall()
+
+        if len(master_admin_rows) != 1:
+            return {
+                "status": (
+                    "no_active_master_admin"
+                    if not master_admin_rows
+                    else "multiple_active_master_admins"
+                ),
+            }
+
+        (
+            master_admin_user_id,
+            notification_email,
+            email_alerts_enabled,
+        ) = master_admin_rows[0]
+
+        if not bool(email_alerts_enabled):
+            return {
+                "status": "email_alerts_disabled",
+            }
+
+        if not notification_email:
+            return {
+                "status": "missing_notification_email",
+            }
+
+    finally:
+        cur.close()
+        conn.close()
+
+    owner_name = " ".join(
+        part
+        for part in (
+            str(owner_first_name or "").strip(),
+            str(owner_last_name or "").strip(),
+        )
+        if part
+    ) or "Owner"
+
+    tier_name = str(
+        subscription_summary.get("tier_name")
+        or subscription_summary.get("tier_code")
+        or "Subscription"
+    ).strip()
+
+    amount_display = str(
+        subscription_summary.get("amount_display")
+        or ""
+    ).strip()
+
+    billing_interval = str(
+        subscription_summary.get("billing_interval")
+        or ""
+    ).strip().lower()
+
+    billing_display = amount_display
+
+    if amount_display and billing_interval:
+        billing_display = (
+            f"{amount_display} / {billing_interval}"
+        )
+
+    trial_end = subscription_summary.get("trial_end")
+
+    trial_end_display = (
+        trial_end.strftime("%B %d, %Y at %I:%M %p %Z")
+        if trial_end is not None
+        else "Not available"
+    )
+
+    started_display = (
+        onboarding_started_at.strftime(
+            "%B %d, %Y at %I:%M %p %Z"
+        )
+    )
+
+    subject = (
+        "New Peach Suite Pro Customer Started Onboarding"
+        f" - {spa_name}"
+    )
+
+    body_lines = [
+        (
+            "A new Peach Suite Pro customer has clicked "
+            "Get Started and begun onboarding."
+        ),
+        "",
+        f"Business: {spa_name}",
+        f"Owner: {owner_name}",
+        f"Owner Email: {owner_email or 'Not available'}",
+        f"Plan: {tier_name}",
+    ]
+
+    if billing_display:
+        body_lines.append(
+            f"Billing: {billing_display}"
+        )
+
+    body_lines.extend([
+        f"Trial Ends: {trial_end_display}",
+        f"PSP Business ID: {spa_id}",
+        f"Started Onboarding: {started_display}",
+        "",
+        (
+            "This is an internal Peach Suite Pro "
+            "soft-launch notification."
+        ),
+    ])
+
+    try:
+        response = send_email(
+            notification_email,
+            subject,
+            "\n".join(body_lines),
+            add_footer=False,
+            log_related_type=(
+                "new_subscriber_onboarding_started"
+            ),
+        )
+    except Exception:
+        app.logger.exception(
+            (
+                "New subscriber onboarding-start email "
+                "failed for spa_id=%s."
+            ),
+            spa_id,
+        )
+        return {
+            "status": "email_send_failed",
+        }
+
+    if not (
+        200
+        <= int(response.status_code)
+        < 300
+    ):
+        app.logger.error(
+            (
+                "New subscriber onboarding-start email "
+                "was rejected for spa_id=%s with HTTP %s."
+            ),
+            spa_id,
+            response.status_code,
+        )
+        return {
+            "status": "email_rejected",
+            "status_code": int(response.status_code),
+        }
+
+    marker_conn = get_db_connection()
+    marker_cur = marker_conn.cursor()
+
+    try:
+        marker_cur.execute(
+            """
+            UPDATE business_onboarding
+            SET
+                onboarding_started_notice_sent_at = NOW(),
+                updated_at = NOW()
+            WHERE business_onboarding_id = %s
+              AND spa_id = %s
+              AND primary_onboarding_user_id = %s
+              AND onboarding_started_at IS NOT NULL
+              AND onboarding_started_notice_sent_at IS NULL
+            """,
+            (
+                business_onboarding_id,
+                spa_id,
+                user_id,
+            ),
+        )
+
+        marker_conn.commit()
+
+    except Exception:
+        marker_conn.rollback()
+        app.logger.exception(
+            (
+                "New subscriber onboarding-start notice "
+                "delivery marker failed for spa_id=%s."
+            ),
+            spa_id,
+        )
+        return {
+            "status": "sent_marker_failed",
+        }
+
+    finally:
+        marker_cur.close()
+        marker_conn.close()
+
+    return {
+        "status": "sent",
+        "master_admin_user_id": master_admin_user_id,
+    }
+
+
+@app.route("/coach/welcome/get-started", methods=["POST"])
+@login_required
+@spa_required
+def coach_welcome_get_started():
+    user_id = session.get("user_id")
+    spa_id = current_spa_id()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    first_onboarding_start = False
+
+    try:
+        cur.execute(
+            """
             UPDATE users
             SET coach_welcome_seen_at = CURRENT_TIMESTAMP
             WHERE user_id = %s
+              AND spa_id = %s
               AND active = TRUE
             """,
-            (user_id,)
+            (
+                user_id,
+                spa_id,
+            ),
+        )
+
+        cur.execute(
+            """
+            UPDATE business_onboarding
+            SET
+                onboarding_started_at = NOW(),
+                updated_at = NOW()
+            WHERE spa_id = %s
+              AND primary_onboarding_user_id = %s
+              AND waiting_on_initial_activation = FALSE
+              AND completed_at IS NULL
+              AND onboarding_started_at IS NULL
+            RETURNING business_onboarding_id
+            """,
+            (
+                spa_id,
+                user_id,
+            ),
+        )
+
+        first_onboarding_start = (
+            cur.fetchone() is not None
         )
 
         conn.commit()
@@ -108742,6 +110963,33 @@ def coach_welcome_get_started():
         conn.close()
 
     session.pop("coach_welcome_dismissed", None)
+
+    if first_onboarding_start:
+        try:
+            notice_result = (
+                _send_onboarding_started_master_admin_notice(
+                    spa_id=spa_id,
+                    user_id=user_id,
+                )
+            )
+
+            app.logger.info(
+                (
+                    "New subscriber onboarding-start notice "
+                    "result for spa_id=%s: %s"
+                ),
+                spa_id,
+                notice_result.get("status"),
+            )
+
+        except Exception:
+            app.logger.exception(
+                (
+                    "Unexpected new subscriber onboarding-start "
+                    "notice failure for spa_id=%s."
+                ),
+                spa_id,
+            )
 
     return redirect(
         url_for("morning_briefing")

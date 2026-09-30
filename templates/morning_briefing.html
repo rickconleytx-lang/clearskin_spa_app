@@ -268,6 +268,59 @@
     </div>
 
 
+        {% if subscription_summary.show_trial_card %}
+
+        <!-- Solo Free Trial -->
+        <div class="briefing-summary-card">
+
+            <div class="briefing-card-title">
+                {{ subscription_summary.tier_name }} Free Trial
+            </div>
+
+            <div class="briefing-card-value">
+                {{ subscription_summary.days_remaining }}
+                {% if subscription_summary.days_remaining == 1 %}
+                    Day Left
+                {% else %}
+                    Days Left
+                {% endif %}
+            </div>
+
+            {% if subscription_summary.trial_end %}
+                <div class="briefing-card-detail">
+                    Billing begins
+                    {{ subscription_summary.trial_end.strftime(
+                        "%B %-d, %Y"
+                    ) }}
+                </div>
+            {% endif %}
+
+            {% if subscription_summary.amount_display %}
+                <div class="briefing-card-detail">
+                    {{ subscription_summary.amount_display }}
+                    {% if subscription_summary.billing_interval == "month" %}
+                        / month
+                    {% elif subscription_summary.billing_interval == "year" %}
+                        / year
+                    {% endif %}
+                </div>
+            {% endif %}
+
+            {% if is_organization_admin %}
+                <div style="margin-top:12px;">
+                    <a
+                        href="{{ url_for('manage_subscription') }}"
+                        class="tool-pill tool-pill-small"
+                    >
+                        Manage Subscription
+                    </a>
+                </div>
+            {% endif %}
+
+        </div>
+
+        {% else %}
+
         <!-- Operational Health -->
     <div class="briefing-summary-card">
 
@@ -392,6 +445,9 @@
     </div>
 
 
+
+
+        {% endif %}
 
 
     <!-- Today's Business -->

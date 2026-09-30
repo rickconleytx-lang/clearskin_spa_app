@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Cancel Subscription | Peach Suite Pro{% endblock %}
+
+{% block content %}
+
+<h1>Cancel Subscription</h1>
+
+<section class="form-card">
+
+    <h2>Confirm Cancellation</h2>
+
+    <p>
+        Are you sure you want to cancel your
+        <strong>
+            {{ subscription_summary.tier_name or "Peach Suite Pro" }}
+        </strong>
+        subscription?
+    </p>
+
+    {% if subscription_summary.show_trial_card
+          and subscription_summary.trial_end %}
+
+        <p>
+            You will continue to have access to Peach Suite Pro
+            through
+            <strong>
+                {{ subscription_summary.trial_end.strftime(
+                    "%B %-d, %Y at %-I:%M %p"
+                ) }}
+            </strong>.
+        </p>
+
+        <p>
+            Your subscription will not renew and you will not be
+            charged when the free trial ends.
+        </p>
+
+    {% elif subscription_summary.current_period_end %}
+
+        <p>
+            You will continue to have access to Peach Suite Pro
+            through
+            <strong>
+                {{ subscription_summary.current_period_end.strftime(
+                    "%B %-d, %Y"
+                ) }}
+            </strong>.
+        </p>
+
+        <p>
+            Your subscription will not renew after the current
+            subscription period ends.
+        </p>
+
+    {% else %}
+
+        <p>
+            Your subscription will remain available through the
+            current subscription period and will not renew afterward.
+        </p>
+
+    {% endif %}
+
+    <div class="form-buttons">
+
+        <a
+            href="{{ url_for('manage_subscription') }}"
+            class="btn btn-secondary"
+        >
+            Keep My Subscription
+        </a>
+
+        <form
+            method="POST"
+            action="{{ url_for('cancel_subscription') }}"
+        >
+            <input
+                type="hidden"
+                name="security_csrf_token"
+                value="{{ security_csrf_token }}"
+            >
+
+            <button
+                type="submit"
+                class="btn btn-danger"
+            >
+                Cancel Subscription
+            </button>
+        </form>
+
+    </div>
+
+</section>
+
+{% endblock %}

@@ -1673,6 +1673,16 @@ form textarea {
     display: inline-block;
 }
 
+.btn.btn-danger {
+    background-color: #c0392b;
+    color: #fff;
+}
+
+.btn.btn-secondary {
+    background-color: #6b7280;
+    color: #fff;
+}
+
 .compensation-row {
     display: flex;
     align-items: end;

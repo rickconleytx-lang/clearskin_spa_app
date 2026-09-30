@@ -43,3 +43,4 @@ PyNaCl==1.6.2
 cloudinary==1.45.0
 
 cryptography==47.0.0
+stripe==15.6.1

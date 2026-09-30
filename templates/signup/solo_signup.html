@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1"
+    >
+
+    <meta
+        name="robots"
+        content="noindex, nofollow"
+    >
+
+    <title>Start Peach Suite Pro Solo</title>
+
+    <style>
+        :root {
+            --peach: #e6a27e;
+            --peach-dark: #b86845;
+            --peach-light: #f7e8e2;
+            --cream: #fffaf7;
+            --ink: #332b27;
+            --muted: #746a64;
+            --border: #eaded7;
+            --card: #ffffff;
+            --danger: #a43b32;
+            --success: #36714a;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background:
+                linear-gradient(
+                    180deg,
+                    var(--cream) 0%,
+                    var(--peach-light) 100%
+                );
+            color: var(--ink);
+            font-family:
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                sans-serif;
+        }
+
+        .page {
+            width: min(760px, calc(100% - 32px));
+            margin: 0 auto;
+            padding: 42px 0 56px;
+        }
+
+        .brand {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+
+        .brand h1 {
+            margin: 0;
+            font-size: clamp(28px, 5vw, 40px);
+        }
+
+        .brand p {
+            margin: 8px 0 0;
+            color: var(--muted);
+        }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            padding: 28px;
+            box-shadow:
+                0 10px 30px rgba(70, 45, 35, 0.08);
+        }
+
+        h2 {
+            margin-top: 0;
+        }
+
+        .intro {
+            color: var(--muted);
+            line-height: 1.55;
+        }
+
+        .price {
+            margin: 18px 0 24px;
+            padding: 16px;
+            border-radius: 12px;
+            background: var(--cream);
+            border: 1px solid var(--border);
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        .field {
+            margin-bottom: 16px;
+        }
+
+        .field.full {
+            grid-column: 1 / -1;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: 650;
+        }
+
+        input,
+        select {
+            width: 100%;
+            padding: 12px 13px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: white;
+            color: var(--ink);
+            font: inherit;
+        }
+
+        input:focus,
+        select:focus {
+            outline: 2px solid var(--peach);
+            outline-offset: 1px;
+        }
+
+        .check-row {
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
+            margin: 14px 0;
+        }
+
+        .check-row input {
+            width: auto;
+            margin-top: 4px;
+        }
+
+        .check-row label {
+            margin: 0;
+            font-weight: 500;
+            line-height: 1.45;
+        }
+
+        .note {
+            color: var(--muted);
+            font-size: 0.93rem;
+            line-height: 1.45;
+        }
+
+        .alert {
+            margin-bottom: 18px;
+            padding: 12px 14px;
+            border-radius: 10px;
+        }
+
+        .alert-error {
+            color: var(--danger);
+            background: #fff3f1;
+            border: 1px solid #efd0cc;
+        }
+
+        .alert-success {
+            color: var(--success);
+            background: #f0f8f2;
+            border: 1px solid #cfe4d4;
+        }
+
+        button {
+            width: 100%;
+            padding: 13px 18px;
+            border: 0;
+            border-radius: 11px;
+            background: var(--peach-dark);
+            color: white;
+            font: inherit;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        button:hover {
+            filter: brightness(0.96);
+        }
+
+        .secondary-button {
+            background: white;
+            color: var(--peach-dark);
+            border: 1px solid var(--peach-dark);
+            margin-top: 10px;
+        }
+
+        .verification-number {
+            font-weight: 700;
+        }
+
+        .footer {
+            margin-top: 22px;
+            text-align: center;
+            color: var(--muted);
+            font-size: 0.88rem;
+        }
+
+        @media (max-width: 640px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+
+            .card {
+                padding: 22px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+<div class="page">
+
+    <div class="brand">
+        <h1>Peach Suite Pro</h1>
+        <p>Start your Solo subscription</p>
+    </div>
+
+    <div class="card">
+
+        {% if error_message %}
+            <div class="alert alert-error">
+                {{ error_message }}
+            </div>
+        {% endif %}
+
+        {% if success_message %}
+            <div class="alert alert-success">
+                {{ success_message }}
+            </div>
+        {% endif %}
+
+        {% if signup_stage == "checkout_returned" %}
+
+            <h2>We're confirming your subscription</h2>
+
+            <div class="alert alert-success">
+                Your secure Stripe Checkout has returned to
+                Peach Suite Pro.
+            </div>
+
+            <p class="intro">
+                We're securely confirming your subscription
+                before activating your Peach Suite Pro account.
+            </p>
+
+            <p class="note">
+                Your account is not activated from this page alone.
+                Once Stripe confirmation is received and your
+                account is prepared, we'll send your Peach Suite Pro
+                owner invitation by email.
+            </p>
+
+            {% if signup_record.ten_dlc_assistance_selected %}
+                <p class="note">
+                    Your 10DLC Setup Assistance request is saved
+                    separately. The $50 assistance fee is not part
+                    of your Stripe subscription checkout.
+                </p>
+            {% endif %}
+
+        {% elif signup_stage == "phone_verified" %}
+
+            <h2>Mobile number verified</h2>
+
+            <div class="alert alert-success">
+                Your mobile number has been verified successfully.
+            </div>
+
+            <p class="intro">
+                Your Peach Suite Pro Solo signup is ready for
+                secure checkout.
+            </p>
+
+            <form
+                method="POST"
+                action="{{ url_for('stripe_signup_checkout') }}"
+            >
+                <input
+                    type="hidden"
+                    name="csrf_token"
+                    value="{{ csrf_token }}"
+                >
+
+                <button type="submit">
+                    Continue to Secure Checkout
+                </button>
+            </form>
+
+            <p class="note">
+                Stripe securely handles your Peach Suite Pro Solo
+                subscription and payment method.
+            </p>
+
+            {% if signup_record.ten_dlc_assistance_selected %}
+                <p class="note">
+                    Your $50 10DLC Setup Assistance request is saved
+                    separately and is not included in this Stripe
+                    subscription checkout.
+                </p>
+            {% endif %}
+
+        {% elif signup_stage == "verify_phone" %}
+
+            <h2>Verify your mobile number</h2>
+
+            <p class="intro">
+                We sent a six-digit verification code to
+                <span class="verification-number">
+                    {{ masked_phone }}
+                </span>.
+                Enter the code below before continuing to
+                secure checkout.
+            </p>
+
+            <form
+                method="POST"
+                action="{{ url_for('stripe_signup_verify_phone') }}"
+            >
+                <input
+                    type="hidden"
+                    name="csrf_token"
+                    value="{{ csrf_token }}"
+                >
+
+                <div class="field">
+                    <label for="verification_code">
+                        Verification code
+                    </label>
+
+                    <input
+                        type="text"
+                        id="verification_code"
+                        name="verification_code"
+                        inputmode="numeric"
+                        autocomplete="one-time-code"
+                        pattern="[0-9]{6}"
+                        maxlength="6"
+                        required
+                    >
+                </div>
+
+                <button type="submit">
+                    Verify Mobile Number
+                </button>
+            </form>
+
+            <form
+                method="POST"
+                action="{{ url_for('stripe_signup_send_phone_code') }}"
+            >
+                <input
+                    type="hidden"
+                    name="csrf_token"
+                    value="{{ csrf_token }}"
+                >
+
+                <button
+                    type="submit"
+                    class="secondary-button"
+                >
+                    Send Another Code
+                </button>
+            </form>
+
+            <p class="note">
+                Verification codes expire after 10 minutes.
+                For your security, resend and failed-attempt
+                limits apply.
+            </p>
+
+        {% else %}
+
+            <h2>Start your 10-day free trial</h2>
+
+            <p class="intro">
+                Peach Suite Pro Solo includes client management,
+                appointment scheduling, PeachBook, PeachWeb,
+                business financial tools, inventory, Coach Peach,
+                Square integration, and import/export tools.
+            </p>
+
+            <div class="price">
+                <strong>Solo</strong><br>
+                $49/month or $490/year after the
+                10-day free trial.
+            </div>
+
+            <form
+                method="POST"
+                action="{{ url_for('stripe_signup') }}"
+            >
+                <input
+                    type="hidden"
+                    name="csrf_token"
+                    value="{{ csrf_token }}"
+                >
+
+                <div class="grid">
+
+                    <div class="field full">
+                        <label for="business_name">
+                            Business name
+                        </label>
+
+                        <input
+                            type="text"
+                            id="business_name"
+                            name="business_name"
+                            value="{{ form_values.business_name or '' }}"
+                            maxlength="150"
+                            autocomplete="organization"
+                            required
+                        >
+                    </div>
+
+                    <div class="field">
+                        <label for="owner_first_name">
+                            First name
+                        </label>
+
+                        <input
+                            type="text"
+                            id="owner_first_name"
+                            name="owner_first_name"
+                            value="{{ form_values.owner_first_name or '' }}"
+                            maxlength="100"
+                            autocomplete="given-name"
+                            required
+                        >
+                    </div>
+
+                    <div class="field">
+                        <label for="owner_last_name">
+                            Last name
+                        </label>
+
+                        <input
+                            type="text"
+                            id="owner_last_name"
+                            name="owner_last_name"
+                            value="{{ form_values.owner_last_name or '' }}"
+                            maxlength="100"
+                            autocomplete="family-name"
+                            required
+                        >
+                    </div>
+
+                    <div class="field">
+                        <label for="owner_email">
+                            Email
+                        </label>
+
+                        <input
+                            type="email"
+                            id="owner_email"
+                            name="owner_email"
+                            value="{{ form_values.owner_email or '' }}"
+                            maxlength="255"
+                            autocomplete="email"
+                            required
+                        >
+                    </div>
+
+                    <div class="field">
+                        <label for="owner_phone">
+                            Personal mobile number
+                        </label>
+
+                        <input
+                            type="tel"
+                            id="owner_phone"
+                            name="owner_phone"
+                            value="{{ form_values.owner_phone or '' }}"
+                            autocomplete="tel"
+                            required
+                        >
+                    </div>
+
+                    <div class="field">
+                        <label for="timezone_name">
+                            Business timezone
+                        </label>
+
+                        <select
+                            id="timezone_name"
+                            name="timezone_name"
+                            required
+                        >
+                            <option
+                                value="America/New_York"
+                                {% if form_values.timezone_name == "America/New_York" %}
+                                    selected
+                                {% endif %}
+                            >
+                                Eastern Time
+                            </option>
+
+                            <option
+                                value="America/Chicago"
+                                {% if not form_values.timezone_name or form_values.timezone_name == "America/Chicago" %}
+                                    selected
+                                {% endif %}
+                            >
+                                Central Time
+                            </option>
+
+                            <option
+                                value="America/Denver"
+                                {% if form_values.timezone_name == "America/Denver" %}
+                                    selected
+                                {% endif %}
+                            >
+                                Mountain Time
+                            </option>
+
+                            <option
+                                value="America/Phoenix"
+                                {% if form_values.timezone_name == "America/Phoenix" %}
+                                    selected
+                                {% endif %}
+                            >
+                                Arizona
+                            </option>
+
+                            <option
+                                value="America/Los_Angeles"
+                                {% if form_values.timezone_name == "America/Los_Angeles" %}
+                                    selected
+                                {% endif %}
+                            >
+                                Pacific Time
+                            </option>
+
+                            <option
+                                value="America/Anchorage"
+                                {% if form_values.timezone_name == "America/Anchorage" %}
+                                    selected
+                                {% endif %}
+                            >
+                                Alaska Time
+                            </option>
+
+                            <option
+                                value="Pacific/Honolulu"
+                                {% if form_values.timezone_name == "Pacific/Honolulu" %}
+                                    selected
+                                {% endif %}
+                            >
+                                Hawaii Time
+                            </option>
+                        </select>
+                    </div>
+
+                    <div class="field">
+                        <label for="billing_interval">
+                            Billing
+                        </label>
+
+                        <select
+                            id="billing_interval"
+                            name="billing_interval"
+                            required
+                        >
+                            <option
+                                value="month"
+                                {% if form_values.billing_interval != "year" %}
+                                    selected
+                                {% endif %}
+                            >
+                                Monthly — $49/month
+                            </option>
+
+                            <option
+                                value="year"
+                                {% if form_values.billing_interval == "year" %}
+                                    selected
+                                {% endif %}
+                            >
+                                Annual — $490/year
+                            </option>
+                        </select>
+                    </div>
+
+                    <div class="field">
+                        <label for="discount_code">
+                            Discount code
+                            <span class="note">(optional)</span>
+                        </label>
+
+                        <input
+                            type="text"
+                            id="discount_code"
+                            name="discount_code"
+                            value="{{ form_values.discount_code or '' }}"
+                            maxlength="100"
+                            autocomplete="off"
+                        >
+                    </div>
+
+                </div>
+
+                <div class="check-row">
+                    <input
+                        type="checkbox"
+                        id="sms_addon_selected"
+                        name="sms_addon_selected"
+                        value="1"
+                        {% if form_values.sms_addon_selected %}
+                            checked
+                        {% endif %}
+                    >
+
+                    <label for="sms_addon_selected">
+                        I am interested in Peach Suite Pro SMS.
+                        SMS service is activated only after required
+                        10DLC approval.
+                    </label>
+                </div>
+
+                <div class="check-row">
+                    <input
+                        type="checkbox"
+                        id="ten_dlc_assistance_selected"
+                        name="ten_dlc_assistance_selected"
+                        value="1"
+                        {% if form_values.ten_dlc_assistance_selected %}
+                            checked
+                        {% endif %}
+                    >
+
+                    <label for="ten_dlc_assistance_selected">
+                        Add $50 one-time 10DLC registration assistance.
+                    </label>
+                </div>
+
+                <div class="check-row">
+                    <input
+                        type="checkbox"
+                        id="terms_accepted"
+                        name="terms_accepted"
+                        value="1"
+                        required
+                    >
+
+                    <label for="terms_accepted">
+                        I agree to the Peach Suite Pro Subscription
+                        Terms, version {{ subscription_terms_version }}.
+                    </label>
+                </div>
+
+                <p class="note">
+                    A card will be required at secure Stripe Checkout.
+                    Your Solo subscription will begin billing after the
+                    10-day free trial unless canceled before the trial ends.
+                </p>
+
+                <button type="submit">
+                    Continue and Verify Mobile Number
+                </button>
+
+            </form>
+
+        {% endif %}
+
+    </div>
+
+    <div class="footer">
+        © 2026 Just Peachy Data LLC · Peach Suite Pro
+    </div>
+
+</div>
+</body>
+</html>

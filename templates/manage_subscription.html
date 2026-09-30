@@ -1,0 +1,212 @@
+{% extends "base.html" %}
+{% block title %}Manage Subscription | Peach Suite Pro{% endblock %}
+
+{% block content %}
+
+<h1>Manage Subscription</h1>
+
+<p>
+    Review your Peach Suite Pro plan, trial, and billing status.
+</p>
+
+<section class="form-card">
+
+    <h2>Plan</h2>
+
+    <p>
+        <strong>Plan:</strong>
+        {{ subscription_summary.tier_name or "Not Available" }}
+    </p>
+
+    <p>
+        <strong>PSP Status:</strong>
+        {{ subscription_summary.psp_status or "Not Available" }}
+    </p>
+
+    {% if subscription_summary.stripe_status %}
+        <p>
+            <strong>Billing Status:</strong>
+            {{ subscription_summary.stripe_status | replace("_", " ") | title }}
+        </p>
+    {% endif %}
+
+</section>
+
+
+{% if subscription_summary.show_trial_card %}
+
+<section class="form-card">
+
+    <h2>Free Trial</h2>
+
+    <p>
+        <strong>
+            {{ subscription_summary.days_remaining }}
+            {% if subscription_summary.days_remaining == 1 %}
+                day remaining
+            {% else %}
+                days remaining
+            {% endif %}
+        </strong>
+    </p>
+
+    {% if subscription_summary.trial_end %}
+        <p>
+            Your free trial ends
+            <strong>
+                {{ subscription_summary.trial_end.strftime(
+                    "%B %-d, %Y at %-I:%M %p"
+                ) }}
+            </strong>.
+        </p>
+    {% endif %}
+
+    {% if subscription_summary.amount_display %}
+        <p>
+            After the trial,
+            <strong>
+                {{ subscription_summary.amount_display }}
+                {% if subscription_summary.billing_interval == "month" %}
+                    per month
+                {% elif subscription_summary.billing_interval == "year" %}
+                    per year
+                {% endif %}
+            </strong>
+            will begin unless the subscription is canceled.
+        </p>
+    {% endif %}
+
+</section>
+
+{% endif %}
+
+
+{% if subscription_summary.stripe_billing_account_id %}
+
+<section class="form-card">
+
+    <h2>Billing</h2>
+
+    {% if subscription_summary.amount_display %}
+        <p>
+            <strong>Subscription Amount:</strong>
+            {{ subscription_summary.amount_display }}
+
+            {% if subscription_summary.billing_interval == "month" %}
+                / month
+            {% elif subscription_summary.billing_interval == "year" %}
+                / year
+            {% endif %}
+        </p>
+    {% endif %}
+
+    {% if subscription_summary.current_period_end %}
+        <p>
+            <strong>Current Billing Period Ends:</strong>
+            {{ subscription_summary.current_period_end.strftime(
+                "%B %-d, %Y"
+            ) }}
+        </p>
+    {% endif %}
+
+    {% if subscription_summary.cancel_at_period_end %}
+        <p>
+            <strong>Cancellation Scheduled:</strong>
+            Your subscription will remain available through the
+            current subscription period and will not renew afterward.
+        </p>
+    {% endif %}
+
+</section>
+
+{% else %}
+
+<section class="form-card">
+
+    <h2>Billing</h2>
+
+    <p>
+        No Stripe-managed billing account is associated with this
+        Peach Suite Pro business.
+    </p>
+
+</section>
+
+{% endif %}
+
+
+<section class="form-card">
+
+    <h2>Subscription Changes</h2>
+
+    {% if subscription_summary.stripe_billing_account_id %}
+
+        {% if subscription_summary.cancel_at_period_end %}
+
+            <p>
+                Your subscription cancellation is already scheduled.
+            </p>
+
+            <p>
+                If you change your mind before the subscription ends,
+                you can keep your Peach Suite Pro subscription and
+                continue renewal normally.
+            </p>
+
+            <div class="form-buttons">
+                <form
+                    method="POST"
+                    action="{{ url_for('keep_subscription') }}"
+                >
+                    <input
+                        type="hidden"
+                        name="security_csrf_token"
+                        value="{{ security_csrf_token }}"
+                    >
+
+                    <button
+                        type="submit"
+                        class="btn"
+                    >
+                        Keep My Subscription
+                    </button>
+                </form>
+            </div>
+
+        {% else %}
+
+            <p>
+                You may schedule your Peach Suite Pro subscription
+                to cancel at the end of the current trial or billing
+                period.
+            </p>
+
+            <div class="form-buttons">
+                <a
+                    href="{{ url_for('cancel_subscription') }}"
+                    class="btn btn-danger"
+                >
+                    Cancel Subscription
+                </a>
+            </div>
+
+        {% endif %}
+
+        <p>
+            Payment-method updates and invoice history will be
+            available here in a future update.
+        </p>
+
+    {% else %}
+
+        <p>
+            Subscription changes are not available because no
+            Stripe-managed billing account is associated with this
+            business.
+        </p>
+
+    {% endif %}
+
+</section>
+
+{% endblock %}
