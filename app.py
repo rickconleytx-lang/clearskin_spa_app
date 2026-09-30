@@ -110906,8 +110906,6 @@ def coach_welcome_get_started():
     conn = get_db_connection()
     cur = conn.cursor()
 
-    first_onboarding_start = False
-
     try:
         cur.execute(
             """
@@ -110934,16 +110932,11 @@ def coach_welcome_get_started():
               AND waiting_on_initial_activation = FALSE
               AND completed_at IS NULL
               AND onboarding_started_at IS NULL
-            RETURNING business_onboarding_id
             """,
             (
                 spa_id,
                 user_id,
             ),
-        )
-
-        first_onboarding_start = (
-            cur.fetchone() is not None
         )
 
         conn.commit()
@@ -110964,36 +110957,37 @@ def coach_welcome_get_started():
 
     session.pop("coach_welcome_dismissed", None)
 
-    if first_onboarding_start:
-        try:
-            notice_result = (
-                _send_onboarding_started_master_admin_notice(
-                    spa_id=spa_id,
-                    user_id=user_id,
-                )
+    try:
+        notice_result = (
+            _send_onboarding_started_master_admin_notice(
+                spa_id=spa_id,
+                user_id=user_id,
             )
+        )
 
-            app.logger.info(
-                (
-                    "New subscriber onboarding-start notice "
-                    "result for spa_id=%s: %s"
-                ),
-                spa_id,
-                notice_result.get("status"),
-            )
+        app.logger.info(
+            (
+                "New subscriber onboarding-start notice "
+                "result for spa_id=%s: %s"
+            ),
+            spa_id,
+            notice_result.get("status"),
+        )
 
-        except Exception:
-            app.logger.exception(
-                (
-                    "Unexpected new subscriber onboarding-start "
-                    "notice failure for spa_id=%s."
-                ),
-                spa_id,
-            )
+    except Exception:
+        app.logger.exception(
+            (
+                "Unexpected new subscriber onboarding-start "
+                "notice failure for spa_id=%s."
+            ),
+            spa_id,
+        )
 
     return redirect(
-        url_for("morning_briefing")
-        + "#onboarding-setup"
+        url_for(
+            "service_types",
+            onboarding=1,
+        )
     )
 
 ################################################################
