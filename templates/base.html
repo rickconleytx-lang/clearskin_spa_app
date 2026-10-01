@@ -577,6 +577,19 @@
         {% endif %}
 
 
+        {% if "import_export" in subscription_entitlements %}
+
+            <a href="{{ url_for('import_center') }}"
+               class="app-side-panel-link">
+
+                <span aria-hidden="true">📥</span>
+                <span>Import Center</span>
+
+            </a>
+
+        {% endif %}
+
+
         {% if nav_access.can_view_communications %}
             {% include "partials/communication_menu.html" %}
         {% endif %}
