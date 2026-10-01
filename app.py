@@ -38935,7 +38935,7 @@ def current_sms_email_terms_version():
 
 
 SUBSCRIPTION_TERMS_SETTING_KEY = "subscription_terms_version"
-SUBSCRIPTION_TERMS_DEFAULT_VERSION = "v1.0"
+SUBSCRIPTION_TERMS_DEFAULT_VERSION = "1.0"
 
 
 def current_subscription_terms_version():
@@ -60889,6 +60889,11 @@ def master_admin_settings():
                 "sms_email_terms_version_changed"
             )
             display_label = "SMS & Email Terms"
+            version_pattern = r"v\d+\.\d+"
+            version_error_message = (
+                "Terms version must use a format such as "
+                "v1.0, v1.1, or v2.0."
+            )
             audit_notes = (
                 "Master Admin changed the required "
                 "SMS & Email Terms version. Businesses "
@@ -60904,20 +60909,26 @@ def master_admin_settings():
                 SUBSCRIPTION_TERMS_DEFAULT_VERSION
             )
             setting_label = (
-                "Current Subscription Terms Version"
+                "Current SaaS License Version"
             )
             setting_group = "subscriptions"
             audit_action = (
                 "subscription_terms_version_changed"
             )
             display_label = (
-                "Peach Suite Pro Subscription Terms"
+                "Peach Suite Pro SaaS License & Data "
+                "Responsibility Agreement"
+            )
+            version_pattern = r"\d+\.\d+"
+            version_error_message = (
+                "SaaS License version must use a format such as "
+                "1.0, 1.1, or 2.0."
             )
             audit_notes = (
                 "Master Admin changed the current "
-                "Peach Suite Pro Subscription Terms "
-                "version used for new subscription "
-                "signup acceptance."
+                "Peach Suite Pro SaaS License & Data "
+                "Responsibility Agreement version used "
+                "for new subscription signup acceptance."
             )
 
         else:
@@ -60932,12 +60943,11 @@ def master_admin_settings():
         ).strip().lower()
 
         if not re.fullmatch(
-            r"v\d+\.\d+",
+            version_pattern,
             new_terms_version
         ):
             flash(
-                "Terms version must use a format such as "
-                "v1.0, v1.1, or v2.0.",
+                version_error_message,
                 "error"
             )
 
