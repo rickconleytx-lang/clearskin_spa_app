@@ -1199,6 +1199,40 @@
 
 <script>
 document.addEventListener("DOMContentLoaded", function () {
+    document.querySelectorAll(
+        "form"
+    ).forEach(function (form) {
+        const actionInput = form.querySelector(
+            'input[name="mfa_action"][value="code_verify"]'
+        );
+
+        if (!actionInput) {
+            return;
+        }
+
+        let submitted = false;
+
+        form.addEventListener("submit", function (event) {
+            if (submitted) {
+                event.preventDefault();
+                return;
+            }
+
+            submitted = true;
+
+            const submitButton = form.querySelector(
+                'button[type="submit"]'
+            );
+
+            if (submitButton) {
+                submitButton.disabled = true;
+                submitButton.textContent = "Verifying...";
+            }
+        });
+    });
+});
+
+document.addEventListener("DOMContentLoaded", function () {
     const codesElement = document.getElementById(
         "mfaRecoveryCodes"
     );
