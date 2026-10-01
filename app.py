@@ -3022,6 +3022,21 @@ def _normalize_public_website_hostname(hostname):
     return hostname
 
 
+def _is_public_marketing_host(hostname):
+    """
+    Return True only for the Peach Suite Pro public marketing hosts.
+    """
+
+    normalized = _normalize_public_website_hostname(
+        hostname
+    )
+
+    return normalized in {
+        "peachsuitepro.com",
+        "www.peachsuitepro.com",
+    }
+
+
 def _is_public_support_host(hostname):
     """
     Return True only for the Peach Suite Pro public Support host.
@@ -5335,6 +5350,49 @@ def _render_public_tenant_home(tenant):
         website_links=
             content["website_links"],
     )
+
+
+@app.before_request
+def route_public_marketing_site():
+    """
+    Serve the Peach Suite Pro public marketing site on the
+    system root and www hostnames without affecting customer
+    PeachWeb sites or normal PSP application routes.
+    """
+
+    if not _is_public_marketing_host(
+        request.host
+    ):
+        return None
+
+    if request.method not in (
+        "GET",
+        "HEAD",
+    ):
+        return None
+
+    if request.path == "/":
+        return render_template(
+            "public_site/psp_home.html"
+        )
+
+    if request.path in {
+        "/subscription-packages",
+        "/subscription-packages/",
+    }:
+        return render_template(
+            "public_site/psp_packages.html"
+        )
+
+    if request.path in {
+        "/pricing",
+        "/pricing/",
+    }:
+        return render_template(
+            "public_site/psp_pricing.html"
+        )
+
+    return None
 
 
 @app.before_request
@@ -43068,11 +43126,11 @@ DROPDOWN_CONFIG = {
     },
 
     "treatment_rooms": {
-        "title": "Treatment Rooms",
+        "title": "Rooms / Resources",
         "table": "treatment_rooms",
         "pk": "room_id",
         "value": "room_name",
-        "label": "Room Name",
+        "label": "Room / Resource Name",
         "spa_scoped": True,
         "active_column": "is_active",
         "order_by": "room_name"
@@ -43101,11 +43159,11 @@ DROPDOWN_CONFIG = {
     },
 
     "spa_locations": {
-        "title": "Spa Locations",
+        "title": "Business Locations",
         "table": "spa_locations",
         "pk": "spa_location_id",
         "value": "location_name",
-        "label": "Spa Locations",
+        "label": "Business Location",
         "spa_scoped": True,
         "active_column": "is_active",
         "order_by": "location_name"

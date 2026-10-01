@@ -1,0 +1,1453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Peach Suite Pro | Business Operations Platform</title>
+    <meta name="description"
+          content="Peach Suite Pro helps service-based businesses manage clients, appointments, booking, websites, finances, inventory, communication, and more from one connected platform.">
+
+    <style>
+        :root {
+            --black: #0b0b0c;
+            --charcoal: #171718;
+            --charcoal-2: #222224;
+            --warm-gray: #ceccc4;
+            --light-gray: #f3f2ee;
+            --white: #ffffff;
+            --ink: #1d1d1f;
+            --muted: #676767;
+            --orange: #ff8c00;
+            --orange-bright: #ffab22;
+            --green: #2ebe2e;
+            --blue: #00a6db;
+            --radius: 22px;
+            --shadow: 0 24px 60px rgba(0, 0, 0, .18);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            margin: 0;
+            color: var(--ink);
+            background: var(--warm-gray);
+            font-family: "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+        }
+
+        h1,
+        h2,
+        h3,
+        .brand,
+        .eyebrow,
+        .nav-link,
+        .btn {
+            font-family: "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+        }
+
+        a {
+            color: inherit;
+        }
+
+        img {
+            display: block;
+            max-width: 100%;
+        }
+
+        .container {
+            width: min(1180px, calc(100% - 40px));
+            margin: 0 auto;
+        }
+
+        .site-header {
+            position: absolute;
+            inset: 0 0 auto 0;
+            z-index: 20;
+            border-bottom: 1px solid rgba(255,255,255,.10);
+            background: linear-gradient(
+                to bottom,
+                rgba(0,0,0,.72),
+                rgba(0,0,0,.10)
+            );
+        }
+
+        .nav {
+            min-height: 82px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 28px;
+        }
+
+        .brand {
+            color: #fff;
+            font-weight: 800;
+            letter-spacing: .04em;
+            text-decoration: none;
+            font-size: 1.02rem;
+            white-space: nowrap;
+        }
+
+        .nav-links {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 24px;
+            flex-wrap: wrap;
+        }
+
+        .nav-link {
+            color: rgba(255,255,255,.88);
+            text-decoration: none;
+            text-transform: uppercase;
+            font-size: .82rem;
+            font-weight: 700;
+            letter-spacing: .08em;
+        }
+
+        .nav-link:hover {
+            color: #fff;
+        }
+
+        .nav-trial {
+            padding: 11px 18px;
+            border-radius: 999px;
+            background: var(--orange);
+            color: #111;
+        }
+
+        .nav-trial:hover {
+            background: var(--orange-bright);
+            color: #000;
+        }
+
+        .hero {
+            min-height: 850px;
+            color: white;
+            display: flex;
+            align-items: center;
+            position: relative;
+            overflow: hidden;
+            background:
+                radial-gradient(circle at 78% 35%, rgba(46,190,46,.18), transparent 30%),
+                radial-gradient(circle at 65% 60%, rgba(0,166,219,.16), transparent 27%),
+                radial-gradient(circle at 20% 35%, rgba(255,140,0,.22), transparent 32%),
+                linear-gradient(135deg, #070707 0%, #151515 55%, #090909 100%);
+            padding: 150px 0 130px;
+        }
+
+        .hero::before {
+            content: "";
+            position: absolute;
+            width: 700px;
+            height: 700px;
+            border: 1px solid rgba(255,255,255,.08);
+            border-radius: 50%;
+            right: -190px;
+            top: 110px;
+            box-shadow:
+                0 0 0 80px rgba(255,255,255,.025),
+                0 0 0 160px rgba(255,255,255,.018);
+        }
+
+        .hero-grid {
+            position: relative;
+            z-index: 2;
+            display: grid;
+            grid-template-columns: 1.06fr .94fr;
+            gap: 72px;
+            align-items: center;
+        }
+
+        .eyebrow {
+            display: inline-flex;
+            gap: 9px;
+            align-items: center;
+            padding: 8px 13px;
+            margin-bottom: 24px;
+            border: 1px solid rgba(255,255,255,.18);
+            border-radius: 999px;
+            background: rgba(255,255,255,.06);
+            color: #f6f6f6;
+            font-size: .78rem;
+            text-transform: uppercase;
+            font-weight: 800;
+            letter-spacing: .12em;
+        }
+
+        .eyebrow::before {
+            content: "";
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--green);
+            box-shadow: 0 0 18px rgba(46,190,46,.85);
+        }
+
+        .hero h1 {
+            margin: 0 0 26px;
+            font-size: clamp(3rem, 6vw, 5.7rem);
+            line-height: .98;
+            letter-spacing: -.045em;
+            max-width: 850px;
+        }
+
+        .hero h1 span {
+            background: linear-gradient(
+                90deg,
+                #ff5a24 0%,
+                #ffad14 25%,
+                #61db1e 54%,
+                #00b4d8 82%,
+                #2f9ef5 100%
+            );
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+        }
+
+        .hero-copy {
+            max-width: 710px;
+            font-size: clamp(1.08rem, 1.8vw, 1.32rem);
+            color: rgba(255,255,255,.76);
+            margin: 0 0 34px;
+        }
+
+        .hero-actions {
+            display: flex;
+            gap: 14px;
+            flex-wrap: wrap;
+            margin-bottom: 26px;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 54px;
+            padding: 0 25px;
+            border-radius: 999px;
+            text-decoration: none;
+            text-transform: uppercase;
+            letter-spacing: .065em;
+            font-size: .83rem;
+            font-weight: 800;
+            transition: transform .2s ease, box-shadow .2s ease, background .2s ease;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .btn-primary {
+            background: linear-gradient(90deg, #ff7919, #ffae17);
+            color: #151515;
+            box-shadow: 0 12px 34px rgba(255,140,0,.24);
+        }
+
+        .btn-secondary {
+            border: 1px solid rgba(255,255,255,.32);
+            color: white;
+            background: rgba(255,255,255,.06);
+        }
+
+        .btn-dark {
+            background: #121212;
+            color: white;
+        }
+
+        .btn-outline-dark {
+            border: 1px solid #202020;
+            color: #161616;
+            background: transparent;
+        }
+
+        .trial-note {
+            color: rgba(255,255,255,.58);
+            font-size: .92rem;
+        }
+
+        .hero-logo-wrap {
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 520px;
+        }
+
+        .hero-logo-wrap::before {
+            content: "";
+            position: absolute;
+            inset: 7% 4%;
+            border-radius: 50%;
+            background:
+                radial-gradient(circle at 35% 30%, rgba(255,140,0,.30), transparent 30%),
+                radial-gradient(circle at 70% 45%, rgba(46,190,46,.25), transparent 32%),
+                radial-gradient(circle at 55% 78%, rgba(0,166,219,.23), transparent 30%);
+            filter: blur(30px);
+        }
+
+        .hero-logo {
+            position: relative;
+            z-index: 2;
+            width: min(620px, 100%);
+            filter: drop-shadow(0 32px 35px rgba(0,0,0,.52));
+        }
+
+        .wave {
+            position: absolute;
+            bottom: -1px;
+            left: 0;
+            width: 100%;
+            height: 80px;
+            color: var(--warm-gray);
+            line-height: 0;
+        }
+
+        .wave svg {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        .intro {
+            padding: 90px 0 105px;
+            background: var(--warm-gray);
+        }
+
+        .section-heading {
+            text-align: center;
+            max-width: 840px;
+            margin: 0 auto 54px;
+        }
+
+        .section-kicker {
+            color: #4e4d49;
+            font-weight: 800;
+            letter-spacing: .12em;
+            text-transform: uppercase;
+            font-size: .78rem;
+            margin-bottom: 10px;
+        }
+
+        .section-heading h2 {
+            margin: 0 0 18px;
+            font-size: clamp(2.25rem, 4.4vw, 4.2rem);
+            line-height: 1.03;
+            letter-spacing: -.035em;
+        }
+
+        .section-heading p {
+            margin: 0;
+            color: #4e4d49;
+            font-size: 1.1rem;
+        }
+
+        .impact-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 18px;
+        }
+
+        .impact-card {
+            background: rgba(255,255,255,.72);
+            border: 1px solid rgba(0,0,0,.07);
+            padding: 32px;
+            border-radius: var(--radius);
+            box-shadow: 0 16px 36px rgba(0,0,0,.07);
+        }
+
+        .impact-card .number {
+            font-size: 2.5rem;
+            font-weight: 800;
+            margin-bottom: 6px;
+        }
+
+        .impact-card p {
+            margin: 0;
+            color: #585858;
+        }
+
+        .dark-section {
+            position: relative;
+            background: #0d0d0e;
+            color: white;
+            padding: 115px 0;
+            overflow: hidden;
+        }
+
+        .dark-section::before {
+            content: "";
+            position: absolute;
+            width: 720px;
+            height: 720px;
+            border-radius: 50%;
+            right: -320px;
+            top: -230px;
+            background: radial-gradient(circle, rgba(255,140,0,.13), transparent 65%);
+        }
+
+        .dark-section .section-kicker {
+            color: #b6b6b6;
+        }
+
+        .dark-section .section-heading p {
+            color: #aaa;
+        }
+
+        .feature-grid {
+            position: relative;
+            z-index: 2;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 18px;
+        }
+
+        .feature-card {
+            min-height: 240px;
+            padding: 30px;
+            border-radius: var(--radius);
+            border: 1px solid rgba(255,255,255,.10);
+            background:
+                linear-gradient(
+                    145deg,
+                    rgba(255,255,255,.075),
+                    rgba(255,255,255,.025)
+                );
+        }
+
+        .feature-icon {
+            width: 48px;
+            height: 48px;
+            display: grid;
+            place-items: center;
+            border-radius: 14px;
+            margin-bottom: 26px;
+            background: linear-gradient(135deg, #ff8c00, #2ebe2e);
+            color: #0a0a0a;
+            font-weight: 900;
+            font-size: 1.05rem;
+        }
+
+        .feature-card h3 {
+            margin: 0 0 10px;
+            font-size: 1.35rem;
+        }
+
+        .feature-card p {
+            margin: 0;
+            color: #aaa;
+        }
+
+        .product-section {
+            padding: 115px 0;
+            background: #f6f6f4;
+        }
+
+        .product-section.alt {
+            background: #e5e3dd;
+        }
+
+        .product-row {
+            display: grid;
+            grid-template-columns: .92fr 1.08fr;
+            gap: 80px;
+            align-items: center;
+        }
+
+        .product-row.reverse {
+            grid-template-columns: 1.08fr .92fr;
+        }
+
+        .product-row.reverse .product-visual {
+            order: 2;
+        }
+
+        .product-visual {
+            min-height: 430px;
+            border-radius: 30px;
+            overflow: hidden;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 50px;
+            box-shadow: var(--shadow);
+            background:
+                radial-gradient(circle at 30% 25%, rgba(255,140,0,.44), transparent 28%),
+                radial-gradient(circle at 70% 65%, rgba(0,166,219,.30), transparent 30%),
+                linear-gradient(135deg, #161616, #2a2a2a);
+        }
+
+        .product-visual.green {
+            background:
+                radial-gradient(circle at 65% 30%, rgba(46,190,46,.42), transparent 30%),
+                radial-gradient(circle at 20% 70%, rgba(255,140,0,.34), transparent 32%),
+                linear-gradient(135deg, #101010, #242424);
+        }
+
+        .product-visual .mock-window {
+            width: 100%;
+            border-radius: 20px;
+            overflow: hidden;
+            background: #f7f7f7;
+            box-shadow: 0 25px 55px rgba(0,0,0,.40);
+        }
+
+        .mock-bar {
+            height: 46px;
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            padding: 0 16px;
+            background: #252525;
+        }
+
+        .mock-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #777;
+        }
+
+        .mock-content {
+            padding: 24px;
+            color: #1c1c1c;
+        }
+
+        .mock-title {
+            height: 20px;
+            width: 46%;
+            border-radius: 6px;
+            background: #1c1c1c;
+            margin-bottom: 22px;
+        }
+
+        .mock-row {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+        }
+
+        .mock-card {
+            min-height: 92px;
+            border-radius: 12px;
+            background: #e8e8e8;
+        }
+
+        .mock-card:nth-child(2) {
+            background: #d9ead8;
+        }
+
+        .mock-card:nth-child(3) {
+            background: #fde1bf;
+        }
+
+        .product-copy .label {
+            color: #696969;
+            text-transform: uppercase;
+            letter-spacing: .12em;
+            font-size: .78rem;
+            font-weight: 800;
+        }
+
+        .product-copy h2 {
+            margin: 10px 0 18px;
+            font-size: clamp(2.45rem, 4vw, 4.25rem);
+            line-height: 1.02;
+            letter-spacing: -.04em;
+        }
+
+        .product-copy p {
+            color: #555;
+            font-size: 1.08rem;
+            margin-bottom: 24px;
+        }
+
+        .check-list {
+            list-style: none;
+            padding: 0;
+            margin: 28px 0 0;
+            display: grid;
+            gap: 13px;
+        }
+
+        .check-list li {
+            position: relative;
+            padding-left: 31px;
+        }
+
+        .check-list li::before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            top: 0;
+            font-weight: 900;
+            color: #168a16;
+        }
+
+        .coach-section {
+            padding: 120px 0;
+            background:
+                radial-gradient(circle at 10% 15%, rgba(255,140,0,.18), transparent 32%),
+                radial-gradient(circle at 88% 80%, rgba(46,190,46,.14), transparent 30%),
+                #111112;
+            color: white;
+        }
+
+        .coach-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 70px;
+            align-items: center;
+        }
+
+        .coach-copy h2 {
+            margin: 8px 0 20px;
+            font-size: clamp(2.7rem, 4.8vw, 4.8rem);
+            line-height: 1;
+            letter-spacing: -.04em;
+        }
+
+        .coach-copy p {
+            color: #bcbcbc;
+            font-size: 1.08rem;
+        }
+
+        .coach-card {
+            border-radius: 28px;
+            padding: 36px;
+            border: 1px solid rgba(255,255,255,.11);
+            background: rgba(255,255,255,.055);
+            box-shadow: 0 25px 65px rgba(0,0,0,.28);
+        }
+
+        .coach-card .brief-line {
+            display: flex;
+            justify-content: space-between;
+            gap: 24px;
+            padding: 17px 0;
+            border-bottom: 1px solid rgba(255,255,255,.09);
+        }
+
+        .coach-card .brief-line:last-child {
+            border-bottom: 0;
+        }
+
+        .coach-card .brief-line span:first-child {
+            color: #bdbdbd;
+        }
+
+        .coach-card .brief-line strong {
+            color: #fff;
+        }
+
+        .pricing-preview {
+            padding: 110px 0;
+            background: var(--warm-gray);
+        }
+
+        .pricing-card {
+            max-width: 880px;
+            margin: 0 auto;
+            padding: 50px;
+            border-radius: 30px;
+            background: white;
+            box-shadow: var(--shadow);
+            display: grid;
+            grid-template-columns: 1.2fr .8fr;
+            gap: 48px;
+            align-items: center;
+        }
+
+        .pricing-card h2 {
+            margin: 0 0 12px;
+            font-size: 3rem;
+            letter-spacing: -.04em;
+        }
+
+        .price {
+            font-size: 3.8rem;
+            line-height: 1;
+            font-weight: 900;
+            margin: 18px 0 10px;
+        }
+
+        .price small {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #777;
+        }
+
+        .price-meta {
+            color: #666;
+            margin-bottom: 26px;
+        }
+
+        .price-actions {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .mini-list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            display: grid;
+            gap: 12px;
+        }
+
+        .mini-list li {
+            padding: 12px 0 12px 28px;
+            border-bottom: 1px solid #ececec;
+            position: relative;
+        }
+
+        .mini-list li::before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            color: #1c9a1c;
+            font-weight: 900;
+        }
+
+        .mission {
+            padding: 110px 0;
+            background: #f7f7f5;
+        }
+
+        .mission-grid {
+            display: grid;
+            grid-template-columns: .8fr 1.2fr;
+            gap: 70px;
+            align-items: center;
+        }
+
+        .company-logo-card {
+            background: #2a2a2b;
+            border-radius: 28px;
+            padding: 34px;
+            box-shadow: var(--shadow);
+        }
+
+        .company-logo-card img {
+            border-radius: 18px;
+        }
+
+        .mission h2 {
+            margin: 8px 0 20px;
+            font-size: clamp(2.5rem, 4vw, 4rem);
+            letter-spacing: -.04em;
+            line-height: 1.03;
+        }
+
+        .mission p {
+            color: #585858;
+            font-size: 1.08rem;
+        }
+
+        .final-cta {
+            position: relative;
+            overflow: hidden;
+            text-align: center;
+            padding: 120px 0 135px;
+            background: #0d0d0e;
+            color: white;
+        }
+
+        .final-cta::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background:
+                radial-gradient(circle at 20% 60%, rgba(255,140,0,.18), transparent 32%),
+                radial-gradient(circle at 80% 38%, rgba(46,190,46,.14), transparent 28%);
+        }
+
+        .final-cta .container {
+            position: relative;
+            z-index: 2;
+        }
+
+        .final-cta h2 {
+            margin: 0 auto 22px;
+            max-width: 900px;
+            font-size: clamp(2.8rem, 5vw, 5.2rem);
+            line-height: 1;
+            letter-spacing: -.045em;
+        }
+
+        .final-cta p {
+            max-width: 690px;
+            margin: 0 auto 34px;
+            color: #bcbcbc;
+            font-size: 1.12rem;
+        }
+
+        footer {
+            background: #2ebe2e;
+            color: #101010;
+            padding: 56px 0 34px;
+        }
+
+        .footer-grid {
+            display: grid;
+            grid-template-columns: 1.4fr .6fr;
+            gap: 50px;
+        }
+
+        .footer-brand {
+            font-weight: 900;
+            font-size: 1.3rem;
+            margin-bottom: 10px;
+        }
+
+        .footer-copy {
+            max-width: 620px;
+            margin: 0;
+        }
+
+        .footer-links {
+            display: flex;
+            gap: 18px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            align-content: flex-start;
+        }
+
+        .footer-links a {
+            font-weight: 800;
+            text-decoration: none;
+            font-size: .92rem;
+        }
+
+        .footer-bottom {
+            border-top: 1px solid rgba(0,0,0,.20);
+            margin-top: 38px;
+            padding-top: 25px;
+            font-size: .88rem;
+        }
+
+        @media (max-width: 900px) {
+            .nav-links {
+                gap: 13px;
+            }
+
+            .hero-grid,
+            .product-row,
+            .product-row.reverse,
+            .coach-grid,
+            .pricing-card,
+            .mission-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .hero-logo-wrap {
+                min-height: 350px;
+            }
+
+            .product-row.reverse .product-visual {
+                order: initial;
+            }
+
+            .feature-grid,
+            .impact-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+
+            .pricing-card {
+                padding: 38px;
+            }
+
+            .footer-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .footer-links {
+                justify-content: flex-start;
+            }
+        }
+
+        @media (max-width: 680px) {
+            .site-header {
+                position: relative;
+                background: #0b0b0c;
+            }
+
+            .nav {
+                align-items: flex-start;
+                flex-direction: column;
+                padding: 22px 0;
+            }
+
+            .nav-links {
+                width: 100%;
+                justify-content: flex-start;
+            }
+
+            .hero {
+                padding-top: 80px;
+                min-height: auto;
+            }
+
+            .hero h1 {
+                font-size: 3.25rem;
+            }
+
+            .feature-grid,
+            .impact-grid,
+            .mock-row {
+                grid-template-columns: 1fr;
+            }
+
+            .product-visual {
+                min-height: 300px;
+                padding: 24px;
+            }
+
+            .pricing-card {
+                padding: 30px 24px;
+            }
+
+            .price {
+                font-size: 3rem;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+<header class="site-header">
+    <div class="container nav">
+        <a class="brand" href="/">PEACH SUITE PRO</a>
+
+        <nav class="nav-links" aria-label="Main navigation">
+            <a class="nav-link" href="#features">Features</a>
+            <a class="nav-link" href="#peachweb">PeachWeb + PeachBook</a>
+            <a class="nav-link" href="/subscription-packages">Packages</a>
+            <a class="nav-link" href="/pricing">Pricing</a>
+            <a class="nav-link" href="https://support.peachsuitepro.com/">Support</a>
+            <a class="nav-link" href="/login">Login</a>
+            <a class="nav-link nav-trial" href="/signup/solo">Start Free Trial</a>
+        </nav>
+    </div>
+</header>
+
+<main>
+
+<section class="hero">
+    <div class="container hero-grid">
+
+        <div>
+            <div class="eyebrow">Business Operations Platform</div>
+
+            <h1>
+                Helping Business Owners Stay Focused on
+                <span>Their Business, Not Their Software.</span>
+            </h1>
+
+            <p class="hero-copy">
+                Peach Suite Pro brings the tools service-based businesses use every day
+                into one connected platform — clients, appointments, online booking,
+                websites, business finances, inventory, communication, reporting,
+                and more.
+            </p>
+
+            <div class="hero-actions">
+                <a class="btn btn-primary" href="/signup/solo">
+                    Start Your 10-Day Free Trial
+                </a>
+
+                <a class="btn btn-secondary" href="/pricing">
+                    View Pricing
+                </a>
+            </div>
+
+            <div class="trial-note">
+                Solo is $49/month or $490/year after the 10-day free trial.
+            </div>
+        </div>
+
+        <div class="hero-logo-wrap">
+            <img
+                class="hero-logo"
+                src="{{ url_for('static', filename='images/Marketing/peach_suite_pro_logo_trans.png') }}"
+                alt="Peach Suite Pro">
+        </div>
+
+    </div>
+
+    <div class="wave" aria-hidden="true">
+        <svg viewBox="0 0 1200 120" preserveAspectRatio="none">
+            <path
+                d="M0,60 C200,95 400,20 600,60 C800,100 1000,25 1200,60 L1200,120 L0,120 Z"
+                fill="currentColor"></path>
+        </svg>
+    </div>
+</section>
+
+
+<section class="intro">
+    <div class="container">
+
+        <div class="section-heading">
+            <div class="section-kicker">One connected system</div>
+            <h2>Built to simplify the work behind your business.</h2>
+            <p>
+                Peach Suite Pro is designed to reduce the number of disconnected
+                systems a business owner has to manage while keeping daily operations
+                clear, organized, and accessible.
+            </p>
+        </div>
+
+        <div class="impact-grid">
+
+            <div class="impact-card">
+                <div class="number">01</div>
+                <h3>Operate</h3>
+                <p>
+                    Keep clients, appointments, services, income, expenses,
+                    inventory, and business activity organized.
+                </p>
+            </div>
+
+            <div class="impact-card">
+                <div class="number">02</div>
+                <h3>Connect</h3>
+                <p>
+                    Bring your website, online booking, communication,
+                    and customer experience together.
+                </p>
+            </div>
+
+            <div class="impact-card">
+                <div class="number">03</div>
+                <h3>Understand</h3>
+                <p>
+                    Use dashboards, reporting, and Coach Peach to stay aware
+                    of what needs your attention.
+                </p>
+            </div>
+
+        </div>
+    </div>
+</section>
+
+
+<section class="dark-section" id="features">
+    <div class="container">
+
+        <div class="section-heading">
+            <div class="section-kicker">What Peach Suite Pro helps you do</div>
+            <h2>More of your business in one place.</h2>
+            <p>
+                Replace repetitive work and disconnected information with tools
+                designed to work together.
+            </p>
+        </div>
+
+        <div class="feature-grid">
+
+            <article class="feature-card">
+                <div class="feature-icon">C</div>
+                <h3>Client Management</h3>
+                <p>
+                    Organize client information, contact details, history,
+                    notes, preferences, and activity.
+                </p>
+            </article>
+
+            <article class="feature-card">
+                <div class="feature-icon">A</div>
+                <h3>Appointments</h3>
+                <p>
+                    Schedule, manage, and track appointments with business
+                    and provider availability built in.
+                </p>
+            </article>
+
+            <article class="feature-card">
+                <div class="feature-icon">B</div>
+                <h3>PeachBook</h3>
+                <p>
+                    Give customers a connected online booking experience
+                    using the services and hours you manage in Peach Suite Pro.
+                </p>
+            </article>
+
+            <article class="feature-card">
+                <div class="feature-icon">W</div>
+                <h3>PeachWeb</h3>
+                <p>
+                    Create a professional business web presence that works
+                    alongside PeachBook and your PSP business information.
+                </p>
+            </article>
+
+            <article class="feature-card">
+                <div class="feature-icon">$</div>
+                <h3>Business Financials</h3>
+                <p>
+                    Track income, expenses, loans, payment activity,
+                    and the numbers that help explain business performance.
+                </p>
+            </article>
+
+            <article class="feature-card">
+                <div class="feature-icon">I</div>
+                <h3>Inventory</h3>
+                <p>
+                    Keep business inventory visible and organized alongside
+                    the rest of your operations.
+                </p>
+            </article>
+
+            <article class="feature-card">
+                <div class="feature-icon">S</div>
+                <h3>Square Integration</h3>
+                <p>
+                    Connect Square payment information with Peach Suite Pro
+                    for clearer business records and reconciliation.
+                </p>
+            </article>
+
+            <article class="feature-card">
+                <div class="feature-icon">↕</div>
+                <h3>Import &amp; Export</h3>
+                <p>
+                    Bring existing business information into Peach Suite Pro
+                    and export your data when you need it.
+                </p>
+            </article>
+
+            <article class="feature-card">
+                <div class="feature-icon">P</div>
+                <h3>Performance Visibility</h3>
+                <p>
+                    Use dashboards, operational summaries, and reports
+                    to see what is happening across the business.
+                </p>
+            </article>
+
+        </div>
+    </div>
+</section>
+
+
+<section class="product-section" id="peachweb">
+    <div class="container product-row">
+
+        <div class="product-visual">
+            <div class="mock-window">
+                <div class="mock-bar">
+                    <span class="mock-dot"></span>
+                    <span class="mock-dot"></span>
+                    <span class="mock-dot"></span>
+                </div>
+
+                <div class="mock-content">
+                    <div class="mock-title"></div>
+
+                    <div class="mock-row">
+                        <div class="mock-card"></div>
+                        <div class="mock-card"></div>
+                        <div class="mock-card"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="product-copy">
+            <div class="label">Introducing PeachWeb</div>
+            <h2>Your website and your business should work together.</h2>
+
+            <p>
+                PeachWeb gives Peach Suite Pro businesses a professional online
+                presence connected to the same information used to operate the business.
+                Build a custom web page without needing to become a web developer.
+            </p>
+
+            <ul class="check-list">
+                <li>Built into Peach Suite Pro</li>
+                <li>Designed for your business and brand</li>
+                <li>Works together with PeachBook</li>
+                <li>Update business information from one system</li>
+            </ul>
+
+            <p style="margin-top:30px;">
+                <a class="btn btn-dark"
+                   href="https://clearskinesthetics.peachsuitepro.com/"
+                   target="_blank"
+                   rel="noopener">
+                    Visit a PeachWeb Site
+                </a>
+            </p>
+        </div>
+
+    </div>
+</section>
+
+
+<section class="product-section alt">
+    <div class="container product-row reverse">
+
+        <div class="product-visual green">
+            <div class="mock-window">
+                <div class="mock-bar">
+                    <span class="mock-dot"></span>
+                    <span class="mock-dot"></span>
+                    <span class="mock-dot"></span>
+                </div>
+
+                <div class="mock-content">
+                    <div class="mock-title" style="width:62%;"></div>
+
+                    <div class="mock-row">
+                        <div class="mock-card" style="min-height:130px;"></div>
+                        <div class="mock-card" style="min-height:130px;"></div>
+                        <div class="mock-card" style="min-height:130px;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="product-copy">
+            <div class="label">Introducing PeachBook</div>
+            <h2>Turn online visitors into booked customers.</h2>
+
+            <p>
+                With PeachBook, customers can explore services and book appointments
+                online using the services, pricing, business hours, provider hours,
+                and availability managed inside Peach Suite Pro.
+            </p>
+
+            <ul class="check-list">
+                <li>Online service browsing</li>
+                <li>Connected booking availability</li>
+                <li>Business and provider hours</li>
+                <li>Designed to work with PeachWeb</li>
+            </ul>
+
+            <p style="margin-top:30px;">
+                <a class="btn btn-dark"
+                   href="https://clearskinesthetics.peachsuitepro.com/book/clear-skin-esthetics"
+                   target="_blank"
+                   rel="noopener">
+                    Visit a PeachBook Site
+                </a>
+            </p>
+        </div>
+
+    </div>
+</section>
+
+
+<section class="coach-section">
+    <div class="container coach-grid">
+
+        <div class="coach-copy">
+            <div class="section-kicker" style="color:#aaa;">Meet Coach Peach</div>
+            <h2>Your business deserves more than another dashboard.</h2>
+
+            <p>
+                Coach Peach helps surface the operational information that deserves
+                your attention so you can spend less time looking for answers and more
+                time running your business.
+            </p>
+
+            <p>
+                Daily Briefing brings important activity, upcoming appointments,
+                overdue items, revenue information, and setup progress together
+                in one place.
+            </p>
+        </div>
+
+        <div class="coach-card">
+            <div class="eyebrow" style="margin-bottom:18px;">Daily Briefing</div>
+
+            <div class="brief-line">
+                <span>Operational Health</span>
+                <strong>Ready</strong>
+            </div>
+
+            <div class="brief-line">
+                <span>Today's Revenue</span>
+                <strong>Visible</strong>
+            </div>
+
+            <div class="brief-line">
+                <span>Tomorrow</span>
+                <strong>Prepared</strong>
+            </div>
+
+            <div class="brief-line">
+                <span>7-Day Outlook</span>
+                <strong>Connected</strong>
+            </div>
+
+            <div class="brief-line">
+                <span>Imports &amp; Setup</span>
+                <strong>Tracked</strong>
+            </div>
+        </div>
+
+    </div>
+</section>
+
+
+<section class="pricing-preview">
+    <div class="container">
+
+        <div class="section-heading">
+            <div class="section-kicker">Simple starting point</div>
+            <h2>Start with Peach Suite Pro Solo.</h2>
+            <p>
+                A complete single-user business operations platform for independent
+                service professionals.
+            </p>
+        </div>
+
+        <div class="pricing-card">
+
+            <div>
+                <div class="section-kicker">Solo</div>
+                <h2>One business. One owner. One connected system.</h2>
+
+                <div class="price">
+                    $49
+                    <small>/ month</small>
+                </div>
+
+                <div class="price-meta">
+                    Or $490/year. Start with a 10-day free trial.
+                </div>
+
+                <div class="price-actions">
+                    <a class="btn btn-primary" href="/signup/solo">
+                        Start Free Trial
+                    </a>
+
+                    <a class="btn btn-outline-dark" href="/pricing">
+                        View Full Pricing
+                    </a>
+                </div>
+            </div>
+
+            <ul class="mini-list">
+                <li>Client Management</li>
+                <li>Appointment Calendar</li>
+                <li>PeachBook</li>
+                <li>PeachWeb</li>
+                <li>Income &amp; Expenses</li>
+                <li>Inventory</li>
+                <li>Coach Peach</li>
+                <li>Square Integration</li>
+                <li>Import &amp; Export</li>
+            </ul>
+
+        </div>
+    </div>
+</section>
+
+
+<section class="mission">
+    <div class="container mission-grid">
+
+        <div class="company-logo-card">
+            <img
+                src="{{ url_for('static', filename='images/Marketing/just_peachy_data_logo.png') }}"
+                alt="Just Peachy Data">
+        </div>
+
+        <div>
+            <div class="section-kicker">Our Mission</div>
+            <h2>Software built around the business owner.</h2>
+
+            <p>
+                Peach Suite Pro is a Business Operations Platform designed to help
+                businesses organize, operate, and grow with confidence.
+            </p>
+
+            <p>
+                Our goal is to provide service-based businesses with a secure,
+                reliable, and practical system that reduces unnecessary complexity
+                and keeps the owner connected to the information that matters.
+            </p>
+
+            <p>
+                Peach Suite Pro is developed by Just Peachy Data LLC.
+            </p>
+        </div>
+
+    </div>
+</section>
+
+
+<section class="final-cta">
+    <div class="container">
+        <h2>Helping Your Business Bear Fruit™</h2>
+
+        <p>
+            Spend more time building the business you wanted to create
+            and less time managing disconnected software.
+        </p>
+
+        <div class="hero-actions" style="justify-content:center;">
+            <a class="btn btn-primary" href="/signup/solo">
+                Start Your 10-Day Free Trial
+            </a>
+
+            <a class="btn btn-secondary" href="/login">
+                Peach Suite Pro Login
+            </a>
+        </div>
+    </div>
+</section>
+
+</main>
+
+
+<footer>
+    <div class="container">
+
+        <div class="footer-grid">
+
+            <div>
+                <div class="footer-brand">PEACH SUITE PRO</div>
+
+                <p class="footer-copy">
+                    Peach Suite Pro by Just Peachy Data LLC.<br>
+                    Business operations software designed to help service-based
+                    businesses stay organized, connected, and informed.
+                </p>
+            </div>
+
+            <nav class="footer-links" aria-label="Footer navigation">
+                <a href="/">Home</a>
+                <a href="/pricing">Pricing</a>
+                <a href="https://support.peachsuitepro.com/">Support</a>
+                <a href="/login">Login</a>
+                <a href="/signup/solo">Start Trial</a>
+            </nav>
+
+        </div>
+
+        <div class="footer-bottom">
+            Just Peachy Data LLC. All rights reserved.<br>
+            © 2026 Peach Suite Pro • Coach Peach • PeachPOS • PeachWeb • PeachBook<br>
+            Helping Your Business Bear Fruit™
+        </div>
+
+    </div>
+</footer>
+
+</body>
+</html>

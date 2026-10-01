@@ -67,7 +67,7 @@ Cat 2
         Public Website Settings
     </a>
 
-    <a class="btn" href="{{ url_for('manage_dropdown', dropdown_key='treatment_rooms') }}">Treatment Rooms</a>
+    <a class="btn" href="{{ url_for('manage_dropdown', dropdown_key='treatment_rooms') }}">Rooms / Resources</a>
 </div>
 
 <br>
@@ -83,11 +83,11 @@ Cat 2
 
 <br>
 
-<h2>Spa Management</h2>
+<h2>Business Management</h2>
 <div class="admin-links">
     <a class="btn" 
         href="{{ url_for('manage_dropdown', dropdown_key='spa_locations') }}">
-        Spa Locations
+        Business Locations
     </a>
     
     <a class="btn"  
@@ -116,7 +116,7 @@ Cat 2
     </a>
 </div>
 <br>
-<p style="color: red";>Important:  Each Spa MUST set their Time Zone</p>
+<p style="color: red";>Important: Each Business MUST set its Time Zone</p>
 
 <div class="admin-section">
     <h2>Time Settings</h2>
@@ -153,53 +153,6 @@ Cat 2
         <br>
         <button type="submit" class="btn">Save Time Settings</button>
     </form>
-</div>
-
-
-
-<div class="admin-section">
-    <h2>Booking & Calendar Integration Settings</h2>
-
-    <div class="form-group">
-        <label for="integration_provider">Integration Provider</label>
-        <select name="integration_provider" id="integration_provider">
-            <option value="manual">Manual Only</option>
-            <option value="google_calendar">Google Calendar</option>
-            <option value="square">Square</option>
-            <option value="godaddy">GoDaddy</option>
-            <option value="outlook_calendar">Outlook Calendar</option>
-            <option value="other">Other</option>
-        </select>
-    </div>
-
-    <div class="form-group">
-        <label>
-            <input type="checkbox" name="sync_enabled">
-            Enable Calendar Sync
-        </label>
-    </div>
-
-    <div class="form-group">
-        <label for="external_calendar_id">External Calendar ID / Email</label>
-        <input type="text" name="external_calendar_id" id="external_calendar_id">
-    </div>
-
-    <div class="form-group">
-        <label for="website_booking_provider">Website Booking Provider</label>
-        <select name="website_booking_provider" id="website_booking_provider">
-            <option value="">None</option>
-            <option value="square">Square</option>
-            <option value="godaddy">GoDaddy</option>
-            <option value="other">Other</option>
-        </select>
-    </div>
-
-    <div class="form-group">
-        <label for="provider_notes">Provider Notes</label>
-        <textarea name="provider_notes" id="provider_notes" rows="3"></textarea>
-    </div>
-
-    <button type="button" class="btn" disabled>Save Settings (Coming Later)</button>
 </div>
 
 

@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Pricing | Peach Suite Pro</title>
+    <meta name="description"
+          content="Peach Suite Pro pricing for Solo, PeachPOS, Team, and Peach Collective subscription packages.">
+
+    <style>
+        :root {
+            --black: #0b0b0c;
+            --charcoal: #171718;
+            --warm-gray: #ceccc4;
+            --light: #f5f4f1;
+            --white: #fff;
+            --ink: #1d1d1f;
+            --muted: #686868;
+            --orange: #ff8c00;
+            --green: #2ebe2e;
+            --blue: #00a6db;
+            --radius: 24px;
+            --shadow: 0 24px 60px rgba(0,0,0,.14);
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            font-family: "Helvetica Neue", Arial, sans-serif;
+            color: var(--ink);
+            background: var(--warm-gray);
+            line-height: 1.6;
+        }
+
+        a { color: inherit; }
+
+        .container {
+            width: min(1180px, calc(100% - 40px));
+            margin: 0 auto;
+        }
+
+        .site-header {
+            background: var(--black);
+            color: #fff;
+            border-bottom: 1px solid rgba(255,255,255,.1);
+        }
+
+        .nav {
+            min-height: 82px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 24px;
+        }
+
+        .brand {
+            color: #fff;
+            font-weight: 900;
+            letter-spacing: .04em;
+            text-decoration: none;
+        }
+
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 22px;
+            flex-wrap: wrap;
+        }
+
+        .nav-links a {
+            color: rgba(255,255,255,.88);
+            text-decoration: none;
+            text-transform: uppercase;
+            font-size: .8rem;
+            font-weight: 800;
+            letter-spacing: .07em;
+        }
+
+        .nav-links .trial {
+            color: #111;
+            background: var(--orange);
+            border-radius: 999px;
+            padding: 10px 17px;
+        }
+
+        .hero {
+            position: relative;
+            overflow: hidden;
+            padding: 105px 0 120px;
+            text-align: center;
+            color: #fff;
+            background:
+                radial-gradient(circle at 18% 35%, rgba(255,140,0,.18), transparent 28%),
+                radial-gradient(circle at 82% 55%, rgba(46,190,46,.15), transparent 27%),
+                #111112;
+        }
+
+        .hero-logo {
+            width: min(420px, 76vw);
+            margin-bottom: 34px;
+            filter: drop-shadow(0 24px 34px rgba(0,0,0,.4));
+        }
+
+        .hero h1 {
+            max-width: 900px;
+            margin: 0 auto 20px;
+            font-size: clamp(3rem, 6vw, 5.6rem);
+            line-height: .98;
+            letter-spacing: -.045em;
+        }
+
+        .hero p {
+            max-width: 720px;
+            margin: 0 auto;
+            color: #bdbdbd;
+            font-size: 1.15rem;
+        }
+
+        .pricing-section {
+            padding: 100px 0 115px;
+        }
+
+        .section-heading {
+            max-width: 820px;
+            margin: 0 auto 52px;
+            text-align: center;
+        }
+
+        .section-heading h2 {
+            margin: 0 0 15px;
+            font-size: clamp(2.4rem, 4vw, 4rem);
+            line-height: 1.03;
+            letter-spacing: -.035em;
+        }
+
+        .section-heading p {
+            margin: 0;
+            color: #555;
+        }
+
+        .pricing-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 24px;
+        }
+
+        .price-card {
+            position: relative;
+            padding: 38px;
+            border-radius: var(--radius);
+            background: #fff;
+            box-shadow: var(--shadow);
+            overflow: hidden;
+        }
+
+        .price-card.featured {
+            background: #111112;
+            color: #fff;
+        }
+
+        .price-card::before {
+            content: "";
+            position: absolute;
+            inset: 0 0 auto 0;
+            height: 7px;
+            background: linear-gradient(90deg, var(--orange), var(--green), var(--blue));
+        }
+
+        .status {
+            display: inline-block;
+            margin-bottom: 20px;
+            padding: 7px 12px;
+            border-radius: 999px;
+            font-size: .76rem;
+            font-weight: 900;
+            letter-spacing: .07em;
+            text-transform: uppercase;
+        }
+
+        .status.live {
+            color: #176c17;
+            background: #daf3d8;
+        }
+
+        .status.coming {
+            color: #8b5100;
+            background: #fff0d4;
+        }
+
+        .price-card h3 {
+            margin: 0 0 12px;
+            font-size: 2rem;
+        }
+
+        .amount {
+            display: flex;
+            align-items: flex-end;
+            gap: 7px;
+            margin-bottom: 4px;
+        }
+
+        .amount strong {
+            font-size: 3.8rem;
+            line-height: 1;
+            letter-spacing: -.05em;
+        }
+
+        .amount span {
+            padding-bottom: 7px;
+            color: #777;
+            font-weight: 700;
+        }
+
+        .featured .amount span,
+        .featured .summary,
+        .featured .annual-note,
+        .featured li {
+            color: #bdbdbd;
+        }
+
+        .annual {
+            margin: 7px 0 18px;
+            font-weight: 800;
+        }
+
+        .annual-note {
+            color: #666;
+            font-size: .9rem;
+        }
+
+        .summary {
+            margin: 22px 0;
+            color: #575757;
+        }
+
+        .price-card ul {
+            padding-left: 20px;
+            margin: 20px 0 28px;
+        }
+
+        .price-card li {
+            margin: 7px 0;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 52px;
+            padding: 0 24px;
+            border-radius: 999px;
+            text-decoration: none;
+            text-transform: uppercase;
+            font-size: .8rem;
+            font-weight: 900;
+            letter-spacing: .06em;
+        }
+
+        .btn-primary {
+            color: #111;
+            background: linear-gradient(90deg, #ff7919, #ffae17);
+        }
+
+        .btn-light {
+            color: #111;
+            background: #fff;
+        }
+
+        .btn-disabled {
+            color: #666;
+            background: #ddd;
+            cursor: default;
+        }
+
+        .trial-box {
+            margin-top: 26px;
+            padding: 20px;
+            border-radius: 16px;
+            background: rgba(255,255,255,.07);
+            border: 1px solid rgba(255,255,255,.1);
+        }
+
+        .trial-box strong {
+            color: var(--orange);
+        }
+
+        .billing {
+            padding: 100px 0;
+            background: #111112;
+            color: #fff;
+        }
+
+        .billing .section-heading p {
+            color: #aaa;
+        }
+
+        .billing-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 22px;
+        }
+
+        .billing-card {
+            padding: 30px;
+            border-radius: 22px;
+            background: rgba(255,255,255,.06);
+            border: 1px solid rgba(255,255,255,.1);
+        }
+
+        .billing-card h3 {
+            margin-top: 0;
+            font-size: 1.4rem;
+        }
+
+        .billing-card p {
+            margin-bottom: 0;
+            color: #bbb;
+        }
+
+        .addons {
+            padding: 100px 0;
+        }
+
+        .addon-card {
+            max-width: 850px;
+            margin: 0 auto;
+            padding: 40px;
+            border-radius: var(--radius);
+            background: #fff;
+            box-shadow: var(--shadow);
+        }
+
+        .addon-card h3 {
+            margin-top: 0;
+            font-size: 2rem;
+        }
+
+        .addon-price {
+            font-size: 1.2rem;
+            font-weight: 900;
+        }
+
+        .bottom-cta {
+            padding: 100px 0;
+            text-align: center;
+            background: #efeee9;
+        }
+
+        .bottom-cta h2 {
+            margin: 0 0 18px;
+            font-size: clamp(2.5rem, 4vw, 4.3rem);
+            line-height: 1;
+            letter-spacing: -.04em;
+        }
+
+        .bottom-cta p {
+            max-width: 720px;
+            margin: 0 auto 30px;
+            color: #555;
+        }
+
+        footer {
+            padding: 45px 0 30px;
+            color: #111;
+            background: var(--green);
+        }
+
+        .footer-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 30px;
+            flex-wrap: wrap;
+        }
+
+        .footer-links {
+            display: flex;
+            gap: 18px;
+            flex-wrap: wrap;
+        }
+
+        .footer-links a {
+            text-decoration: none;
+            font-weight: 800;
+        }
+
+        .copyright {
+            margin-top: 25px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(0,0,0,.2);
+            font-size: .88rem;
+        }
+
+        @media (max-width: 880px) {
+            .pricing-grid,
+            .billing-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .nav {
+                flex-direction: column;
+                align-items: flex-start;
+                padding: 20px 0;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+<header class="site-header">
+    <div class="container nav">
+        <a class="brand" href="/">PEACH SUITE PRO</a>
+
+        <nav class="nav-links">
+            <a href="/">Home</a>
+            <a href="/subscription-packages">Packages</a>
+            <a href="/pricing">Pricing</a>
+            <a href="https://support.peachsuitepro.com/">Support</a>
+            <a href="/login">Login</a>
+            <a class="trial" href="/signup/solo">Start Free Trial</a>
+        </nav>
+    </div>
+</header>
+
+<main>
+
+<section class="hero">
+    <div class="container">
+        <img
+            class="hero-logo"
+            src="{{ url_for('static', filename='images/Marketing/peach_suite_pro_logo_trans.png') }}"
+            alt="Peach Suite Pro">
+
+        <h1>Simple pricing. Powerful business tools.</h1>
+
+        <p>
+            Choose the Peach Suite Pro package that fits how your business operates.
+            Solo is available now, with additional packages arriving throughout
+            October and November.
+        </p>
+    </div>
+</section>
+
+
+<section class="pricing-section">
+    <div class="container">
+
+        <div class="section-heading">
+            <h2>Peach Suite Pro Pricing</h2>
+            <p>
+                Monthly and annual billing options make it easy to choose
+                what works best for your business.
+            </p>
+        </div>
+
+        <div class="pricing-grid">
+
+            <article class="price-card featured">
+                <span class="status live">Available Now</span>
+
+                <h3>🍑 Solo</h3>
+
+                <div class="amount">
+                    <strong>$49</strong>
+                    <span>/ month</span>
+                </div>
+
+                <div class="annual">$490 / year</div>
+                <div class="annual-note">Save two months with annual billing.</div>
+
+                <p class="summary">
+                    Built for independent beauty and wellness professionals who need
+                    clients, appointments, booking, business management, and financial tools.
+                </p>
+
+                <ul>
+                    <li>Client Management</li>
+                    <li>Appointment Calendar</li>
+                    <li>PeachBook online booking</li>
+                    <li>PeachWeb custom website</li>
+                    <li>Income &amp; Expenses</li>
+                    <li>Inventory</li>
+                    <li>Business Loans</li>
+                    <li>Coach Peach</li>
+                    <li>Square Integration</li>
+                    <li>Import / Export</li>
+                </ul>
+
+                <a class="btn btn-primary" href="/signup/solo">
+                    Start 10-Day Free Trial
+                </a>
+
+                <div class="trial-box">
+                    <strong>10-day free trial.</strong><br>
+                    A payment method is required at checkout.
+                    Billing begins after the trial unless canceled before it ends.
+                </div>
+            </article>
+
+
+            <article class="price-card">
+                <span class="status coming">Available October 14</span>
+
+                <h3>🍑 PeachPOS</h3>
+
+                <div class="amount">
+                    <strong>$49</strong>
+                    <span>/ month</span>
+                </div>
+
+                <div class="annual">$490 / year</div>
+                <div class="annual-note">Save two months with annual billing.</div>
+
+                <p class="summary">
+                    Built for sales-focused businesses that use Square POS and do not
+                    need client or appointment scheduling tools.
+                </p>
+
+                <ul>
+                    <li>Event Calendar</li>
+                    <li>Inventory</li>
+                    <li>Income &amp; Expenses</li>
+                    <li>Business Loans</li>
+                    <li>Square Integration</li>
+                    <li>Email</li>
+                    <li>Coach Peach</li>
+                    <li>PeachWeb</li>
+                    <li>Employees</li>
+                    <li>Import / Export</li>
+                </ul>
+
+                <span class="btn btn-disabled">Coming October 14</span>
+            </article>
+
+
+            <article class="price-card">
+                <span class="status coming">Available October 28</span>
+
+                <h3>👥 Team</h3>
+
+                <div class="amount">
+                    <strong>$75</strong>
+                    <span>/ month</span>
+                </div>
+
+                <div class="annual">$750 / year</div>
+                <div class="annual-note">Annual billing available.</div>
+
+                <p class="summary">
+                    For businesses where employees work together under one company
+                    and the owner manages the overall operation.
+                </p>
+
+                <ul>
+                    <li>Everything included in Solo</li>
+                    <li>Employee Management</li>
+                    <li>Individual employee logins</li>
+                    <li>Provider availability and services</li>
+                    <li>Provider time off</li>
+                    <li>Role-based access</li>
+                    <li>Owner-only financial areas</li>
+                </ul>
+
+                <span class="btn btn-disabled">Coming October 28</span>
+            </article>
+
+
+            <article class="price-card">
+                <span class="status coming">Available November 11</span>
+
+                <h3>🍑 Peach Collective</h3>
+
+                <div class="amount">
+                    <strong>$49</strong>
+                    <span>/ provider / month</span>
+                </div>
+
+                <div class="annual">$490 / provider / year</div>
+                <div class="annual-note">Priced independently for each provider.</div>
+
+                <p class="summary">
+                    For independent professionals who work together while maintaining
+                    private clients, finances, settings, and business operations.
+                </p>
+
+                <ul>
+                    <li>Private provider workspace</li>
+                    <li>Private clients and finances</li>
+                    <li>Individual PeachBook booking</li>
+                    <li>Individual services and availability</li>
+                    <li>Optional shared visibility and resources</li>
+                    <li>Shared branding where appropriate</li>
+                </ul>
+
+                <span class="btn btn-disabled">Coming November 11</span>
+            </article>
+
+        </div>
+    </div>
+</section>
+
+
+<section class="billing">
+    <div class="container">
+
+        <div class="section-heading">
+            <h2>Know what to expect.</h2>
+            <p>
+                Peach Suite Pro keeps subscription pricing straightforward
+                while giving you flexibility in how you pay.
+            </p>
+        </div>
+
+        <div class="billing-grid">
+
+            <article class="billing-card">
+                <h3>Monthly Billing</h3>
+                <p>
+                    Choose monthly billing when you prefer a smaller recurring
+                    payment and maximum flexibility.
+                </p>
+            </article>
+
+            <article class="billing-card">
+                <h3>Annual Billing</h3>
+                <p>
+                    Annual pricing is available for each published Peach Suite Pro
+                    package and can reduce the overall yearly subscription cost.
+                </p>
+            </article>
+
+            <article class="billing-card">
+                <h3>Secure Checkout</h3>
+                <p>
+                    Solo trial signup continues through Peach Suite Pro's secure
+                    Stripe checkout process.
+                </p>
+            </article>
+
+        </div>
+    </div>
+</section>
+
+
+<section class="addons">
+    <div class="container">
+
+        <div class="section-heading">
+            <h2>Optional SMS Setup Assistance</h2>
+            <p>
+                For businesses that want SMS messaging through Peach Suite Pro.
+            </p>
+        </div>
+
+        <article class="addon-card">
+            <span class="status coming">Begins October 10</span>
+
+            <h3>10DLC Registration Assistance</h3>
+
+            <div class="addon-price">
+                $50 one-time setup assistance + $5 additional per month
+            </div>
+
+            <p>
+                Just Peachy Data can assist with preparing your business information,
+                website compliance, SMS consent language, messaging examples,
+                and the 10DLC registration submission process.
+            </p>
+
+            <p>
+                Final approval is determined by the applicable mobile carriers and
+                messaging registration providers. Carrier, provider, phone-number,
+                registration, and usage charges may be separate where applicable.
+            </p>
+        </article>
+    </div>
+</section>
+
+
+<section class="bottom-cta">
+    <div class="container">
+
+        <h2>Ready to get started?</h2>
+
+        <p>
+            Solo is available today. Start your 10-day free trial
+            and begin setting up Peach Suite Pro for your business.
+        </p>
+
+        <a class="btn btn-primary" href="/signup/solo">
+            Start Your 10-Day Free Trial
+        </a>
+
+        <a class="btn btn-light"
+           href="/subscription-packages"
+           style="margin-left:10px;">
+            Compare Packages
+        </a>
+
+    </div>
+</section>
+
+</main>
+
+
+<footer>
+    <div class="container">
+
+        <div class="footer-row">
+            <strong>PEACH SUITE PRO</strong>
+
+            <nav class="footer-links">
+                <a href="/">Home</a>
+                <a href="/subscription-packages">Packages</a>
+                <a href="/pricing">Pricing</a>
+                <a href="https://support.peachsuitepro.com/">Support</a>
+                <a href="/login">Login</a>
+            </nav>
+        </div>
+
+        <div class="copyright">
+            Just Peachy Data LLC. All rights reserved.<br>
+            © 2026 Peach Suite Pro • Coach Peach • PeachPOS • PeachWeb • PeachBook<br>
+            Helping Your Business Bear Fruit™
+        </div>
+
+    </div>
+</footer>
+
+</body>
+</html>

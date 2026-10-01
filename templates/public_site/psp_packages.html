@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Subscription Packages | Peach Suite Pro</title>
+    <meta name="description"
+          content="Compare Peach Suite Pro subscription packages for solo providers, POS businesses, teams, and independent provider collectives.">
+
+    <style>
+        :root {
+            --black: #0b0b0c;
+            --charcoal: #171718;
+            --warm-gray: #ceccc4;
+            --light: #f5f4f1;
+            --white: #fff;
+            --ink: #1d1d1f;
+            --muted: #666;
+            --orange: #ff8c00;
+            --green: #2ebe2e;
+            --blue: #00a6db;
+            --radius: 24px;
+            --shadow: 0 24px 60px rgba(0,0,0,.14);
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            font-family: "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            color: var(--ink);
+            background: var(--warm-gray);
+        }
+
+        a { color: inherit; }
+
+        .container {
+            width: min(1180px, calc(100% - 40px));
+            margin: 0 auto;
+        }
+
+        .site-header {
+            background: #0b0b0c;
+            color: #fff;
+            border-bottom: 1px solid rgba(255,255,255,.1);
+        }
+
+        .nav {
+            min-height: 82px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 24px;
+        }
+
+        .brand {
+            font-weight: 900;
+            letter-spacing: .04em;
+            text-decoration: none;
+        }
+
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 22px;
+            flex-wrap: wrap;
+        }
+
+        .nav-links a {
+            color: rgba(255,255,255,.88);
+            text-decoration: none;
+            text-transform: uppercase;
+            font-size: .8rem;
+            font-weight: 800;
+            letter-spacing: .07em;
+        }
+
+        .nav-links .trial {
+            color: #111;
+            background: var(--orange);
+            border-radius: 999px;
+            padding: 10px 17px;
+        }
+
+        .hero {
+            position: relative;
+            overflow: hidden;
+            padding: 110px 0 125px;
+            color: #fff;
+            text-align: center;
+            background:
+                radial-gradient(circle at 18% 35%, rgba(255,140,0,.18), transparent 28%),
+                radial-gradient(circle at 82% 55%, rgba(46,190,46,.15), transparent 27%),
+                #111112;
+        }
+
+        .hero h1 {
+            margin: 0 auto 20px;
+            max-width: 900px;
+            font-size: clamp(3rem, 6vw, 5.6rem);
+            line-height: .98;
+            letter-spacing: -.045em;
+        }
+
+        .hero p {
+            max-width: 760px;
+            margin: 0 auto;
+            color: #bdbdbd;
+            font-size: 1.15rem;
+        }
+
+        .hero-logo {
+            width: min(440px, 78vw);
+            margin: 0 auto 40px;
+            filter: drop-shadow(0 24px 34px rgba(0,0,0,.4));
+        }
+
+        .packages {
+            padding: 95px 0 110px;
+        }
+
+        .section-heading {
+            text-align: center;
+            max-width: 850px;
+            margin: 0 auto 52px;
+        }
+
+        .section-heading h2 {
+            font-size: clamp(2.3rem, 4vw, 4rem);
+            margin: 0 0 15px;
+            line-height: 1.03;
+            letter-spacing: -.035em;
+        }
+
+        .section-heading p {
+            color: #555;
+            margin: 0;
+        }
+
+        .package-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 24px;
+        }
+
+        .package {
+            position: relative;
+            background: #fff;
+            border-radius: var(--radius);
+            padding: 38px;
+            box-shadow: var(--shadow);
+            overflow: hidden;
+        }
+
+        .package::before {
+            content: "";
+            position: absolute;
+            inset: 0 0 auto 0;
+            height: 7px;
+            background: linear-gradient(90deg, var(--orange), var(--green), var(--blue));
+        }
+
+        .status {
+            display: inline-block;
+            margin-bottom: 18px;
+            padding: 7px 12px;
+            border-radius: 999px;
+            font-size: .76rem;
+            font-weight: 900;
+            letter-spacing: .07em;
+            text-transform: uppercase;
+            background: #ececec;
+        }
+
+        .status.live {
+            background: #daf3d8;
+            color: #176c17;
+        }
+
+        .status.coming {
+            background: #fff0d4;
+            color: #8b5100;
+        }
+
+        .package h3 {
+            margin: 0 0 4px;
+            font-size: 2.1rem;
+            line-height: 1.05;
+        }
+
+        .price {
+            font-size: 1.15rem;
+            font-weight: 800;
+            margin-bottom: 18px;
+        }
+
+        .package .lead {
+            font-weight: 700;
+            font-size: 1.06rem;
+            margin-bottom: 12px;
+        }
+
+        .package p {
+            color: #575757;
+        }
+
+        .package ul {
+            padding-left: 20px;
+            margin: 22px 0;
+        }
+
+        .package li {
+            margin: 7px 0;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 50px;
+            padding: 0 23px;
+            border-radius: 999px;
+            text-decoration: none;
+            text-transform: uppercase;
+            font-size: .8rem;
+            font-weight: 900;
+            letter-spacing: .06em;
+        }
+
+        .btn-primary {
+            background: linear-gradient(90deg, #ff7919, #ffae17);
+            color: #111;
+        }
+
+        .btn-dark {
+            background: #151515;
+            color: #fff;
+        }
+
+        .btn-disabled {
+            background: #ddd;
+            color: #666;
+            cursor: default;
+        }
+
+        .extras {
+            padding: 100px 0;
+            background: #111112;
+            color: #fff;
+        }
+
+        .extras .section-heading p {
+            color: #aaa;
+        }
+
+        .extra-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+        }
+
+        .extra-card {
+            border-radius: var(--radius);
+            padding: 36px;
+            background: rgba(255,255,255,.06);
+            border: 1px solid rgba(255,255,255,.1);
+        }
+
+        .extra-card h3 {
+            font-size: 1.65rem;
+            margin-top: 0;
+        }
+
+        .extra-card p,
+        .extra-card li {
+            color: #bbb;
+        }
+
+        .extra-card strong {
+            color: #fff;
+        }
+
+        .final-cta {
+            text-align: center;
+            padding: 100px 0;
+            background: var(--warm-gray);
+        }
+
+        .final-cta h2 {
+            margin: 0 0 18px;
+            font-size: clamp(2.5rem, 4vw, 4.2rem);
+            letter-spacing: -.04em;
+        }
+
+        .final-cta p {
+            max-width: 720px;
+            margin: 0 auto 30px;
+            color: #555;
+        }
+
+        footer {
+            background: var(--green);
+            padding: 45px 0 30px;
+            color: #111;
+        }
+
+        .footer-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 30px;
+            flex-wrap: wrap;
+        }
+
+        .footer-links {
+            display: flex;
+            gap: 18px;
+            flex-wrap: wrap;
+        }
+
+        .footer-links a {
+            text-decoration: none;
+            font-weight: 800;
+        }
+
+        .copyright {
+            margin-top: 25px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(0,0,0,.2);
+            font-size: .88rem;
+        }
+
+        @media (max-width: 850px) {
+            .package-grid,
+            .extra-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .nav {
+                flex-direction: column;
+                align-items: flex-start;
+                padding: 20px 0;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+<header class="site-header">
+    <div class="container nav">
+        <a class="brand" href="/">PEACH SUITE PRO</a>
+
+        <nav class="nav-links">
+            <a href="/">Home</a>
+            <a href="/subscription-packages">Packages</a>
+            <a href="/pricing">Pricing</a>
+            <a href="https://support.peachsuitepro.com/">Support</a>
+            <a href="/login">Login</a>
+            <a class="trial" href="/signup/solo">Start Free Trial</a>
+        </nav>
+    </div>
+</header>
+
+<main>
+
+<section class="hero">
+    <div class="container">
+        <img
+            class="hero-logo"
+            src="{{ url_for('static', filename='images/Marketing/peach_suite_pro_logo_trans.png') }}"
+            alt="Peach Suite Pro">
+
+        <h1>Choose the Peach Suite Pro package built for your business.</h1>
+
+        <p>
+            Whether you work independently, sell through Square POS, manage employees,
+            or operate as a group of independent providers, Peach Suite Pro is designed
+            to give you the tools that fit the way your business actually works.
+        </p>
+    </div>
+</section>
+
+
+<section class="packages">
+    <div class="container">
+
+        <div class="section-heading">
+            <h2>Subscription Packages</h2>
+            <p>
+                Start with the package that matches your business today.
+                Peach Suite Pro can grow with you as your operation changes.
+            </p>
+        </div>
+
+        <div class="package-grid">
+
+            <article class="package">
+                <span class="status live">Available Now</span>
+
+                <h3>🍑 Solo</h3>
+                <div class="price">$49/month · $490/year</div>
+
+                <p class="lead">
+                    For independent beauty and wellness professionals who want a
+                    simple, professional way to run their business.
+                </p>
+
+                <p>
+                    Perfect for estheticians, hairstylists, massage therapists,
+                    nail professionals, lash artists, and other solo providers.
+                </p>
+
+                <ul>
+                    <li>PeachBook online booking</li>
+                    <li>PeachWeb custom website</li>
+                    <li>Calendar and appointment management</li>
+                    <li>Client profiles and history</li>
+                    <li>Service catalog</li>
+                    <li>Income and expense tracking</li>
+                    <li>Financial and loan tracking</li>
+                    <li>Inventory management</li>
+                    <li>Appointment reminders</li>
+                    <li>Email communications</li>
+                    <li>Business reports</li>
+                    <li>Daily Business Briefing</li>
+                    <li>Coach Peach</li>
+                    <li>Square integration</li>
+                    <li>Import / Export</li>
+                    <li>Secure cloud access</li>
+                </ul>
+
+                <p>
+                    <strong>Already have a website?</strong><br>
+                    Keep it and connect its Book Now button directly to PeachBook.
+                </p>
+
+                <a class="btn btn-primary" href="/signup/solo">
+                    Start 10-Day Free Trial
+                </a>
+            </article>
+
+
+            <article class="package">
+                <span class="status coming">Available October 14</span>
+
+                <h3>🍑 PeachPOS</h3>
+                <div class="price">$49/month · $490/year</div>
+
+                <p class="lead">
+                    For businesses that sell products or services through Square POS
+                    and do not need appointment scheduling or client-management tools.
+                </p>
+
+                <p>
+                    Ideal for food trucks, retail businesses, vendors, boutiques,
+                    and other sales-focused businesses.
+                </p>
+
+                <ul>
+                    <li>PeachWeb custom website</li>
+                    <li>Square POS integration</li>
+                    <li>Business income tracking</li>
+                    <li>Income and expense tracking</li>
+                    <li>Business financing and loans</li>
+                    <li>Inventory management</li>
+                    <li>Event Calendar</li>
+                    <li>Business reports</li>
+                    <li>Email communications</li>
+                    <li>Employee management tools</li>
+                    <li>Daily Business Briefing</li>
+                    <li>Coach Peach</li>
+                    <li>Import / Export</li>
+                    <li>Secure cloud access</li>
+                </ul>
+
+                <span class="btn btn-disabled">Coming October 14</span>
+            </article>
+
+
+            <article class="package">
+                <span class="status coming">Available October 28</span>
+
+                <h3>👥 Team</h3>
+                <div class="price">$75/month · $750/year</div>
+
+                <p class="lead">
+                    For businesses with employees working together under one company.
+                </p>
+
+                <p>
+                    Designed for salons, spas, med spas, wellness businesses,
+                    and other teams where the business owner manages the operation.
+                </p>
+
+                <p><strong>Includes everything in Solo plus:</strong></p>
+
+                <ul>
+                    <li>Individual employee logins</li>
+                    <li>Employee/provider availability</li>
+                    <li>Provider-specific services</li>
+                    <li>Provider time off and scheduling</li>
+                    <li>Employee management</li>
+                    <li>Employee compensation tools</li>
+                    <li>Employee performance reporting</li>
+                    <li>Role-based access controls</li>
+                    <li>Owner-only financial areas</li>
+                    <li>Activity and audit tracking</li>
+                    <li>PeachBook</li>
+                    <li>PeachWeb</li>
+                    <li>Square integration</li>
+                    <li>Import / Export</li>
+                </ul>
+
+                <span class="btn btn-disabled">Coming October 28</span>
+            </article>
+
+
+            <article class="package">
+                <span class="status coming">Available November 11</span>
+
+                <h3>🍑 Peach Collective</h3>
+                <div class="price">$49/provider/month · $490/provider/year</div>
+
+                <p class="lead">
+                    For independent professionals who work together but still operate
+                    their own businesses.
+                </p>
+
+                <p>
+                    Ideal for salon suites, shared spas, collectives,
+                    independent-provider groups, and similar businesses.
+                </p>
+
+                <p><strong>Each provider receives a private workspace with:</strong></p>
+
+                <ul>
+                    <li>Individual PeachBook booking</li>
+                    <li>Private clients</li>
+                    <li>Private income and expenses</li>
+                    <li>Private business reporting</li>
+                    <li>Individual services and pricing</li>
+                    <li>Individual availability</li>
+                    <li>Individual communications</li>
+                    <li>Individual business settings</li>
+                </ul>
+
+                <p><strong>The group can optionally share:</strong></p>
+
+                <ul>
+                    <li>Calendar visibility</li>
+                    <li>Booking experience</li>
+                    <li>Locations</li>
+                    <li>Rooms and resources</li>
+                    <li>Selected client information</li>
+                    <li>Business branding</li>
+                    <li>A common website experience</li>
+                </ul>
+
+                <p><strong>Together when you want to be. Private where it matters.</strong></p>
+
+                <span class="btn btn-disabled">Coming November 11</span>
+            </article>
+
+        </div>
+    </div>
+</section>
+
+
+<section class="extras">
+    <div class="container">
+
+        <div class="section-heading">
+            <h2>Additional Services &amp; Launch Benefits</h2>
+            <p>
+                Peach Suite Pro also offers optional assistance and launch benefits
+                for businesses getting established on the platform.
+            </p>
+        </div>
+
+        <div class="extra-grid">
+
+            <article class="extra-card">
+                <span class="status coming">Begins October 10</span>
+
+                <h3>SMS / 10DLC Registration Assistance</h3>
+
+                <p>
+                    <strong>$50 one-time setup assistance</strong><br>
+                    <strong>$5 additional per month</strong>
+                </p>
+
+                <p>
+                    For businesses wanting text messaging through Peach Suite Pro,
+                    Just Peachy Data can assist with:
+                </p>
+
+                <ul>
+                    <li>10DLC registration preparation</li>
+                    <li>Business information setup</li>
+                    <li>Website compliance requirements</li>
+                    <li>SMS consent language</li>
+                    <li>Privacy and terms requirements</li>
+                    <li>Message examples</li>
+                    <li>Registration submission assistance</li>
+                </ul>
+
+                <p>
+                    Final approval is determined by the applicable mobile carriers
+                    and messaging registration providers. Carrier, provider,
+                    registration, phone-number, and usage charges may be separate.
+                </p>
+            </article>
+
+
+            <article class="extra-card">
+                <h3>Free Domain Name</h3>
+
+                <p>
+                    Just Peachy Data can obtain a domain name for qualifying
+                    Peach Suite Pro subscribers.
+                </p>
+
+                <p>
+                    Maintain the Peach Suite Pro subscription for at least nine months
+                    and the domain can be transferred to you. If the subscription is
+                    canceled earlier, you may purchase the domain for $50.
+                </p>
+
+                <p>
+                    <strong>
+                        Free domain promotion is limited to the first 100 subscribers.
+                    </strong>
+                </p>
+            </article>
+
+        </div>
+    </div>
+</section>
+
+
+<section class="final-cta">
+    <div class="container">
+        <h2>Solo is available now.</h2>
+
+        <p>
+            Start Peach Suite Pro today with a 10-day free trial.
+            Additional packages will roll out throughout October and November.
+        </p>
+
+        <a class="btn btn-primary" href="/signup/solo">
+            Start Your 10-Day Free Trial
+        </a>
+
+        <a class="btn btn-dark" href="/pricing" style="margin-left:10px;">
+            View Pricing
+        </a>
+    </div>
+</section>
+
+</main>
+
+
+<footer>
+    <div class="container">
+
+        <div class="footer-row">
+            <strong>PEACH SUITE PRO</strong>
+
+            <nav class="footer-links">
+                <a href="/">Home</a>
+                <a href="/subscription-packages">Packages</a>
+                <a href="/pricing">Pricing</a>
+                <a href="https://support.peachsuitepro.com/">Support</a>
+                <a href="/login">Login</a>
+            </nav>
+        </div>
+
+        <div class="copyright">
+            Just Peachy Data LLC. All rights reserved.<br>
+            © 2026 Peach Suite Pro • Coach Peach • PeachPOS • PeachWeb • PeachBook<br>
+            Helping Your Business Bear Fruit™
+        </div>
+
+    </div>
+</footer>
+
+</body>
+</html>
