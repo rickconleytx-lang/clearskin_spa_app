@@ -5373,7 +5373,12 @@ def route_public_marketing_site():
 
     if request.path == "/":
         return render_template(
-            "public_site/psp_home.html"
+            "public_site/psp_home.html",
+            contact_csrf_token=(
+                _public_security_csrf_token(
+                    "public_contact"
+                )
+            ),
         )
 
     if request.path in {
@@ -5392,7 +5397,146 @@ def route_public_marketing_site():
             "public_site/psp_pricing.html"
         )
 
+    if request.path in {
+        "/privacy-policy",
+        "/privacy-policy/",
+    }:
+        return render_template(
+            "public_site/psp_privacy_policy.html"
+        )
+
+    if request.path in {
+        "/terms-of-service",
+        "/terms-of-service/",
+    }:
+        return render_template(
+            "public_site/psp_terms_of_service.html"
+        )
+
+    if request.path in {
+        "/sms-compliance",
+        "/sms-compliance/",
+    }:
+        return render_template(
+            "public_site/psp_sms_compliance.html"
+        )
+
+    if request.path in {
+        "/sms-email-consent-policy",
+        "/sms-email-consent-policy/",
+    }:
+        return render_template(
+            "public_site/psp_sms_email_consent.html"
+        )
+
+    if request.path in {
+        "/downloads",
+        "/downloads/",
+    }:
+        return render_template(
+            "public_site/psp_downloads.html"
+        )
+
+    if request.path in {
+        "/sms-compilance",
+        "/sms-compilance/",
+    }:
+        return redirect(
+            "/sms-compliance",
+            code=301,
+        )
+
+    if request.path in {
+        "/sms-%2Femail-consent-policy",
+        "/sms-/email-consent-policy",
+    }:
+        return redirect(
+            "/sms-email-consent-policy",
+            code=301,
+        )
+
     return None
+
+
+@app.route(
+    "/contact",
+    methods=["POST"],
+)
+def public_marketing_contact():
+    if not _is_public_marketing_host(
+        request.host
+    ):
+        return "Not found.", 404
+
+    submitted_csrf_token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _public_security_csrf_valid(
+        submitted_csrf_token,
+        "public_contact",
+    ):
+        return "Invalid request.", 400
+
+    name = str(
+        request.form.get("name") or ""
+    ).strip()
+
+    email = str(
+        request.form.get("email") or ""
+    ).strip()
+
+    message = str(
+        request.form.get("message") or ""
+    ).strip()
+
+    if (
+        not name
+        or len(name) > 120
+        or not email
+        or len(email) > 254
+        or "@" not in email
+        or email.startswith("@")
+        or email.endswith("@")
+        or not message
+        or len(message) > 5000
+    ):
+        return redirect(
+            "/?contact=invalid#contact"
+        )
+
+    body = (
+        "New Peach Suite Pro website inquiry\n\n"
+        f"Name: {name}\n"
+        f"Email: {email}\n\n"
+        "Message:\n"
+        f"{message}"
+    )
+
+    try:
+        response = send_email(
+            "admin@justpeachydata.com",
+            "Peach Suite Pro Contact Us Inquiry",
+            body,
+            add_footer=False,
+            log_related_type="public_contact_form",
+        )
+    except Exception:
+        return redirect(
+            "/?contact=error#contact"
+        )
+
+    if not (
+        200 <= int(response.status_code) < 300
+    ):
+        return redirect(
+            "/?contact=error#contact"
+        )
+
+    return redirect(
+        "/?contact=sent#contact"
+    )
 
 
 @app.before_request
@@ -38555,6 +38699,7 @@ def load_spa():
         "stripe_signup_checkout",
         "stripe_signup_success",
         "stripe_webhook",
+        "public_marketing_contact",
         "public_booking",
         "public_booking_confirm",
         "tenant_booking_policy",

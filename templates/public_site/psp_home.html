@@ -791,6 +791,158 @@
             font-size: 1.12rem;
         }
 
+        .contact-section {
+            padding: 90px 0 100px;
+            background: var(--warm-gray);
+        }
+
+        .contact-card {
+            max-width: 760px;
+            margin: 0 auto;
+            padding: 42px;
+            background: #fff;
+            border-radius: 24px;
+            box-shadow: 0 24px 60px rgba(0,0,0,.12);
+        }
+
+        .contact-card h2 {
+            margin: 0 0 10px;
+            font-size: clamp(2.3rem, 4vw, 3.6rem);
+            line-height: 1.05;
+            letter-spacing: -.035em;
+        }
+
+        .contact-card > p {
+            margin: 0 0 28px;
+            color: #5c5c5c;
+        }
+
+        .contact-form {
+            display: grid;
+            gap: 18px;
+        }
+
+        .contact-form label {
+            display: grid;
+            gap: 7px;
+            font-weight: 800;
+        }
+
+        .contact-form input,
+        .contact-form textarea {
+            width: 100%;
+            padding: 14px 15px;
+            border: 1px solid #c8c8c8;
+            border-radius: 12px;
+            font: inherit;
+            background: #fff;
+            color: #111;
+        }
+
+        .contact-form textarea {
+            min-height: 150px;
+            resize: vertical;
+        }
+
+        .contact-form button {
+            justify-self: start;
+            border: 0;
+            cursor: pointer;
+        }
+
+        .contact-status {
+            margin: 0 0 22px;
+            padding: 12px 14px;
+            border-radius: 10px;
+            font-weight: 700;
+        }
+
+        .contact-status.success {
+            background: #e6f7e6;
+            color: #176b17;
+        }
+
+        .contact-status.error {
+            background: #fff0e5;
+            color: #8a4300;
+        }
+
+        .contact-section {
+            padding: 90px 0 100px;
+            background: var(--warm-gray);
+        }
+
+        .contact-card {
+            max-width: 760px;
+            margin: 0 auto;
+            padding: 42px;
+            background: #fff;
+            border-radius: 24px;
+            box-shadow: 0 24px 60px rgba(0,0,0,.12);
+        }
+
+        .contact-card h2 {
+            margin: 0 0 10px;
+            font-size: clamp(2.3rem, 4vw, 3.6rem);
+            line-height: 1.05;
+            letter-spacing: -.035em;
+        }
+
+        .contact-card > p {
+            margin: 0 0 28px;
+            color: #5c5c5c;
+        }
+
+        .contact-form {
+            display: grid;
+            gap: 18px;
+        }
+
+        .contact-form label {
+            display: grid;
+            gap: 7px;
+            font-weight: 800;
+        }
+
+        .contact-form input,
+        .contact-form textarea {
+            width: 100%;
+            padding: 14px 15px;
+            border: 1px solid #c8c8c8;
+            border-radius: 12px;
+            font: inherit;
+            background: #fff;
+            color: #111;
+        }
+
+        .contact-form textarea {
+            min-height: 150px;
+            resize: vertical;
+        }
+
+        .contact-form button {
+            justify-self: start;
+            border: 0;
+            cursor: pointer;
+        }
+
+        .contact-status {
+            margin: 0 0 22px;
+            padding: 12px 14px;
+            border-radius: 10px;
+            font-weight: 700;
+        }
+
+        .contact-status.success {
+            background: #e6f7e6;
+            color: #176b17;
+        }
+
+        .contact-status.error {
+            background: #fff0e5;
+            color: #8a4300;
+        }
+
         footer {
             background: #2ebe2e;
             color: #101010;
@@ -1408,6 +1560,128 @@
             <a class="btn btn-secondary" href="/login">
                 Peach Suite Pro Login
             </a>
+        </div>
+    </div>
+</section>
+
+<section class="contact-section" id="contact">
+    <div class="container">
+        <div class="contact-card">
+            <div class="section-kicker">Contact Us</div>
+            <h2>Have a question?</h2>
+            <p>Send us a message and we’ll get back to you.</p>
+
+            {% if request.args.get("contact") == "sent" %}
+                <div class="contact-status success">
+                    Thank you. Your message has been sent.
+                </div>
+            {% elif request.args.get("contact") in ("invalid", "error") %}
+                <div class="contact-status error">
+                    We could not send your message. Please check your information and try again.
+                </div>
+            {% endif %}
+
+            <form class="contact-form" method="post" action="/contact">
+                <input
+                    type="hidden"
+                    name="security_csrf_token"
+                    value="{{ contact_csrf_token }}"
+                >
+
+                <label>
+                    Name
+                    <input
+                        type="text"
+                        name="name"
+                        maxlength="120"
+                        required
+                    >
+                </label>
+
+                <label>
+                    Email
+                    <input
+                        type="email"
+                        name="email"
+                        maxlength="254"
+                        required
+                    >
+                </label>
+
+                <label>
+                    Message
+                    <textarea
+                        name="message"
+                        maxlength="5000"
+                        required
+                    ></textarea>
+                </label>
+
+                <button class="btn btn-primary" type="submit">
+                    Send Message
+                </button>
+            </form>
+        </div>
+    </div>
+</section>
+
+<section class="contact-section" id="contact">
+    <div class="container">
+        <div class="contact-card">
+            <div class="section-kicker">Contact Us</div>
+            <h2>Have a question?</h2>
+            <p>Send us a message and we’ll get back to you.</p>
+
+            {% if request.args.get("contact") == "sent" %}
+                <div class="contact-status success">
+                    Thank you. Your message has been sent.
+                </div>
+            {% elif request.args.get("contact") in ("invalid", "error") %}
+                <div class="contact-status error">
+                    We could not send your message. Please check your information and try again.
+                </div>
+            {% endif %}
+
+            <form class="contact-form" method="post" action="/contact">
+                <input
+                    type="hidden"
+                    name="security_csrf_token"
+                    value="{{ contact_csrf_token }}"
+                >
+
+                <label>
+                    Name
+                    <input
+                        type="text"
+                        name="name"
+                        maxlength="120"
+                        required
+                    >
+                </label>
+
+                <label>
+                    Email
+                    <input
+                        type="email"
+                        name="email"
+                        maxlength="254"
+                        required
+                    >
+                </label>
+
+                <label>
+                    Message
+                    <textarea
+                        name="message"
+                        maxlength="5000"
+                        required
+                    ></textarea>
+                </label>
+
+                <button class="btn btn-primary" type="submit">
+                    Send Message
+                </button>
+            </form>
         </div>
     </div>
 </section>
