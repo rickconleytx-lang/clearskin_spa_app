@@ -37197,8 +37197,8 @@ def get_spa_now(spa_id=None):
     )
 
 
-def get_spa_today():
-    return get_spa_now().date()
+def get_spa_today(spa_id=None):
+    return get_spa_now(spa_id).date()
 
 
 def get_spa_current_time():
@@ -84501,7 +84501,7 @@ def cancel_reminder(reminder_id):
 
 
 def generate_birthday_reminders(spa_id):
-    today = get_spa_today()
+    today = get_spa_today(spa_id)
     end_date = today + timedelta(days=45)
 
     conn = get_db_connection()
