@@ -77,6 +77,241 @@ DEFAULT_PSP_ACCESS_AREA_LEVELS = (
 )
 
 
+DEFAULT_MESSAGING_TEMPLATES = (
+    (
+        "sms",
+        "appointment_confirmation",
+        None,
+        "Hi {{ client_first_name }}, your {{ service_name }} appointment is confirmed for {{ appointment_date }} at {{ appointment_time }}. - {{ spa_name }}",
+    ),
+    (
+        "sms",
+        "appointment_reminder",
+        None,
+        "Hi {{ client_first_name }}, reminder: your {{ service_name }} appointment is {{ appointment_date }} at {{ appointment_time }}. - {{ spa_name }}",
+    ),
+    (
+        "sms",
+        "appointment_cancelled",
+        None,
+        "Hi {{ client_first_name }}, your {{ service_name }} appointment on {{ appointment_date }} at {{ appointment_time }} has been cancelled. - {{ spa_name }}",
+    ),
+    (
+        "sms",
+        "appointment_rescheduled",
+        None,
+        "Hi {{ client_first_name }}, your {{ service_name }} appointment has been rescheduled to {{ appointment_date }} at {{ appointment_time }}. - {{ spa_name }}",
+    ),
+    (
+        "sms",
+        "follow_up",
+        None,
+        "Hi {{ client_first_name }}, just checking in after your recent visit. If you have any questions, we're happy to help. - {{ spa_name }}",
+    ),
+    (
+        "sms",
+        "review_request",
+        None,
+        "Hi {{ client_first_name }}, thank you for choosing {{ spa_name }}. We'd appreciate your feedback about your experience.",
+    ),
+    (
+        "sms",
+        "birthday_message",
+        None,
+        "Happy birthday, {{ client_first_name }}! Wishing you a wonderful day and a great year ahead. - {{ spa_name }}",
+    ),
+    (
+        "sms",
+        "internal_test",
+        None,
+        "Hi {{ client_first_name }}, this is a test message from {{ spa_name }}.",
+    ),
+    (
+        "sms",
+        "general_customer_care",
+        None,
+        "Hi {{ client_first_name }}, we hope you're doing well. If you need assistance, {{ spa_name }} is here to help.",
+    ),
+    (
+        "sms",
+        "marketing",
+        None,
+        "Hi {{ client_first_name }}, here's an update from {{ spa_name }}. Contact us to learn more about our latest services and offerings.",
+    ),
+    (
+        "email",
+        "appointment_confirmation",
+        "Your Appointment Is Confirmed",
+        "Hello {{ client_first_name }},\n\n"
+        "Your {{ service_name }} appointment is confirmed for "
+        "{{ appointment_date }} at {{ appointment_time }}.\n\n"
+        "We look forward to seeing you.\n\n"
+        "Warm regards,\n{{ spa_name }}",
+    ),
+    (
+        "email",
+        "appointment_reminder",
+        "Appointment Reminder from {{ spa_name }}",
+        "Hello {{ client_first_name }},\n\n"
+        "This is a friendly reminder about your upcoming "
+        "{{ service_name }} appointment on {{ appointment_date }} "
+        "at {{ appointment_time }}.\n\n"
+        "We look forward to seeing you.\n\n"
+        "Warm regards,\n{{ spa_name }}",
+    ),
+    (
+        "email",
+        "appointment_cancelled",
+        "Your Appointment Has Been Cancelled",
+        "Hello {{ client_first_name }},\n\n"
+        "Your {{ service_name }} appointment scheduled for "
+        "{{ appointment_date }} at {{ appointment_time }} has been "
+        "cancelled.\n\n"
+        "If you would like to reschedule, we would be happy to help.\n\n"
+        "Warm regards,\n{{ spa_name }}",
+    ),
+    (
+        "email",
+        "appointment_rescheduled",
+        "Your Appointment Has Been Rescheduled",
+        "Hello {{ client_first_name }},\n\n"
+        "Your {{ service_name }} appointment has been rescheduled to "
+        "{{ appointment_date }} at {{ appointment_time }}.\n\n"
+        "We look forward to seeing you.\n\n"
+        "Warm regards,\n{{ spa_name }}",
+    ),
+    (
+        "email",
+        "follow_up",
+        "Following Up from {{ spa_name }}",
+        "Hello {{ client_first_name }},\n\n"
+        "We wanted to check in after your recent visit. We hope "
+        "everything is going well.\n\n"
+        "If you have any questions or need assistance, we're happy "
+        "to help.\n\n"
+        "Warm regards,\n{{ spa_name }}",
+    ),
+    (
+        "email",
+        "review_request",
+        "We'd Love Your Feedback",
+        "Hello {{ client_first_name }},\n\n"
+        "Thank you for choosing {{ spa_name }}. If you have a moment, "
+        "we'd appreciate hearing about your experience.\n\n"
+        "Your feedback helps us continue improving the service we "
+        "provide.\n\n"
+        "Thank you,\n{{ spa_name }}",
+    ),
+    (
+        "email",
+        "birthday_message",
+        "Happy Birthday from {{ spa_name }}!",
+        "Hello {{ client_first_name }},\n\n"
+        "Happy Birthday! We hope you have a wonderful day and a year "
+        "filled with happiness and great moments.\n\n"
+        "Warmest wishes,\n{{ spa_name }}",
+    ),
+    (
+        "email",
+        "internal_test",
+        "Test Message from {{ spa_name }}",
+        "Hello {{ client_first_name }},\n\n"
+        "This is a test email from {{ spa_name }}. No action is "
+        "required.\n\n"
+        "Thank you,\n{{ spa_name }}",
+    ),
+    (
+        "email",
+        "general_customer_care",
+        "A Message from {{ spa_name }}",
+        "Hello {{ client_first_name }},\n\n"
+        "We hope you're doing well. If there is anything we can help "
+        "you with, please don't hesitate to reach out.\n\n"
+        "Warm regards,\n{{ spa_name }}",
+    ),
+    (
+        "email",
+        "marketing",
+        "News from {{ spa_name }}",
+        "Hello {{ client_first_name }},\n\n"
+        "We wanted to share an update from {{ spa_name }}. We appreciate "
+        "having you as part of our community.\n\n"
+        "Contact us to learn more about our current services, "
+        "availability, and upcoming announcements.\n\n"
+        "Warm regards,\n{{ spa_name }}",
+    ),
+)
+
+
+def seed_default_messaging_templates(cursor, *, spa_id):
+    # Factory defaults are spa-owned and intentionally idempotent.
+    # Existing Default templates are never overwritten.
+    for (
+        channel,
+        template_type,
+        subject_text,
+        message_text,
+    ) in DEFAULT_MESSAGING_TEMPLATES:
+        cursor.execute(
+            """
+            INSERT INTO messaging_templates (
+                spa_id,
+                channel,
+                template_name,
+                template_type,
+                language_code,
+                subject_text,
+                message_text,
+                is_active,
+                approved_for_use,
+                is_archived,
+                ai_score,
+                ai_review,
+                ai_risk_level,
+                last_ai_reviewed_at,
+                created_at,
+                updated_at
+            )
+            SELECT
+                %s,
+                %s,
+                'Default',
+                %s,
+                'EN',
+                %s,
+                %s,
+                TRUE,
+                TRUE,
+                FALSE,
+                100,
+                'Peach Suite Pro factory default.',
+                'low',
+                NOW(),
+                NOW(),
+                NOW()
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM messaging_templates
+                WHERE spa_id = %s
+                  AND channel = %s
+                  AND template_type = %s
+                  AND UPPER(COALESCE(language_code, 'EN')) = 'EN'
+                  AND LOWER(COALESCE(template_name, '')) = 'default'
+            )
+            """,
+            (
+                spa_id,
+                channel,
+                template_type,
+                subject_text,
+                message_text,
+                spa_id,
+                channel,
+                template_type,
+            ),
+        )
+
+
 def _required_text(value, field_name):
     value = str(value or "").strip()
     if not value:
@@ -561,6 +796,11 @@ def _provision_new_business_workspace_foundation(
             business_unit_id,
             hostname,
         ),
+    )
+
+    seed_default_messaging_templates(
+        cursor,
+        spa_id=spa_id,
     )
 
     return {
