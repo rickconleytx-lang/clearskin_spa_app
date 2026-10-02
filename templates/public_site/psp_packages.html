@@ -67,13 +67,53 @@
             flex-wrap: wrap;
         }
 
-        .nav-links a {
+        .nav-links a,
+        .nav-menu > summary {
             color: rgba(255,255,255,.88);
             text-decoration: none;
             text-transform: uppercase;
             font-size: .8rem;
             font-weight: 800;
             letter-spacing: .07em;
+        }
+
+        .nav-menu {
+            position: relative;
+        }
+
+        .nav-menu > summary {
+            list-style: none;
+            cursor: pointer;
+        }
+
+        .nav-menu > summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .nav-menu-panel {
+            position: absolute;
+            top: calc(100% + 12px);
+            right: 0;
+            min-width: 230px;
+            padding: 10px;
+            background: #fff;
+            border-radius: 14px;
+            box-shadow: 0 18px 45px rgba(0,0,0,.22);
+            z-index: 50;
+        }
+
+        .nav-menu-panel a {
+            display: block;
+            padding: 11px 12px;
+            border-radius: 9px;
+            color: #111;
+            text-transform: none;
+            letter-spacing: 0;
+            font-size: .88rem;
+        }
+
+        .nav-menu-panel a:hover {
+            background: #f1f1f1;
         }
 
         .nav-links .trial {
@@ -356,7 +396,20 @@
             <a href="/subscription-packages">Packages</a>
             <a href="/pricing">Pricing</a>
             <a href="https://support.peachsuitepro.com/">Support</a>
-            <a href="/login">Login</a>
+
+            <details class="nav-menu">
+                <summary>Resources</summary>
+
+                <div class="nav-menu-panel">
+                    <a href="/login">Login</a>
+                    <a href="/downloads">Downloads</a>
+                    <a href="/privacy-policy">Privacy Policy</a>
+                    <a href="/terms-of-service">Terms of Service</a>
+                    <a href="/sms-compliance">SMS Compliance</a>
+                    <a href="/sms-email-consent-policy">SMS / Email Consent</a>
+                </div>
+            </details>
+
             <a class="trial" href="/signup/solo">Start Free Trial</a>
         </nav>
     </div>
