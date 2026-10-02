@@ -6795,6 +6795,171 @@ def master_admin_resend_owner_invitation(spa_id):
     )
 
 
+@app.route("/master-admin/businesses/<int:spa_id>")
+@login_required
+@master_admin_required
+def master_admin_business_detail(spa_id):
+
+    environment = get_stripe_environment()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                s.spa_id,
+                s.spa_name,
+                s.registration_number,
+                s.subscription_status,
+                s.active,
+
+                bu.business_unit_id,
+                e.employee_id,
+                e.first_name,
+                e.last_name,
+                e.email,
+                e.phone,
+
+                bo.primary_onboarding_user_id,
+                bo.waiting_on_initial_activation,
+                bo.contact_setup_completed_at,
+                bo.business_setup_completed_at,
+                bo.completed_at,
+                bo.created_at AS onboarding_created_at,
+
+                scs.stripe_checkout_signup_id,
+                scs.signup_status,
+                scs.tier_code,
+                scs.billing_interval,
+                scs.business_name AS signup_business_name,
+                scs.owner_first_name AS signup_owner_first_name,
+                scs.owner_last_name AS signup_owner_last_name,
+                scs.owner_email AS signup_owner_email,
+                scs.owner_phone AS signup_owner_phone,
+                scs.terms_version,
+                scs.terms_accepted_at,
+                scs.checkout_completed_at,
+                scs.provisioned_at,
+                scs.created_at AS signup_created_at,
+
+                sba.stripe_customer_id,
+                sba.stripe_subscription_id,
+                sba.stripe_subscription_status,
+                sba.trial_start,
+                sba.trial_end,
+                sba.cancel_at_period_end,
+                sba.cancel_at,
+                sba.canceled_at,
+                sba.ended_at,
+                sba.last_synced_at
+
+            FROM spas s
+
+            LEFT JOIN business_units bu
+              ON bu.spa_id = s.spa_id
+             AND bu.is_default = TRUE
+             AND bu.is_active = TRUE
+
+            LEFT JOIN employees e
+              ON e.spa_id = bu.spa_id
+             AND e.employee_id = bu.owner_employee_id
+             AND e.is_active = TRUE
+
+            LEFT JOIN business_onboarding bo
+              ON bo.spa_id = s.spa_id
+
+            LEFT JOIN LATERAL (
+                SELECT scs_inner.*
+                FROM stripe_checkout_signups scs_inner
+                WHERE scs_inner.spa_id = s.spa_id
+                  AND scs_inner.environment = %s
+                ORDER BY
+                    scs_inner.provisioned_at DESC NULLS LAST,
+                    scs_inner.created_at DESC
+                LIMIT 1
+            ) scs ON TRUE
+
+            LEFT JOIN stripe_billing_accounts sba
+              ON sba.spa_id = s.spa_id
+             AND sba.environment = %s
+
+            WHERE s.spa_id = %s
+            LIMIT 1
+            """,
+            (
+                environment,
+                environment,
+                spa_id,
+            ),
+        )
+
+        row = cur.fetchone()
+
+        if not row:
+            abort(404)
+
+        business = {
+            "spa_id": row[0],
+            "spa_name": row[1],
+            "registration_number": row[2],
+            "subscription_status": row[3],
+            "active": bool(row[4]),
+
+            "business_unit_id": row[5],
+            "owner_employee_id": row[6],
+            "owner_first_name": row[7] or "",
+            "owner_last_name": row[8] or "",
+            "owner_email": row[9] or "",
+            "owner_phone": row[10] or "",
+
+            "primary_onboarding_user_id": row[11],
+            "waiting_on_initial_activation": bool(row[12]),
+            "contact_setup_completed_at": row[13],
+            "business_setup_completed_at": row[14],
+            "onboarding_completed_at": row[15],
+            "onboarding_created_at": row[16],
+
+            "stripe_checkout_signup_id": row[17],
+            "signup_status": row[18],
+            "tier_code": row[19],
+            "billing_interval": row[20],
+            "signup_business_name": row[21] or "",
+            "signup_owner_first_name": row[22] or "",
+            "signup_owner_last_name": row[23] or "",
+            "signup_owner_email": row[24] or "",
+            "signup_owner_phone": row[25] or "",
+            "terms_version": row[26],
+            "terms_accepted_at": row[27],
+            "checkout_completed_at": row[28],
+            "provisioned_at": row[29],
+            "signup_created_at": row[30],
+
+            "stripe_customer_id": row[31] or "",
+            "stripe_subscription_id": row[32] or "",
+            "stripe_subscription_status": row[33],
+            "trial_start": row[34],
+            "trial_end": row[35],
+            "cancel_at_period_end": bool(row[36]),
+            "cancel_at": row[37],
+            "canceled_at": row[38],
+            "ended_at": row[39],
+            "last_synced_at": row[40],
+
+            "stripe_environment": environment,
+        }
+
+        return render_template(
+            "master_admin/businesses/business_detail.html",
+            business=business,
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
 @app.route("/master-admin/businesses")
 @login_required
 @master_admin_required

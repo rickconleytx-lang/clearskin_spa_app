@@ -123,7 +123,16 @@ Businesses | Master Admin
 
                             <td>
                                 <strong>
-                                    {{ business.spa_name }}
+                                    <a
+                                        href="{{
+                                            url_for(
+                                                'master_admin_business_detail',
+                                                spa_id=business.spa_id
+                                            )
+                                        }}"
+                                    >
+                                        {{ business.spa_name }}
+                                    </a>
                                 </strong>
 
                                 <div class="business-id">
@@ -248,6 +257,18 @@ Businesses | Master Admin
 
 
                             <td>
+                                <a
+                                    href="{{
+                                        url_for(
+                                            'master_admin_business_detail',
+                                            spa_id=business.spa_id
+                                        )
+                                    }}"
+                                    class="btn btn-small"
+                                >
+                                    View Details
+                                </a>
+
                                 <a
                                     href="{{
                                         url_for(
@@ -401,7 +422,7 @@ Businesses | Master Admin
 }
 
 .business-directory-table th {
-    color: #555555;
+    color: #ffffff;
     font-size: 0.8rem;
     text-transform: uppercase;
 }

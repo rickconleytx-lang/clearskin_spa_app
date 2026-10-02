@@ -1,0 +1,348 @@
+{% extends "base.html" %}
+
+{% block title %}
+{{ business.spa_name }} | Master Admin
+{% endblock %}
+
+{% block content %}
+
+<div class="page-title">
+    <h1>{{ business.spa_name }}</h1>
+</div>
+
+<div class="page-tool-pills">
+
+    <a
+        href="{{ url_for('master_admin_businesses') }}"
+        class="tool-pill tool-pill-small"
+    >
+        Businesses
+    </a>
+
+    <a
+        href="{{ url_for('master_admin_home') }}"
+        class="tool-pill tool-pill-small"
+    >
+        Master Admin
+    </a>
+
+</div>
+
+<br>
+
+<div class="business-detail-grid">
+
+    <section class="detail-card">
+        <h2>Business</h2>
+
+        <dl class="detail-list">
+            <div>
+                <dt>Business Name</dt>
+                <dd>{{ business.spa_name }}</dd>
+            </div>
+
+            <div>
+                <dt>Business ID</dt>
+                <dd>{{ business.spa_id }}</dd>
+            </div>
+
+            <div>
+                <dt>Registration Number</dt>
+                <dd>{{ business.registration_number or "Not Assigned" }}</dd>
+            </div>
+
+            <div>
+                <dt>Business Status</dt>
+                <dd>
+                    {% if business.active %}
+                        Active
+                    {% else %}
+                        Inactive
+                    {% endif %}
+                </dd>
+            </div>
+
+            <div>
+                <dt>Subscription Status</dt>
+                <dd>{{ business.subscription_status or "Not Set" }}</dd>
+            </div>
+
+            <div>
+                <dt>Business Unit ID</dt>
+                <dd>{{ business.business_unit_id or "Not Available" }}</dd>
+            </div>
+        </dl>
+    </section>
+
+    <section class="detail-card">
+        <h2>Owner &amp; Activation</h2>
+
+        <dl class="detail-list">
+            <div>
+                <dt>Owner Name</dt>
+                <dd>
+                    {{
+                        (
+                            business.owner_first_name
+                            ~ " "
+                            ~ business.owner_last_name
+                        ).strip()
+                        or "Not Available"
+                    }}
+                </dd>
+            </div>
+
+            <div>
+                <dt>Owner Email</dt>
+                <dd>{{ business.owner_email or "Not Available" }}</dd>
+            </div>
+
+            <div>
+                <dt>Owner Phone</dt>
+                <dd>{{ business.owner_phone or "Not Available" }}</dd>
+            </div>
+
+            <div>
+                <dt>Owner Employee ID</dt>
+                <dd>{{ business.owner_employee_id or "Not Available" }}</dd>
+            </div>
+
+            <div>
+                <dt>Activation Status</dt>
+                <dd>
+                    {% if business.waiting_on_initial_activation %}
+                        Owner Activation Pending
+                    {% elif business.primary_onboarding_user_id %}
+                        Activated
+                    {% else %}
+                        Not Available
+                    {% endif %}
+                </dd>
+            </div>
+
+            <div>
+                <dt>Onboarding User ID</dt>
+                <dd>{{ business.primary_onboarding_user_id or "Not Available" }}</dd>
+            </div>
+
+            <div>
+                <dt>Onboarding Started</dt>
+                <dd>{{ business.onboarding_created_at or "Not Available" }}</dd>
+            </div>
+
+            <div>
+                <dt>Contact Setup Completed</dt>
+                <dd>{{ business.contact_setup_completed_at or "Not Complete" }}</dd>
+            </div>
+
+            <div>
+                <dt>Business Setup Completed</dt>
+                <dd>{{ business.business_setup_completed_at or "Not Complete" }}</dd>
+            </div>
+
+            <div>
+                <dt>Onboarding Completed</dt>
+                <dd>{{ business.onboarding_completed_at or "Not Complete" }}</dd>
+            </div>
+        </dl>
+    </section>
+
+    <section class="detail-card detail-card-wide">
+        <h2>Signup &amp; Billing</h2>
+
+        {% if business.stripe_checkout_signup_id %}
+
+            <dl class="detail-list detail-list-wide">
+
+                <div>
+                    <dt>Signup ID</dt>
+                    <dd>{{ business.stripe_checkout_signup_id }}</dd>
+                </div>
+
+                <div>
+                    <dt>Signup Status</dt>
+                    <dd>{{ business.signup_status or "Not Available" }}</dd>
+                </div>
+
+                <div>
+                    <dt>Plan</dt>
+                    <dd>{{ business.tier_code or "Not Available" }}</dd>
+                </div>
+
+                <div>
+                    <dt>Billing Interval</dt>
+                    <dd>{{ business.billing_interval or "Not Available" }}</dd>
+                </div>
+
+                <div>
+                    <dt>Signup Created</dt>
+                    <dd>{{ business.signup_created_at or "Not Available" }}</dd>
+                </div>
+
+                <div>
+                    <dt>Agreement Version</dt>
+                    <dd>{{ business.terms_version or "Not Available" }}</dd>
+                </div>
+
+                <div>
+                    <dt>Agreement Accepted</dt>
+                    <dd>{{ business.terms_accepted_at or "Not Available" }}</dd>
+                </div>
+
+                <div>
+                    <dt>Checkout Completed</dt>
+                    <dd>{{ business.checkout_completed_at or "Not Complete" }}</dd>
+                </div>
+
+                <div>
+                    <dt>Provisioned</dt>
+                    <dd>{{ business.provisioned_at or "Not Complete" }}</dd>
+                </div>
+
+                <div>
+                    <dt>Stripe Environment</dt>
+                    <dd>{{ business.stripe_environment }}</dd>
+                </div>
+
+                <div>
+                    <dt>Stripe Customer ID</dt>
+                    <dd>{{ business.stripe_customer_id or "Not Available" }}</dd>
+                </div>
+
+                <div>
+                    <dt>Stripe Subscription ID</dt>
+                    <dd>{{ business.stripe_subscription_id or "Not Available" }}</dd>
+                </div>
+
+                <div>
+                    <dt>Stripe Subscription Status</dt>
+                    <dd>{{ business.stripe_subscription_status or "Not Available" }}</dd>
+                </div>
+
+                <div>
+                    <dt>Trial Start</dt>
+                    <dd>{{ business.trial_start or "Not Available" }}</dd>
+                </div>
+
+                <div>
+                    <dt>Trial End</dt>
+                    <dd>{{ business.trial_end or "Not Available" }}</dd>
+                </div>
+
+                <div>
+                    <dt>Cancel at Period End</dt>
+                    <dd>
+                        {% if business.cancel_at_period_end %}
+                            Yes
+                        {% else %}
+                            No
+                        {% endif %}
+                    </dd>
+                </div>
+
+                <div>
+                    <dt>Cancel At</dt>
+                    <dd>{{ business.cancel_at or "Not Set" }}</dd>
+                </div>
+
+                <div>
+                    <dt>Canceled At</dt>
+                    <dd>{{ business.canceled_at or "Not Set" }}</dd>
+                </div>
+
+                <div>
+                    <dt>Ended At</dt>
+                    <dd>{{ business.ended_at or "Not Set" }}</dd>
+                </div>
+
+                <div>
+                    <dt>Last Stripe Sync</dt>
+                    <dd>{{ business.last_synced_at or "Not Available" }}</dd>
+                </div>
+
+            </dl>
+
+        {% else %}
+
+            <p class="detail-empty">
+                No public Stripe signup record is linked to this business.
+            </p>
+
+        {% endif %}
+
+    </section>
+
+</div>
+
+<style>
+
+.business-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px;
+}
+
+.detail-card {
+    padding: 24px;
+    border: 1px solid #dddddd;
+    border-radius: 12px;
+    background: #ffffff;
+}
+
+.detail-card-wide {
+    grid-column: 1 / -1;
+}
+
+.detail-card h2 {
+    margin-top: 0;
+}
+
+.detail-list {
+    display: grid;
+    gap: 0;
+    margin: 0;
+}
+
+.detail-list-wide {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 28px;
+}
+
+.detail-list > div {
+    padding: 12px 0;
+    border-bottom: 1px solid #eeeeee;
+}
+
+.detail-list dt {
+    margin-bottom: 4px;
+    color: #666666;
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.detail-list dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+    font-weight: 600;
+}
+
+.detail-empty {
+    margin: 0;
+    color: #666666;
+}
+
+@media (max-width: 800px) {
+    .business-detail-grid,
+    .detail-list-wide {
+        grid-template-columns: 1fr;
+    }
+
+    .detail-card-wide {
+        grid-column: auto;
+    }
+}
+
+</style>
+
+{% endblock %}
