@@ -562,6 +562,136 @@ CLIENT_IMPORT_FIELDS = (
 
 
 # =========================================================
+# STANDARD INCOME IMPORT PROFILE
+# =========================================================
+
+
+INCOME_IMPORT_FIELDS = (
+    {
+        "key": "income_date",
+        "label": "Income Date",
+        "required": True,
+        "aliases": (
+            "income date",
+            "date",
+            "payment date",
+            "sale date",
+            "transaction date",
+        ),
+    },
+    {
+        "key": "income_type",
+        "label": "Income Type",
+        "required": True,
+        "aliases": (
+            "income type",
+            "type",
+            "category",
+            "income category",
+        ),
+    },
+    {
+        "key": "payment_method",
+        "label": "Payment Method",
+        "required": True,
+        "aliases": (
+            "payment method",
+            "payment type",
+            "method",
+            "tender",
+            "tender type",
+        ),
+    },
+    {
+        "key": "client_name",
+        "label": "Client",
+        "required": False,
+        "aliases": (
+            "client",
+            "client name",
+            "customer",
+            "customer name",
+        ),
+    },
+    {
+        "key": "description",
+        "label": "Description",
+        "required": False,
+        "aliases": (
+            "description",
+            "income description",
+            "details",
+        ),
+    },
+    {
+        "key": "service_amount",
+        "label": "Service Amount",
+        "required": False,
+        "aliases": (
+            "service amount",
+            "services",
+            "service sales",
+        ),
+    },
+    {
+        "key": "retail_amount",
+        "label": "Retail Amount",
+        "required": False,
+        "aliases": (
+            "retail amount",
+            "retail",
+            "retail sales",
+            "product sales",
+        ),
+    },
+    {
+        "key": "tax_amount",
+        "label": "Tax Amount",
+        "required": False,
+        "aliases": (
+            "tax",
+            "tax amount",
+            "sales tax",
+        ),
+    },
+    {
+        "key": "total_amount",
+        "label": "Total Amount",
+        "required": False,
+        "aliases": (
+            "total",
+            "total amount",
+            "amount",
+            "gross amount",
+        ),
+    },
+    {
+        "key": "processor_payment_id",
+        "label": "Processor Payment ID",
+        "required": False,
+        "aliases": (
+            "processor payment id",
+            "payment id",
+            "transaction id",
+            "reference id",
+            "reference number",
+        ),
+    },
+    {
+        "key": "notes",
+        "label": "Notes",
+        "required": False,
+        "aliases": (
+            "notes",
+            "note",
+            "memo",
+            "comments",
+        ),
+    },
+)
+
+
+# =========================================================
 # PEACHPOS INCOME IMPORT PROFILE
 # =========================================================
 
@@ -774,6 +904,14 @@ def get_import_profile(entity_type):
                 "client_status": "Current",
                 "active_client": True,
             },
+        }
+
+    if entity_type == "income":
+        return {
+            "entity_type": "income",
+            "display_name": "Income",
+            "fields": INCOME_IMPORT_FIELDS,
+            "defaults": {},
         }
 
     if entity_type == "peachpos_income":
@@ -1569,6 +1707,113 @@ def validate_client_import_row(
     }
 
 
+def validate_income_import_row(
+    row_data,
+):
+    """
+    Normalize and validate one mapped standard Income row.
+
+    This mirrors PSP General Income entry rules:
+      - Income Date is required
+      - Income Type is required
+      - Payment Method is required
+      - Client is optional and resolved later within the workspace
+      - monetary values must be valid when supplied
+      - Total Amount cannot be negative
+      - PSP never invents missing source values
+    """
+    normalized = {
+        key: str(value or "").strip()
+        for key, value in row_data.items()
+    }
+    errors = []
+
+    income_date = normalized.get(
+        "income_date",
+        "",
+    )
+
+    if not income_date:
+        errors.append(
+            "Income Date is required."
+        )
+    else:
+        try:
+            normalized["income_date"] = (
+                _parse_import_date(
+                    income_date
+                )
+            )
+        except ImportServiceError as exc:
+            errors.append(str(exc))
+            normalized["income_date"] = income_date
+
+    if not normalized.get(
+        "income_type",
+        "",
+    ):
+        errors.append(
+            "Income Type is required."
+        )
+
+    if not normalized.get(
+        "payment_method",
+        "",
+    ):
+        errors.append(
+            "Payment Method is required."
+        )
+
+    money_fields = (
+        ("service_amount", "Service Amount"),
+        ("retail_amount", "Retail Amount"),
+        ("tax_amount", "Tax Amount"),
+        ("total_amount", "Total Amount"),
+    )
+
+    for field_key, field_label in money_fields:
+        raw_value = normalized.get(
+            field_key,
+            "",
+        )
+
+        if not raw_value:
+            normalized[field_key] = ""
+            continue
+
+        try:
+            amount = _parse_import_money(
+                raw_value
+            )
+            normalized[field_key] = str(
+                amount
+            )
+        except ImportServiceError:
+            errors.append(
+                f"{field_label} is not a valid monetary amount."
+            )
+
+    total_amount = normalized.get(
+        "total_amount",
+        "",
+    )
+
+    if total_amount:
+        try:
+            if Decimal(total_amount) < 0:
+                errors.append(
+                    "Total Amount cannot be negative."
+                )
+        except (InvalidOperation, ValueError):
+            pass
+
+    return {
+        "valid": not errors,
+        "data": normalized,
+        "errors": errors,
+    }
+
+
 def validate_peachpos_income_import_row(
     row_data,
 ):
@@ -1908,6 +2153,250 @@ def _normalize_import_dropdown_value(value):
     )
 
 
+def validate_income_import_workspace_values(
+    cur,
+    *,
+    spa_id,
+    business_unit_id,
+    prepared_rows,
+):
+    """
+    Resolve database-backed standard Income values.
+
+    Income Type:
+      imported display value -> existing spa income type
+
+    Payment Method:
+      imported display value -> existing spa payment method
+
+    Client:
+      imported client display name -> exact current-workspace client_id
+
+    Matching is case-insensitive and whitespace-normalized.
+    PSP never creates or guesses missing reference data.
+    Unknown or ambiguous values become review errors.
+    """
+
+    # -------------------------------------------------
+    # Income Types
+    # -------------------------------------------------
+    cur.execute(
+        """
+        SELECT income_type_name
+        FROM income_types
+        WHERE spa_id = %s
+        ORDER BY income_type_name
+        """,
+        (spa_id,),
+    )
+
+    income_type_lookup = {}
+
+    for (income_type_name,) in cur.fetchall():
+        normalized_value = (
+            _normalize_import_dropdown_value(
+                income_type_name
+            )
+        )
+
+        if not normalized_value:
+            continue
+
+        income_type_lookup.setdefault(
+            normalized_value,
+            [],
+        ).append(
+            str(income_type_name).strip()
+        )
+
+    # -------------------------------------------------
+    # Payment Methods
+    # -------------------------------------------------
+    cur.execute(
+        """
+        SELECT payment_method
+        FROM payment_methods
+        WHERE spa_id = %s
+        ORDER BY payment_method
+        """,
+        (spa_id,),
+    )
+
+    payment_method_lookup = {}
+
+    for (payment_method,) in cur.fetchall():
+        normalized_value = (
+            _normalize_import_dropdown_value(
+                payment_method
+            )
+        )
+
+        if not normalized_value:
+            continue
+
+        payment_method_lookup.setdefault(
+            normalized_value,
+            [],
+        ).append(
+            str(payment_method).strip()
+        )
+
+    # -------------------------------------------------
+    # Clients
+    # -------------------------------------------------
+    cur.execute(
+        """
+        SELECT
+            client_id,
+            first_name,
+            last_name
+        FROM clients
+        WHERE spa_id = %s
+          AND business_unit_id = %s
+        ORDER BY client_id
+        """,
+        (
+            spa_id,
+            business_unit_id,
+        ),
+    )
+
+    client_lookup = {}
+
+    for client_id, first_name, last_name in cur.fetchall():
+        display_name = " ".join(
+            part
+            for part in (
+                str(first_name or "").strip(),
+                str(last_name or "").strip(),
+            )
+            if part
+        )
+
+        normalized_value = (
+            _normalize_import_dropdown_value(
+                display_name
+            )
+        )
+
+        if not normalized_value:
+            continue
+
+        client_lookup.setdefault(
+            normalized_value,
+            [],
+        ).append(
+            client_id
+        )
+
+    for row in prepared_rows:
+        data = row.get("data") or {}
+        errors = list(
+            row.get("errors") or []
+        )
+
+        # Income Type
+        raw_income_type = data.get(
+            "income_type",
+            "",
+        )
+
+        normalized_income_type = (
+            _normalize_import_dropdown_value(
+                raw_income_type
+            )
+        )
+
+        if normalized_income_type:
+            matches = income_type_lookup.get(
+                normalized_income_type,
+                [],
+            )
+
+            if len(matches) == 1:
+                data["income_type"] = matches[0]
+            elif not matches:
+                errors.append(
+                    f"Income Type '{raw_income_type}' "
+                    "does not exist in this business."
+                )
+            else:
+                errors.append(
+                    f"Income Type '{raw_income_type}' "
+                    "matches more than one existing value."
+                )
+
+        # Payment Method
+        raw_payment_method = data.get(
+            "payment_method",
+            "",
+        )
+
+        normalized_payment_method = (
+            _normalize_import_dropdown_value(
+                raw_payment_method
+            )
+        )
+
+        if normalized_payment_method:
+            matches = payment_method_lookup.get(
+                normalized_payment_method,
+                [],
+            )
+
+            if len(matches) == 1:
+                data["payment_method"] = matches[0]
+            elif not matches:
+                errors.append(
+                    f"Payment Method '{raw_payment_method}' "
+                    "does not exist in this business."
+                )
+            else:
+                errors.append(
+                    f"Payment Method '{raw_payment_method}' "
+                    "matches more than one existing value."
+                )
+
+        # Optional Client
+        raw_client_name = data.get(
+            "client_name",
+            "",
+        )
+
+        normalized_client_name = (
+            _normalize_import_dropdown_value(
+                raw_client_name
+            )
+        )
+
+        if not normalized_client_name:
+            data["client_id"] = None
+        else:
+            matches = client_lookup.get(
+                normalized_client_name,
+                [],
+            )
+
+            if len(matches) == 1:
+                data["client_id"] = matches[0]
+            elif not matches:
+                errors.append(
+                    f"Client '{raw_client_name}' was not found "
+                    "in this Provider Workspace."
+                )
+            else:
+                errors.append(
+                    f"Client '{raw_client_name}' matches more "
+                    "than one client in this Provider Workspace."
+                )
+
+        row["errors"] = errors
+        row["valid"] = not errors
+        row["data"] = data
+
+    return prepared_rows
+
+
 def validate_client_import_workspace_dropdowns(
     cur,
     *,
@@ -2076,6 +2565,12 @@ def prepare_import_rows(
         if entity_type == "clients":
             validation = (
                 validate_client_import_row(
+                    mapped
+                )
+            )
+        elif entity_type == "income":
+            validation = (
+                validate_income_import_row(
                     mapped
                 )
             )
@@ -2387,6 +2882,182 @@ def annotate_client_import_existing_duplicates(
 
     return annotated_rows
 
+
+
+def annotate_income_import_file_duplicates(
+    prepared_rows,
+):
+    """
+    Detect strong duplicates inside one standard Income import file.
+
+    Strong duplicate:
+      exact nonblank Processor Payment ID
+
+    Date/amount/type/payment method alone are not sufficient because
+    legitimate income records can share those values.
+    """
+    seen_payment_ids = {}
+    annotated_rows = []
+
+    for row in prepared_rows:
+        result = dict(row)
+
+        result["duplicate_type"] = None
+        result["duplicate_reasons"] = []
+        result["duplicate_row_numbers"] = []
+
+        if not result.get("valid"):
+            annotated_rows.append(result)
+            continue
+
+        data = result.get("data") or {}
+
+        processor_payment_id = str(
+            data.get("processor_payment_id") or ""
+        ).strip()
+
+        row_number = result.get("row_number")
+
+        if (
+            processor_payment_id
+            and processor_payment_id in seen_payment_ids
+        ):
+            result["duplicate_type"] = "strong"
+            result["duplicate_reasons"] = [
+                "Processor Payment ID"
+            ]
+            result["duplicate_row_numbers"] = [
+                seen_payment_ids[processor_payment_id]
+            ]
+
+        annotated_rows.append(result)
+
+        if processor_payment_id:
+            seen_payment_ids.setdefault(
+                processor_payment_id,
+                row_number,
+            )
+
+    return annotated_rows
+
+
+def annotate_income_import_existing_duplicates(
+    cur,
+    *,
+    spa_id,
+    business_unit_id,
+    prepared_rows,
+):
+    """
+    Compare standard Income rows against existing PSP Income.
+
+    Strong duplicate:
+      workspace + exact nonblank Processor Payment ID
+    """
+    payment_ids = sorted({
+        str(
+            (row.get("data") or {}).get(
+                "processor_payment_id"
+            )
+            or ""
+        ).strip()
+        for row in prepared_rows
+        if row.get("valid")
+        and str(
+            (row.get("data") or {}).get(
+                "processor_payment_id"
+            )
+            or ""
+        ).strip()
+    })
+
+    existing_by_payment_id = {}
+
+    if payment_ids:
+        cur.execute(
+            """
+            SELECT
+                income_id,
+                processor_payment_id,
+                income_date,
+                income_type,
+                total_amount
+            FROM income
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND processor_payment_id = ANY(%s)
+            """,
+            (
+                spa_id,
+                business_unit_id,
+                payment_ids,
+            ),
+        )
+
+        for (
+            income_id,
+            processor_payment_id,
+            income_date,
+            income_type,
+            total_amount,
+        ) in cur.fetchall():
+            payment_id = str(
+                processor_payment_id or ""
+            ).strip()
+
+            if not payment_id:
+                continue
+
+            existing_by_payment_id.setdefault(
+                payment_id,
+                [],
+            ).append({
+                "income_id": income_id,
+                "processor_payment_id": payment_id,
+                "income_date": (
+                    income_date.isoformat()
+                    if income_date
+                    else None
+                ),
+                "income_type": income_type,
+                "total_amount": (
+                    str(total_amount)
+                    if total_amount is not None
+                    else None
+                ),
+            })
+
+    annotated_rows = []
+
+    for row in prepared_rows:
+        result = dict(row)
+
+        result["existing_duplicate_type"] = None
+        result["existing_duplicate_matches"] = []
+
+        if not result.get("valid"):
+            annotated_rows.append(result)
+            continue
+
+        data = result.get("data") or {}
+
+        processor_payment_id = str(
+            data.get("processor_payment_id") or ""
+        ).strip()
+
+        if processor_payment_id:
+            matches = existing_by_payment_id.get(
+                processor_payment_id,
+                [],
+            )
+
+            if matches:
+                result["existing_duplicate_type"] = "strong"
+                result["existing_duplicate_matches"] = matches
+
+        annotated_rows.append(result)
+
+    return annotated_rows
 
 
 def annotate_peachpos_import_file_duplicates(
@@ -2962,6 +3633,12 @@ def analyze_import_run(
                         mapped
                     )
                 )
+            elif entity_type == "income":
+                validation = (
+                    validate_income_import_row(
+                        mapped
+                    )
+                )
             elif entity_type == "peachpos_income":
                 validation = (
                     validate_peachpos_income_import_row(
@@ -2996,8 +3673,24 @@ def analyze_import_run(
                 )
             )
 
+        elif entity_type == "income":
             prepared_rows = (
-                annotate_client_import_existing_duplicates(
+                validate_income_import_workspace_values(
+                    cur,
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    prepared_rows=prepared_rows,
+                )
+            )
+
+            prepared_rows = (
+                annotate_income_import_file_duplicates(
+                    prepared_rows
+                )
+            )
+
+            prepared_rows = (
+                annotate_income_import_existing_duplicates(
                     cur,
                     spa_id=spa_id,
                     business_unit_id=business_unit_id,
@@ -3610,6 +4303,267 @@ def get_import_run_records(
         cur.close()
         conn.close()
 
+
+
+def update_financial_import_review_decision(
+    import_run_id,
+    import_run_row_id,
+    *,
+    decision,
+    spa_id,
+    business_unit_id,
+):
+    """
+    Apply one durable financial Import review decision.
+
+    Supported entity types:
+      - income
+      - peachpos_income
+
+    Review policy:
+      - clean valid rows may be approved
+      - invalid rows may never be approved
+      - strong duplicates may never be approved
+      - any still-pending row may be discarded
+      - validation/duplicate evidence remains preserved
+      - the run becomes ready only when no unresolved
+        pending review decisions remain
+    """
+    decision = str(
+        decision or ""
+    ).strip().lower()
+
+    if decision not in {
+        "approved",
+        "discard",
+    }:
+        raise ImportServiceError(
+            "Financial import review decision must be "
+            "Approve or Discard."
+        )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                entity_type,
+                run_status
+            FROM import_runs
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            FOR UPDATE
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        run = cur.fetchone()
+
+        if not run:
+            raise ImportServiceError(
+                "Import Run was not found in this workspace."
+            )
+
+        entity_type = str(
+            run[0] or ""
+        ).strip().lower()
+
+        run_status = str(
+            run[1] or ""
+        ).strip().lower()
+
+        if entity_type not in {
+            "income",
+            "peachpos_income",
+        }:
+            raise ImportServiceError(
+                "This review action is available for "
+                "financial imports only."
+            )
+
+        if run_status in {
+            "completed",
+            "failed",
+        }:
+            raise ImportServiceError(
+                "This financial Import Run can no longer "
+                "be reviewed."
+            )
+
+        cur.execute(
+            """
+            SELECT
+                validation_status,
+                duplicate_status,
+                review_decision,
+                import_status
+            FROM import_run_rows
+            WHERE import_run_row_id = %s
+              AND import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            FOR UPDATE
+            """,
+            (
+                import_run_row_id,
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        row = cur.fetchone()
+
+        if not row:
+            raise ImportServiceError(
+                "Financial Import row was not found "
+                "in this workspace."
+            )
+
+        validation_status = str(
+            row[0] or ""
+        ).strip().lower()
+
+        duplicate_status = str(
+            row[1] or "none"
+        ).strip().lower()
+
+        import_status = str(
+            row[3] or ""
+        ).strip().lower()
+
+        if import_status != "pending":
+            raise ImportServiceError(
+                "Only pending financial Import rows "
+                "can be reviewed."
+            )
+
+        if decision == "approved":
+            if validation_status != "valid":
+                raise ImportServiceError(
+                    "Invalid financial Import rows cannot "
+                    "be approved."
+                )
+
+            if duplicate_status == "strong":
+                raise ImportServiceError(
+                    "Strong duplicate financial Import rows "
+                    "cannot be approved."
+                )
+
+            if duplicate_status not in {
+                "none",
+                "possible",
+            }:
+                raise ImportServiceError(
+                    "This financial Import row has an "
+                    "unresolved duplicate state."
+                )
+
+        cur.execute(
+            """
+            UPDATE import_run_rows
+            SET review_decision = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE import_run_row_id = %s
+              AND import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND import_status = 'pending'
+            """,
+            (
+                decision,
+                import_run_row_id,
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        if cur.rowcount != 1:
+            raise ImportServiceError(
+                "The financial Import row changed while "
+                "it was being reviewed."
+            )
+
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM import_run_rows
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND import_status = 'pending'
+              AND (
+                  review_decision IS NULL
+                  OR review_decision NOT IN (
+                      'approved',
+                      'discard'
+                  )
+              )
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        unresolved_review_rows = cur.fetchone()[0]
+
+        next_status = (
+            "review"
+            if unresolved_review_rows > 0
+            else "ready"
+        )
+
+        cur.execute(
+            """
+            UPDATE import_runs
+            SET run_status = %s,
+                failure_message = NULL,
+                completed_at = NULL,
+                last_activity_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            """,
+            (
+                next_status,
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        conn.commit()
+
+        return {
+            "import_run_id": import_run_id,
+            "import_run_row_id": import_run_row_id,
+            "entity_type": entity_type,
+            "review_decision": decision,
+            "run_status": next_status,
+            "unresolved_review_rows": (
+                unresolved_review_rows
+            ),
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
 
 
 def update_client_import_review_decision(
@@ -4904,6 +5858,648 @@ def process_client_import_packet(
         cur.close()
         conn.close()
 
+
+
+# =========================================================
+# STANDARD INCOME IMPORT POSTING
+# =========================================================
+
+INCOME_IMPORT_PACKET_SIZE = 50
+INCOME_IMPORT_PACKET_MAX_ROWS = 50
+
+
+def process_income_import_packet(
+    import_run_id,
+    *,
+    spa_id,
+    business_unit_id,
+    packet_size=INCOME_IMPORT_PACKET_SIZE,
+):
+    """
+    Post one bounded packet of approved standard Income rows.
+
+    Safety rules:
+      - only READY / already-IMPORTING Income runs execute
+      - only valid, non-duplicate, approved, pending rows post
+      - strong duplicates can never post
+      - unresolved review rows block posting
+      - discarded rows are permanently skipped
+      - Income Type and Payment Method are revalidated at posting
+      - optional Client is revalidated in the current workspace
+      - each Income insert and staged-row update are atomic
+      - repeated calls are safe; imported rows are never reinserted
+    """
+
+    try:
+        packet_size = int(packet_size)
+    except (TypeError, ValueError):
+        raise ImportServiceError(
+            "Import packet size must be a whole number."
+        )
+
+    if (
+        packet_size < 1
+        or packet_size > INCOME_IMPORT_PACKET_MAX_ROWS
+    ):
+        raise ImportServiceError(
+            "Import packet size must be between 1 and "
+            f"{INCOME_IMPORT_PACKET_MAX_ROWS}."
+        )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        # Lock the run so two requests cannot post the same packet
+        # at the same time.
+        cur.execute(
+            """
+            SELECT
+                entity_type,
+                run_status
+            FROM import_runs
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            FOR UPDATE
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        run = cur.fetchone()
+
+        if not run:
+            raise ImportServiceError(
+                "Import Run was not found in this workspace."
+            )
+
+        entity_type = str(
+            run[0] or ""
+        ).strip().lower()
+
+        run_status = str(
+            run[1] or ""
+        ).strip().lower()
+
+        if entity_type != "income":
+            raise ImportServiceError(
+                "This importer executes standard Income runs only."
+            )
+
+        # A completed run is safely idempotent.
+        if run_status == "completed":
+            cur.execute(
+                """
+                SELECT
+                    total_rows,
+                    imported_rows,
+                    skipped_rows,
+                    error_rows
+                FROM import_runs
+                WHERE import_run_id = %s
+                """,
+                (import_run_id,),
+            )
+
+            counts = cur.fetchone()
+            conn.rollback()
+
+            return {
+                "import_run_id": import_run_id,
+                "run_status": "completed",
+                "total_rows": counts[0],
+                "imported_rows": counts[1],
+                "skipped_rows": counts[2],
+                "error_rows": counts[3],
+                "processed_this_packet": 0,
+                "remaining_rows": 0,
+            }
+
+        if run_status not in {
+            "ready",
+            "importing",
+        }:
+            raise ImportServiceError(
+                "This Income Import Run is not ready to post. "
+                "Complete its review first."
+            )
+
+        # Approval never overrides validation or a duplicate.
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM import_run_rows
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND import_status = 'pending'
+              AND review_decision = 'approved'
+              AND (
+                  validation_status <> 'valid'
+                  OR duplicate_status <> 'none'
+              )
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        unsafe_approved_rows = cur.fetchone()[0]
+
+        if unsafe_approved_rows:
+            raise ImportServiceError(
+                "One or more approved Income rows still require "
+                "validation or duplicate review."
+            )
+
+        # READY means every pending row must have a final review
+        # decision before posting begins.
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM import_run_rows
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND import_status = 'pending'
+              AND (
+                  review_decision IS NULL
+                  OR review_decision NOT IN ('approved', 'discard')
+              )
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        unresolved_review_rows = cur.fetchone()[0]
+
+        if unresolved_review_rows:
+            raise ImportServiceError(
+                "This Income Import Run still has rows requiring review."
+            )
+
+        # Discard is terminal.
+        cur.execute(
+            """
+            UPDATE import_run_rows
+            SET import_status = 'skipped',
+                imported_record_id = NULL,
+                error_message = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND import_status = 'pending'
+              AND review_decision = 'discard'
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        cur.execute(
+            """
+            UPDATE import_runs
+            SET run_status = 'importing',
+                started_at = COALESCE(
+                    started_at,
+                    CURRENT_TIMESTAMP
+                ),
+                last_activity_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        cur.execute(
+            """
+            SELECT
+                import_run_row_id,
+                source_row_number,
+                mapped_data
+            FROM import_run_rows
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND validation_status = 'valid'
+              AND duplicate_status = 'none'
+              AND review_decision = 'approved'
+              AND import_status = 'pending'
+            ORDER BY source_row_number
+            LIMIT %s
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+                packet_size,
+            ),
+        )
+
+        packet_rows = cur.fetchall()
+        processed_this_packet = 0
+
+        for (
+            import_run_row_id,
+            source_row_number,
+            mapped_data,
+        ) in packet_rows:
+
+            data = (
+                mapped_data
+                if isinstance(mapped_data, dict)
+                else {}
+            )
+
+            cur.execute(
+                "SAVEPOINT income_import_row"
+            )
+
+            try:
+                income_date_raw = str(
+                    data.get("income_date") or ""
+                ).strip()
+
+                if not income_date_raw:
+                    raise ImportServiceError(
+                        "Income Date is required."
+                    )
+
+                try:
+                    income_date = date.fromisoformat(
+                        income_date_raw
+                    )
+                except ValueError:
+                    raise ImportServiceError(
+                        "Income Date is invalid."
+                    )
+
+                income_type = str(
+                    data.get("income_type") or ""
+                ).strip()
+
+                if not income_type:
+                    raise ImportServiceError(
+                        "Income Type is required."
+                    )
+
+                payment_method = str(
+                    data.get("payment_method") or ""
+                ).strip()
+
+                if not payment_method:
+                    raise ImportServiceError(
+                        "Payment Method is required."
+                    )
+
+                # Defense-in-depth: these values must still exist
+                # when the row actually posts.
+                cur.execute(
+                    """
+                    SELECT 1
+                    FROM income_types
+                    WHERE spa_id = %s
+                      AND LOWER(TRIM(income_type_name)) =
+                          LOWER(TRIM(%s))
+                    LIMIT 1
+                    """,
+                    (
+                        spa_id,
+                        income_type,
+                    ),
+                )
+
+                if not cur.fetchone():
+                    raise ImportServiceError(
+                        f"Income Type '{income_type}' no longer "
+                        "exists in this business."
+                    )
+
+                cur.execute(
+                    """
+                    SELECT 1
+                    FROM payment_methods
+                    WHERE spa_id = %s
+                      AND LOWER(TRIM(payment_method)) =
+                          LOWER(TRIM(%s))
+                    LIMIT 1
+                    """,
+                    (
+                        spa_id,
+                        payment_method,
+                    ),
+                )
+
+                if not cur.fetchone():
+                    raise ImportServiceError(
+                        f"Payment Method '{payment_method}' no longer "
+                        "exists in this business."
+                    )
+
+                client_id = data.get("client_id")
+
+                if client_id in ("", None):
+                    client_id = None
+                else:
+                    try:
+                        client_id = int(client_id)
+                    except (TypeError, ValueError):
+                        raise ImportServiceError(
+                            "Resolved Client ID is invalid."
+                        )
+
+                    cur.execute(
+                        """
+                        SELECT 1
+                        FROM clients
+                        WHERE client_id = %s
+                          AND spa_id = %s
+                          AND business_unit_id = %s
+                        LIMIT 1
+                        """,
+                        (
+                            client_id,
+                            spa_id,
+                            business_unit_id,
+                        ),
+                    )
+
+                    if not cur.fetchone():
+                        raise ImportServiceError(
+                            "The resolved Client is no longer "
+                            "available in this Provider Workspace."
+                        )
+
+                def money_value(key):
+                    value = _parse_import_money(
+                        data.get(key),
+                        default=Decimal("0.00"),
+                    )
+
+                    if value is None:
+                        return Decimal("0.00")
+
+                    return value
+
+                service_amount = money_value(
+                    "service_amount"
+                )
+                retail_amount = money_value(
+                    "retail_amount"
+                )
+                tax_amount = money_value(
+                    "tax_amount"
+                )
+                total_amount = money_value(
+                    "total_amount"
+                )
+
+                if total_amount < 0:
+                    raise ImportServiceError(
+                        "Total Amount cannot be negative."
+                    )
+
+                description = str(
+                    data.get("description") or ""
+                ).strip()
+
+                processor_payment_id = str(
+                    data.get("processor_payment_id") or ""
+                ).strip() or None
+
+                notes = str(
+                    data.get("notes") or ""
+                ).strip()
+
+                cur.execute(
+                    """
+                    INSERT INTO income (
+                        spa_id,
+                        business_unit_id,
+                        income_date,
+                        client_id,
+                        appointment_id,
+                        visit_id,
+                        income_type,
+                        description,
+                        service_amount,
+                        retail_amount,
+                        tax_amount,
+                        total_amount,
+                        payment_method,
+                        processor_payment_id,
+                        notes
+                    )
+                    VALUES (
+                        %s, %s, %s, %s,
+                        NULL, NULL,
+                        %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s
+                    )
+                    RETURNING income_id
+                    """,
+                    (
+                        spa_id,
+                        business_unit_id,
+                        income_date,
+                        client_id,
+                        income_type,
+                        description,
+                        service_amount,
+                        retail_amount,
+                        tax_amount,
+                        total_amount,
+                        payment_method,
+                        processor_payment_id,
+                        notes,
+                    ),
+                )
+
+                income_id = cur.fetchone()[0]
+
+                cur.execute(
+                    """
+                    UPDATE import_run_rows
+                    SET import_status = 'imported',
+                        imported_record_id = %s,
+                        error_message = NULL,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE import_run_row_id = %s
+                      AND import_run_id = %s
+                      AND spa_id = %s
+                      AND business_unit_id = %s
+                      AND review_decision = 'approved'
+                      AND import_status = 'pending'
+                    """,
+                    (
+                        income_id,
+                        import_run_row_id,
+                        import_run_id,
+                        spa_id,
+                        business_unit_id,
+                    ),
+                )
+
+                if cur.rowcount != 1:
+                    raise ImportServiceError(
+                        "The staged Income row changed while "
+                        "it was being imported."
+                    )
+
+                cur.execute(
+                    "RELEASE SAVEPOINT income_import_row"
+                )
+
+                processed_this_packet += 1
+
+            except Exception as exc:
+                cur.execute(
+                    "ROLLBACK TO SAVEPOINT income_import_row"
+                )
+
+                cur.execute(
+                    "RELEASE SAVEPOINT income_import_row"
+                )
+
+                cur.execute(
+                    """
+                    UPDATE import_run_rows
+                    SET import_status = 'error',
+                        imported_record_id = NULL,
+                        error_message = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE import_run_row_id = %s
+                      AND import_run_id = %s
+                      AND spa_id = %s
+                      AND business_unit_id = %s
+                    """,
+                    (
+                        str(exc)[:1000],
+                        import_run_row_id,
+                        import_run_id,
+                        spa_id,
+                        business_unit_id,
+                    ),
+                )
+
+        # Recalculate counters from durable staged-row state.
+        cur.execute(
+            """
+            SELECT
+                COUNT(*) FILTER (
+                    WHERE import_status = 'imported'
+                ),
+                COUNT(*) FILTER (
+                    WHERE import_status = 'skipped'
+                ),
+                COUNT(*) FILTER (
+                    WHERE import_status = 'error'
+                ),
+                COUNT(*) FILTER (
+                    WHERE import_status = 'pending'
+                )
+            FROM import_run_rows
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        (
+            imported_rows,
+            skipped_rows,
+            error_rows,
+            remaining_rows,
+        ) = cur.fetchone()
+
+        if remaining_rows > 0:
+            next_status = "importing"
+            failure_message = None
+            completed_at_sql = "completed_at"
+
+        elif error_rows > 0:
+            next_status = "failed"
+            failure_message = (
+                "One or more Income rows could not be imported."
+            )
+            completed_at_sql = "CURRENT_TIMESTAMP"
+
+        else:
+            next_status = "completed"
+            failure_message = None
+            completed_at_sql = "CURRENT_TIMESTAMP"
+
+        cur.execute(
+            f"""
+            UPDATE import_runs
+            SET run_status = %s,
+                imported_rows = %s,
+                skipped_rows = %s,
+                error_rows = %s,
+                failure_message = %s,
+                completed_at = {completed_at_sql},
+                last_activity_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            """,
+            (
+                next_status,
+                imported_rows,
+                skipped_rows,
+                error_rows,
+                failure_message,
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        conn.commit()
+
+        return {
+            "import_run_id": import_run_id,
+            "run_status": next_status,
+            "imported_rows": imported_rows,
+            "skipped_rows": skipped_rows,
+            "error_rows": error_rows,
+            "processed_this_packet": (
+                processed_this_packet
+            ),
+            "remaining_rows": remaining_rows,
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
 
 
 # =========================================================

@@ -166,8 +166,10 @@ from services.import_service import (
     get_import_run_record_details,
     get_workspace_import_profile,
     update_client_import_review_decision,
+    update_financial_import_review_decision,
     discard_client_import_review_rows,
     process_client_import_packet,
+    process_income_import_packet,
     process_peachpos_income_import_packet,
 )
 from services.peachpos_processor_labels import (
@@ -97817,6 +97819,381 @@ def client_import_mapping(import_run_id):
 
 
 #  ------------------------------------------
+#      INCOME IMPORT
+#  ------------------------------------------
+
+
+@app.route(
+    "/imports/income",
+    methods=["GET", "POST"],
+)
+@login_required
+@spa_required
+@require_subscription_feature("import_export")
+@require_psp_access("financial_management")
+def income_import_upload():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to import Income.",
+            "error",
+        )
+        return redirect(url_for("import_center"))
+
+    if request.method == "POST":
+        submitted_token = request.form.get(
+            "security_csrf_token",
+            "",
+        )
+
+        if not _security_form_csrf_valid(submitted_token):
+            abort(400)
+
+        uploaded_file = request.files.get("import_file")
+
+        try:
+            import_run = create_import_run(
+                uploaded_file,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                entity_type="income",
+                requested_by=session.get("user_id"),
+            )
+
+        except ImportServiceError as exc:
+            flash(str(exc), "error")
+
+        else:
+            return redirect(
+                url_for(
+                    "income_import_mapping",
+                    import_run_id=import_run["import_run_id"],
+                )
+            )
+
+    return render_template(
+        "import_upload.html",
+        import_title="Import Income",
+        import_description=(
+            "Upload a CSV or Excel file containing historical "
+            "Income records you want to bring into Peach Suite Pro."
+        ),
+        setup_message=(
+            "Before uploading, make sure the Income Types and "
+            "Payment Methods used in your file already exist in "
+            "Peach Suite Pro. Client is optional."
+        ),
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
+@app.route(
+    "/imports/income/<int:import_run_id>/mapping",
+    methods=["GET", "POST"],
+)
+@login_required
+@spa_required
+@require_subscription_feature("import_export")
+@require_psp_access("financial_management")
+def income_import_mapping(import_run_id):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to map an Income import.",
+            "error",
+        )
+        return redirect(url_for("import_center"))
+
+    try:
+        import_data = get_import_run_mapping_data(
+            import_run_id,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+        )
+
+    except ImportServiceError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("import_center"))
+
+    if import_data.get("entity_type") != "income":
+        flash(
+            "This Import Run is not an Income import.",
+            "error",
+        )
+        return redirect(url_for("import_center"))
+
+    if request.method == "POST":
+        submitted_token = request.form.get(
+            "security_csrf_token",
+            "",
+        )
+
+        if not _security_form_csrf_valid(submitted_token):
+            abort(400)
+
+        mapping = []
+
+        for source_index, source_header in enumerate(
+            import_data["headers"]
+        ):
+            target_key = (
+                request.form.get(
+                    f"target_{source_index}",
+                    "",
+                )
+                or ""
+            ).strip()
+
+            mapping.append({
+                "source_index": source_index,
+                "source_header": source_header,
+                "target_key": target_key or None,
+            })
+
+        try:
+            analyze_import_run(
+                import_run_id,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                mapping=mapping,
+            )
+
+        except ImportServiceError as exc:
+            flash(str(exc), "error")
+            import_data["mapping"] = mapping
+
+        else:
+            return redirect(
+                url_for(
+                    "import_run_records",
+                    import_run_id=import_run_id,
+                )
+            )
+
+    return render_template(
+        "import_mapping.html",
+        import_data=import_data,
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
+#  ------------------------------------------
+#      PEACHPOS INCOME IMPORT
+#  ------------------------------------------
+
+
+@app.route(
+    "/imports/peachpos",
+    methods=["GET", "POST"],
+)
+@login_required
+@spa_required
+@require_subscription_feature("import_export")
+@require_psp_access("financial_management")
+def peachpos_import_upload():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to import Processor Transactions.",
+            "error",
+        )
+        return redirect(url_for("import_center"))
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        SELECT
+            credit_processor_id,
+            credit_processor_name,
+            merchant_account_identifier
+        FROM credit_processors
+        WHERE spa_id = %s
+          AND business_unit_id = %s
+          AND is_active = TRUE
+          AND LOWER(TRIM(credit_processor_name)) <> 'square'
+        ORDER BY credit_processor_name
+        """,
+        (
+            spa_id,
+            business_unit_id,
+        ),
+    )
+
+    processors = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    selected_processor_id = (
+        request.form.get("credit_processor_id", "")
+        or ""
+    ).strip()
+
+    event_name = (
+        request.form.get("event_name", "")
+        or ""
+    ).strip()
+
+    if request.method == "POST":
+        submitted_token = request.form.get(
+            "security_csrf_token",
+            "",
+        )
+
+        if not _security_form_csrf_valid(submitted_token):
+            abort(400)
+
+        if not selected_processor_id:
+            flash(
+                "Choose a Processor Company before uploading.",
+                "error",
+            )
+
+        else:
+            uploaded_file = request.files.get("import_file")
+
+            try:
+                import_run = create_import_run(
+                    uploaded_file,
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    entity_type="peachpos_income",
+                    requested_by=session.get("user_id"),
+                    options={
+                        "credit_processor_id": (
+                            selected_processor_id
+                        ),
+                        "event_name": event_name,
+                    },
+                )
+
+            except ImportServiceError as exc:
+                flash(str(exc), "error")
+
+            else:
+                return redirect(
+                    url_for(
+                        "peachpos_import_mapping",
+                        import_run_id=(
+                            import_run["import_run_id"]
+                        ),
+                    )
+                )
+
+    return render_template(
+        "peachpos_import_upload.html",
+        processors=processors,
+        selected_processor_id=selected_processor_id,
+        event_name=event_name,
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
+@app.route(
+    "/imports/peachpos/<int:import_run_id>/mapping",
+    methods=["GET", "POST"],
+)
+@login_required
+@spa_required
+@require_subscription_feature("import_export")
+@require_psp_access("financial_management")
+def peachpos_import_mapping(import_run_id):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to map a Processor Transaction import.",
+            "error",
+        )
+        return redirect(url_for("import_center"))
+
+    try:
+        import_data = get_import_run_mapping_data(
+            import_run_id,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+        )
+
+    except ImportServiceError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("import_center"))
+
+    if import_data.get("entity_type") != "peachpos_income":
+        flash(
+            "This Import Run is not a Processor Transaction import.",
+            "error",
+        )
+        return redirect(url_for("import_center"))
+
+    if request.method == "POST":
+        submitted_token = request.form.get(
+            "security_csrf_token",
+            "",
+        )
+
+        if not _security_form_csrf_valid(submitted_token):
+            abort(400)
+
+        mapping = []
+
+        for source_index, source_header in enumerate(
+            import_data["headers"]
+        ):
+            target_key = (
+                request.form.get(
+                    f"target_{source_index}",
+                    "",
+                )
+                or ""
+            ).strip()
+
+            mapping.append({
+                "source_index": source_index,
+                "source_header": source_header,
+                "target_key": target_key or None,
+            })
+
+        try:
+            analyze_import_run(
+                import_run_id,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                mapping=mapping,
+            )
+
+        except ImportServiceError as exc:
+            flash(str(exc), "error")
+            import_data["mapping"] = mapping
+
+        else:
+            return redirect(
+                url_for(
+                    "import_run_records",
+                    import_run_id=import_run_id,
+                )
+            )
+
+    return render_template(
+        "import_mapping.html",
+        import_data=import_data,
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
+#  ------------------------------------------
 #      PEACH SUITE PRO IMPORT RECORDS
 #  ------------------------------------------
 
@@ -98156,6 +98533,198 @@ def client_import_review_row(
         else:
             flash(
                 "Client row discarded from this import.",
+                "success",
+            )
+
+    return redirect(
+        url_for(
+            "import_run_records",
+            import_run_id=import_run_id,
+        )
+    )
+
+
+# ------------------------------------------
+#     FINANCIAL IMPORT REVIEW / POSTING
+# ------------------------------------------
+
+
+@app.route(
+    "/imports/financial/<int:import_run_id>/rows/"
+    "<int:import_run_row_id>/review",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_subscription_feature("import_export")
+@require_psp_access("financial_management")
+def financial_import_review_row(
+    import_run_id,
+    import_run_row_id,
+):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to review financial imports.",
+            "error",
+        )
+        return redirect(url_for("dashboard"))
+
+    submitted_csrf_token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_csrf_token
+    ):
+        flash(
+            "Your security token expired or could not be verified. "
+            "Please try again.",
+            "error",
+        )
+        return redirect(
+            url_for(
+                "import_run_records",
+                import_run_id=import_run_id,
+            )
+        )
+
+    decision = (
+        request.form.get("decision", "")
+        or ""
+    ).strip().lower()
+
+    try:
+        result = update_financial_import_review_decision(
+            import_run_id,
+            import_run_row_id,
+            decision=decision,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+        )
+
+    except ImportServiceError as exc:
+        flash(str(exc), "error")
+
+    else:
+        if result["review_decision"] == "approved":
+            flash(
+                "Financial import row approved.",
+                "success",
+            )
+        else:
+            flash(
+                "Financial import row discarded.",
+                "success",
+            )
+
+    return redirect(
+        url_for(
+            "import_run_records",
+            import_run_id=import_run_id,
+        )
+    )
+
+
+@app.route(
+    "/imports/financial/<int:import_run_id>/import-approved",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_subscription_feature("import_export")
+@require_psp_access("financial_management")
+def financial_import_approved_rows(import_run_id):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to import financial records.",
+            "error",
+        )
+        return redirect(url_for("dashboard"))
+
+    submitted_csrf_token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_csrf_token
+    ):
+        flash(
+            "Your security token expired or could not be verified. "
+            "Please try again.",
+            "error",
+        )
+        return redirect(
+            url_for(
+                "import_run_records",
+                import_run_id=import_run_id,
+            )
+        )
+
+    try:
+        import_data = get_import_run_records(
+            import_run_id,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+        )
+
+        entity_type = str(
+            import_data.get("entity_type") or ""
+        ).strip().lower()
+
+        if entity_type == "income":
+            result = process_income_import_packet(
+                import_run_id,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+            )
+            label = "Income"
+
+        elif entity_type == "peachpos_income":
+            result = process_peachpos_income_import_packet(
+                import_run_id,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+            )
+            label = "PeachPOS Income"
+
+        else:
+            raise ImportServiceError(
+                "This Import Run is not a supported "
+                "financial import."
+            )
+
+    except ImportServiceError as exc:
+        flash(str(exc), "error")
+
+    else:
+        if result["run_status"] == "completed":
+            flash(
+                f"{label} import completed successfully.",
+                "success",
+            )
+
+        elif result["run_status"] == "failed":
+            flash(
+                f"{label} import finished with one or more "
+                "errors. Review the affected rows below.",
+                "error",
+            )
+
+        else:
+            flash(
+                f"Imported {result['processed_this_packet']} "
+                f"{label} records in this packet. "
+                f"{result['remaining_rows']} remain.",
                 "success",
             )
 

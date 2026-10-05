@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+
+{% block title %}Import Processor Transactions | Peach Suite Pro{% endblock %}
+
+{% block content %}
+
+<div class="page-title">
+    <h1>Import Processor Transactions</h1>
+</div>
+
+<p class="muted-text" style="max-width:850px;">
+    Import PeachPOS transaction history from a supported non-Square
+    payment processor using a CSV or Excel file.
+</p>
+
+
+<div style="
+    max-width:850px;
+    border:1px solid #d9d9d9;
+    border-radius:10px;
+    padding:16px 18px;
+    margin:20px 0;
+    background:#fafafa;
+">
+    <strong>Before Uploading</strong>
+
+    <p style="margin:10px 0 6px 0;">
+        Choose the Processor Company that produced this file.
+    </p>
+
+    <p style="margin:6px 0;">
+        The uploaded file must contain a
+        <strong>Merchant ID / Account ID</strong> column.
+        Every imported row must contain the same identifier, and it must
+        exactly match the identifier saved in Processor Company Setup.
+    </p>
+
+    <p style="margin:6px 0 0 0;">
+        Peach Suite Pro will block the import if the processor account
+        cannot be verified.
+    </p>
+</div>
+
+
+<div style="
+    max-width:850px;
+    border:1px solid #d9d9d9;
+    border-radius:10px;
+    padding:16px 18px;
+    margin:20px 0;
+    background:#fafafa;
+">
+    <strong>Using Square?</strong>
+
+    <p class="muted-text" style="margin:6px 0 0 0;">
+        Square transactions use Peach Suite Pro's native Square
+        integration and cannot be imported through Processor Transactions.
+    </p>
+</div>
+
+
+<div style="max-width:700px; margin-top:24px;">
+
+    <form method="POST" enctype="multipart/form-data">
+
+        <input
+            type="hidden"
+            name="security_csrf_token"
+            value="{{ security_csrf_token }}"
+        >
+
+
+        <div class="form-group">
+
+            <label for="credit_processor_id">
+                Processor Company
+            </label>
+
+            <select
+                id="credit_processor_id"
+                name="credit_processor_id"
+                required
+            >
+                <option value="">
+                    Choose Processor Company
+                </option>
+
+                {% for processor in processors %}
+
+                    <option
+                        value="{{ processor[0] }}"
+                        {% if selected_processor_id|string == processor[0]|string %}
+                            selected
+                        {% endif %}
+                    >
+                        {{ processor[1] }}
+
+                        {% if processor[2] %}
+                            — Merchant ID configured
+                        {% else %}
+                            — Merchant ID NOT configured
+                        {% endif %}
+                    </option>
+
+                {% endfor %}
+            </select>
+
+            <small class="muted-text">
+                Only active non-Square processors in this Provider
+                Workspace are available.
+            </small>
+
+        </div>
+
+
+        <div class="form-group">
+
+            <label for="event_name">
+                Event Name
+            </label>
+
+            <input
+                type="text"
+                id="event_name"
+                name="event_name"
+                value="{{ event_name or '' }}"
+                maxlength="255"
+            >
+
+            <small class="muted-text">
+                Optional. Use this when the imported transactions belong
+                to a specific event, market, pop-up, or operating day.
+            </small>
+
+        </div>
+
+
+        <div class="form-group">
+
+            <label for="import_file">
+                Choose Import File
+            </label>
+
+            <input
+                type="file"
+                id="import_file"
+                name="import_file"
+                accept=".csv,.xlsx"
+                required
+            >
+
+            <small class="muted-text">
+                CSV (.csv) or Excel (.xlsx), 10 MB maximum.
+                The first row must contain column headings.
+            </small>
+
+        </div>
+
+
+        <div class="form-buttons" style="margin-top:22px;">
+
+            <button type="submit" class="btn">
+                Upload and Continue
+            </button>
+
+            <a
+                href="{{ url_for('credit_processors') }}"
+                class="btn"
+            >
+                Processor Company Setup
+            </a>
+
+            <a
+                href="{{ url_for('import_center') }}"
+                class="btn"
+            >
+                Cancel
+            </a>
+
+        </div>
+
+    </form>
+
+</div>
+
+{% endblock %}

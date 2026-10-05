@@ -130,6 +130,53 @@
     {% endif %}
 
 
+    {% if import_data.entity_type in ["income", "peachpos_income"]
+          and import_data.run_status in ["ready", "importing"] %}
+
+        <div class="report-section no-print">
+
+            <form
+                method="POST"
+                action="{{ url_for(
+                    'financial_import_approved_rows',
+                    import_run_id=import_data.import_run_id
+                ) }}"
+            >
+                <input
+                    type="hidden"
+                    name="security_csrf_token"
+                    value="{{ security_csrf_token }}"
+                >
+
+                <button type="submit" class="btn">
+
+                    {% if import_data.entity_type == "income" %}
+
+                        {% if import_data.approved_rows > 0 %}
+                            Import Approved Income
+                        {% else %}
+                            Finalize Income Import
+                        {% endif %}
+
+                    {% else %}
+
+                        {% if import_data.approved_rows > 0 %}
+                            Import Approved PeachPOS Income
+                        {% else %}
+                            Finalize PeachPOS Income Import
+                        {% endif %}
+
+                    {% endif %}
+
+                </button>
+
+            </form>
+
+        </div>
+
+    {% endif %}
+
+
     {% if import_data.entity_type == "peachpos_income" %}
 
         <div class="report-section">
@@ -192,6 +239,364 @@
         </div>
 
     {% endif %}
+
+    {% if import_data.entity_type == "income" %}
+
+        <div class="report-section">
+
+            <h2>Income Import Records</h2>
+
+            <div class="table-wrap">
+
+                <table class="styled-report-table wide-report-table">
+
+                    <thead>
+                        <tr>
+                            <th>Row</th>
+                            <th>Income Date</th>
+                            <th>Income Type</th>
+                            <th>Client</th>
+                            <th>Description</th>
+                            <th>Service</th>
+                            <th>Retail</th>
+                            <th>Tax</th>
+                            <th>Total</th>
+                            <th>Payment Method</th>
+                            <th>Processor Payment ID</th>
+                            <th>Notes</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+
+                        {% if import_data.records %}
+
+                            {% for record in import_data.records %}
+
+                                {% set data = record.mapped_data or {} %}
+
+                                <tr>
+
+                                    <td>
+                                        {{ record.source_row_number }}
+                                    </td>
+
+                                    <td>
+                                        {{ data.get("income_date") or "—" }}
+                                    </td>
+
+                                    <td>
+                                        {{ data.get("income_type") or "—" }}
+                                    </td>
+
+                                    <td>
+                                        {{ data.get("client_name") or "—" }}
+                                    </td>
+
+                                    <td>
+                                        {{ data.get("description") or "—" }}
+                                    </td>
+
+                                    <td class="amount-cell">
+                                        {% if data.get("service_amount") %}
+                                            {{ data.get("service_amount")|currency }}
+                                        {% else %}
+                                            —
+                                        {% endif %}
+                                    </td>
+
+                                    <td class="amount-cell">
+                                        {% if data.get("retail_amount") %}
+                                            {{ data.get("retail_amount")|currency }}
+                                        {% else %}
+                                            —
+                                        {% endif %}
+                                    </td>
+
+                                    <td class="amount-cell">
+                                        {% if data.get("tax_amount") %}
+                                            {{ data.get("tax_amount")|currency }}
+                                        {% else %}
+                                            —
+                                        {% endif %}
+                                    </td>
+
+                                    <td class="amount-cell total-highlight">
+                                        {% if data.get("total_amount") %}
+                                            {{ data.get("total_amount")|currency }}
+                                        {% else %}
+                                            —
+                                        {% endif %}
+                                    </td>
+
+                                    <td>
+                                        {{ data.get("payment_method") or "—" }}
+                                    </td>
+
+                                    <td>
+                                        {{ data.get("processor_payment_id") or "—" }}
+                                    </td>
+
+                                    <td>
+                                        {{ data.get("notes") or "—" }}
+                                    </td>
+
+                                    <td>
+
+                                        {% if record.review_decision == "approved" %}
+
+                                            <span class="import-status-badge import-status-approved">
+                                                Approved
+                                            </span>
+
+                                        {% elif record.review_decision == "needs_review" %}
+
+                                            <span class="import-status-badge import-status-review">
+                                                Needs Review
+                                            </span>
+
+                                        {% elif record.review_decision == "hold" %}
+
+                                            <span class="import-status-badge import-status-hold">
+                                                Hold
+                                            </span>
+
+                                        {% elif record.review_decision == "discard" %}
+
+                                            <span class="import-status-badge import-status-discard">
+                                                Discard
+                                            </span>
+
+                                        {% else %}
+
+                                            <span class="muted-text">—</span>
+
+                                        {% endif %}
+
+
+                                        {% if record.import_status == "pending"
+                                              and record.review_decision not in [
+                                                  "approved",
+                                                  "discard"
+                                              ] %}
+
+                                            <div
+                                                class="no-print"
+                                                style="margin-top: 8px;"
+                                            >
+
+                                                {% if record.validation_status == "valid"
+                                                      and record.duplicate_status != "strong" %}
+
+                                                    <form
+                                                        method="POST"
+                                                        action="{{ url_for(
+                                                            'financial_import_review_row',
+                                                            import_run_id=import_data.import_run_id,
+                                                            import_run_row_id=record.import_run_row_id
+                                                        ) }}"
+                                                        style="display:inline-block;"
+                                                    >
+                                                        <input
+                                                            type="hidden"
+                                                            name="security_csrf_token"
+                                                            value="{{ security_csrf_token }}"
+                                                        >
+                                                        <input
+                                                            type="hidden"
+                                                            name="decision"
+                                                            value="approved"
+                                                        >
+                                                        <button
+                                                            type="submit"
+                                                            class="btn btn-small"
+                                                        >
+                                                            Approve
+                                                        </button>
+                                                    </form>
+
+                                                {% endif %}
+
+                                                <form
+                                                    method="POST"
+                                                    action="{{ url_for(
+                                                        'financial_import_review_row',
+                                                        import_run_id=import_data.import_run_id,
+                                                        import_run_row_id=record.import_run_row_id
+                                                    ) }}"
+                                                    style="display:inline-block;"
+                                                >
+                                                    <input
+                                                        type="hidden"
+                                                        name="security_csrf_token"
+                                                        value="{{ security_csrf_token }}"
+                                                    >
+                                                    <input
+                                                        type="hidden"
+                                                        name="decision"
+                                                        value="discard"
+                                                    >
+                                                    <button
+                                                        type="submit"
+                                                        class="btn btn-small"
+                                                    >
+                                                        Discard
+                                                    </button>
+                                                </form>
+
+                                            </div>
+
+                                        {% endif %}
+
+
+                                        <div style="margin-top: 6px;">
+
+                                            {% if record.import_status == "imported" %}
+
+                                                <span class="import-status-badge import-status-posted">
+                                                    Posted
+                                                </span>
+
+                                                {% if record.imported_record_id %}
+                                                    <div class="import-posted-id">
+                                                        Income #{{ record.imported_record_id }}
+                                                    </div>
+                                                {% endif %}
+
+                                            {% elif record.import_status == "skipped" %}
+
+                                                <span class="import-status-badge import-status-skipped">
+                                                    Skipped
+                                                </span>
+
+                                            {% elif record.import_status == "error" %}
+
+                                                <span class="import-status-badge import-status-error">
+                                                    Error
+                                                </span>
+
+                                            {% else %}
+
+                                                <span class="muted-text">
+                                                    Not Posted
+                                                </span>
+
+                                            {% endif %}
+
+                                        </div>
+
+                                    </td>
+
+                                </tr>
+
+
+                                {% if record.review_decision != "approved"
+                                      or record.validation_errors
+                                      or record.error_message
+                                      or record.duplicate_status != "none" %}
+
+                                    <tr class="import-detail-row">
+
+                                        <td colspan="13">
+
+                                            {% if record.validation_errors %}
+
+                                                <div class="import-detail-block">
+                                                    <strong>Validation:</strong>
+                                                    <ul>
+                                                        {% for error in record.validation_errors %}
+                                                            <li>{{ error }}</li>
+                                                        {% endfor %}
+                                                    </ul>
+                                                </div>
+
+                                            {% endif %}
+
+
+                                            {% if record.duplicate_status == "strong" %}
+
+                                                <div class="import-detail-block">
+                                                    <strong>Strong Duplicate:</strong>
+                                                    This Processor Payment ID already exists
+                                                    in this Provider Workspace.
+                                                </div>
+
+                                            {% elif record.duplicate_status == "possible" %}
+
+                                                <div class="import-detail-block">
+                                                    <strong>Possible Duplicate:</strong>
+                                                    This Income record requires review
+                                                    before posting.
+                                                </div>
+
+                                            {% endif %}
+
+
+                                            {% if record.review_decision == "needs_review" %}
+
+                                                <div class="import-detail-block">
+                                                    <strong>Review Required:</strong>
+                                                    This Income record must be resolved
+                                                    before it can be posted.
+                                                </div>
+
+                                            {% elif record.review_decision == "hold" %}
+
+                                                <div class="import-detail-block">
+                                                    <strong>On Hold:</strong>
+                                                    This Income record will not be posted
+                                                    while it remains on hold.
+                                                </div>
+
+                                            {% elif record.review_decision == "discard" %}
+
+                                                <div class="import-detail-block">
+                                                    <strong>Marked for Discard:</strong>
+                                                    This record remains in the Import
+                                                    Records audit trail but will not be
+                                                    posted to Income.
+                                                </div>
+
+                                            {% endif %}
+
+
+                                            {% if record.error_message %}
+
+                                                <div class="import-detail-block">
+                                                    <strong>Posting Error:</strong>
+                                                    {{ record.error_message }}
+                                                </div>
+
+                                            {% endif %}
+
+                                        </td>
+
+                                    </tr>
+
+                                {% endif %}
+
+                            {% endfor %}
+
+                        {% else %}
+
+                            <tr>
+                                <td colspan="13" class="no-data">
+                                    No Income import records were found.
+                                </td>
+                            </tr>
+
+                        {% endif %}
+
+                    </tbody>
+
+                </table>
+
+            </div>
+
+        </div>
+
+    {% else %}
 
     <div class="report-section">
 
@@ -321,7 +726,80 @@
 
                                     {% endif %}
 
-                                    </div>
+
+                                    {% if record.import_status == "pending"
+                                          and record.review_decision not in [
+                                              "approved",
+                                              "discard"
+                                          ] %}
+
+                                        <div
+                                            class="no-print"
+                                            style="margin-top: 8px;"
+                                        >
+
+                                            {% if record.validation_status == "valid"
+                                                  and record.duplicate_status != "strong" %}
+
+                                                <form
+                                                    method="POST"
+                                                    action="{{ url_for(
+                                                        'financial_import_review_row',
+                                                        import_run_id=import_data.import_run_id,
+                                                        import_run_row_id=record.import_run_row_id
+                                                    ) }}"
+                                                    style="display:inline-block;"
+                                                >
+                                                    <input
+                                                        type="hidden"
+                                                        name="security_csrf_token"
+                                                        value="{{ security_csrf_token }}"
+                                                    >
+                                                    <input
+                                                        type="hidden"
+                                                        name="decision"
+                                                        value="approved"
+                                                    >
+                                                    <button
+                                                        type="submit"
+                                                        class="btn btn-small"
+                                                    >
+                                                        Approve
+                                                    </button>
+                                                </form>
+
+                                            {% endif %}
+
+                                            <form
+                                                method="POST"
+                                                action="{{ url_for(
+                                                    'financial_import_review_row',
+                                                    import_run_id=import_data.import_run_id,
+                                                    import_run_row_id=record.import_run_row_id
+                                                ) }}"
+                                                style="display:inline-block;"
+                                            >
+                                                <input
+                                                    type="hidden"
+                                                    name="security_csrf_token"
+                                                    value="{{ security_csrf_token }}"
+                                                >
+                                                <input
+                                                    type="hidden"
+                                                    name="decision"
+                                                    value="discard"
+                                                >
+                                                <button
+                                                    type="submit"
+                                                    class="btn btn-small"
+                                                >
+                                                    Discard
+                                                </button>
+                                            </form>
+
+                                        </div>
+
+                                    {% endif %}
 
                                 </td>
 
@@ -543,6 +1021,8 @@
         </div>
 
     </div>
+
+    {% endif %}
 
 </div>
 

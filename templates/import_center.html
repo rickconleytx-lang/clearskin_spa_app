@@ -69,6 +69,28 @@
     </div>
 
     <div class="dashboard-card">
+        <h2>Income</h2>
+
+        <p style="font-size:1rem; font-weight:400; line-height:1.5;">
+            Import historical Income records from a CSV or Excel file.
+        </p>
+
+        <p class="muted-text" style="font-size:0.95rem; font-weight:400; line-height:1.5;">
+            Income Types and Payment Methods used in the file must already
+            exist in Peach Suite Pro. Client is optional.
+        </p>
+
+        <div style="margin-top:18px;">
+            <a
+                href="{{ url_for('income_import_upload') }}"
+                class="btn"
+            >
+                Start Income Import
+            </a>
+        </div>
+    </div>
+
+    <div class="dashboard-card">
         <h2>Processor Transactions</h2>
 
         <p style="font-size:1rem; font-weight:400; line-height:1.5;">
@@ -94,14 +116,12 @@
         </p>
 
         <div style="margin-top:12px;">
-            <button
-                type="button"
+            <a
+                href="{{ url_for('peachpos_import_upload') }}"
                 class="btn"
-                disabled
-                title="Import workflow is being connected."
             >
                 Start Processor Import
-            </button>
+            </a>
         </div>
 
         <div style="
@@ -127,8 +147,8 @@
 <h3>Import History</h3>
 
 <p class="muted-text">
-    Recent Client and Processor Transaction imports will appear here as
-    we connect the upload and review workflow.
+    Recent Client, Income, and Processor Transaction imports will appear
+    here as import history becomes available.
 </p>
 
 {% endblock %}
