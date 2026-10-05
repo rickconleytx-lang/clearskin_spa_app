@@ -2733,11 +2733,18 @@ def sync_stripe_subscription_snapshot(
         "canceled",
         "incomplete_expired",
     }:
+        # A completed Stripe cancellation ends paid PSP access only
+        # while this business is using standard billing. Complimentary
+        # access is intentionally independent of an old Stripe
+        # Subscription ending.
         cursor.execute(
             """
             UPDATE spas
-            SET subscription_status = 'Canceled'
+            SET
+                subscription_status = 'Canceled',
+                access_status = 'restricted'
             WHERE spa_id = %s
+              AND billing_mode = 'standard'
               AND subscription_status IN (
                   'Trial',
                   'Active'
