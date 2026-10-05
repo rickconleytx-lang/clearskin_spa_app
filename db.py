@@ -8,11 +8,15 @@ def get_db_connection():
     database_url = os.environ.get("DATABASE_URL")
 
     if database_url:
-        return psycopg2.connect(database_url)
+        return psycopg2.connect(
+            database_url,
+            connect_timeout=5
+        )
 
     return psycopg2.connect(
         host="localhost",
         database="clearskin_spa",
         user=os.environ.get("LOCAL_DB_USER", "postgres"),
-        password=os.environ.get("LOCAL_DB_PASSWORD")
+        password=os.environ.get("LOCAL_DB_PASSWORD"),
+        connect_timeout=5
     )

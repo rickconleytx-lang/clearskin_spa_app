@@ -132834,6 +132834,10 @@ def scheduled_purge_system_logs():
 def start_scheduler():
     scheduler = BackgroundScheduler()
 
+    # Stagger startup-only job execution so Render deploys do not
+    # launch every database/provider health task at the same instant.
+    startup_time = datetime.now()
+
     scheduler.add_job(
         scheduled_send_pending_reminders,
         "interval",
@@ -132873,7 +132877,7 @@ def start_scheduler():
         coalesce=True,
         max_instances=1,
         misfire_grace_time=300,
-        next_run_time=datetime.now()
+        next_run_time=startup_time + timedelta(seconds=45)
     )
 
     scheduler.add_job(
@@ -132885,7 +132889,7 @@ def start_scheduler():
         coalesce=True,
         max_instances=1,
         misfire_grace_time=300,
-        next_run_time=datetime.now()
+        next_run_time=startup_time + timedelta(seconds=75)
     )
 
     scheduler.add_job(
@@ -132897,7 +132901,7 @@ def start_scheduler():
         coalesce=True,
         max_instances=1,
         misfire_grace_time=300,
-        next_run_time=datetime.now()
+        next_run_time=startup_time + timedelta(seconds=105)
     )
 
     scheduler.add_job(
@@ -132909,7 +132913,7 @@ def start_scheduler():
         coalesce=True,
         max_instances=1,
         misfire_grace_time=300,
-        next_run_time=datetime.now()
+        next_run_time=startup_time + timedelta(seconds=135)
     )
 
     scheduler.add_job(
@@ -132930,7 +132934,7 @@ def start_scheduler():
         coalesce=True,
         max_instances=1,
         misfire_grace_time=3600,
-        next_run_time=datetime.now()
+        next_run_time=startup_time + timedelta(minutes=3)
     )
 
 
@@ -132943,8 +132947,7 @@ def start_scheduler():
         replace_existing=True,
         coalesce=True,
         max_instances=1,
-        misfire_grace_time=3600,
-        next_run_time=datetime.now()
+        misfire_grace_time=3600
     )
 
 
@@ -132957,7 +132960,7 @@ def start_scheduler():
         coalesce=True,
         max_instances=1,
         misfire_grace_time=1800,
-        next_run_time=datetime.now()
+        next_run_time=startup_time + timedelta(seconds=10)
     )
 
     scheduler.add_job(
@@ -132969,7 +132972,7 @@ def start_scheduler():
         coalesce=True,
         max_instances=1,
         misfire_grace_time=1800,
-        next_run_time=datetime.now()
+        next_run_time=startup_time + timedelta(seconds=20)
     )
 
 
@@ -133004,10 +133007,6 @@ def start_scheduler():
 
     scheduler.start()
     print("Scheduler started.", flush=True)
-
-
-
-    log_scheduler("System logging initialized.")
 
 
 
