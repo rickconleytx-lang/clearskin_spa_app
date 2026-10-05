@@ -6855,9 +6855,22 @@ def master_admin_business_detail(spa_id):
                 sba.cancel_at,
                 sba.canceled_at,
                 sba.ended_at,
-                sba.last_synced_at
+                sba.last_synced_at,
+
+                st.tier_code AS current_tier_code,
+                st.tier_name AS current_tier_name,
+                s.billing_mode,
+                s.access_status,
+                s.complimentary_started_at,
+                s.complimentary_ends_at,
+                s.complimentary_reason,
+                s.complimentary_set_by,
+                s.complimentary_set_at
 
             FROM spas s
+
+            JOIN subscription_tiers st
+              ON st.subscription_tier_id = s.subscription_tier_id
 
             LEFT JOIN business_units bu
               ON bu.spa_id = s.spa_id
@@ -6949,17 +6962,672 @@ def master_admin_business_detail(spa_id):
             "ended_at": row[39],
             "last_synced_at": row[40],
 
+            "current_tier_code": row[41],
+            "current_tier_name": row[42],
+            "billing_mode": row[43],
+            "access_status": row[44],
+            "complimentary_started_at": row[45],
+            "complimentary_ends_at": row[46],
+            "complimentary_reason": row[47] or "",
+            "complimentary_set_by": row[48],
+            "complimentary_set_at": row[49],
+
             "stripe_environment": environment,
         }
+
+        cur.execute(
+            """
+            SELECT tier_code, tier_name
+            FROM subscription_tiers
+            WHERE is_active = TRUE
+              AND tier_code IN (
+                  'pos',
+                  'solo',
+                  'team',
+                  'collective'
+              )
+            ORDER BY display_order, tier_name
+            """
+        )
+
+        subscription_tiers = [
+            {
+                "code": tier_row[0],
+                "name": tier_row[1],
+            }
+            for tier_row in cur.fetchall()
+        ]
 
         return render_template(
             "master_admin/businesses/business_detail.html",
             business=business,
+            subscription_tiers=subscription_tiers,
+            security_csrf_token=_security_form_csrf_token(),
         )
 
     finally:
         cur.close()
         conn.close()
+
+
+@app.route(
+    "/master-admin/businesses/<int:spa_id>/subscription",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_update_business_subscription(spa_id):
+    """
+    Update Master Admin-controlled PSP subscription settings.
+
+    PSP feature tier, billing treatment, and operational access are
+    separate concerns.
+
+    Stripe-protected rule:
+    - A business with an existing Stripe Subscription cannot have its
+      PSP tier changed locally.
+    - A business with an existing Stripe Subscription cannot be moved
+      to complimentary billing locally.
+
+    Those operations require a coordinated Stripe billing change.
+    """
+    submitted_token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(submitted_token):
+        abort(400)
+
+    actor_user_id = session.get("user_id")
+
+    try:
+        actor_user_id = int(actor_user_id)
+    except (TypeError, ValueError):
+        abort(403)
+
+    if actor_user_id <= 0:
+        abort(403)
+
+    requested_tier_code = str(
+        request.form.get("subscription_tier_code") or ""
+    ).strip().lower()
+
+    requested_billing_mode = str(
+        request.form.get("billing_mode") or ""
+    ).strip().lower()
+
+    requested_access_status = str(
+        request.form.get("access_status") or ""
+    ).strip().lower()
+
+    complimentary_reason = str(
+        request.form.get("complimentary_reason") or ""
+    ).strip()
+
+    complimentary_start_raw = str(
+        request.form.get("complimentary_started_at") or ""
+    ).strip()
+
+    complimentary_end_raw = str(
+        request.form.get("complimentary_ends_at") or ""
+    ).strip()
+
+    original_complimentary_start_raw = str(
+        request.form.get(
+            "original_complimentary_started_at"
+        )
+        or ""
+    ).strip()
+
+    original_complimentary_end_raw = str(
+        request.form.get(
+            "original_complimentary_ends_at"
+        )
+        or ""
+    ).strip()
+
+    if requested_billing_mode not in {
+        "standard",
+        "complimentary",
+    }:
+        flash(
+            "Billing mode is invalid.",
+            "error",
+        )
+        return redirect(
+            url_for(
+                "master_admin_business_detail",
+                spa_id=spa_id,
+            )
+        )
+
+    if requested_access_status not in {
+        "active",
+        "grace",
+        "restricted",
+    }:
+        flash(
+            "Access status is invalid.",
+            "error",
+        )
+        return redirect(
+            url_for(
+                "master_admin_business_detail",
+                spa_id=spa_id,
+            )
+        )
+
+    complimentary_started_at = None
+    complimentary_ends_at = None
+
+    if requested_billing_mode == "complimentary":
+        if not complimentary_reason:
+            flash(
+                "A reason is required for complimentary billing.",
+                "error",
+            )
+            return redirect(
+                url_for(
+                    "master_admin_business_detail",
+                    spa_id=spa_id,
+                )
+            )
+
+        if len(complimentary_reason) > 1000:
+            flash(
+                "Complimentary billing reason must be "
+                "1,000 characters or fewer.",
+                "error",
+            )
+            return redirect(
+                url_for(
+                    "master_admin_business_detail",
+                    spa_id=spa_id,
+                )
+            )
+
+        try:
+            if complimentary_start_raw:
+                complimentary_started_at = datetime.combine(
+                    date.fromisoformat(
+                        complimentary_start_raw
+                    ),
+                    datetime.min.time(),
+                    tzinfo=timezone.utc,
+                )
+
+            if complimentary_end_raw:
+                complimentary_ends_at = datetime.combine(
+                    date.fromisoformat(
+                        complimentary_end_raw
+                    ),
+                    datetime.min.time(),
+                    tzinfo=timezone.utc,
+                )
+
+        except ValueError:
+            flash(
+                "Complimentary billing dates are invalid.",
+                "error",
+            )
+            return redirect(
+                url_for(
+                    "master_admin_business_detail",
+                    spa_id=spa_id,
+                )
+            )
+
+        if (
+            complimentary_started_at is not None
+            and complimentary_ends_at is not None
+            and complimentary_ends_at
+            <= complimentary_started_at
+        ):
+            flash(
+                "Complimentary billing end date must be "
+                "after the start date.",
+                "error",
+            )
+            return redirect(
+                url_for(
+                    "master_admin_business_detail",
+                    spa_id=spa_id,
+                )
+            )
+
+    environment = get_stripe_environment()
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                s.spa_name,
+                s.subscription_tier_id,
+                st.tier_code,
+                s.subscription_status,
+                s.billing_mode,
+                s.access_status,
+                s.complimentary_started_at,
+                s.complimentary_ends_at,
+                s.complimentary_reason,
+                s.complimentary_set_by,
+                s.complimentary_set_at,
+                sba.stripe_subscription_id
+            FROM spas s
+            JOIN subscription_tiers st
+              ON st.subscription_tier_id =
+                    s.subscription_tier_id
+            LEFT JOIN stripe_billing_accounts sba
+              ON sba.spa_id = s.spa_id
+             AND sba.environment = %s
+            WHERE s.spa_id = %s
+            FOR UPDATE OF s
+            """,
+            (
+                environment,
+                spa_id,
+            ),
+        )
+
+        current_row = cur.fetchone()
+
+        if not current_row:
+            abort(404)
+
+        (
+            spa_name,
+            current_tier_id,
+            current_tier_code,
+            current_subscription_status,
+            current_billing_mode,
+            current_access_status,
+            current_complimentary_started_at,
+            current_complimentary_ends_at,
+            current_complimentary_reason,
+            current_complimentary_set_by,
+            current_complimentary_set_at,
+            stripe_subscription_id,
+        ) = current_row
+
+        current_tier_code = str(
+            current_tier_code or ""
+        ).strip().lower()
+
+        current_billing_mode = str(
+            current_billing_mode or "standard"
+        ).strip().lower()
+
+        current_access_status = str(
+            current_access_status or "active"
+        ).strip().lower()
+
+        stripe_subscription_id = str(
+            stripe_subscription_id or ""
+        ).strip()
+
+        cur.execute(
+            """
+            SELECT
+                subscription_tier_id,
+                tier_code,
+                tier_name
+            FROM subscription_tiers
+            WHERE tier_code = %s
+              AND is_active = TRUE
+            LIMIT 1
+            """,
+            (requested_tier_code,),
+        )
+
+        tier_row = cur.fetchone()
+
+        if not tier_row:
+            conn.rollback()
+            flash(
+                "The selected subscription plan is not available.",
+                "error",
+            )
+            return redirect(
+                url_for(
+                    "master_admin_business_detail",
+                    spa_id=spa_id,
+                )
+            )
+
+        (
+            requested_tier_id,
+            requested_tier_code,
+            requested_tier_name,
+        ) = tier_row
+
+        tier_changed = (
+            int(requested_tier_id)
+            != int(current_tier_id)
+        )
+
+        billing_mode_changed = (
+            requested_billing_mode
+            != current_billing_mode
+        )
+
+        access_status_changed = (
+            requested_access_status
+            != current_access_status
+        )
+
+        if stripe_subscription_id:
+            if tier_changed:
+                conn.rollback()
+                flash(
+                    "This business has a Stripe subscription. "
+                    "Its plan cannot be changed locally until "
+                    "the Stripe-safe plan-change workflow is enabled.",
+                    "error",
+                )
+                return redirect(
+                    url_for(
+                        "master_admin_business_detail",
+                        spa_id=spa_id,
+                    )
+                )
+
+            if (
+                requested_billing_mode == "complimentary"
+                and current_billing_mode != "complimentary"
+            ):
+                conn.rollback()
+                flash(
+                    "This business has a Stripe subscription. "
+                    "Complimentary billing cannot be enabled "
+                    "until Stripe billing is safely handled.",
+                    "error",
+                )
+                return redirect(
+                    url_for(
+                        "master_admin_business_detail",
+                        spa_id=spa_id,
+                    )
+                )
+
+        if requested_billing_mode == "complimentary":
+            # The form displays timestamps as date-only values.
+            # Compare submitted dates to the date values originally
+            # rendered in the form. If the operator did not change a
+            # date, preserve the exact current database timestamp.
+            #
+            # This also prevents a stale browser form from truncating
+            # a newer database timestamp during an unrelated save.
+            if (
+                complimentary_start_raw
+                == original_complimentary_start_raw
+                and current_complimentary_started_at is not None
+            ):
+                complimentary_started_at = (
+                    current_complimentary_started_at
+                )
+
+            if (
+                complimentary_end_raw
+                == original_complimentary_end_raw
+                and current_complimentary_ends_at is not None
+            ):
+                complimentary_ends_at = (
+                    current_complimentary_ends_at
+                )
+
+            effective_started_at = (
+                complimentary_started_at
+                or current_complimentary_started_at
+                or datetime.now(timezone.utc)
+            )
+
+            if (
+                complimentary_ends_at is not None
+                and complimentary_ends_at
+                <= effective_started_at
+            ):
+                conn.rollback()
+                flash(
+                    "Complimentary billing end date must be "
+                    "after the effective start date.",
+                    "error",
+                )
+                return redirect(
+                    url_for(
+                        "master_admin_business_detail",
+                        spa_id=spa_id,
+                    )
+                )
+
+            new_complimentary_started_at = (
+                effective_started_at
+            )
+            new_complimentary_ends_at = (
+                complimentary_ends_at
+            )
+            new_complimentary_reason = (
+                complimentary_reason
+            )
+
+            complimentary_details_changed = (
+                billing_mode_changed
+                or current_complimentary_started_at
+                != new_complimentary_started_at
+                or current_complimentary_ends_at
+                != new_complimentary_ends_at
+                or (current_complimentary_reason or "")
+                != (new_complimentary_reason or "")
+            )
+
+            if complimentary_details_changed:
+                new_complimentary_set_by = actor_user_id
+                new_complimentary_set_at = datetime.now(
+                    timezone.utc
+                )
+            else:
+                new_complimentary_set_by = (
+                    current_complimentary_set_by
+                )
+                new_complimentary_set_at = (
+                    current_complimentary_set_at
+                )
+
+        else:
+            new_complimentary_started_at = None
+            new_complimentary_ends_at = None
+            new_complimentary_reason = None
+            new_complimentary_set_by = None
+            new_complimentary_set_at = None
+
+        old_state = {
+            "tier_code": current_tier_code,
+            "subscription_status": (
+                current_subscription_status
+            ),
+            "billing_mode": current_billing_mode,
+            "access_status": current_access_status,
+            "complimentary_started_at": (
+                current_complimentary_started_at.isoformat()
+                if current_complimentary_started_at
+                else None
+            ),
+            "complimentary_ends_at": (
+                current_complimentary_ends_at.isoformat()
+                if current_complimentary_ends_at
+                else None
+            ),
+            "complimentary_reason": (
+                current_complimentary_reason
+            ),
+        }
+
+        new_state = {
+            "tier_code": requested_tier_code,
+            "subscription_status": (
+                current_subscription_status
+            ),
+            "billing_mode": requested_billing_mode,
+            "access_status": requested_access_status,
+            "complimentary_started_at": (
+                new_complimentary_started_at.isoformat()
+                if new_complimentary_started_at
+                else None
+            ),
+            "complimentary_ends_at": (
+                new_complimentary_ends_at.isoformat()
+                if new_complimentary_ends_at
+                else None
+            ),
+            "complimentary_reason": (
+                new_complimentary_reason
+            ),
+        }
+
+        if old_state == new_state:
+            conn.rollback()
+            flash(
+                "Business subscription settings were unchanged.",
+                "success",
+            )
+            return redirect(
+                url_for(
+                    "master_admin_business_detail",
+                    spa_id=spa_id,
+                )
+            )
+
+        cur.execute(
+            """
+            UPDATE spas
+            SET
+                subscription_tier_id = %s,
+                billing_mode = %s,
+                access_status = %s,
+                complimentary_started_at = %s,
+                complimentary_ends_at = %s,
+                complimentary_reason = %s,
+                complimentary_set_by = %s,
+                complimentary_set_at = %s
+            WHERE spa_id = %s
+            """,
+            (
+                requested_tier_id,
+                requested_billing_mode,
+                requested_access_status,
+                new_complimentary_started_at,
+                new_complimentary_ends_at,
+                new_complimentary_reason,
+                new_complimentary_set_by,
+                new_complimentary_set_at,
+                spa_id,
+            ),
+        )
+
+        if cur.rowcount != 1:
+            raise RuntimeError(
+                "Business subscription update did not "
+                "modify exactly one business."
+            )
+
+        changed_fields = []
+
+        if tier_changed:
+            changed_fields.append(
+                f"plan {current_tier_code} "
+                f"-> {requested_tier_code}"
+            )
+
+        if billing_mode_changed:
+            changed_fields.append(
+                f"billing mode {current_billing_mode} "
+                f"-> {requested_billing_mode}"
+            )
+
+        if access_status_changed:
+            changed_fields.append(
+                f"access {current_access_status} "
+                f"-> {requested_access_status}"
+            )
+
+        if (
+            old_state["complimentary_started_at"]
+            != new_state["complimentary_started_at"]
+            or old_state["complimentary_ends_at"]
+            != new_state["complimentary_ends_at"]
+            or old_state["complimentary_reason"]
+            != new_state["complimentary_reason"]
+        ):
+            changed_fields.append(
+                "complimentary billing details updated"
+            )
+
+        log_audit(
+            cur,
+            spa_id=spa_id,
+            user_id=actor_user_id,
+            action_type=(
+                "master_admin_business_subscription_updated"
+            ),
+            table_name="spas",
+            record_id=spa_id,
+            old_value=json.dumps(
+                old_state,
+                sort_keys=True,
+            ),
+            new_value=json.dumps(
+                new_state,
+                sort_keys=True,
+            ),
+            notes=(
+                "Master Admin updated business subscription "
+                "settings: "
+                + ", ".join(changed_fields)
+                + "."
+            ),
+        )
+
+        conn.commit()
+
+        flash(
+            (
+                f"{spa_name} subscription settings were updated. "
+                f"Current plan: {requested_tier_name}."
+            ),
+            "success",
+        )
+
+    except HTTPException:
+        conn.rollback()
+        raise
+
+    except Exception:
+        conn.rollback()
+        app.logger.exception(
+            "Master Admin business subscription update failed. "
+            "spa_id=%s",
+            spa_id,
+        )
+        flash(
+            "Business subscription settings could not be updated. "
+            "No changes were saved.",
+            "error",
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    return redirect(
+        url_for(
+            "master_admin_business_detail",
+            spa_id=spa_id,
+        )
+    )
 
 
 @app.route("/master-admin/businesses")
