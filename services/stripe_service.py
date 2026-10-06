@@ -3127,6 +3127,117 @@ def schedule_business_subscription_cancellation(
     return synchronized
 
 
+def cancel_business_subscription_for_complimentary(
+    cursor,
+    *,
+    spa_id,
+    environment=None,
+):
+    """
+    Immediately end a Stripe Subscription because Master Admin is
+    granting complimentary PSP access.
+
+    Safety contract:
+    - The caller must first stage billing_mode='complimentary' for the
+      business inside the same database transaction.
+    - Stripe is canceled immediately with no final proration invoice
+      and no unused-time proration credit.
+    - The returned Stripe snapshot is synchronized immediately.
+    - The caller owns the database transaction.
+
+    If a later database failure rolls the transaction back after Stripe
+    has already canceled the Subscription, PSP intentionally fails
+    closed: the later Stripe lifecycle webhook can synchronize the
+    canceled Subscription against standard billing and restrict access
+    until an administrator safely completes the complimentary grant.
+    """
+    environment = normalize_stripe_environment(
+        environment
+        or get_stripe_environment()
+    )
+
+    cursor.execute(
+        """
+        SELECT
+            a.stripe_billing_account_id,
+            a.stripe_subscription_id,
+            s.billing_mode
+        FROM stripe_billing_accounts a
+        JOIN spas s
+          ON s.spa_id = a.spa_id
+        WHERE a.spa_id = %s
+          AND a.environment = %s
+        LIMIT 1
+        FOR UPDATE OF a, s
+        """,
+        (
+            spa_id,
+            environment,
+        ),
+    )
+
+    billing_row = cursor.fetchone()
+
+    if not billing_row:
+        raise StripeServiceError(
+            "PSP business does not have a Stripe billing account."
+        )
+
+    (
+        stripe_billing_account_id,
+        stripe_subscription_id,
+        billing_mode,
+    ) = billing_row
+
+    stripe_subscription_id = str(
+        stripe_subscription_id or ""
+    ).strip()
+
+    billing_mode = str(
+        billing_mode or ""
+    ).strip().lower()
+
+    if not stripe_subscription_id:
+        raise StripeServiceError(
+            "PSP Stripe billing account does not have a "
+            "Subscription ID."
+        )
+
+    if billing_mode != "complimentary":
+        raise StripeServiceError(
+            "Complimentary billing must be staged before "
+            "Stripe billing can be ended."
+        )
+
+    configure_stripe(
+        environment=environment
+    )
+
+    try:
+        subscription = stripe.Subscription.cancel(
+            stripe_subscription_id,
+            invoice_now=False,
+            prorate=False,
+        )
+    except Exception as exc:
+        raise StripeServiceError(
+            "Stripe Subscription could not be ended for "
+            "complimentary billing."
+        ) from exc
+
+    synchronized = sync_stripe_subscription_snapshot(
+        cursor,
+        subscription,
+        environment=environment,
+    )
+
+    synchronized["stripe_billing_account_id"] = (
+        stripe_billing_account_id
+    )
+
+    return synchronized
+
+
 STRIPE_SUBSCRIPTION_LIFECYCLE_EVENT_TYPES = {
     "customer.subscription.created",
     "customer.subscription.updated",

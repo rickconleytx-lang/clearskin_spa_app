@@ -86,6 +86,7 @@ from services.stripe_service import (
     get_business_subscription_summary,
     schedule_business_subscription_cancellation,
     resume_business_subscription_renewal,
+    cancel_business_subscription_for_complimentary,
     get_stripe_checkout_signup,
     get_stripe_environment,
     process_recorded_stripe_webhook_event,
@@ -7202,6 +7203,8 @@ def master_admin_update_business_subscription(spa_id):
     conn.autocommit = False
     cur = conn.cursor()
 
+    stripe_billing_workflow_started = False
+
     try:
         cur.execute(
             """
@@ -7320,6 +7323,8 @@ def master_admin_update_business_subscription(spa_id):
             != current_access_status
         )
 
+        stripe_ended_for_complimentary = False
+
         if stripe_subscription_id:
             if tier_changed:
                 conn.rollback()
@@ -7340,19 +7345,34 @@ def master_admin_update_business_subscription(spa_id):
                 requested_billing_mode == "complimentary"
                 and current_billing_mode != "complimentary"
             ):
-                conn.rollback()
-                flash(
-                    "This business has a Stripe subscription. "
-                    "Complimentary billing cannot be enabled "
-                    "until Stripe billing is safely handled.",
-                    "error",
+                # Stage Complimentary inside this transaction before
+                # ending Stripe. The Stripe synchronization path then
+                # knows that a completed cancellation must not restrict
+                # this business's PSP access.
+                cur.execute(
+                    """
+                    UPDATE spas
+                    SET billing_mode = 'complimentary'
+                    WHERE spa_id = %s
+                    """,
+                    (spa_id,),
                 )
-                return redirect(
-                    url_for(
-                        "master_admin_business_detail",
-                        spa_id=spa_id,
+
+                if cur.rowcount != 1:
+                    raise RuntimeError(
+                        "Complimentary billing staging did not "
+                        "modify exactly one business."
                     )
+
+                stripe_billing_workflow_started = True
+
+                cancel_business_subscription_for_complimentary(
+                    cur,
+                    spa_id=spa_id,
+                    environment=environment,
                 )
+
+                stripe_ended_for_complimentary = True
 
         if requested_billing_mode == "complimentary":
             # The form displays timestamps as date-only values.
@@ -7548,6 +7568,12 @@ def master_admin_update_business_subscription(spa_id):
                 f"-> {requested_billing_mode}"
             )
 
+        if stripe_ended_for_complimentary:
+            changed_fields.append(
+                "Stripe subscription ended immediately for "
+                "complimentary billing"
+            )
+
         if access_status_changed:
             changed_fields.append(
                 f"access {current_access_status} "
@@ -7612,11 +7638,22 @@ def master_admin_update_business_subscription(spa_id):
             "spa_id=%s",
             spa_id,
         )
-        flash(
-            "Business subscription settings could not be updated. "
-            "No changes were saved.",
-            "error",
-        )
+
+        if stripe_billing_workflow_started:
+            flash(
+                "The PSP subscription update could not be completed "
+                "after the Stripe billing workflow began. PSP database "
+                "changes were rolled back. Verify the Stripe "
+                "subscription before retrying or making another "
+                "billing change.",
+                "error",
+            )
+        else:
+            flash(
+                "Business subscription settings could not be updated. "
+                "No PSP changes were saved.",
+                "error",
+            )
 
     finally:
         cur.close()
