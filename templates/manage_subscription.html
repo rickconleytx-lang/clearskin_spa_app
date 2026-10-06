@@ -139,7 +139,160 @@
 
     <h2>Subscription Changes</h2>
 
-    {% if subscription_summary.stripe_billing_account_id %}
+    {% if open_resubscription %}
+
+        {% if open_resubscription.resubscription_status == "checkout_completed" %}
+
+            <p>
+                Your secure checkout has completed.
+                Peach Suite Pro is finalizing your subscription
+                activation.
+            </p>
+
+            <p>
+                Your business data remains preserved while activation
+                finishes.
+            </p>
+
+        {% else %}
+
+            <p>
+                A resubscription is already in progress for your
+                {{ subscription_summary.tier_name or "Peach Suite Pro" }}
+                plan.
+            </p>
+
+            <p>
+                <strong>Billing:</strong>
+                {% if open_resubscription.billing_interval == "month" %}
+                    Monthly
+                {% elif open_resubscription.billing_interval == "year" %}
+                    Annual
+                {% else %}
+                    {{ open_resubscription.billing_interval | title }}
+                {% endif %}
+            </p>
+
+            <p>
+                Continue to secure Stripe Checkout to complete the
+                resubscription. No new free trial will be added.
+            </p>
+
+            <div class="form-buttons">
+                <form
+                    method="POST"
+                    action="{{ url_for('resubscribe_subscription') }}"
+                >
+                    <input
+                        type="hidden"
+                        name="security_csrf_token"
+                        value="{{ security_csrf_token }}"
+                    >
+
+                    <button
+                        type="submit"
+                        class="btn"
+                    >
+                        Continue Secure Checkout
+                    </button>
+                </form>
+            </div>
+
+        {% endif %}
+
+    {% elif subscription_summary.can_resubscribe %}
+
+        <p>
+            Your previous Peach Suite Pro subscription has ended.
+            You can restore your existing
+            <strong>
+                {{ subscription_summary.tier_name or "Peach Suite Pro" }}
+            </strong>
+            plan without creating a new business account.
+        </p>
+
+        <p>
+            Your existing business data is preserved. Resubscription
+            creates a new Stripe subscription for this business and
+            <strong>does not include another free trial</strong>.
+            Billing begins immediately after successful checkout.
+        </p>
+
+        <form
+            method="POST"
+            action="{{ url_for('resubscribe_subscription') }}"
+        >
+            <input
+                type="hidden"
+                name="security_csrf_token"
+                value="{{ security_csrf_token }}"
+            >
+
+            <div class="form-group">
+                <label for="billing_interval">
+                    <strong>Billing Frequency</strong>
+                </label>
+
+                <select
+                    id="billing_interval"
+                    name="billing_interval"
+                    required
+                >
+                    <option
+                        value="month"
+                        {% if subscription_summary.billing_interval == "month" %}
+                            selected
+                        {% endif %}
+                    >
+                        Monthly
+                    </option>
+
+                    <option
+                        value="year"
+                        {% if subscription_summary.billing_interval == "year" %}
+                            selected
+                        {% endif %}
+                    >
+                        Annual
+                    </option>
+                </select>
+            </div>
+
+            <div class="check-row">
+                <input
+                    type="checkbox"
+                    id="terms_accepted"
+                    name="terms_accepted"
+                    value="1"
+                    required
+                >
+
+                <label for="terms_accepted">
+                    I have read and agree to the Peach Suite Pro
+                    SaaS License &amp; Data Responsibility Agreement,
+                    Version {{ subscription_terms_version }}.
+                    <br>
+                    <a
+                        href="https://support.peachsuitepro.com/article/saas-license-data-agreement?lang=EN"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                    >
+                        Read the SaaS License &amp; Data Responsibility Agreement
+                    </a>
+                </label>
+            </div>
+
+            <div class="form-buttons">
+                <button
+                    type="submit"
+                    class="btn"
+                >
+                    Resubscribe with Stripe
+                </button>
+            </div>
+        </form>
+
+    {% elif subscription_summary.stripe_billing_account_id %}
 
         {% if subscription_summary.cancel_at_period_end %}
 
@@ -173,6 +326,13 @@
                 </form>
             </div>
 
+        {% elif subscription_summary.psp_status == "Canceled" %}
+
+            <p>
+                This subscription has ended and is not currently
+                eligible for self-service subscription changes.
+            </p>
+
         {% else %}
 
             <p>
@@ -192,10 +352,12 @@
 
         {% endif %}
 
-        <p>
-            Payment-method updates and invoice history will be
-            available here in a future update.
-        </p>
+        {% if subscription_summary.psp_status != "Canceled" %}
+            <p>
+                Payment-method updates and invoice history will be
+                available here in a future update.
+            </p>
+        {% endif %}
 
     {% else %}
 

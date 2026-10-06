@@ -83,7 +83,10 @@ from services.stripe_service import (
     construct_stripe_webhook_event,
     create_stripe_checkout_session,
     create_stripe_checkout_signup,
+    create_stripe_resubscription,
+    create_stripe_resubscription_checkout_session,
     get_business_subscription_summary,
+    get_open_stripe_resubscription,
     schedule_business_subscription_cancellation,
     resume_business_subscription_renewal,
     cancel_business_subscription_for_complimentary,
@@ -40679,6 +40682,97 @@ def stripe_webhook():
             environment=environment,
         )
 
+        resubscription_completion = (
+            processed.get("resubscription_completion")
+            or {}
+        )
+
+        if (
+            processed["processing_status"] == "processed"
+            and resubscription_completion
+            and not resubscription_completion.get(
+                "already_activated"
+            )
+        ):
+            stripe_resubscription_id = (
+                resubscription_completion[
+                    "stripe_resubscription_id"
+                ]
+            )
+            resubscription_spa_id = (
+                resubscription_completion["spa_id"]
+            )
+            new_stripe_subscription_id = (
+                resubscription_completion[
+                    "stripe_subscription_id"
+                ]
+            )
+
+            process_cur.execute(
+                """
+                SELECT
+                    initiated_by_user_id,
+                    tier_code,
+                    billing_interval,
+                    provider_quantity,
+                    terms_version
+                FROM stripe_resubscriptions
+                WHERE stripe_resubscription_id = %s
+                  AND spa_id = %s
+                  AND environment = %s
+                  AND resubscription_status = 'activated'
+                  AND stripe_subscription_id = %s
+                LIMIT 1
+                """,
+                (
+                    stripe_resubscription_id,
+                    resubscription_spa_id,
+                    environment,
+                    new_stripe_subscription_id,
+                ),
+            )
+
+            audit_source = process_cur.fetchone()
+
+            if not audit_source:
+                raise StripeServiceError(
+                    "Activated Stripe resubscription audit "
+                    "source could not be resolved."
+                )
+
+            (
+                initiated_by_user_id,
+                tier_code,
+                billing_interval,
+                provider_quantity,
+                terms_version,
+            ) = audit_source
+
+            log_audit(
+                process_cur,
+                spa_id=resubscription_spa_id,
+                user_id=initiated_by_user_id,
+                action_type=(
+                    "subscription_resubscription_activated"
+                ),
+                table_name="stripe_resubscriptions",
+                record_id=stripe_resubscription_id,
+                old_value=(
+                    f"{resubscription_completion['previous_stripe_subscription_id']} "
+                    "| Canceled | restricted"
+                ),
+                new_value=(
+                    f"{new_stripe_subscription_id} | "
+                    f"{tier_code} | {billing_interval} | "
+                    f"quantity {provider_quantity} | "
+                    f"terms {terms_version} | Active | active"
+                ),
+                notes=(
+                    "Stripe confirmed Peach Suite Pro "
+                    "resubscription activation"
+                ),
+            )
+
         process_conn.commit()
 
     except Exception:
@@ -40700,11 +40794,44 @@ def stripe_webhook():
         }), 500
 
     invitation_status = None
+    checkout_workflow = None
+
+    if (
+        processed["event_type"]
+        == "checkout.session.completed"
+    ):
+        if hasattr(event, "to_dict_recursive"):
+            webhook_payload = event.to_dict_recursive()
+        elif hasattr(event, "to_dict"):
+            webhook_payload = event.to_dict()
+        else:
+            webhook_payload = dict(event)
+
+        checkout_object = (
+            (webhook_payload.get("data") or {}).get("object")
+            or {}
+        )
+
+        checkout_metadata = (
+            checkout_object.get("metadata")
+            or {}
+        )
+
+        if checkout_metadata.get(
+            "psp_resubscription_token"
+        ):
+            checkout_workflow = "resubscription"
+
+        elif checkout_metadata.get(
+            "psp_checkout_signup_token"
+        ):
+            checkout_workflow = "signup"
 
     if (
         processed["processing_status"] == "processed"
         and processed["event_type"]
             == "checkout.session.completed"
+        and checkout_workflow == "signup"
     ):
         provisioning_result = (
             processed.get("provisioning_result")
@@ -61298,6 +61425,13 @@ def manage_subscription():
                 spa_id=spa_id,
             )
         )
+
+        open_resubscription = (
+            get_open_stripe_resubscription(
+                cur,
+                spa_id=spa_id,
+            )
+        )
     finally:
         cur.close()
         conn.close()
@@ -61305,8 +61439,283 @@ def manage_subscription():
     return render_template(
         "manage_subscription.html",
         subscription_summary=subscription_summary,
+        open_resubscription=open_resubscription,
+        subscription_terms_version=(
+            current_subscription_terms_version()
+        ),
         security_csrf_token=_security_form_csrf_token(),
     )
+
+
+
+
+
+@app.route(
+    "/account/subscription/resubscribe",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+def resubscribe_subscription():
+    if (
+        current_business_unit_membership_role_code()
+        != "organization_admin"
+    ):
+        abort(403)
+
+    submitted_csrf_token = request.form.get(
+        "security_csrf_token",
+        ""
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_csrf_token
+    ):
+        flash(
+            "Your security token expired or could not be verified. "
+            "Please try again.",
+            "error"
+        )
+
+        return redirect(
+            url_for("manage_subscription")
+        )
+
+    spa_id = current_spa_id()
+    user_id = session.get("user_id")
+
+    #
+    # Phase 1:
+    # Resolve or durably create the PSP resubscription BEFORE
+    # making any external Stripe Checkout call.
+    #
+    # This preserves the durable resubscription ID and therefore
+    # its stable Stripe idempotency key if Checkout succeeds but a
+    # later database attachment/commit must be retried.
+    #
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        subscription_summary = (
+            get_business_subscription_summary(
+                cur,
+                spa_id=spa_id,
+            )
+        )
+
+        if not subscription_summary[
+            "can_resubscribe"
+        ]:
+            conn.rollback()
+
+            flash(
+                "This subscription is not currently eligible "
+                "for self-service resubscription.",
+                "error"
+            )
+
+            return redirect(
+                url_for("manage_subscription")
+            )
+
+        open_resubscription = (
+            get_open_stripe_resubscription(
+                cur,
+                spa_id=spa_id,
+            )
+        )
+
+        if open_resubscription:
+            if (
+                open_resubscription[
+                    "resubscription_status"
+                ]
+                == "checkout_completed"
+            ):
+                conn.rollback()
+
+                flash(
+                    "Your secure checkout has already completed. "
+                    "Peach Suite Pro is finalizing your "
+                    "subscription activation.",
+                    "success"
+                )
+
+                return redirect(
+                    url_for("manage_subscription")
+                )
+
+            stripe_resubscription_id = (
+                open_resubscription[
+                    "stripe_resubscription_id"
+                ]
+            )
+
+            # No database mutation is required when continuing an
+            # existing pending/Checkout attempt.
+            conn.commit()
+
+        else:
+            billing_interval = str(
+                request.form.get(
+                    "billing_interval",
+                    ""
+                )
+                or ""
+            ).strip().lower()
+
+            terms_accepted = bool(
+                request.form.get(
+                    "terms_accepted"
+                )
+            )
+
+            terms_version = (
+                current_subscription_terms_version()
+            )
+
+            resubscription = (
+                create_stripe_resubscription(
+                    cur,
+                    spa_id=spa_id,
+                    initiated_by_user_id=user_id,
+                    billing_interval=billing_interval,
+                    terms_version=terms_version,
+                    terms_accepted=terms_accepted,
+                )
+            )
+
+            stripe_resubscription_id = (
+                resubscription[
+                    "stripe_resubscription_id"
+                ]
+            )
+
+            log_audit(
+                cur,
+                spa_id=spa_id,
+                user_id=user_id,
+                action_type=(
+                    "subscription_resubscription_started"
+                ),
+                table_name="stripe_resubscriptions",
+                record_id=stripe_resubscription_id,
+                old_value=(
+                    "Canceled | restricted"
+                ),
+                new_value=(
+                    f"{resubscription['tier_code']} | "
+                    f"{resubscription['billing_interval']} | "
+                    f"quantity "
+                    f"{resubscription['provider_quantity']} | "
+                    f"terms "
+                    f"{resubscription['terms_version']}"
+                ),
+                notes=(
+                    "Customer started Peach Suite Pro "
+                    "resubscription"
+                ),
+            )
+
+            conn.commit()
+
+    except (StripeServiceError, ValueError):
+        conn.rollback()
+
+        flash(
+            "Your resubscription could not be started. "
+            "Please review your selections and try again.",
+            "error"
+        )
+
+        return redirect(
+            url_for("manage_subscription")
+        )
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    #
+    # Phase 2:
+    # Create or recover Stripe Checkout in a separate transaction.
+    # The durable PSP resubscription now already exists.
+    #
+    base_url = _password_reset_base_url()
+
+    success_url = (
+        f"{base_url}/account/subscription"
+        "?resubscribe=success"
+    )
+
+    cancel_url = (
+        f"{base_url}/account/subscription"
+    )
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        checkout = (
+            create_stripe_resubscription_checkout_session(
+                cur,
+                stripe_resubscription_id=(
+                    stripe_resubscription_id
+                ),
+                success_url=success_url,
+                cancel_url=cancel_url,
+            )
+        )
+
+        conn.commit()
+
+    except StripeServiceError:
+        conn.rollback()
+
+        flash(
+            "Secure checkout could not be started. "
+            "Your resubscription request was saved, so you "
+            "can try again.",
+            "error"
+        )
+
+        return redirect(
+            url_for("manage_subscription")
+        )
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+    checkout_url = str(
+        checkout.get("checkout_url")
+        or ""
+    ).strip()
+
+    if not checkout_url:
+        flash(
+            "Secure checkout could not be opened. "
+            "Please try again.",
+            "error"
+        )
+
+        return redirect(
+            url_for("manage_subscription")
+        )
+
+    return redirect(checkout_url)
+
 
 
 

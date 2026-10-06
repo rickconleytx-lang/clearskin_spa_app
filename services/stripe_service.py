@@ -1233,6 +1233,779 @@ def provision_completed_stripe_signup(
     }
 
 
+def complete_stripe_resubscription_from_event(
+    cursor,
+    event,
+    *,
+    environment=None,
+):
+    """
+    Validate and activate one existing-business Stripe resubscription
+    from an authenticated checkout.session.completed event.
+
+    The existing Stripe customer and PSP business are retained. The
+    canceled historical Stripe subscription is replaced by the NEW
+    subscription created by Checkout.
+
+    No second introductory trial is permitted.
+    """
+    environment = normalize_stripe_environment(
+        environment
+        or get_stripe_environment()
+    )
+
+    if hasattr(
+        event,
+        "to_dict_recursive",
+    ):
+        payload = event.to_dict_recursive()
+    elif hasattr(
+        event,
+        "to_dict",
+    ):
+        payload = event.to_dict()
+    else:
+        payload = dict(event)
+
+    stripe_event_id = str(
+        payload.get("id")
+        or ""
+    ).strip()
+
+    event_type = str(
+        payload.get("type")
+        or ""
+    ).strip()
+
+    if not stripe_event_id:
+        raise StripeServiceError(
+            "Stripe webhook event ID is missing."
+        )
+
+    if event_type != "checkout.session.completed":
+        raise StripeServiceError(
+            "Stripe webhook event is not a completed "
+            "Checkout Session."
+        )
+
+    expected_livemode = (
+        environment == "live"
+    )
+
+    if bool(
+        payload.get("livemode")
+    ) != expected_livemode:
+        raise StripeServiceError(
+            "Stripe Checkout completion environment "
+            "does not match PSP."
+        )
+
+    data = payload.get("data") or {}
+    stripe_object = data.get("object") or {}
+
+    if hasattr(
+        stripe_object,
+        "to_dict_recursive",
+    ):
+        stripe_object = (
+            stripe_object.to_dict_recursive()
+        )
+    elif hasattr(
+        stripe_object,
+        "to_dict",
+    ):
+        stripe_object = stripe_object.to_dict()
+    else:
+        stripe_object = dict(stripe_object)
+
+    if str(
+        stripe_object.get("object")
+        or ""
+    ).strip() != "checkout.session":
+        raise StripeServiceError(
+            "Stripe webhook object is not a "
+            "Checkout Session."
+        )
+
+    checkout_session_id = str(
+        stripe_object.get("id")
+        or ""
+    ).strip()
+
+    if not checkout_session_id:
+        raise StripeServiceError(
+            "Stripe Checkout Session ID is missing."
+        )
+
+    if str(
+        stripe_object.get("mode")
+        or ""
+    ).strip().lower() != "subscription":
+        raise StripeServiceError(
+            "Stripe Checkout Session is not a "
+            "subscription Checkout."
+        )
+
+    if str(
+        stripe_object.get("status")
+        or ""
+    ).strip().lower() != "complete":
+        raise StripeServiceError(
+            "Stripe Checkout Session is not complete."
+        )
+
+    metadata = dict(
+        stripe_object.get("metadata")
+        or {}
+    )
+
+    resubscription_token = str(
+        metadata.get(
+            "psp_resubscription_token"
+        )
+        or ""
+    ).strip()
+
+    if not resubscription_token:
+        raise StripeServiceError(
+            "Stripe Checkout Session is missing "
+            "the PSP resubscription token."
+        )
+
+    client_reference_id = str(
+        stripe_object.get(
+            "client_reference_id"
+        )
+        or ""
+    ).strip()
+
+    if client_reference_id != resubscription_token:
+        raise StripeServiceError(
+            "Stripe Checkout client reference does not "
+            "match PSP resubscription metadata."
+        )
+
+    customer_value = stripe_object.get(
+        "customer"
+    )
+
+    subscription_value = stripe_object.get(
+        "subscription"
+    )
+
+    if isinstance(customer_value, dict):
+        customer_value = customer_value.get(
+            "id"
+        )
+
+    if isinstance(
+        subscription_value,
+        dict,
+    ):
+        subscription_value = (
+            subscription_value.get("id")
+        )
+
+    stripe_customer_id = str(
+        customer_value or ""
+    ).strip()
+
+    new_stripe_subscription_id = str(
+        subscription_value or ""
+    ).strip()
+
+    if not stripe_customer_id:
+        raise StripeServiceError(
+            "Completed Stripe Checkout Session "
+            "is missing a customer ID."
+        )
+
+    if not new_stripe_subscription_id:
+        raise StripeServiceError(
+            "Completed Stripe Checkout Session "
+            "is missing a subscription ID."
+        )
+
+    cursor.execute(
+        """
+        SELECT
+            r.stripe_resubscription_id,
+            r.resubscription_status,
+            r.spa_id,
+            r.stripe_billing_account_id,
+            r.tier_code,
+            r.provider_quantity,
+            r.stripe_customer_id,
+            r.previous_stripe_subscription_id,
+            r.stripe_checkout_session_id,
+            r.stripe_subscription_id,
+            r.checkout_completed_at,
+            r.activated_at,
+            s.subscription_status,
+            s.billing_mode,
+            s.access_status,
+            st.tier_code,
+            a.stripe_customer_id,
+            a.stripe_subscription_id,
+            a.stripe_subscription_status
+        FROM stripe_resubscriptions r
+        JOIN spas s
+          ON s.spa_id = r.spa_id
+        JOIN subscription_tiers st
+          ON st.subscription_tier_id =
+             s.subscription_tier_id
+        JOIN stripe_billing_accounts a
+          ON a.stripe_billing_account_id =
+             r.stripe_billing_account_id
+         AND a.spa_id = r.spa_id
+         AND a.environment = r.environment
+        WHERE r.environment = %s
+          AND r.resubscription_token = %s
+        FOR UPDATE OF r, s, a
+        """,
+        (
+            environment,
+            resubscription_token,
+        ),
+    )
+
+    row = cursor.fetchone()
+
+    if not row:
+        raise StripeServiceError(
+            "Stripe Checkout completion does not "
+            "match a PSP resubscription."
+        )
+
+    (
+        stripe_resubscription_id,
+        resubscription_status,
+        spa_id,
+        stripe_billing_account_id,
+        tier_code,
+        provider_quantity,
+        stored_customer_id,
+        previous_stripe_subscription_id,
+        stored_checkout_session_id,
+        stored_new_subscription_id,
+        checkout_completed_at,
+        activated_at,
+        psp_subscription_status,
+        billing_mode,
+        access_status,
+        current_tier_code,
+        billing_customer_id,
+        billing_subscription_id,
+        billing_subscription_status,
+    ) = row
+
+    resubscription_status = str(
+        resubscription_status or ""
+    ).strip().lower()
+
+    tier_code = str(
+        tier_code or ""
+    ).strip().lower()
+
+    current_tier_code = str(
+        current_tier_code or ""
+    ).strip().lower()
+
+    stored_customer_id = str(
+        stored_customer_id or ""
+    ).strip()
+
+    previous_stripe_subscription_id = str(
+        previous_stripe_subscription_id or ""
+    ).strip()
+
+    stored_checkout_session_id = str(
+        stored_checkout_session_id or ""
+    ).strip()
+
+    stored_new_subscription_id = str(
+        stored_new_subscription_id or ""
+    ).strip()
+
+    psp_subscription_status = str(
+        psp_subscription_status or ""
+    ).strip().lower()
+
+    billing_mode = str(
+        billing_mode or ""
+    ).strip().lower()
+
+    access_status = str(
+        access_status or ""
+    ).strip().lower()
+
+    billing_customer_id = str(
+        billing_customer_id or ""
+    ).strip()
+
+    billing_subscription_id = str(
+        billing_subscription_id or ""
+    ).strip()
+
+    billing_subscription_status = str(
+        billing_subscription_status or ""
+    ).strip().lower()
+
+    if tier_code != current_tier_code:
+        raise StripeServiceError(
+            "The Peach Suite Pro plan changed after "
+            "resubscription began."
+        )
+
+    if stored_checkout_session_id != checkout_session_id:
+        raise StripeServiceError(
+            "Completed Stripe Checkout Session does not "
+            "match the PSP resubscription."
+        )
+
+    if stored_customer_id != stripe_customer_id:
+        raise StripeServiceError(
+            "Stripe customer ID conflicts with "
+            "the PSP resubscription."
+        )
+
+    if billing_customer_id != stripe_customer_id:
+        raise StripeServiceError(
+            "Stripe customer does not match the "
+            "PSP billing account."
+        )
+
+    if not previous_stripe_subscription_id:
+        raise StripeServiceError(
+            "PSP resubscription is missing the "
+            "previous Stripe subscription."
+        )
+
+    if new_stripe_subscription_id == previous_stripe_subscription_id:
+        raise StripeServiceError(
+            "Stripe resubscription did not create "
+            "a new Subscription."
+        )
+
+    if (
+        stored_new_subscription_id
+        and stored_new_subscription_id
+        != new_stripe_subscription_id
+    ):
+        raise StripeServiceError(
+            "Stripe subscription ID conflicts with "
+            "the PSP resubscription."
+        )
+
+    # Semantic replay after successful activation is safe only when
+    # every durable Stripe identity still agrees.
+    if resubscription_status == "activated":
+        if (
+            stored_new_subscription_id
+            != new_stripe_subscription_id
+            or billing_subscription_id
+            != new_stripe_subscription_id
+            or psp_subscription_status != "active"
+            or access_status != "active"
+            or activated_at is None
+        ):
+            raise StripeServiceError(
+                "Activated PSP resubscription has "
+                "conflicting durable state."
+            )
+
+        return {
+            "stripe_resubscription_id": (
+                stripe_resubscription_id
+            ),
+            "resubscription_status": "activated",
+            "spa_id": spa_id,
+            "stripe_billing_account_id": (
+                stripe_billing_account_id
+            ),
+            "stripe_customer_id": stripe_customer_id,
+            "stripe_subscription_id": (
+                new_stripe_subscription_id
+            ),
+            "previous_stripe_subscription_id": (
+                previous_stripe_subscription_id
+            ),
+            "checkout_completed_at": (
+                checkout_completed_at
+            ),
+            "activated_at": activated_at,
+            "already_activated": True,
+            "stripe_event_id": stripe_event_id,
+        }
+
+    if resubscription_status != "checkout_created":
+        raise StripeServiceError(
+            "PSP resubscription is not in "
+            "checkout_created state."
+        )
+
+    if (
+        psp_subscription_status != "canceled"
+        or billing_mode != "standard"
+        or access_status != "restricted"
+    ):
+        raise StripeServiceError(
+            "PSP business is no longer eligible "
+            "for resubscription activation."
+        )
+
+    if (
+        billing_subscription_id
+        != previous_stripe_subscription_id
+    ):
+        raise StripeServiceError(
+            "PSP billing account no longer references "
+            "the expected prior Stripe subscription."
+        )
+
+    if billing_subscription_status not in {
+        "canceled",
+        "incomplete_expired",
+    }:
+        raise StripeServiceError(
+            "Prior Stripe subscription has not fully ended."
+        )
+
+    try:
+        provider_quantity = int(
+            provider_quantity
+        )
+    except (TypeError, ValueError) as exc:
+        raise StripeServiceError(
+            "PSP resubscription quantity is invalid."
+        ) from exc
+
+    if provider_quantity <= 0:
+        raise StripeServiceError(
+            "PSP resubscription quantity is invalid."
+        )
+
+    # Friendly duplicate checks. Database uniqueness constraints remain
+    # the race-condition backstop.
+    cursor.execute(
+        """
+        SELECT stripe_resubscription_id
+        FROM stripe_resubscriptions
+        WHERE environment = %s
+          AND stripe_subscription_id = %s
+          AND stripe_resubscription_id <> %s
+        LIMIT 1
+        """,
+        (
+            environment,
+            new_stripe_subscription_id,
+            stripe_resubscription_id,
+        ),
+    )
+
+    if cursor.fetchone():
+        raise StripeServiceError(
+            "Stripe subscription is already attached "
+            "to another PSP resubscription."
+        )
+
+    cursor.execute(
+        """
+        SELECT stripe_billing_account_id
+        FROM stripe_billing_accounts
+        WHERE environment = %s
+          AND stripe_subscription_id = %s
+          AND stripe_billing_account_id <> %s
+        LIMIT 1
+        FOR UPDATE
+        """,
+        (
+            environment,
+            new_stripe_subscription_id,
+            stripe_billing_account_id,
+        ),
+    )
+
+    if cursor.fetchone():
+        raise StripeServiceError(
+            "Stripe subscription is already attached "
+            "to another PSP billing account."
+        )
+
+    configure_stripe(
+        environment=environment
+    )
+
+    try:
+        current_subscription = (
+            stripe.Subscription.retrieve(
+                new_stripe_subscription_id
+            )
+        )
+    except Exception as exc:
+        raise StripeServiceError(
+            "New Stripe Subscription could not be retrieved."
+        ) from exc
+
+    if hasattr(
+        current_subscription,
+        "to_dict",
+    ):
+        current_subscription = (
+            current_subscription.to_dict()
+        )
+    else:
+        current_subscription = dict(
+            current_subscription
+        )
+
+    retrieved_subscription_id = str(
+        current_subscription.get("id")
+        or ""
+    ).strip()
+
+    retrieved_customer = (
+        current_subscription.get("customer")
+    )
+
+    if isinstance(retrieved_customer, dict):
+        retrieved_customer = (
+            retrieved_customer.get("id")
+        )
+
+    retrieved_customer = str(
+        retrieved_customer or ""
+    ).strip()
+
+    retrieved_status = str(
+        current_subscription.get("status")
+        or ""
+    ).strip().lower()
+
+    subscription_metadata = dict(
+        current_subscription.get("metadata")
+        or {}
+    )
+
+    if retrieved_subscription_id != new_stripe_subscription_id:
+        raise StripeServiceError(
+            "Retrieved Stripe Subscription ID does not "
+            "match Checkout."
+        )
+
+    if retrieved_customer != stripe_customer_id:
+        raise StripeServiceError(
+            "Retrieved Stripe Subscription customer does "
+            "not match PSP."
+        )
+
+    if (
+        subscription_metadata.get(
+            "psp_resubscription_token"
+        )
+        != resubscription_token
+    ):
+        raise StripeServiceError(
+            "Retrieved Stripe Subscription metadata "
+            "does not match PSP resubscription."
+        )
+
+    # Resubscription is intentionally immediate paid service. A second
+    # introductory trial must never be created for a returning business.
+    if retrieved_status != "active":
+        raise StripeServiceError(
+            "New Stripe Subscription is not active."
+        )
+
+    if (
+        current_subscription.get("trial_start") is not None
+        or current_subscription.get("trial_end") is not None
+    ):
+        raise StripeServiceError(
+            "Returning Stripe subscription unexpectedly "
+            "contains trial dates."
+        )
+
+    # Atomically move the existing billing account from the historical
+    # canceled subscription identity to the newly validated Checkout
+    # subscription. Any later validation failure rolls this DB change
+    # back with the caller's transaction/savepoint.
+    cursor.execute(
+        """
+        UPDATE stripe_billing_accounts
+        SET
+            stripe_subscription_id = %s,
+            updated_at = NOW()
+        WHERE stripe_billing_account_id = %s
+          AND spa_id = %s
+          AND environment = %s
+          AND stripe_customer_id = %s
+          AND stripe_subscription_id = %s
+          AND stripe_subscription_status IN (
+              'canceled',
+              'incomplete_expired'
+          )
+        """,
+        (
+            new_stripe_subscription_id,
+            stripe_billing_account_id,
+            spa_id,
+            environment,
+            stripe_customer_id,
+            previous_stripe_subscription_id,
+        ),
+    )
+
+    if cursor.rowcount != 1:
+        raise StripeServiceError(
+            "PSP billing account could not be moved "
+            "to the new Stripe subscription."
+        )
+
+    synchronized = sync_stripe_subscription_snapshot(
+        cursor,
+        current_subscription,
+        environment=environment,
+    )
+
+    if (
+        synchronized["stripe_billing_account_id"]
+        != stripe_billing_account_id
+        or synchronized["spa_id"] != spa_id
+        or synchronized["stripe_customer_id"]
+        != stripe_customer_id
+        or synchronized["stripe_subscription_id"]
+        != new_stripe_subscription_id
+        or synchronized["stripe_subscription_status"]
+        != "active"
+    ):
+        raise StripeServiceError(
+            "New Stripe subscription did not synchronize "
+            "to the expected PSP billing account."
+        )
+
+    # Confirm Stripe preserved the exact base-plan quantity recorded
+    # when the resubscription was initiated.
+    cursor.execute(
+        """
+        SELECT quantity
+        FROM stripe_subscription_items
+        WHERE stripe_billing_account_id = %s
+          AND environment = %s
+          AND item_kind = 'base_plan'
+          AND is_active = TRUE
+        LIMIT 1
+        """,
+        (
+            stripe_billing_account_id,
+            environment,
+        ),
+    )
+
+    quantity_row = cursor.fetchone()
+
+    if (
+        not quantity_row
+        or int(quantity_row[0] or 0)
+        != provider_quantity
+    ):
+        raise StripeServiceError(
+            "New Stripe base-plan quantity does not "
+            "match the PSP resubscription."
+        )
+
+    cursor.execute(
+        """
+        UPDATE spas
+        SET
+            subscription_status = 'Active',
+            access_status = 'active'
+        WHERE spa_id = %s
+          AND billing_mode = 'standard'
+          AND subscription_status = 'Canceled'
+          AND access_status = 'restricted'
+        """,
+        (spa_id,),
+    )
+
+    if cursor.rowcount != 1:
+        raise StripeServiceError(
+            "PSP business could not be reactivated "
+            "after Stripe resubscription."
+        )
+
+    cursor.execute(
+        """
+        UPDATE stripe_resubscriptions
+        SET
+            resubscription_status = 'activated',
+            stripe_subscription_id = %s,
+            checkout_completed_at =
+                COALESCE(
+                    checkout_completed_at,
+                    NOW()
+                ),
+            activated_at =
+                COALESCE(
+                    activated_at,
+                    NOW()
+                ),
+            updated_at = NOW()
+        WHERE stripe_resubscription_id = %s
+          AND environment = %s
+          AND resubscription_status = 'checkout_created'
+          AND stripe_checkout_session_id = %s
+          AND stripe_customer_id = %s
+          AND previous_stripe_subscription_id = %s
+          AND stripe_subscription_id IS NULL
+        RETURNING
+            checkout_completed_at,
+            activated_at
+        """,
+        (
+            new_stripe_subscription_id,
+            stripe_resubscription_id,
+            environment,
+            checkout_session_id,
+            stripe_customer_id,
+            previous_stripe_subscription_id,
+        ),
+    )
+
+    activated_row = cursor.fetchone()
+
+    if not activated_row:
+        raise StripeServiceError(
+            "PSP resubscription could not be "
+            "atomically marked activated."
+        )
+
+    return {
+        "stripe_resubscription_id": (
+            stripe_resubscription_id
+        ),
+        "resubscription_status": "activated",
+        "spa_id": spa_id,
+        "stripe_billing_account_id": (
+            stripe_billing_account_id
+        ),
+        "stripe_customer_id": stripe_customer_id,
+        "stripe_subscription_id": (
+            new_stripe_subscription_id
+        ),
+        "previous_stripe_subscription_id": (
+            previous_stripe_subscription_id
+        ),
+        "checkout_completed_at": (
+            activated_row[0]
+        ),
+        "activated_at": activated_row[1],
+        "already_activated": False,
+        "stripe_event_id": stripe_event_id,
+    }
+
+
+
 def process_recorded_stripe_webhook_event(
     cursor,
     stripe_webhook_event_id,
@@ -1326,6 +2099,9 @@ def process_recorded_stripe_webhook_event(
             ),
             "already_final": True,
             "signup_completion": None,
+            "provisioning_result": None,
+            "resubscription_completion": None,
+            "subscription_sync": None,
         }
 
     if processing_status not in {
@@ -1439,59 +2215,154 @@ def process_recorded_stripe_webhook_event(
     try:
         signup_completion = None
         provisioning_result = None
+        resubscription_completion = None
         subscription_sync = None
 
         if (
             stored_event_type
             == "checkout.session.completed"
         ):
-            signup_completion = (
-                complete_stripe_checkout_signup_from_event(
-                    cursor,
-                    payload,
-                    environment=environment,
-                )
+            checkout_data = payload.get("data") or {}
+            checkout_object = (
+                checkout_data.get("object") or {}
             )
 
-            provisioning_result = (
-                provision_completed_stripe_signup(
-                    cursor,
-                    signup_completion[
-                        "stripe_checkout_signup_id"
-                    ],
-                    environment=environment,
+            if not isinstance(
+                checkout_object,
+                dict,
+            ):
+                raise StripeServiceError(
+                    "Recorded Stripe Checkout object is invalid."
                 )
+
+            checkout_metadata = (
+                checkout_object.get("metadata")
+                or {}
             )
 
-            cursor.execute(
-                """
-                UPDATE stripe_webhook_events
-                SET
-                    processing_status = 'processed',
-                    stripe_customer_id = %s,
-                    stripe_subscription_id = %s,
-                    stripe_billing_account_id = %s,
-                    spa_id = %s,
-                    error_message = NULL,
-                    processed_at = NOW()
-                WHERE stripe_webhook_event_id = %s
-                  AND environment = %s
-                """,
-                (
-                    signup_completion[
-                        "stripe_customer_id"
-                    ],
-                    signup_completion[
-                        "stripe_subscription_id"
-                    ],
-                    provisioning_result[
-                        "stripe_billing_account_id"
-                    ],
-                    provisioning_result["spa_id"],
-                    webhook_event_id,
-                    environment,
-                ),
-            )
+            if not isinstance(
+                checkout_metadata,
+                dict,
+            ):
+                raise StripeServiceError(
+                    "Recorded Stripe Checkout metadata is invalid."
+                )
+
+            signup_token = str(
+                checkout_metadata.get(
+                    "psp_checkout_signup_token"
+                )
+                or ""
+            ).strip()
+
+            resubscription_token = str(
+                checkout_metadata.get(
+                    "psp_resubscription_token"
+                )
+                or ""
+            ).strip()
+
+            if signup_token and resubscription_token:
+                raise StripeServiceError(
+                    "Stripe Checkout Session contains conflicting "
+                    "PSP workflow metadata."
+                )
+
+            if not signup_token and not resubscription_token:
+                raise StripeServiceError(
+                    "Stripe Checkout Session does not identify "
+                    "a supported PSP checkout workflow."
+                )
+
+            if resubscription_token:
+                resubscription_completion = (
+                    complete_stripe_resubscription_from_event(
+                        cursor,
+                        payload,
+                        environment=environment,
+                    )
+                )
+
+                cursor.execute(
+                    """
+                    UPDATE stripe_webhook_events
+                    SET
+                        processing_status = 'processed',
+                        stripe_customer_id = %s,
+                        stripe_subscription_id = %s,
+                        stripe_billing_account_id = %s,
+                        spa_id = %s,
+                        error_message = NULL,
+                        processed_at = NOW()
+                    WHERE stripe_webhook_event_id = %s
+                      AND environment = %s
+                    """,
+                    (
+                        resubscription_completion[
+                            "stripe_customer_id"
+                        ],
+                        resubscription_completion[
+                            "stripe_subscription_id"
+                        ],
+                        resubscription_completion[
+                            "stripe_billing_account_id"
+                        ],
+                        resubscription_completion[
+                            "spa_id"
+                        ],
+                        webhook_event_id,
+                        environment,
+                    ),
+                )
+
+            else:
+                signup_completion = (
+                    complete_stripe_checkout_signup_from_event(
+                        cursor,
+                        payload,
+                        environment=environment,
+                    )
+                )
+
+                provisioning_result = (
+                    provision_completed_stripe_signup(
+                        cursor,
+                        signup_completion[
+                            "stripe_checkout_signup_id"
+                        ],
+                        environment=environment,
+                    )
+                )
+
+                cursor.execute(
+                    """
+                    UPDATE stripe_webhook_events
+                    SET
+                        processing_status = 'processed',
+                        stripe_customer_id = %s,
+                        stripe_subscription_id = %s,
+                        stripe_billing_account_id = %s,
+                        spa_id = %s,
+                        error_message = NULL,
+                        processed_at = NOW()
+                    WHERE stripe_webhook_event_id = %s
+                      AND environment = %s
+                    """,
+                    (
+                        signup_completion[
+                            "stripe_customer_id"
+                        ],
+                        signup_completion[
+                            "stripe_subscription_id"
+                        ],
+                        provisioning_result[
+                            "stripe_billing_account_id"
+                        ],
+                        provisioning_result["spa_id"],
+                        webhook_event_id,
+                        environment,
+                    ),
+                )
 
             final_status = "processed"
 
@@ -1507,11 +2378,17 @@ def process_recorded_stripe_webhook_event(
                 )
             )
 
+            historical_subscription = bool(
+                subscription_sync.get(
+                    "historical_subscription"
+                )
+            )
+
             cursor.execute(
                 """
                 UPDATE stripe_webhook_events
                 SET
-                    processing_status = 'processed',
+                    processing_status = %s,
                     stripe_customer_id = %s,
                     stripe_subscription_id = %s,
                     stripe_billing_account_id = %s,
@@ -1522,6 +2399,11 @@ def process_recorded_stripe_webhook_event(
                   AND environment = %s
                 """,
                 (
+                    (
+                        "ignored"
+                        if historical_subscription
+                        else "processed"
+                    ),
                     subscription_sync[
                         "stripe_customer_id"
                     ],
@@ -1537,7 +2419,11 @@ def process_recorded_stripe_webhook_event(
                 ),
             )
 
-            final_status = "processed"
+            final_status = (
+                "ignored"
+                if historical_subscription
+                else "processed"
+            )
 
         else:
             # Authenticated Stripe event type is not handled yet.
@@ -1574,6 +2460,9 @@ def process_recorded_stripe_webhook_event(
             "already_final": False,
             "signup_completion": signup_completion,
             "provisioning_result": provisioning_result,
+            "resubscription_completion": (
+                resubscription_completion
+            ),
             "subscription_sync": subscription_sync,
         }
 
@@ -2831,9 +3720,13 @@ def get_business_subscription_summary(
         """
         SELECT
             s.subscription_status,
+            s.billing_mode,
+            s.access_status,
             st.tier_code,
             st.tier_name,
             a.stripe_billing_account_id,
+            a.stripe_customer_id,
+            a.stripe_subscription_id,
             a.stripe_subscription_status,
             a.trial_start,
             a.trial_end,
@@ -2887,9 +3780,13 @@ def get_business_subscription_summary(
 
     (
         psp_status,
+        billing_mode,
+        access_status,
         tier_code,
         tier_name,
         stripe_billing_account_id,
+        stripe_customer_id,
+        stripe_subscription_id,
         stripe_status,
         trial_start,
         trial_end,
@@ -2928,12 +3825,54 @@ def get_business_subscription_summary(
             f"${int(unit_amount_cents) / 100:,.2f}"
         )
 
+    normalized_psp_status = str(
+        psp_status or ""
+    ).strip()
+
+    normalized_billing_mode = str(
+        billing_mode or ""
+    ).strip().lower()
+
+    normalized_access_status = str(
+        access_status or ""
+    ).strip().lower()
+
+    normalized_stripe_status = str(
+        stripe_status or ""
+    ).strip().lower()
+
+    normalized_stripe_customer_id = str(
+        stripe_customer_id or ""
+    ).strip()
+
+    normalized_stripe_subscription_id = str(
+        stripe_subscription_id or ""
+    ).strip()
+
+    can_resubscribe = (
+        normalized_psp_status.lower() == "canceled"
+        and normalized_billing_mode == "standard"
+        and normalized_access_status == "restricted"
+        and stripe_billing_account_id is not None
+        and bool(normalized_stripe_customer_id)
+        and bool(normalized_stripe_subscription_id)
+        and normalized_stripe_status in {
+            "canceled",
+            "incomplete_expired",
+        }
+    )
+
     return {
-        "psp_status": str(psp_status or "").strip(),
+        "psp_status": normalized_psp_status,
+        "billing_mode": normalized_billing_mode,
+        "access_status": normalized_access_status,
         "tier_code": str(tier_code or "").strip(),
         "tier_name": str(tier_name or "").strip(),
         "stripe_billing_account_id": stripe_billing_account_id,
-        "stripe_status": str(stripe_status or "").strip().lower(),
+        "stripe_customer_id": normalized_stripe_customer_id,
+        "stripe_subscription_id": normalized_stripe_subscription_id,
+        "stripe_status": normalized_stripe_status,
+        "can_resubscribe": can_resubscribe,
         "trial_start": trial_start,
         "trial_end": trial_end,
         "days_remaining": days_remaining,
@@ -2955,6 +3894,1108 @@ def get_business_subscription_summary(
                 == "trialing"
         ),
     }
+
+
+def get_open_stripe_resubscription(
+    cursor,
+    *,
+    spa_id,
+    environment=None,
+):
+    """
+    Return the current unresolved resubscription for one PSP business.
+
+    This is a read-only lookup used by Manage Subscription so an
+    existing pending/Checkout attempt can be continued instead of
+    creating a duplicate returning-business workflow.
+    """
+    try:
+        spa_id = int(spa_id)
+    except (TypeError, ValueError) as exc:
+        raise StripeServiceError(
+            "PSP business is invalid."
+        ) from exc
+
+    if spa_id <= 0:
+        raise StripeServiceError(
+            "PSP business is invalid."
+        )
+
+    environment = normalize_stripe_environment(
+        environment
+        or get_stripe_environment()
+    )
+
+    cursor.execute(
+        """
+        SELECT
+            stripe_resubscription_id,
+            resubscription_status,
+            tier_code,
+            billing_interval,
+            provider_quantity,
+            terms_version,
+            terms_accepted_at,
+            stripe_checkout_session_id,
+            checkout_expires_at,
+            created_at,
+            updated_at
+        FROM stripe_resubscriptions
+        WHERE spa_id = %s
+          AND environment = %s
+          AND resubscription_status IN (
+              'pending',
+              'checkout_created',
+              'checkout_completed'
+          )
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        (
+            spa_id,
+            environment,
+        ),
+    )
+
+    row = cursor.fetchone()
+
+    if not row:
+        return None
+
+    return {
+        "stripe_resubscription_id": row[0],
+        "resubscription_status": str(
+            row[1] or ""
+        ).strip().lower(),
+        "tier_code": str(
+            row[2] or ""
+        ).strip().lower(),
+        "billing_interval": str(
+            row[3] or ""
+        ).strip().lower(),
+        "provider_quantity": row[4],
+        "terms_version": str(
+            row[5] or ""
+        ).strip(),
+        "terms_accepted_at": row[6],
+        "stripe_checkout_session_id": str(
+            row[7] or ""
+        ).strip(),
+        "checkout_expires_at": row[8],
+        "created_at": row[9],
+        "updated_at": row[10],
+        "environment": environment,
+        "spa_id": spa_id,
+    }
+
+
+def create_stripe_resubscription(
+    cursor,
+    *,
+    spa_id,
+    initiated_by_user_id,
+    billing_interval,
+    terms_version,
+    terms_accepted,
+    environment=None,
+):
+    """
+    Create one pending Stripe resubscription for an existing PSP
+    business whose prior paid subscription has fully ended.
+
+    This function does not call Stripe and does not reactivate PSP
+    access. It records the durable returning-business workflow only.
+
+    The existing PSP plan, Stripe customer, prior Stripe subscription,
+    and latest synchronized base-plan quantity are authoritative.
+    Resubscription never grants another introductory trial.
+    """
+    try:
+        spa_id = int(spa_id)
+    except (TypeError, ValueError) as exc:
+        raise StripeServiceError(
+            "PSP business is invalid."
+        ) from exc
+
+    if spa_id <= 0:
+        raise StripeServiceError(
+            "PSP business is invalid."
+        )
+
+    try:
+        initiated_by_user_id = int(
+            initiated_by_user_id
+        )
+    except (TypeError, ValueError) as exc:
+        raise StripeServiceError(
+            "Resubscription user is invalid."
+        ) from exc
+
+    if initiated_by_user_id <= 0:
+        raise StripeServiceError(
+            "Resubscription user is invalid."
+        )
+
+    environment = normalize_stripe_environment(
+        environment
+        or get_stripe_environment()
+    )
+
+    billing_interval = (
+        normalize_stripe_billing_interval(
+            billing_interval
+        )
+    )
+
+    terms_version = str(
+        terms_version or ""
+    ).strip()
+
+    if not terms_version:
+        raise ValueError(
+            "Subscription Terms version is required."
+        )
+
+    if len(terms_version) > 100:
+        raise ValueError(
+            "Subscription Terms version is invalid."
+        )
+
+    if terms_accepted is not True:
+        raise ValueError(
+            "You must accept the Peach Suite Pro "
+            "Subscription Terms before continuing."
+        )
+
+    cursor.execute(
+        """
+        SELECT
+            s.subscription_status,
+            s.billing_mode,
+            s.access_status,
+            st.tier_code,
+            a.stripe_billing_account_id,
+            a.stripe_customer_id,
+            a.stripe_subscription_id,
+            a.stripe_subscription_status,
+            i.quantity
+        FROM spas s
+        JOIN subscription_tiers st
+          ON st.subscription_tier_id =
+             s.subscription_tier_id
+        JOIN stripe_billing_accounts a
+          ON a.spa_id = s.spa_id
+         AND a.environment = %s
+        LEFT JOIN LATERAL (
+            SELECT
+                quantity
+            FROM stripe_subscription_items
+            WHERE stripe_billing_account_id =
+                  a.stripe_billing_account_id
+              AND item_kind = 'base_plan'
+            ORDER BY
+                is_active DESC,
+                stripe_subscription_item_id DESC
+            LIMIT 1
+        ) i ON TRUE
+        WHERE s.spa_id = %s
+        FOR UPDATE OF s, a
+        """,
+        (
+            environment,
+            spa_id,
+        ),
+    )
+
+    row = cursor.fetchone()
+
+    if not row:
+        raise StripeServiceError(
+            "This business does not have a Stripe billing "
+            "account available for resubscription."
+        )
+
+    (
+        subscription_status,
+        billing_mode,
+        access_status,
+        tier_code,
+        stripe_billing_account_id,
+        stripe_customer_id,
+        previous_stripe_subscription_id,
+        stripe_subscription_status,
+        provider_quantity,
+    ) = row
+
+    subscription_status = str(
+        subscription_status or ""
+    ).strip().lower()
+
+    billing_mode = str(
+        billing_mode or ""
+    ).strip().lower()
+
+    access_status = str(
+        access_status or ""
+    ).strip().lower()
+
+    tier_code = str(
+        tier_code or ""
+    ).strip().lower()
+
+    stripe_customer_id = str(
+        stripe_customer_id or ""
+    ).strip()
+
+    previous_stripe_subscription_id = str(
+        previous_stripe_subscription_id or ""
+    ).strip()
+
+    stripe_subscription_status = str(
+        stripe_subscription_status or ""
+    ).strip().lower()
+
+    if subscription_status != "canceled":
+        raise StripeServiceError(
+            "This Peach Suite Pro subscription has not ended."
+        )
+
+    if billing_mode != "standard":
+        raise StripeServiceError(
+            "Complimentary billing does not use the "
+            "self-service resubscription workflow."
+        )
+
+    if access_status != "restricted":
+        raise StripeServiceError(
+            "This Peach Suite Pro business is not in the "
+            "restricted state required for resubscription."
+        )
+
+    if not tier_code:
+        raise StripeServiceError(
+            "The Peach Suite Pro plan could not be resolved."
+        )
+
+    if not stripe_customer_id:
+        raise StripeServiceError(
+            "The existing Stripe customer could not be resolved."
+        )
+
+    if not previous_stripe_subscription_id:
+        raise StripeServiceError(
+            "The prior Stripe subscription could not be resolved."
+        )
+
+    if stripe_subscription_status not in {
+        "canceled",
+        "incomplete_expired",
+    }:
+        raise StripeServiceError(
+            "The prior Stripe subscription has not fully ended."
+        )
+
+    try:
+        provider_quantity = int(
+            provider_quantity
+        )
+    except (TypeError, ValueError) as exc:
+        raise StripeServiceError(
+            "The prior Stripe base-plan quantity could not "
+            "be resolved."
+        ) from exc
+
+    if provider_quantity <= 0:
+        raise StripeServiceError(
+            "The prior Stripe base-plan quantity is invalid."
+        )
+
+    # Fail closed before creating a durable workflow if the current
+    # PSP plan does not have a configured Stripe price for the newly
+    # selected billing interval.
+    get_stripe_price_mapping(
+        cursor,
+        item_kind="base_plan",
+        tier_code=tier_code,
+        billing_interval=billing_interval,
+        environment=environment,
+    )
+
+    cursor.execute(
+        """
+        SELECT
+            stripe_resubscription_id,
+            resubscription_status
+        FROM stripe_resubscriptions
+        WHERE spa_id = %s
+          AND environment = %s
+          AND resubscription_status IN (
+              'pending',
+              'checkout_created',
+              'checkout_completed'
+          )
+        ORDER BY created_at DESC
+        LIMIT 1
+        FOR UPDATE
+        """,
+        (
+            spa_id,
+            environment,
+        ),
+    )
+
+    if cursor.fetchone():
+        raise ValueError(
+            "A Peach Suite Pro resubscription is already "
+            "in progress for this business."
+        )
+
+    resubscription_token = secrets.token_urlsafe(32)
+
+    if len(resubscription_token) > 64:
+        raise StripeServiceError(
+            "Generated resubscription token is invalid."
+        )
+
+    cursor.execute(
+        """
+        INSERT INTO stripe_resubscriptions (
+            resubscription_token,
+            environment,
+            resubscription_status,
+            spa_id,
+            stripe_billing_account_id,
+            tier_code,
+            billing_interval,
+            provider_quantity,
+            initiated_by_user_id,
+            terms_version,
+            terms_accepted_at,
+            stripe_customer_id,
+            previous_stripe_subscription_id
+        )
+        VALUES (
+            %s,
+            %s,
+            'pending',
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            NOW(),
+            %s,
+            %s
+        )
+        ON CONFLICT (
+            spa_id,
+            environment
+        )
+        WHERE resubscription_status IN (
+            'pending',
+            'checkout_created',
+            'checkout_completed'
+        )
+        DO NOTHING
+        RETURNING
+            stripe_resubscription_id,
+            resubscription_token,
+            created_at
+        """,
+        (
+            resubscription_token,
+            environment,
+            spa_id,
+            stripe_billing_account_id,
+            tier_code,
+            billing_interval,
+            provider_quantity,
+            initiated_by_user_id,
+            terms_version,
+            stripe_customer_id,
+            previous_stripe_subscription_id,
+        ),
+    )
+
+    inserted = cursor.fetchone()
+
+    if not inserted:
+        raise ValueError(
+            "A Peach Suite Pro resubscription is already "
+            "in progress for this business."
+        )
+
+    return {
+        "stripe_resubscription_id": inserted[0],
+        "resubscription_token": inserted[1],
+        "created_at": inserted[2],
+        "environment": environment,
+        "resubscription_status": "pending",
+        "spa_id": spa_id,
+        "stripe_billing_account_id": (
+            stripe_billing_account_id
+        ),
+        "tier_code": tier_code,
+        "billing_interval": billing_interval,
+        "provider_quantity": provider_quantity,
+        "initiated_by_user_id": initiated_by_user_id,
+        "terms_version": terms_version,
+        "stripe_customer_id": stripe_customer_id,
+        "previous_stripe_subscription_id": (
+            previous_stripe_subscription_id
+        ),
+    }
+
+
+
+def create_stripe_resubscription_checkout_session(
+    cursor,
+    *,
+    stripe_resubscription_id,
+    success_url,
+    cancel_url,
+    environment=None,
+):
+    """
+    Create or recover the Stripe-hosted Checkout Session for one
+    existing-business resubscription.
+
+    The existing Stripe customer is reused. Checkout creates a NEW
+    Stripe subscription and intentionally grants no introductory trial.
+
+    The caller owns the database transaction.
+    """
+    try:
+        resubscription_id = int(
+            stripe_resubscription_id
+        )
+    except (TypeError, ValueError) as exc:
+        raise StripeServiceError(
+            "Stripe resubscription is invalid."
+        ) from exc
+
+    if resubscription_id <= 0:
+        raise StripeServiceError(
+            "Stripe resubscription is invalid."
+        )
+
+    environment = normalize_stripe_environment(
+        environment
+        or get_stripe_environment()
+    )
+
+    success_url = str(
+        success_url or ""
+    ).strip()
+
+    cancel_url = str(
+        cancel_url or ""
+    ).strip()
+
+    if not success_url:
+        raise StripeServiceError(
+            "Stripe Checkout success URL is required."
+        )
+
+    if not cancel_url:
+        raise StripeServiceError(
+            "Stripe Checkout cancel URL is required."
+        )
+
+    cursor.execute(
+        """
+        SELECT
+            r.resubscription_token,
+            r.environment,
+            r.resubscription_status,
+            r.spa_id,
+            r.stripe_billing_account_id,
+            r.tier_code,
+            r.billing_interval,
+            r.provider_quantity,
+            r.terms_version,
+            r.terms_accepted_at,
+            r.stripe_customer_id,
+            r.previous_stripe_subscription_id,
+            r.stripe_checkout_session_id,
+            s.subscription_status,
+            s.billing_mode,
+            s.access_status,
+            st.tier_code,
+            a.stripe_customer_id,
+            a.stripe_subscription_id,
+            a.stripe_subscription_status
+        FROM stripe_resubscriptions r
+        JOIN spas s
+          ON s.spa_id = r.spa_id
+        JOIN subscription_tiers st
+          ON st.subscription_tier_id =
+             s.subscription_tier_id
+        JOIN stripe_billing_accounts a
+          ON a.stripe_billing_account_id =
+             r.stripe_billing_account_id
+         AND a.spa_id = r.spa_id
+         AND a.environment = r.environment
+        WHERE r.stripe_resubscription_id = %s
+          AND r.environment = %s
+        FOR UPDATE OF r, s, a
+        """,
+        (
+            resubscription_id,
+            environment,
+        ),
+    )
+
+    row = cursor.fetchone()
+
+    if not row:
+        raise StripeServiceError(
+            "Stripe resubscription is no longer available."
+        )
+
+    (
+        resubscription_token,
+        stored_environment,
+        resubscription_status,
+        spa_id,
+        stripe_billing_account_id,
+        tier_code,
+        billing_interval,
+        provider_quantity,
+        terms_version,
+        terms_accepted_at,
+        stripe_customer_id,
+        previous_stripe_subscription_id,
+        existing_checkout_session_id,
+        subscription_status,
+        billing_mode,
+        access_status,
+        current_tier_code,
+        current_stripe_customer_id,
+        current_stripe_subscription_id,
+        current_stripe_subscription_status,
+    ) = row
+
+    resubscription_token = str(
+        resubscription_token or ""
+    ).strip()
+
+    resubscription_status = str(
+        resubscription_status or ""
+    ).strip().lower()
+
+    tier_code = str(
+        tier_code or ""
+    ).strip().lower()
+
+    current_tier_code = str(
+        current_tier_code or ""
+    ).strip().lower()
+
+    terms_version = str(
+        terms_version or ""
+    ).strip()
+
+    stripe_customer_id = str(
+        stripe_customer_id or ""
+    ).strip()
+
+    previous_stripe_subscription_id = str(
+        previous_stripe_subscription_id or ""
+    ).strip()
+
+    existing_checkout_session_id = str(
+        existing_checkout_session_id or ""
+    ).strip()
+
+    subscription_status = str(
+        subscription_status or ""
+    ).strip().lower()
+
+    billing_mode = str(
+        billing_mode or ""
+    ).strip().lower()
+
+    access_status = str(
+        access_status or ""
+    ).strip().lower()
+
+    current_stripe_customer_id = str(
+        current_stripe_customer_id or ""
+    ).strip()
+
+    current_stripe_subscription_id = str(
+        current_stripe_subscription_id or ""
+    ).strip()
+
+    current_stripe_subscription_status = str(
+        current_stripe_subscription_status or ""
+    ).strip().lower()
+
+    if stored_environment != environment:
+        raise StripeServiceError(
+            "Stripe resubscription environment does not match."
+        )
+
+    if not resubscription_token:
+        raise StripeServiceError(
+            "Stripe resubscription token is missing."
+        )
+
+    if (
+        not terms_version
+        or terms_accepted_at is None
+    ):
+        raise StripeServiceError(
+            "Subscription Terms must be accepted "
+            "before Stripe Checkout."
+        )
+
+    if subscription_status != "canceled":
+        raise StripeServiceError(
+            "This Peach Suite Pro subscription is no longer "
+            "eligible for resubscription."
+        )
+
+    if billing_mode != "standard":
+        raise StripeServiceError(
+            "This business is no longer using Standard billing."
+        )
+
+    if access_status != "restricted":
+        raise StripeServiceError(
+            "This business is no longer in the restricted "
+            "state required for resubscription."
+        )
+
+    if tier_code != current_tier_code:
+        raise StripeServiceError(
+            "The Peach Suite Pro plan changed after the "
+            "resubscription was started."
+        )
+
+    if not stripe_customer_id:
+        raise StripeServiceError(
+            "Stripe resubscription customer is missing."
+        )
+
+    if (
+        stripe_customer_id
+        != current_stripe_customer_id
+    ):
+        raise StripeServiceError(
+            "The Stripe customer changed after the "
+            "resubscription was started."
+        )
+
+    if not previous_stripe_subscription_id:
+        raise StripeServiceError(
+            "Prior Stripe subscription is missing."
+        )
+
+    if (
+        previous_stripe_subscription_id
+        != current_stripe_subscription_id
+    ):
+        raise StripeServiceError(
+            "The Stripe subscription changed after the "
+            "resubscription was started."
+        )
+
+    if current_stripe_subscription_status not in {
+        "canceled",
+        "incomplete_expired",
+    }:
+        raise StripeServiceError(
+            "The prior Stripe subscription has not fully ended."
+        )
+
+    try:
+        provider_quantity = int(
+            provider_quantity
+        )
+    except (TypeError, ValueError) as exc:
+        raise StripeServiceError(
+            "Stripe resubscription quantity is invalid."
+        ) from exc
+
+    if provider_quantity <= 0:
+        raise StripeServiceError(
+            "Stripe resubscription quantity is invalid."
+        )
+
+    billing_interval = (
+        normalize_stripe_billing_interval(
+            billing_interval
+        )
+    )
+
+    base_price = get_stripe_price_mapping(
+        cursor,
+        item_kind="base_plan",
+        tier_code=tier_code,
+        billing_interval=billing_interval,
+        environment=environment,
+    )
+
+    configure_stripe(
+        environment=environment
+    )
+
+    replacement_of_checkout_session_id = None
+
+    if existing_checkout_session_id:
+        try:
+            existing_session = (
+                stripe.checkout.Session.retrieve(
+                    existing_checkout_session_id
+                )
+            )
+        except Exception as exc:
+            raise StripeServiceError(
+                "Existing Stripe Checkout Session "
+                "could not be retrieved."
+            ) from exc
+
+        existing_data = (
+            existing_session.to_dict()
+        )
+
+        expected_livemode = (
+            environment == "live"
+        )
+
+        if bool(
+            existing_data.get("livemode")
+        ) != expected_livemode:
+            raise StripeServiceError(
+                "Existing Stripe Checkout Session "
+                "environment does not match PSP."
+            )
+
+        existing_metadata = dict(
+            existing_data.get("metadata")
+            or {}
+        )
+
+        if (
+            existing_metadata.get(
+                "psp_resubscription_token"
+            )
+            != resubscription_token
+        ):
+            raise StripeServiceError(
+                "Existing Stripe Checkout Session "
+                "does not match this PSP resubscription."
+            )
+
+        existing_customer = (
+            existing_data.get("customer")
+        )
+
+        if isinstance(existing_customer, dict):
+            existing_customer = (
+                existing_customer.get("id")
+            )
+
+        existing_customer = str(
+            existing_customer or ""
+        ).strip()
+
+        if (
+            existing_customer
+            and existing_customer
+            != stripe_customer_id
+        ):
+            raise StripeServiceError(
+                "Existing Stripe Checkout Session "
+                "customer does not match PSP."
+            )
+
+        existing_status = str(
+            existing_data.get("status")
+            or ""
+        ).strip().lower()
+
+        if existing_status == "open":
+            return {
+                "stripe_checkout_session_id": (
+                    existing_data.get("id")
+                ),
+                "checkout_url": (
+                    existing_data.get("url")
+                ),
+                "expires_at": (
+                    existing_data.get("expires_at")
+                ),
+                "status": existing_status,
+                "existing": True,
+            }
+
+        if existing_status == "complete":
+            raise StripeServiceError(
+                "Stripe Checkout has already been completed "
+                "for this resubscription."
+            )
+
+        if existing_status != "expired":
+            raise StripeServiceError(
+                "Existing Stripe Checkout Session "
+                "has an unsupported status."
+            )
+
+        replacement_of_checkout_session_id = str(
+            existing_data.get("id")
+            or existing_checkout_session_id
+        ).strip()
+
+        if resubscription_status != "checkout_created":
+            raise StripeServiceError(
+                "Expired Stripe Checkout Session does not "
+                "match PSP resubscription state."
+            )
+
+    elif resubscription_status != "pending":
+        raise StripeServiceError(
+            "This resubscription is not ready to create "
+            "a new Stripe Checkout Session."
+        )
+
+    metadata = {
+        "psp_resubscription_token": (
+            resubscription_token
+        )
+    }
+
+    checkout_params = {
+        "mode": "subscription",
+        "line_items": [
+            {
+                "price": (
+                    base_price["stripe_price_id"]
+                ),
+                "quantity": provider_quantity,
+            }
+        ],
+        "customer": stripe_customer_id,
+        "client_reference_id": (
+            resubscription_token
+        ),
+        "success_url": success_url,
+        "cancel_url": cancel_url,
+        "payment_method_collection": "always",
+        "metadata": metadata,
+        "subscription_data": {
+            "metadata": metadata,
+        },
+        "idempotency_key": (
+            (
+                "psp-resub-replacement-v1-"
+                f"{environment}-{resubscription_id}-"
+                f"{replacement_of_checkout_session_id}"
+            )
+            if replacement_of_checkout_session_id
+            else (
+                "psp-resub-v1-"
+                f"{environment}-{resubscription_id}"
+            )
+        ),
+    }
+
+    try:
+        checkout_session = (
+            stripe.checkout.Session.create(
+                **checkout_params
+            )
+        )
+
+    except stripe.InvalidRequestError:
+        # A definite Stripe validation failure means Checkout was not
+        # created. Retry once with a fresh idempotency key so corrected
+        # external catalog/configuration issues may be retried safely.
+        retry_token = secrets.token_hex(12)
+
+        retry_params = dict(
+            checkout_params
+        )
+
+        retry_params["idempotency_key"] = (
+            (
+                "psp-resub-replacement-retry-v1-"
+                f"{environment}-{resubscription_id}-"
+                f"{replacement_of_checkout_session_id}-"
+                f"{retry_token}"
+            )
+            if replacement_of_checkout_session_id
+            else (
+                "psp-resub-retry-v1-"
+                f"{environment}-{resubscription_id}-"
+                f"{retry_token}"
+            )
+        )
+
+        try:
+            checkout_session = (
+                stripe.checkout.Session.create(
+                    **retry_params
+                )
+            )
+        except Exception as exc:
+            raise StripeServiceError(
+                "Stripe Checkout Session could not be created."
+            ) from exc
+
+    except Exception as exc:
+        raise StripeServiceError(
+            "Stripe Checkout Session could not be created."
+        ) from exc
+
+    checkout_data = (
+        checkout_session.to_dict()
+    )
+
+    checkout_session_id = str(
+        checkout_data.get("id")
+        or ""
+    ).strip()
+
+    checkout_url = str(
+        checkout_data.get("url")
+        or ""
+    ).strip()
+
+    checkout_expires_at = (
+        checkout_data.get("expires_at")
+    )
+
+    if not checkout_session_id:
+        raise StripeServiceError(
+            "Stripe did not return a Checkout Session ID."
+        )
+
+    if not checkout_url:
+        raise StripeServiceError(
+            "Stripe did not return a Checkout URL."
+        )
+
+    expected_livemode = (
+        environment == "live"
+    )
+
+    if bool(
+        checkout_data.get("livemode")
+    ) != expected_livemode:
+        raise StripeServiceError(
+            "Stripe Checkout Session environment "
+            "does not match PSP."
+        )
+
+    returned_metadata = dict(
+        checkout_data.get("metadata")
+        or {}
+    )
+
+    if (
+        returned_metadata.get(
+            "psp_resubscription_token"
+        )
+        != resubscription_token
+    ):
+        raise StripeServiceError(
+            "Stripe Checkout Session metadata "
+            "does not match PSP resubscription."
+        )
+
+    returned_customer = (
+        checkout_data.get("customer")
+    )
+
+    if isinstance(returned_customer, dict):
+        returned_customer = (
+            returned_customer.get("id")
+        )
+
+    returned_customer = str(
+        returned_customer or ""
+    ).strip()
+
+    if (
+        returned_customer
+        and returned_customer
+        != stripe_customer_id
+    ):
+        raise StripeServiceError(
+            "Stripe Checkout Session customer "
+            "does not match PSP."
+        )
+
+    cursor.execute(
+        """
+        UPDATE stripe_resubscriptions
+        SET
+            resubscription_status = 'checkout_created',
+            stripe_checkout_session_id = %s,
+            checkout_expires_at =
+                CASE
+                    WHEN %s IS NULL
+                    THEN NULL
+                    ELSE to_timestamp(%s)
+                END,
+            updated_at = NOW()
+        WHERE stripe_resubscription_id = %s
+          AND environment = %s
+          AND (
+              (
+                  %s IS NULL
+                  AND resubscription_status = 'pending'
+                  AND stripe_checkout_session_id IS NULL
+              )
+              OR
+              (
+                  %s IS NOT NULL
+                  AND resubscription_status = 'checkout_created'
+                  AND stripe_checkout_session_id = %s
+              )
+          )
+        RETURNING stripe_resubscription_id
+        """,
+        (
+            checkout_session_id,
+            checkout_expires_at,
+            checkout_expires_at,
+            resubscription_id,
+            environment,
+            replacement_of_checkout_session_id,
+            replacement_of_checkout_session_id,
+            replacement_of_checkout_session_id,
+        ),
+    )
+
+    if not cursor.fetchone():
+        raise StripeServiceError(
+            "Stripe Checkout Session could not be attached "
+            "to the PSP resubscription."
+        )
+
+    return {
+        "stripe_checkout_session_id": (
+            checkout_session_id
+        ),
+        "checkout_url": checkout_url,
+        "expires_at": checkout_expires_at,
+        "status": checkout_data.get("status"),
+        "existing": False,
+        "stripe_resubscription_id": (
+            resubscription_id
+        ),
+        "spa_id": spa_id,
+        "stripe_billing_account_id": (
+            stripe_billing_account_id
+        ),
+    }
+
 
 
 def resume_business_subscription_renewal(
@@ -3349,6 +5390,87 @@ def sync_stripe_subscription_from_event(
             "Stripe subscription lifecycle event "
             "Subscription ID is missing."
         )
+
+    event_customer = subscription.get(
+        "customer"
+    )
+
+    if isinstance(event_customer, dict):
+        event_customer = event_customer.get("id")
+
+    event_customer_id = str(
+        event_customer or ""
+    ).strip()
+
+    #
+    # A delayed lifecycle event may arrive for a subscription that
+    # was replaced by a completed PSP resubscription. Treat it as
+    # historical only when PSP can prove that:
+    #
+    # - the event Subscription is a recorded previous subscription,
+    # - that resubscription reached activated state,
+    # - the same billing account/customer still exists, and
+    # - the billing account no longer points at that old Subscription.
+    #
+    # This deliberately does NOT ignore an unknown new Subscription.
+    # A new-subscription event that arrives before Checkout activation
+    # must continue to fail closed so Stripe can retry it later.
+    #
+    if event_customer_id:
+        cursor.execute(
+            """
+            SELECT
+                r.spa_id,
+                r.stripe_billing_account_id,
+                r.stripe_customer_id,
+                a.stripe_subscription_id
+            FROM stripe_resubscriptions r
+            JOIN stripe_billing_accounts a
+              ON a.stripe_billing_account_id =
+                   r.stripe_billing_account_id
+             AND a.spa_id = r.spa_id
+             AND a.environment = r.environment
+             AND a.stripe_customer_id =
+                   r.stripe_customer_id
+            WHERE r.environment = %s
+              AND r.resubscription_status = 'activated'
+              AND r.activated_at IS NOT NULL
+              AND r.previous_stripe_subscription_id = %s
+              AND r.stripe_customer_id = %s
+              AND a.stripe_subscription_id IS NOT NULL
+              AND a.stripe_subscription_id <> %s
+            ORDER BY
+                r.activated_at DESC,
+                r.stripe_resubscription_id DESC
+            LIMIT 1
+            """,
+            (
+                environment,
+                subscription_id,
+                event_customer_id,
+                subscription_id,
+            ),
+        )
+
+        historical_row = cursor.fetchone()
+
+        if historical_row:
+            return {
+                "historical_subscription": True,
+                "stripe_customer_id": str(
+                    historical_row[2] or ""
+                ).strip(),
+                "stripe_subscription_id": subscription_id,
+                "current_stripe_subscription_id": str(
+                    historical_row[3] or ""
+                ).strip(),
+                "stripe_billing_account_id": (
+                    historical_row[1]
+                ),
+                "spa_id": historical_row[0],
+                "stripe_event_id": event_id,
+                "event_type": event_type,
+            }
 
     # Webhook delivery order is not guaranteed. Retrieve Stripe's
     # current Subscription snapshot before changing PSP billing state
