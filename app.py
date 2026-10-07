@@ -5485,6 +5485,17 @@ def public_marketing_contact():
     ):
         return "Invalid request.", 400
 
+    honeypot_value = str(
+        request.form.get("company_website") or ""
+    ).strip()
+
+    if honeypot_value:
+        # Silently discard likely automated submissions without
+        # revealing that the anti-bot field was triggered.
+        return redirect(
+            "/?contact=sent#contact"
+        )
+
     name = str(
         request.form.get("name") or ""
     ).strip()
@@ -5506,10 +5517,45 @@ def public_marketing_contact():
         or email.startswith("@")
         or email.endswith("@")
         or not message
+        or len(message) < 10
         or len(message) > 5000
     ):
         return redirect(
             "/?contact=invalid#contact"
+        )
+
+    source_hash = _public_contact_source_hash()
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        rate_limit = (
+            _reserve_public_contact_source_request(
+                cur,
+                source_hash,
+            )
+        )
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+
+        return redirect(
+            "/?contact=error#contact"
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if not rate_limit["allowed"]:
+        # Do not reveal rate-limit enforcement to automated clients.
+        # Present the same success response without sending an email.
+        return redirect(
+            "/?contact=sent#contact"
         )
 
     body = (
@@ -8274,6 +8320,9 @@ PASSWORD_RESET_MAX_EMAILS_PER_HOUR = 3
 PASSWORD_RESET_SOURCE_MAX_REQUESTS = 5
 PASSWORD_RESET_SOURCE_WINDOW_MINUTES = 10
 PASSWORD_RESET_RESPONSE_FLOOR_SECONDS = 1.5
+
+PUBLIC_CONTACT_SOURCE_MAX_REQUESTS = 3
+PUBLIC_CONTACT_SOURCE_WINDOW_MINUTES = 15
 BUSINESS_USER_INVITATION_TOKEN_HOURS = 72
 BUSINESS_USER_INVITATION_DELIVERY_STALE_MINUTES = 10
 
@@ -27594,6 +27643,69 @@ def _password_reset_source_hash():
 
 
 
+def _public_contact_source_hash():
+    """
+    Return a privacy-safe fingerprint of the Contact Us request source.
+
+    The raw IP address is never stored. Render's left-most
+    X-Forwarded-For value is trusted only when running on Render,
+    matching PSP's existing public-source security policy.
+    """
+    candidate = ""
+
+    if os.environ.get("RENDER"):
+        forwarded_for = str(
+            request.headers.get(
+                "X-Forwarded-For",
+                "",
+            )
+            or ""
+        ).strip()
+
+        if forwarded_for:
+            candidate = (
+                forwarded_for
+                .split(",", 1)[0]
+                .strip()
+            )
+
+    if not candidate:
+        candidate = str(
+            request.remote_addr
+            or ""
+        ).strip()
+
+    try:
+        source_address = str(
+            ipaddress.ip_address(candidate)
+        )
+
+    except ValueError:
+        source_address = "unknown"
+
+    secret = app.secret_key
+
+    if isinstance(secret, str):
+        secret = secret.encode("utf-8")
+
+    if not secret:
+        raise RuntimeError(
+            "Application secret key is unavailable."
+        )
+
+    message = (
+        "public-contact-source:"
+        + source_address
+    ).encode("utf-8")
+
+    return hmac.new(
+        secret,
+        message,
+        hashlib.sha256,
+    ).hexdigest()
+
+
+
 def _employee_access_source_hash():
     """
     Return a privacy-safe fingerprint of the request source.
@@ -29974,6 +30086,108 @@ def _employee_access_safe_return_path(
 
     return value
 
+
+
+def _reserve_public_contact_source_request(
+    cur,
+    source_hash,
+):
+    """
+    Reserve one Contact Us submission for a privacy-safe request source.
+
+    Returns allowed=False once the rolling source limit has been
+    reached. The caller owns the surrounding transaction.
+    """
+    source_hash = str(
+        source_hash
+        or ""
+    ).strip().lower()
+
+    if (
+        len(source_hash) != 64
+        or any(
+            ch not in "0123456789abcdef"
+            for ch in source_hash
+        )
+    ):
+        raise ValueError(
+            "Invalid public Contact Us source fingerprint."
+        )
+
+    # Serialize reservations for the same source even when no prior
+    # request row exists yet.
+    advisory_key = int(
+        source_hash[:16],
+        16,
+    )
+
+    if advisory_key >= 2**63:
+        advisory_key -= 2**64
+
+    cur.execute(
+        """
+        SELECT pg_advisory_xact_lock(%s)
+        """,
+        (advisory_key,),
+    )
+
+    # Keep only short-lived abuse-prevention history.
+    cur.execute(
+        """
+        DELETE FROM public_contact_source_requests
+        WHERE created_at
+            < NOW() - INTERVAL '24 hours'
+        """
+    )
+
+    cur.execute(
+        """
+        SELECT COUNT(*)
+        FROM public_contact_source_requests
+        WHERE source_hash = %s
+          AND created_at
+              > NOW()
+                - (
+                    %s
+                    * INTERVAL '1 minute'
+                )
+        """,
+        (
+            source_hash,
+            PUBLIC_CONTACT_SOURCE_WINDOW_MINUTES,
+        ),
+    )
+
+    recent_count = int(
+        cur.fetchone()[0]
+        or 0
+    )
+
+    if (
+        recent_count
+        >= PUBLIC_CONTACT_SOURCE_MAX_REQUESTS
+    ):
+        return {
+            "allowed": False,
+            "recent_count": recent_count,
+        }
+
+    cur.execute(
+        """
+        INSERT INTO public_contact_source_requests (
+            source_hash
+        )
+        VALUES (%s)
+        RETURNING public_contact_source_request_id
+        """,
+        (source_hash,),
+    )
+
+    return {
+        "allowed": True,
+        "request_id": cur.fetchone()[0],
+        "recent_count": recent_count + 1,
+    }
 
 
 def _reserve_password_reset_source_request(

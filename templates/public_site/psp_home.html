@@ -1578,6 +1578,27 @@
                     value="{{ contact_csrf_token }}"
                 >
 
+                <div
+                    aria-hidden="true"
+                    style="
+                        position: absolute;
+                        left: -10000px;
+                        width: 1px;
+                        height: 1px;
+                        overflow: hidden;
+                    "
+                >
+                    <label>
+                        Company Website
+                        <input
+                            type="text"
+                            name="company_website"
+                            tabindex="-1"
+                            autocomplete="off"
+                        >
+                    </label>
+                </div>
+
                 <label>
                     Name
                     <input
@@ -1602,6 +1623,7 @@
                     Message
                     <textarea
                         name="message"
+                        minlength="10"
                         maxlength="5000"
                         required
                     ></textarea>
