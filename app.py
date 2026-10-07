@@ -170,9 +170,11 @@ from services.import_service import (
     get_import_run_record_details,
     get_workspace_import_profile,
     update_client_import_review_decision,
+    update_appointment_import_review_decision,
     update_financial_import_review_decision,
     discard_client_import_review_rows,
     process_client_import_packet,
+    process_appointment_import_packet,
     process_income_import_packet,
     process_peachpos_income_import_packet,
 )
@@ -8131,6 +8133,69 @@ def has_subscription_feature(feature_key, *, spa_id=None):
         )
 
     return feature_key in entitlements
+
+
+def current_subscription_tier_code():
+    """
+    Return the current business subscription tier code.
+
+    Tier identity comes from the PSP business subscription record and
+    does not depend on whether the business has an active Stripe account.
+    """
+    spa_id = current_spa_id()
+
+    if spa_id is None:
+        return ""
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        summary = get_business_subscription_summary(
+            cur,
+            spa_id=spa_id,
+        )
+        return str(
+            summary.get("tier_code") or ""
+        ).strip().lower()
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def require_subscription_tier(*tier_codes):
+    """
+    Require the current business to use one of the supplied PSP tiers.
+
+    Master Admin retains support access. Ordinary business users are
+    checked against PSP's canonical subscription tier assignment.
+    """
+    allowed_tiers = {
+        str(tier_code or "").strip().lower()
+        for tier_code in tier_codes
+        if str(tier_code or "").strip()
+    }
+
+    if not allowed_tiers:
+        raise ValueError(
+            "At least one subscription tier code is required."
+        )
+
+    def decorator(view_function):
+        @wraps(view_function)
+        def decorated_function(*args, **kwargs):
+            if is_master_admin():
+                return view_function(*args, **kwargs)
+
+            if current_subscription_tier_code() not in allowed_tiers:
+                abort(403)
+
+            return view_function(*args, **kwargs)
+
+        return decorated_function
+
+    return decorator
 
 
 def require_subscription_feature(feature_key):
@@ -35809,6 +35874,7 @@ def send_appointment_reminder_sms(reminder_id, spa_id):
                 a.business_unit_id,
                 a.appointment_date,
                 a.appointment_time,
+                a.status,
                 a.service_type,
                 s.spa_name,
                 s.owner_phone,
@@ -35845,11 +35911,33 @@ def send_appointment_reminder_sms(reminder_id, spa_id):
             business_unit_id,
             appointment_date,
             appointment_time,
+            appointment_status,
             service_name,
             spa_name,
             spa_phone,
             spa_website
         ) = row
+
+        if appointment_status != "booked":
+            cur.execute("""
+                UPDATE reminder_queue
+                SET status = 'skipped',
+                    error_message = %s
+                WHERE reminder_id = %s
+                  AND spa_id = %s
+            """, (
+                "Appointment is no longer booked.",
+                reminder_id,
+                spa_id
+            ))
+
+            conn.commit()
+
+            return False, {
+                "success": False,
+                "status": "skipped",
+                "error": "Appointment is no longer booked."
+            }
 
         if not recipient_phone:
             cur.execute("""
@@ -85418,6 +85506,7 @@ def generate_appointment_reminders():
                 ON a.client_id = c.client_id
                AND a.spa_id = c.spa_id
             WHERE a.spa_id = %s
+              AND a.status = 'booked'
               AND a.appointment_date >= CURRENT_DATE
               AND a.appointment_date <= CURRENT_DATE + INTERVAL '7 days'
             ORDER BY a.appointment_date, a.appointment_time
@@ -99115,6 +99204,48 @@ def add_expense():
 
 
 
+def _require_import_run_entity_access(import_data):
+    """
+    Enforce commercial access for an existing Import Run.
+
+    Shared Import Center routes must re-check the entity represented by
+    the durable run so a saved/direct URL cannot bypass plan entitlements.
+    """
+    if is_master_admin():
+        return
+
+    entity_type = str(
+        (import_data or {}).get("entity_type") or ""
+    ).strip().lower()
+
+    if entity_type == "clients":
+        if not has_subscription_feature("clients"):
+            abort(403)
+        return
+
+    if entity_type == "appointments":
+        if not has_subscription_feature("appointments"):
+            abort(403)
+        return
+
+    if entity_type == "income":
+        if not has_subscription_feature("income_expenses"):
+            abort(403)
+        return
+
+    if entity_type == "peachpos_income":
+        if (
+            not has_subscription_feature("income_expenses")
+            or current_subscription_tier_code() != "pos"
+        ):
+            abort(403)
+        return
+
+    # Unknown Import Run types fail closed until an explicit commercial
+    # access rule is added for that importer.
+    abort(403)
+
+
 #  ------------------------------------------
 #      PEACH SUITE PRO IMPORT CENTER
 #  ------------------------------------------
@@ -99124,6 +99255,7 @@ def add_expense():
 @spa_required
 @require_subscription_feature("import_export")
 def import_center():
+    spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
 
     if business_unit_id is None:
@@ -99134,7 +99266,88 @@ def import_center():
         )
         return redirect(url_for("dashboard"))
 
-    return render_template("import_center.html")
+    import_features = {
+        "clients": has_subscription_feature("clients"),
+        "employees": has_subscription_feature("employees"),
+        "appointments": has_subscription_feature("appointments"),
+        "income_expenses": has_subscription_feature(
+            "income_expenses"
+        ),
+    }
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        subscription_summary = get_business_subscription_summary(
+            cur,
+            spa_id=spa_id,
+        )
+        tier_code = str(
+            subscription_summary.get("tier_code") or ""
+        ).strip().lower()
+
+        import_features["peachpos"] = tier_code == "pos"
+
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM service_name_types
+            WHERE spa_id = %s
+              AND is_active = TRUE
+            """,
+            (spa_id,),
+        )
+        service_count = cur.fetchone()[0]
+
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM clients
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+            """,
+            (
+                spa_id,
+                business_unit_id,
+            ),
+        )
+        client_count = cur.fetchone()[0]
+
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM employees
+            WHERE spa_id = %s
+              AND is_active = TRUE
+            """,
+            (spa_id,),
+        )
+        employee_count = cur.fetchone()[0]
+
+    finally:
+        cur.close()
+        conn.close()
+
+    import_readiness = {
+        "service_count": service_count,
+        "client_count": client_count,
+        "employee_count": employee_count,
+        "services_ready": service_count > 0,
+        "clients_ready": client_count > 0,
+        "employees_ready": employee_count > 0,
+        "appointments_ready": (
+            import_features["appointments"]
+            and service_count > 0
+            and client_count > 0
+        ),
+    }
+
+    return render_template(
+        "import_center.html",
+        import_features=import_features,
+        import_readiness=import_readiness,
+    )
 
 
 #  ------------------------------------------
@@ -99279,6 +99492,227 @@ def client_import_mapping(import_run_id):
         except ImportServiceError as exc:
             flash(str(exc), "error")
             import_data["mapping"] = mapping
+        else:
+            return redirect(
+                url_for(
+                    "import_run_records",
+                    import_run_id=import_run_id,
+                )
+            )
+
+    return render_template(
+        "import_mapping.html",
+        import_data=import_data,
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
+#  ------------------------------------------
+#      APPOINTMENT IMPORT
+#  ------------------------------------------
+
+
+@app.route(
+    "/imports/appointments",
+    methods=["GET", "POST"],
+)
+@login_required
+@spa_required
+@require_subscription_feature("import_export")
+@require_subscription_feature("appointments")
+def appointment_import_upload():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to import Appointments.",
+            "error",
+        )
+        return redirect(url_for("import_center"))
+
+    # Appointment records depend on existing PSP Services and Clients.
+    # Do not accept an upload that cannot possibly resolve those
+    # relationships during analysis.
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM service_name_types
+            WHERE spa_id = %s
+              AND is_active = TRUE
+            """,
+            (spa_id,),
+        )
+        service_count = cur.fetchone()[0]
+
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM clients
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+            """,
+            (
+                spa_id,
+                business_unit_id,
+            ),
+        )
+        client_count = cur.fetchone()[0]
+
+    finally:
+        cur.close()
+        conn.close()
+
+    missing_prerequisites = []
+
+    if service_count < 1:
+        missing_prerequisites.append("Service Catalog")
+
+    if client_count < 1:
+        missing_prerequisites.append("Clients")
+
+    if missing_prerequisites:
+        flash(
+            "Appointment Import is not ready yet. Complete "
+            + " and ".join(missing_prerequisites)
+            + " before importing appointments.",
+            "error",
+        )
+        return redirect(url_for("import_center"))
+
+    if request.method == "POST":
+        submitted_token = request.form.get(
+            "security_csrf_token",
+            "",
+        )
+
+        if not _security_form_csrf_valid(submitted_token):
+            abort(400)
+
+        uploaded_file = request.files.get("import_file")
+
+        try:
+            import_run = create_import_run(
+                uploaded_file,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                entity_type="appointments",
+                requested_by=session.get("user_id"),
+            )
+
+        except ImportServiceError as exc:
+            flash(str(exc), "error")
+
+        else:
+            return redirect(
+                url_for(
+                    "appointment_import_mapping",
+                    import_run_id=import_run["import_run_id"],
+                )
+            )
+
+    return render_template(
+        "import_upload.html",
+        import_title="Import Appointments",
+        import_description=(
+            "Upload a CSV or Excel file containing appointment "
+            "history or upcoming appointments you want to bring "
+            "into Peach Suite Pro."
+        ),
+        setup_message=(
+            "Before uploading, make sure your Service Catalog and "
+            "Clients are already set up. If your file contains named "
+            "providers, set up those Employees / Providers first. "
+            "Appointments using Any Available do not require a "
+            "named provider."
+        ),
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
+@app.route(
+    "/imports/appointments/<int:import_run_id>/mapping",
+    methods=["GET", "POST"],
+)
+@login_required
+@spa_required
+@require_subscription_feature("import_export")
+@require_subscription_feature("appointments")
+def appointment_import_mapping(import_run_id):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to map an Appointment import.",
+            "error",
+        )
+        return redirect(url_for("import_center"))
+
+    try:
+        import_data = get_import_run_mapping_data(
+            import_run_id,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+        )
+
+    except ImportServiceError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("import_center"))
+
+    if import_data.get("entity_type") != "appointments":
+        flash(
+            "This Import Run is not an Appointment import.",
+            "error",
+        )
+        return redirect(url_for("import_center"))
+
+    if request.method == "POST":
+        submitted_token = request.form.get(
+            "security_csrf_token",
+            "",
+        )
+
+        if not _security_form_csrf_valid(submitted_token):
+            abort(400)
+
+        mapping = []
+
+        for source_index, source_header in enumerate(
+            import_data["headers"]
+        ):
+            target_key = (
+                request.form.get(
+                    f"target_{source_index}",
+                    "",
+                )
+                or ""
+            ).strip()
+
+            mapping.append({
+                "source_index": source_index,
+                "source_header": source_header,
+                "target_key": target_key or None,
+            })
+
+        try:
+            analyze_import_run(
+                import_run_id,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                mapping=mapping,
+            )
+
+        except ImportServiceError as exc:
+            flash(str(exc), "error")
+            import_data["mapping"] = mapping
+
         else:
             return redirect(
                 url_for(
@@ -99471,6 +99905,8 @@ def income_import_mapping(import_run_id):
 @login_required
 @spa_required
 @require_subscription_feature("import_export")
+@require_subscription_feature("income_expenses")
+@require_subscription_tier("pos")
 @require_psp_access("financial_management")
 def peachpos_import_upload():
     spa_id = current_spa_id()
@@ -99583,6 +100019,8 @@ def peachpos_import_upload():
 @login_required
 @spa_required
 @require_subscription_feature("import_export")
+@require_subscription_feature("income_expenses")
+@require_subscription_tier("pos")
 @require_psp_access("financial_management")
 def peachpos_import_mapping(import_run_id):
     spa_id = current_spa_id()
@@ -99680,6 +100118,8 @@ def peachpos_import_mapping(import_run_id):
 @login_required
 @spa_required
 @require_subscription_feature("import_export")
+@require_subscription_feature("income_expenses")
+@require_subscription_tier("pos")
 @require_psp_access("financial_management")
 def import_run_record_details(
     import_run_id,
@@ -99748,10 +100188,9 @@ def import_run_records(import_run_id):
         flash(str(exc), "error")
         return redirect(url_for("dashboard"))
 
-    if import_data.get("entity_type") == "clients":
-        if not has_subscription_feature("clients"):
-            abort(403)
+    _require_import_run_entity_access(import_data)
 
+    if import_data.get("entity_type") == "clients":
         template_name = "import_run_clients.html"
     else:
         template_name = "import_run_records.html"
@@ -100021,6 +100460,431 @@ def client_import_review_row(
 
 
 # ------------------------------------------
+#     APPOINTMENT IMPORT PROCESSING
+# ------------------------------------------
+
+
+@app.route(
+    "/imports/appointments/<int:import_run_id>/start",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_subscription_feature("import_export")
+@require_subscription_feature("appointments")
+def appointment_import_start(import_run_id):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to import Appointments.",
+            "error",
+        )
+        return redirect(url_for("dashboard"))
+
+    submitted_csrf_token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_csrf_token
+    ):
+        flash(
+            "Your security token expired or could not be verified. "
+            "Please try again.",
+            "error",
+        )
+        return redirect(
+            url_for(
+                "import_run_records",
+                import_run_id=import_run_id,
+            )
+        )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                entity_type,
+                run_status
+            FROM import_runs
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        row = cur.fetchone()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if not row:
+        abort(404)
+
+    entity_type = str(
+        row[0] or ""
+    ).strip().lower()
+
+    run_status = str(
+        row[1] or ""
+    ).strip().lower()
+
+    if entity_type != "appointments":
+        abort(404)
+
+    if run_status not in {
+        "ready",
+        "importing",
+        "completed",
+        "failed",
+    }:
+        flash(
+            "This Appointment Import is not ready to start. "
+            "Complete its review first.",
+            "error",
+        )
+        return redirect(
+            url_for(
+                "import_run_records",
+                import_run_id=import_run_id,
+            )
+        )
+
+    return redirect(
+        url_for(
+            "appointment_import_progress",
+            import_run_id=import_run_id,
+        )
+    )
+
+
+@app.route(
+    "/imports/appointments/<int:import_run_id>/progress",
+    methods=["GET"],
+)
+@login_required
+@spa_required
+@require_subscription_feature("import_export")
+@require_subscription_feature("appointments")
+def appointment_import_progress(import_run_id):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        abort(403)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                entity_type,
+                run_status,
+                source_filename,
+                total_rows,
+                imported_rows,
+                skipped_rows,
+                error_rows,
+                failure_message,
+                started_at,
+                completed_at
+            FROM import_runs
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        row = cur.fetchone()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if not row:
+        abort(404)
+
+    if str(row[0] or "").strip().lower() != "appointments":
+        abort(404)
+
+    import_run = {
+        "import_run_id": import_run_id,
+        "run_status": str(row[1] or "").strip().lower(),
+        "source_filename": row[2],
+        "total_rows": int(row[3] or 0),
+        "imported_rows": int(row[4] or 0),
+        "skipped_rows": int(row[5] or 0),
+        "error_rows": int(row[6] or 0),
+        "failure_message": row[7],
+        "started_at": row[8],
+        "completed_at": row[9],
+    }
+
+    return render_template(
+        "appointment_import_progress.html",
+        import_run=import_run,
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
+@app.route(
+    "/imports/appointments/<int:import_run_id>/packet",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_subscription_feature("import_export")
+@require_subscription_feature("appointments")
+def appointment_import_packet(import_run_id):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        abort(403)
+
+    submitted_csrf_token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_csrf_token
+    ):
+        return jsonify({
+            "status": "error",
+            "message": (
+                "Your security token expired or could not "
+                "be verified. Refresh this page to continue."
+            ),
+        }), 400
+
+    try:
+        result = process_appointment_import_packet(
+            import_run_id,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+        )
+
+    except ImportServiceError as exc:
+        return jsonify({
+            "status": "error",
+            "message": str(exc),
+        }), 400
+
+    except Exception as exc:
+        app.logger.exception(
+            "Appointment Import packet failed unexpectedly. "
+            "import_run_id=%s spa_id=%s business_unit_id=%s "
+            "error=%s",
+            import_run_id,
+            spa_id,
+            business_unit_id,
+            exc,
+        )
+
+        return jsonify({
+            "status": "error",
+            "message": (
+                "This Appointment Import packet could not "
+                "complete safely. Refresh the progress page "
+                "to resume from durable import state."
+            ),
+        }), 500
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                total_rows,
+                imported_rows,
+                skipped_rows,
+                error_rows,
+                run_status,
+                failure_message
+            FROM import_runs
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND entity_type = 'appointments'
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        row = cur.fetchone()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if not row:
+        return jsonify({
+            "status": "not_found",
+            "message": (
+                "This Appointment Import Run could not "
+                "be found in the current workspace."
+            ),
+        }), 404
+
+    total_rows = int(row[0] or 0)
+    imported_rows = int(row[1] or 0)
+    skipped_rows = int(row[2] or 0)
+    error_rows = int(row[3] or 0)
+    run_status = str(row[4] or "").strip().lower()
+
+    processed_rows = (
+        imported_rows
+        + skipped_rows
+        + error_rows
+    )
+
+    return jsonify({
+        "status": run_status,
+        "import_run_id": import_run_id,
+        "total_rows": total_rows,
+        "processed_rows": processed_rows,
+        "imported_rows": imported_rows,
+        "skipped_rows": skipped_rows,
+        "error_rows": error_rows,
+        "remaining_rows": max(
+            0,
+            total_rows - processed_rows,
+        ),
+        "processed_this_packet": int(
+            result.get("processed_this_packet") or 0
+        ),
+        "failure_message": row[5],
+        "results_url": url_for(
+            "import_run_records",
+            import_run_id=import_run_id,
+        ),
+    })
+
+
+# ------------------------------------------
+#     APPOINTMENT IMPORT REVIEW
+# ------------------------------------------
+
+
+@app.route(
+    "/imports/appointments/<int:import_run_id>/rows/"
+    "<int:import_run_row_id>/review",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_subscription_feature("import_export")
+@require_subscription_feature("appointments")
+def appointment_import_review_row(
+    import_run_id,
+    import_run_row_id,
+):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to review Appointment imports.",
+            "error",
+        )
+        return redirect(url_for("dashboard"))
+
+    submitted_csrf_token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_csrf_token
+    ):
+        flash(
+            "Your security token expired or could not be verified. "
+            "Please try again.",
+            "error",
+        )
+        return redirect(
+            url_for(
+                "import_run_records",
+                import_run_id=import_run_id,
+            )
+        )
+
+    decision = (
+        request.form.get("decision", "")
+        or ""
+    ).strip().lower()
+
+    try:
+        reviewed_by_user_id = session.get("user_id")
+
+        try:
+            reviewed_by_user_id = int(reviewed_by_user_id)
+        except (TypeError, ValueError):
+            abort(403)
+
+        if reviewed_by_user_id <= 0:
+            abort(403)
+
+        result = update_appointment_import_review_decision(
+            import_run_id,
+            import_run_row_id,
+            decision=decision,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            reviewed_by_user_id=reviewed_by_user_id,
+        )
+
+    except ImportServiceError as exc:
+        flash(str(exc), "error")
+
+    else:
+        if result["review_decision"] == "approved":
+            flash(
+                "Appointment row approved for import.",
+                "success",
+            )
+        else:
+            flash(
+                "Appointment row discarded from this import.",
+                "success",
+            )
+
+    return redirect(
+        url_for(
+            "import_run_records",
+            import_run_id=import_run_id,
+        )
+    )
+
+
+# ------------------------------------------
 #     FINANCIAL IMPORT REVIEW / POSTING
 # ------------------------------------------
 
@@ -100033,6 +100897,7 @@ def client_import_review_row(
 @login_required
 @spa_required
 @require_subscription_feature("import_export")
+@require_subscription_feature("income_expenses")
 @require_psp_access("financial_management")
 def financial_import_review_row(
     import_run_id,
@@ -100075,6 +100940,14 @@ def financial_import_review_row(
     ).strip().lower()
 
     try:
+        import_data = get_import_run_records(
+            import_run_id,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+        )
+
+        _require_import_run_entity_access(import_data)
+
         result = update_financial_import_review_decision(
             import_run_id,
             import_run_row_id,
@@ -100113,6 +100986,7 @@ def financial_import_review_row(
 @login_required
 @spa_required
 @require_subscription_feature("import_export")
+@require_subscription_feature("income_expenses")
 @require_psp_access("financial_management")
 def financial_import_approved_rows(import_run_id):
     spa_id = current_spa_id()
@@ -100152,6 +101026,8 @@ def financial_import_approved_rows(import_run_id):
             spa_id=spa_id,
             business_unit_id=business_unit_id,
         )
+
+        _require_import_run_entity_access(import_data)
 
         entity_type = str(
             import_data.get("entity_type") or ""
@@ -110432,7 +111308,25 @@ def calendar_day_view():
                 pe.first_name,                              -- 17
                 pe.last_name,                               -- 18
                 pe.employee_nickname,                       -- 19
-                pe.provider_color_code                      -- 20
+                pe.provider_color_code,                       -- 20
+                CASE
+                    WHEN a.parser_version = 'psp_appt_import_v1'
+                     AND NOT EXISTS (
+                        SELECT 1
+                        FROM appointment_history ah
+                        WHERE ah.appointment_id = a.appointment_id
+                          AND ah.spa_id = a.spa_id
+                          AND ah.action_type IN (
+                              'updated',
+                              'rescheduled',
+                              'cancelled',
+                              'completed',
+                              'wrap_up_saved'
+                          )
+                    )
+                    THEN TRUE
+                    ELSE FALSE
+                END AS imported_pending_action              -- 21
             FROM appointments a
 
             JOIN clients c
@@ -110730,7 +111624,9 @@ def calendar_day_view():
             "owner_reviewed":
                 bool(appt[9]),
             "external_source":
-                appt[15] or ""
+                appt[15] or "",
+            "imported_pending_action":
+                bool(appt[21])
         })
 
     range_starts = []

@@ -22,21 +22,145 @@
     margin:20px 0 28px 0;
     background:#fafafa;
 ">
-    <h3 style="margin-top:0;">Before You Import</h3>
+    <h3 style="margin-top:0;">Recommended Setup & Import Order</h3>
 
-    <p style="margin-bottom:8px;">
-        <strong>1.</strong> Review field names and required setup.
+    <p class="muted-text" style="margin-top:0;">
+        Import related records in this order so Peach Suite Pro can safely
+        connect appointments and other records to data that already exists.
     </p>
-    <p style="margin-bottom:8px;">
-        <strong>2.</strong> Upload your file and map its columns.
-    </p>
-    <p style="margin-bottom:0;">
-        <strong>3.</strong> Review the results and import approved records.
-    </p>
+
+    {% if import_features.appointments %}
+        <ol style="margin:18px 0 0 22px; padding:0; line-height:1.6;">
+            <li style="margin-bottom:14px;">
+                <strong>Service Catalog</strong>
+                <div class="muted-text">
+                    Set up the services used by your appointment records.
+                    {% if import_readiness.services_ready %}
+                        <strong>
+                            Ready — {{ import_readiness.service_count }}
+                            active service{% if import_readiness.service_count != 1 %}s{% endif %}.
+                        </strong>
+                    {% else %}
+                        <strong>Setup needed before Appointment Import.</strong>
+                    {% endif %}
+                </div>
+            </li>
+
+            <li style="margin-bottom:14px;">
+                <strong>Clients</strong>
+                <div class="muted-text">
+                    Import clients before appointments so each appointment
+                    can be linked to the correct client record.
+                    {% if import_readiness.clients_ready %}
+                        <strong>
+                            Ready — {{ import_readiness.client_count }}
+                            client record{% if import_readiness.client_count != 1 %}s{% endif %}.
+                        </strong>
+                    {% else %}
+                        <strong>Import clients before Appointment Import.</strong>
+                    {% endif %}
+                </div>
+            </li>
+
+            {% if import_features.employees %}
+                <li style="margin-bottom:14px;">
+                    <strong>Employees / Providers</strong>
+                    <div class="muted-text">
+                        Set up or import providers before appointments that
+                        contain named providers. Appointments using
+                        Any Available do not require this step.
+                        {% if import_readiness.employees_ready %}
+                            <strong>
+                                {{ import_readiness.employee_count }}
+                                active employee{% if import_readiness.employee_count != 1 %}s{% endif %}
+                                available.
+                            </strong>
+                        {% else %}
+                            <strong>
+                                Needed when imported appointments contain
+                                named providers.
+                            </strong>
+                        {% endif %}
+                    </div>
+                </li>
+            {% endif %}
+
+            <li style="margin-bottom:14px;">
+                <strong>Appointments</strong>
+                <div class="muted-text">
+                    Import appointment history and upcoming appointments
+                    after Services and Clients are ready.
+                    {% if import_readiness.appointments_ready %}
+                        <strong>Core prerequisites are ready.</strong>
+                    {% else %}
+                        <strong>Waiting on the required setup above.</strong>
+                    {% endif %}
+                </div>
+            </li>
+
+            {% if import_features.income_expenses %}
+                <li>
+                    <strong>Income & Expenses</strong>
+                    <div class="muted-text">
+                        Import financial history after the core client and
+                        appointment relationships are in place.
+                    </div>
+                </li>
+            {% endif %}
+        </ol>
+    {% else %}
+        <ol style="margin:18px 0 0 22px; padding:0; line-height:1.6;">
+            {% if import_features.employees %}
+                <li style="margin-bottom:14px;">
+                    <strong>Employees</strong>
+                    <div class="muted-text">
+                        Set up or import employee records used by your business.
+                        {% if import_readiness.employees_ready %}
+                            <strong>
+                                {{ import_readiness.employee_count }}
+                                active employee{% if import_readiness.employee_count != 1 %}s{% endif %}
+                                available.
+                            </strong>
+                        {% endif %}
+                    </div>
+                </li>
+            {% endif %}
+
+            {% if import_features.income_expenses %}
+                <li style="margin-bottom:14px;">
+                    <strong>Income & Expenses</strong>
+                    <div class="muted-text">
+                        Import your historical business financial records.
+                    </div>
+                </li>
+
+                <li>
+                    <strong>Processor Transactions</strong>
+                    <div class="muted-text">
+                        Configure the processor company and Merchant ID /
+                        Account ID before importing non-Square transactions.
+                    </div>
+                </li>
+            {% endif %}
+        </ol>
+    {% endif %}
+
+    <div style="
+        margin-top:20px;
+        padding-top:16px;
+        border-top:1px solid #dddddd;
+    ">
+        <strong>For every import:</strong>
+        <span class="muted-text">
+            Upload the file, map its columns, review validation and duplicate
+            results, then import only the approved records.
+        </span>
+    </div>
 </div>
 
 <div class="dashboard-cards">
 
+    {% if import_features.clients %}
     <div class="dashboard-card">
         <h2>Clients</h2>
 
@@ -67,7 +191,82 @@
             </a>
         </div>
     </div>
+    {% endif %}
 
+    {% if import_features.appointments %}
+    <div class="dashboard-card">
+        <h2>Appointments</h2>
+
+        <p style="font-size:1rem; font-weight:400; line-height:1.5;">
+            Import appointment history and upcoming appointments
+            from a CSV or Excel file.
+        </p>
+
+        {% if import_readiness.appointments_ready %}
+            <p class="muted-text" style="font-size:0.95rem; font-weight:400; line-height:1.5;">
+                Your Service Catalog and Clients are ready for
+                Appointment Import. If your file contains named
+                providers, make sure those providers are set up first.
+            </p>
+        {% else %}
+            <p class="muted-text" style="font-size:0.95rem; font-weight:400; line-height:1.5;">
+                Complete the required setup below before importing
+                appointments.
+            </p>
+
+            {% if not import_readiness.services_ready %}
+                <div style="margin-top:12px;">
+                    <a
+                        href="{{ url_for('service_types') }}"
+                        class="btn"
+                    >
+                        Set Up Service Catalog
+                    </a>
+                </div>
+            {% endif %}
+
+            {% if not import_readiness.clients_ready %}
+                <div style="margin-top:12px;">
+                    <a
+                        href="{{ url_for('client_import_upload') }}"
+                        class="btn"
+                    >
+                        Import Clients
+                    </a>
+                </div>
+            {% endif %}
+        {% endif %}
+
+        {% if import_features.employees %}
+            <div style="margin-top:12px;">
+                <a
+                    href="{{ url_for('employees_home') }}"
+                    class="btn"
+                >
+                    Manage Employees / Providers
+                </a>
+            </div>
+        {% endif %}
+
+        {% if import_readiness.appointments_ready %}
+            <div style="margin-top:12px;">
+                <a
+                    href="{{ url_for('appointment_import_upload') }}"
+                    class="btn"
+                >
+                    Start Appointment Import
+                </a>
+            </div>
+        {% else %}
+            <p class="muted-text" style="margin-top:14px; font-size:0.9rem;">
+                Appointment Import will become available after the
+                required Service Catalog and Client setup is complete.
+            </p>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% if import_features.income_expenses %}
     <div class="dashboard-card">
         <h2>Income</h2>
 
@@ -89,7 +288,9 @@
             </a>
         </div>
     </div>
+    {% endif %}
 
+    {% if import_features.peachpos %}
     <div class="dashboard-card">
         <h2>Processor Transactions</h2>
 
@@ -138,6 +339,7 @@
             </div>
         </div>
     </div>
+    {% endif %}
 
 </div>
 
@@ -147,8 +349,8 @@
 <h3>Import History</h3>
 
 <p class="muted-text">
-    Recent Client, Income, and Processor Transaction imports will appear
-    here as import history becomes available.
+    Recent Client, Appointment, Income, and Processor Transaction imports
+    will appear here as import history becomes available.
 </p>
 
 {% endblock %}

@@ -692,6 +692,189 @@ INCOME_IMPORT_FIELDS = (
 
 
 # =========================================================
+# APPOINTMENT IMPORT PROFILE
+# =========================================================
+
+
+APPOINTMENT_IMPORT_FIELDS = (
+    {
+        "key": "client_first_name",
+        "label": "Client First Name",
+        "required": False,
+        "aliases": (
+            "client first name",
+            "customer first name",
+            "first name",
+            "firstname",
+            "first",
+        ),
+    },
+    {
+        "key": "client_last_name",
+        "label": "Client Last Name",
+        "required": False,
+        "aliases": (
+            "client last name",
+            "customer last name",
+            "last name",
+            "lastname",
+            "last",
+            "surname",
+        ),
+    },
+    {
+        "key": "client_email",
+        "label": "Client Email",
+        "required": False,
+        "aliases": (
+            "client email",
+            "customer email",
+            "email",
+            "email address",
+            "e-mail",
+        ),
+    },
+    {
+        "key": "client_phone",
+        "label": "Client Phone",
+        "required": False,
+        "aliases": (
+            "client phone",
+            "customer phone",
+            "phone",
+            "phone number",
+            "mobile",
+            "cell",
+        ),
+    },
+    {
+        "key": "appointment_date",
+        "label": "Appointment Date",
+        "required": True,
+        "aliases": (
+            "appointment date",
+            "booking date",
+            "service date",
+            "date",
+        ),
+    },
+    {
+        "key": "appointment_time",
+        "label": "Appointment Time",
+        "required": True,
+        "aliases": (
+            "appointment time",
+            "booking time",
+            "service time",
+            "start time",
+            "time",
+        ),
+    },
+    {
+        "key": "service_name",
+        "label": "Service",
+        "required": True,
+        "aliases": (
+            "service",
+            "service name",
+            "service type",
+            "appointment type",
+            "booking service",
+        ),
+    },
+    {
+        "key": "provider_name",
+        "label": "Provider",
+        "required": False,
+        "aliases": (
+            "provider",
+            "provider name",
+            "employee",
+            "employee name",
+            "staff",
+            "staff member",
+            "team member",
+        ),
+    },
+    {
+        "key": "duration_minutes",
+        "label": "Duration Minutes",
+        "required": False,
+        "aliases": (
+            "duration",
+            "duration minutes",
+            "duration_minutes",
+            "length",
+            "session length",
+            "minutes",
+        ),
+    },
+    {
+        "key": "price_at_booking",
+        "label": "Price at Booking",
+        "required": False,
+        "aliases": (
+            "price",
+            "service price",
+            "appointment price",
+            "price at booking",
+            "amount",
+        ),
+    },
+    {
+        "key": "status",
+        "label": "Appointment Status",
+        "required": True,
+        "aliases": (
+            "status",
+            "appointment status",
+            "booking status",
+        ),
+    },
+    {
+        "key": "notes",
+        "label": "Appointment Notes",
+        "required": False,
+        "aliases": (
+            "notes",
+            "appointment notes",
+            "booking notes",
+            "note",
+            "comments",
+            "memo",
+        ),
+    },
+    {
+        "key": "external_source",
+        "label": "Booking System / Source",
+        "required": False,
+        "aliases": (
+            "booking system",
+            "booking source",
+            "source system",
+            "external source",
+            "source",
+            "platform",
+        ),
+    },
+    {
+        "key": "external_order_id",
+        "label": "External Appointment ID",
+        "required": False,
+        "aliases": (
+            "external appointment id",
+            "appointment id",
+            "booking id",
+            "booking number",
+            "confirmation number",
+            "confirmation id",
+            "external id",
+        ),
+    },
+)
+
+
+# =========================================================
 # PEACHPOS INCOME IMPORT PROFILE
 # =========================================================
 
@@ -911,6 +1094,14 @@ def get_import_profile(entity_type):
             "entity_type": "income",
             "display_name": "Income",
             "fields": INCOME_IMPORT_FIELDS,
+            "defaults": {},
+        }
+
+    if entity_type == "appointments":
+        return {
+            "entity_type": "appointments",
+            "display_name": "Appointments",
+            "fields": APPOINTMENT_IMPORT_FIELDS,
             "defaults": {},
         }
 
@@ -1418,6 +1609,41 @@ def _parse_import_date(value):
     )
 
 
+def _parse_import_time(value):
+    """
+    Accept common appointment-export time formats and return HH:MM:SS.
+    Blank values remain blank.
+    """
+
+    raw = str(value or "").strip()
+
+    if not raw:
+        return ""
+
+    time_formats = (
+        "%H:%M:%S",
+        "%H:%M",
+        "%I:%M:%S %p",
+        "%I:%M %p",
+        "%I %p",
+    )
+
+    for time_format in time_formats:
+        try:
+            parsed = datetime.strptime(
+                raw,
+                time_format,
+            ).time()
+
+            return parsed.strftime("%H:%M:%S")
+        except ValueError:
+            continue
+
+    raise ImportServiceError(
+        f"Time '{raw}' is not in a supported format."
+    )
+
+
 def _parse_import_boolean(
     value,
     *,
@@ -1806,6 +2032,298 @@ def validate_income_import_row(
                 )
         except (InvalidOperation, ValueError):
             pass
+
+    return {
+        "valid": not errors,
+        "data": normalized,
+        "errors": errors,
+    }
+
+
+def validate_appointment_import_row(
+    row_data,
+):
+    """
+    Normalize and validate one mapped Appointment import row.
+
+    Import policy:
+      - appointment date, time, service, and status are required
+      - client must be identifiable by email, phone, or unique full name
+      - client/service/provider database resolution happens later
+      - duration is required for operational booked appointments
+      - duration may remain blank for historical completed/cancelled/no_show rows
+      - historical price remains optional
+      - supplied duration and price must be valid
+      - PSP does not invent missing appointment facts
+    """
+
+    normalized = {
+        key: str(value or "").strip()
+        for key, value in row_data.items()
+    }
+    errors = []
+
+    # -------------------------------------------------
+    # Client identity
+    # -------------------------------------------------
+    client_email = _normalize_import_email(
+        normalized.get(
+            "client_email",
+            "",
+        )
+    )
+
+    if client_email and not _is_valid_import_email(
+        client_email
+    ):
+        errors.append(
+            "Client Email is not valid."
+        )
+
+    normalized["client_email"] = client_email
+
+    client_phone = normalized.get(
+        "client_phone",
+        "",
+    )
+
+    normalized_phone = normalize_client_import_phone(
+        client_phone
+    )
+
+    client_first_name = normalized.get(
+        "client_first_name",
+        "",
+    )
+    client_last_name = normalized.get(
+        "client_last_name",
+        "",
+    )
+
+    has_full_name = bool(
+        client_first_name
+        and client_last_name
+    )
+
+    if not (
+        client_email
+        or normalized_phone
+        or has_full_name
+    ):
+        errors.append(
+            "Identify the client with Client Email, "
+            "Client Phone, or both Client First Name "
+            "and Client Last Name."
+        )
+
+    # -------------------------------------------------
+    # Appointment date
+    # -------------------------------------------------
+    appointment_date = normalized.get(
+        "appointment_date",
+        "",
+    )
+
+    if not appointment_date:
+        errors.append(
+            "Appointment Date is required."
+        )
+    else:
+        try:
+            normalized["appointment_date"] = (
+                _parse_import_date(
+                    appointment_date
+                )
+            )
+        except ImportServiceError as exc:
+            errors.append(str(exc))
+            normalized["appointment_date"] = (
+                appointment_date
+            )
+
+    # -------------------------------------------------
+    # Appointment time
+    # -------------------------------------------------
+    appointment_time = normalized.get(
+        "appointment_time",
+        "",
+    )
+
+    if not appointment_time:
+        errors.append(
+            "Appointment Time is required."
+        )
+    else:
+        try:
+            normalized["appointment_time"] = (
+                _parse_import_time(
+                    appointment_time
+                )
+            )
+        except ImportServiceError as exc:
+            errors.append(str(exc))
+            normalized["appointment_time"] = (
+                appointment_time
+            )
+
+    # -------------------------------------------------
+    # Service
+    # -------------------------------------------------
+    if not normalized.get(
+        "service_name",
+        "",
+    ):
+        errors.append(
+            "Service is required."
+        )
+
+    # -------------------------------------------------
+    # Appointment status
+    # -------------------------------------------------
+    raw_status = normalized.get(
+        "status",
+        "",
+    )
+
+    status_key = " ".join(
+        raw_status
+        .strip()
+        .lower()
+        .replace("_", " ")
+        .replace("-", " ")
+        .split()
+    )
+
+    status_map = {
+        "booked": "booked",
+        "scheduled": "booked",
+        "confirmed": "booked",
+        "complete": "completed",
+        "completed": "completed",
+        "cancelled": "cancelled",
+        "canceled": "cancelled",
+        "no show": "no_show",
+        "noshow": "no_show",
+    }
+
+    if not raw_status:
+        errors.append(
+            "Appointment Status is required."
+        )
+    elif status_key not in status_map:
+        errors.append(
+            "Appointment Status must be Booked, "
+            "Scheduled, Confirmed, Completed, "
+            "Cancelled, Canceled, or No Show."
+        )
+    else:
+        normalized["status"] = (
+            status_map[status_key]
+        )
+
+    # -------------------------------------------------
+    # Optional external appointment identity
+    # -------------------------------------------------
+    external_order_id = str(
+        normalized.get(
+            "external_order_id",
+            "",
+        )
+        or ""
+    ).strip()
+
+    external_source = str(
+        normalized.get(
+            "external_source",
+            "",
+        )
+        or ""
+    ).strip()
+
+    if external_order_id and not external_source:
+        errors.append(
+            "Booking System / Source is required when an "
+            "External Appointment ID is supplied."
+        )
+
+    normalized["external_order_id"] = external_order_id
+    normalized["external_source"] = external_source
+
+    # -------------------------------------------------
+    # Duration
+    #
+    # A future/operational booked appointment must carry the
+    # actual imported duration. PSP does not silently substitute
+    # today's Service Catalog duration for missing source data.
+    #
+    # Historical completed/cancelled/no_show rows may preserve
+    # a blank duration when the source system did not provide it.
+    # -------------------------------------------------
+    duration_raw = normalized.get(
+        "duration_minutes",
+        "",
+    )
+
+    normalized_status = str(
+        normalized.get("status") or ""
+    ).strip().lower()
+
+    if not duration_raw:
+        if normalized_status == "booked":
+            errors.append(
+                "Duration Minutes is required for Booked appointments."
+            )
+
+    else:
+        try:
+            duration_value = Decimal(
+                duration_raw
+            )
+
+            if (
+                duration_value <= 0
+                or duration_value
+                != duration_value.to_integral_value()
+            ):
+                raise ValueError
+
+            normalized["duration_minutes"] = str(
+                int(duration_value)
+            )
+        except (
+            InvalidOperation,
+            ValueError,
+        ):
+            errors.append(
+                "Duration Minutes must be a positive whole number."
+            )
+
+    # -------------------------------------------------
+    # Optional historical price
+    # -------------------------------------------------
+    price_raw = normalized.get(
+        "price_at_booking",
+        "",
+    )
+
+    if price_raw:
+        try:
+            price = _parse_import_money(
+                price_raw
+            )
+
+            if price < Decimal("0.00"):
+                errors.append(
+                    "Price at Booking cannot be negative."
+                )
+            else:
+                normalized["price_at_booking"] = (
+                    format(price, ".2f")
+                )
+        except ImportServiceError as exc:
+            errors.append(
+                f"Price at Booking: {exc}"
+            )
 
     return {
         "valid": not errors,
@@ -2397,6 +2915,565 @@ def validate_income_import_workspace_values(
     return prepared_rows
 
 
+def validate_appointment_import_workspace_values(
+    cur,
+    *,
+    spa_id,
+    business_unit_id,
+    prepared_rows,
+):
+    """
+    Resolve database-backed Appointment import values.
+
+    Client:
+      - exact email and/or normalized phone when supplied
+      - otherwise exact unique first + last name
+      - client must belong to the current Provider Workspace
+      - inactive clients remain eligible for historical imports
+
+    Service:
+      - exact normalized active Service Catalog name
+      - service_type_id and canonical service name are resolved
+      - catalog duration/price are retained as reference values only;
+        missing imported historical values are not silently invented
+
+    Provider:
+      - blank / Any Available resolves to no employee assignment
+      - otherwise exact nickname or full-name match
+      - provider must be active in the current business
+
+    Unknown, ambiguous, or conflicting reference data becomes a
+    review error. PSP never guesses a reference record.
+    """
+
+    # -------------------------------------------------
+    # Clients -- current Provider Workspace
+    # -------------------------------------------------
+    cur.execute(
+        """
+        SELECT
+            client_id,
+            first_name,
+            last_name,
+            phone,
+            email
+        FROM clients
+        WHERE spa_id = %s
+          AND business_unit_id = %s
+        ORDER BY client_id
+        """,
+        (
+            spa_id,
+            business_unit_id,
+        ),
+    )
+
+    client_email_lookup = {}
+    client_phone_lookup = {}
+    client_name_lookup = {}
+
+    for (
+        client_id,
+        first_name,
+        last_name,
+        phone,
+        email,
+    ) in cur.fetchall():
+        normalized_email = _normalize_import_email(
+            email
+        )
+
+        normalized_phone = normalize_client_import_phone(
+            phone
+        )
+
+        normalized_name = " ".join(
+            part
+            for part in (
+                normalize_client_import_name(first_name),
+                normalize_client_import_name(last_name),
+            )
+            if part
+        )
+
+        if normalized_email:
+            client_email_lookup.setdefault(
+                normalized_email,
+                [],
+            ).append(client_id)
+
+        if normalized_phone:
+            client_phone_lookup.setdefault(
+                normalized_phone,
+                [],
+            ).append(client_id)
+
+        if normalized_name:
+            client_name_lookup.setdefault(
+                normalized_name,
+                [],
+            ).append(client_id)
+
+    # -------------------------------------------------
+    # Services -- active Service Catalog for business
+    # -------------------------------------------------
+    cur.execute(
+        """
+        SELECT
+            service_type_id,
+            service_name,
+            default_duration_minutes,
+            default_price
+        FROM service_name_types
+        WHERE spa_id = %s
+          AND is_active = TRUE
+        ORDER BY service_type_id
+        """,
+        (spa_id,),
+    )
+
+    service_lookup = {}
+
+    for (
+        service_type_id,
+        service_name,
+        default_duration_minutes,
+        default_price,
+    ) in cur.fetchall():
+        normalized_service = (
+            _normalize_import_dropdown_value(
+                service_name
+            )
+        )
+
+        if not normalized_service:
+            continue
+
+        service_lookup.setdefault(
+            normalized_service,
+            [],
+        ).append({
+            "service_type_id": service_type_id,
+            "service_name": str(
+                service_name or ""
+            ).strip(),
+            "default_duration_minutes": (
+                default_duration_minutes
+            ),
+            "default_price": default_price,
+        })
+
+    # -------------------------------------------------
+    # Providers -- active employees for business
+    # -------------------------------------------------
+    cur.execute(
+        """
+        SELECT
+            employee_id,
+            first_name,
+            last_name,
+            employee_nickname
+        FROM employees
+        WHERE spa_id = %s
+          AND is_active = TRUE
+        ORDER BY employee_id
+        """,
+        (spa_id,),
+    )
+
+    provider_lookup = {}
+
+    for (
+        employee_id,
+        first_name,
+        last_name,
+        employee_nickname,
+    ) in cur.fetchall():
+        first_name = str(
+            first_name or ""
+        ).strip()
+
+        last_name = str(
+            last_name or ""
+        ).strip()
+
+        nickname = str(
+            employee_nickname or ""
+        ).strip()
+
+        full_name = " ".join(
+            part
+            for part in (
+                first_name,
+                last_name,
+            )
+            if part
+        )
+
+        provider_snapshot = (
+            nickname
+            or full_name
+            or "Provider"
+        )
+
+        match_names = {
+            _normalize_import_dropdown_value(
+                value
+            )
+            for value in (
+                nickname,
+                full_name,
+            )
+            if str(value or "").strip()
+        }
+
+        for normalized_provider in match_names:
+            provider_lookup.setdefault(
+                normalized_provider,
+                {},
+            )[employee_id] = provider_snapshot
+
+    # -------------------------------------------------
+    # Resolve every prepared row
+    # -------------------------------------------------
+    for row in prepared_rows:
+        data = row.get("data") or {}
+
+        errors = list(
+            row.get("errors") or []
+        )
+
+        # ---------------------------------------------
+        # Client
+        # ---------------------------------------------
+        raw_email = _normalize_import_email(
+            data.get(
+                "client_email",
+                "",
+            )
+        )
+
+        raw_phone = normalize_client_import_phone(
+            data.get(
+                "client_phone",
+                "",
+            )
+        )
+
+        strong_client_ids = []
+        strong_identifier_supplied = False
+
+        if raw_email:
+            strong_identifier_supplied = True
+
+            email_matches = client_email_lookup.get(
+                raw_email,
+                [],
+            )
+
+            if len(email_matches) == 1:
+                strong_client_ids.append(
+                    email_matches[0]
+                )
+            elif not email_matches:
+                errors.append(
+                    f"Client Email '{raw_email}' was not found "
+                    "in this Provider Workspace."
+                )
+            else:
+                errors.append(
+                    f"Client Email '{raw_email}' matches more "
+                    "than one client in this Provider Workspace."
+                )
+
+        if raw_phone:
+            strong_identifier_supplied = True
+
+            phone_matches = client_phone_lookup.get(
+                raw_phone,
+                [],
+            )
+
+            if len(phone_matches) == 1:
+                strong_client_ids.append(
+                    phone_matches[0]
+                )
+            elif not phone_matches:
+                errors.append(
+                    "Client Phone was not found in this "
+                    "Provider Workspace."
+                )
+            else:
+                errors.append(
+                    "Client Phone matches more than one client "
+                    "in this Provider Workspace."
+                )
+
+        if strong_identifier_supplied:
+            unique_client_ids = set(
+                strong_client_ids
+            )
+
+            if len(unique_client_ids) == 1:
+                data["client_id"] = next(
+                    iter(unique_client_ids)
+                )
+            elif len(unique_client_ids) > 1:
+                errors.append(
+                    "Client Email and Client Phone resolve to "
+                    "different clients. Review this row."
+                )
+
+        else:
+            first_name = normalize_client_import_name(
+                data.get(
+                    "client_first_name",
+                    "",
+                )
+            )
+
+            last_name = normalize_client_import_name(
+                data.get(
+                    "client_last_name",
+                    "",
+                )
+            )
+
+            normalized_name = " ".join(
+                part
+                for part in (
+                    first_name,
+                    last_name,
+                )
+                if part
+            )
+
+            name_matches = client_name_lookup.get(
+                normalized_name,
+                [],
+            )
+
+            if len(name_matches) == 1:
+                data["client_id"] = name_matches[0]
+            elif not name_matches:
+                errors.append(
+                    "Client name was not found in this "
+                    "Provider Workspace."
+                )
+            else:
+                errors.append(
+                    "Client name matches more than one client "
+                    "in this Provider Workspace. Map Email or "
+                    "Phone to identify the correct client."
+                )
+
+        # ---------------------------------------------
+        # Appointment lifecycle context
+        # ---------------------------------------------
+        appointment_status = str(
+            data.get("status") or ""
+        ).strip().lower()
+
+        historical_statuses = {
+            "completed",
+            "cancelled",
+            "no_show",
+        }
+
+        is_historical = (
+            appointment_status in historical_statuses
+        )
+
+        # ---------------------------------------------
+        # Appointment lifecycle context
+        # ---------------------------------------------
+        appointment_status = str(
+            data.get("status") or ""
+        ).strip().lower()
+
+        historical_statuses = {
+            "completed",
+            "cancelled",
+            "no_show",
+        }
+
+        is_historical = (
+            appointment_status in historical_statuses
+        )
+
+        # ---------------------------------------------
+        # Service
+        # ---------------------------------------------
+        raw_service_name = str(
+            data.get(
+                "service_name",
+                "",
+            )
+            or ""
+        ).strip()
+
+        # Always preserve the source-facing service name as the
+        # booking-time snapshot, even when a current PSP Service
+        # Catalog record resolves successfully.
+        data["external_service_name"] = raw_service_name
+
+        normalized_service = (
+            _normalize_import_dropdown_value(
+                raw_service_name
+            )
+        )
+
+        service_matches = service_lookup.get(
+            normalized_service,
+            [],
+        )
+
+        if len(service_matches) == 1:
+            service = service_matches[0]
+
+            data["service_type_id"] = (
+                service["service_type_id"]
+            )
+
+            # service_name becomes the current canonical PSP service
+            # name used by the operational appointment record.
+            data["service_name"] = (
+                service["service_name"]
+            )
+
+            data[
+                "service_default_duration_minutes"
+            ] = service[
+                "default_duration_minutes"
+            ]
+
+            default_price = service[
+                "default_price"
+            ]
+
+            data["service_default_price"] = (
+                format(
+                    default_price,
+                    ".2f",
+                )
+                if default_price is not None
+                else None
+            )
+
+        elif not service_matches:
+            if is_historical:
+                # Historical records may reference a discontinued
+                # service. Preserve the source snapshot without
+                # inventing a current Service Catalog relationship.
+                data["service_type_id"] = None
+                data["service_name"] = raw_service_name
+                data[
+                    "service_default_duration_minutes"
+                ] = None
+                data["service_default_price"] = None
+
+            else:
+                errors.append(
+                    f"Service '{raw_service_name}' does not match "
+                    "an active Service Catalog service."
+                )
+
+        else:
+            # Never guess between multiple current PSP records.
+            errors.append(
+                f"Service '{raw_service_name}' matches more "
+                "than one active Service Catalog service."
+            )
+
+        # ---------------------------------------------
+        # Provider
+        # ---------------------------------------------
+        raw_provider_name = str(
+            data.get(
+                "provider_name",
+                "",
+            )
+            or ""
+        ).strip()
+
+        normalized_provider = (
+            _normalize_import_dropdown_value(
+                raw_provider_name
+            )
+        )
+
+        any_provider_values = {
+            "",
+            "any",
+            "any available",
+            "any provider",
+            "no preference",
+            "unassigned",
+        }
+
+        if normalized_provider in any_provider_values:
+            data["provider_employee_id"] = None
+            data["provider_name_at_booking"] = (
+                "Any Available"
+            )
+
+        else:
+            provider_matches = provider_lookup.get(
+                normalized_provider,
+                {},
+            )
+
+            if len(provider_matches) == 1:
+                (
+                    provider_employee_id,
+                    _provider_snapshot,
+                ) = next(
+                    iter(
+                        provider_matches.items()
+                    )
+                )
+
+                data["provider_employee_id"] = (
+                    provider_employee_id
+                )
+
+                # Preserve exactly what the source file called this
+                # provider as the booking-time snapshot.
+                data["provider_name_at_booking"] = (
+                    raw_provider_name
+                )
+
+            elif not provider_matches:
+                if is_historical:
+                    # Former providers are valid historical context.
+                    # Preserve the source name without assigning it to
+                    # a current employee record.
+                    data["provider_employee_id"] = None
+                    data["provider_name_at_booking"] = (
+                        raw_provider_name
+                    )
+
+                else:
+                    errors.append(
+                        f"Provider '{raw_provider_name}' was not "
+                        "found as an active employee in this business."
+                    )
+
+            else:
+                # Ambiguous current matches remain an error even for
+                # historical rows. PSP never guesses identities.
+                errors.append(
+                    f"Provider '{raw_provider_name}' matches more "
+                    "than one active employee in this business."
+                )
+
+        row["errors"] = errors
+        row["valid"] = not errors
+        row["data"] = data
+
+    return prepared_rows
+
+
 def validate_client_import_workspace_dropdowns(
     cur,
     *,
@@ -2571,6 +3648,12 @@ def prepare_import_rows(
         elif entity_type == "income":
             validation = (
                 validate_income_import_row(
+                    mapped
+                )
+            )
+        elif entity_type == "appointments":
+            validation = (
+                validate_appointment_import_row(
                     mapped
                 )
             )
@@ -3054,6 +4137,571 @@ def annotate_income_import_existing_duplicates(
             if matches:
                 result["existing_duplicate_type"] = "strong"
                 result["existing_duplicate_matches"] = matches
+
+        annotated_rows.append(result)
+
+    return annotated_rows
+
+
+def _appointment_import_duplicate_service_identity(data):
+    """
+    Build the service portion of an Appointment possible-duplicate key.
+
+    Prefer the resolved PSP Service Catalog identity when one exists.
+    Historical rows may legitimately have no current service_type_id,
+    so fall back to the normalized booking-time service snapshot.
+
+    This identity is used only for possible-duplicate review. Strong
+    external-source duplicate protection remains separate.
+    """
+    service_type_id = data.get("service_type_id")
+
+    if service_type_id is not None:
+        return (
+            "service_type_id",
+            service_type_id,
+        )
+
+    service_snapshot = str(
+        data.get("external_service_name")
+        or data.get("service_name")
+        or ""
+    ).strip()
+
+    normalized_snapshot = (
+        _normalize_import_dropdown_value(
+            service_snapshot
+        )
+    )
+
+    if normalized_snapshot:
+        return (
+            "service_snapshot",
+            normalized_snapshot,
+        )
+
+    return None
+
+
+def annotate_appointment_import_file_duplicates(
+    prepared_rows,
+):
+    """
+    Detect duplicate Appointment rows inside one uploaded file.
+
+    Strong duplicate:
+      exact normalized Booking System / Source
+      + exact nonblank External Appointment ID
+
+    Possible duplicate:
+      same resolved client
+      + appointment date
+      + appointment time
+      + resolved Service Catalog identity, or historical
+        booking-time service snapshot
+
+    Possible matches require review rather than automatic rejection.
+    """
+
+    seen_external_ids = {}
+    seen_appointment_keys = {}
+    annotated_rows = []
+
+    for row in prepared_rows:
+        result = dict(row)
+
+        result["duplicate_type"] = None
+        result["duplicate_reasons"] = []
+        result["duplicate_row_numbers"] = []
+
+        if not result.get("valid"):
+            annotated_rows.append(result)
+            continue
+
+        data = result.get("data") or {}
+        row_number = result.get("row_number")
+
+        external_source = (
+            _normalize_import_dropdown_value(
+                data.get(
+                    "external_source",
+                    "",
+                )
+            )
+        )
+
+        external_order_id = str(
+            data.get(
+                "external_order_id",
+                "",
+            )
+            or ""
+        ).strip()
+
+        external_key = None
+
+        if external_source and external_order_id:
+            external_key = (
+                external_source,
+                external_order_id,
+            )
+
+        appointment_key = (
+            data.get("client_id"),
+            str(
+                data.get(
+                    "appointment_date",
+                    "",
+                )
+                or ""
+            ).strip(),
+            str(
+                data.get(
+                    "appointment_time",
+                    "",
+                )
+                or ""
+            ).strip(),
+            _appointment_import_duplicate_service_identity(
+                data
+            ),
+        )
+
+        if (
+            external_key
+            and external_key in seen_external_ids
+        ):
+            result["duplicate_type"] = "strong"
+            result["duplicate_reasons"] = [
+                "Booking System / Source + External Appointment ID"
+            ]
+            result["duplicate_row_numbers"] = [
+                seen_external_ids[external_key]
+            ]
+
+        elif (
+            all(
+                value not in (
+                    None,
+                    "",
+                )
+                for value in appointment_key
+            )
+            and appointment_key in seen_appointment_keys
+        ):
+            result["duplicate_type"] = "possible"
+            result["duplicate_reasons"] = [
+                "Client + Date + Time + Service"
+            ]
+            result["duplicate_row_numbers"] = [
+                seen_appointment_keys[
+                    appointment_key
+                ]
+            ]
+
+        annotated_rows.append(result)
+
+        if external_key:
+            seen_external_ids.setdefault(
+                external_key,
+                row_number,
+            )
+
+        if all(
+            value not in (
+                None,
+                "",
+            )
+            for value in appointment_key
+        ):
+            seen_appointment_keys.setdefault(
+                appointment_key,
+                row_number,
+            )
+
+    return annotated_rows
+
+
+def annotate_appointment_import_existing_duplicates(
+    cur,
+    *,
+    spa_id,
+    business_unit_id,
+    prepared_rows,
+):
+    """
+    Compare prepared Appointment rows against existing PSP appointments.
+
+    Strong duplicate:
+      same business
+      + normalized Booking System / Source
+      + exact External Appointment ID
+
+    Possible duplicate:
+      same Provider Workspace
+      + resolved client
+      + appointment date
+      + appointment time
+      + resolved Service Catalog identity, or historical
+        booking-time service snapshot
+
+    Database reads only. Nothing is inserted or changed here.
+    """
+
+    external_pairs = {
+        (
+            _normalize_import_dropdown_value(
+                (row.get("data") or {}).get(
+                    "external_source",
+                    "",
+                )
+            ),
+            str(
+                (row.get("data") or {}).get(
+                    "external_order_id",
+                    "",
+                )
+                or ""
+            ).strip(),
+        )
+        for row in prepared_rows
+        if row.get("valid")
+        and _normalize_import_dropdown_value(
+            (row.get("data") or {}).get(
+                "external_source",
+                "",
+            )
+        )
+        and str(
+            (row.get("data") or {}).get(
+                "external_order_id",
+                "",
+            )
+            or ""
+        ).strip()
+    }
+
+    appointment_keys = {
+        (
+            (row.get("data") or {}).get(
+                "client_id"
+            ),
+            str(
+                (row.get("data") or {}).get(
+                    "appointment_date",
+                    "",
+                )
+                or ""
+            ).strip(),
+            str(
+                (row.get("data") or {}).get(
+                    "appointment_time",
+                    "",
+                )
+                or ""
+            ).strip(),
+            _appointment_import_duplicate_service_identity(
+                row.get("data") or {}
+            ),
+        )
+        for row in prepared_rows
+        if row.get("valid")
+        and (row.get("data") or {}).get(
+            "client_id"
+        ) is not None
+        and str(
+            (row.get("data") or {}).get(
+                "appointment_date",
+                "",
+            )
+            or ""
+        ).strip()
+        and str(
+            (row.get("data") or {}).get(
+                "appointment_time",
+                "",
+            )
+            or ""
+        ).strip()
+        and _appointment_import_duplicate_service_identity(
+            row.get("data") or {}
+        ) is not None
+    }
+
+    existing_by_external = {}
+    existing_by_appointment = {}
+
+    if external_pairs:
+        external_ids = sorted({
+            external_id
+            for _source, external_id
+            in external_pairs
+        })
+
+        cur.execute(
+            """
+            SELECT
+                appointment_id,
+                external_source,
+                external_order_id,
+                appointment_date,
+                appointment_time,
+                client_id,
+                service_type_id,
+                provider_employee_id,
+                status
+            FROM appointments
+            WHERE spa_id = %s
+              AND external_order_id = ANY(%s)
+            """,
+            (
+                spa_id,
+                external_ids,
+            ),
+        )
+
+        for (
+            appointment_id,
+            external_source,
+            external_order_id,
+            appointment_date,
+            appointment_time,
+            client_id,
+            service_type_id,
+            provider_employee_id,
+            status,
+        ) in cur.fetchall():
+            source_key = (
+                _normalize_import_dropdown_value(
+                    external_source
+                )
+            )
+
+            external_id = str(
+                external_order_id or ""
+            ).strip()
+
+            pair_key = (
+                source_key,
+                external_id,
+            )
+
+            if (
+                source_key
+                and external_id
+                and pair_key in external_pairs
+            ):
+                existing_by_external.setdefault(
+                    pair_key,
+                    [],
+                ).append({
+                    "appointment_id": appointment_id,
+                    "external_source": external_source,
+                    "external_order_id": external_id,
+                    "appointment_date": (
+                        appointment_date.isoformat()
+                        if appointment_date
+                        else None
+                    ),
+                    "appointment_time": (
+                        appointment_time.isoformat()
+                        if appointment_time
+                        else None
+                    ),
+                    "client_id": client_id,
+                    "service_type_id": service_type_id,
+                    "provider_employee_id": (
+                        provider_employee_id
+                    ),
+                    "status": status,
+                })
+
+    if appointment_keys:
+        client_ids = sorted({
+            key[0]
+            for key in appointment_keys
+        })
+
+        appointment_dates = sorted({
+            key[1]
+            for key in appointment_keys
+        })
+
+        cur.execute(
+            """
+            SELECT
+                appointment_id,
+                client_id,
+                appointment_date,
+                appointment_time,
+                service_type_id,
+                external_service_name,
+                service_type,
+                provider_employee_id,
+                external_source,
+                external_order_id,
+                status
+            FROM appointments
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND client_id = ANY(%s)
+              AND appointment_date = ANY(%s::date[])
+            """,
+            (
+                spa_id,
+                business_unit_id,
+                client_ids,
+                appointment_dates,
+            ),
+        )
+
+        for (
+            appointment_id,
+            client_id,
+            appointment_date,
+            appointment_time,
+            service_type_id,
+            external_service_name,
+            service_type,
+            provider_employee_id,
+            external_source,
+            external_order_id,
+            status,
+        ) in cur.fetchall():
+            key = (
+                client_id,
+                (
+                    appointment_date.isoformat()
+                    if appointment_date
+                    else ""
+                ),
+                (
+                    appointment_time.isoformat()
+                    if appointment_time
+                    else ""
+                ),
+                _appointment_import_duplicate_service_identity({
+                    "service_type_id": service_type_id,
+                    "external_service_name": external_service_name,
+                    "service_name": service_type,
+                }),
+            )
+
+            if key not in appointment_keys:
+                continue
+
+            existing_by_appointment.setdefault(
+                key,
+                [],
+            ).append({
+                "appointment_id": appointment_id,
+                "client_id": client_id,
+                "appointment_date": key[1],
+                "appointment_time": key[2],
+                "service_type_id": service_type_id,
+                "provider_employee_id": (
+                    provider_employee_id
+                ),
+                "external_source": external_source,
+                "external_order_id": (
+                    external_order_id
+                ),
+                "status": status,
+            })
+
+    annotated_rows = []
+
+    for row in prepared_rows:
+        result = dict(row)
+
+        result["existing_duplicate_type"] = None
+        result["existing_duplicate_matches"] = []
+
+        if not result.get("valid"):
+            annotated_rows.append(result)
+            continue
+
+        data = result.get("data") or {}
+
+        external_key = (
+            _normalize_import_dropdown_value(
+                data.get(
+                    "external_source",
+                    "",
+                )
+            ),
+            str(
+                data.get(
+                    "external_order_id",
+                    "",
+                )
+                or ""
+            ).strip(),
+        )
+
+        strong_matches = []
+
+        if all(external_key):
+            strong_matches = (
+                existing_by_external.get(
+                    external_key,
+                    [],
+                )
+            )
+
+        appointment_key = (
+            data.get("client_id"),
+            str(
+                data.get(
+                    "appointment_date",
+                    "",
+                )
+                or ""
+            ).strip(),
+            str(
+                data.get(
+                    "appointment_time",
+                    "",
+                )
+                or ""
+            ).strip(),
+            _appointment_import_duplicate_service_identity(
+                data
+            ),
+        )
+
+        possible_matches = (
+            existing_by_appointment.get(
+                appointment_key,
+                [],
+            )
+            if all(
+                value not in (
+                    None,
+                    "",
+                )
+                for value in appointment_key
+            )
+            else []
+        )
+
+        if strong_matches:
+            result[
+                "existing_duplicate_type"
+            ] = "strong"
+
+            result[
+                "existing_duplicate_matches"
+            ] = strong_matches
+
+        elif possible_matches:
+            result[
+                "existing_duplicate_type"
+            ] = "possible"
+
+            result[
+                "existing_duplicate_matches"
+            ] = possible_matches
 
         annotated_rows.append(result)
 
@@ -3639,6 +5287,12 @@ def analyze_import_run(
                         mapped
                     )
                 )
+            elif entity_type == "appointments":
+                validation = (
+                    validate_appointment_import_row(
+                        mapped
+                    )
+                )
             elif entity_type == "peachpos_income":
                 validation = (
                     validate_peachpos_income_import_row(
@@ -3698,6 +5352,31 @@ def analyze_import_run(
                 )
             )
 
+        elif entity_type == "appointments":
+            prepared_rows = (
+                validate_appointment_import_workspace_values(
+                    cur,
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    prepared_rows=prepared_rows,
+                )
+            )
+
+            prepared_rows = (
+                annotate_appointment_import_file_duplicates(
+                    prepared_rows
+                )
+            )
+
+            prepared_rows = (
+                annotate_appointment_import_existing_duplicates(
+                    cur,
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    prepared_rows=prepared_rows,
+                )
+            )
+
         elif entity_type == "peachpos_income":
             merchant_verification = (
                 verify_peachpos_import_merchant_identity(
@@ -3734,6 +5413,7 @@ def analyze_import_run(
         invalid_rows = 0
         strong_duplicate_rows = 0
         possible_duplicate_rows = 0
+        appointment_needs_review_rows = 0
 
         for row in prepared_rows:
             validation_status = (
@@ -3793,12 +5473,29 @@ def analyze_import_run(
                 },
             }
 
-            review_decision = (
-                "approved"
-                if validation_status == "valid"
+            if (
+                entity_type == "appointments"
+                and duplicate_status == "strong"
+            ):
+                # A strong Appointment duplicate is already known
+                # to be unsafe to import. Resolve it automatically
+                # instead of requiring a pointless Discard click.
+                review_decision = "discard"
+
+            elif (
+                validation_status == "valid"
                 and duplicate_status == "none"
-                else "needs_review"
-            )
+            ):
+                review_decision = "approved"
+
+            else:
+                review_decision = "needs_review"
+
+            if (
+                entity_type == "appointments"
+                and review_decision == "needs_review"
+            ):
+                appointment_needs_review_rows += 1
 
             cur.execute(
                 """
@@ -3846,11 +5543,16 @@ def analyze_import_run(
                     "A staged import row could not be updated safely."
                 )
 
-        needs_review = bool(
-            invalid_rows
-            or strong_duplicate_rows
-            or possible_duplicate_rows
-        )
+        if entity_type == "appointments":
+            needs_review = bool(
+                appointment_needs_review_rows
+            )
+        else:
+            needs_review = bool(
+                invalid_rows
+                or strong_duplicate_rows
+                or possible_duplicate_rows
+            )
 
         next_status = (
             "review"
@@ -4069,33 +5771,108 @@ def get_import_run_records(
                         or None
                     )
 
-        cur.execute(
-            """
-            SELECT
-                import_run_row_id,
-                source_row_number,
-                source_data,
-                mapped_data,
-                validation_status,
-                validation_errors,
-                duplicate_status,
-                duplicate_details,
-                review_decision,
-                import_status,
-                imported_record_id,
-                error_message
-            FROM import_run_rows
-            WHERE import_run_id = %s
-              AND spa_id = %s
-              AND business_unit_id = %s
-            ORDER BY source_row_number
-            """,
-            (
-                import_run_id,
-                spa_id,
-                business_unit_id,
-            ),
-        )
+        appointment_review_counts = None
+
+        if entity_type == "appointments":
+            cur.execute(
+                """
+                SELECT
+                    COUNT(*) FILTER (
+                        WHERE review_decision = 'approved'
+                    ),
+                    COUNT(*) FILTER (
+                        WHERE review_decision = 'needs_review'
+                    ),
+                    COUNT(*) FILTER (
+                        WHERE review_decision = 'hold'
+                    ),
+                    COUNT(*) FILTER (
+                        WHERE review_decision = 'discard'
+                    ),
+                    COUNT(*) FILTER (
+                        WHERE import_status = 'pending'
+                          AND (
+                              review_decision IS NULL
+                              OR review_decision NOT IN (
+                                  'approved',
+                                  'discard'
+                              )
+                          )
+                    )
+                FROM import_run_rows
+                WHERE import_run_id = %s
+                  AND spa_id = %s
+                  AND business_unit_id = %s
+                """,
+                (
+                    import_run_id,
+                    spa_id,
+                    business_unit_id,
+                ),
+            )
+
+            appointment_review_counts = cur.fetchone()
+
+            cur.execute(
+                """
+                SELECT
+                    import_run_row_id,
+                    source_row_number,
+                    source_data,
+                    mapped_data,
+                    validation_status,
+                    validation_errors,
+                    duplicate_status,
+                    duplicate_details,
+                    review_decision,
+                    import_status,
+                    imported_record_id,
+                    error_message
+                FROM import_run_rows
+                WHERE import_run_id = %s
+                  AND spa_id = %s
+                  AND business_unit_id = %s
+                  AND (
+                      review_decision IS NULL
+                      OR review_decision <> 'approved'
+                      OR import_status = 'error'
+                  )
+                ORDER BY source_row_number
+                """,
+                (
+                    import_run_id,
+                    spa_id,
+                    business_unit_id,
+                ),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT
+                    import_run_row_id,
+                    source_row_number,
+                    source_data,
+                    mapped_data,
+                    validation_status,
+                    validation_errors,
+                    duplicate_status,
+                    duplicate_details,
+                    review_decision,
+                    import_status,
+                    imported_record_id,
+                    error_message
+                FROM import_run_rows
+                WHERE import_run_id = %s
+                  AND spa_id = %s
+                  AND business_unit_id = %s
+                ORDER BY source_row_number
+                """,
+                (
+                    import_run_id,
+                    spa_id,
+                    business_unit_id,
+                ),
+            )
 
         records = []
 
@@ -4156,39 +5933,57 @@ def get_import_run_records(
                 "error_message": error_message,
             })
 
-        approved_rows = sum(
-            1
-            for record in records
-            if record.get("review_decision") == "approved"
-        )
+        if entity_type == "appointments":
+            (
+                approved_rows,
+                needs_review_rows,
+                hold_rows,
+                discard_rows,
+                unresolved_review_rows,
+            ) = appointment_review_counts
 
-        needs_review_rows = sum(
-            1
-            for record in records
-            if record.get("review_decision") == "needs_review"
-        )
-
-        hold_rows = sum(
-            1
-            for record in records
-            if record.get("review_decision") == "hold"
-        )
-
-        discard_rows = sum(
-            1
-            for record in records
-            if record.get("review_decision") == "discard"
-        )
-
-        unresolved_review_rows = sum(
-            1
-            for record in records
-            if (
-                record.get("import_status") == "pending"
-                and record.get("review_decision")
-                not in {"approved", "discard"}
+            review_visible_rows = len(records)
+            review_hidden_rows = max(
+                int(run[6] or 0) - review_visible_rows,
+                0,
             )
-        )
+        else:
+            approved_rows = sum(
+                1
+                for record in records
+                if record.get("review_decision") == "approved"
+            )
+
+            needs_review_rows = sum(
+                1
+                for record in records
+                if record.get("review_decision") == "needs_review"
+            )
+
+            hold_rows = sum(
+                1
+                for record in records
+                if record.get("review_decision") == "hold"
+            )
+
+            discard_rows = sum(
+                1
+                for record in records
+                if record.get("review_decision") == "discard"
+            )
+
+            unresolved_review_rows = sum(
+                1
+                for record in records
+                if (
+                    record.get("import_status") == "pending"
+                    and record.get("review_decision")
+                    not in {"approved", "discard"}
+                )
+            )
+
+            review_visible_rows = len(records)
+            review_hidden_rows = 0
 
         financial_summary = {
             "transactions": 0,
@@ -4283,6 +6078,8 @@ def get_import_run_records(
             "hold_rows": hold_rows,
             "discard_rows": discard_rows,
             "unresolved_review_rows": unresolved_review_rows,
+            "review_visible_rows": review_visible_rows,
+            "review_hidden_rows": review_hidden_rows,
             "financial_summary": financial_summary,
             "total_gross": total_gross,
             "total_net": total_net,
@@ -4555,6 +6352,301 @@ def update_financial_import_review_decision(
             "unresolved_review_rows": (
                 unresolved_review_rows
             ),
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+def update_appointment_import_review_decision(
+    import_run_id,
+    import_run_row_id,
+    *,
+    decision,
+    spa_id,
+    business_unit_id,
+    reviewed_by_user_id,
+):
+    """
+    Apply one durable Appointment Import review decision.
+
+    Appointment review policy:
+      - clean valid rows may be approved
+      - possible duplicates may be explicitly approved
+      - invalid rows may never be approved
+      - strong duplicates may never be approved
+      - any still-pending row may be discarded
+      - duplicate/validation evidence is preserved
+      - the Import Run becomes ready only when no unresolved
+        pending review decisions remain
+    """
+    decision = str(decision or "").strip().lower()
+
+    if decision not in {"approved", "discard"}:
+        raise ImportServiceError(
+            "Appointment review decision must be Approve or Discard."
+        )
+
+    try:
+        reviewed_by_user_id = int(reviewed_by_user_id)
+    except (TypeError, ValueError):
+        raise ImportServiceError(
+            "A valid authenticated reviewer is required."
+        )
+
+    if reviewed_by_user_id <= 0:
+        raise ImportServiceError(
+            "A valid authenticated reviewer is required."
+        )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                entity_type,
+                run_status
+            FROM import_runs
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            FOR UPDATE
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        run = cur.fetchone()
+
+        if not run:
+            raise ImportServiceError(
+                "Import Run was not found in this workspace."
+            )
+
+        entity_type = str(run[0] or "").strip().lower()
+        run_status = str(run[1] or "").strip().lower()
+
+        if entity_type != "appointments":
+            raise ImportServiceError(
+                "This review action is available for "
+                "Appointment imports only."
+            )
+
+        if run_status in {"completed", "failed"}:
+            raise ImportServiceError(
+                "This Appointment Import Run can no longer be reviewed."
+            )
+
+        cur.execute(
+            """
+            SELECT
+                validation_status,
+                duplicate_status,
+                review_decision,
+                import_status
+            FROM import_run_rows
+            WHERE import_run_row_id = %s
+              AND import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            FOR UPDATE
+            """,
+            (
+                import_run_row_id,
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        row = cur.fetchone()
+
+        if not row:
+            raise ImportServiceError(
+                "Appointment Import row was not found "
+                "in this workspace."
+            )
+
+        validation_status = str(
+            row[0] or ""
+        ).strip().lower()
+
+        duplicate_status = str(
+            row[1] or "none"
+        ).strip().lower()
+
+        current_review_decision = str(
+            row[2] or ""
+        ).strip().lower()
+
+        import_status = str(
+            row[3] or ""
+        ).strip().lower()
+
+        if import_status != "pending":
+            raise ImportServiceError(
+                "Only pending Appointment Import rows "
+                "can be reviewed."
+            )
+
+        if decision == "approved":
+            if validation_status != "valid":
+                raise ImportServiceError(
+                    "Invalid Appointment rows cannot be approved. "
+                    "Correct the source data and re-import, or "
+                    "discard the row."
+                )
+
+            if duplicate_status == "strong":
+                raise ImportServiceError(
+                    "Strong duplicate Appointment rows cannot be "
+                    "approved. Discard the row or correct the "
+                    "source data and re-import."
+                )
+
+            if duplicate_status not in {"none", "possible"}:
+                raise ImportServiceError(
+                    "This Appointment row has an unresolved "
+                    "duplicate state."
+                )
+
+        cur.execute(
+            """
+            UPDATE import_run_rows
+            SET review_decision = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE import_run_row_id = %s
+              AND import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND import_status = 'pending'
+            """,
+            (
+                decision,
+                import_run_row_id,
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        if cur.rowcount != 1:
+            raise ImportServiceError(
+                "The Appointment Import row changed while "
+                "it was being reviewed."
+            )
+
+        audit_action_type = (
+            "appointment_import_row_approved"
+            if decision == "approved"
+            else "appointment_import_row_discarded"
+        )
+
+        cur.execute(
+            """
+            INSERT INTO audit_log (
+                spa_id,
+                user_id,
+                action_type,
+                table_name,
+                record_id,
+                old_value,
+                new_value,
+                notes,
+                business_unit_id,
+                verified_employee_id
+            )
+            VALUES (
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s
+            )
+            """,
+            (
+                spa_id,
+                reviewed_by_user_id,
+                audit_action_type,
+                "import_run_rows",
+                import_run_row_id,
+                current_review_decision or None,
+                decision,
+                (
+                    f"Appointment Import Run {import_run_id}; "
+                    f"duplicate status: {duplicate_status}."
+                ),
+                business_unit_id,
+                None,
+            ),
+        )
+
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM import_run_rows
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND import_status = 'pending'
+              AND (
+                  review_decision IS NULL
+                  OR review_decision NOT IN (
+                      'approved',
+                      'discard'
+                  )
+              )
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        unresolved_review_rows = cur.fetchone()[0]
+
+        next_status = (
+            "review"
+            if unresolved_review_rows > 0
+            else "ready"
+        )
+
+        cur.execute(
+            """
+            UPDATE import_runs
+            SET run_status = %s,
+                failure_message = NULL,
+                completed_at = NULL,
+                last_activity_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            """,
+            (
+                next_status,
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        conn.commit()
+
+        return {
+            "import_run_id": import_run_id,
+            "import_run_row_id": import_run_row_id,
+            "review_decision": decision,
+            "run_status": next_status,
+            "unresolved_review_rows": unresolved_review_rows,
         }
 
     except Exception:
@@ -5863,6 +7955,890 @@ def process_client_import_packet(
 # =========================================================
 # STANDARD INCOME IMPORT POSTING
 # =========================================================
+
+APPOINTMENT_IMPORT_PACKET_SIZE = 50
+APPOINTMENT_IMPORT_PACKET_MAX_ROWS = 50
+
+
+def process_appointment_import_packet(
+    import_run_id,
+    *,
+    spa_id,
+    business_unit_id,
+    packet_size=APPOINTMENT_IMPORT_PACKET_SIZE,
+):
+    """
+    Import one bounded packet of validated Appointment rows.
+
+    Safety rules:
+      - only ready/importing Appointment runs may execute
+      - only valid, approved rows may import
+      - possible duplicates require prior explicit approval
+      - strong duplicates and invalid rows never import
+      - discarded rows become permanently skipped
+      - each appointment, audit/history write, and staged-row
+        update are atomic inside one row savepoint
+      - posting rechecks duplicate identity
+      - no live availability rule is imposed on migrated history
+      - repeated calls never reinsert imported rows
+    """
+    try:
+        packet_size = int(packet_size)
+    except (TypeError, ValueError):
+        raise ImportServiceError(
+            "Import packet size must be a whole number."
+        )
+
+    if (
+        packet_size < 1
+        or packet_size > APPOINTMENT_IMPORT_PACKET_MAX_ROWS
+    ):
+        raise ImportServiceError(
+            "Import packet size must be between 1 and "
+            f"{APPOINTMENT_IMPORT_PACKET_MAX_ROWS}."
+        )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                entity_type,
+                run_status,
+                requested_by
+            FROM import_runs
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            FOR UPDATE
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        run = cur.fetchone()
+
+        if not run:
+            raise ImportServiceError(
+                "Import Run was not found in this workspace."
+            )
+
+        entity_type = str(
+            run[0] or ""
+        ).strip().lower()
+
+        run_status = str(
+            run[1] or ""
+        ).strip().lower()
+
+        requested_by = run[2]
+
+        if entity_type != "appointments":
+            raise ImportServiceError(
+                "This importer currently executes "
+                "Appointment runs only."
+            )
+
+        if run_status == "completed":
+            cur.execute(
+                """
+                SELECT
+                    total_rows,
+                    imported_rows,
+                    skipped_rows,
+                    error_rows
+                FROM import_runs
+                WHERE import_run_id = %s
+                """,
+                (import_run_id,),
+            )
+
+            counts = cur.fetchone()
+
+            conn.rollback()
+
+            return {
+                "import_run_id": import_run_id,
+                "run_status": "completed",
+                "total_rows": counts[0],
+                "imported_rows": counts[1],
+                "skipped_rows": counts[2],
+                "error_rows": counts[3],
+                "processed_this_packet": 0,
+                "remaining_rows": 0,
+            }
+
+        if run_status not in {
+            "ready",
+            "importing",
+        }:
+            raise ImportServiceError(
+                "This Appointment Import Run is not ready "
+                "to import. Complete its review first."
+            )
+
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM import_run_rows
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND import_status = 'pending'
+              AND review_decision = 'approved'
+              AND (
+                  validation_status <> 'valid'
+                  OR duplicate_status NOT IN ('none', 'possible')
+              )
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        if cur.fetchone()[0]:
+            raise ImportServiceError(
+                "One or more approved Appointment rows still "
+                "require validation or duplicate review."
+            )
+
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM import_run_rows
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND import_status = 'pending'
+              AND (
+                  review_decision IS NULL
+                  OR review_decision NOT IN ('approved', 'discard')
+              )
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        if cur.fetchone()[0]:
+            raise ImportServiceError(
+                "This Appointment Import Run still has "
+                "rows requiring review."
+            )
+
+        cur.execute(
+            """
+            UPDATE import_run_rows
+            SET import_status = 'skipped',
+                imported_record_id = NULL,
+                error_message = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND import_status = 'pending'
+              AND review_decision = 'discard'
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        cur.execute(
+            """
+            UPDATE import_runs
+            SET run_status = 'importing',
+                started_at = COALESCE(
+                    started_at,
+                    CURRENT_TIMESTAMP
+                ),
+                last_activity_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        cur.execute(
+            """
+            SELECT
+                import_run_row_id,
+                source_row_number,
+                mapped_data,
+                duplicate_status
+            FROM import_run_rows
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND validation_status = 'valid'
+              AND duplicate_status IN ('none', 'possible')
+              AND review_decision = 'approved'
+              AND import_status = 'pending'
+            ORDER BY source_row_number
+            LIMIT %s
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+                packet_size,
+            ),
+        )
+
+        packet_rows = cur.fetchall()
+        processed_this_packet = 0
+
+        for (
+            import_run_row_id,
+            source_row_number,
+            mapped_data,
+            analyzed_duplicate_status,
+        ) in packet_rows:
+            data = (
+                mapped_data
+                if isinstance(mapped_data, dict)
+                else {}
+            )
+
+            cur.execute(
+                "SAVEPOINT appointment_import_row"
+            )
+
+            try:
+                try:
+                    client_id = int(
+                        data.get("client_id")
+                    )
+                except (TypeError, ValueError):
+                    raise ImportServiceError(
+                        "Resolved Client is missing or invalid."
+                    )
+
+                appointment_date = str(
+                    data.get("appointment_date") or ""
+                ).strip()
+
+                appointment_time = str(
+                    data.get("appointment_time") or ""
+                ).strip()
+
+                status = str(
+                    data.get("status") or ""
+                ).strip().lower()
+
+                if status not in {
+                    "booked",
+                    "completed",
+                    "cancelled",
+                    "no_show",
+                }:
+                    raise ImportServiceError(
+                        "Appointment status is no longer valid."
+                    )
+
+                duration_raw = str(
+                    data.get("duration_minutes") or ""
+                ).strip()
+
+                duration_minutes = (
+                    int(duration_raw)
+                    if duration_raw
+                    else None
+                )
+
+                if (
+                    status == "booked"
+                    and duration_minutes is None
+                ):
+                    raise ImportServiceError(
+                        "Duration Minutes is required for "
+                        "Booked appointments."
+                    )
+
+                price_raw = str(
+                    data.get("price_at_booking") or ""
+                ).strip()
+
+                price_at_booking = (
+                    Decimal(price_raw)
+                    if price_raw
+                    else None
+                )
+
+                service_type_id_raw = data.get(
+                    "service_type_id"
+                )
+
+                service_type_id = (
+                    int(service_type_id_raw)
+                    if service_type_id_raw not in {
+                        None,
+                        "",
+                    }
+                    else None
+                )
+
+                if (
+                    status == "booked"
+                    and service_type_id is None
+                ):
+                    raise ImportServiceError(
+                        "Booked appointments must resolve "
+                        "to an active Service Catalog service."
+                    )
+
+                provider_employee_id_raw = data.get(
+                    "provider_employee_id"
+                )
+
+                provider_employee_id = (
+                    int(provider_employee_id_raw)
+                    if provider_employee_id_raw not in {
+                        None,
+                        "",
+                    }
+                    else None
+                )
+
+                service_name = str(
+                    data.get("service_name") or ""
+                ).strip()
+
+                external_service_name = str(
+                    data.get("external_service_name")
+                    or service_name
+                    or ""
+                ).strip()
+
+                provider_name_at_booking = str(
+                    data.get("provider_name_at_booking")
+                    or data.get("provider_name")
+                    or ""
+                ).strip() or None
+
+                external_source = str(
+                    data.get("external_source") or ""
+                ).strip()
+
+                external_order_id = str(
+                    data.get("external_order_id") or ""
+                ).strip()
+
+                notes = str(
+                    data.get("notes") or ""
+                ).strip() or None
+
+                # Client must still exist in this workspace.
+                cur.execute(
+                    """
+                    SELECT client_id
+                    FROM clients
+                    WHERE client_id = %s
+                      AND spa_id = %s
+                      AND business_unit_id = %s
+                    """,
+                    (
+                        client_id,
+                        spa_id,
+                        business_unit_id,
+                    ),
+                )
+
+                if not cur.fetchone():
+                    raise ImportServiceError(
+                        "The resolved Client no longer exists "
+                        "in this Provider Workspace."
+                    )
+
+                # Strong duplicate recheck.
+                if external_order_id:
+                    normalized_source = (
+                        _normalize_import_dropdown_value(
+                            external_source
+                        )
+                    )
+
+                    duplicate_lock_key = (
+                        "psp-appointment-import:"
+                        f"{spa_id}:"
+                        f"{normalized_source}:"
+                        f"{external_order_id}"
+                    )
+
+                    cur.execute(
+                        """
+                        SELECT pg_advisory_xact_lock(
+                            hashtext(%s)
+                        )
+                        """,
+                        (duplicate_lock_key,),
+                    )
+
+                    cur.execute(
+                        """
+                        SELECT
+                            appointment_id,
+                            external_source
+                        FROM appointments
+                        WHERE spa_id = %s
+                          AND external_order_id = %s
+                        """,
+                        (
+                            spa_id,
+                            external_order_id,
+                        ),
+                    )
+
+                    strong_existing = None
+
+                    for (
+                        existing_appointment_id,
+                        existing_external_source,
+                    ) in cur.fetchall():
+                        if (
+                            _normalize_import_dropdown_value(
+                                existing_external_source
+                            )
+                            == normalized_source
+                        ):
+                            strong_existing = (
+                                existing_appointment_id
+                            )
+                            break
+
+                    if strong_existing is not None:
+                        raise ImportServiceError(
+                            "A strong duplicate Appointment now "
+                            "exists for this Booking System / "
+                            "Source and External Appointment ID."
+                        )
+
+                # Possible duplicate recheck.
+                staged_service_identity = (
+                    _appointment_import_duplicate_service_identity(
+                        data
+                    )
+                )
+
+                cur.execute(
+                    """
+                    SELECT
+                        appointment_id,
+                        service_type_id,
+                        external_service_name,
+                        service_type
+                    FROM appointments
+                    WHERE spa_id = %s
+                      AND business_unit_id = %s
+                      AND client_id = %s
+                      AND appointment_date = %s
+                      AND appointment_time = %s
+                    """,
+                    (
+                        spa_id,
+                        business_unit_id,
+                        client_id,
+                        appointment_date,
+                        appointment_time,
+                    ),
+                )
+
+                current_possible_duplicate = None
+
+                for (
+                    existing_appointment_id,
+                    existing_service_type_id,
+                    existing_external_service_name,
+                    existing_service_type,
+                ) in cur.fetchall():
+                    existing_identity = (
+                        _appointment_import_duplicate_service_identity(
+                            {
+                                "service_type_id":
+                                    existing_service_type_id,
+                                "external_service_name":
+                                    existing_external_service_name,
+                                "service_name":
+                                    existing_service_type,
+                            }
+                        )
+                    )
+
+                    if (
+                        staged_service_identity is not None
+                        and existing_identity
+                        == staged_service_identity
+                    ):
+                        current_possible_duplicate = (
+                            existing_appointment_id
+                        )
+                        break
+
+                analyzed_duplicate_status = str(
+                    analyzed_duplicate_status or "none"
+                ).strip().lower()
+
+                if (
+                    current_possible_duplicate is not None
+                    and analyzed_duplicate_status == "none"
+                ):
+                    raise ImportServiceError(
+                        "A possible duplicate Appointment "
+                        "appeared after this Import Run was "
+                        "analyzed. Re-import the source file "
+                        "so the duplicate can be reviewed."
+                    )
+
+                # Create the Appointment.
+                #
+                # booking_channel is intentionally omitted so the
+                # existing database default ('manual') remains intact.
+                #
+                # owner_reviewed/import_reviewed are TRUE because the
+                # controlled generic import workflow has already cleared
+                # the row for normal PSP operation. import_reviewed_by
+                # stays NULL for auto-approved clean rows so PSP does not
+                # falsely attribute human review.
+                cur.execute(
+                    """
+                    INSERT INTO appointments (
+                        spa_id,
+                        business_unit_id,
+                        client_id,
+                        service_type_id,
+                        appointment_date,
+                        appointment_time,
+                        duration_minutes,
+                        status,
+                        price_at_booking,
+                        notes,
+                        service_type,
+                        external_service_name,
+                        external_source,
+                        external_order_id,
+                        imported_at,
+                        import_reviewed,
+                        import_reviewed_at,
+                        import_reviewed_by,
+                        parser_version,
+                        import_status,
+                        provider_name_at_booking,
+                        provider_employee_id,
+                        owner_reviewed,
+                        owner_reviewed_at
+                    )
+                    VALUES (
+                        %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s,
+                        %s, %s,
+                        CURRENT_TIMESTAMP,
+                        TRUE,
+                        CURRENT_TIMESTAMP,
+                        NULL,
+                        'psp_appt_import_v1',
+                        'Imported',
+                        %s, %s,
+                        TRUE,
+                        CURRENT_TIMESTAMP
+                    )
+                    RETURNING appointment_id
+                    """,
+                    (
+                        spa_id,
+                        business_unit_id,
+                        client_id,
+                        service_type_id,
+                        appointment_date,
+                        appointment_time,
+                        duration_minutes,
+                        status,
+                        price_at_booking,
+                        notes,
+                        service_name or None,
+                        external_service_name or None,
+                        external_source or None,
+                        external_order_id or None,
+                        provider_name_at_booking,
+                        provider_employee_id,
+                    ),
+                )
+
+                appointment_id = cur.fetchone()[0]
+
+                # Audit entry.
+                cur.execute(
+                    """
+                    INSERT INTO audit_log (
+                        spa_id,
+                        user_id,
+                        action_type,
+                        table_name,
+                        record_id,
+                        old_value,
+                        new_value,
+                        notes,
+                        business_unit_id,
+                        verified_employee_id
+                    )
+                    VALUES (
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s
+                    )
+                    """,
+                    (
+                        spa_id,
+                        requested_by,
+                        "appointment_imported",
+                        "appointments",
+                        appointment_id,
+                        None,
+                        (
+                            f"{appointment_date} "
+                            f"{appointment_time}"
+                        ),
+                        (
+                            f"Appointment imported by Import Run "
+                            f"{import_run_id}, source row "
+                            f"{source_row_number}."
+                        ),
+                        business_unit_id,
+                        None,
+                    ),
+                )
+
+                # Initial Appointment History entry. This gives the
+                # future Imported/I badge a durable starting point;
+                # later normal appointment actions will naturally
+                # clear the visible indicator without erasing
+                # permanent import provenance.
+                cur.execute(
+                    """
+                    INSERT INTO appointment_history (
+                        spa_id,
+                        business_unit_id,
+                        appointment_id,
+                        client_id,
+                        user_id,
+                        action_type,
+                        old_date,
+                        old_time,
+                        new_date,
+                        new_time,
+                        old_status,
+                        new_status,
+                        notes
+                    )
+                    VALUES (
+                        %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s
+                    )
+                    """,
+                    (
+                        spa_id,
+                        business_unit_id,
+                        appointment_id,
+                        client_id,
+                        requested_by,
+                        "created",
+                        None,
+                        None,
+                        appointment_date,
+                        appointment_time,
+                        None,
+                        status,
+                        (
+                            f"Appointment created by Appointment "
+                            f"Import Run {import_run_id}, source "
+                            f"row {source_row_number}."
+                        ),
+                    ),
+                )
+
+                # Mark the staged row imported only after the
+                # Appointment plus audit/history writes succeed.
+                cur.execute(
+                    """
+                    UPDATE import_run_rows
+                    SET import_status = 'imported',
+                        imported_record_id = %s,
+                        error_message = NULL,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE import_run_row_id = %s
+                      AND import_run_id = %s
+                      AND spa_id = %s
+                      AND business_unit_id = %s
+                      AND review_decision = 'approved'
+                      AND import_status = 'pending'
+                    """,
+                    (
+                        appointment_id,
+                        import_run_row_id,
+                        import_run_id,
+                        spa_id,
+                        business_unit_id,
+                    ),
+                )
+
+                if cur.rowcount != 1:
+                    raise ImportServiceError(
+                        "The staged Appointment row changed while "
+                        "it was being imported."
+                    )
+
+                cur.execute(
+                    "RELEASE SAVEPOINT appointment_import_row"
+                )
+
+                processed_this_packet += 1
+
+            except Exception as exc:
+                cur.execute(
+                    "ROLLBACK TO SAVEPOINT appointment_import_row"
+                )
+
+                cur.execute(
+                    "RELEASE SAVEPOINT appointment_import_row"
+                )
+
+                cur.execute(
+                    """
+                    UPDATE import_run_rows
+                    SET import_status = 'error',
+                        imported_record_id = NULL,
+                        error_message = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE import_run_row_id = %s
+                      AND import_run_id = %s
+                      AND spa_id = %s
+                      AND business_unit_id = %s
+                    """,
+                    (
+                        str(exc)[:1000],
+                        import_run_row_id,
+                        import_run_id,
+                        spa_id,
+                        business_unit_id,
+                    ),
+                )
+
+        # Recalculate counts from durable staged-row state.
+        cur.execute(
+            """
+            SELECT
+                COUNT(*) FILTER (
+                    WHERE import_status = 'imported'
+                ),
+                COUNT(*) FILTER (
+                    WHERE import_status = 'skipped'
+                ),
+                COUNT(*) FILTER (
+                    WHERE import_status = 'error'
+                ),
+                COUNT(*) FILTER (
+                    WHERE import_status = 'pending'
+                )
+            FROM import_run_rows
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        (
+            imported_rows,
+            skipped_rows,
+            error_rows,
+            remaining_rows,
+        ) = cur.fetchone()
+
+        if remaining_rows > 0:
+            next_status = "importing"
+            failure_message = None
+            completed_at_sql = "completed_at"
+
+        elif error_rows > 0:
+            next_status = "failed"
+            failure_message = (
+                "One or more Appointment rows could not "
+                "be imported."
+            )
+            completed_at_sql = "CURRENT_TIMESTAMP"
+
+        else:
+            next_status = "completed"
+            failure_message = None
+            completed_at_sql = "CURRENT_TIMESTAMP"
+
+        cur.execute(
+            f"""
+            UPDATE import_runs
+            SET run_status = %s,
+                imported_rows = %s,
+                skipped_rows = %s,
+                error_rows = %s,
+                failure_message = %s,
+                completed_at = {completed_at_sql},
+                last_activity_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            """,
+            (
+                next_status,
+                imported_rows,
+                skipped_rows,
+                error_rows,
+                failure_message,
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        conn.commit()
+
+        return {
+            "import_run_id": import_run_id,
+            "run_status": next_status,
+            "imported_rows": imported_rows,
+            "skipped_rows": skipped_rows,
+            "error_rows": error_rows,
+            "processed_this_packet": (
+                processed_this_packet
+            ),
+            "remaining_rows": remaining_rows,
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
 
 INCOME_IMPORT_PACKET_SIZE = 50
 INCOME_IMPORT_PACKET_MAX_ROWS = 50

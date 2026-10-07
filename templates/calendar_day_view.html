@@ -333,6 +333,24 @@
         line-height: 1.1;
     }
 
+    .day-appt-imported-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 16px;
+        height: 16px;
+        margin-left: 4px;
+        padding: 0 4px;
+        border: 1px solid rgba(0, 0, 0, 0.28);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.8);
+        font-size: 0.62rem;
+        font-weight: 900;
+        line-height: 1;
+        vertical-align: middle;
+        text-decoration: none;
+    }
+
     .day-appt-client {
         display: block;
         margin-top: 2px;
@@ -829,6 +847,16 @@
                                 >
                                     <span class="day-appt-time">
                                         {{ appt.start_display }}
+
+                                {% if appt.imported_pending_action %}
+                                    <span
+                                        class="day-appt-imported-badge"
+                                        title="Imported appointment"
+                                        aria-label="Imported appointment"
+                                    >
+                                        I
+                                    </span>
+                                {% endif %}
                                     </span>
 
                                     <span class="day-appt-client">

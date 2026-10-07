@@ -79,7 +79,13 @@
         <div class="import-batch-stats">
 
             <div class="import-stat-card">
-                <span>Total Transactions</span>
+                <span>
+                    {% if import_data.entity_type == "appointments" %}
+                        Total Appointments
+                    {% else %}
+                        Total Transactions
+                    {% endif %}
+                </span>
                 <strong>{{ import_data.total_rows }}</strong>
             </div>
 
@@ -104,7 +110,13 @@
             </div>
 
             <div class="import-stat-card">
-                <span>Posted</span>
+                <span>
+                    {% if import_data.entity_type == "appointments" %}
+                        Imported
+                    {% else %}
+                        Posted
+                    {% endif %}
+                </span>
                 <strong>{{ import_data.imported_rows }}</strong>
             </div>
 
@@ -125,6 +137,60 @@
         <div class="import-message import-message-error">
             <strong>Import Error:</strong>
             {{ import_data.failure_message }}
+        </div>
+
+    {% endif %}
+
+
+    {% if import_data.entity_type == "appointments"
+          and import_data.run_status in ["ready", "importing"] %}
+
+        <div class="report-section no-print">
+            {% if import_data.run_status == "ready" %}
+                <form
+                    method="POST"
+                    action="{{ url_for(
+                        'appointment_import_start',
+                        import_run_id=import_data.import_run_id
+                    ) }}"
+                >
+                    <input
+                        type="hidden"
+                        name="security_csrf_token"
+                        value="{{ security_csrf_token }}"
+                    >
+
+                    <button type="submit" class="btn">
+                        {% if import_data.approved_rows > 0 %}
+                            Import Approved Appointments
+                        {% else %}
+                            Finalize Appointment Import
+                        {% endif %}
+                    </button>
+                </form>
+
+                <p class="muted-text" style="margin-top:10px;">
+                    Clean Appointment rows are already approved.
+                    Peach Suite Pro will continue automatically in
+                    safe packets of 50 after you start the import.
+                </p>
+
+            {% else %}
+                <a
+                    href="{{ url_for(
+                        'appointment_import_progress',
+                        import_run_id=import_data.import_run_id
+                    ) }}"
+                    class="btn"
+                >
+                    Resume Appointment Import
+                </a>
+
+                <p class="muted-text" style="margin-top:10px;">
+                    This import is already in progress. Resume the
+                    progress screen to continue from durable state.
+                </p>
+            {% endif %}
         </div>
 
     {% endif %}
@@ -172,6 +238,269 @@
 
             </form>
 
+        </div>
+
+    {% endif %}
+
+
+    {% if import_data.entity_type == "appointments" %}
+
+        <div class="report-section">
+            <h2>Appointment Import Records</h2>
+
+            {% if import_data.review_hidden_rows %}
+                <p class="muted-text">
+                    <strong>
+                        {{ import_data.review_hidden_rows }}
+                        approved Appointment
+                        {% if import_data.review_hidden_rows != 1 %}records{% else %}record{% endif %}
+                    </strong>
+                    {% if import_data.review_hidden_rows != 1 %}are{% else %}is{% endif %}
+                    hidden from this exception-focused list.
+                    Only records needing attention, discarded records,
+                    or import errors are shown below.
+                </p>
+            {% endif %}
+
+            <div class="table-wrap">
+                <table class="styled-report-table wide-report-table">
+                    <thead>
+                        <tr>
+                            <th>Row</th>
+                            <th>Date</th>
+                            <th>Time</th>
+                            <th>Client</th>
+                            <th>Service</th>
+                            <th>Provider</th>
+                            <th>Duration</th>
+                            <th>Price</th>
+                            <th>Appointment Status</th>
+                            <th>Import Status</th>
+                            <th>Review</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        {% if import_data.records %}
+                            {% for record in import_data.records %}
+                                {% set data = record.mapped_data or {} %}
+
+                                <tr>
+                                    <td>
+                                        {{ record.source_row_number }}
+                                    </td>
+
+                                    <td>
+                                        {{ data.get("appointment_date") or "—" }}
+                                    </td>
+
+                                    <td>
+                                        {{ data.get("appointment_time") or "—" }}
+                                    </td>
+
+                                    <td>
+                                        {{
+                                            (
+                                                (data.get("client_first_name") or "")
+                                                ~ " "
+                                                ~ (data.get("client_last_name") or "")
+                                            )|trim
+                                            or data.get("client_email")
+                                            or data.get("client_phone")
+                                            or "—"
+                                        }}
+                                    </td>
+
+                                    <td>
+                                        {{
+                                            data.get("external_service_name")
+                                            or data.get("service_name")
+                                            or "—"
+                                        }}
+                                    </td>
+
+                                    <td>
+                                        {{
+                                            data.get("provider_name_at_booking")
+                                            or data.get("provider_name")
+                                            or "Any Available"
+                                        }}
+                                    </td>
+
+                                    <td>
+                                        {% if data.get("duration_minutes") %}
+                                            {{ data.get("duration_minutes") }} min
+                                        {% else %}
+                                            —
+                                        {% endif %}
+                                    </td>
+
+                                    <td>
+                                        {% if data.get("price_at_booking") %}
+                                            {{ data.get("price_at_booking")|currency }}
+                                        {% else %}
+                                            —
+                                        {% endif %}
+                                    </td>
+
+                                    <td>
+                                        {{
+                                            (data.get("status") or "—")
+                                            |replace("_", " ")
+                                            |title
+                                        }}
+                                    </td>
+
+                                    <td>
+                                        {% if record.import_status == "imported" %}
+                                            <span class="import-status-badge import-status-posted">
+                                                Imported
+                                            </span>
+                                        {% elif record.import_status == "skipped" %}
+                                            <span class="import-status-badge import-status-skipped">
+                                                Skipped
+                                            </span>
+                                        {% elif record.import_status == "error" %}
+                                            <span class="import-status-badge import-status-error">
+                                                Error
+                                            </span>
+                                        {% else %}
+                                            <span class="muted-text">
+                                                Pending
+                                            </span>
+                                        {% endif %}
+                                    </td>
+
+                                    <td>
+                                        {% if record.review_decision == "approved" %}
+                                            <span class="import-status-badge import-status-approved">
+                                                Approved
+                                            </span>
+
+                                        {% elif record.review_decision == "discard" %}
+                                            <span class="import-status-badge import-status-discard">
+                                                Discard
+                                            </span>
+
+                                        {% elif record.import_status == "pending" %}
+                                            <div class="no-print">
+                                                {% if record.validation_status == "valid"
+                                                      and record.duplicate_status != "strong" %}
+                                                    <form
+                                                        method="POST"
+                                                        action="{{ url_for(
+                                                            'appointment_import_review_row',
+                                                            import_run_id=import_data.import_run_id,
+                                                            import_run_row_id=record.import_run_row_id
+                                                        ) }}"
+                                                        style="display:inline-block;"
+                                                    >
+                                                        <input
+                                                            type="hidden"
+                                                            name="security_csrf_token"
+                                                            value="{{ security_csrf_token }}"
+                                                        >
+                                                        <input
+                                                            type="hidden"
+                                                            name="decision"
+                                                            value="approved"
+                                                        >
+                                                        <button
+                                                            type="submit"
+                                                            class="btn btn-small"
+                                                        >
+                                                            Approve
+                                                        </button>
+                                                    </form>
+                                                {% endif %}
+
+                                                <form
+                                                    method="POST"
+                                                    action="{{ url_for(
+                                                        'appointment_import_review_row',
+                                                        import_run_id=import_data.import_run_id,
+                                                        import_run_row_id=record.import_run_row_id
+                                                    ) }}"
+                                                    style="display:inline-block;"
+                                                >
+                                                    <input
+                                                        type="hidden"
+                                                        name="security_csrf_token"
+                                                        value="{{ security_csrf_token }}"
+                                                    >
+                                                    <input
+                                                        type="hidden"
+                                                        name="decision"
+                                                        value="discard"
+                                                    >
+                                                    <button
+                                                        type="submit"
+                                                        class="btn btn-small"
+                                                    >
+                                                        Discard
+                                                    </button>
+                                                </form>
+                                            </div>
+                                        {% else %}
+                                            <span class="muted-text">—</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+
+                                {% if record.validation_errors
+                                      or record.error_message
+                                      or record.duplicate_status != "none" %}
+                                    <tr class="import-detail-row">
+                                        <td colspan="11">
+                                            {% if record.validation_errors %}
+                                                <div class="import-detail-block">
+                                                    <strong>Validation:</strong>
+                                                    <ul>
+                                                        {% for error in record.validation_errors %}
+                                                            <li>{{ error }}</li>
+                                                        {% endfor %}
+                                                    </ul>
+                                                </div>
+                                            {% endif %}
+
+                                            {% if record.duplicate_status == "strong" %}
+                                                <div class="import-detail-block">
+                                                    <strong>Strong Duplicate:</strong>
+                                                    This Appointment cannot be imported
+                                                    again unless the source data is corrected.
+                                                </div>
+                                            {% elif record.duplicate_status == "possible" %}
+                                                <div class="import-detail-block">
+                                                    <strong>Possible Duplicate:</strong>
+                                                    Review this Appointment before importing it.
+                                                </div>
+                                            {% endif %}
+
+                                            {% if record.error_message %}
+                                                <div class="import-detail-block">
+                                                    <strong>Import Error:</strong>
+                                                    {{ record.error_message }}
+                                                </div>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                {% endif %}
+                            {% endfor %}
+                        {% else %}
+                            <tr>
+                                <td colspan="11">
+                                    {% if import_data.review_hidden_rows %}
+                                        No Appointment Import records currently
+                                        need attention.
+                                    {% else %}
+                                        No Appointment Import records were found.
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
         </div>
 
     {% endif %}

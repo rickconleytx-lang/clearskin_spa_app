@@ -1,0 +1,415 @@
+{% extends "base.html" %}
+
+{% block title %}Appointment Import Progress{% endblock %}
+
+{% block content %}
+
+<div
+    id="appointment-import-progress"
+    data-run-status="{{ import_run.run_status }}"
+    data-packet-url="{{
+        url_for(
+            'appointment_import_packet',
+            import_run_id=import_run.import_run_id
+        )
+    }}"
+    data-results-url="{{
+        url_for(
+            'import_run_records',
+            import_run_id=import_run.import_run_id
+        )
+    }}"
+    data-total="{{ import_run.total_rows }}"
+    data-imported="{{ import_run.imported_rows }}"
+    data-skipped="{{ import_run.skipped_rows }}"
+    data-errors="{{ import_run.error_rows }}"
+    style="max-width:900px; margin:0 auto;"
+>
+    <div
+        style="
+            display:flex;
+            justify-content:space-between;
+            align-items:flex-start;
+            gap:20px;
+            flex-wrap:wrap;
+            margin-bottom:24px;
+        "
+    >
+        <div>
+            <h1 style="margin-bottom:6px;">
+                Appointment Import
+            </h1>
+
+            <p style="margin:0; opacity:.78;">
+                {% if import_run.source_filename %}
+                    {{ import_run.source_filename }}
+                {% else %}
+                    Import Run {{ import_run.import_run_id }}
+                {% endif %}
+            </p>
+        </div>
+
+        <a
+            id="appointment-import-results-link"
+            href="{{
+                url_for(
+                    'import_run_records',
+                    import_run_id=import_run.import_run_id
+                )
+            }}"
+            class="btn"
+        >
+            View Import Records
+        </a>
+    </div>
+
+    <div
+        style="
+            border:1px solid rgba(0,0,0,.12);
+            border-radius:14px;
+            padding:24px;
+            background:#fff;
+        "
+    >
+        <div
+            style="
+                display:grid;
+                grid-template-columns:repeat(
+                    auto-fit,
+                    minmax(130px, 1fr)
+                );
+                gap:14px;
+                margin-bottom:22px;
+            "
+        >
+            <div>
+                <div style="font-size:.82rem; opacity:.65;">
+                    Status
+                </div>
+                <strong id="appointment-import-status">
+                    {% if import_run.run_status == "completed" %}
+                        Completed
+                    {% elif import_run.run_status == "failed" %}
+                        Failed
+                    {% elif import_run.run_status == "ready" %}
+                        Ready
+                    {% else %}
+                        Importing…
+                    {% endif %}
+                </strong>
+            </div>
+
+            <div>
+                <div style="font-size:.82rem; opacity:.65;">
+                    Total
+                </div>
+                <strong id="appointment-import-total">
+                    {{ import_run.total_rows }}
+                </strong>
+            </div>
+
+            <div>
+                <div style="font-size:.82rem; opacity:.65;">
+                    Imported
+                </div>
+                <strong id="appointment-import-imported">
+                    {{ import_run.imported_rows }}
+                </strong>
+            </div>
+
+            <div>
+                <div style="font-size:.82rem; opacity:.65;">
+                    Skipped
+                </div>
+                <strong id="appointment-import-skipped">
+                    {{ import_run.skipped_rows }}
+                </strong>
+            </div>
+
+            <div>
+                <div style="font-size:.82rem; opacity:.65;">
+                    Errors
+                </div>
+                <strong id="appointment-import-errors">
+                    {{ import_run.error_rows }}
+                </strong>
+            </div>
+        </div>
+
+        <progress
+            id="appointment-import-meter"
+            value="{{
+                import_run.imported_rows
+                + import_run.skipped_rows
+                + import_run.error_rows
+            }}"
+            max="{{ import_run.total_rows if import_run.total_rows else 1 }}"
+            style="
+                width:100%;
+                height:24px;
+                margin-bottom:10px;
+            "
+        ></progress>
+
+        <div
+            id="appointment-import-count"
+            style="font-weight:600; margin-bottom:18px;"
+        >
+            {{
+                import_run.imported_rows
+                + import_run.skipped_rows
+                + import_run.error_rows
+            }}
+            of {{ import_run.total_rows }} records processed
+        </div>
+
+        <div
+            id="appointment-import-message"
+            style="
+                padding:14px 16px;
+                border-radius:10px;
+                background:rgba(0,0,0,.045);
+                line-height:1.45;
+            "
+        >
+            {% if import_run.run_status == "completed" %}
+                Appointment Import completed.
+            {% elif import_run.run_status == "failed" %}
+                Appointment Import stopped because one or more
+                records could not be imported safely.
+            {% else %}
+                Peach Suite Pro is importing appointments in
+                safe packets of 50. Keep this page open until
+                the import finishes.
+            {% endif %}
+        </div>
+
+        <div
+            id="appointment-import-error"
+            style="
+                display:{{
+                    'block'
+                    if import_run.failure_message
+                    else 'none'
+                }};
+                margin-top:14px;
+                padding:14px 16px;
+                border-radius:10px;
+                background:#fff2f2;
+            "
+        >
+            {{ import_run.failure_message or "" }}
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const root = document.getElementById(
+        "appointment-import-progress"
+    );
+
+    if (!root) {
+        return;
+    }
+
+    const packetUrl = root.dataset.packetUrl;
+    const resultsUrl = root.dataset.resultsUrl;
+
+    const csrfToken = {{
+        security_csrf_token | tojson
+    }};
+
+    const statusElement = document.getElementById(
+        "appointment-import-status"
+    );
+
+    const totalElement = document.getElementById(
+        "appointment-import-total"
+    );
+
+    const importedElement = document.getElementById(
+        "appointment-import-imported"
+    );
+
+    const skippedElement = document.getElementById(
+        "appointment-import-skipped"
+    );
+
+    const errorsElement = document.getElementById(
+        "appointment-import-errors"
+    );
+
+    const meterElement = document.getElementById(
+        "appointment-import-meter"
+    );
+
+    const countElement = document.getElementById(
+        "appointment-import-count"
+    );
+
+    const messageElement = document.getElementById(
+        "appointment-import-message"
+    );
+
+    const errorElement = document.getElementById(
+        "appointment-import-error"
+    );
+
+    let stopped = (
+        root.dataset.runStatus === "completed"
+        || root.dataset.runStatus === "failed"
+    );
+
+    function updateProgress(data) {
+        const total = Number(data.total_rows || 0);
+        const imported = Number(data.imported_rows || 0);
+        const skipped = Number(data.skipped_rows || 0);
+        const errors = Number(data.error_rows || 0);
+
+        const processed = (
+            imported
+            + skipped
+            + errors
+        );
+
+        totalElement.textContent = total;
+        importedElement.textContent = imported;
+        skippedElement.textContent = skipped;
+        errorsElement.textContent = errors;
+
+        meterElement.max = total || 1;
+        meterElement.value = processed;
+
+        countElement.textContent = (
+            processed
+            + " of "
+            + total
+            + " records processed"
+        );
+
+        if (data.status === "completed") {
+            stopped = true;
+            statusElement.textContent = "Completed";
+
+            messageElement.textContent = (
+                "Appointment Import completed successfully. "
+                + "You can now review the imported records "
+                + "or return to the calendar."
+            );
+
+        } else if (data.status === "failed") {
+            stopped = true;
+            statusElement.textContent = "Failed";
+
+            messageElement.textContent = (
+                "Appointment Import stopped because one or "
+                + "more records could not be imported safely."
+            );
+
+            if (data.failure_message) {
+                errorElement.textContent =
+                    data.failure_message;
+
+                errorElement.style.display = "block";
+            }
+
+        } else {
+            statusElement.textContent = "Importing…";
+
+            messageElement.textContent = (
+                "Peach Suite Pro is continuing automatically "
+                + "in safe packets of 50. "
+                + Number(data.remaining_rows || 0)
+                + " records remain."
+            );
+        }
+    }
+
+    async function runPacket() {
+        if (stopped) {
+            return;
+        }
+
+        const body = new URLSearchParams();
+
+        body.set(
+            "security_csrf_token",
+            csrfToken
+        );
+
+        try {
+            const response = await fetch(
+                packetUrl,
+                {
+                    method: "POST",
+                    credentials: "same-origin",
+                    headers: {
+                        "Content-Type":
+                            "application/x-www-form-urlencoded"
+                    },
+                    body: body.toString()
+                }
+            );
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                stopped = true;
+                statusElement.textContent =
+                    "Import Paused";
+
+                messageElement.textContent = (
+                    data.message
+                    || "Appointment Import could not continue."
+                );
+
+                errorElement.textContent = (
+                    "Refresh this page to resume safely "
+                    + "from the last completed packet."
+                );
+
+                errorElement.style.display = "block";
+                return;
+            }
+
+            updateProgress(data);
+
+            if (!stopped) {
+                window.setTimeout(
+                    runPacket,
+                    150
+                );
+            }
+
+        } catch (error) {
+            stopped = true;
+
+            statusElement.textContent =
+                "Connection Interrupted";
+
+            messageElement.textContent = (
+                "The browser could not start the next "
+                + "Appointment Import packet."
+            );
+
+            errorElement.textContent = (
+                "Refresh this page to resume safely. "
+                + "Already imported records will not be "
+                + "inserted again."
+            );
+
+            errorElement.style.display = "block";
+        }
+    }
+
+    if (!stopped) {
+        window.setTimeout(
+            runPacket,
+            150
+        );
+    }
+});
+</script>
+
+{% endblock %}
