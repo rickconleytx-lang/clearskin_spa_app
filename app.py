@@ -7909,6 +7909,70 @@ def current_spa_id():
     return getattr(g, "spa_id", None)
 
 
+def current_business_access_status():
+    """
+    Return the current business's durable PSP access status.
+
+    Access status is separate from subscription tier entitlements and
+    workspace permissions. Cache the result only for this request.
+
+    Valid business states are active, grace, and restricted. An
+    authenticated business with a missing or invalid stored state
+    fails closed as restricted.
+    """
+    if "user_id" not in session:
+        return None
+
+    if is_master_admin():
+        return None
+
+    if hasattr(g, "_business_access_status"):
+        return g._business_access_status
+
+    spa_id = current_spa_id()
+
+    if spa_id is None:
+        g._business_access_status = None
+        return None
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT access_status
+            FROM spas
+            WHERE spa_id = %s
+              AND active = TRUE
+            LIMIT 1
+            """,
+            (spa_id,),
+        )
+
+        row = cur.fetchone()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    access_status = (
+        str(row[0] or "").strip().lower()
+        if row
+        else ""
+    )
+
+    if access_status not in {
+        "active",
+        "grace",
+        "restricted",
+    }:
+        access_status = "restricted"
+
+    g._business_access_status = access_status
+    return access_status
+
+
 def _subscription_entitlements_for_spa(spa_id):
     """
     Return active base subscription feature keys for one business.
@@ -39786,6 +39850,70 @@ def load_spa():
     return
 
 
+@app.before_request
+def enforce_business_subscription_access():
+    """
+    Limit a business with durable PSP access_status='restricted'
+    to account recovery, subscription management, and essential
+    session/security routes.
+
+    Subscription access is intentionally separate from commercial
+    tier entitlements, workspace permissions, Employee Verification,
+    and PSP Access Levels.
+    """
+    if "user_id" not in session:
+        return
+
+    if is_master_admin():
+        return
+
+    spa_id = current_spa_id()
+
+    # Public/login/session endpoints that return from load_spa()
+    # before business context is loaded naturally have no g.spa_id.
+    if spa_id is None:
+        return
+
+    if current_business_access_status() != "restricted":
+        return
+
+    allowed_endpoints = {
+        "subscription_access_restricted",
+        "manage_subscription",
+        "resubscribe_subscription",
+        "cancel_subscription",
+        "logout",
+        "change_password",
+        "confirm_login_business_switch",
+        "cancel_login_business_switch",
+        "browser_session_state",
+        "browser_session_activity",
+        "browser_session_tab_presence",
+        "browser_session_reauthenticate",
+        "browser_session_reauthentication_required",
+        "static",
+    }
+
+    if request.endpoint in allowed_endpoints:
+        return
+
+    # API callers should receive an authorization response rather
+    # than an HTML redirect.
+    if request.path.startswith("/api/"):
+        return jsonify(
+            success=False,
+            error="subscription_access_restricted",
+            message=(
+                "This business currently has restricted "
+                "Peach Suite Pro access."
+            ),
+        ), 403
+
+    return redirect(
+        url_for("subscription_access_restricted")
+    )
+
+
 
 #   ----------------------
 #
@@ -61401,6 +61529,26 @@ def my_settings():
 #   MANAGE SUBSCRIPTION
 #
 ##############################################
+
+
+@app.route("/account/restricted")
+@login_required
+@spa_required
+def subscription_access_restricted():
+    if current_business_access_status() != "restricted":
+        return redirect(
+            url_for("morning_briefing")
+        )
+
+    can_manage_subscription = (
+        current_business_unit_membership_role_code()
+        == "organization_admin"
+    )
+
+    return render_template(
+        "subscription_restricted.html",
+        can_manage_subscription=can_manage_subscription,
+    )
 
 
 @app.route("/account/subscription")

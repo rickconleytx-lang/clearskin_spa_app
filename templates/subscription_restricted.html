@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block title %}Subscription Access Restricted | Peach Suite Pro{% endblock %}
+
+{% block content %}
+
+<h1>Subscription Access Restricted</h1>
+
+<p>
+    This business currently has restricted access to Peach Suite Pro.
+</p>
+
+<section class="form-card">
+
+    <h2>Your Business Data Is Preserved</h2>
+
+    <p>
+        Your business information and Peach Suite Pro data have not
+        been deleted. Normal business features will become available
+        again when subscription access is restored.
+    </p>
+
+    {% if can_manage_subscription %}
+
+        <p>
+            As an organization administrator, you can review the
+            subscription status and any available reactivation options.
+        </p>
+
+        <p>
+            <a
+                href="{{ url_for('manage_subscription') }}"
+                class="btn"
+            >
+                Manage Subscription
+            </a>
+        </p>
+
+    {% else %}
+
+        <p>
+            Contact your business Owner or organization administrator
+            to review the Peach Suite Pro subscription and restore
+            access.
+        </p>
+
+    {% endif %}
+
+</section>
+
+<p>
+    <a
+        href="{{ url_for('logout') }}"
+        class="btn btn-secondary"
+    >
+        Log Out
+    </a>
+</p>
+
+{% endblock %}
