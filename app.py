@@ -34454,7 +34454,7 @@ def local_datetime(value, format_string="%m/%d/%Y %I:%M %p"):
         value = value.replace(tzinfo=timezone.utc)
 
     local_value = value.astimezone(
-        ZoneInfo("America/Chicago")
+        ZoneInfo(get_current_spa_timezone())
     )
 
     return local_value.strftime(format_string)

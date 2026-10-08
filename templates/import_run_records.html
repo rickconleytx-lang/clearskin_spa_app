@@ -21,9 +21,19 @@
 
     <div class="report-header">
         <div>
-            <h1>Import Records</h1>
+            <h1>
+                {% if import_data.entity_type == "appointments" %}
+                    Import Appointment Records
+                {% else %}
+                    Import Records
+                {% endif %}
+            </h1>
             <p class="report-subtitle">
-                Review imported processor transactions before they are posted to Income.
+                {% if import_data.entity_type == "appointments" %}
+                    Review appointment records before they are imported into the Appointment Calendar.
+                {% else %}
+                    Review imported processor transactions before they are posted to Income.
+                {% endif %}
             </p>
         </div>
 
@@ -63,7 +73,7 @@
 
                 <span>
                     <strong>Imported:</strong>
-                    {{ import_data.requested_at.strftime('%m/%d/%Y %I:%M %p')
+                    {{ import_data.requested_at|local_datetime
                        if import_data.requested_at else '—' }}
                 </span>
 
@@ -452,6 +462,50 @@
                                       or record.duplicate_status != "none" %}
                                     <tr class="import-detail-row">
                                         <td colspan="11">
+
+                                            {% if data.get("client_email")
+                                                  or data.get("client_phone")
+                                                  or data.get("notes")
+                                                  or data.get("external_source")
+                                                  or data.get("external_order_id") %}
+
+                                                <div class="import-detail-block">
+                                                    <strong>Import Details:</strong>
+
+                                                    <div style="margin-top:6px;">
+                                                        {% if data.get("client_email") %}
+                                                            <strong>Email:</strong>
+                                                            {{ data.get("client_email") }}
+                                                            <br>
+                                                        {% endif %}
+
+                                                        {% if data.get("client_phone") %}
+                                                            <strong>Phone:</strong>
+                                                            {{ data.get("client_phone") }}
+                                                            <br>
+                                                        {% endif %}
+
+                                                        {% if data.get("external_source") %}
+                                                            <strong>Booking Source:</strong>
+                                                            {{ data.get("external_source") }}
+                                                            <br>
+                                                        {% endif %}
+
+                                                        {% if data.get("external_order_id") %}
+                                                            <strong>External Appointment ID:</strong>
+                                                            {{ data.get("external_order_id") }}
+                                                            <br>
+                                                        {% endif %}
+
+                                                        {% if data.get("notes") %}
+                                                            <strong>Notes:</strong>
+                                                            {{ data.get("notes") }}
+                                                        {% endif %}
+                                                    </div>
+                                                </div>
+
+                                            {% endif %}
+
                                             {% if record.validation_errors %}
                                                 <div class="import-detail-block">
                                                     <strong>Validation:</strong>
@@ -925,7 +979,7 @@
 
         </div>
 
-    {% else %}
+    {% elif import_data.entity_type == "peachpos_income" %}
 
     <div class="report-section">
 
