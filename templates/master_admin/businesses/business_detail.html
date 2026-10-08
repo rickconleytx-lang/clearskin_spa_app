@@ -193,6 +193,66 @@
                 </div>
 
                 <div>
+                    <label for="subscription_status">
+                        Subscription Status
+                    </label>
+
+                    <select
+                        id="subscription_status"
+                        name="subscription_status"
+                        required
+                        {% if business.stripe_subscription_id %}
+                            disabled
+                        {% endif %}
+                    >
+                        <option
+                            value="Trial"
+                            {% if business.subscription_status == "Trial" %}
+                                selected
+                            {% endif %}
+                        >
+                            Trial
+                        </option>
+
+                        <option
+                            value="Active"
+                            {% if business.subscription_status == "Active" %}
+                                selected
+                            {% endif %}
+                        >
+                            Active
+                        </option>
+
+                        <option
+                            value="Canceled"
+                            {% if business.subscription_status == "Canceled" %}
+                                selected
+                            {% endif %}
+                        >
+                            Canceled
+                        </option>
+                    </select>
+
+                    {% if business.stripe_subscription_id %}
+                        <input
+                            type="hidden"
+                            name="subscription_status"
+                            value="{{ business.subscription_status }}"
+                        >
+
+                        <small>
+                            Managed by Stripe for this business and
+                            cannot be changed locally.
+                        </small>
+                    {% else %}
+                        <small>
+                            PSP subscription lifecycle state.
+                            Separate from plan, billing mode, and access.
+                        </small>
+                    {% endif %}
+                </div>
+
+                <div>
                     <label for="billing_mode">
                         Billing Mode
                     </label>

@@ -7105,6 +7105,10 @@ def master_admin_update_business_subscription(spa_id):
         request.form.get("subscription_tier_code") or ""
     ).strip().lower()
 
+    requested_subscription_status = str(
+        request.form.get("subscription_status") or ""
+    ).strip()
+
     requested_billing_mode = str(
         request.form.get("billing_mode") or ""
     ).strip().lower()
@@ -7138,6 +7142,22 @@ def master_admin_update_business_subscription(spa_id):
         )
         or ""
     ).strip()
+
+    if requested_subscription_status not in {
+        "Trial",
+        "Active",
+        "Canceled",
+    }:
+        flash(
+            "Subscription status is invalid.",
+            "error",
+        )
+        return redirect(
+            url_for(
+                "master_admin_business_detail",
+                spa_id=spa_id,
+            )
+        )
 
     if requested_billing_mode not in {
         "standard",
@@ -7312,6 +7332,10 @@ def master_admin_update_business_subscription(spa_id):
             current_tier_code or ""
         ).strip().lower()
 
+        current_subscription_status = str(
+            current_subscription_status or ""
+        ).strip()
+
         current_billing_mode = str(
             current_billing_mode or "standard"
         ).strip().lower()
@@ -7364,6 +7388,11 @@ def master_admin_update_business_subscription(spa_id):
             != int(current_tier_id)
         )
 
+        subscription_status_changed = (
+            requested_subscription_status
+            != current_subscription_status
+        )
+
         billing_mode_changed = (
             requested_billing_mode
             != current_billing_mode
@@ -7377,6 +7406,21 @@ def master_admin_update_business_subscription(spa_id):
         stripe_ended_for_complimentary = False
 
         if stripe_subscription_id:
+            if subscription_status_changed:
+                conn.rollback()
+                flash(
+                    "This business has a Stripe subscription. "
+                    "Its subscription lifecycle status is managed "
+                    "by Stripe and cannot be changed locally.",
+                    "error",
+                )
+                return redirect(
+                    url_for(
+                        "master_admin_business_detail",
+                        spa_id=spa_id,
+                    )
+                )
+
             if tier_changed:
                 conn.rollback()
                 flash(
@@ -7540,7 +7584,7 @@ def master_admin_update_business_subscription(spa_id):
         new_state = {
             "tier_code": requested_tier_code,
             "subscription_status": (
-                current_subscription_status
+                requested_subscription_status
             ),
             "billing_mode": requested_billing_mode,
             "access_status": requested_access_status,
@@ -7577,6 +7621,7 @@ def master_admin_update_business_subscription(spa_id):
             UPDATE spas
             SET
                 subscription_tier_id = %s,
+                subscription_status = %s,
                 billing_mode = %s,
                 access_status = %s,
                 complimentary_started_at = %s,
@@ -7588,6 +7633,7 @@ def master_admin_update_business_subscription(spa_id):
             """,
             (
                 requested_tier_id,
+                requested_subscription_status,
                 requested_billing_mode,
                 requested_access_status,
                 new_complimentary_started_at,
@@ -7606,6 +7652,13 @@ def master_admin_update_business_subscription(spa_id):
             )
 
         changed_fields = []
+
+        if subscription_status_changed:
+            changed_fields.append(
+                f"subscription status "
+                f"{current_subscription_status} "
+                f"-> {requested_subscription_status}"
+            )
 
         if tier_changed:
             changed_fields.append(
