@@ -175,6 +175,7 @@ from services.import_service import (
     discard_client_import_review_rows,
     process_client_import_packet,
     process_appointment_import_packet,
+    process_expense_import_packet,
     process_income_import_packet,
     process_peachpos_income_import_packet,
 )
@@ -99281,7 +99282,7 @@ def _require_import_run_entity_access(import_data):
             abort(403)
         return
 
-    if entity_type == "income":
+    if entity_type in {"income", "expenses"}:
         if not has_subscription_feature("income_expenses"):
             abort(403)
         return
@@ -99944,6 +99945,170 @@ def income_import_mapping(import_run_id):
         import_data=import_data,
         security_csrf_token=_security_form_csrf_token(),
     )
+
+
+@app.route(
+    "/imports/expenses",
+    methods=["GET", "POST"],
+)
+@login_required
+@spa_required
+@require_subscription_feature("import_export")
+@require_psp_access("financial_management")
+@require_subscription_feature('income_expenses')
+def expense_import_upload():
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to import Expense.",
+            "error",
+        )
+        return redirect(url_for("import_center"))
+
+    if request.method == "POST":
+        submitted_token = request.form.get(
+            "security_csrf_token",
+            "",
+        )
+
+        if not _security_form_csrf_valid(submitted_token):
+            abort(400)
+
+        uploaded_file = request.files.get("import_file")
+
+        try:
+            import_run = create_import_run(
+                uploaded_file,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                entity_type="expenses",
+                requested_by=session.get("user_id"),
+            )
+
+        except ImportServiceError as exc:
+            flash(str(exc), "error")
+
+        else:
+            return redirect(
+                url_for(
+                    "expense_import_mapping",
+                    import_run_id=import_run["import_run_id"],
+                )
+            )
+
+    return render_template(
+        "import_upload.html",
+        import_title="Import Expenses",
+        import_description=(
+            "Upload a CSV or Excel file containing historical "
+            "Expense records you want to bring into Peach Suite Pro."
+        ),
+        setup_message=(
+            "Before uploading, make sure Vendor Names, Expense Categories, and "
+            "Payment Methods used in your file already exist in "
+            "Peach Suite Pro. Transaction identity is optional."
+        ),
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
+@app.route(
+    "/imports/expenses/<int:import_run_id>/mapping",
+    methods=["GET", "POST"],
+)
+@login_required
+@spa_required
+@require_subscription_feature("import_export")
+@require_psp_access("financial_management")
+@require_subscription_feature('income_expenses')
+def expense_import_mapping(import_run_id):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to map an Expense import.",
+            "error",
+        )
+        return redirect(url_for("import_center"))
+
+    try:
+        import_data = get_import_run_mapping_data(
+            import_run_id,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+        )
+
+    except ImportServiceError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("import_center"))
+
+    if import_data.get("entity_type") != "expenses":
+        flash(
+            "This Import Run is not an Expense import.",
+            "error",
+        )
+        return redirect(url_for("import_center"))
+
+    if request.method == "POST":
+        submitted_token = request.form.get(
+            "security_csrf_token",
+            "",
+        )
+
+        if not _security_form_csrf_valid(submitted_token):
+            abort(400)
+
+        mapping = []
+
+        for source_index, source_header in enumerate(
+            import_data["headers"]
+        ):
+            target_key = (
+                request.form.get(
+                    f"target_{source_index}",
+                    "",
+                )
+                or ""
+            ).strip()
+
+            mapping.append({
+                "source_index": source_index,
+                "source_header": source_header,
+                "target_key": target_key or None,
+            })
+
+        try:
+            analyze_import_run(
+                import_run_id,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                mapping=mapping,
+            )
+
+        except ImportServiceError as exc:
+            flash(str(exc), "error")
+            import_data["mapping"] = mapping
+
+        else:
+            return redirect(
+                url_for(
+                    "import_run_records",
+                    import_run_id=import_run_id,
+                )
+            )
+
+    return render_template(
+        "import_mapping.html",
+        import_data=import_data,
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
 
 
 #  ------------------------------------------
@@ -100838,6 +101003,334 @@ def appointment_import_packet(import_run_id):
             import_run_id=import_run_id,
         ),
     })
+
+
+@app.route(
+    "/imports/expenses/<int:import_run_id>/start",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_subscription_feature("import_export")
+@require_subscription_feature("income_expenses")
+@require_psp_access('financial_management')
+def expense_import_start(import_run_id):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash(
+            "A valid Provider Workspace is required "
+            "to import Expenses.",
+            "error",
+        )
+        return redirect(url_for("dashboard"))
+
+    submitted_csrf_token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_csrf_token
+    ):
+        flash(
+            "Your security token expired or could not be verified. "
+            "Please try again.",
+            "error",
+        )
+        return redirect(
+            url_for(
+                "import_run_records",
+                import_run_id=import_run_id,
+            )
+        )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                entity_type,
+                run_status
+            FROM import_runs
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        row = cur.fetchone()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if not row:
+        abort(404)
+
+    entity_type = str(
+        row[0] or ""
+    ).strip().lower()
+
+    run_status = str(
+        row[1] or ""
+    ).strip().lower()
+
+    if entity_type != "expenses":
+        abort(404)
+
+    if run_status not in {
+        "ready",
+        "importing",
+        "completed",
+        "failed",
+    }:
+        flash(
+            "This Expense Import is not ready to start. "
+            "Complete its review first.",
+            "error",
+        )
+        return redirect(
+            url_for(
+                "import_run_records",
+                import_run_id=import_run_id,
+            )
+        )
+
+    return redirect(
+        url_for(
+            "expense_import_progress",
+            import_run_id=import_run_id,
+        )
+    )
+
+
+@app.route(
+    "/imports/expenses/<int:import_run_id>/progress",
+    methods=["GET"],
+)
+@login_required
+@spa_required
+@require_subscription_feature("import_export")
+@require_subscription_feature("income_expenses")
+@require_psp_access('financial_management')
+def expense_import_progress(import_run_id):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        abort(403)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                entity_type,
+                run_status,
+                source_filename,
+                total_rows,
+                imported_rows,
+                skipped_rows,
+                error_rows,
+                failure_message,
+                started_at,
+                completed_at
+            FROM import_runs
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        row = cur.fetchone()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if not row:
+        abort(404)
+
+    if str(row[0] or "").strip().lower() != "expenses":
+        abort(404)
+
+    import_run = {
+        "import_run_id": import_run_id,
+        "run_status": str(row[1] or "").strip().lower(),
+        "source_filename": row[2],
+        "total_rows": int(row[3] or 0),
+        "imported_rows": int(row[4] or 0),
+        "skipped_rows": int(row[5] or 0),
+        "error_rows": int(row[6] or 0),
+        "failure_message": row[7],
+        "started_at": row[8],
+        "completed_at": row[9],
+    }
+
+    return render_template(
+        "expense_import_progress.html",
+        import_run=import_run,
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
+@app.route(
+    "/imports/expenses/<int:import_run_id>/packet",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_subscription_feature("import_export")
+@require_subscription_feature("income_expenses")
+@require_psp_access('financial_management')
+def expense_import_packet(import_run_id):
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        abort(403)
+
+    submitted_csrf_token = request.form.get(
+        "security_csrf_token",
+        "",
+    )
+
+    if not _security_form_csrf_valid(
+        submitted_csrf_token
+    ):
+        return jsonify({
+            "status": "error",
+            "message": (
+                "Your security token expired or could not "
+                "be verified. Refresh this page to continue."
+            ),
+        }), 400
+
+    try:
+        result = process_expense_import_packet(
+            import_run_id,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+        )
+
+    except ImportServiceError as exc:
+        return jsonify({
+            "status": "error",
+            "message": str(exc),
+        }), 400
+
+    except Exception as exc:
+        app.logger.exception(
+            "Expense Import packet failed unexpectedly. "
+            "import_run_id=%s spa_id=%s business_unit_id=%s "
+            "error=%s",
+            import_run_id,
+            spa_id,
+            business_unit_id,
+            exc,
+        )
+
+        return jsonify({
+            "status": "error",
+            "message": (
+                "This Expense Import packet could not "
+                "complete safely. Refresh the progress page "
+                "to resume from durable import state."
+            ),
+        }), 500
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                total_rows,
+                imported_rows,
+                skipped_rows,
+                error_rows,
+                run_status,
+                failure_message
+            FROM import_runs
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND entity_type = 'expenses'
+            """,
+            (
+                import_run_id,
+                spa_id,
+                business_unit_id,
+            ),
+        )
+
+        row = cur.fetchone()
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if not row:
+        return jsonify({
+            "status": "not_found",
+            "message": (
+                "This Expense Import Run could not "
+                "be found in the current workspace."
+            ),
+        }), 404
+
+    total_rows = int(row[0] or 0)
+    imported_rows = int(row[1] or 0)
+    skipped_rows = int(row[2] or 0)
+    error_rows = int(row[3] or 0)
+    run_status = str(row[4] or "").strip().lower()
+
+    processed_rows = (
+        imported_rows
+        + skipped_rows
+        + error_rows
+    )
+
+    return jsonify({
+        "status": run_status,
+        "import_run_id": import_run_id,
+        "total_rows": total_rows,
+        "processed_rows": processed_rows,
+        "imported_rows": imported_rows,
+        "skipped_rows": skipped_rows,
+        "error_rows": error_rows,
+        "remaining_rows": max(
+            0,
+            total_rows - processed_rows,
+        ),
+        "processed_this_packet": int(
+            result.get("processed_this_packet") or 0
+        ),
+        "failure_message": row[5],
+        "results_url": url_for(
+            "import_run_records",
+            import_run_id=import_run_id,
+        ),
+    })
+
+
 
 
 # ------------------------------------------

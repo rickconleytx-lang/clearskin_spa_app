@@ -206,6 +206,65 @@
     {% endif %}
 
 
+    {% if import_data.entity_type == "expenses"
+          and import_data.run_status in ["ready", "importing"] %}
+
+        <div class="report-section no-print">
+
+            {% if import_data.run_status == "ready" %}
+
+                <form
+                    method="POST"
+                    action="{{ url_for(
+                        'expense_import_start',
+                        import_run_id=import_data.import_run_id
+                    ) }}"
+                >
+                    <input
+                        type="hidden"
+                        name="security_csrf_token"
+                        value="{{ security_csrf_token }}"
+                    >
+
+                    <button type="submit" class="btn">
+                        {% if import_data.approved_rows > 0 %}
+                            Import Approved Expenses
+                        {% else %}
+                            Finalize Expense Import
+                        {% endif %}
+                    </button>
+                </form>
+
+                <p class="muted-text" style="margin-top:10px;">
+                    Clean Expense records are automatically approved.
+                    Review exceptions before starting. Peach Suite Pro
+                    will continue automatically in safe packets of 50.
+                </p>
+
+            {% else %}
+
+                <a
+                    href="{{ url_for(
+                        'expense_import_progress',
+                        import_run_id=import_data.import_run_id
+                    ) }}"
+                    class="btn"
+                >
+                    Resume Expense Import
+                </a>
+
+                <p class="muted-text" style="margin-top:10px;">
+                    Resume automatic processing from the last
+                    completed packet.
+                </p>
+
+            {% endif %}
+
+        </div>
+
+    {% endif %}
+
+
     {% if import_data.entity_type in ["income", "peachpos_income"]
           and import_data.run_status in ["ready", "importing"] %}
 
@@ -622,6 +681,244 @@
         </div>
 
     {% endif %}
+
+    {% if import_data.entity_type == "expenses" %}
+
+        <div class="report-section">
+            <h2>Expense Import Records</h2>
+
+            <div class="import-stats-grid">
+
+                <div class="import-stat-card">
+                    <span>Approved Expenses</span>
+                    <strong>
+                        {{ import_data.financial_summary.transactions }}
+                    </strong>
+                </div>
+
+                <div class="import-stat-card">
+                    <span>Approved Expense Amount</span>
+                    <strong>
+                        {{ import_data.financial_summary.expense_total|currency }}
+                    </strong>
+                </div>
+
+            </div>
+
+            <p class="muted-text">
+                These totals include all approved Expense Import records,
+                including those hidden from exception review.
+                Invalid and discarded records are excluded.
+                Approved amounts are not necessarily posted amounts.
+            </p>
+
+            <p class="muted-text">
+                Review exceptions before posting. Clean, approved
+                Expenses are processed automatically.
+            </p>
+
+            {% if import_data.review_hidden_rows %}
+                <p class="muted-text">
+                    {{ import_data.review_hidden_rows }}
+                    automatically approved records are hidden
+                    from this exception review table.
+                </p>
+            {% endif %}
+
+            <div class="table-wrap">
+                <table class="styled-report-table wide-report-table">
+                    <thead>
+                        <tr>
+                            <th>Row</th>
+                            <th>Expense Date</th>
+                            <th>Vendor</th>
+                            <th>Category</th>
+                            <th>Description</th>
+                            <th>Amount</th>
+                            <th>Payment Method</th>
+                            <th>Transaction Identity</th>
+                            <th>Duplicate</th>
+                            <th>Review</th>
+                            <th>Import Status</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        {% for record in import_data.records %}
+                            {% set data = record.mapped_data or {} %}
+                            {% set details = record.duplicate_details or {} %}
+                            {% set file_info = details.get("file") or {} %}
+                            {% set existing = details.get("existing_psp") or {} %}
+
+                            <tr>
+                                <td>{{ record.source_row_number }}</td>
+                                <td>{{ data.get("expense_date") or "—" }}</td>
+                                <td>{{ data.get("vendor_name") or "—" }}</td>
+                                <td>{{ data.get("category") or "—" }}</td>
+                                <td>{{ data.get("description") or "—" }}</td>
+                                <td>
+                                    {% if data.get("amount") %}
+                                        {{ data.get("amount")|currency }}
+                                    {% else %}
+                                        —
+                                    {% endif %}
+                                </td>
+                                <td>{{ data.get("payment_method") or "—" }}</td>
+                                <td>
+                                    {{ data.get("transaction_source") or "—" }}
+                                    {% if data.get("external_transaction_id") %}
+                                        <div class="muted-text">
+                                            ID: {{ data.get("external_transaction_id") }}
+                                        </div>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if record.duplicate_status == "strong" %}
+                                        <strong>Strong Duplicate</strong>
+                                    {% elif record.duplicate_status == "possible" %}
+                                        <strong>Possible Duplicate</strong>
+                                    {% else %}
+                                        None
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {{ (record.review_decision or "Pending")|replace("_", " ")|title }}
+
+                                    {% if record.import_status == "pending"
+                                          and record.review_decision not in ["approved", "discard"] %}
+
+                                        <div class="no-print" style="margin-top:8px;">
+
+                                            {% if record.validation_status == "valid"
+                                                  and record.duplicate_status in ["none", "possible"] %}
+                                                <form method="POST"
+                                                      action="{{ url_for(
+                                                          'financial_import_review_row',
+                                                          import_run_id=import_data.import_run_id,
+                                                          import_run_row_id=record.import_run_row_id
+                                                      ) }}"
+                                                      style="display:inline-block;">
+                                                    <input type="hidden"
+                                                           name="security_csrf_token"
+                                                           value="{{ security_csrf_token }}">
+                                                    <input type="hidden"
+                                                           name="decision"
+                                                           value="approved">
+                                                    <button type="submit" class="btn btn-small">
+                                                        Approve
+                                                    </button>
+                                                </form>
+                                            {% endif %}
+
+                                            <form method="POST"
+                                                  action="{{ url_for(
+                                                      'financial_import_review_row',
+                                                      import_run_id=import_data.import_run_id,
+                                                      import_run_row_id=record.import_run_row_id
+                                                  ) }}"
+                                                  style="display:inline-block;">
+                                                <input type="hidden"
+                                                       name="security_csrf_token"
+                                                       value="{{ security_csrf_token }}">
+                                                <input type="hidden"
+                                                       name="decision"
+                                                       value="discard">
+                                                <button type="submit" class="btn btn-small">
+                                                    Discard
+                                                </button>
+                                            </form>
+                                        </div>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {{ record.import_status|replace("_", " ")|title }}
+                                    {% if record.imported_record_id %}
+                                        <div class="muted-text">
+                                            Expense #{{ record.imported_record_id }}
+                                        </div>
+                                    {% endif %}
+                                </td>
+                            </tr>
+
+                            {% if record.validation_errors
+                                  or record.duplicate_status != "none"
+                                  or record.error_message %}
+                                <tr class="import-detail-row">
+                                    <td colspan="11">
+
+                                        {% if record.validation_errors %}
+                                            <strong>Validation:</strong>
+                                            <ul>
+                                                {% for error in record.validation_errors %}
+                                                    <li>{{ error }}</li>
+                                                {% endfor %}
+                                            </ul>
+                                        {% endif %}
+
+                                        {% if record.duplicate_status == "strong" %}
+                                            <p>
+                                                <strong>Strong Duplicate:</strong>
+                                                This record has been marked for
+                                                automatic discard. It cannot be approved.
+                                            </p>
+                                        {% elif record.duplicate_status == "possible" %}
+                                            <p>
+                                                <strong>Possible Duplicate:</strong>
+                                                Compare the matching transactions
+                                                before approving or discarding.
+                                            </p>
+                                        {% endif %}
+
+                                        {% if file_info.get("reasons") %}
+                                            <ul>
+                                                {% for reason in file_info.get("reasons") %}
+                                                    <li>{{ reason }}</li>
+                                                {% endfor %}
+                                            </ul>
+                                        {% endif %}
+
+                                        {% if file_info.get("row_numbers") %}
+                                            <p>
+                                                Matching file rows:
+                                                {{ file_info.get("row_numbers")|join(", ") }}
+                                            </p>
+                                        {% endif %}
+
+                                        {% for match in existing.get("matches", []) %}
+                                            <p>
+                                                Existing Expense
+                                                #{{ match.get("expense_id") or "—" }}:
+                                                {{ match.get("expense_date") or "—" }},
+                                                {{ match.get("vendor_name") or "—" }},
+                                                {{ match.get("amount") or "—" }}
+                                            </p>
+                                        {% endfor %}
+
+                                        {% if record.error_message %}
+                                            <p>
+                                                <strong>Posting Error:</strong>
+                                                {{ record.error_message }}
+                                            </p>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            {% endif %}
+                        {% else %}
+                            <tr>
+                                <td colspan="11" class="no-data">
+                                    No Expense records currently require
+                                    review. Clean approved rows are ready
+                                    for automatic processing.
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    {% endif %}
+
 
     {% if import_data.entity_type == "income" %}
 

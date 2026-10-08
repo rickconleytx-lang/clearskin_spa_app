@@ -290,6 +290,31 @@
     </div>
     {% endif %}
 
+    {% if import_features.income_expenses %}
+    <div class="dashboard-card">
+        <h2>Expenses</h2>
+
+        <p style="font-size:1rem; font-weight:400; line-height:1.5;">
+            Import historical Expense records from a CSV or Excel file.
+        </p>
+
+        <p class="muted-text" style="font-size:0.95rem; font-weight:400; line-height:1.5;">
+            Vendor Names, Expense Categories, and any Payment Methods
+            used in your file must already exist and be active in
+            Peach Suite Pro. Transaction identity is optional.
+        </p>
+
+        <div style="margin-top:18px;">
+            <a
+                href="{{ url_for('expense_import_upload') }}"
+                class="btn"
+            >
+                Start Expense Import
+            </a>
+        </div>
+    </div>
+    {% endif %}
+
     {% if import_features.peachpos %}
     <div class="dashboard-card">
         <h2>Processor Transactions</h2>
@@ -349,7 +374,7 @@
 <h3>Import History</h3>
 
 <p class="muted-text">
-    Recent Client, Appointment, Income, and Processor Transaction imports
+    Recent Client, Appointment, Income, Expense, and Processor Transaction imports
     will appear here as import history becomes available.
 </p>
 

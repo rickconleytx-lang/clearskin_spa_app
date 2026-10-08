@@ -692,6 +692,114 @@ INCOME_IMPORT_FIELDS = (
 
 
 # =========================================================
+# EXPENSE IMPORT PROFILE
+# =========================================================
+
+EXPENSE_IMPORT_FIELDS = (
+    {
+        "key": "expense_date",
+        "label": "Expense Date",
+        "required": True,
+        "aliases": (
+            "expense date",
+            "date",
+            "transaction date",
+            "purchase date",
+            "payment date",
+        ),
+    },
+    {
+        "key": "vendor_name",
+        "label": "Vendor Name",
+        "required": True,
+        "aliases": (
+            "vendor",
+            "vendor name",
+            "merchant",
+            "payee",
+            "supplier",
+        ),
+    },
+    {
+        "key": "category",
+        "label": "Expense Category",
+        "required": True,
+        "aliases": (
+            "expense category",
+            "category",
+            "expense type",
+        ),
+    },
+    {
+        "key": "amount",
+        "label": "Amount",
+        "required": True,
+        "aliases": (
+            "amount",
+            "expense amount",
+            "transaction amount",
+            "total amount",
+            "total",
+        ),
+    },
+    {
+        "key": "description",
+        "label": "Description",
+        "required": False,
+        "aliases": (
+            "description",
+            "expense description",
+            "details",
+        ),
+    },
+    {
+        "key": "payment_method",
+        "label": "Payment Method",
+        "required": False,
+        "aliases": (
+            "payment method",
+            "payment type",
+            "method",
+            "paid by",
+        ),
+    },
+    {
+        "key": "notes",
+        "label": "Notes",
+        "required": False,
+        "aliases": (
+            "notes",
+            "note",
+            "memo",
+            "comments",
+        ),
+    },
+    {
+        "key": "external_transaction_id",
+        "label": "External Transaction ID",
+        "required": False,
+        "aliases": (
+            "external transaction id",
+            "transaction id",
+            "bank transaction id",
+            "reference id",
+            "reference number",
+        ),
+    },
+    {
+        "key": "transaction_source",
+        "label": "Transaction Source",
+        "required": False,
+        "aliases": (
+            "transaction source",
+            "source system",
+            "statement source",
+        ),
+    },
+)
+
+
+# =========================================================
 # APPOINTMENT IMPORT PROFILE
 # =========================================================
 
@@ -1094,6 +1202,14 @@ def get_import_profile(entity_type):
             "entity_type": "income",
             "display_name": "Income",
             "fields": INCOME_IMPORT_FIELDS,
+            "defaults": {},
+        }
+
+    if entity_type == "expenses":
+        return {
+            "entity_type": "expenses",
+            "display_name": "Expenses",
+            "fields": EXPENSE_IMPORT_FIELDS,
             "defaults": {},
         }
 
@@ -2040,6 +2156,117 @@ def validate_income_import_row(
     }
 
 
+def validate_expense_import_row(row_data):
+    """
+    Normalize and validate one mapped Expense import row.
+
+    Required:
+      - Expense Date
+      - Vendor Name
+      - Expense Category
+      - Amount
+
+    Optional:
+      - Description
+      - Payment Method
+      - Notes
+      - External Transaction ID
+      - Transaction Source
+
+    Database-backed lookup resolution happens separately.
+    PSP never invents missing source values.
+    """
+
+    normalized = {
+        key: str(
+            value if value is not None else ""
+        ).strip()
+        for key, value in row_data.items()
+    }
+
+    errors = []
+
+    expense_date = normalized.get(
+        "expense_date", ""
+    )
+
+    if not expense_date:
+        errors.append(
+            "Expense Date is required."
+        )
+    else:
+        try:
+            normalized["expense_date"] = (
+                _parse_import_date(expense_date)
+            )
+        except ImportServiceError as exc:
+            errors.append(str(exc))
+
+    if not normalized.get("vendor_name", ""):
+        errors.append(
+            "Vendor Name is required."
+        )
+
+    if not normalized.get("category", ""):
+        errors.append(
+            "Expense Category is required."
+        )
+
+    raw_amount = normalized.get(
+        "amount", ""
+    )
+
+    if not raw_amount:
+        errors.append(
+            "Amount is required."
+        )
+    else:
+        try:
+            amount = _parse_import_money(
+                raw_amount
+            )
+
+            if amount is None:
+                raise ImportServiceError(
+                    "Amount is invalid."
+                )
+
+            amount = Decimal(str(amount))
+
+            if not amount.is_finite():
+                raise ImportServiceError(
+                    "Amount must be finite."
+                )
+
+            normalized["amount"] = str(
+                amount
+            )
+
+        except (
+            ImportServiceError,
+            InvalidOperation,
+            ValueError,
+        ):
+            errors.append(
+                "Amount is not a valid monetary amount."
+            )
+
+    if (
+        normalized.get("external_transaction_id")
+        and not normalized.get("transaction_source")
+    ):
+        errors.append(
+            "Transaction Source is required when "
+            "External Transaction ID is provided."
+        )
+
+    return {
+        "valid": not errors,
+        "data": normalized,
+        "errors": errors,
+    }
+
+
 def validate_appointment_import_row(
     row_data,
 ):
@@ -2911,6 +3138,137 @@ def validate_income_import_workspace_values(
         row["errors"] = errors
         row["valid"] = not errors
         row["data"] = data
+
+    return prepared_rows
+
+
+def validate_expense_import_workspace_values(
+    cur,
+    *,
+    spa_id,
+    business_unit_id,
+    prepared_rows,
+):
+    """
+    Resolve Expense Import lookup values within the current business.
+
+    Vendor Name, Expense Category, and Payment Method:
+      - only active values are eligible
+      - matching is case-insensitive and whitespace-normalized
+      - unique matches use the existing PSP display value
+      - unknown or ambiguous matches become validation errors
+      - missing lookup records are never created
+
+    Required-field validation happens in the row validator.
+    """
+
+    lookup_specs = (
+        (
+            "vendor_name",
+            "Vendor Name",
+            """
+            SELECT vendors_name
+            FROM vendor_name
+            WHERE spa_id = %s
+              AND is_active = TRUE
+            ORDER BY vendor_id
+            """,
+        ),
+        (
+            "category",
+            "Expense Category",
+            """
+            SELECT expense_cat_name
+            FROM expense_categories
+            WHERE spa_id = %s
+              AND is_active = TRUE
+            ORDER BY expense_cat_id
+            """,
+        ),
+        (
+            "payment_method",
+            "Payment Method",
+            """
+            SELECT payment_method
+            FROM payment_methods
+            WHERE spa_id = %s
+              AND is_active = TRUE
+            ORDER BY payment_method_id
+            """,
+        ),
+    )
+
+    lookups = {}
+
+    for field_key, field_label, query in lookup_specs:
+        cur.execute(query, (spa_id,))
+
+        values = {}
+
+        for (stored_value,) in cur.fetchall():
+            canonical_value = str(
+                stored_value or ""
+            ).strip()
+
+            normalized_value = (
+                _normalize_import_dropdown_value(
+                    canonical_value
+                )
+            )
+
+            if not normalized_value:
+                continue
+
+            values.setdefault(
+                normalized_value,
+                [],
+            ).append(canonical_value)
+
+        lookups[field_key] = values
+
+    for row in prepared_rows:
+        data = dict(row.get("data") or {})
+        errors = list(row.get("errors") or [])
+
+        for field_key, field_label, _ in lookup_specs:
+            raw_value = str(
+                data.get(field_key) or ""
+            ).strip()
+
+            normalized_value = (
+                _normalize_import_dropdown_value(
+                    raw_value
+                )
+            )
+
+            if not normalized_value:
+                continue
+
+            matches = lookups[field_key].get(
+                normalized_value,
+                [],
+            )
+
+            if len(matches) == 1:
+                data[field_key] = matches[0]
+
+            elif not matches:
+                errors.append(
+                    f"{field_label} '{raw_value}' "
+                    "does not match an active value "
+                    "in this business."
+                )
+
+            else:
+                errors.append(
+                    f"{field_label} '{raw_value}' "
+                    "matches more than one active value "
+                    "in this business."
+                )
+
+        row["data"] = data
+        row["errors"] = errors
+        row["valid"] = not errors
 
     return prepared_rows
 
@@ -4183,6 +4541,221 @@ def _appointment_import_duplicate_service_identity(data):
     return None
 
 
+def annotate_expense_import_file_duplicates(prepared_rows):
+    """Detect strong and possible duplicates within an Expense file."""
+    seen_ids = {}
+    seen_values = {}
+    results = []
+
+    for original in prepared_rows:
+        row = dict(original)
+        row["duplicate_type"] = None
+        row["duplicate_reasons"] = []
+        row["duplicate_row_numbers"] = []
+
+        if not row.get("valid"):
+            results.append(row)
+            continue
+
+        data = row.get("data") or {}
+        source = _normalize_import_dropdown_value(
+            data.get("transaction_source")
+        )
+        external_id = str(
+            data.get("external_transaction_id") or ""
+        ).strip()
+        identity = (source, external_id) if source and external_id else None
+
+        expense_date = str(data.get("expense_date") or "").strip()
+        vendor = _normalize_import_dropdown_value(data.get("vendor_name"))
+        fingerprint = None
+
+        try:
+            amount = Decimal(str(data.get("amount") or ""))
+            if expense_date and vendor and amount.is_finite():
+                fingerprint = (expense_date, vendor, amount)
+        except InvalidOperation:
+            pass
+
+        if identity and identity in seen_ids:
+            row["duplicate_type"] = "strong"
+            row["duplicate_reasons"] = ["Source + Transaction ID"]
+            row["duplicate_row_numbers"] = [seen_ids[identity]]
+        elif fingerprint and fingerprint in seen_values:
+            row["duplicate_type"] = "possible"
+            row["duplicate_reasons"] = ["Date + Vendor + Amount"]
+            row["duplicate_row_numbers"] = [seen_values[fingerprint]]
+
+        if identity:
+            seen_ids.setdefault(identity, row["row_number"])
+        if fingerprint:
+            seen_values.setdefault(fingerprint, row["row_number"])
+
+        results.append(row)
+
+    return results
+
+
+def annotate_expense_import_existing_duplicates(
+    cur, *, spa_id, business_unit_id, prepared_rows
+):
+    """Find possible matches against existing workspace Expenses."""
+    from collections import defaultdict
+
+    dates = sorted({
+        str((r.get("data") or {}).get("expense_date") or "")
+        for r in prepared_rows if r.get("valid")
+    } - {""})
+
+    existing = defaultdict(list)
+
+    # Query bounded groups of dates using the workspace/date index.
+    for start in range(0, len(dates), 200):
+        cur.execute("""
+            SELECT expense_id, expense_date, vendor_name,
+                   amount, category, payment_method
+            FROM expenses
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND expense_date = ANY(%s::date[])
+        """, (
+            spa_id, business_unit_id, dates[start:start + 200]
+        ))
+
+        for eid, edate, vendor, amount, category, method in cur:
+            if not vendor or amount is None:
+                continue
+            key = (
+                edate.isoformat(),
+                _normalize_import_dropdown_value(vendor),
+                Decimal(str(amount)),
+            )
+            if len(existing[key]) < 5:
+                existing[key].append({
+                    "expense_id": eid,
+                    "expense_date": edate.isoformat(),
+                    "vendor_name": vendor,
+                    "amount": str(amount),
+                    "category": category,
+                    "payment_method": method,
+                })
+
+    results = []
+    for original in prepared_rows:
+        row = dict(original)
+        row["existing_duplicate_type"] = None
+        row["existing_duplicate_matches"] = []
+
+        if row.get("valid"):
+            data = row.get("data") or {}
+            try:
+                key = (
+                    str(data.get("expense_date") or ""),
+                    _normalize_import_dropdown_value(
+                        data.get("vendor_name")
+                    ),
+                    Decimal(str(data.get("amount") or "")),
+                )
+                matches = existing.get(key, [])
+                if matches:
+                    row["existing_duplicate_type"] = "possible"
+                    row["existing_duplicate_matches"] = matches
+            except InvalidOperation:
+                pass
+
+        results.append(row)
+
+    return results
+
+
+def annotate_expense_import_existing_identity_duplicates(
+    cur, *, spa_id, business_unit_id, prepared_rows
+):
+    """Detect existing Expenses with matching external identity."""
+    identities = set()
+
+    for row in prepared_rows:
+        if not row.get("valid"):
+            continue
+        data = row.get("data") or {}
+        source = _normalize_import_dropdown_value(
+            data.get("transaction_source")
+        )
+        external_id = str(
+            data.get("external_transaction_id") or ""
+        ).strip()
+        if source and external_id:
+            identities.add((source, external_id))
+
+    identities = sorted(identities)
+    existing = {}
+
+    for start in range(0, len(identities), 200):
+        batch = identities[start:start + 200]
+
+        cur.execute("""
+            SELECT e.expense_id, e.transaction_source,
+                   e.external_transaction_id, e.expense_date,
+                   e.vendor_name, e.amount
+            FROM expenses e
+            JOIN UNNEST(
+                %s::text[], %s::text[]
+            ) AS wanted(source_key, external_id)
+              ON LOWER(REGEXP_REPLACE(
+                   BTRIM(e.transaction_source),
+                   '[[:space:]]+', ' ', 'g'
+                 )) = wanted.source_key
+             AND BTRIM(e.external_transaction_id) =
+                 wanted.external_id
+            WHERE e.spa_id = %s
+              AND e.business_unit_id = %s
+        """, (
+            [pair[0] for pair in batch],
+            [pair[1] for pair in batch],
+            spa_id,
+            business_unit_id,
+        ))
+
+        for eid, src, txid, day, vendor, amount in cur.fetchall():
+            key = (
+                _normalize_import_dropdown_value(src),
+                str(txid).strip(),
+            )
+            existing[key] = {
+                "expense_id": eid,
+                "transaction_source": src,
+                "external_transaction_id": txid,
+                "expense_date": day.isoformat(),
+                "vendor_name": vendor,
+                "amount": str(amount),
+            }
+
+    results = []
+
+    for original in prepared_rows:
+        row = dict(original)
+
+        if row.get("valid"):
+            data = row.get("data") or {}
+            key = (
+                _normalize_import_dropdown_value(
+                    data.get("transaction_source")
+                ),
+                str(
+                    data.get("external_transaction_id") or ""
+                ).strip(),
+            )
+            match = existing.get(key)
+
+            if match:
+                row["existing_duplicate_type"] = "strong"
+                row["existing_duplicate_matches"] = [match]
+
+        results.append(row)
+
+    return results
+
+
 def annotate_appointment_import_file_duplicates(
     prepared_rows,
 ):
@@ -5287,6 +5860,12 @@ def analyze_import_run(
                         mapped
                     )
                 )
+            elif entity_type == "expenses":
+                validation = (
+                    validate_expense_import_row(
+                        mapped
+                    )
+                )
             elif entity_type == "appointments":
                 validation = (
                     validate_appointment_import_row(
@@ -5345,6 +5924,37 @@ def analyze_import_run(
 
             prepared_rows = (
                 annotate_income_import_existing_duplicates(
+                    cur,
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    prepared_rows=prepared_rows,
+                )
+            )
+
+        elif entity_type == "expenses":
+            prepared_rows = (
+                validate_expense_import_workspace_values(
+                    cur,
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    prepared_rows=prepared_rows,
+                )
+            )
+            prepared_rows = (
+                annotate_expense_import_file_duplicates(
+                    prepared_rows
+                )
+            )
+            prepared_rows = (
+                annotate_expense_import_existing_duplicates(
+                    cur,
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    prepared_rows=prepared_rows,
+                )
+            )
+            prepared_rows = (
+                annotate_expense_import_existing_identity_duplicates(
                     cur,
                     spa_id=spa_id,
                     business_unit_id=business_unit_id,
@@ -5414,6 +6024,7 @@ def analyze_import_run(
         strong_duplicate_rows = 0
         possible_duplicate_rows = 0
         appointment_needs_review_rows = 0
+        expense_needs_review_rows = 0
 
         for row in prepared_rows:
             validation_status = (
@@ -5474,12 +6085,10 @@ def analyze_import_run(
             }
 
             if (
-                entity_type == "appointments"
+                entity_type in {"appointments", "expenses"}
                 and duplicate_status == "strong"
             ):
-                # A strong Appointment duplicate is already known
-                # to be unsafe to import. Resolve it automatically
-                # instead of requiring a pointless Discard click.
+                # Confirmed duplicates are discarded automatically.
                 review_decision = "discard"
 
             elif (
@@ -5496,6 +6105,12 @@ def analyze_import_run(
                 and review_decision == "needs_review"
             ):
                 appointment_needs_review_rows += 1
+
+            if (
+                entity_type == "expenses"
+                and review_decision == "needs_review"
+            ):
+                expense_needs_review_rows += 1
 
             cur.execute(
                 """
@@ -5546,6 +6161,10 @@ def analyze_import_run(
         if entity_type == "appointments":
             needs_review = bool(
                 appointment_needs_review_rows
+            )
+        elif entity_type == "expenses":
+            needs_review = bool(
+                expense_needs_review_rows
             )
         else:
             needs_review = bool(
@@ -5771,9 +6390,9 @@ def get_import_run_records(
                         or None
                     )
 
-        appointment_review_counts = None
+        exception_review_counts = None
 
-        if entity_type == "appointments":
+        if entity_type in {"appointments", "expenses"}:
             cur.execute(
                 """
                 SELECT
@@ -5811,7 +6430,7 @@ def get_import_run_records(
                 ),
             )
 
-            appointment_review_counts = cur.fetchone()
+            exception_review_counts = cur.fetchone()
 
             cur.execute(
                 """
@@ -5933,14 +6552,14 @@ def get_import_run_records(
                 "error_message": error_message,
             })
 
-        if entity_type == "appointments":
+        if entity_type in {"appointments", "expenses"}:
             (
                 approved_rows,
                 needs_review_rows,
                 hold_rows,
                 discard_rows,
                 unresolved_review_rows,
-            ) = appointment_review_counts
+            ) = exception_review_counts
 
             review_visible_rows = len(records)
             review_hidden_rows = max(
@@ -6046,6 +6665,75 @@ def get_import_run_records(
                     summary_key
                 ] += amount
 
+        # Expense exception review hides approved records, so its
+        # financial totals must be calculated from all staged rows.
+        # Keep existing Income and PeachPOS calculations unchanged.
+        if entity_type == "expenses":
+            cur.execute(
+                """
+                SELECT
+                    COUNT(*),
+                    COALESCE(
+                        SUM(
+                            CASE
+                                WHEN validation_status = 'valid'
+                                 AND BTRIM(
+                                     COALESCE(
+                                         mapped_data ->> 'amount',
+                                         ''
+                                     )
+                                 ) ~
+                                 '^[+-]?([0-9]+([.][0-9]*)?|[.][0-9]+)([eE][+-]?[0-9]+)?$'
+                                THEN (
+                                    mapped_data ->> 'amount'
+                                )::numeric
+                                ELSE NULL
+                            END
+                        ),
+                        0
+                    ),
+                    COUNT(*) FILTER (
+                        WHERE validation_status = 'valid'
+                          AND BTRIM(
+                              COALESCE(
+                                  mapped_data ->> 'amount',
+                                  ''
+                              )
+                          ) ~
+                          '^[+-]?([0-9]+([.][0-9]*)?|[.][0-9]+)([eE][+-]?[0-9]+)?$'
+                    )
+                FROM import_run_rows
+                WHERE import_run_id = %s
+                  AND spa_id = %s
+                  AND business_unit_id = %s
+                  AND review_decision = 'approved'
+                """,
+                (
+                    import_run_id,
+                    spa_id,
+                    business_unit_id,
+                ),
+            )
+
+            (
+                expense_approved_count,
+                expense_approved_total,
+                expense_amount_count,
+            ) = cur.fetchone()
+
+            if expense_approved_count != expense_amount_count:
+                raise ImportServiceError(
+                    "Approved Expense Import records contain "
+                    "an invalid or missing amount."
+                )
+
+            financial_summary["transactions"] = int(
+                expense_approved_count
+            )
+            financial_summary["expense_total"] = Decimal(
+                expense_approved_total
+            ).quantize(Decimal("0.01"))
+
         total_gross = financial_summary["gross"]
         total_net = financial_summary[
             "net_received"
@@ -6116,6 +6804,7 @@ def update_financial_import_review_decision(
     Supported entity types:
       - income
       - peachpos_income
+      - expenses
 
     Review policy:
       - clean valid rows may be approved
@@ -6179,6 +6868,7 @@ def update_financial_import_review_decision(
         if entity_type not in {
             "income",
             "peachpos_income",
+            "expenses",
         }:
             raise ImportServiceError(
                 "This review action is available for "
@@ -8842,6 +9532,508 @@ def process_appointment_import_packet(
 
 INCOME_IMPORT_PACKET_SIZE = 50
 INCOME_IMPORT_PACKET_MAX_ROWS = 50
+
+
+def insert_validated_expense_import_row(
+    cur,
+    *,
+    spa_id,
+    business_unit_id,
+    mapped_data,
+):
+    """
+    Insert one approved Expense using current workspace validation.
+
+    The caller owns the transaction and any savepoint.
+    Returns the Expense ID, or None for an existing strong
+    transaction-identity duplicate.
+
+    Approval and pending-row checks belong to the packet processor.
+    """
+    if not isinstance(mapped_data, dict):
+        raise ImportServiceError(
+            "Expense Import data must be a mapped record."
+        )
+
+    validated = validate_expense_import_row(mapped_data)
+
+    if not validated["valid"]:
+        raise ImportServiceError(
+            "; ".join(validated["errors"])
+        )
+
+    prepared = [{
+        "valid": True,
+        "data": validated["data"],
+        "errors": [],
+    }]
+
+    validate_expense_import_workspace_values(
+        cur,
+        spa_id=spa_id,
+        business_unit_id=business_unit_id,
+        prepared_rows=prepared,
+    )
+
+    row = prepared[0]
+
+    if not row["valid"]:
+        raise ImportServiceError(
+            "; ".join(row["errors"])
+        )
+
+    data = row["data"]
+
+    source = str(
+        data.get("transaction_source") or ""
+    ).strip() or None
+
+    external_id = str(
+        data.get("external_transaction_id") or ""
+    ).strip() or None
+
+    if external_id:
+        source_key = _normalize_import_dropdown_value(source)
+
+        cur.execute(
+            """
+            SELECT expense_id
+            FROM expenses
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND LOWER(REGEXP_REPLACE(
+                    BTRIM(transaction_source),
+                    '[[:space:]]+', ' ', 'g'
+                  )) = %s
+              AND BTRIM(external_transaction_id) = %s
+            LIMIT 1
+            """,
+            (
+                spa_id,
+                business_unit_id,
+                source_key,
+                external_id,
+            ),
+        )
+
+        if cur.fetchone():
+            return None
+
+    cur.execute(
+        """
+        INSERT INTO expenses (
+            spa_id,
+            business_unit_id,
+            expense_date,
+            vendor_name,
+            category,
+            description,
+            amount,
+            payment_method,
+            notes,
+            transaction_source,
+            external_transaction_id
+        )
+        VALUES (
+            %s, %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s
+        )
+        RETURNING expense_id
+        """,
+        (
+            spa_id,
+            business_unit_id,
+            data["expense_date"],
+            data["vendor_name"],
+            data["category"],
+            str(data.get("description") or "").strip() or None,
+            Decimal(data["amount"]),
+            str(data.get("payment_method") or "").strip() or None,
+            str(data.get("notes") or "").strip() or None,
+            source,
+            external_id,
+        ),
+    )
+
+    inserted = cur.fetchone()
+
+    if not inserted:
+        raise ImportServiceError(
+            "Expense insert did not return an Expense ID."
+        )
+
+    return inserted[0]
+
+
+def process_expense_import_packet(
+    import_run_id,
+    *,
+    spa_id,
+    business_unit_id,
+    packet_size=50,
+):
+    """Post one durable packet of approved Expense Import rows."""
+    try:
+        packet_size = int(packet_size)
+    except (TypeError, ValueError):
+        raise ImportServiceError(
+            "Expense packet size must be a whole number."
+        )
+
+    if not 1 <= packet_size <= 50:
+        raise ImportServiceError(
+            "Expense packet size must be between 1 and 50."
+        )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT entity_type, run_status
+            FROM import_runs
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            FOR UPDATE
+            """,
+            (import_run_id, spa_id, business_unit_id),
+        )
+        run = cur.fetchone()
+
+        if not run:
+            raise ImportServiceError(
+                "Expense Import Run was not found in this workspace."
+            )
+
+        entity_type, run_status = run
+
+        if entity_type != "expenses":
+            raise ImportServiceError(
+                "This processor accepts Expense imports only."
+            )
+
+        if run_status == "completed":
+            cur.execute(
+                """
+                SELECT total_rows, imported_rows,
+                       skipped_rows, error_rows
+                FROM import_runs
+                WHERE import_run_id = %s
+                  AND spa_id = %s
+                  AND business_unit_id = %s
+                """,
+                (import_run_id, spa_id, business_unit_id),
+            )
+            total, imported, skipped, errors = cur.fetchone()
+            conn.rollback()
+            return {
+                "import_run_id": import_run_id,
+                "run_status": "completed",
+                "total_rows": total,
+                "imported_rows": imported,
+                "skipped_rows": skipped,
+                "error_rows": errors,
+                "processed_this_packet": 0,
+                "remaining_rows": 0,
+            }
+
+        if run_status not in ("ready", "importing"):
+            raise ImportServiceError(
+                "Expense Import is not ready. Complete review first."
+            )
+
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM import_run_rows
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND import_status = 'pending'
+              AND (
+                  review_decision IS NULL
+                  OR review_decision NOT IN ('approved', 'discard')
+                  OR (
+                      review_decision = 'approved'
+                      AND (
+                          validation_status <> 'valid'
+                          OR duplicate_status NOT IN ('none', 'possible')
+                      )
+                  )
+              )
+            """,
+            (import_run_id, spa_id, business_unit_id),
+        )
+
+        if cur.fetchone()[0]:
+            raise ImportServiceError(
+                "Expense Import contains unresolved or unsafe rows."
+            )
+
+        cur.execute(
+            """
+            UPDATE import_run_rows
+            SET import_status = 'skipped',
+                imported_record_id = NULL,
+                error_message = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND import_status = 'pending'
+              AND review_decision = 'discard'
+            """,
+            (import_run_id, spa_id, business_unit_id),
+        )
+
+        cur.execute(
+            """
+            UPDATE import_runs
+            SET run_status = 'importing',
+                started_at = COALESCE(
+                    started_at, CURRENT_TIMESTAMP
+                ),
+                last_activity_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            """,
+            (import_run_id, spa_id, business_unit_id),
+        )
+
+        cur.execute(
+            """
+            SELECT import_run_row_id, mapped_data
+            FROM import_run_rows
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND validation_status = 'valid'
+              AND duplicate_status IN ('none', 'possible')
+              AND review_decision = 'approved'
+              AND import_status = 'pending'
+            ORDER BY source_row_number
+            LIMIT %s
+            """,
+            (import_run_id, spa_id, business_unit_id, packet_size),
+        )
+
+        packet_rows = cur.fetchall()
+        processed_this_packet = 0
+
+        for row_id, mapped_data in packet_rows:
+            cur.execute("SAVEPOINT expense_import_row")
+
+            try:
+                expense_id = insert_validated_expense_import_row(
+                    cur,
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    mapped_data=mapped_data,
+                )
+
+                if expense_id is None:
+                    cur.execute(
+                        """
+                        UPDATE import_run_rows
+                        SET import_status = 'skipped',
+                            review_decision = 'discard',
+                            duplicate_status = 'strong',
+                            imported_record_id = NULL,
+                            error_message =
+                                'External transaction identity already exists.',
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE import_run_row_id = %s
+                          AND import_run_id = %s
+                          AND spa_id = %s
+                          AND business_unit_id = %s
+                          AND import_status = 'pending'
+                        """,
+                        (row_id, import_run_id, spa_id, business_unit_id),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        UPDATE import_run_rows
+                        SET import_status = 'imported',
+                            imported_record_id = %s,
+                            error_message = NULL,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE import_run_row_id = %s
+                          AND import_run_id = %s
+                          AND spa_id = %s
+                          AND business_unit_id = %s
+                          AND review_decision = 'approved'
+                          AND import_status = 'pending'
+                        """,
+                        (
+                            expense_id, row_id, import_run_id,
+                            spa_id, business_unit_id,
+                        ),
+                    )
+
+                if cur.rowcount != 1:
+                    raise ImportServiceError(
+                        "Staged Expense row changed during posting."
+                    )
+
+                cur.execute("RELEASE SAVEPOINT expense_import_row")
+                processed_this_packet += 1
+
+            except Exception as exc:
+                cur.execute(
+                    "ROLLBACK TO SAVEPOINT expense_import_row"
+                )
+                cur.execute(
+                    "RELEASE SAVEPOINT expense_import_row"
+                )
+
+                constraint = getattr(
+                    getattr(exc, "diag", None),
+                    "constraint_name",
+                    None,
+                )
+
+                if constraint == (
+                    "uq_expenses_workspace_external_identity"
+                ):
+                    cur.execute(
+                        """
+                        UPDATE import_run_rows
+                        SET import_status = 'skipped',
+                            review_decision = 'discard',
+                            duplicate_status = 'strong',
+                            imported_record_id = NULL,
+                            error_message =
+                                'External transaction identity already exists.',
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE import_run_row_id = %s
+                          AND import_run_id = %s
+                          AND spa_id = %s
+                          AND business_unit_id = %s
+                          AND import_status = 'pending'
+                        """,
+                        (
+                            row_id, import_run_id,
+                            spa_id, business_unit_id,
+                        ),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        UPDATE import_run_rows
+                        SET import_status = 'error',
+                            imported_record_id = NULL,
+                            error_message = %s,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE import_run_row_id = %s
+                          AND import_run_id = %s
+                          AND spa_id = %s
+                          AND business_unit_id = %s
+                          AND import_status = 'pending'
+                        """,
+                        (
+                            str(exc)[:2000], row_id, import_run_id,
+                            spa_id, business_unit_id,
+                        ),
+                    )
+
+                if cur.rowcount != 1:
+                    raise ImportServiceError(
+                        "Failed to record Expense posting outcome."
+                    )
+
+        cur.execute(
+            """
+            SELECT
+                COUNT(*) FILTER (
+                    WHERE import_status = 'imported'
+                ),
+                COUNT(*) FILTER (
+                    WHERE import_status = 'skipped'
+                ),
+                COUNT(*) FILTER (
+                    WHERE import_status = 'error'
+                ),
+                COUNT(*) FILTER (
+                    WHERE import_status = 'pending'
+                )
+            FROM import_run_rows
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            """,
+            (import_run_id, spa_id, business_unit_id),
+        )
+
+        imported, skipped, errors, remaining = cur.fetchone()
+
+        if remaining:
+            next_status = "importing"
+        elif errors:
+            next_status = "failed"
+        else:
+            next_status = "completed"
+
+        failure_message = (
+            "One or more Expense rows could not be imported."
+            if next_status == "failed"
+            else None
+        )
+
+        cur.execute(
+            """
+            UPDATE import_runs
+            SET run_status = %s,
+                imported_rows = %s,
+                skipped_rows = %s,
+                error_rows = %s,
+                failure_message = %s,
+                completed_at = CASE
+                    WHEN %s = 'completed'
+                    THEN CURRENT_TIMESTAMP
+                    ELSE completed_at
+                END,
+                last_activity_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE import_run_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            """,
+            (
+                next_status, imported, skipped, errors,
+                failure_message, next_status,
+                import_run_id, spa_id, business_unit_id,
+            ),
+        )
+
+        if cur.rowcount != 1:
+            raise ImportServiceError(
+                "Expense Import progress could not be saved."
+            )
+
+        conn.commit()
+
+        return {
+            "import_run_id": import_run_id,
+            "run_status": next_status,
+            "imported_rows": imported,
+            "skipped_rows": skipped,
+            "error_rows": errors,
+            "processed_this_packet": processed_this_packet,
+            "remaining_rows": remaining,
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
 
 
 def process_income_import_packet(
