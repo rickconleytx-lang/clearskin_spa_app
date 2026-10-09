@@ -106227,6 +106227,7 @@ def resolve_service_recipient(appointment_id):
 @spa_required
 @require_psp_access("add_income")
 def add_income(appointment_id):
+    from uuid import uuid4
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
 
@@ -106464,6 +106465,214 @@ def add_income(appointment_id):
     credit_balance = float(cur.fetchone()[0] or 0.00)
 
     if request.method == "POST":
+
+        # Reject forged or stale-session form submissions before
+        # reserving a submission or making financial writes.
+        if not _security_form_csrf_valid(
+            request.form.get("security_csrf_token", "")
+        ):
+            conn.rollback()
+            cur.close()
+            conn.close()
+            abort(400)
+
+        # Reserve the identity of this exact form submission before
+        # any Income, client-credit, or Square financial writes.
+        from uuid import UUID
+        import hashlib
+        import json
+
+        raw_submission_token = (
+            request.form.get("income_submission_token") or ""
+        ).strip()
+
+        try:
+            parsed_token = UUID(raw_submission_token)
+            if parsed_token.version != 4:
+                raise ValueError("Expected a UUID4 submission token.")
+            submission_token = str(parsed_token)
+        except (ValueError, AttributeError):
+            conn.rollback()
+            cur.close()
+            conn.close()
+            flash(
+                "This Income form has expired or is invalid. "
+                "Please open Finish Session again.",
+                "warning",
+            )
+            return redirect(url_for(
+                "add_income",
+                appointment_id=appointment_id,
+                date=selected_date,
+            ))
+
+        # CSRF values may rotate between requests. The fingerprint
+        # covers the actual submitted Income content instead.
+        fingerprint_fields = sorted(
+            (
+                key,
+                list(values),
+            )
+            for key, values in request.form.lists()
+            if key not in {
+                "security_csrf_token",
+                "csrf_token",
+            }
+        )
+
+        request_sha256 = hashlib.sha256(
+            json.dumps(
+                fingerprint_fields,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+
+        # PostgreSQL's unique token constraint serializes concurrent
+        # requests. A second request waits for the first transaction
+        # to commit or roll back before evaluating this conflict.
+        cur.execute(
+            """
+            INSERT INTO income_save_submissions (
+                submission_token,
+                spa_id,
+                business_unit_id,
+                appointment_id,
+                request_sha256
+            )
+            VALUES (%s::uuid, %s, %s, %s, %s)
+            ON CONFLICT (submission_token) DO NOTHING
+            RETURNING submission_token
+            """,
+            (
+                submission_token,
+                spa_id,
+                business_unit_id,
+                appointment_id,
+                request_sha256,
+            ),
+        )
+
+        claimed_submission = cur.fetchone()
+
+        if not claimed_submission:
+            cur.execute(
+                """
+                SELECT
+                    spa_id,
+                    business_unit_id,
+                    appointment_id,
+                    request_sha256,
+                    income_id,
+                    completed_at
+                FROM income_save_submissions
+                WHERE submission_token = %s::uuid
+                FOR UPDATE
+                """,
+                (submission_token,),
+            )
+            prior_submission = cur.fetchone()
+
+            if (
+                not prior_submission
+                or prior_submission[0] != spa_id
+                or prior_submission[1] != business_unit_id
+                or prior_submission[2] != appointment_id
+                or prior_submission[3] != request_sha256
+            ):
+                conn.rollback()
+                cur.close()
+                conn.close()
+                abort(403)
+
+            if (
+                prior_submission[4] is None
+                or prior_submission[5] is None
+            ):
+                conn.rollback()
+                cur.close()
+                conn.close()
+                abort(409)
+
+            # Same token and same request: already completed.
+            # Never repeat Income or client-credit writes.
+            conn.rollback()
+            cur.close()
+            conn.close()
+            flash(
+                "This Income submission was already saved. "
+                "No additional payment was recorded.",
+                "info",
+            )
+            return redirect(url_for(
+                "post_appointment_wrap_up",
+                appointment_id=appt[0],
+                date=selected_date,
+            ))
+
+        # Serialize saves for this appointment, including requests
+        # using different form tokens. Under PostgreSQL READ COMMITTED,
+        # a waiting request checks Income after the earlier save commits.
+        cur.execute(
+            """
+            SELECT appointment_id
+            FROM appointments
+            WHERE appointment_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            FOR UPDATE
+            """,
+            (appointment_id, spa_id, business_unit_id),
+        )
+
+        if not cur.fetchone():
+            conn.rollback()
+            cur.close()
+            conn.close()
+            abort(404)
+
+        cur.execute(
+            """
+            SELECT income_id
+            FROM income
+            WHERE appointment_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            LIMIT 1
+            """,
+            (appointment_id, spa_id, business_unit_id),
+        )
+
+        has_existing_income = cur.fetchone() is not None
+        confirmed_another_payment = (
+            request.form.get("record_another_payment") == "yes"
+        )
+
+        if has_existing_income and not confirmed_another_payment:
+            conn.rollback()
+            cur.close()
+            conn.close()
+            flash(
+                "Income has already been recorded for this "
+                "appointment. Review the existing payment and "
+                "confirm if you need to record another.",
+                "warning",
+            )
+            return redirect(url_for(
+                "add_income",
+                appointment_id=appointment_id,
+                date=selected_date,
+            ))
+
+        duplicate_override_confirmed = (
+            has_existing_income and confirmed_another_payment
+        )
+        duplicate_override_user_id = (
+            session.get("user_id")
+            if duplicate_override_confirmed
+            else None
+        )
+
         income_date = request.form.get("income_date")
         income_type = request.form.get("income_type")
         description = request.form.get("description")
@@ -106473,6 +106682,45 @@ def add_income(appointment_id):
         tax_amount = money_value("tax_amount")
         tip_amount = money_value("tip_amount")
         credit_applied = money_value("credit_applied")
+
+        # Refresh available credit after locking the client.
+        # Different appointments for the same client must not
+        # consume the same credit balance concurrently.
+        #
+        # The appointment lock and duplicate-payment check
+        # have already run at this point.
+        if credit_applied > 0:
+            cur.execute(
+                """
+                SELECT client_id
+                FROM clients
+                WHERE client_id = %s
+                  AND spa_id = %s
+                FOR UPDATE
+                """,
+                (appt[1], spa_id),
+            )
+
+            if not cur.fetchone():
+                conn.rollback()
+                cur.close()
+                conn.close()
+                abort(409)
+
+            cur.execute(
+                """
+                SELECT COALESCE(SUM(amount), 0.00)
+                FROM client_credit_transactions
+                WHERE spa_id = %s
+                  AND business_unit_id = %s
+                  AND client_id = %s
+                """,
+                (spa_id, business_unit_id, appt[1]),
+            )
+
+            credit_balance = float(
+                cur.fetchone()[0] or 0.00
+            )
 
         total_amount = round(service_amount + retail_amount + tax_amount + tip_amount, 2)
         discountable_total = round(service_amount + retail_amount, 2)
@@ -107785,6 +108033,42 @@ def add_income(appointment_id):
                     date=selected_date
                 ))
 
+        # Complete the submission in the SAME transaction as
+        # its Income, client-credit, and Square financial writes.
+        # If anything fails, PostgreSQL rolls back the claim too.
+        cur.execute(
+            """
+            UPDATE income_save_submissions
+            SET income_id = %s,
+                completed_at = CURRENT_TIMESTAMP,
+                duplicate_override_confirmed = %s,
+                confirmed_by_user_id = %s
+            WHERE submission_token = %s::uuid
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND appointment_id = %s
+              AND income_id IS NULL
+            RETURNING submission_token
+            """,
+            (
+                new_income_id,
+                duplicate_override_confirmed,
+                duplicate_override_user_id,
+                submission_token,
+                spa_id,
+                business_unit_id,
+                appointment_id,
+            ),
+        )
+
+        if not cur.fetchone():
+            conn.rollback()
+            cur.close()
+            conn.close()
+            raise RuntimeError(
+                "Income submission could not be completed safely."
+            )
+
         conn.commit()
         cur.close()
         conn.close()
@@ -107796,11 +108080,34 @@ def add_income(appointment_id):
             date=selected_date
         ))
 
+    # Show recent recorded payments before another Income save.
+    # Payment amounts and methods are scoped to this workspace.
+    cur.execute(
+        """
+        SELECT
+            income_date,
+            total_amount,
+            payment_method,
+            income_type
+        FROM income
+        WHERE appointment_id = %s
+          AND spa_id = %s
+          AND business_unit_id = %s
+        ORDER BY income_id DESC
+        LIMIT 10
+        """,
+        (appointment_id, spa_id, business_unit_id),
+    )
+    existing_income_records = cur.fetchall()
+
     cur.close()
     conn.close()
 
     return render_template(
         "add_income.html",
+        security_csrf_token=_security_form_csrf_token(),
+        income_submission_token=str(uuid4()),
+        existing_income_records=existing_income_records,
         appt=appt,
         selected_date=selected_date,
         credit_processors=credit_processors,

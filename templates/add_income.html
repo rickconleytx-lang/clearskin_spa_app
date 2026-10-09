@@ -15,6 +15,66 @@
 <form method="POST">
     <input
         type="hidden"
+        name="security_csrf_token"
+        value="{{ security_csrf_token }}"
+    >
+    <input
+        type="hidden"
+        name="income_submission_token"
+        id="income_submission_token"
+        value="{{ income_submission_token }}"
+    >
+
+    {% if existing_income_records %}
+    <div
+        class="alert alert-warning"
+        role="alert"
+        style="border: 2px solid #c77700; padding: 15px; margin: 16px 0;"
+    >
+        <h3 style="margin-top: 0;">
+            Income Already Recorded for This Appointment
+        </h3>
+
+        <p>
+            This appointment already has recorded Income.
+            Review the payment history below before saving.
+            Do not enter the same payment again.
+        </p>
+
+        <ul>
+            {% for payment in existing_income_records %}
+            <li>
+                {{ payment[0] }} —
+                ${{ "{:,.2f}".format(payment[1] or 0) }}
+                — {{ payment[2] or "Payment method not specified" }}
+                ({{ payment[3] or "Income" }})
+            </li>
+            {% endfor %}
+        </ul>
+
+        <p>
+            <strong>
+                Only continue if you are recording a separate,
+                legitimate additional payment.
+            </strong>
+        </p>
+
+        <label for="record_another_payment">
+            <input
+                type="checkbox"
+                id="record_another_payment"
+                name="record_another_payment"
+                value="yes"
+                required
+            >
+            I reviewed the existing Income and confirm that
+            this is another payment, not a duplicate.
+        </label>
+    </div>
+    {% endif %}
+
+    <input
+        type="hidden"
         id="square_payment_id"
         name="square_payment_id"
         value=""
@@ -186,6 +246,43 @@ document.addEventListener("DOMContentLoaded", function () {
     const squarePaymentCandidates = document.getElementById("square_payment_candidates");
     const squarePaymentPreview = document.getElementById("square_payment_preview");
     const saveIncomeButton = document.getElementById("save_income_button");
+
+    // Browser-level duplicate submission protection.
+    // The server-side submission ledger remains authoritative.
+    const incomeForm = saveIncomeButton
+        ? saveIncomeButton.form
+        : null;
+
+    if (incomeForm && saveIncomeButton) {
+        let incomeSubmissionStarted = false;
+
+        incomeForm.addEventListener("submit", function (event) {
+            // Also protects keyboard submissions or a button that
+            // another UI handler might re-enable while saving.
+            if (incomeSubmissionStarted) {
+                event.preventDefault();
+                return;
+            }
+
+            // Preserve existing Square payment readiness checks.
+            if (saveIncomeButton.disabled) {
+                event.preventDefault();
+                return;
+            }
+
+            // Keep browser validation and required confirmations.
+            if (!incomeForm.checkValidity()) {
+                event.preventDefault();
+                incomeForm.reportValidity();
+                return;
+            }
+
+            incomeSubmissionStarted = true;
+            saveIncomeButton.disabled = true;
+            saveIncomeButton.textContent = "Saving Income...";
+            saveIncomeButton.setAttribute("aria-busy", "true");
+        });
+    }
 
     let squareReviewButtons = [];
     let squareConfirmedPaymentId = "";
