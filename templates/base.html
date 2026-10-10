@@ -608,7 +608,8 @@
 
         {% if (
             nav_access.can_view_employees
-            and "employees" in subscription_entitlements
+            or nav_access.can_view_employee_compensation
+            or nav_access.can_manage_employee_compensation
         ) %}
             {% include "partials/employees_menu.html" %}
         {% endif %}

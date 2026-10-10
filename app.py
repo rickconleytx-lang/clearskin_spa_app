@@ -93779,7 +93779,6 @@ def mark_birthday_offer_sent_disabled():
 @app.route("/employees")
 @login_required
 @spa_required
-@require_subscription_feature("employees")
 @require_workspace_permission("can_view_employees")
 def employees_home():
     spa_id = current_spa_id()
@@ -93860,7 +93859,6 @@ from datetime import date
 @app.route("/employee_pay_summary")
 @login_required
 @spa_required
-@require_subscription_feature("employees")
 @require_workspace_permission("can_view_employee_compensation")
 def employee_pay_summary():
     spa_id = current_spa_id()
@@ -93938,7 +93936,6 @@ def employee_pay_summary():
 @app.route("/add_employee_compensation", methods=["GET", "POST"])
 @login_required
 @spa_required
-@require_subscription_feature("employees")
 @require_workspace_permission("can_manage_employee_compensation")
 @require_psp_access("employees_compensation")
 def add_employee_compensation():
@@ -94229,7 +94226,6 @@ def add_employee_compensation():
 @app.route("/employee_admin")
 @login_required
 @spa_required
-@require_subscription_feature("employees")
 @require_workspace_permission("can_manage_employees")
 def employee_admin():
     spa_id = current_spa_id()
@@ -96528,7 +96524,6 @@ def get_employee_compensation_history_data(
 @app.route("/compensation_types")
 @login_required
 @spa_required
-@require_subscription_feature("employees")
 @require_workspace_permission("can_manage_employee_compensation")
 def compensation_types_report():
     spa_id = current_spa_id()
@@ -96568,7 +96563,6 @@ def compensation_types_report():
 @app.route("/add_compensation_type", methods=["GET", "POST"])
 @login_required
 @spa_required
-@require_subscription_feature("employees")
 @require_workspace_permission("can_manage_employee_compensation")
 def add_compensation_type():
     spa_id = current_spa_id()
@@ -96626,7 +96620,6 @@ def add_compensation_type():
 @app.route("/edit_compensation_type/<int:compensation_type_id>", methods=["GET", "POST"])
 @login_required
 @spa_required
-@require_subscription_feature("employees")
 @require_workspace_permission("can_manage_employee_compensation")
 def edit_compensation_type(compensation_type_id):
     spa_id = current_spa_id()
@@ -96704,7 +96697,6 @@ def edit_compensation_type(compensation_type_id):
 @app.route("/toggle_compensation_type/<int:compensation_type_id>", methods=["POST"])
 @login_required
 @spa_required
-@require_subscription_feature("employees")
 @require_workspace_permission("can_manage_employee_compensation")
 def toggle_compensation_type(compensation_type_id):
     spa_id = current_spa_id()
@@ -96744,7 +96736,6 @@ def toggle_compensation_type(compensation_type_id):
 @app.route("/employee_compensation_report")
 @login_required
 @spa_required
-@require_subscription_feature("employees")
 @require_workspace_permission("can_view_employee_compensation")
 @require_psp_access("employees_compensation")
 def employee_compensation_report():
@@ -96980,7 +96971,6 @@ def employee_compensation_report():
 @app.route("/employee_compensation_history")
 @login_required
 @spa_required
-@require_subscription_feature("employees")
 @require_workspace_permission("can_view_employee_compensation")
 @require_psp_access("employees_compensation")
 def employee_compensation_history():
@@ -97086,7 +97076,6 @@ def employee_compensation_history():
 @app.route("/delete_employee_compensation/<int:compensation_id>", methods=["POST"])
 @login_required
 @spa_required
-@require_subscription_feature("employees")
 @require_workspace_permission("can_manage_employee_compensation")
 @require_psp_access("employees_compensation")
 def delete_employee_compensation(compensation_id):
@@ -97205,7 +97194,6 @@ def delete_employee_compensation(compensation_id):
 @app.route("/edit_employee_compensation/<int:compensation_id>", methods=["GET", "POST"])
 @login_required
 @spa_required
-@require_subscription_feature("employees")
 @require_workspace_permission("can_manage_employee_compensation")
 @require_psp_access("employees_compensation")
 def edit_employee_compensation(compensation_id):
@@ -97601,7 +97589,6 @@ def edit_employee_compensation(compensation_id):
 @app.route("/export_employee_compensation_history_csv")
 @login_required
 @spa_required
-@require_subscription_feature("employees")
 @require_workspace_permission("can_view_employee_compensation")
 @require_psp_access("employees_compensation")
 def export_employee_compensation_history_csv():
@@ -97689,7 +97676,6 @@ def export_employee_compensation_history_csv():
 @app.route("/export_employee_compensation_history_excel")
 @login_required
 @spa_required
-@require_subscription_feature("employees")
 @require_workspace_permission("can_view_employee_compensation")
 @require_psp_access("employees_compensation")
 def export_employee_compensation_history_excel():
@@ -97778,7 +97764,6 @@ def export_employee_compensation_history_excel():
 @app.route("/employees/add", methods=["GET", "POST"])
 @login_required
 @spa_required
-@require_subscription_feature("employees")
 @require_workspace_permission("can_manage_employees")
 def add_employee():
     spa_id = current_spa_id()
@@ -98047,7 +98032,6 @@ def add_employee():
 @app.route("/employees/edit/<int:employee_id>", methods=["GET", "POST"])
 @login_required
 @spa_required
-@require_subscription_feature("employees")
 @require_workspace_permission("can_manage_employees")
 def edit_employee(employee_id):
     spa_id = current_spa_id()
@@ -98412,7 +98396,6 @@ def edit_employee(employee_id):
 @app.route("/employees/archive/<int:employee_id>", methods=["POST"])
 @login_required
 @spa_required
-@require_subscription_feature("employees")
 @require_workspace_permission("can_manage_employees")
 def archive_employee(employee_id):
     spa_id = current_spa_id()
@@ -98604,7 +98587,6 @@ def archive_employee(employee_id):
 @app.route("/employees/reactivate/<int:employee_id>", methods=["POST"])
 @login_required
 @spa_required
-@require_subscription_feature("employees")
 @require_workspace_permission("can_manage_employees")
 def reactivate_employee(employee_id):
     spa_id = current_spa_id()
@@ -98754,7 +98736,6 @@ def reactivate_employee(employee_id):
 @app.route("/employees/<int:employee_id>")
 @login_required
 @spa_required
-@require_subscription_feature("employees")
 @require_workspace_permission("can_view_employees")
 def employee_command_center(employee_id):
     spa_id = current_spa_id()

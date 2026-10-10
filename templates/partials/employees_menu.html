@@ -30,10 +30,7 @@
          style="display:none;">
 
 
-        {% if (
-            nav_access.can_view_employees
-            and "employees" in subscription_entitlements
-        ) %}
+        {% if nav_access.can_view_employees %}
 
             <!-- Employees -->
             <div class="app-menu-submenu-section">
@@ -69,11 +66,8 @@
 
         <!-- Compensation -->
         {% if (
-            "employees" in subscription_entitlements
-            and (
-                nav_access.can_view_employee_compensation
-                or nav_access.can_manage_employee_compensation
-            )
+            nav_access.can_view_employee_compensation
+            or nav_access.can_manage_employee_compensation
         ) %}
             <div class="app-menu-submenu-section">
 
