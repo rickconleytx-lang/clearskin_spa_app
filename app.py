@@ -28190,7 +28190,7 @@ def _employee_access_rate_limit_state(
             session_locked_until,
             source_locked_until,
         )
-        if value is not None and value > now
+        if value is not None
     ]
 
     locked_until = (
