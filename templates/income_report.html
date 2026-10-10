@@ -404,6 +404,10 @@
 
                                 {% else %}
 
+                                    <div class="muted-text" style="font-size:0.78rem; margin-bottom:4px;">
+                                        Income #{{ row.income_id }}
+                                    </div>
+
                                     <a
                                         href="{{ url_for(
                                             'edit_income',
