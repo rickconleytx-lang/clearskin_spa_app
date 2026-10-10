@@ -29449,6 +29449,7 @@ def _end_employee_access_secure_session(
 
 
 PSP_ACCESS_AREA_LABELS = {
+    "employee_management": "Employee Management",
     "employees_compensation": "Employee Compensation",
     "financial_management": "Financial Management",
     "add_income": "Add Income",
@@ -93780,6 +93781,7 @@ def mark_birthday_offer_sent_disabled():
 @login_required
 @spa_required
 @require_workspace_permission("can_view_employees")
+@require_psp_access("employee_management")
 def employees_home():
     spa_id = current_spa_id()
 
@@ -93860,6 +93862,7 @@ from datetime import date
 @login_required
 @spa_required
 @require_workspace_permission("can_view_employee_compensation")
+@require_psp_access("employees_compensation")
 def employee_pay_summary():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -94227,6 +94230,7 @@ def add_employee_compensation():
 @login_required
 @spa_required
 @require_workspace_permission("can_manage_employees")
+@require_psp_access("employee_management")
 def employee_admin():
     spa_id = current_spa_id()
 
@@ -97765,6 +97769,7 @@ def export_employee_compensation_history_excel():
 @login_required
 @spa_required
 @require_workspace_permission("can_manage_employees")
+@require_psp_access("employee_management")
 def add_employee():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -98033,6 +98038,7 @@ def add_employee():
 @login_required
 @spa_required
 @require_workspace_permission("can_manage_employees")
+@require_psp_access("employee_management")
 def edit_employee(employee_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -98397,6 +98403,7 @@ def edit_employee(employee_id):
 @login_required
 @spa_required
 @require_workspace_permission("can_manage_employees")
+@require_psp_access("employee_management")
 def archive_employee(employee_id):
     spa_id = current_spa_id()
     user_id = session.get("user_id")
@@ -98588,6 +98595,7 @@ def archive_employee(employee_id):
 @login_required
 @spa_required
 @require_workspace_permission("can_manage_employees")
+@require_psp_access("employee_management")
 def reactivate_employee(employee_id):
     spa_id = current_spa_id()
     user_id = session.get("user_id")
@@ -98737,6 +98745,7 @@ def reactivate_employee(employee_id):
 @login_required
 @spa_required
 @require_workspace_permission("can_view_employees")
+@require_psp_access("employee_management")
 def employee_command_center(employee_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()

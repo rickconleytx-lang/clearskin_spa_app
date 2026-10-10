@@ -67,6 +67,7 @@ DEFAULT_CLIENT_STATUSES = (
 
 
 DEFAULT_PSP_ACCESS_AREA_LEVELS = (
+    ("employee_management", 1),
     ("employees_compensation", 1),
     ("financial_management", 1),
     ("add_income", 1),
@@ -534,7 +535,7 @@ def seed_psp_access_area_defaults(
     business_unit_id,
 ):
     """
-    Seed the seven restricted PSP Access Areas for one workspace.
+    Seed the eight restricted PSP Access Areas for one workspace.
 
     New workspaces begin conservatively at Access Level 1, matching
     the original psp_access_levels_v1 migration. The operation is
