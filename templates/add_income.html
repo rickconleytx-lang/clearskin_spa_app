@@ -73,6 +73,34 @@
     </div>
     {% endif %}
 
+    {% if archived_income_records %}
+    <details style="margin: 12px 0 18px;">
+        <summary style="cursor: pointer;">
+            Archived Income History
+            (not counted as active payments)
+        </summary>
+
+        <p>
+            These entries were archived for correction or
+            review. They remain in PSP's financial history
+            but do not count as active payments.
+        </p>
+
+        <ul>
+            {% for payment in archived_income_records %}
+            <li>
+                {{ payment[0] }} —
+                ${{ "{:,.2f}".format(payment[1] or 0) }}
+                — {{ payment[2] or "Payment method not specified" }}
+                ({{ payment[3] or "Income" }})
+                — Archived: {{ payment[5] }}
+                — Reason: {{ payment[4] }}
+            </li>
+            {% endfor %}
+        </ul>
+    </details>
+    {% endif %}
+
     <input
         type="hidden"
         id="square_payment_id"

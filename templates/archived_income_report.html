@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+
+{% block title %}Archived Income{% endblock %}
+
+{% block content %}
+<div class="report-page">
+    <div class="report-header">
+        <div>
+            <h1>Archived Income</h1>
+            <p class="report-subtitle">
+                Read-only history of voided financial entries.
+                These records do not count toward active Income.
+            </p>
+        </div>
+        <a href="{{ url_for('income_report') }}"
+           class="tool-pill tool-pill-small no-print">
+            Back to Income Report
+        </a>
+    </div>
+
+    <div class="report-filter-card no-print">
+        <form method="GET"
+              action="{{ url_for('archived_income_report') }}">
+            <label for="start_date">Original Income From</label>
+            <input type="date" name="start_date"
+                   id="start_date" value="{{ start_date }}">
+
+            <label for="end_date">Through</label>
+            <input type="date" name="end_date"
+                   id="end_date" value="{{ end_date }}">
+
+            <button class="tool-pill tool-pill-small"
+                    type="submit">
+                Run Report
+            </button>
+            <a class="tool-pill tool-pill-small"
+               href="{{ url_for('archived_income_report') }}">
+                Reset
+            </a>
+        </form>
+    </div>
+
+    <p><strong>{{ total }}</strong> archived Income
+       record(s) match your filters.</p>
+
+    {% if rows %}
+    <div style="overflow-x:auto;">
+        <table class="report-table"
+               style="width:100%; border-collapse:collapse;">
+            <thead>
+                <tr>
+                    <th>Income ID</th>
+                    <th>Original Date</th>
+                    <th>Client</th>
+                    <th>Payment</th>
+                    <th>Original Amount</th>
+                    <th>Archived At</th>
+                    <th>Archived By</th>
+                    <th>Reason / Details</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                <tr>
+                    <td>{{ row.income_id }}</td>
+                    <td>{{ row.income_date }}</td>
+                    <td>{{ row.client_name }}</td>
+                    <td>{{ row.payment_method or "—" }}</td>
+                    <td>${{ "{:,.2f}".format(
+                        row.total_amount or 0
+                    ) }}</td>
+                    <td>{{ row.voided_at }}</td>
+                    <td>{{ row.archived_by }}</td>
+                    <td>
+                        <strong>{{ row.void_reason }}</strong>
+                        <details>
+                            <summary>Original transaction</summary>
+                            <p>
+                                Appointment:
+                                {{ row.appointment_id or "—" }}
+                            </p>
+                            <p>
+                                Type: {{ row.income_type or "—" }}
+                            </p>
+                            <p>
+                                Description:
+                                {{ row.description or "—" }}
+                            </p>
+                            <p>
+                                Service:
+                                ${{ "{:,.2f}".format(
+                                    row.service_amount or 0
+                                ) }}
+                                | Retail:
+                                ${{ "{:,.2f}".format(
+                                    row.retail_amount or 0
+                                ) }}
+                                | PeachPOS:
+                                ${{ "{:,.2f}".format(
+                                    row.pos_amount or 0
+                                ) }}
+                            </p>
+                            <p>
+                                Tax:
+                                ${{ "{:,.2f}".format(
+                                    row.tax_amount or 0
+                                ) }}
+                                | Tip:
+                                ${{ "{:,.2f}".format(
+                                    row.tip_amount or 0
+                                ) }}
+                            </p>
+                            <p>
+                                Processor Payment ID:
+                                {{ row.processor_payment_id or "—" }}
+                            </p>
+                            <p>Notes: {{ row.notes or "—" }}</p>
+                            <p>
+                                Archived by User ID:
+                                {{ row.voided_by_user_id }}
+                            </p>
+                        </details>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+        <p>No archived Income records found.</p>
+    {% endif %}
+
+    <div class="page-tool-pills no-print"
+         style="margin-top:16px;">
+        {% if page > 1 %}
+        <a class="tool-pill tool-pill-small"
+           href="{{ url_for(
+               'archived_income_report',
+               start_date=start_date,
+               end_date=end_date,
+               page=page - 1
+           ) }}">Previous</a>
+        {% endif %}
+
+        <span>Page {{ page }} of {{ pages }}</span>
+
+        {% if page < pages %}
+        <a class="tool-pill tool-pill-small"
+           href="{{ url_for(
+               'archived_income_report',
+               start_date=start_date,
+               end_date=end_date,
+               page=page + 1
+           ) }}">Next</a>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

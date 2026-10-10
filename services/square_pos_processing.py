@@ -595,6 +595,7 @@ def process_square_pos_payment(
                 WHERE income_id = %s
                   AND spa_id = %s
                   AND business_unit_id = %s
+                  AND voided_at IS NULL
                 FOR UPDATE
             """, (
                 income_id,
@@ -709,6 +710,7 @@ def process_square_pos_payment(
                   AND business_unit_id = %s
                   AND income_type = 'PeachPOS'
                   AND processor_payment_id = %s
+                  AND voided_at IS NULL
             """, (
                 processing_fee_amount,
                 net_received,

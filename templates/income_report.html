@@ -25,6 +25,13 @@
         </div>
 
         <div class="report-actions no-print">
+                <a
+                    href="{{ url_for('archived_income_report') }}"
+                    class="tool-pill tool-pill-small"
+                >
+                    Archived Income
+                </a>
+
             <button class="btn btn-print" onclick="window.print()">🖨️ Print Report</button>
         </div>
     </div>
@@ -407,38 +414,68 @@
                                         Edit
                                     </a>
 
-                                    <form
-                                        method="POST"
-                                        action="{{ url_for(
-                                            'delete_income',
-                                            income_id=row.income_id
-                                        ) }}"
-                                        style="display:inline;"
-                                        onsubmit="return confirm('Are you sure you want to delete this income record?');"
-                                    >
-                                        <input
-                                            type="hidden"
-                                            name="start_date"
-                                            value="{{ start_date }}"
-                                        >
-                                        <input
-                                            type="hidden"
-                                            name="end_date"
-                                            value="{{ end_date }}"
-                                        >
-                                        <input
-                                            type="hidden"
-                                            name="income_type"
-                                            value="{{ income_type }}"
-                                        >
-
-                                        <button
-                                            type="submit"
+                                    <details style="display:inline-block; vertical-align:top;">
+                                        <summary
                                             class="btn btn-small"
+                                            style="cursor:pointer;"
                                         >
-                                            Delete
-                                        </button>
-                                    </form>
+                                            Archive
+                                        </summary>
+
+                                        <form
+                                            method="POST"
+                                            action="{{ url_for(
+                                                'delete_income',
+                                                income_id=row.income_id
+                                            ) }}"
+                                            style="margin-top:8px;"
+                                            onsubmit="return confirm('Archive this Income? It will be excluded from active financial reporting. The original record and audit history will be preserved. This does not refund or reverse a payment.');"
+                                        >
+                                            <input
+                                                type="hidden"
+                                                name="security_csrf_token"
+                                                value="{{ security_csrf_token }}"
+                                            >
+                                            <input
+                                                type="hidden"
+                                                name="start_date"
+                                                value="{{ start_date }}"
+                                            >
+                                            <input
+                                                type="hidden"
+                                                name="end_date"
+                                                value="{{ end_date }}"
+                                            >
+                                            <input
+                                                type="hidden"
+                                                name="income_type"
+                                                value="{{ income_type }}"
+                                            >
+
+                                            <label for="archive_reason_{{ row.income_id }}">
+                                                Reason for Archive
+                                            </label>
+
+                                            <input
+                                                type="text"
+                                                id="archive_reason_{{ row.income_id }}"
+                                                name="archive_reason"
+                                                placeholder="Explain why this Income is incorrect"
+                                                aria-label="Reason for archiving Income"
+                                                required
+                                                minlength="10"
+                                                maxlength="500"
+                                                style="display:block; width:260px; max-width:100%; margin:5px 0;"
+                                            >
+
+                                            <button
+                                                type="submit"
+                                                class="btn btn-small"
+                                            >
+                                                Confirm Archive
+                                            </button>
+                                        </form>
+                                    </details>
 
                                 {% endif %}
                             </td>

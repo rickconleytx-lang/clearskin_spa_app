@@ -37484,6 +37484,7 @@ def _get_peachpos_sales_summary(
         WHERE spa_id = %s
           AND business_unit_id = %s
           AND income_type = 'PeachPOS'
+          AND voided_at IS NULL
     """, (
         today,
         week_start,
@@ -39509,6 +39510,7 @@ def get_accounting_ytd_summary(spa_id):
         FROM income
         WHERE spa_id = %s
           AND income_date BETWEEN %s AND %s
+          AND voided_at IS NULL
     """, (spa_id, year_start, today))
 
     ytd_income = cur.fetchone()[0]
@@ -53363,6 +53365,7 @@ def _build_square_reconciliation_state(
                         WHERE i.spa_id = %s
                           AND i.business_unit_id = %s
                           AND i.appointment_id = %s
+                          AND i.voided_at IS NULL
                         ORDER BY i.income_id DESC
                     """, (
                         spa_id,
@@ -55581,6 +55584,7 @@ def square_reconcile_match_appointment():
             FROM appointments a
             LEFT JOIN income i
               ON i.appointment_id = a.appointment_id
+              AND i.voided_at IS NULL
              AND i.spa_id = a.spa_id
              AND i.business_unit_id =
                     a.business_unit_id
@@ -56049,6 +56053,7 @@ def square_reconcile_review_existing_income():
             WHERE i.spa_id = %s
               AND i.business_unit_id = %s
               AND i.appointment_id = %s
+              AND i.voided_at IS NULL
             ORDER BY i.income_id DESC
         """, (
             spa_id,
@@ -56949,6 +56954,7 @@ def square_reconcile_link_existing_income():
             WHERE i.spa_id = %s
               AND i.business_unit_id = %s
               AND i.appointment_id = %s
+              AND i.voided_at IS NULL
             ORDER BY i.income_id DESC
             FOR UPDATE OF i
         """, (
@@ -57399,6 +57405,7 @@ def square_reconcile_link_existing_income():
               AND business_unit_id = %s
               AND appointment_id = %s
               AND client_id = %s
+              AND voided_at IS NULL
               AND (
                     processor_payment_id IS NULL
                     OR BTRIM(
@@ -91770,6 +91777,7 @@ def income_home():
         FROM income
         WHERE spa_id = %s
           AND business_unit_id = %s
+          AND voided_at IS NULL
     """, (
         spa_id,
         business_unit_id
@@ -91806,6 +91814,7 @@ def income_home():
            AND i.business_unit_id = c.business_unit_id
         WHERE i.spa_id = %s
           AND i.business_unit_id = %s
+          AND voided_at IS NULL
         ORDER BY i.income_date DESC, i.income_id DESC
     """, (
         spa_id,
@@ -93889,6 +93898,7 @@ def employee_pay_summary():
            AND i.spa_id = e.spa_id
            AND i.business_unit_id = %s
            AND i.income_date BETWEEN %s AND %s
+           AND i.voided_at IS NULL
         WHERE e.spa_id = %s
         GROUP BY e.employee_id, e.first_name, e.last_name
         ORDER BY e.last_name, e.first_name
@@ -96782,6 +96792,7 @@ def employee_compensation_report():
         WHERE spa_id = %s
           AND business_unit_id = %s
           AND income_date BETWEEN %s AND %s
+          AND voided_at IS NULL
     """, (
         spa_id,
         business_unit_id,
@@ -96864,6 +96875,7 @@ def employee_compensation_report():
             WHERE spa_id = %s
               AND business_unit_id = %s
               AND income_date BETWEEN %s AND %s
+              AND voided_at IS NULL
             GROUP BY employee_id
         ) inc ON e.employee_id = inc.employee_id
 
@@ -101929,6 +101941,7 @@ def expense_report():
         WHERE i.spa_id = %s
         AND i.business_unit_id = %s
         AND COALESCE(i.processing_fee_amount, 0) <> 0
+        AND i.voided_at IS NULL
 """
 
     processor_fee_params = [
@@ -106638,6 +106651,7 @@ def add_income(appointment_id):
             WHERE appointment_id = %s
               AND spa_id = %s
               AND business_unit_id = %s
+              AND voided_at IS NULL
             LIMIT 1
             """,
             (appointment_id, spa_id, business_unit_id),
@@ -108093,12 +108107,36 @@ def add_income(appointment_id):
         WHERE appointment_id = %s
           AND spa_id = %s
           AND business_unit_id = %s
+          AND voided_at IS NULL
         ORDER BY income_id DESC
         LIMIT 10
         """,
         (appointment_id, spa_id, business_unit_id),
     )
     existing_income_records = cur.fetchall()
+
+    # Archived payments remain visible for historical review,
+    # but must not trigger the additional-payment safeguard.
+    cur.execute(
+        """
+        SELECT
+            income_date,
+            total_amount,
+            payment_method,
+            income_type,
+            void_reason,
+            voided_at
+        FROM income
+        WHERE appointment_id = %s
+          AND spa_id = %s
+          AND business_unit_id = %s
+          AND voided_at IS NOT NULL
+        ORDER BY voided_at DESC, income_id DESC
+        LIMIT 10
+        """,
+        (appointment_id, spa_id, business_unit_id),
+    )
+    archived_income_records = cur.fetchall()
 
     cur.close()
     conn.close()
@@ -108108,6 +108146,7 @@ def add_income(appointment_id):
         security_csrf_token=_security_form_csrf_token(),
         income_submission_token=str(uuid4()),
         existing_income_records=existing_income_records,
+        archived_income_records=archived_income_records,
         appt=appt,
         selected_date=selected_date,
         credit_processors=credit_processors,
@@ -109377,6 +109416,7 @@ def edit_income(income_id):
         WHERE income_id = %s
           AND spa_id = %s
           AND business_unit_id = %s
+          AND voided_at IS NULL
         LIMIT 1
     """, (
         income_id,
@@ -109548,6 +109588,7 @@ def edit_income(income_id):
             WHERE income_id = %s
               AND spa_id = %s
               AND business_unit_id = %s
+              AND voided_at IS NULL
         """, (
             income_date,
             income_type,
@@ -109732,6 +109773,7 @@ def income_report_csv():
         WHERE i.income_date BETWEEN %s AND %s
           AND i.spa_id = %s
           AND i.business_unit_id = %s
+          AND i.voided_at IS NULL
     """
     params = [
         start_date,
@@ -109851,6 +109893,7 @@ def income_report_excel():
         WHERE i.income_date BETWEEN %s AND %s
           AND i.spa_id = %s
           AND i.business_unit_id = %s
+          AND i.voided_at IS NULL
     """
     params = [
         start_date,
@@ -109947,67 +109990,237 @@ def income_report_excel():
 @spa_required
 @require_psp_access("financial_management")
 def delete_income(income_id):
+    """Archive Income without deleting the financial history."""
+    import json
+
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
-
-    start_date = request.form.get("start_date", "").strip()
-    end_date = request.form.get("end_date", "").strip()
-    income_type = request.form.get("income_type", "").strip()
+    user_id = session.get("user_id")
 
     redirect_args = {
-        "start_date": start_date,
-        "end_date": end_date,
-        "income_type": income_type
+        "start_date": request.form.get("start_date", "").strip(),
+        "end_date": request.form.get("end_date", "").strip(),
+        "income_type": request.form.get("income_type", "").strip(),
     }
 
+    submitted_token = request.form.get(
+        "security_csrf_token", ""
+    )
+    if not _security_form_csrf_valid(submitted_token):
+        abort(400)
+
+    if not user_id:
+        abort(403)
+
     if business_unit_id is None:
+        flash("A valid Provider Workspace is required.", "error")
+        return redirect(url_for("income_report", **redirect_args))
+
+    reason = request.form.get("archive_reason", "").strip()
+
+    if not 10 <= len(reason) <= 500:
         flash(
-            "A valid Provider Workspace is required "
-            "to delete income.",
-            "error"
+            "An archive reason of 10 to 500 characters is required.",
+            "error",
         )
-        return redirect(
-            url_for("income_report", **redirect_args)
-        )
+        return redirect(url_for("income_report", **redirect_args))
 
     conn = get_db_connection()
-    cur = conn.cursor()
 
-    cur.execute("""
-        DELETE FROM income
-        WHERE income_id = %s
-          AND spa_id = %s
-          AND business_unit_id = %s
-    """, (
-        income_id,
-        spa_id,
-        business_unit_id
-    ))
+    try:
+        cur = conn.cursor()
 
-    if cur.rowcount != 1:
+        cur.execute("""
+            SELECT
+                income_id,
+                client_id,
+                appointment_id,
+                income_date,
+                income_type,
+                payment_method,
+                total_amount,
+                processor_payment_id,
+                voided_at
+            FROM income
+            WHERE income_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+            FOR UPDATE
+        """, (income_id, spa_id, business_unit_id))
+
+        record = cur.fetchone()
+
+        if not record:
+            conn.rollback()
+            flash("Income record not found.", "error")
+            return redirect(
+                url_for("income_report", **redirect_args)
+            )
+
+        (
+            record_id,
+            client_id,
+            appointment_id,
+            income_date,
+            income_type,
+            payment_method,
+            total_amount,
+            processor_payment_id,
+            voided_at,
+        ) = record
+
+        if voided_at is not None:
+            conn.rollback()
+            flash("This Income is already archived.", "error")
+            return redirect(
+                url_for("income_report", **redirect_args)
+            )
+
+        cur.execute("""
+            SELECT
+                EXISTS (
+                    SELECT 1
+                    FROM square_payments
+                    WHERE income_id = %s
+                      AND spa_id = %s
+                      AND business_unit_id = %s
+                ),
+                EXISTS (
+                    SELECT 1
+                    FROM inventory_movements
+                    WHERE income_id = %s
+                      AND spa_id = %s
+                      AND business_unit_id = %s
+                )
+        """, (
+            income_id, spa_id, business_unit_id,
+            income_id, spa_id, business_unit_id,
+        ))
+
+        square_linked, inventory_linked = cur.fetchone()
+
+        credit_note = (
+            f"Client credit applied to income for appointment "
+            f"{appointment_id}."
+            if appointment_id is not None
+            else None
+        )
+
+        cur.execute("""
+            SELECT EXISTS (
+                SELECT 1
+                FROM client_credit_transactions
+                WHERE spa_id = %s
+                  AND business_unit_id = %s
+                  AND client_id = %s
+                  AND LOWER(COALESCE(source_type, '')) = 'income'
+                  AND (
+                      source_id = %s
+                      OR (
+                          source_id IS NULL
+                          AND notes = %s
+                      )
+                  )
+            )
+        """, (
+            spa_id,
+            business_unit_id,
+            client_id,
+            income_id,
+            credit_note,
+        ))
+
+        credit_linked = cur.fetchone()[0]
+
+        if (
+            square_linked
+            or inventory_linked
+            or credit_linked
+            or str(processor_payment_id or "").strip()
+        ):
+            conn.rollback()
+            flash(
+                "This Income has linked payment, inventory, "
+                "or client-credit activity and cannot be "
+                "archived through the standard workflow.",
+                "error",
+            )
+            return redirect(
+                url_for("income_report", **redirect_args)
+            )
+
+        old_state = {
+            "income_id": record_id,
+            "client_id": client_id,
+            "appointment_id": appointment_id,
+            "income_date": str(income_date),
+            "income_type": income_type,
+            "payment_method": payment_method,
+            "total_amount": str(total_amount),
+            "status": "active",
+        }
+
+        cur.execute("""
+            UPDATE income
+            SET
+                voided_at = clock_timestamp(),
+                voided_by_user_id = %s,
+                void_reason = %s
+            WHERE income_id = %s
+              AND spa_id = %s
+              AND business_unit_id = %s
+              AND voided_at IS NULL
+            RETURNING voided_at
+        """, (
+            user_id,
+            reason,
+            income_id,
+            spa_id,
+            business_unit_id,
+        ))
+
+        updated = cur.fetchone()
+        if updated is None:
+            raise RuntimeError(
+                "Income archive state changed unexpectedly."
+            )
+
+        archived_at = updated[0]
+
+        log_audit(
+            cur,
+            spa_id=spa_id,
+            user_id=user_id,
+            action_type="income_archived",
+            table_name="income",
+            record_id=income_id,
+            old_value=json.dumps(old_state, sort_keys=True),
+            new_value=json.dumps({
+                "status": "voided",
+                "voided_at": archived_at.isoformat(),
+                "voided_by_user_id": user_id,
+                "void_reason": reason,
+            }, sort_keys=True),
+            notes=reason,
+            business_unit_id=business_unit_id,
+            use_clock_timestamp=True,
+        )
+
+        conn.commit()
+
+    except Exception:
         conn.rollback()
-        cur.close()
+        raise
+
+    finally:
         conn.close()
 
-        flash(
-            "Income record was not found in this "
-            "Provider Workspace.",
-            "error"
-        )
-
-        return redirect(
-            url_for("income_report", **redirect_args)
-        )
-
-    conn.commit()
-    cur.close()
-    conn.close()
-
-    flash("Income record deleted.", "success")
-
-    return redirect(
-        url_for("income_report", **redirect_args)
+    flash(
+        "Income archived. The original record and audit "
+        "history have been preserved.",
+        "success",
     )
+    return redirect(url_for("income_report", **redirect_args))
 
 
 
@@ -110027,6 +110240,154 @@ def delete_income(income_id):
 from datetime import date
 from flask import render_template, request
 from db import get_db_connection
+
+
+@app.route("/income_report/archived", methods=["GET"])
+@login_required
+@spa_required
+@require_psp_access("financial_management")
+def archived_income_report():
+    """Read-only history of voided Income in this workspace."""
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None:
+        flash("A valid Provider Workspace is required.", "error")
+        return redirect(url_for("income_report"))
+
+    start_date = request.args.get("start_date", "").strip()
+    end_date = request.args.get("end_date", "").strip()
+
+    try:
+        if start_date:
+            date.fromisoformat(start_date)
+        if end_date:
+            date.fromisoformat(end_date)
+    except ValueError:
+        abort(400)
+
+    if start_date and end_date and start_date > end_date:
+        abort(400)
+
+    page = max(1, request.args.get("page", 1, type=int))
+    page_size = 50
+
+    filters = [
+        "i.spa_id = %s",
+        "i.business_unit_id = %s",
+        "i.voided_at IS NOT NULL",
+    ]
+    params = [spa_id, business_unit_id]
+
+    if start_date:
+        filters.append("i.income_date >= %s")
+        params.append(start_date)
+
+    if end_date:
+        filters.append("i.income_date <= %s")
+        params.append(end_date)
+
+    where_sql = " AND ".join(filters)
+
+    conn = get_db_connection()
+
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                f"""
+                SELECT COUNT(*) AS total
+                FROM income i
+                WHERE {where_sql}
+                """,
+                tuple(params),
+            )
+            total = cur.fetchone()["total"]
+
+            pages = max(
+                1,
+                (total + page_size - 1) // page_size,
+            )
+            page = min(page, pages)
+
+            cur.execute(
+                f"""
+                SELECT
+                    i.income_id,
+                    i.income_date,
+                    i.appointment_id,
+                    i.income_type,
+                    i.description,
+                    i.payment_method,
+                    i.total_amount,
+                    i.service_amount,
+                    i.retail_amount,
+                    i.pos_amount,
+                    i.tax_amount,
+                    i.tip_amount,
+                    i.processor_payment_id,
+                    i.notes,
+                    i.voided_at,
+                    i.voided_by_user_id,
+                    i.void_reason,
+                    COALESCE(
+                        NULLIF(
+                            BTRIM(CONCAT_WS(
+                                ' ',
+                                c.first_name,
+                                c.last_name
+                            )),
+                            ''
+                        ),
+                        'No Client'
+                    ) AS client_name,
+                    COALESCE(
+                        NULLIF(
+                            BTRIM(CONCAT_WS(
+                                ' ',
+                                u.first_name,
+                                u.last_name
+                            )),
+                            ''
+                        ),
+                        NULLIF(u.username, ''),
+                        'User #' ||
+                            i.voided_by_user_id::text
+                    ) AS archived_by
+                FROM income i
+                LEFT JOIN clients c
+                    ON c.client_id = i.client_id
+                   AND c.spa_id = i.spa_id
+                   AND c.business_unit_id =
+                       i.business_unit_id
+                LEFT JOIN users u
+                    ON u.user_id = i.voided_by_user_id
+                   AND u.spa_id = i.spa_id
+                WHERE {where_sql}
+                ORDER BY
+                    i.voided_at DESC,
+                    i.income_id DESC
+                LIMIT %s OFFSET %s
+                """,
+                tuple(params) + (
+                    page_size,
+                    (page - 1) * page_size,
+                ),
+            )
+            rows = cur.fetchall()
+
+    finally:
+        conn.rollback()
+        conn.close()
+
+    return render_template(
+        "archived_income_report.html",
+        rows=rows,
+        total=total,
+        page=page,
+        pages=pages,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
 
 @app.route("/income_report")
@@ -110061,6 +110422,7 @@ def income_report():
         FROM income
         WHERE spa_id = %s
           AND business_unit_id = %s
+          AND voided_at IS NULL
           AND income_type IS NOT NULL
           AND income_type <> ''
         ORDER BY income_type
@@ -110076,6 +110438,7 @@ def income_report():
         WHERE income_date BETWEEN %s AND %s
           AND spa_id = %s
           AND business_unit_id = %s
+          AND voided_at IS NULL
     """
     params = [
         start_date,
@@ -110093,6 +110456,7 @@ def income_report():
         WHERE i.income_date BETWEEN %s AND %s
           AND i.spa_id = %s
           AND i.business_unit_id = %s
+          AND i.voided_at IS NULL
     """
     params_i = [
         start_date,
@@ -110121,7 +110485,7 @@ def income_report():
         FROM income
         {filter_sql}
     """, params)
-    summary = cur.fetchone()
+    financial_summary = cur.fetchone()
 
     # Income type breakdown
     cur.execute(f"""
@@ -110403,11 +110767,12 @@ def income_report():
         end_date=end_date,
         income_type=income_type,
         income_type_options=income_type_options,
-        summary=summary,
+        summary=financial_summary,
         income_type_breakdown=income_type_breakdown,
         payment_breakdown=payment_breakdown,
         processor_breakdown=processor_breakdown,
-        income_rows=income_rows
+        income_rows=income_rows,
+        security_csrf_token=_security_form_csrf_token(),
     )
 
 
@@ -110525,6 +110890,7 @@ def peachpos_income_report():
             WHERE i.spa_id = %s
               AND i.business_unit_id = %s
               AND i.income_type = 'PeachPOS'
+              AND i.voided_at IS NULL
               AND i.income_date BETWEEN %s AND %s
             ORDER BY
                 COALESCE(
@@ -110556,6 +110922,7 @@ def peachpos_income_report():
             WHERE spa_id = %s
               AND business_unit_id = %s
               AND income_type = 'PeachPOS'
+              AND voided_at IS NULL
               AND income_date BETWEEN %s AND %s
         """, (
             spa_id,
@@ -110713,6 +111080,7 @@ def peachpos_income_csv():
             WHERE i.spa_id = %s
               AND i.business_unit_id = %s
               AND i.income_type = 'PeachPOS'
+              AND i.voided_at IS NULL
               AND i.income_date BETWEEN %s AND %s
             ORDER BY
                 COALESCE(
@@ -110889,6 +111257,7 @@ def peachpos_income_excel():
             WHERE i.spa_id = %s
               AND i.business_unit_id = %s
               AND i.income_type = 'PeachPOS'
+              AND i.voided_at IS NULL
               AND i.income_date BETWEEN %s AND %s
             ORDER BY
                 COALESCE(
@@ -113456,6 +113825,7 @@ def dashboard():
         FROM income
         WHERE spa_id = %s
           AND income_date = %s
+          AND voided_at IS NULL
     """, (spa_id, today))
     revenue_today = cur.fetchone()[0] or 0.00
 
@@ -113572,6 +113942,7 @@ def dashboard():
         FROM income
         WHERE spa_id = %s
           AND income_date BETWEEN %s AND %s
+          AND voided_at IS NULL
     """, (spa_id, year_start, today))
 
     ytd_income = cur.fetchone()[0]
@@ -121222,6 +121593,7 @@ def edit_client(client_id):
         WHERE client_id = %s
           AND spa_id = %s
           AND business_unit_id = %s
+          AND voided_at IS NULL
     """, (
         client_id,
         client_spa_id,
