@@ -1,0 +1,236 @@
+{% extends "base.html" %}
+
+{% block title %}
+Peach Suite Pro | Daily Briefing
+{% endblock %}
+
+{% block content %}
+
+{% include "morning_briefing_login_splash.html" %}
+
+<div class="page-title">
+    <h1>🌅 Daily Briefing</h1>
+</div>
+
+<p style="color:#777; margin-top:4px;">
+    Prepared by Coach<br>
+    Your Business Operations Assistant
+</p>
+
+<div
+    id="daily-briefing-loading"
+    class="card"
+    role="status"
+    aria-live="polite"
+    style="margin-top:20px;"
+>
+    <div class="card-body">
+
+        <h2>
+            🍑 Coach Peach is gathering your daily insights…
+        </h2>
+
+        <p>
+            Reviewing your appointments, operational health,
+            business priorities, and recommendations.
+        </p>
+
+        <p>
+            <strong>
+                {{ spa_now.strftime('%A, %B %d, %Y') }}
+            </strong>
+        </p>
+
+    </div>
+</div>
+
+<div
+    id="daily-briefing-content"
+    aria-busy="true"
+></div>
+
+
+<script>
+(() => {
+    let splashClosing = false;
+
+    function closeBriefingSplash() {
+        const splash = document.getElementById("loginSplash");
+
+        if (!splash || splashClosing) {
+            return;
+        }
+
+        splashClosing = true;
+        splash.classList.add("login-splash-exit");
+
+        const reducedMotion = window.matchMedia(
+            "(prefers-reduced-motion: reduce)"
+        ).matches;
+
+        window.setTimeout(
+            () => splash.remove(),
+            reducedMotion ? 0 : 350
+        );
+    }
+
+    // Make the Skip button functional immediately.
+    window.dismissLoginSplash = closeBriefingSplash;
+
+    document.addEventListener(
+        "DOMContentLoaded",
+        () => {
+            if (!document.getElementById("loginSplash")) {
+                return;
+            }
+
+            const reducedMotion = window.matchMedia(
+                "(prefers-reduced-motion: reduce)"
+            ).matches;
+
+            window.setTimeout(
+                closeBriefingSplash,
+                reducedMotion ? 400 : 2500
+            );
+        },
+        { once: true }
+    );
+})();
+</script>
+
+
+
+<script>
+document.addEventListener("DOMContentLoaded", async function () {
+    const loading = document.getElementById(
+        "daily-briefing-loading"
+    );
+
+    const content = document.getElementById(
+        "daily-briefing-content"
+    );
+
+    if (!loading || !content) {
+        return;
+    }
+
+    try {
+        const briefingUrl = new URL(
+            "{{ url_for('morning_briefing_content') }}",
+            window.location.origin
+        );
+
+        const pageParams = new URLSearchParams(
+            window.location.search
+        );
+
+
+        if (pageParams.get("setup_complete") === "1") {
+            briefingUrl.searchParams.set(
+                "setup_complete",
+                "1"
+            );
+        }
+
+const response = await fetch(
+    briefingUrl.toString(),
+    {
+        credentials: "same-origin",
+        headers: {
+            "Accept": "text/html"
+        }
+    }
+);
+
+        if (response.redirected) {
+            window.location.assign(response.url);
+            return;
+        }
+
+        if (!response.ok) {
+            throw new Error(
+                "Daily Briefing request failed: "
+                + response.status
+            );
+        }
+
+        const html = await response.text();
+
+        content.innerHTML = html;
+        // Activate existing Daily Briefing JavaScript.
+        // Scripts inserted through innerHTML do not execute automatically.
+        const briefingScripts = content.querySelectorAll("script");
+
+        for (const originalScript of briefingScripts) {
+            const activeScript = document.createElement("script");
+
+            activeScript.textContent = originalScript.textContent;
+
+            originalScript.replaceWith(activeScript);
+        }
+        // Start the business clock after the briefing loads.
+        const clock = content.querySelector(
+            "#briefing-local-time"
+        );
+
+        if (clock) {
+            const initialSpaTime = Date.UTC(
+                Number(clock.dataset.spaYear),
+                Number(clock.dataset.spaMonth) - 1,
+                Number(clock.dataset.spaDay),
+                Number(clock.dataset.spaHour),
+                Number(clock.dataset.spaMinute),
+                Number(clock.dataset.spaSecond)
+            );
+
+            const browserStartTime = Date.now();
+
+            function updateBusinessClock() {
+                const currentSpaTime = new Date(
+                    initialSpaTime +
+                    (Date.now() - browserStartTime)
+                );
+
+                const formattedTime = new Intl.DateTimeFormat(
+                    "en-US",
+                    {
+                        hour: "numeric",
+                        minute: "2-digit",
+                        hour12: true,
+                        timeZone: "UTC"
+                    }
+                ).format(currentSpaTime);
+
+                clock.textContent =
+                    "Local Business Time: " + formattedTime;
+            }
+
+            updateBusinessClock();
+
+            window.setInterval(
+                updateBusinessClock,
+                1000
+            );
+        }
+        content.setAttribute("aria-busy", "false");
+        loading.remove();
+
+    } catch (error) {
+        console.error("Daily Briefing loading error:", error);
+
+        loading.innerHTML = `
+            <div class="card-body">
+                <h2>Unable to load Daily Briefing</h2>
+                <p>
+                    Your insights could not be loaded.
+                    Please refresh the page to try again.
+                </p>
+            </div>
+        `;
+
+        content.setAttribute("aria-busy", "false");
+    }
+});
+</script>
+
+{% endblock %}

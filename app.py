@@ -114261,14 +114261,33 @@ def calculate_business_health(
 #    MORNING BRIEFING
 #
 #############################################
-
-
+# ==========================================================
+# Daily Briefing — Progressive Loading Preview
+# ==========================================================
 
 @app.route("/morning_briefing")
 @login_required
 @spa_required
 @require_workspace_permission("can_view_daily_briefing")
 def morning_briefing():
+
+    spa_now = get_spa_now(current_spa_id())
+
+    show_login_splash = bool(
+        session.pop("show_login_splash", False)
+    )
+
+    return render_template(
+        "morning_briefing_loading.html",
+        spa_now=spa_now,
+        show_login_splash=show_login_splash
+    )
+
+@app.route("/morning_briefing/content")
+@login_required
+@spa_required
+@require_workspace_permission("can_view_daily_briefing")
+def morning_briefing_content():
 
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -114829,10 +114848,7 @@ def morning_briefing():
     cur.close()
     conn.close()
 
-    show_login_splash = bool(
-        session.pop("show_login_splash", False)
-    )
-
+    show_login_splash = False
     return render_template(
         "morning_briefing.html",
         dashboard=dashboard,
@@ -114852,14 +114868,9 @@ def morning_briefing():
         show_setup_complete_welcome=(
             show_setup_complete_welcome
         ),
-        show_login_splash=show_login_splash
+        show_login_splash=show_login_splash,
+        briefing_fragment=True
     )
-
-
-
-
-
-
 
 
 ####################################################

@@ -1,51 +1,15 @@
-{% extends "base.html" %}
+{% extends "morning_briefing_fragment_base.html" if briefing_fragment|default(false) else "base.html" %}
 {% block title %}Peach Suite Pro | Daily Briefing{% endblock %}
 
 {% block content %}
 
-{% if show_login_splash %}
-<div
-    id="loginSplash"
-    class="login-splash"
-    role="status"
-    aria-live="polite"
-    aria-label="Preparing your Daily Briefing"
->
-    <button
-        type="button"
-        class="login-splash-skip"
-        onclick="dismissLoginSplash()"
-    >
-        Skip
-    </button>
+{% include "morning_briefing_login_splash.html" %}
 
-    <div class="login-splash-content">
-
-        <img
-            src="{{ url_for(
-                'static',
-                filename='peachsuite-icon.png'
-            ) }}"
-            alt="Peach Suite Pro"
-            class="login-splash-logo"
-        >
-
-        <h1>Peach Suite Pro</h1>
-
-        <p>Preparing your Daily Briefing…</p>
-
-        <div
-            class="login-splash-loader"
-            aria-hidden="true"
-        ></div>
-
-    </div>
-</div>
-{% endif %}
-
+{% if not briefing_fragment|default(false) %}
 <div class="page-title">
     <h1>🌅 Daily Briefing</h1>
 </div>
+{% endif %}
 
 {% if (
     show_coach_welcome
@@ -197,10 +161,12 @@
 
 {% endif %}
 
+{% if not briefing_fragment|default(false) %}
 <p style="color:#777; margin-top:4px;">
     Prepared by Coach<br>
     Your Business Operations Assistant
 </p>
+{% endif %}
 
 {% set today_appointment_count =
     dashboard.get(
@@ -740,17 +706,23 @@
 
         {% endif %}
     </div>
-            
-            <!-- Final response after recommendation No -->
 
-                    <div id="coach-deferred"
-                 class="coach-response"
-                 hidden>
+    <!-- Final response after recommendation No -->
+    <div
+        id="coach-deferred"
+        class="coach-response"
+        hidden>
+        <p>
+            Okay. You can return to it when you’re ready.
+        </p>
+    </div>
 
-                <p>
-                    Okay. You can return to it when you’re ready.
-                </p>
-            </div>
+    <!-- Response after dismissing or pausing a recommendation -->
+    <div
+        id="coach-dismissed"
+        class="coach-response"
+        hidden>
+    </div>
 
         {% endif %}
 
@@ -1341,16 +1313,35 @@ async function dismissCoachRecommendation(
     recommendation on the Daily Briefing page.
     */
     {% if coach.current_recommendation %}
-    document.addEventListener(
-        "DOMContentLoaded",
-        function () {
+
+        function recordCoachRecommendationMention() {
+            // Record this recommendation only once per page load.
+            // Protect against the briefing script being initialized twice.
+            if (window.__pspCoachMentionSent) {
+                return;
+            }
+
+            window.__pspCoachMentionSent = true;
+
             sendCoachAction(
                 {{ coach.current_recommendation.category|tojson }},
                 "mention"
             );
         }
-    );
-    {% endif %}
+
+        if (document.readyState === "loading") {
+            document.addEventListener(
+                "DOMContentLoaded",
+                recordCoachRecommendationMention,
+                { once: true }
+            );
+        } else {
+            recordCoachRecommendationMention();
+        }
+
+        {% endif %}
+
+    {% if not briefing_fragment|default(false) %}
 
     let loginSplashIsClosing = false;
 
@@ -1398,6 +1389,7 @@ async function dismissCoachRecommendation(
             );
         }
     );
+    {% endif %}
 
 </script>
 

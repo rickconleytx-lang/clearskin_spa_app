@@ -1,0 +1,41 @@
+{% if show_login_splash|default(false) %}
+
+<div
+    id="loginSplash"
+    class="login-splash"
+    role="status"
+    aria-live="polite"
+    aria-label="Preparing your Daily Briefing"
+>
+    <button
+        type="button"
+        class="login-splash-skip"
+        onclick="dismissLoginSplash()"
+    >
+        Skip
+    </button>
+
+    <div class="login-splash-content">
+
+        <img
+            src="{{ url_for(
+                'static',
+                filename='peachsuite-icon.png'
+            ) }}"
+            alt="Peach Suite Pro"
+            class="login-splash-logo"
+        >
+
+        <h1>Peach Suite Pro</h1>
+
+        <p>Preparing your Daily Briefing…</p>
+
+        <div
+            class="login-splash-loader"
+            aria-hidden="true"
+        ></div>
+
+    </div>
+</div>
+
+{% endif %}
