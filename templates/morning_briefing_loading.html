@@ -132,15 +132,17 @@ document.addEventListener("DOMContentLoaded", async function () {
             );
         }
 
-const response = await fetch(
-    briefingUrl.toString(),
-    {
-        credentials: "same-origin",
-        headers: {
-            "Accept": "text/html"
-        }
-    }
-);
+        const briefingRequestStartedAt = Date.now();
+
+        const response = await fetch(
+            briefingUrl.toString(),
+            {
+                credentials: "same-origin",
+                headers: {
+                    "Accept": "text/html"
+                }
+            }
+        );
 
         if (response.redirected) {
             window.location.assign(response.url);
@@ -183,7 +185,7 @@ const response = await fetch(
                 Number(clock.dataset.spaSecond)
             );
 
-            const browserStartTime = Date.now();
+            const browserStartTime = briefingRequestStartedAt;
 
             function updateBusinessClock() {
                 const currentSpaTime = new Date(
