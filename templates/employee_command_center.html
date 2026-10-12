@@ -241,6 +241,22 @@
         gap: 24px;
     }
 
+    /* Employee Payroll Settings: full-width, responsive card */
+    .information-grid > .employee-payroll-section {
+        grid-column: 1 / -1;
+    }
+
+    .employee-payroll-section .detail-list {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        column-gap: 28px;
+    }
+
+    @media (max-width: 760px) {
+        .employee-payroll-section .detail-list {
+            grid-template-columns: 1fr;
+        }
+    }
+
     .detail-list {
         display: grid;
         gap: 0;
@@ -848,6 +864,136 @@
         </section>
         {% endif %}
 
+
+        <!-- Employee Payroll Settings Card V1 -->
+        {% if nav_access.can_view_employee_compensation %}
+        <section class="employee-section employee-payroll-section">
+
+            <h2 class="section-heading">
+                <span class="section-icon">🕒</span>
+                Employee Payroll Settings
+            </h2>
+
+            <p>
+                Employee pay configuration is separate from
+                service, retail, and tip compensation.
+            </p>
+
+            <div class="detail-list">
+
+                {% for pay_type, label in [
+                    ("hourly", "Hourly Rate"),
+                    ("daily", "Daily Rate"),
+                    ("event", "Default Event Rate")
+                ] %}
+                    {% set latest = payroll_rates.get(pay_type) %}
+
+                    <div class="detail-row">
+                        <div class="detail-label">
+                            {{ label }}
+                        </div>
+
+                        <div class="detail-value">
+                            {% if latest %}
+                                ${{ "{:,.2f}".format(latest.rate) }}
+                                <div>
+                                    <small>
+                                        Effective
+                                        {{ latest.effective_date }}
+                                        {% if latest.end_date %}
+                                            through {{ latest.end_date }}
+                                        {% endif %}
+                                    </small>
+                                </div>
+                            {% else %}
+                                Not configured
+                            {% endif %}
+                        </div>
+                    </div>
+                {% endfor %}
+
+                <div class="detail-row">
+                    <div class="detail-label">
+                        Default Pay Period
+                    </div>
+                    <div class="detail-value">
+                        {% set period_labels = {
+                            "weekly": "Weekly",
+                            "biweekly": "Every Two Weeks",
+                            "semimonthly": "Twice Monthly",
+                            "monthly": "Monthly"
+                        } %}
+                        {% if payroll_settings %}
+                            {{ period_labels.get(
+                                payroll_settings.default_pay_period,
+                                "Not set"
+                            ) }}
+                        {% else %}
+                            Not set
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="detail-row">
+                    <div class="detail-label">
+                        FICA Withholding
+                    </div>
+                    <div class="detail-value">
+                        {% if payroll_settings and
+                              payroll_settings.fica_withholding_percent
+                              is not none %}
+                            {{ "{:,.2f}".format(
+                                payroll_settings.fica_withholding_percent
+                            ) }}%
+                        {% else %}
+                            Not configured
+                        {% endif %}
+                    </div>
+                </div>
+
+                {% for label, title, amount in [
+                    (
+                        "Custom Deduction 1",
+                        payroll_settings.deduction_1_title
+                        if payroll_settings else none,
+                        payroll_settings.deduction_1_amount
+                        if payroll_settings else none
+                    ),
+                    (
+                        "Custom Deduction 2",
+                        payroll_settings.deduction_2_title
+                        if payroll_settings else none,
+                        payroll_settings.deduction_2_amount
+                        if payroll_settings else none
+                    )
+                ] %}
+                    <div class="detail-row">
+                        <div class="detail-label">
+                            {{ title or label }}
+                        </div>
+                        <div class="detail-value">
+                            {% if amount is not none %}
+                                ${{ "{:,.2f}".format(amount) }}
+                            {% else %}
+                                Not configured
+                            {% endif %}
+                        </div>
+                    </div>
+                {% endfor %}
+
+            </div>
+
+            <p>
+                <small>
+                    Payroll settings can be saved on all plans.
+                    Hours tracking, payroll calculations,
+                    and payroll processing are available
+                    with PeachPOS and Team subscriptions.
+                </small>
+            </p>
+
+        </section>
+        {% endif %}
     </div>
 
 

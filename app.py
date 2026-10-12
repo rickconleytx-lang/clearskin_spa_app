@@ -99044,12 +99044,69 @@ def employee_command_center(employee_id):
         flash("Employee not found.", "error")
         return redirect(url_for("employees_home"))
 
+    # Payroll configuration is visible only to users
+    # with employee compensation viewing permission.
+    payroll_settings = None
+    payroll_rates = {}
+
+    if can_view_compensation:
+        cur.execute("""
+            SELECT
+                default_pay_period,
+                fica_withholding_percent,
+                deduction_1_title,
+                deduction_1_amount,
+                deduction_2_title,
+                deduction_2_amount
+            FROM employee_payroll_settings
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND employee_id = %s
+        """, (
+            spa_id,
+            business_unit_id,
+            employee_id,
+        ))
+
+        payroll_settings = cur.fetchone()
+
+        cur.execute("""
+            SELECT DISTINCT ON (pay_type)
+                pay_type,
+                rate,
+                effective_date,
+                end_date
+            FROM employee_pay_rates
+            WHERE spa_id = %s
+              AND business_unit_id = %s
+              AND employee_id = %s
+            ORDER BY
+                pay_type,
+                effective_date DESC,
+                pay_rate_id DESC
+        """, (
+            spa_id,
+            business_unit_id,
+            employee_id,
+        ))
+
+        payroll_rates = {
+            row["pay_type"]: {
+                "rate": row["rate"],
+                "effective_date": row["effective_date"],
+                "end_date": row["end_date"],
+            }
+            for row in cur.fetchall()
+        }
+
     cur.close()
     conn.close()
 
     return render_template(
         "employee_command_center.html",
         employee=employee,
+        payroll_settings=payroll_settings,
+        payroll_rates=payroll_rates,
         today=date.today(),
         security_csrf_token=_security_form_csrf_token()
     )
