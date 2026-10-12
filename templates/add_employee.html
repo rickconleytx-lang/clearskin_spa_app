@@ -10,6 +10,11 @@
 <h1>Add Employee</h1>
 
 <form method="POST" action="{{ url_for('add_employee') }}">
+    <input
+        type="hidden"
+        name="security_csrf_token"
+        value="{{ security_csrf_token }}"
+    >
     <div class="form-group">
         <label for="first_name">First Name</label>
         <input type="text" id="first_name" name="first_name" required>
@@ -169,7 +174,7 @@
     </div>
 
     <div class="form-group">
-        <label for="esthetician_license_number">Esthetician License Number</label>
+        <label for="esthetician_license_number">Professional License Number</label>
         <input type="text" id="esthetician_license_number" name="esthetician_license_number">
     </div>
 

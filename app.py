@@ -97774,6 +97774,7 @@ def add_employee():
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
     user_id = session.get("user_id")
+    security_csrf_token = _security_form_csrf_token()
 
     if business_unit_id is None or user_id is None:
         abort(403)
@@ -97782,6 +97783,16 @@ def add_employee():
     cur = conn.cursor()
 
     if request.method == "POST":
+        submitted_token = request.form.get(
+            "security_csrf_token",
+            "",
+        )
+
+        if not _security_form_csrf_valid(submitted_token):
+            cur.close()
+            conn.close()
+            abort(400)
+
         first_name = request.form.get("first_name")
         last_name = request.form.get("last_name")
         address_line1 = request.form.get("address_line1")
@@ -98015,7 +98026,8 @@ def add_employee():
     return render_template(
         "add_employee.html",
         statuses=statuses,
-        employee_roles=employee_roles
+        employee_roles=employee_roles,
+        security_csrf_token=security_csrf_token
         )
 
 
