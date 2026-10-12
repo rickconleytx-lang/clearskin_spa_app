@@ -123,6 +123,12 @@ from services.employee_access_security import (
     normalize_access_code_format,
     verify_access_code,
 )
+from services.employee_payroll_settings import (
+    PayrollSettingsValidationError,
+    validate_employee_payroll_settings,
+    save_employee_payroll_settings,
+    save_employee_pay_rates,
+)
 from services import square_oauth
 from services import square_service
 from services import square_sync_auth
@@ -97793,6 +97799,25 @@ def add_employee():
             conn.close()
             abort(400)
 
+        # Shared payroll settings are available to all plans.
+        # Operational payroll permissions are enforced separately.
+        payroll_settings = None
+
+        if request.form.get(
+            "employee_payroll_settings_present"
+        ) == "1":
+            try:
+                payroll_settings = (
+                    validate_employee_payroll_settings(
+                        request.form
+                    )
+                )
+            except PayrollSettingsValidationError as exc:
+                cur.close()
+                conn.close()
+                flash(str(exc), "error")
+                return redirect(url_for("add_employee"))
+
         first_name = request.form.get("first_name")
         last_name = request.form.get("last_name")
         address_line1 = request.form.get("address_line1")
@@ -97979,6 +98004,48 @@ def add_employee():
             access_level,
         ))
 
+        # Save shared payroll configuration in the same
+        # transaction as employee creation and membership.
+        if payroll_settings is not None:
+            try:
+                settings_changed = save_employee_payroll_settings(
+                    cur,
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    employee_id=employee_id,
+                    settings=payroll_settings,
+                )
+
+                rate_changes = save_employee_pay_rates(
+                    cur,
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    employee_id=employee_id,
+                    settings=payroll_settings,
+                )
+
+                if settings_changed or rate_changes:
+                    log_audit(
+                        cur,
+                        spa_id=spa_id,
+                        user_id=user_id,
+                        action_type="employee_payroll_settings_created",
+                        table_name="employees",
+                        record_id=employee_id,
+                        business_unit_id=business_unit_id,
+                        notes=(
+                            "Initial employee payroll settings "
+                            "saved. Sensitive pay and deduction "
+                            "values omitted from audit log."
+                        ),
+                    )
+
+            except Exception:
+                conn.rollback()
+                cur.close()
+                conn.close()
+                raise
+
         conn.commit()
         cur.close()
         conn.close()
@@ -98055,8 +98122,9 @@ def edit_employee(employee_id):
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
     security_csrf_token = _security_form_csrf_token()
+    user_id = session.get("user_id")
 
-    if business_unit_id is None:
+    if business_unit_id is None or user_id is None:
         abort(403)
 
     conn = get_db_connection()
@@ -98074,6 +98142,30 @@ def edit_employee(employee_id):
             cur.close()
             conn.close()
             abort(400)
+
+        # Shared employee payroll settings are available
+        # to all subscription tiers.
+        payroll_settings = None
+
+        if request.form.get(
+            "employee_payroll_settings_present"
+        ) == "1":
+            try:
+                payroll_settings = (
+                    validate_employee_payroll_settings(
+                        request.form
+                    )
+                )
+            except PayrollSettingsValidationError as exc:
+                cur.close()
+                conn.close()
+                flash(str(exc), "error")
+                return redirect(
+                    url_for(
+                        "edit_employee",
+                        employee_id=employee_id,
+                    )
+                )
 
         first_name = request.form.get("first_name")
         last_name = request.form.get("last_name")
@@ -98290,6 +98382,60 @@ def edit_employee(employee_id):
             )
             return redirect(url_for("employees_home"))
 
+        # Persist payroll configuration in the existing
+        # employee update transaction.
+        if payroll_settings is not None:
+            try:
+                settings_changed = save_employee_payroll_settings(
+                    cur,
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    employee_id=employee_id,
+                    settings=payroll_settings,
+                )
+
+                rate_changes = save_employee_pay_rates(
+                    cur,
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    employee_id=employee_id,
+                    settings=payroll_settings,
+                )
+
+                if settings_changed or rate_changes:
+                    log_audit(
+                        cur,
+                        spa_id=spa_id,
+                        user_id=user_id,
+                        action_type="employee_payroll_settings_updated",
+                        table_name="employees",
+                        record_id=employee_id,
+                        business_unit_id=business_unit_id,
+                        notes=(
+                            "Employee payroll settings or pay "
+                            "rates updated. Sensitive monetary "
+                            "and deduction values omitted."
+                        ),
+                    )
+
+            except (PayrollSettingsValidationError, PermissionError) as exc:
+                conn.rollback()
+                cur.close()
+                conn.close()
+                flash(str(exc), "error")
+                return redirect(
+                    url_for(
+                        "edit_employee",
+                        employee_id=employee_id,
+                    )
+                )
+
+            except Exception:
+                conn.rollback()
+                cur.close()
+                conn.close()
+                raise
+
         conn.commit()
         cur.close()
         conn.close()
@@ -98393,6 +98539,57 @@ def edit_employee(employee_id):
     """, (spa_id,))
     statuses = cur.fetchall()
 
+    # Load shared payroll settings only after the employee
+    # has passed the existing workspace membership check.
+    cur.execute("""
+        SELECT
+            default_pay_period,
+            fica_withholding_percent,
+            deduction_1_title,
+            deduction_1_amount,
+            deduction_2_title,
+            deduction_2_amount
+        FROM employee_payroll_settings
+        WHERE spa_id = %s
+          AND business_unit_id = %s
+          AND employee_id = %s
+    """, (
+        spa_id,
+        business_unit_id,
+        employee_id,
+    ))
+
+    payroll_settings = cur.fetchone()
+
+    # Retrieve the latest configured rate for each type.
+    # Historical rate records are not modified.
+    cur.execute("""
+        SELECT DISTINCT ON (pay_type)
+            pay_type,
+            rate,
+            effective_date
+        FROM employee_pay_rates
+        WHERE spa_id = %s
+          AND business_unit_id = %s
+          AND employee_id = %s
+        ORDER BY
+            pay_type,
+            effective_date DESC,
+            pay_rate_id DESC
+    """, (
+        spa_id,
+        business_unit_id,
+        employee_id,
+    ))
+
+    payroll_rates = {
+        row["pay_type"]: {
+            "rate": row["rate"],
+            "effective_date": row["effective_date"],
+        }
+        for row in cur.fetchall()
+    }
+
     cur.close()
     conn.close()
 
@@ -98401,6 +98598,8 @@ def edit_employee(employee_id):
         employee=employee,
         statuses=statuses,
         employee_roles=employee_roles,
+        payroll_settings=payroll_settings,
+        payroll_rates=payroll_rates,
         security_csrf_token=security_csrf_token
     )
 
