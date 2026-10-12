@@ -19,28 +19,47 @@ Peach Suite Pro | Daily Briefing
 
 <div
     id="daily-briefing-loading"
-    class="card"
     role="status"
     aria-live="polite"
     style="margin-top:20px;"
 >
-    <div class="card-body">
-
-        <h2>
-            🍑 Coach Peach is gathering your daily insights…
-        </h2>
+    <div class="dashboard-card">
+        <h2>🍑 Coach Peach</h2>
 
         <p>
-            Reviewing your appointments, operational health,
-            business priorities, and recommendations.
+            I'm gathering your latest business insights.
+            Your Daily Briefing will be ready shortly.
         </p>
+    </div>
 
-        <p>
-            <strong>
-                {{ spa_now.strftime('%A, %B %d, %Y') }}
-            </strong>
-        </p>
+    <div class="briefing-summary-card">
+        <div class="briefing-card-title">
+            Operational Health
+        </div>
+        <div class="briefing-card-value">—</div>
+        <div class="briefing-card-detail">
+            Gathering Your Data…
+        </div>
+    </div>
 
+    <div class="briefing-summary-card">
+        <div class="briefing-card-title">
+            Today's Business
+        </div>
+        <div class="briefing-card-value">—</div>
+        <div class="briefing-card-detail">
+            Gathering Your Data…
+        </div>
+    </div>
+
+    <div class="briefing-summary-card">
+        <div class="briefing-card-title">
+            Needs Attention
+        </div>
+        <div class="briefing-card-value">—</div>
+        <div class="briefing-card-detail">
+            Gathering Your Data…
+        </div>
     </div>
 </div>
 
