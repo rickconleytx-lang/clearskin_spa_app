@@ -96905,6 +96905,217 @@ def employee_hours_payroll():
         ledger_rows=ledger_rows,
         gross_total=gross_total,
         entry_total=entry_total,
+        can_add_work_entry=bool(
+            current_workspace_access().get(
+                "can_manage_employee_compensation", False
+            )
+        ),
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
+
+# ==========================================================
+# EMPLOYEE PAYROLL — ADD WORK ENTRY
+# PeachPOS / Team operational payroll only.
+# Separate from legacy Employee Compensation.
+# ==========================================================
+
+@app.route(
+    "/employees/hours-payroll/add",
+    methods=["GET", "POST"],
+)
+@login_required
+@spa_required
+@require_subscription_tier("pos", "team")
+@require_workspace_permission("can_manage_employee_compensation")
+@require_psp_access("employees_compensation")
+def employee_payroll_add_work_entry():
+    from uuid import uuid4
+    from psycopg2.errors import UniqueViolation
+
+    from services.employee_payroll_work_entries import (
+        PayrollWorkEntryError,
+        DuplicatePayrollWorkEntryError,
+        validate_payroll_work_entry,
+        create_payroll_work_entry,
+    )
+
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if (
+        spa_id is None
+        or business_unit_id is None
+        or user_id is None
+    ):
+        abort(403)
+
+    verification = g.get(
+        "psp_employee_access_verification"
+    )
+    page_scope = g.get(
+        "psp_employee_access_page_scope", ""
+    )
+    return_path = g.get(
+        "psp_employee_access_return_path", ""
+    )
+    page_instance_id = g.get(
+        "psp_employee_access_page_instance_id", ""
+    )
+
+    if request.method == "POST":
+
+        submitted_csrf = request.form.get(
+            "security_csrf_token", ""
+        )
+
+        if not _security_form_csrf_valid(
+            submitted_csrf
+        ):
+            abort(400)
+
+        try:
+            entry = validate_payroll_work_entry(
+                request.form
+            )
+        except PayrollWorkEntryError as exc:
+            flash(str(exc), "error")
+
+        else:
+            conn = get_db_connection()
+
+            try:
+                cur = conn.cursor(
+                    cursor_factory=RealDictCursor
+                )
+
+                work_entry_id = create_payroll_work_entry(
+                    cur,
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    user_id=user_id,
+                    entry=entry,
+                )
+
+                log_audit(
+                    cur,
+                    spa_id=spa_id,
+                    user_id=user_id,
+                    action_type=(
+                        "employee_payroll_work_entry_created"
+                    ),
+                    table_name=(
+                        "employee_payroll_work_entries"
+                    ),
+                    record_id=work_entry_id,
+                    notes=(
+                        "Employee payroll work entry created. "
+                        "Historical pay rate snapshotted."
+                    ),
+                    business_unit_id=business_unit_id,
+                    verified_employee_id=(
+                        verification["employee_id"]
+                        if verification else None
+                    ),
+                )
+
+                conn.commit()
+
+            except (
+                DuplicatePayrollWorkEntryError,
+                UniqueViolation,
+            ):
+                conn.rollback()
+
+                flash(
+                    "This work entry was already submitted. "
+                    "Review the payroll ledger before "
+                    "entering it again.",
+                    "error",
+                )
+
+                return redirect(
+                    url_for("employee_hours_payroll")
+                )
+
+            except PermissionError:
+                conn.rollback()
+                abort(403)
+
+            except PayrollWorkEntryError as exc:
+                conn.rollback()
+                flash(str(exc), "error")
+
+            except Exception:
+                conn.rollback()
+                raise
+
+            else:
+                flash(
+                    "Employee payroll work entry "
+                    "saved successfully.",
+                    "success",
+                )
+
+                return redirect(
+                    url_for("employee_hours_payroll")
+                )
+
+            finally:
+                conn.close()
+
+    # Only active employees assigned to this workspace
+    # may appear in the Add Work Entry employee selector.
+    conn = get_db_connection()
+
+    try:
+        cur = conn.cursor(
+            cursor_factory=RealDictCursor
+        )
+
+        cur.execute("""
+            SELECT
+                e.employee_id,
+                e.first_name,
+                e.last_name
+            FROM employees e
+            JOIN employee_business_unit_memberships m
+              ON m.spa_id = e.spa_id
+             AND m.employee_id = e.employee_id
+            WHERE e.spa_id = %s
+              AND m.business_unit_id = %s
+              AND e.is_active = TRUE
+              AND m.is_active = TRUE
+            ORDER BY
+                e.last_name,
+                e.first_name,
+                e.employee_id
+        """, (
+            spa_id,
+            business_unit_id,
+        ))
+
+        employees = cur.fetchall()
+
+    finally:
+        conn.close()
+
+    return render_template(
+        "employee_payroll_add_work_entry.html",
+        employees=employees,
+        form_values=(
+            request.form.to_dict()
+            if request.method == "POST"
+            else {}
+        ),
+        work_date_default=date.today().isoformat(),
+        entry_request_id=str(uuid4()),
+        employee_access_verified=verification,
+        employee_access_page_scope=page_scope,
+        employee_access_return_path=return_path,
+        employee_access_page_instance_id=page_instance_id,
         security_csrf_token=_security_form_csrf_token(),
     )
 

@@ -1,0 +1,433 @@
+{% extends "base.html" %}
+
+{% block title %}Add Payroll Work Entry{% endblock %}
+
+{% block content %}
+
+<style>
+    .payroll-entry-page {
+        max-width: 950px;
+        margin: 0 auto;
+        padding: 24px 16px;
+    }
+
+    .payroll-entry-header {
+        margin-bottom: 24px;
+    }
+
+    .payroll-entry-header h1 {
+        margin-bottom: 8px;
+    }
+
+    .payroll-entry-card {
+        background: white;
+        border: 1px solid #e8e4eb;
+        border-radius: 16px;
+        padding: 26px;
+        margin-bottom: 22px;
+    }
+
+    .payroll-entry-card h2 {
+        margin-top: 0;
+        margin-bottom: 18px;
+        font-size: 21px;
+    }
+
+    .payroll-entry-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 20px;
+    }
+
+    .payroll-field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .payroll-field label {
+        font-weight: 600;
+    }
+
+    .payroll-field input,
+    .payroll-field select,
+    .payroll-field textarea {
+        width: 100%;
+        padding: 11px;
+        border: 1px solid #ccc5d2;
+        border-radius: 8px;
+        box-sizing: border-box;
+        font: inherit;
+    }
+
+    .payroll-field small,
+    .payroll-entry-hint {
+        color: #625a68;
+        line-height: 1.5;
+    }
+
+    .payroll-entry-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+        margin-top: 24px;
+    }
+
+    .payroll-type-fields[hidden] {
+        display: none !important;
+    }
+
+    @media (max-width: 700px) {
+        .payroll-entry-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .payroll-entry-card {
+            padding: 18px;
+        }
+    }
+</style>
+
+<div class="payroll-entry-page">
+
+    <div class="payroll-entry-header">
+        <a href="{{ url_for('employee_hours_payroll') }}"
+           class="btn btn-secondary">
+            Back to Hours &amp; Payroll
+        </a>
+
+        <h1>Add Payroll Work Entry</h1>
+
+        <p class="payroll-entry-hint">
+            Record employee hours, daily work, or event earnings.
+            This is separate from Employee Compensation.
+        </p>
+    </div>
+
+    <form method="POST"
+          action="{{ url_for('employee_payroll_add_work_entry') }}">
+
+        <input type="hidden"
+               name="security_csrf_token"
+               value="{{ security_csrf_token }}">
+
+        <input type="hidden"
+               name="entry_request_id"
+               value="{{ entry_request_id }}">
+
+        <section class="payroll-entry-card">
+
+            <h2>Employee &amp; Work Date</h2>
+
+            <div class="payroll-entry-grid">
+
+                <div class="payroll-field">
+                    <label for="employee_id">Employee *</label>
+
+                    <select id="employee_id"
+                            name="employee_id"
+                            required>
+                        <option value="">Select Employee</option>
+
+                        {% for employee in employees %}
+                        <option
+                            value="{{ employee.employee_id }}"
+                            {% if
+                                form_values.get('employee_id', '')|string
+                                == employee.employee_id|string
+                            %}selected{% endif %}>
+                            {{ employee.first_name }}
+                            {{ employee.last_name }}
+                        </option>
+                        {% endfor %}
+                    </select>
+
+                    <small>
+                        Only active employees in this workspace.
+                    </small>
+                </div>
+
+                <div class="payroll-field">
+                    <label for="work_date">Work Date *</label>
+
+                    <input type="date"
+                           id="work_date"
+                           name="work_date"
+                           value="{{ form_values.get(
+                               'work_date',
+                               work_date_default
+                           ) }}"
+                           required>
+                </div>
+
+                <div class="payroll-field">
+                    <label for="entry_type">Pay Entry Type *</label>
+
+                    <select id="entry_type"
+                            name="entry_type"
+                            required>
+                        <option value="hourly"
+                            {% if form_values.get(
+                                'entry_type', 'hourly'
+                            ) == 'hourly' %}selected{% endif %}>
+                            Hourly
+                        </option>
+
+                        <option value="daily"
+                            {% if form_values.get(
+                                'entry_type'
+                            ) == 'daily' %}selected{% endif %}>
+                            Daily
+                        </option>
+
+                        <option value="event"
+                            {% if form_values.get(
+                                'entry_type'
+                            ) == 'event' %}selected{% endif %}>
+                            Event
+                        </option>
+                    </select>
+                </div>
+
+            </div>
+
+        </section>
+
+        <section class="payroll-entry-card payroll-type-fields"
+                 id="hourly_fields">
+
+            <h2>Hourly Work</h2>
+
+            <div class="payroll-entry-grid">
+
+                <div class="payroll-field">
+                    <label for="regular_hours">
+                        Regular Hours
+                    </label>
+
+                    <input type="number"
+                           id="regular_hours"
+                           name="regular_hours"
+                           min="0"
+                           max="999999.99"
+                           step="0.01"
+                           placeholder="8.00"
+                           value="{{ form_values.get(
+                               'regular_hours', ''
+                           ) }}">
+                </div>
+
+                <div class="payroll-field">
+                    <label for="overtime_hours">
+                        Overtime Hours
+                    </label>
+
+                    <input type="number"
+                           id="overtime_hours"
+                           name="overtime_hours"
+                           min="0"
+                           max="999999.99"
+                           step="0.01"
+                           placeholder="0.00"
+                           value="{{ form_values.get(
+                               'overtime_hours', ''
+                           ) }}">
+                </div>
+
+                <div class="payroll-field">
+                    <label for="overtime_rate">
+                        Overtime Hourly Rate
+                    </label>
+
+                    <input type="number"
+                           id="overtime_rate"
+                           name="overtime_rate"
+                           min="0"
+                           max="9999999999.99"
+                           step="0.01"
+                           placeholder="Enter rate if overtime worked"
+                           value="{{ form_values.get(
+                               'overtime_rate', ''
+                           ) }}">
+
+                    <small>
+                        Required when overtime hours are entered.
+                        PSP will not assume an overtime multiplier.
+                    </small>
+                </div>
+
+            </div>
+
+            <p class="payroll-entry-hint">
+                The employee's regular hourly rate is retrieved
+                from their effective-dated payroll settings.
+            </p>
+
+        </section>
+
+        <section class="payroll-entry-card payroll-type-fields"
+                 id="daily_fields"
+                 hidden>
+
+            <h2>Daily Work</h2>
+
+            <div class="payroll-entry-grid">
+                <div class="payroll-field">
+                    <label for="days_worked">
+                        Days Worked *
+                    </label>
+
+                    <input type="number"
+                           id="days_worked"
+                           name="days_worked"
+                           min="0.01"
+                           max="9999.99"
+                           step="0.01"
+                           placeholder="1.00"
+                           value="{{ form_values.get(
+                               'days_worked', ''
+                           ) }}">
+                </div>
+            </div>
+
+            <p class="payroll-entry-hint">
+                The applicable daily rate is retrieved
+                from the employee's saved pay-rate history.
+            </p>
+
+        </section>
+
+        <section class="payroll-entry-card payroll-type-fields"
+                 id="event_fields"
+                 hidden>
+
+            <h2>Event Work</h2>
+
+            <div class="payroll-entry-grid">
+
+                <div class="payroll-field">
+                    <label for="event_name">
+                        Event Name *
+                    </label>
+
+                    <input type="text"
+                           id="event_name"
+                           name="event_name"
+                           maxlength="200"
+                           placeholder="Enter Event Name"
+                           value="{{ form_values.get(
+                               'event_name', ''
+                           ) }}">
+                </div>
+
+                <div class="payroll-field">
+                    <label for="event_rate">
+                        Event Pay Amount
+                    </label>
+
+                    <input type="number"
+                           id="event_rate"
+                           name="event_rate"
+                           min="0"
+                           max="9999999999.99"
+                           step="0.01"
+                           placeholder="Optional custom event rate"
+                           value="{{ form_values.get(
+                               'event_rate', ''
+                           ) }}">
+
+                    <small>
+                        Leave blank to use the employee's
+                        default event rate for this date.
+                    </small>
+                </div>
+
+            </div>
+
+            <p class="payroll-entry-hint">
+                Event assignments will be connected to
+                PSP Event Calendar and Event Units in a later stage.
+            </p>
+
+        </section>
+
+        <section class="payroll-entry-card">
+
+            <h2>Additional Information</h2>
+
+            <div class="payroll-field">
+                <label for="notes">Notes</label>
+
+                <textarea id="notes"
+                          name="notes"
+                          rows="3"
+                          maxlength="4000"
+                          placeholder="Optional work-entry notes">{{ form_values.get(
+                    'notes', ''
+                ) }}</textarea>
+            </div>
+
+            <p class="payroll-entry-hint">
+                The selected rate will be saved as a historical
+                snapshot. Future pay-rate changes will not
+                overwrite this entry.
+            </p>
+
+            <div class="payroll-entry-actions">
+                <button type="submit"
+                        class="btn">
+                    Save Work Entry
+                </button>
+
+                <a href="{{ url_for('employee_hours_payroll') }}"
+                   class="btn btn-secondary">
+                    Cancel
+                </a>
+            </div>
+
+        </section>
+
+    </form>
+
+</div>
+
+<script>
+(function () {
+    "use strict";
+
+    const selector = document.getElementById("entry_type");
+
+    const sections = {
+        hourly: document.getElementById("hourly_fields"),
+        daily: document.getElementById("daily_fields"),
+        event: document.getElementById("event_fields")
+    };
+
+    if (!selector) {
+        return;
+    }
+
+    function updatePayFields() {
+        const selected = selector.value;
+
+        Object.keys(sections).forEach(function (type) {
+            const section = sections[type];
+            const active = type === selected;
+
+            section.hidden = !active;
+
+            section.querySelectorAll(
+                "input, select, textarea"
+            ).forEach(function (field) {
+                field.disabled = !active;
+            });
+        });
+    }
+
+    selector.addEventListener("change", updatePayFields);
+    updatePayFields();
+})();
+</script>
+
+{% endblock %}

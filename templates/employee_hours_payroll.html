@@ -12,6 +12,13 @@
                class="btn btn-secondary">
                 Back to Employee Home
             </a>
+
+            {% if can_add_work_entry %}
+            <a href="{{ url_for('employee_payroll_add_work_entry') }}"
+               class="btn">
+                + Add Work Entry
+            </a>
+            {% endif %}
         </div>
 
         <div>
