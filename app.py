@@ -96743,6 +96743,172 @@ def toggle_compensation_type(compensation_type_id):
 
 
 
+
+# ==========================================================
+# EMPLOYEE HOURS & PAYROLL
+# Operational payroll: PeachPOS and Team only.
+# Existing Employee Compensation remains separate.
+# ==========================================================
+
+@app.route("/employees/hours-payroll")
+@login_required
+@spa_required
+@require_subscription_tier("pos", "team")
+@require_workspace_permission("can_view_employee_compensation")
+@require_psp_access("employees_compensation")
+def employee_hours_payroll():
+    from decimal import Decimal
+
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if business_unit_id is None or session.get("user_id") is None:
+        abort(403)
+
+    today = date.today()
+    first_day = today.replace(day=1)
+
+    start_text = request.args.get("start_date") or first_day.isoformat()
+    end_text = request.args.get("end_date") or today.isoformat()
+
+    try:
+        start_date = date.fromisoformat(start_text)
+        end_date = date.fromisoformat(end_text)
+    except ValueError:
+        abort(400)
+
+    if start_date > end_date:
+        abort(400)
+
+    conn = get_db_connection()
+
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        # Historical entries retain their recorded rate.
+        # This is not the existing Compensation ledger.
+        cur.execute("""
+            SELECT
+                w.employee_id,
+                e.first_name || ' ' || e.last_name
+                    AS employee_name,
+                COUNT(*) AS entry_count,
+                COALESCE(SUM(
+                    CASE WHEN w.entry_type = 'hourly'
+                    THEN w.regular_hours ELSE 0 END
+                ), 0) AS regular_hours,
+                COALESCE(SUM(
+                    CASE WHEN w.entry_type = 'hourly'
+                    THEN w.overtime_hours ELSE 0 END
+                ), 0) AS overtime_hours,
+                COALESCE(SUM(
+                    CASE WHEN w.entry_type = 'daily'
+                    THEN w.days_worked ELSE 0 END
+                ), 0) AS days_worked,
+                COUNT(*) FILTER (
+                    WHERE w.entry_type = 'event'
+                ) AS event_count,
+                COALESCE(SUM(
+                    CASE
+                        WHEN w.entry_type = 'hourly'
+                        THEN
+                            w.regular_hours * w.rate_snapshot
+                            + w.overtime_hours *
+                              COALESCE(w.overtime_rate_snapshot, 0)
+                        WHEN w.entry_type = 'daily'
+                        THEN w.days_worked * w.rate_snapshot
+                        WHEN w.entry_type = 'event'
+                        THEN w.rate_snapshot
+                        ELSE 0
+                    END
+                ), 0) AS gross_pay
+            FROM employee_payroll_work_entries w
+            JOIN employees e
+              ON e.spa_id = w.spa_id
+             AND e.employee_id = w.employee_id
+            WHERE w.spa_id = %s
+              AND w.business_unit_id = %s
+              AND w.work_date BETWEEN %s AND %s
+              AND w.voided_at IS NULL
+            GROUP BY
+                w.employee_id,
+                e.first_name,
+                e.last_name
+            ORDER BY e.last_name, e.first_name, w.employee_id
+        """, (
+            spa_id, business_unit_id, start_date, end_date
+        ))
+
+        summary_rows = cur.fetchall()
+
+        # Display the latest 100 entries for this period.
+        # Employee totals above cover the entire selected period.
+        cur.execute("""
+            SELECT
+                w.work_entry_id,
+                w.work_date,
+                e.first_name || ' ' || e.last_name
+                    AS employee_name,
+                w.entry_type,
+                w.regular_hours,
+                w.overtime_hours,
+                w.days_worked,
+                w.rate_snapshot,
+                w.overtime_rate_snapshot,
+                w.event_name_snapshot,
+                CASE
+                    WHEN w.entry_type = 'hourly'
+                    THEN
+                        w.regular_hours * w.rate_snapshot
+                        + w.overtime_hours *
+                          COALESCE(w.overtime_rate_snapshot, 0)
+                    WHEN w.entry_type = 'daily'
+                    THEN w.days_worked * w.rate_snapshot
+                    WHEN w.entry_type = 'event'
+                    THEN w.rate_snapshot
+                    ELSE 0
+                END AS gross_amount
+            FROM employee_payroll_work_entries w
+            JOIN employees e
+              ON e.spa_id = w.spa_id
+             AND e.employee_id = w.employee_id
+            WHERE w.spa_id = %s
+              AND w.business_unit_id = %s
+              AND w.work_date BETWEEN %s AND %s
+              AND w.voided_at IS NULL
+            ORDER BY w.work_date DESC, w.work_entry_id DESC
+            LIMIT 100
+        """, (
+            spa_id, business_unit_id, start_date, end_date
+        ))
+
+        ledger_rows = cur.fetchall()
+
+    finally:
+        conn.close()
+
+    gross_total = sum(
+        (row["gross_pay"] for row in summary_rows),
+        Decimal("0.00")
+    )
+
+    entry_total = sum(
+        (row["entry_count"] for row in summary_rows),
+        0
+    )
+
+    return render_template(
+        "employee_hours_payroll.html",
+        start_date=start_date.isoformat(),
+        end_date=end_date.isoformat(),
+        summary_rows=summary_rows,
+        ledger_rows=ledger_rows,
+        gross_total=gross_total,
+        entry_total=entry_total,
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
 @app.route("/employee_compensation_report")
 @login_required
 @spa_required

@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+
+{% block title %}Employee Hours & Payroll{% endblock %}
+
+{% block content %}
+
+<div class="report-page">
+
+    <div class="report-header">
+        <div class="form-buttons">
+            <a href="{{ url_for('employees_home') }}"
+               class="btn btn-secondary">
+                Back to Employee Home
+            </a>
+        </div>
+
+        <div>
+            <h1>Employee Hours & Payroll</h1>
+            <p class="report-subtitle">
+                Track employee hours, daily pay, and event earnings.
+            </p>
+        </div>
+    </div>
+
+    <div class="report-filter-card no-print">
+        <form method="GET"
+              action="{{ url_for('employee_hours_payroll') }}"
+              class="report-filter-form">
+
+            <div class="filter-group">
+                <label for="start_date">Start Date</label>
+                <input type="date"
+                       id="start_date"
+                       name="start_date"
+                       value="{{ start_date }}"
+                       required>
+            </div>
+
+            <div class="filter-group">
+                <label for="end_date">End Date</label>
+                <input type="date"
+                       id="end_date"
+                       name="end_date"
+                       value="{{ end_date }}"
+                       required>
+            </div>
+
+            <div class="filter-buttons">
+                <button type="submit" class="btn">
+                    View Entries
+                </button>
+
+                <a href="{{ url_for('employee_hours_payroll') }}"
+                   class="btn btn-secondary">
+                    Reset
+                </a>
+            </div>
+        </form>
+    </div>
+
+    <div class="report-period">
+        <strong>Reporting Period:</strong>
+        {{ start_date }} through {{ end_date }}
+    </div>
+
+    <div class="summary-cards">
+
+        <div class="summary-card">
+            <h3>Employees with Entries</h3>
+            <p>{{ summary_rows|length }}</p>
+        </div>
+
+        <div class="summary-card">
+            <h3>Work Entries</h3>
+            <p>{{ entry_total }}</p>
+        </div>
+
+        <div class="summary-card">
+            <h3>Preliminary Gross Pay</h3>
+            <p>{{ gross_total|currency }}</p>
+        </div>
+
+    </div>
+
+    <div class="report-section">
+
+        <h2>Employee Pay Summary</h2>
+
+        <div class="table-wrap">
+            <table class="styled-report-table wide-report-table">
+                <thead>
+                    <tr>
+                        <th>Employee</th>
+                        <th>Entries</th>
+                        <th>Regular Hours</th>
+                        <th>Overtime Hours</th>
+                        <th>Days Worked</th>
+                        <th>Events</th>
+                        <th>Gross Pay</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+                    {% for row in summary_rows %}
+                    <tr>
+                        <td>{{ row.employee_name }}</td>
+                        <td>{{ row.entry_count }}</td>
+                        <td>{{ row.regular_hours }}</td>
+                        <td>{{ row.overtime_hours }}</td>
+                        <td>{{ row.days_worked }}</td>
+                        <td>{{ row.event_count }}</td>
+                        <td class="amount-cell total-highlight">
+                            {{ row.gross_pay|currency }}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7">
+                            No payroll work entries were found
+                            for the selected dates.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+    </div>
+
+    <div class="report-section">
+
+        <h2>Work Entry Ledger</h2>
+
+        <p class="report-subtitle">
+            Showing the latest 100 entries in this date range.
+            Employee totals above include all matching entries.
+        </p>
+
+        <div class="table-wrap">
+            <table class="styled-report-table wide-report-table">
+
+                <thead>
+                    <tr>
+                        <th>Work Date</th>
+                        <th>Employee</th>
+                        <th>Pay Type</th>
+                        <th>Work Quantity</th>
+                        <th>Base Rate</th>
+                        <th>Overtime Rate</th>
+                        <th>Event</th>
+                        <th>Gross Amount</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+                    {% for row in ledger_rows %}
+                    <tr>
+                        <td>{{ row.work_date }}</td>
+                        <td>{{ row.employee_name }}</td>
+                        <td>{{ row.entry_type|title }}</td>
+
+                        <td>
+                            {% if row.entry_type == 'hourly' %}
+                                {{ row.regular_hours }} regular
+                                {% if row.overtime_hours %}
+                                    / {{ row.overtime_hours }} overtime
+                                {% endif %}
+                            {% elif row.entry_type == 'daily' %}
+                                {{ row.days_worked }} day(s)
+                            {% else %}
+                                1 event
+                            {% endif %}
+                        </td>
+
+                        <td class="amount-cell">
+                            {{ row.rate_snapshot|currency }}
+                        </td>
+
+                        <td class="amount-cell">
+                            {% if row.overtime_rate_snapshot is not none %}
+                                {{ row.overtime_rate_snapshot|currency }}
+                            {% else %}
+                                —
+                            {% endif %}
+                        </td>
+
+                        <td>
+                            {{ row.event_name_snapshot or "—" }}
+                        </td>
+
+                        <td class="amount-cell total-highlight">
+                            {{ row.gross_amount|currency }}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="8">
+                            No work entries have been recorded
+                            for this period.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+
+            </table>
+        </div>
+
+    </div>
+
+    <div class="report-section">
+        <p>
+            <strong>Payroll Development Status:</strong>
+            Gross earnings use recorded historical pay rates.
+            FICA, other deductions, estimated net pay,
+            approvals, and payment history will be added
+            in upcoming payroll development stages.
+        </p>
+        <p>
+            This page is separate from the existing
+            Employee Compensation Report.
+            No payroll payments are initiated here.
+        </p>
+    </div>
+
+</div>
+
+{% endblock %}
