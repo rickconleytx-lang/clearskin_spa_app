@@ -96931,7 +96931,8 @@ def employee_hours_payroll():
 @require_workspace_permission("can_manage_employee_compensation")
 @require_psp_access("employees_compensation")
 def employee_payroll_add_work_entry():
-    from uuid import uuid4
+    from uuid import UUID, uuid4
+    import hashlib
     from psycopg2.errors import UniqueViolation
 
     from services.employee_payroll_work_entries import (
@@ -96939,6 +96940,7 @@ def employee_payroll_add_work_entry():
         DuplicatePayrollWorkEntryError,
         validate_payroll_work_entry,
         create_payroll_work_entry,
+        find_possible_duplicate_work_entries,
     )
 
     spa_id = current_spa_id()
@@ -96965,6 +96967,12 @@ def employee_payroll_add_work_entry():
         "psp_employee_access_page_instance_id", ""
     )
 
+    duplicate_entries = []
+
+    class DuplicateReviewRequired(Exception):
+        def __init__(self, entries):
+            self.entries = entries
+
     if request.method == "POST":
 
         submitted_csrf = request.form.get(
@@ -96990,6 +96998,95 @@ def employee_payroll_add_work_entry():
                 cur = conn.cursor(
                     cursor_factory=RealDictCursor
                 )
+
+                # Serialize same-employee/date submissions so
+                # concurrent requests cannot bypass review.
+                cur.execute(
+                    '''
+                    SELECT pg_advisory_xact_lock(
+                        hashtext(%s),
+                        hashtext(%s)
+                    )
+                    ''',
+                    (
+                        f"payroll:{spa_id}:{business_unit_id}",
+                        f"{entry['employee_id']}:{entry['work_date']}",
+                    ),
+                )
+
+                # Exact request replay is always blocked.
+                cur.execute('''
+                    SELECT 1
+                    FROM employee_payroll_work_entries
+                    WHERE spa_id = %s
+                      AND business_unit_id = %s
+                      AND source_system = 'manual'
+                      AND source_reference = %s
+                    LIMIT 1
+                ''', (
+                    spa_id,
+                    business_unit_id,
+                    entry["entry_request_id"],
+                ))
+
+                if cur.fetchone():
+                    raise DuplicatePayrollWorkEntryError(
+                        "This work entry was already submitted."
+                    )
+
+                candidates = find_possible_duplicate_work_entries(
+                    cur,
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    employee_id=entry["employee_id"],
+                    work_date=entry["work_date"],
+                    entry_type=entry["entry_type"],
+                )
+
+                if candidates:
+                    entry_signature = hashlib.sha256(
+                        repr(sorted(
+                            (key, str(value))
+                            for key, value in entry.items()
+                        )).encode("utf-8")
+                    ).hexdigest()
+
+                    existing_signature = hashlib.sha256(
+                        repr([
+                            sorted(
+                                (key, str(value))
+                                for key, value in item.items()
+                            )
+                            for item in candidates
+                        ]).encode("utf-8")
+                    ).hexdigest()
+
+                    review = {
+                        "spa_id": spa_id,
+                        "business_unit_id": business_unit_id,
+                        "user_id": user_id,
+                        "entry_signature": entry_signature,
+                        "existing_signature": existing_signature,
+                    }
+
+                    review_key = "payroll_duplicate_review_v1"
+
+                    confirmed = (
+                        request.form.get("confirm_duplicate") == "1"
+                        and session.get(review_key) == review
+                    )
+
+                    if not confirmed:
+                        session[review_key] = review
+                        raise DuplicateReviewRequired(candidates)
+
+                    # Single-use confirmation.
+                    session.pop(review_key, None)
+
+                else:
+                    session.pop(
+                        "payroll_duplicate_review_v1", None
+                    )
 
                 work_entry_id = create_payroll_work_entry(
                     cur,
@@ -97022,6 +97119,17 @@ def employee_payroll_add_work_entry():
                 )
 
                 conn.commit()
+
+            except DuplicateReviewRequired as exc:
+                conn.rollback()
+                duplicate_entries = exc.entries
+
+                flash(
+                    "Possible duplicate work entry: review "
+                    "the existing entries before confirming "
+                    "an additional shift or event.",
+                    "warning",
+                )
 
             except (
                 DuplicatePayrollWorkEntryError,
@@ -97102,16 +97210,28 @@ def employee_payroll_add_work_entry():
     finally:
         conn.close()
 
+    submitted_request_id = (
+        request.form.get("entry_request_id", "")
+        if request.method == "POST"
+        else ""
+    )
+
+    try:
+        retained_request_id = str(UUID(submitted_request_id))
+    except (ValueError, TypeError, AttributeError):
+        retained_request_id = str(uuid4())
+
     return render_template(
         "employee_payroll_add_work_entry.html",
         employees=employees,
+        duplicate_entries=duplicate_entries,
         form_values=(
             request.form.to_dict()
             if request.method == "POST"
             else {}
         ),
         work_date_default=date.today().isoformat(),
-        entry_request_id=str(uuid4()),
+        entry_request_id=retained_request_id,
         employee_access_verified=verification,
         employee_access_page_scope=page_scope,
         employee_access_return_path=return_path,

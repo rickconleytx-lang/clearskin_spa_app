@@ -66,6 +66,75 @@
         line-height: 1.5;
     }
 
+
+    .payroll-time-scratchpad {
+        margin-bottom: 25px;
+        padding: 20px;
+        border: 1px solid #d7dce5;
+        border-radius: 12px;
+        background: #f7fafc;
+    }
+
+    .payroll-time-scratchpad h3 {
+        margin-top: 0;
+    }
+
+    .payroll-time-scratchpad input[type="checkbox"] {
+        width: auto;
+        margin-right: 8px;
+    }
+
+    .payroll-time-results {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px 30px;
+        margin: 18px 0;
+        font-size: 17px;
+    }
+
+
+    /* Potential duplicate work-entry review */
+    .payroll-duplicate-review {
+        margin-top: 22px;
+        padding: 20px;
+        border: 2px solid #d7aa4d;
+        border-radius: 12px;
+        background: #fffaf0;
+    }
+
+    .payroll-duplicate-review h3 {
+        margin: 0 0 10px;
+        color: #6a4717;
+    }
+
+    .payroll-duplicate-review p {
+        line-height: 1.5;
+    }
+
+    .payroll-duplicate-list {
+        margin: 15px 0;
+        padding: 0;
+        list-style: none;
+    }
+
+    .payroll-duplicate-item {
+        padding: 12px;
+        margin-bottom: 10px;
+        border: 1px solid #e6d6b4;
+        border-radius: 8px;
+        background: #fff;
+    }
+
+    .payroll-duplicate-item strong {
+        display: block;
+        margin-bottom: 6px;
+    }
+
+    .payroll-duplicate-warning-text {
+        font-weight: 600;
+        color: #765017;
+    }
+
     .payroll-entry-actions {
         display: flex;
         flex-wrap: wrap;
@@ -198,6 +267,89 @@
                  id="hourly_fields">
 
             <h2>Hourly Work</h2>
+
+
+            <!-- payroll-time-scratchpad-v1 -->
+            <div class="payroll-time-scratchpad">
+                <h3>Time On / Time Off Calculator</h3>
+
+                <p class="payroll-entry-hint">
+                    Optional scratch pad for calculating
+                    hours worked. Clock times are not saved.
+                </p>
+
+                <div class="payroll-entry-grid">
+                    <div class="payroll-field">
+                        <label for="scratch_time_on">
+                            Time On
+                        </label>
+                        <input type="time"
+                               id="scratch_time_on"
+                               autocomplete="off">
+                    </div>
+
+                    <div class="payroll-field">
+                        <label for="scratch_time_off">
+                            Time Off
+                        </label>
+                        <input type="time"
+                               id="scratch_time_off"
+                               autocomplete="off">
+                    </div>
+
+                    <div class="payroll-field">
+                        <label for="scratch_break">
+                            Unpaid Break (minutes)
+                        </label>
+                        <input type="number"
+                               id="scratch_break"
+                               min="0"
+                               max="1440"
+                               step="1"
+                               value="0">
+                    </div>
+
+                    <div class="payroll-field">
+                        <label>
+                            <input type="checkbox"
+                                   id="scratch_overnight">
+                            Shift ends next day
+                        </label>
+                        <small>
+                            Select for overnight work.
+                        </small>
+                    </div>
+                </div>
+
+                <div class="payroll-time-results"
+                     aria-live="polite">
+                    <div>
+                        <strong>Total Time:</strong>
+                        <span id="scratch_total">—</span>
+                    </div>
+                    <div>
+                        <strong>Decimal Hours:</strong>
+                        <span id="scratch_decimal">—</span>
+                    </div>
+                </div>
+
+                <p id="scratch_message"
+                   class="payroll-entry-hint"
+                   role="status"></p>
+
+                <button type="button"
+                        id="scratch_apply"
+                        class="btn btn-secondary"
+                        disabled>
+                    Use Calculated Hours
+                </button>
+
+                <p class="payroll-entry-hint">
+                    Calculated hours will fill Regular Hours.
+                    If the shift includes overtime, split
+                    regular and overtime hours before saving.
+                </p>
+            </div>
 
             <div class="payroll-entry-grid">
 
@@ -374,11 +526,102 @@
                 overwrite this entry.
             </p>
 
+
+            <!-- payroll-duplicate-review-v1 -->
+            {% if duplicate_entries %}
+            <div class="payroll-duplicate-review"
+                 role="alert">
+
+                <h3>⚠️ Possible Duplicate Work Entry</h3>
+
+                <p>
+                    This employee already has work recorded
+                    for the selected date.
+                    Review the entries below before saving
+                    another shift or event.
+                </p>
+
+                <ul class="payroll-duplicate-list">
+                    {% for previous in duplicate_entries %}
+                    <li class="payroll-duplicate-item">
+
+                        <strong>
+                            Entry #{{ previous.work_entry_id }}
+                            — {{ previous.entry_type|title }}
+                            — {{ previous.work_date }}
+                        </strong>
+
+                        {% if previous.entry_type == "hourly" %}
+                            Regular Hours:
+                            {{ previous.regular_hours }}
+                            |
+                            Overtime:
+                            {{ previous.overtime_hours }}
+
+                        {% elif previous.entry_type == "daily" %}
+                            Days Worked:
+                            {{ previous.days_worked }}
+
+                        {% elif previous.entry_type == "event" %}
+                            Event:
+                            {{ previous.event_name_snapshot or "Unnamed" }}
+                        {% endif %}
+
+                        <div>
+                            Saved Base Rate:
+                            ${{ "{:,.2f}".format(
+                                previous.rate_snapshot
+                            ) }}
+                        </div>
+
+                        {% if previous.same_type %}
+                        <div class="payroll-duplicate-warning-text">
+                            Same pay type as the new entry
+                        </div>
+                        {% endif %}
+
+                    </li>
+                    {% endfor %}
+                </ul>
+
+                <p class="payroll-duplicate-warning-text">
+                    If this is a legitimate additional shift
+                    or event, confirm below. Otherwise,
+                    correct the details or cancel.
+                </p>
+
+                <p>
+                    <small>
+                        Up to 20 existing work entries are
+                        shown for review. A matching date
+                        does not necessarily mean a duplicate.
+                    </small>
+                </p>
+
+                <p>
+                    <a href="#employee_id">
+                        Review or change my entry
+                    </a>
+                </p>
+
+            </div>
+            {% endif %}
+
             <div class="payroll-entry-actions">
+
+                {% if duplicate_entries %}
+                <button type="submit"
+                        name="confirm_duplicate"
+                        value="1"
+                        class="btn">
+                    Confirm &amp; Save Additional Entry
+                </button>
+                {% else %}
                 <button type="submit"
                         class="btn">
                     Save Work Entry
                 </button>
+                {% endif %}
 
                 <a href="{{ url_for('employee_hours_payroll') }}"
                    class="btn btn-secondary">
@@ -424,6 +667,119 @@
             });
         });
     }
+
+
+    // Optional calculator only. Clock times are not persisted.
+    const scratchOn = document.getElementById("scratch_time_on");
+    const scratchOff = document.getElementById("scratch_time_off");
+    const scratchBreak = document.getElementById("scratch_break");
+    const scratchOvernight = document.getElementById("scratch_overnight");
+    const scratchTotal = document.getElementById("scratch_total");
+    const scratchDecimal = document.getElementById("scratch_decimal");
+    const scratchMessage = document.getElementById("scratch_message");
+    const scratchApply = document.getElementById("scratch_apply");
+    const regularHours = document.getElementById("regular_hours");
+
+    let calculatedHours = null;
+
+    function timeToMinutes(value) {
+        if (!/^\d{2}:\d{2}$/.test(value)) {
+            return null;
+        }
+
+        const parts = value.split(":").map(Number);
+
+        if (
+            parts[0] > 23 ||
+            parts[1] > 59
+        ) {
+            return null;
+        }
+
+        return parts[0] * 60 + parts[1];
+    }
+
+    function updateScratchPad() {
+        calculatedHours = null;
+        scratchApply.disabled = true;
+        scratchTotal.textContent = "—";
+        scratchDecimal.textContent = "—";
+        scratchMessage.textContent = "";
+
+        const start = timeToMinutes(scratchOn.value);
+        const finish = timeToMinutes(scratchOff.value);
+
+        if (start === null || finish === null) {
+            return;
+        }
+
+        const breakValue = scratchBreak.value.trim();
+        const breakMinutes = breakValue === ""
+            ? 0
+            : Number(breakValue);
+
+        let elapsed = finish - start;
+
+        if (scratchOvernight.checked) {
+            elapsed += 1440;
+        }
+
+        if (
+            !Number.isInteger(breakMinutes) ||
+            breakMinutes < 0 ||
+            breakMinutes > 1440 ||
+            elapsed <= 0 ||
+            elapsed > 1440 ||
+            breakMinutes >= elapsed
+        ) {
+            scratchMessage.textContent =
+                "Check shift times, overnight selection, " +
+                "and unpaid break.";
+            return;
+        }
+
+        const minutesWorked = elapsed - breakMinutes;
+        const hours = Math.floor(minutesWorked / 60);
+        const minutes = minutesWorked % 60;
+
+        calculatedHours = (minutesWorked / 60).toFixed(2);
+
+        scratchTotal.textContent =
+            hours + ":" + String(minutes).padStart(2, "0");
+
+        scratchDecimal.textContent = calculatedHours;
+        scratchApply.disabled = false;
+
+        scratchMessage.textContent =
+            "Click Use Calculated Hours to copy into Regular Hours.";
+    }
+
+    [
+        scratchOn,
+        scratchOff,
+        scratchBreak,
+        scratchOvernight
+    ].forEach(function (control) {
+        control.addEventListener("input", updateScratchPad);
+        control.addEventListener("change", updateScratchPad);
+    });
+
+    scratchApply.addEventListener("click", function () {
+        if (calculatedHours === null) {
+            return;
+        }
+
+        regularHours.value = calculatedHours;
+
+        regularHours.dispatchEvent(
+            new Event("input", { bubbles: true })
+        );
+
+        scratchMessage.textContent =
+            calculatedHours +
+            " hours copied to Regular Hours. " +
+            "Review before saving.";
+    });
 
     selector.addEventListener("change", updatePayFields);
     updatePayFields();

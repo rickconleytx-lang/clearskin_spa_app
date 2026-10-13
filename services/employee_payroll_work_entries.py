@@ -176,6 +176,68 @@ def validate_payroll_work_entry(form):
     }
 
 
+
+def find_possible_duplicate_work_entries(
+    cur,
+    *,
+    spa_id,
+    business_unit_id,
+    employee_id,
+    work_date,
+    entry_type,
+):
+    """Find existing same-day entries for explicit review.
+
+    A matching date is a warning, not proof of duplication.
+    Legitimate multiple shifts and mixed pay are allowed.
+    Caller must enforce normal payroll authorization.
+    """
+
+    cur.execute("""
+        SELECT
+            work_entry_id,
+            entry_type,
+            work_date,
+            regular_hours,
+            overtime_hours,
+            days_worked,
+            rate_snapshot,
+            event_name_snapshot
+        FROM employee_payroll_work_entries
+        WHERE spa_id = %s
+          AND business_unit_id = %s
+          AND employee_id = %s
+          AND work_date = %s
+          AND voided_at IS NULL
+        ORDER BY
+            CASE WHEN entry_type = %s THEN 0 ELSE 1 END,
+            work_entry_id DESC
+        LIMIT 20
+    """, (
+        spa_id,
+        business_unit_id,
+        employee_id,
+        work_date,
+        entry_type,
+    ))
+
+    rows = cur.fetchall()
+
+    return [
+        {
+            "work_entry_id": row["work_entry_id"],
+            "entry_type": row["entry_type"],
+            "work_date": row["work_date"],
+            "regular_hours": row["regular_hours"],
+            "overtime_hours": row["overtime_hours"],
+            "days_worked": row["days_worked"],
+            "rate_snapshot": row["rate_snapshot"],
+            "event_name_snapshot": row["event_name_snapshot"],
+            "same_type": row["entry_type"] == entry_type,
+        }
+        for row in rows
+    ]
+
 def create_payroll_work_entry(
     cur,
     *,
