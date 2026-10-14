@@ -513,6 +513,198 @@
 
             </div>
 
+
+            {% if employee_source in ('company', 'employee') %}
+
+                {% set edit_values =
+                    selected_employee_settings or {} %}
+                {% set edit_frequency =
+                    edit_values.get('default_pay_period') or '' %}
+                {% set edit_anchor =
+                    edit_values.get('pay_period_anchor_date') %}
+                {% set edit_first =
+                    edit_values.get('semimonthly_first_start_day') %}
+                {% set edit_second =
+                    edit_values.get('semimonthly_second_start_day') %}
+
+                <div class="report-section">
+                    <h3>Edit Employee Payroll Schedule</h3>
+
+                    <p class="report-subtitle">
+                        Choose the company default or configure
+                        an individual payroll schedule.
+                    </p>
+
+                    <form method="POST"
+                          id="employee-payroll-schedule-form"
+                          action="{{ url_for(
+                              'employee_payroll_employee_schedule_save'
+                          ) }}">
+
+                        <input type="hidden"
+                               name="security_csrf_token"
+                               value="{{ security_csrf_token }}">
+
+                        <input type="hidden"
+                               name="employee_id"
+                               value="{{ selected_employee.employee_id }}">
+
+                        <fieldset class="form-group">
+                            <legend>Schedule Type</legend>
+
+                            <label>
+                                <input type="radio"
+                                       name="schedule_source"
+                                       value="company"
+                                       {% if employee_source == 'company' %}
+                                           checked
+                                       {% endif %}>
+                                Use Company Default Schedule
+                            </label>
+
+                            <label>
+                                <input type="radio"
+                                       name="schedule_source"
+                                       value="employee"
+                                       {% if employee_source == 'employee' %}
+                                           checked
+                                       {% endif %}>
+                                Use Employee-Specific Schedule
+                            </label>
+                        </fieldset>
+
+                        <div id="employee-override-fields"
+                             {% if employee_source != 'employee' %}
+                                 hidden
+                             {% endif %}>
+
+                            <div class="form-group">
+                                <label for="employee_pay_frequency">
+                                    Employee Pay Frequency
+                                </label>
+
+                                <select id="employee_pay_frequency"
+                                        name="pay_frequency"
+                                        {% if employee_source != 'employee' %}
+                                            disabled
+                                        {% else %}
+                                            required
+                                        {% endif %}>
+
+                                    <option value="">
+                                        Select Frequency
+                                    </option>
+
+                                    {% for value, label in [
+                                        ('daily', 'Daily'),
+                                        ('weekly', 'Weekly'),
+                                        ('biweekly', 'Every Two Weeks'),
+                                        ('semimonthly', 'Twice Monthly'),
+                                        ('monthly', 'Monthly')
+                                    ] %}
+                                        <option value="{{ value }}"
+                                            {% if edit_frequency == value %}
+                                                selected
+                                            {% endif %}>
+                                            {{ label }}
+                                        </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+
+                            <div id="employee-payroll-anchor-fields"
+                                 {% if edit_frequency == 'semimonthly' %}
+                                     hidden
+                                 {% endif %}>
+
+                                <div class="form-group">
+                                    <label for="employee_reference_start_date">
+                                        Reference Pay Period Starting Date
+                                    </label>
+
+                                    <input type="date"
+                                           id="employee_reference_start_date"
+                                           name="reference_start_date"
+                                           value="{{ edit_anchor.isoformat()
+                                               if edit_anchor else '' }}"
+                                           {% if employee_source != 'employee'
+                                              or edit_frequency == 'semimonthly' %}
+                                               disabled
+                                           {% else %}
+                                               required
+                                           {% endif %}>
+
+                                    <small>
+                                        Enter the confirmed starting date
+                                        for this employee's pay cycle.
+                                    </small>
+                                </div>
+                            </div>
+
+                            <div id="employee-payroll-semimonthly-fields"
+                                 {% if edit_frequency != 'semimonthly' %}
+                                     hidden
+                                 {% endif %}>
+
+                                <div class="form-group">
+                                    <label for="employee_first_start_day">
+                                        First Monthly Starting Day
+                                    </label>
+
+                                    <input type="number"
+                                           id="employee_first_start_day"
+                                           name="semimonthly_first_start_day"
+                                           min="1"
+                                           max="27"
+                                           step="1"
+                                           value="{{ edit_first or '' }}"
+                                           {% if employee_source != 'employee'
+                                              or edit_frequency != 'semimonthly' %}
+                                               disabled
+                                           {% else %}
+                                               required
+                                           {% endif %}>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="employee_second_start_day">
+                                        Second Monthly Starting Day
+                                    </label>
+
+                                    <input type="number"
+                                           id="employee_second_start_day"
+                                           name="semimonthly_second_start_day"
+                                           min="2"
+                                           max="31"
+                                           step="1"
+                                           value="{{ edit_second or '' }}"
+                                           {% if employee_source != 'employee'
+                                              or edit_frequency != 'semimonthly' %}
+                                               disabled
+                                           {% else %}
+                                               required
+                                           {% endif %}>
+                                </div>
+                            </div>
+                        </div>
+
+                        <p class="report-subtitle">
+                            The employee preview above reflects the
+                            currently saved schedule. Save changes
+                            to update the preview.
+                        </p>
+
+                        <div class="form-buttons">
+                            <button type="submit" class="btn">
+                                Save Employee Schedule
+                            </button>
+                        </div>
+
+                    </form>
+                </div>
+
+            {% endif %}
+
         {% else %}
 
             <p class="report-subtitle">
@@ -523,9 +715,9 @@
         {% endif %}
 
         <p class="report-subtitle">
-            Employee schedule changes are not enabled in
-            this view yet. Reviewing an employee does not
-            modify payroll records or company settings.
+            Saving an employee schedule does not create
+            payroll periods, approve earnings, or record payments.
+            Existing payroll history remains protected.
         </p>
 
     </div>
@@ -572,6 +764,92 @@
     }
 
     frequency.addEventListener("change", updateFields);
+    updateFields();
+})();
+</script>
+
+
+<script>
+(function () {
+    "use strict";
+
+    const form = document.getElementById(
+        "employee-payroll-schedule-form"
+    );
+
+    if (!form) {
+        return;
+    }
+
+    const radios = form.querySelectorAll(
+        'input[name="schedule_source"]'
+    );
+
+    const overrideFields = document.getElementById(
+        "employee-override-fields"
+    );
+
+    const frequency = document.getElementById(
+        "employee_pay_frequency"
+    );
+
+    const anchorGroup = document.getElementById(
+        "employee-payroll-anchor-fields"
+    );
+
+    const anchor = document.getElementById(
+        "employee_reference_start_date"
+    );
+
+    const semimonthlyGroup = document.getElementById(
+        "employee-payroll-semimonthly-fields"
+    );
+
+    const firstDay = document.getElementById(
+        "employee_first_start_day"
+    );
+
+    const secondDay = document.getElementById(
+        "employee_second_start_day"
+    );
+
+    function updateFields() {
+        const selected = form.querySelector(
+            'input[name="schedule_source"]:checked'
+        );
+
+        const individual = (
+            selected && selected.value === "employee"
+        );
+
+        const semimonthly = (
+            individual && frequency.value === "semimonthly"
+        );
+
+        overrideFields.hidden = !individual;
+
+        frequency.disabled = !individual;
+        frequency.required = !!individual;
+
+        anchorGroup.hidden = !individual || semimonthly;
+        anchor.disabled = !individual || semimonthly;
+        anchor.required = !!individual && !semimonthly;
+
+        semimonthlyGroup.hidden = !semimonthly;
+
+        firstDay.disabled = !semimonthly;
+        secondDay.disabled = !semimonthly;
+
+        firstDay.required = !!semimonthly;
+        secondDay.required = !!semimonthly;
+    }
+
+    radios.forEach(function (radio) {
+        radio.addEventListener("change", updateFields);
+    });
+
+    frequency.addEventListener("change", updateFields);
+
     updateFields();
 })();
 </script>

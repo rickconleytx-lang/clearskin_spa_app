@@ -96937,6 +96937,156 @@ def employee_hours_payroll():
 # Personal Employee Verification required.
 # ==========================================================
 
+
+@app.route(
+    "/employees/hours-payroll/schedule/employee",
+    methods=["POST"],
+)
+@login_required
+@spa_required
+@require_subscription_tier("pos", "team")
+@require_psp_access(
+    "hours_payroll",
+    require_employee_verification=True,
+)
+def employee_payroll_employee_schedule_save():
+    """Save an employee payroll schedule in the active workspace."""
+
+    from services.employee_payroll_employee_schedule import (
+        validate_employee_schedule_choice,
+    )
+    from services.employee_payroll_employee_schedule_storage import (
+        save_employee_schedule_choice,
+    )
+    from services.employee_payroll_schedule_config import (
+        PayrollScheduleConfigError,
+    )
+
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if (
+        spa_id is None
+        or business_unit_id is None
+        or user_id is None
+    ):
+        abort(403)
+
+    verification = g.get(
+        "psp_employee_access_verification"
+    )
+
+    if not verification or not verification.get("employee_id"):
+        abort(403)
+
+    submitted_csrf = request.form.get(
+        "security_csrf_token", ""
+    )
+
+    if not _security_form_csrf_valid(submitted_csrf):
+        abort(400)
+
+    raw_employee_id = str(
+        request.form.get("employee_id") or ""
+    ).strip()
+
+    if (
+        not raw_employee_id
+        or len(raw_employee_id) > 18
+        or not raw_employee_id.isascii()
+        or not raw_employee_id.isdigit()
+    ):
+        abort(400)
+
+    employee_id = int(raw_employee_id)
+
+    if employee_id <= 0:
+        abort(400)
+
+    return_url = url_for(
+        "employee_payroll_schedule_settings",
+        employee_id=employee_id,
+    )
+
+    try:
+        choice = validate_employee_schedule_choice(
+            request.form
+        )
+    except PayrollScheduleConfigError as exc:
+        flash(str(exc), "error")
+        return redirect(return_url)
+
+    conn = get_db_connection()
+
+    try:
+        cur = conn.cursor(
+            cursor_factory=RealDictCursor
+        )
+
+        changed = save_employee_schedule_choice(
+            cur,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            employee_id=employee_id,
+            choice=choice,
+        )
+
+        if changed:
+            log_audit(
+                cur,
+                spa_id=spa_id,
+                user_id=user_id,
+                action_type=(
+                    "employee_payroll_employee_schedule_saved"
+                ),
+                table_name="employee_payroll_settings",
+                record_id=employee_id,
+                notes=(
+                    "Employee payroll schedule saved. "
+                    "Schedule source: "
+                    f"{choice.schedule_source}. "
+                    "Existing payroll periods and "
+                    "payment records were not changed."
+                ),
+                business_unit_id=business_unit_id,
+                verified_employee_id=(
+                    verification["employee_id"]
+                ),
+            )
+
+        conn.commit()
+
+    except PermissionError:
+        conn.rollback()
+        abort(404)
+
+    except PayrollScheduleConfigError as exc:
+        conn.rollback()
+        flash(str(exc), "error")
+        return redirect(return_url)
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        conn.close()
+
+    if changed:
+        flash(
+            "Employee payroll schedule saved.",
+            "success",
+        )
+    else:
+        flash(
+            "Employee payroll schedule is already up to date.",
+            "info",
+        )
+
+    return redirect(return_url)
+
+
 @app.route(
     "/employees/hours-payroll/schedule",
     methods=["GET", "POST"],
