@@ -1,0 +1,288 @@
+{% extends "base.html" %}
+
+{% block title %}Payroll Schedule Settings{% endblock %}
+
+{% block content %}
+
+{% set frequency = form_values.get('pay_frequency', '') %}
+
+<div class="report-page">
+
+    <div class="report-header">
+        <div class="form-buttons">
+            <a href="{{ url_for('employee_hours_payroll') }}"
+               class="btn btn-secondary">
+                Back to Hours &amp; Payroll
+            </a>
+        </div>
+
+        <div>
+            <h1>Payroll Schedule Settings</h1>
+            <p class="report-subtitle">
+                Configure the company default payroll schedule.
+                Individual employees may use an approved override.
+            </p>
+        </div>
+    </div>
+
+    <div class="report-filter-card">
+
+        <h2>Company Default Pay Schedule</h2>
+
+        <p class="report-subtitle">
+            Enter the payroll frequency and starting date.
+            Peach Suite Pro will calculate subsequent
+            pay periods automatically.
+        </p>
+
+        <form method="POST"
+              id="payroll-schedule-form"
+              action="{{ url_for('employee_payroll_schedule_settings') }}">
+
+            <input type="hidden"
+                   name="security_csrf_token"
+                   value="{{ security_csrf_token }}">
+
+            <div class="form-group">
+                <label for="pay_frequency">
+                    Pay Frequency
+                </label>
+
+                <select id="pay_frequency"
+                        name="pay_frequency"
+                        required>
+                    <option value="">Select Frequency</option>
+
+                    {% for value, label in [
+                        ('daily', 'Daily'),
+                        ('weekly', 'Weekly'),
+                        ('biweekly', 'Every Two Weeks'),
+                        ('semimonthly', 'Twice Monthly'),
+                        ('monthly', 'Monthly')
+                    ] %}
+                    <option value="{{ value }}"
+                        {% if frequency == value %}selected{% endif %}>
+                        {{ label }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div id="payroll-anchor-fields"
+                 {% if frequency == 'semimonthly' %}hidden{% endif %}>
+
+                <div class="form-group">
+                    <label for="reference_start_date">
+                        Reference Pay Period Starting Date
+                    </label>
+
+                    <input type="date"
+                           id="reference_start_date"
+                           name="reference_start_date"
+                           value="{{ form_values.get(
+                               'reference_start_date', ''
+                           ) }}">
+
+                    <small>
+                        Enter a confirmed starting date for the
+                        pay-period cycle.
+                    </small>
+                </div>
+            </div>
+
+            <div id="payroll-semimonthly-fields"
+                 {% if frequency != 'semimonthly' %}hidden{% endif %}>
+
+                <div class="form-group">
+                    <label for="semimonthly_first_start_day">
+                        First Monthly Starting Day
+                    </label>
+
+                    <input type="number"
+                           id="semimonthly_first_start_day"
+                           name="semimonthly_first_start_day"
+                           min="1"
+                           max="27"
+                           step="1"
+                           value="{{ form_values.get(
+                               'semimonthly_first_start_day', ''
+                           ) }}">
+                </div>
+
+                <div class="form-group">
+                    <label for="semimonthly_second_start_day">
+                        Second Monthly Starting Day
+                    </label>
+
+                    <input type="number"
+                           id="semimonthly_second_start_day"
+                           name="semimonthly_second_start_day"
+                           min="2"
+                           max="31"
+                           step="1"
+                           value="{{ form_values.get(
+                               'semimonthly_second_start_day', ''
+                           ) }}">
+
+                    <small>
+                        Example: 1 and 16.
+                        Shorter months are handled automatically.
+                    </small>
+                </div>
+            </div>
+
+            <div class="form-buttons">
+                <button type="submit" class="btn">
+                    Save Payroll Schedule
+                </button>
+            </div>
+
+        </form>
+    </div>
+
+    <div class="report-section">
+        <h2>Payroll Schedule Preview</h2>
+
+        {% if preview_window and next_preview_window %}
+
+            <div class="summary-cards"
+                 style="display: grid;
+                        grid-template-columns:
+                        repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+                        gap: 16px;">
+
+                <div class="summary-card">
+                    <h3>
+                        {% if preview_is_prestart %}
+                            Current Cycle — Preview Only
+                        {% else %}
+                            Current Pay Period
+                        {% endif %}
+                    </h3>
+
+                    <p style="font-size: 1.2rem; line-height: 1.5;">
+                        {{ preview_window.start.strftime('%b %d, %Y') }}
+                        through
+                        {{ preview_window.end.strftime('%b %d, %Y') }}
+                    </p>
+
+                    {% if preview_is_prestart %}
+                        <small>
+                            Calculated cycle before the
+                            payroll schedule begins.
+                        </small>
+                    {% else %}
+                        <small>
+                            Calculated period containing today.
+                        </small>
+                    {% endif %}
+                </div>
+
+                <div class="summary-card">
+                    <h3>
+                        {% if preview_is_prestart %}
+                            First Scheduled Pay Period
+                        {% else %}
+                            Next Pay Period
+                        {% endif %}
+                    </h3>
+
+                    <p style="font-size: 1.2rem; line-height: 1.5;">
+                        {{ next_preview_window.start.strftime('%b %d, %Y') }}
+                        through
+                        {{ next_preview_window.end.strftime('%b %d, %Y') }}
+                    </p>
+
+                    <small>
+                        Calculated automatically from
+                        the saved payroll schedule.
+                    </small>
+                </div>
+
+            </div>
+
+            {% if preview_is_prestart %}
+                <p class="report-subtitle">
+                    The configured payroll schedule begins
+                    in the future. The earlier cycle is
+                    shown for reference only.
+                </p>
+            {% endif %}
+
+            <p class="report-subtitle">
+                Preview calculated for {{ as_of_date }}.
+                These dates do not create or approve
+                payroll records.
+            </p>
+
+        {% else %}
+
+            <p class="report-subtitle">
+                Configure and save a company payroll schedule
+                to display current and upcoming pay periods.
+            </p>
+
+        {% endif %}
+    </div>
+
+    <div class="report-section">
+        <p>
+            <strong>Important:</strong>
+            Saving a payroll schedule does not create
+            payroll records, approve earnings, or record
+            payments.
+        </p>
+
+        <p>
+            Saved employee payroll history and previously
+            approved or paid periods remain protected.
+        </p>
+    </div>
+
+</div>
+
+<script>
+(function () {
+    "use strict";
+
+    const frequency = document.getElementById("pay_frequency");
+    const anchorGroup = document.getElementById(
+        "payroll-anchor-fields"
+    );
+    const semiGroup = document.getElementById(
+        "payroll-semimonthly-fields"
+    );
+
+    const anchor = document.getElementById(
+        "reference_start_date"
+    );
+    const first = document.getElementById(
+        "semimonthly_first_start_day"
+    );
+    const second = document.getElementById(
+        "semimonthly_second_start_day"
+    );
+
+    function updateFields() {
+        const isSemi = frequency.value === "semimonthly";
+        const hasFrequency = frequency.value !== "";
+
+        anchorGroup.hidden = isSemi;
+        semiGroup.hidden = !isSemi;
+
+        anchor.disabled = !hasFrequency || isSemi;
+        anchor.required = hasFrequency && !isSemi;
+
+        first.disabled = !isSemi;
+        second.disabled = !isSemi;
+
+        first.required = isSemi;
+        second.required = isSemi;
+    }
+
+    frequency.addEventListener("change", updateFields);
+    updateFields();
+})();
+</script>
+
+{% endblock %}

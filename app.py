@@ -96930,6 +96930,226 @@ def employee_hours_payroll():
 
 
 
+
+# ==========================================================
+# EMPLOYEE PAYROLL — COMPANY SCHEDULE SETTINGS
+# PeachPOS / Team operational payroll.
+# Personal Employee Verification required.
+# ==========================================================
+
+@app.route(
+    "/employees/hours-payroll/schedule",
+    methods=["GET", "POST"],
+)
+@login_required
+@spa_required
+@require_subscription_tier("pos", "team")
+@require_psp_access(
+    "hours_payroll",
+    require_employee_verification=True,
+)
+def employee_payroll_schedule_settings():
+    from datetime import timedelta
+    from services.employee_payroll_schedule_config import (
+        CompanyPayrollSchedule,
+        PayrollScheduleConfigError,
+        validate_company_payroll_schedule,
+        preview_company_pay_period,
+    )
+    from services.employee_payroll_company_schedule import (
+        get_company_payroll_schedule,
+        save_company_payroll_schedule,
+    )
+
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+    user_id = session.get("user_id")
+
+    if (
+        spa_id is None
+        or business_unit_id is None
+        or user_id is None
+    ):
+        abort(403)
+
+    verification = g.get(
+        "psp_employee_access_verification"
+    )
+
+    if not verification or not verification.get("employee_id"):
+        abort(403)
+
+    if request.method == "POST":
+        submitted_csrf = request.form.get(
+            "security_csrf_token", ""
+        )
+
+        if not _security_form_csrf_valid(submitted_csrf):
+            abort(400)
+
+        try:
+            schedule = validate_company_payroll_schedule(
+                request.form
+            )
+        except PayrollScheduleConfigError as exc:
+            flash(str(exc), "error")
+        else:
+            conn = get_db_connection()
+
+            try:
+                cur = conn.cursor(
+                    cursor_factory=RealDictCursor
+                )
+
+                changed = save_company_payroll_schedule(
+                    cur,
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    actor_user_id=user_id,
+                    schedule=schedule,
+                )
+
+                if changed:
+                    log_audit(
+                        cur,
+                        spa_id=spa_id,
+                        user_id=user_id,
+                        action_type=(
+                            "employee_payroll_company_schedule_saved"
+                        ),
+                        table_name=(
+                            "employee_payroll_company_schedules"
+                        ),
+                        record_id=business_unit_id,
+                        notes=(
+                            "Company payroll schedule saved. "
+                            "Existing payroll periods and "
+                            "payment records were not changed."
+                        ),
+                        business_unit_id=business_unit_id,
+                        verified_employee_id=(
+                            verification["employee_id"]
+                        ),
+                    )
+
+                conn.commit()
+
+            except Exception:
+                conn.rollback()
+                raise
+
+            finally:
+                conn.close()
+
+            if changed:
+                flash(
+                    "Company payroll schedule saved.",
+                    "success",
+                )
+            else:
+                flash(
+                    "Payroll schedule is already up to date.",
+                    "info",
+                )
+
+            return redirect(
+                url_for("employee_payroll_schedule_settings")
+            )
+
+    # Load only the active PSP workspace's schedule.
+    conn = get_db_connection()
+
+    try:
+        cur = conn.cursor(
+            cursor_factory=RealDictCursor
+        )
+
+        saved = get_company_payroll_schedule(
+            cur,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+        )
+
+    finally:
+        conn.close()
+
+    as_of = date.today()
+    preview_window = None
+    next_preview_window = None
+    preview_is_prestart = False
+
+    if saved:
+        saved_schedule = CompanyPayrollSchedule(
+            pay_frequency=saved["pay_frequency"],
+            reference_start_date=(
+                saved["reference_start_date"]
+            ),
+            semimonthly_first_start_day=(
+                saved["semimonthly_first_start_day"]
+            ),
+            semimonthly_second_start_day=(
+                saved["semimonthly_second_start_day"]
+            ),
+        )
+
+        preview_window = preview_company_pay_period(
+            saved_schedule,
+            as_of,
+        )
+
+        # A future reference date marks the first scheduled
+        # payroll period. Earlier cycles are preview-only.
+        preview_is_prestart = (
+            saved["reference_start_date"] is not None
+            and as_of < saved["reference_start_date"]
+        )
+
+        if preview_is_prestart:
+            next_as_of = saved["reference_start_date"]
+        else:
+            next_as_of = (
+                preview_window.end + timedelta(days=1)
+            )
+
+        next_preview_window = preview_company_pay_period(
+            saved_schedule,
+            next_as_of,
+        )
+
+    if request.method == "POST":
+        # Preserve submitted values after validation errors.
+        form_values = request.form.to_dict()
+
+    elif saved:
+        form_values = {
+            "pay_frequency": saved["pay_frequency"],
+            "reference_start_date": (
+                saved["reference_start_date"].isoformat()
+                if saved["reference_start_date"]
+                else ""
+            ),
+            "semimonthly_first_start_day": (
+                saved["semimonthly_first_start_day"] or ""
+            ),
+            "semimonthly_second_start_day": (
+                saved["semimonthly_second_start_day"] or ""
+            ),
+        }
+
+    else:
+        form_values = {}
+
+    return render_template(
+        "employee_payroll_schedule_settings.html",
+        form_values=form_values,
+        preview_window=preview_window,
+        next_preview_window=next_preview_window,
+        preview_is_prestart=preview_is_prestart,
+        as_of_date=as_of.isoformat(),
+        security_csrf_token=_security_form_csrf_token(),
+    )
+
+
 # ==========================================================
 # EMPLOYEE PAYROLL — ADD WORK ENTRY
 # PeachPOS / Team operational payroll only.
