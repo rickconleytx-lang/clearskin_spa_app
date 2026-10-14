@@ -29516,10 +29516,10 @@ def _psp_access_authorization(
     Evaluate one verified employee against one restricted PSP area.
 
     PSP Access Levels are hierarchical:
-        Level 1 may enter areas requiring Levels 1 through 5.
-        Level 2 may enter areas requiring Levels 2 through 5.
+        Level 1 may enter areas requiring Levels 1 through 8.
+        Level 2 may enter areas requiring Levels 2 through 8.
         ...
-        Level 5 may enter only areas requiring Level 5.
+        Level 8 may enter only areas requiring Level 8.
 
     Access levels are always read from the database so an Owner's
     changes take effect immediately. No PSP Access Level is cached
@@ -29621,8 +29621,8 @@ def _psp_access_authorization(
         }
 
     levels_valid = bool(
-        1 <= employee_access_level <= 5
-        and 1 <= required_access_level <= 5
+        1 <= employee_access_level <= 8
+        and 1 <= required_access_level <= 8
     )
 
     return {
@@ -95596,7 +95596,7 @@ def save_psp_access_levels():
         except (TypeError, ValueError):
             required_level = 0
 
-        if required_level not in {1, 2, 3, 4, 5}:
+        if required_level not in set(range(1, 9)):
             flash(
                 "Select a valid PSP Access Level for every "
                 "restricted area.",
@@ -98392,7 +98392,7 @@ def add_employee():
         except ValueError:
             access_level = -1
 
-        if access_level not in {None, 1, 2, 3, 4, 5}:
+        if access_level not in {None, *range(1, 9)}:
             flash("Select a valid PSP Access Level.", "error")
             cur.close()
             conn.close()
@@ -98740,7 +98740,7 @@ def edit_employee(employee_id):
         except ValueError:
             access_level = -1
 
-        if access_level not in {None, 1, 2, 3, 4, 5}:
+        if access_level not in {None, *range(1, 9)}:
             flash("Select a valid PSP Access Level.", "error")
             cur.close()
             conn.close()
