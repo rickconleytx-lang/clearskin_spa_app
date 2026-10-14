@@ -239,6 +239,297 @@
         </p>
     </div>
 
+
+    <div class="report-filter-card"
+         id="employee-schedule-selector">
+
+        <h2>Employee Payroll Schedule</h2>
+
+        <p class="report-subtitle">
+            Select an employee to review their payroll
+            schedule. Employees are listed alphabetically
+            within the current Provider Workspace.
+        </p>
+
+        <form method="GET"
+              action="{{ url_for('employee_payroll_schedule_settings') }}">
+
+            <div class="form-group">
+                <label for="selected_payroll_employee">
+                    Employee
+                </label>
+
+                <select id="selected_payroll_employee"
+                        name="employee_id"
+                        required>
+
+                    <option value="">
+                        Select Employee
+                    </option>
+
+                    {% for employee in employee_roster %}
+                    <option value="{{ employee.employee_id }}"
+                        {% if selected_employee
+                              and selected_employee.employee_id
+                                  == employee.employee_id %}
+                            selected
+                        {% endif %}>
+                        {{ employee.last_name or '' }},
+                        {{ employee.first_name or '' }}
+                    </option>
+                    {% endfor %}
+
+                </select>
+            </div>
+
+            <div class="form-buttons">
+                <button type="submit"
+                        class="btn btn-secondary">
+                    View Employee Schedule
+                </button>
+            </div>
+        </form>
+
+        {% if selected_employee %}
+
+            {% set employee_source = (
+                selected_employee_settings or {}
+            ).get('schedule_source', 'company') or 'company' %}
+
+            <div class="report-section">
+
+                <h3>
+                    {{ selected_employee.first_name or '' }}
+                    {{ selected_employee.last_name or '' }}
+                </h3>
+
+                {% if employee_source == 'company' %}
+
+                    <p>
+                        <strong>Schedule:</strong>
+                        Company Default
+                    </p>
+
+                    {% if preview_window and next_preview_window %}
+                        <p class="report-subtitle">
+                            This employee inherits the company
+                            payroll schedule shown above.
+                        </p>
+                    {% else %}
+                        <p class="report-subtitle">
+                            The company payroll schedule must
+                            be configured before pay periods
+                            can be calculated.
+                        </p>
+                    {% endif %}
+
+                {% elif employee_source == 'employee' %}
+
+                    {% set employee_frequency =
+                        selected_employee_settings.get(
+                            'default_pay_period'
+                        ) %}
+
+                    {% set employee_anchor =
+                        selected_employee_settings.get(
+                            'pay_period_anchor_date'
+                        ) %}
+
+                    {% set first_day =
+                        selected_employee_settings.get(
+                            'semimonthly_first_start_day'
+                        ) %}
+
+                    {% set second_day =
+                        selected_employee_settings.get(
+                            'semimonthly_second_start_day'
+                        ) %}
+
+                    <p>
+                        <strong>Schedule:</strong>
+                        Employee-Specific
+                    </p>
+
+                    <p>
+                        <strong>Pay Frequency:</strong>
+                        {{ {
+                            'daily': 'Daily',
+                            'weekly': 'Weekly',
+                            'biweekly': 'Every Two Weeks',
+                            'semimonthly': 'Twice Monthly',
+                            'monthly': 'Monthly'
+                        }.get(
+                            employee_frequency,
+                            'Not Configured'
+                        ) }}
+                    </p>
+
+                    {% if employee_frequency == 'semimonthly'
+                          and first_day and second_day %}
+
+                        <p>
+                            <strong>Starting Days:</strong>
+                            {{ first_day }} and {{ second_day }}
+                        </p>
+
+                        <p class="report-subtitle">
+                            Individual schedule configured.
+                            Calculated periods appear below.
+                        </p>
+
+                    {% elif employee_frequency
+                            and employee_frequency != 'semimonthly'
+                            and employee_anchor %}
+
+                        <p>
+                            <strong>Reference Starting Date:</strong>
+                            {{ employee_anchor.strftime('%b %d, %Y') }}
+                        </p>
+
+                        <p class="report-subtitle">
+                            Individual schedule configured.
+                            Calculated periods appear below.
+                        </p>
+
+                    {% else %}
+
+                        <p>
+                            <strong>Needs Configuration</strong>
+                        </p>
+
+                        <p class="report-subtitle">
+                            This employee has a legacy pay-period
+                            preference without a complete
+                            individual payroll schedule.
+                            PSP will not invent the missing
+                            starting date or schedule values.
+                        </p>
+
+                    {% endif %}
+
+                {% else %}
+
+                    <p class="report-subtitle">
+                        The saved schedule source is not
+                        recognized. Please review this
+                        employee's payroll configuration.
+                    </p>
+
+                {% endif %}
+
+
+                {% if employee_preview_window
+                      and employee_next_preview_window %}
+
+                    <h3>Employee Pay Period Preview</h3>
+
+                    <div class="summary-cards"
+                         style="display: grid;
+                                grid-template-columns:
+                                repeat(auto-fit,
+                                       minmax(min(100%, 260px), 1fr));
+                                gap: 16px;">
+
+                        <div class="summary-card">
+                            <h4>
+                                {% if employee_preview_is_prestart %}
+                                    Current Cycle — Preview Only
+                                {% else %}
+                                    Current Pay Period
+                                {% endif %}
+                            </h4>
+
+                            <p style="font-size: 1.2rem;
+                                      line-height: 1.5;">
+                                <strong>
+                                    {{ employee_preview_window.start.strftime(
+                                        '%b %d, %Y'
+                                    ) }}
+                                    through
+                                    {{ employee_preview_window.end.strftime(
+                                        '%b %d, %Y'
+                                    ) }}
+                                </strong>
+                            </p>
+
+                            <small>
+                                {% if employee_preview_is_prestart %}
+                                    Calculated cycle before this
+                                    employee's schedule begins.
+                                {% else %}
+                                    Calculated period containing today.
+                                {% endif %}
+                            </small>
+                        </div>
+
+                        <div class="summary-card">
+                            <h4>
+                                {% if employee_preview_is_prestart %}
+                                    First Scheduled Pay Period
+                                {% else %}
+                                    Next Pay Period
+                                {% endif %}
+                            </h4>
+
+                            <p style="font-size: 1.2rem;
+                                      line-height: 1.5;">
+                                <strong>
+                                    {{ employee_next_preview_window.start.strftime(
+                                        '%b %d, %Y'
+                                    ) }}
+                                    through
+                                    {{ employee_next_preview_window.end.strftime(
+                                        '%b %d, %Y'
+                                    ) }}
+                                </strong>
+                            </p>
+
+                            <small>
+                                Calculated from this employee's
+                                effective payroll schedule.
+                            </small>
+                        </div>
+                    </div>
+
+                    <p class="report-subtitle">
+                        {% if employee_schedule_source == 'company' %}
+                            These periods follow the company default.
+                        {% else %}
+                            These periods follow the employee-specific
+                            schedule.
+                        {% endif %}
+                        This preview does not create or approve
+                        payroll records.
+                    </p>
+
+                {% elif employee_schedule_error %}
+
+                    <p class="report-subtitle">
+                        <strong>Pay-period preview unavailable:</strong>
+                        {{ employee_schedule_error }}
+                    </p>
+
+                {% endif %}
+
+            </div>
+
+        {% else %}
+
+            <p class="report-subtitle">
+                Select an employee above to review their
+                existing payroll schedule.
+            </p>
+
+        {% endif %}
+
+        <p class="report-subtitle">
+            Employee schedule changes are not enabled in
+            this view yet. Reviewing an employee does not
+            modify payroll records or company settings.
+        </p>
+
+    </div>
+
 </div>
 
 <script>

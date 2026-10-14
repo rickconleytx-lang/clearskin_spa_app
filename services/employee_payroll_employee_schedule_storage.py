@@ -87,12 +87,20 @@ def save_employee_schedule_choice(
 
     cur.execute("""
         SELECT 1
-        FROM public.employee_business_unit_memberships
-        WHERE spa_id = %s
-          AND business_unit_id = %s
-          AND employee_id = %s
-          AND is_active = TRUE
-        FOR SHARE
+        FROM public.employee_business_unit_memberships m
+        JOIN public.employees e
+          ON e.spa_id = m.spa_id
+         AND e.employee_id = m.employee_id
+        WHERE m.spa_id = %s
+          AND m.business_unit_id = %s
+          AND m.employee_id = %s
+          AND m.is_active = TRUE
+          AND e.is_active = TRUE
+          AND (
+              e.termination_date IS NULL
+              OR e.termination_date >= CURRENT_DATE
+          )
+        FOR SHARE OF m, e
     """, (
         spa_id,
         business_unit_id,

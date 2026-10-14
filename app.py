@@ -96960,6 +96960,15 @@ def employee_payroll_schedule_settings():
         get_company_payroll_schedule,
         save_company_payroll_schedule,
     )
+    from services.employee_payroll_schedule_roster import (
+        get_payroll_schedule_employee_roster,
+    )
+    from services.employee_payroll_employee_schedule_storage import (
+        get_employee_schedule_settings,
+    )
+    from services.employee_payroll_employee_schedule import (
+        resolve_employee_schedule,
+    )
 
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -97070,6 +97079,56 @@ def employee_payroll_schedule_settings():
             business_unit_id=business_unit_id,
         )
 
+        # Only eligible employees in the active workspace
+        # may be selected for payroll schedule management.
+        employee_roster = get_payroll_schedule_employee_roster(
+            cur,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+        )
+
+        selected_employee = None
+        selected_employee_settings = None
+
+        raw_employee_id = request.args.get("employee_id")
+
+        if raw_employee_id is not None:
+            # Reject malformed IDs rather than silently
+            # selecting another employee.
+            if (
+                len(raw_employee_id) > 18
+                or not raw_employee_id.isascii()
+                or not raw_employee_id.isdigit()
+            ):
+                abort(400)
+
+            requested_employee_id = int(raw_employee_id)
+
+            if requested_employee_id <= 0:
+                abort(400)
+
+            selected_employee = next(
+                (
+                    employee
+                    for employee in employee_roster
+                    if employee["employee_id"]
+                    == requested_employee_id
+                ),
+                None,
+            )
+
+            if selected_employee is None:
+                abort(404)
+
+            selected_employee_settings = (
+                get_employee_schedule_settings(
+                    cur,
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    employee_id=requested_employee_id,
+                )
+            )
+
     finally:
         conn.close()
 
@@ -97116,6 +97175,55 @@ def employee_payroll_schedule_settings():
             next_as_of,
         )
 
+    # Calculate employee previews only from validated schedules.
+    # Incomplete legacy preferences never receive invented dates.
+    employee_preview_window = None
+    employee_next_preview_window = None
+    employee_preview_is_prestart = False
+    employee_schedule_error = None
+    employee_schedule_source = None
+
+    if selected_employee is not None:
+        try:
+            (
+                employee_schedule_source,
+                effective_employee_schedule,
+            ) = resolve_employee_schedule(
+                company_row=saved,
+                employee_row=selected_employee_settings,
+            )
+        except PayrollScheduleConfigError as exc:
+            employee_schedule_error = str(exc)
+        else:
+            employee_preview_window = preview_company_pay_period(
+                effective_employee_schedule,
+                as_of,
+            )
+
+            employee_anchor = (
+                effective_employee_schedule.reference_start_date
+            )
+
+            employee_preview_is_prestart = (
+                employee_anchor is not None
+                and as_of < employee_anchor
+            )
+
+            if employee_preview_is_prestart:
+                employee_next_as_of = employee_anchor
+            else:
+                employee_next_as_of = (
+                    employee_preview_window.end
+                    + timedelta(days=1)
+                )
+
+            employee_next_preview_window = (
+                preview_company_pay_period(
+                    effective_employee_schedule,
+                    employee_next_as_of,
+                )
+            )
+
     if request.method == "POST":
         # Preserve submitted values after validation errors.
         form_values = request.form.to_dict()
@@ -97142,6 +97250,14 @@ def employee_payroll_schedule_settings():
     return render_template(
         "employee_payroll_schedule_settings.html",
         form_values=form_values,
+        employee_roster=employee_roster,
+        selected_employee=selected_employee,
+        selected_employee_settings=selected_employee_settings,
+        employee_preview_window=employee_preview_window,
+        employee_next_preview_window=employee_next_preview_window,
+        employee_preview_is_prestart=employee_preview_is_prestart,
+        employee_schedule_error=employee_schedule_error,
+        employee_schedule_source=employee_schedule_source,
         preview_window=preview_window,
         next_preview_window=next_preview_window,
         preview_is_prestart=preview_is_prestart,
