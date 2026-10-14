@@ -424,6 +424,15 @@
             </small>
         </div>
 
+        {% if subscription_tier_code == "solo" %}
+            {% if payroll_settings and (payroll_settings.pay_period_anchor_date or payroll_settings.semimonthly_first_start_day or payroll_settings.semimonthly_second_start_day) %}
+                <h3>Pay Period</h3>
+                <p class="report-subtitle">
+                    This employee has an established
+                    payroll schedule. Its frequency
+                    cannot be changed from this form.
+                </p>
+            {% else %}
         <h3>Pay Period</h3>
 
         <div class="form-group">
@@ -439,6 +448,22 @@
                 <option value="monthly" {% if payroll_settings and payroll_settings.default_pay_period == "monthly" %}selected{% endif %}>Monthly</option>
             </select>
         </div>
+
+            {% endif %}
+        {% elif subscription_tier_code in ("pos", "team") %}
+            <h3>Pay Period</h3>
+            <p class="report-subtitle">
+                Payroll schedules are managed by
+                authorized employees under
+                Employees &rarr; Hours &amp; Payroll.
+            </p>
+        {% else %}
+            <h3>Pay Period</h3>
+            <p class="report-subtitle">
+                Pay period editing is not available
+                on this employee form.
+            </p>
+        {% endif %}
 
         <h3>Withholding & Deductions</h3>
 

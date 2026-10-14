@@ -98748,6 +98748,9 @@ def add_employee():
                     business_unit_id=business_unit_id,
                     employee_id=employee_id,
                     settings=payroll_settings,
+                    allow_legacy_pay_period_update=(
+                        current_subscription_tier_code() == "solo"
+                    ),
                 )
 
                 rate_changes = save_employee_pay_rates(
@@ -98826,6 +98829,7 @@ def add_employee():
 
     return render_template(
         "add_employee.html",
+            subscription_tier_code=current_subscription_tier_code(),
         statuses=statuses,
         employee_roles=employee_roles,
         security_csrf_token=security_csrf_token
@@ -99126,6 +99130,9 @@ def edit_employee(employee_id):
                     business_unit_id=business_unit_id,
                     employee_id=employee_id,
                     settings=payroll_settings,
+                    allow_legacy_pay_period_update=(
+                        current_subscription_tier_code() == "solo"
+                    ),
                 )
 
                 rate_changes = save_employee_pay_rates(
@@ -99278,6 +99285,9 @@ def edit_employee(employee_id):
     cur.execute("""
         SELECT
             default_pay_period,
+            pay_period_anchor_date,
+            semimonthly_first_start_day,
+            semimonthly_second_start_day,
             fica_withholding_percent,
             deduction_1_title,
             deduction_1_amount,
@@ -99329,6 +99339,7 @@ def edit_employee(employee_id):
 
     return render_template(
         "edit_employee.html",
+            subscription_tier_code=current_subscription_tier_code(),
         employee=employee,
         statuses=statuses,
         employee_roles=employee_roles,

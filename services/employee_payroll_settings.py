@@ -156,6 +156,7 @@ def save_employee_payroll_settings(
     business_unit_id,
     employee_id,
     settings,
+    allow_legacy_pay_period_update=False,
 ):
     """
     Save employee payroll configuration.
@@ -194,6 +195,21 @@ def save_employee_payroll_settings(
 
     values = tuple(settings[field] for field in fields)
 
+    # Legacy employee forms cannot overwrite operational
+    # payroll schedules without explicit authorization.
+    allow_legacy_pay_period_update = bool(
+        allow_legacy_pay_period_update
+    )
+
+    if not allow_legacy_pay_period_update:
+        values = (None, *values[1:])
+
+    # Permit explicitly authorized legacy edits only when
+    # no individual payroll cycle has been configured.
+    # This also handles migration-marked legacy employees.
+    #
+    # A configured starting date or semimonthly start days
+    # always protect operational employee payroll scheduling.
     cur.execute("""
         INSERT INTO employee_payroll_settings (
             spa_id,
@@ -216,7 +232,17 @@ def save_employee_payroll_settings(
             employee_id
         )
         DO UPDATE SET
-            default_pay_period = EXCLUDED.default_pay_period,
+            default_pay_period = CASE
+                WHEN %s
+                 AND employee_payroll_settings.pay_period_anchor_date
+                     IS NULL
+                 AND employee_payroll_settings.semimonthly_first_start_day
+                     IS NULL
+                 AND employee_payroll_settings.semimonthly_second_start_day
+                     IS NULL
+                THEN EXCLUDED.default_pay_period
+                ELSE employee_payroll_settings.default_pay_period
+            END,
             fica_withholding_percent =
                 EXCLUDED.fica_withholding_percent,
             deduction_1_title = EXCLUDED.deduction_1_title,
@@ -232,7 +258,17 @@ def save_employee_payroll_settings(
             employee_payroll_settings.deduction_2_title,
             employee_payroll_settings.deduction_2_amount
         ) IS DISTINCT FROM (
-            EXCLUDED.default_pay_period,
+            CASE
+                WHEN %s
+                 AND employee_payroll_settings.pay_period_anchor_date
+                     IS NULL
+                 AND employee_payroll_settings.semimonthly_first_start_day
+                     IS NULL
+                 AND employee_payroll_settings.semimonthly_second_start_day
+                     IS NULL
+                THEN EXCLUDED.default_pay_period
+                ELSE employee_payroll_settings.default_pay_period
+            END,
             EXCLUDED.fica_withholding_percent,
             EXCLUDED.deduction_1_title,
             EXCLUDED.deduction_1_amount,
@@ -245,6 +281,8 @@ def save_employee_payroll_settings(
         business_unit_id,
         employee_id,
         *values,
+        allow_legacy_pay_period_update,
+        allow_legacy_pay_period_update,
     ))
 
     return cur.fetchone() is not None

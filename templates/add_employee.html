@@ -292,6 +292,7 @@
             </small>
         </div>
 
+        {% if subscription_tier_code == "solo" %}
         <h3>Pay Period</h3>
 
         <div class="form-group">
@@ -307,6 +308,21 @@
                 <option value="monthly">Monthly</option>
             </select>
         </div>
+
+        {% elif subscription_tier_code in ("pos", "team") %}
+            <h3>Pay Period</h3>
+            <p class="report-subtitle">
+                Payroll schedules are managed by
+                authorized employees under
+                Employees &rarr; Hours &amp; Payroll.
+            </p>
+        {% else %}
+            <h3>Pay Period</h3>
+            <p class="report-subtitle">
+                Pay period editing is not available
+                on this employee form.
+            </p>
+        {% endif %}
 
         <h3>Withholding & Deductions</h3>
 
