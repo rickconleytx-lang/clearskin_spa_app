@@ -64,6 +64,22 @@
         {% endif %}
 
 
+        <!-- Operational payroll: plan-based navigation -->
+        {% if payroll_navigation_available %}
+
+            <div class="app-menu-submenu-section">
+                <div class="app-menu-submenu-heading">
+                    🕒 Payroll
+                </div>
+
+                <a href="{{ url_for('employee_hours_payroll') }}">
+                    <span aria-hidden="true">🕒</span>
+                    <span>Hours &amp; Payroll</span>
+                </a>
+            </div>
+
+        {% endif %}
+
         <!-- Compensation -->
         {% if (
             nav_access.can_view_employee_compensation

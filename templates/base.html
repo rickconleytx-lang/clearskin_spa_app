@@ -483,6 +483,7 @@
             or nav_access.can_view_clients
             or nav_access.can_view_inventory
             or nav_access.can_view_employees
+            or payroll_navigation_available
             or nav_access.can_view_financials
             or nav_access.can_view_business_management
             or (
@@ -608,6 +609,7 @@
 
         {% if (
             nav_access.can_view_employees
+            or payroll_navigation_available
             or nav_access.can_view_employee_compensation
             or nav_access.can_manage_employee_compensation
         ) %}

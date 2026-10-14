@@ -659,6 +659,12 @@ def inject_navigation_access_context():
         current_subscription_entitlements()
     )
 
+    payroll_navigation_available = (
+        role_code is not None
+        and current_subscription_tier_code()
+            in ("pos", "team")
+    )
+
     return {
         "current_workspace_role_code": role_code,
 
@@ -671,6 +677,9 @@ def inject_navigation_access_context():
         ),
 
         "nav_access": navigation_access,
+        "payroll_navigation_available": (
+            payroll_navigation_available
+        ),
 
         "subscription_entitlements": (
             subscription_entitlements
@@ -29457,6 +29466,9 @@ def _end_employee_access_secure_session(
 PSP_ACCESS_AREA_LABELS = {
     "employee_management": "Employee Management",
     "employees_compensation": "Employee Compensation",
+    "hours_payroll": "Hours & Payroll",
+    "my_hours_pay": "My Hours & Pay",
+    "payroll_adjustments_reports": "Payroll Adjustments & Payroll Reports",
     "financial_management": "Financial Management",
     "add_income": "Add Income",
     "add_expense": "Add Expense",
@@ -29960,7 +29972,9 @@ def _psp_access_settings_owner_authorized(
         conn.close()
 
 
-def require_psp_access(area_key):
+def require_psp_access(
+    area_key, *, require_employee_verification=False
+):
     """
     Require Employee Verification plus the configured hierarchical
     PSP Access Level for one restricted PSP area.
@@ -29990,8 +30004,11 @@ def require_psp_access(area_key):
 
             # Business Access Setup is the master switch.
             # Solo Operator skips this entire employee layer.
-            if not _employee_access_required_for_business(
-                spa_id
+            if (
+                not require_employee_verification
+                and not _employee_access_required_for_business(
+                    spa_id
+                )
             ):
                 return view_function(*args, **kwargs)
 
@@ -96754,8 +96771,10 @@ def toggle_compensation_type(compensation_type_id):
 @login_required
 @spa_required
 @require_subscription_tier("pos", "team")
-@require_workspace_permission("can_view_employee_compensation")
-@require_psp_access("employees_compensation")
+@require_psp_access(
+    "hours_payroll",
+    require_employee_verification=True,
+)
 def employee_hours_payroll():
     from decimal import Decimal
 
@@ -96905,11 +96924,7 @@ def employee_hours_payroll():
         ledger_rows=ledger_rows,
         gross_total=gross_total,
         entry_total=entry_total,
-        can_add_work_entry=bool(
-            current_workspace_access().get(
-                "can_manage_employee_compensation", False
-            )
-        ),
+        can_add_work_entry=True,
         security_csrf_token=_security_form_csrf_token(),
     )
 
@@ -96928,8 +96943,10 @@ def employee_hours_payroll():
 @login_required
 @spa_required
 @require_subscription_tier("pos", "team")
-@require_workspace_permission("can_manage_employee_compensation")
-@require_psp_access("employees_compensation")
+@require_psp_access(
+    "hours_payroll",
+    require_employee_verification=True,
+)
 def employee_payroll_add_work_entry():
     from uuid import UUID, uuid4
     import hashlib
