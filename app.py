@@ -96777,6 +96777,25 @@ def toggle_compensation_type(compensation_type_id):
 )
 def employee_hours_payroll():
     from decimal import Decimal
+    from services.employee_payroll_company_schedule import (
+        get_company_payroll_schedule,
+    )
+    from services.employee_payroll_employee_schedule import (
+        resolve_employee_schedule,
+    )
+    from services.employee_payroll_employee_schedule_storage import (
+        get_employee_schedule_settings,
+    )
+    from services.employee_payroll_period_navigation import (
+        build_pay_period_navigation,
+        build_pay_period_dropdown_options,
+    )
+    from services.employee_payroll_schedule_roster import (
+        get_payroll_schedule_employee_roster,
+    )
+    from services.employee_payroll_schedule_config import (
+        PayrollScheduleConfigError,
+    )
 
     spa_id = current_spa_id()
     business_unit_id = current_business_unit_id()
@@ -96799,10 +96818,131 @@ def employee_hours_payroll():
     if start_date > end_date:
         abort(400)
 
+    employee_text = (
+        request.args.get("employee_id") or ""
+    ).strip()
+
+    period_text = (
+        request.args.get("period_date") or ""
+    ).strip()
+
+    if period_text and not employee_text:
+        abort(400)
+
+    selected_employee_id = None
+
+    if employee_text:
+        if (
+            len(employee_text) > 18
+            or not employee_text.isascii()
+            or not employee_text.isdecimal()
+            or int(employee_text) <= 0
+        ):
+            abort(404)
+
+        selected_employee_id = int(employee_text)
+
+    selected_period_date = None
+
+    if period_text:
+        try:
+            selected_period_date = date.fromisoformat(
+                period_text
+            )
+        except ValueError:
+            abort(400)
+
+        if (
+            selected_period_date.isoformat()
+            != period_text
+        ):
+            abort(400)
+
+    employee_roster = []
+    selected_employee = None
+    employee_period_navigation = None
+    employee_period_options = []
+    employee_schedule_source = None
+    employee_schedule_error = None
+
     conn = get_db_connection()
 
     try:
         cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        employee_roster = (
+            get_payroll_schedule_employee_roster(
+                cur,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+            )
+        )
+
+        if selected_employee_id is not None:
+            selected_employee = next(
+                (
+                    row for row in employee_roster
+                    if int(row["employee_id"])
+                    == selected_employee_id
+                ),
+                None,
+            )
+
+            if selected_employee is None:
+                abort(404)
+
+            company_schedule = get_company_payroll_schedule(
+                cur,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+            )
+
+            employee_settings = get_employee_schedule_settings(
+                cur,
+                spa_id=spa_id,
+                business_unit_id=business_unit_id,
+                employee_id=selected_employee_id,
+            )
+
+            try:
+                (
+                    employee_schedule_source,
+                    effective_schedule,
+                ) = resolve_employee_schedule(
+                    company_row=company_schedule,
+                    employee_row=employee_settings,
+                )
+
+                employee_period_navigation = (
+                    build_pay_period_navigation(
+                        effective_schedule,
+                        as_of=today,
+                        selected_date=selected_period_date,
+                    )
+                )
+
+                employee_period_options = (
+                    build_pay_period_dropdown_options(
+                        effective_schedule,
+                        as_of=today,
+                        selected_date=selected_period_date,
+                        previous_count=12,
+                    )
+                )
+
+            except PayrollScheduleConfigError as exc:
+                employee_schedule_error = str(exc)
+
+            except (ValueError, OverflowError):
+                abort(400)
+
+            if employee_period_navigation is not None:
+                start_date = (
+                    employee_period_navigation.selected.start
+                )
+                end_date = (
+                    employee_period_navigation.selected.end
+                )
 
         # Historical entries retain their recorded rate.
         # This is not the existing Compensation ledger.
@@ -96849,13 +96989,14 @@ def employee_hours_payroll():
               AND w.business_unit_id = %s
               AND w.work_date BETWEEN %s AND %s
               AND w.voided_at IS NULL
+              AND (%s IS NULL OR w.employee_id = %s)
             GROUP BY
                 w.employee_id,
                 e.first_name,
                 e.last_name
             ORDER BY e.last_name, e.first_name, w.employee_id
         """, (
-            spa_id, business_unit_id, start_date, end_date
+            spa_id, business_unit_id, start_date, end_date, selected_employee_id, selected_employee_id
         ))
 
         summary_rows = cur.fetchall()
@@ -96895,10 +97036,11 @@ def employee_hours_payroll():
               AND w.business_unit_id = %s
               AND w.work_date BETWEEN %s AND %s
               AND w.voided_at IS NULL
+              AND (%s IS NULL OR w.employee_id = %s)
             ORDER BY w.work_date DESC, w.work_entry_id DESC
             LIMIT 100
         """, (
-            spa_id, business_unit_id, start_date, end_date
+            spa_id, business_unit_id, start_date, end_date, selected_employee_id, selected_employee_id
         ))
 
         ledger_rows = cur.fetchall()
@@ -96920,6 +97062,22 @@ def employee_hours_payroll():
         "employee_hours_payroll.html",
         start_date=start_date.isoformat(),
         end_date=end_date.isoformat(),
+        employee_roster=employee_roster,
+        selected_employee_id=selected_employee_id,
+        selected_employee=selected_employee,
+        employee_period_navigation=employee_period_navigation,
+        employee_period_options=employee_period_options,
+        employee_schedule_source=employee_schedule_source,
+        employee_schedule_error=employee_schedule_error,
+        employee_reporting_mode=(
+            "pay_period"
+            if employee_period_navigation is not None
+            else (
+                "unconfigured"
+                if selected_employee_id is not None
+                else "date_range"
+            )
+        ),
         summary_rows=summary_rows,
         ledger_rows=ledger_rows,
         gross_total=gross_total,

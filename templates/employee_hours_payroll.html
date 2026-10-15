@@ -40,6 +40,45 @@
               class="report-filter-form">
 
             <div class="filter-group">
+                <label for="payroll_employee_id">Employee</label>
+                <select id="payroll_employee_id"
+                        name="employee_id">
+                    <option value=""
+                        {% if selected_employee_id is none %}selected{% endif %}>
+                        All Employees
+                    </option>
+                    {% for employee in employee_roster %}
+                    <option value="{{ employee.employee_id }}"
+                        {% if selected_employee_id == employee.employee_id %}selected{% endif %}>
+                        {{ employee.last_name }}, {{ employee.first_name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="filter-buttons">
+                <button type="submit" class="btn">
+                    View Payroll
+                </button>
+                <a href="{{ url_for('employee_hours_payroll') }}"
+                   class="btn btn-secondary">
+                    All Employees
+                </a>
+            </div>
+        </form>
+    </div>
+    {% if employee_reporting_mode != "pay_period" %}
+    <div class="report-filter-card no-print">
+        <form method="GET"
+              action="{{ url_for('employee_hours_payroll') }}"
+              class="report-filter-form">
+            {% if selected_employee_id is not none %}
+            <input type="hidden"
+                   name="employee_id"
+                   value="{{ selected_employee_id }}">
+            {% endif %}
+
+            <div class="filter-group">
                 <label for="start_date">Start Date</label>
                 <input type="date"
                        id="start_date"
@@ -70,9 +109,152 @@
         </form>
     </div>
 
-    <div class="report-period">
-        <strong>Reporting Period:</strong>
-        {{ start_date }} through {{ end_date }}
+    {% endif %}
+    {% if employee_reporting_mode == "pay_period" %}
+    <div class="report-section">
+        <h2>
+            Pay Periods —
+            <span style="color: #b91c1c;">
+            {{ selected_employee.first_name }}
+            {{ selected_employee.last_name }}
+            </span>
+        </h2>
+
+        <p class="report-subtitle">
+            Effective Schedule:
+            {{ "Company Default" if employee_schedule_source == "company"
+               else "Employee-Specific" }}
+        </p>
+
+        <p>
+            <strong>Current Working Pay Period:</strong>
+            {{ employee_period_navigation.current.start.strftime("%b %d, %Y") }}
+            through
+            {{ employee_period_navigation.current.end.strftime("%b %d, %Y") }}
+            {% if employee_period_navigation.current_is_prestart %}
+                (Theoretical — Schedule Starts Later)
+            {% endif %}
+        </p>
+
+        {% if employee_period_navigation.current_is_prestart %}
+        <p class="report-subtitle">
+            The employee's confirmed schedule begins in the future.
+            Earlier periods are theoretical previews.
+            {% if employee_period_navigation.first_scheduled %}
+            First Scheduled Pay Period:
+            {{ employee_period_navigation.first_scheduled.start.isoformat() }}
+            through
+            {{ employee_period_navigation.first_scheduled.end.isoformat() }}.
+            {% endif %}
+        </p>
+        {% endif %}
+
+        <div class="report-filter-card no-print">
+            <form method="GET"
+                  action="{{ url_for('employee_hours_payroll') }}"
+                  class="report-filter-form">
+
+                <input type="hidden"
+                       name="employee_id"
+                       value="{{ selected_employee_id }}">
+
+                <div class="filter-group">
+                    <label for="payroll_period_date">
+                        View Pay Period
+                    </label>
+
+                    <select id="payroll_period_date"
+                            name="period_date"
+                            required>
+                        {% for option in employee_period_options %}
+                        <option value="{{ option.start.isoformat() }}"
+                            {% if option.is_selected %}selected{% endif %}>
+                            {{ option.start.strftime("%b %d, %Y") }}
+                            through
+                            {{ option.end.strftime("%b %d, %Y") }}
+                            {% if option.is_current %} — Current{% endif %}
+                            {% if option.is_prestart %} — Theoretical{% endif %}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="filter-buttons">
+                    <button type="submit" class="btn">
+                        View Period
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        {% if employee_period_navigation.selected_is_prestart %}
+        <p class="report-subtitle">
+            The selected period precedes the confirmed schedule
+            starting date. It is a theoretical preview,
+            not an official payroll record.
+        </p>
+        {% endif %}
+
+        <p class="report-subtitle">
+            Viewing a pay period does not create, approve,
+            or record payment for a payroll period.
+        </p>
+    </div>
+
+    {% elif employee_reporting_mode == "unconfigured" %}
+    <div class="report-section">
+        <h2>Employee Schedule Needs Configuration</h2>
+
+        <p>
+            <strong>
+                {{ selected_employee.first_name }}
+                {{ selected_employee.last_name }}
+            </strong>
+            does not yet have a complete payroll schedule.
+        </p>
+
+        <p>{{ employee_schedule_error }}</p>
+
+        <p>
+            Work entries may still be reviewed using the manual
+            date range. Those dates are not confirmed pay-period
+            boundaries.
+        </p>
+
+        <div class="form-buttons no-print">
+            <a class="btn btn-secondary"
+               href="{{ url_for('employee_payroll_schedule_settings',
+                   employee_id=selected_employee_id) }}">
+                Configure Employee Schedule
+            </a>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="report-period"
+         {% if employee_reporting_mode == "pay_period" %}
+         style="border-left: 6px solid #b91c1c;
+                background: #fff5f5;
+                padding: 14px 18px;
+                border-radius: 8px;"
+         {% endif %}>
+
+        {% if employee_reporting_mode == "pay_period" %}
+            <strong style="color: #b91c1c;">
+                WORK ENTRIES FOR SELECTED PAY PERIOD:
+                {{ start_date }} through {{ end_date }}
+            </strong>
+
+        {% elif employee_reporting_mode == "unconfigured" %}
+            <strong>
+                Manual Date Range — Unconfigured Schedule:
+            </strong>
+            {{ start_date }} through {{ end_date }}
+
+        {% else %}
+            <strong>Reporting Period:</strong>
+            {{ start_date }} through {{ end_date }}
+        {% endif %}
     </div>
 
     <div class="summary-cards">
