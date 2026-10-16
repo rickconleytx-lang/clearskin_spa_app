@@ -406,3 +406,129 @@ def process_backup_report(cur, *, source_key, data, now=None):
             cur, source_key=source_key, now=now
         )
     return result
+
+
+def reserve_backup_notifications(cur, *, batch_size=20):
+    """Reserve outbox notifications atomically; caller owns transaction.
+
+    Delivery remains the responsibility of the existing PSP alert worker.
+    Disabled preferences leave transitions pending without reserving sends.
+    """
+    import hashlib
+
+    if type(batch_size) is not int or not 1 <= batch_size <= 100:
+        raise ValueError("Invalid batch size.")
+
+    cur.execute(
+        """
+        SELECT user_id FROM users
+        WHERE role = 'master_admin' AND active = TRUE
+        ORDER BY user_id LIMIT 2 FOR UPDATE
+        """
+    )
+    admins = cur.fetchall()
+    if len(admins) != 1:
+        return {"status": "no_unique_master_admin", "reserved": 0}
+    admin_id = admins[0][0]
+
+    cur.execute(
+        """
+        SELECT email_alerts_enabled, sms_alerts_enabled,
+               system_health_alerts_enabled
+        FROM master_admin_notification_settings WHERE user_id = %s
+        """,
+        (admin_id,),
+    )
+    settings = cur.fetchone()
+    if not settings or not settings[2]:
+        return {"status": "preferences_disabled", "reserved": 0}
+    channels = [
+        channel for channel, enabled
+        in zip(("email", "sms"), settings[:2]) if enabled
+    ]
+    if not channels:
+        return {"status": "channels_disabled", "reserved": 0}
+
+    cur.execute(
+        """
+        SELECT n.backup_notification_id, n.backup_incident_id,
+               n.transition, i.source_key, i.reason_code,
+               i.icloud_failed, i.peachvault_failed
+        FROM master_admin_backup_notifications n
+        JOIN master_admin_backup_incidents i
+          ON i.backup_incident_id = n.backup_incident_id
+        WHERE n.alert_event_id IS NULL
+        ORDER BY n.backup_notification_id
+        LIMIT %s FOR UPDATE OF n SKIP LOCKED
+        """,
+        (batch_size,),
+    )
+    notifications = cur.fetchall()
+
+    for notification_id, incident_id, transition, source, reason, icloud, vault in notifications:
+        recovered = transition == "recovery"
+        title = "Backup Recovered · Peach Suite Pro" if recovered else "Backup Failure · Peach Suite Pro"
+        if recovered:
+            message = (
+                "Backup monitoring has recovered for source "
+                f"{source}. A current backup completed successfully "
+                "to both iCloud Drive and PeachVault."
+            )
+        else:
+            destinations = []
+            if icloud:
+                destinations.append("iCloud Drive")
+            if vault:
+                destinations.append("PeachVault")
+            destination_text = (
+                " Failed destinations: " + ", ".join(destinations) + "."
+                if destinations else
+                " Destination completion has not been confirmed."
+            )
+            message = (
+                f"Backup monitoring requires attention for source {source}. "
+                f"Reason: {reason.replace('_', ' ')}."
+                + destination_text
+            )
+        message += f" Backup incident: {incident_id}."
+        related_type = "backup_recovery" if recovered else "backup_failure"
+        fingerprint = hashlib.sha256(
+            f"backup:{source}:{incident_id}:{transition}".encode("utf-8")
+        ).hexdigest()
+
+        cur.execute(
+            """
+            INSERT INTO master_admin_alert_events (
+                master_admin_user_id, alert_category, alert_key,
+                fingerprint, severity, source_category, source_related_type,
+                alert_title, alert_message, cooldown_minutes
+            )
+            VALUES (%s, 'system_health', %s, %s, %s,
+                    'SYSTEM', %s, %s, %s, 60)
+            RETURNING master_admin_alert_event_id
+            """,
+            (
+                admin_id, f"backup:{incident_id}:{transition}",
+                fingerprint, "INFO" if recovered else "ERROR",
+                related_type, title, message,
+            ),
+        )
+        event_id = cur.fetchone()[0]
+        for channel in channels:
+            cur.execute(
+                """
+                INSERT INTO master_admin_alert_deliveries (
+                    master_admin_alert_event_id, channel, status
+                ) VALUES (%s, %s, 'pending')
+                """,
+                (event_id, channel),
+            )
+        cur.execute(
+            """
+            UPDATE master_admin_backup_notifications
+            SET alert_event_id = %s
+            WHERE backup_notification_id = %s
+            """,
+            (event_id, notification_id),
+        )
+    return {"status": "reserved", "reserved": len(notifications)}
