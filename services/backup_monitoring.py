@@ -271,3 +271,138 @@ def save_backup_report(cur, *, source_key, data, now=None):
         "report_id": report_id,
         "report": report,
     }
+
+
+def evaluate_backup_incident(cur, *, source_key, now=None):
+    """Evaluate report/schedule state under a source lock; caller commits."""
+    now = now or datetime.now(timezone.utc)
+    cur.execute(
+        """
+        SELECT enabled, last_success_at, timezone_name,
+               schedule_hour, grace_minutes
+        FROM master_admin_backup_sources
+        WHERE source_key = %s FOR UPDATE
+        """,
+        (source_key,),
+    )
+    source = cur.fetchone()
+    if source is None or not source[0]:
+        return {"status": "disabled"}
+
+    schedule = backup_schedule_state(
+        now=now, last_success_at=source[1],
+        timezone_name=source[2], schedule_hour=source[3],
+        grace_minutes=source[4],
+    )
+    cur.execute(
+        """
+        SELECT run_status, run_finished_at, icloud_status,
+               peachvault_status, failure_code
+        FROM master_admin_backup_reports
+        WHERE source_key = %s
+        ORDER BY reported_at DESC LIMIT 1
+        """,
+        (source_key,),
+    )
+    latest = cur.fetchone()
+    failed = bool(
+        latest and latest[0] == "failed"
+        and (source[1] is None or latest[1] >= source[1])
+    )
+    reason = (
+        latest[4] if failed
+        else "overdue" if schedule["overdue"] else None
+    )
+    icloud_failed = bool(failed and latest[2] == "failed")
+    peachvault_failed = bool(failed and latest[3] == "failed")
+
+    cur.execute(
+        """
+        SELECT backup_incident_id
+        FROM master_admin_backup_incidents
+        WHERE source_key = %s AND resolved_at IS NULL
+        FOR UPDATE
+        """,
+        (source_key,),
+    )
+    incident = cur.fetchone()
+
+    if reason:
+        if incident:
+            cur.execute(
+                """
+                UPDATE master_admin_backup_incidents
+                SET updated_at = %s, reason_code = %s,
+                    icloud_failed = icloud_failed OR %s,
+                    peachvault_failed = peachvault_failed OR %s
+                WHERE backup_incident_id = %s
+                """,
+                (now, reason, icloud_failed, peachvault_failed, incident[0]),
+            )
+            return {"status": "ongoing", "incident_id": incident[0]}
+        cur.execute(
+            """
+            INSERT INTO master_admin_backup_incidents (
+                source_key, opened_at, updated_at, reason_code,
+                icloud_failed, peachvault_failed
+            )
+            VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING backup_incident_id
+            """,
+            (source_key, now, now, reason, icloud_failed, peachvault_failed),
+        )
+        incident_id = cur.fetchone()[0]
+        cur.execute(
+            """
+            INSERT INTO master_admin_backup_notifications
+                (backup_incident_id, transition)
+            VALUES (%s, 'failure')
+            """,
+            (incident_id,),
+        )
+        return {"status": "opened", "incident_id": incident_id}
+
+    if incident and schedule["current"] and latest and latest[0] == "success":
+        cur.execute(
+            """
+            SELECT MAX(run_finished_at)
+            FROM master_admin_backup_reports
+            WHERE source_key = %s AND run_status = 'failed'
+            """,
+            (source_key,),
+        )
+        last_failure_finish = cur.fetchone()[0]
+        if last_failure_finish is None or source[1] > last_failure_finish:
+            cur.execute(
+                """
+                UPDATE master_admin_backup_incidents
+                SET resolved_at = %s, updated_at = %s
+                WHERE backup_incident_id = %s
+                """,
+                (now, now, incident[0]),
+            )
+            cur.execute(
+                """
+                INSERT INTO master_admin_backup_notifications
+                    (backup_incident_id, transition)
+                VALUES (%s, 'recovery')
+                """,
+                (incident[0],),
+            )
+            return {"status": "recovered", "incident_id": incident[0]}
+
+    return {
+        "status": "ongoing" if incident else "healthy" if schedule["current"] else "due",
+        "incident_id": incident[0] if incident else None,
+    }
+
+
+def process_backup_report(cur, *, source_key, data, now=None):
+    """Atomically stage a report and its incident/outbox transitions."""
+    now = now or datetime.now(timezone.utc)
+    result = save_backup_report(cur, source_key=source_key, data=data, now=now)
+    if result["status"] == "accepted":
+        result["incident"] = evaluate_backup_incident(
+            cur, source_key=source_key, now=now
+        )
+    return result
