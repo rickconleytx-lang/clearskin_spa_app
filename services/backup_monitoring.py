@@ -532,3 +532,43 @@ def reserve_backup_notifications(cur, *, batch_size=20):
             (event_id, notification_id),
         )
     return {"status": "reserved", "reserved": len(notifications)}
+
+
+def verify_backup_report_signature(
+    *, secret, timestamp, signature, body, now=None
+):
+    """Verify HMAC-SHA256 over timestamp + '.' + the exact request bytes.
+
+    Report UUID storage supplies replay deduplication after authentication.
+    This helper never logs or returns the secret.
+    """
+    import hashlib
+    import hmac
+    import re
+
+    if not isinstance(secret, str) or len(secret) < 32:
+        return False
+    if not isinstance(body, bytes) or not 1 <= len(body) <= 8192:
+        return False
+    if not isinstance(timestamp, str) or not re.fullmatch(
+        r"[0-9]{1,12}", timestamp
+    ):
+        return False
+    if not isinstance(signature, str) or not re.fullmatch(
+        r"[0-9a-f]{64}", signature
+    ):
+        return False
+
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None or now.utcoffset() is None:
+        return False
+    age = now.timestamp() - int(timestamp)
+    if age < -60 or age > 300:
+        return False
+
+    expected = hmac.new(
+        secret.encode("utf-8"),
+        timestamp.encode("ascii") + b"." + body,
+        hashlib.sha256,
+    ).hexdigest()
+    return hmac.compare_digest(expected, signature)
