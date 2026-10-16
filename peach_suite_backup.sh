@@ -85,24 +85,32 @@ fi
 
 PEACHVAULT_AVAILABLE=0
 PEACHVAULT_SYNC_FAILED=0
+ICLOUD_AVAILABLE=0
+ICLOUD_SYNC_FAILED=0
 
 if [[ -d "$SSD_MOUNT" ]]; then
-    PEACHVAULT_AVAILABLE=1
-    mkdir -p "$SSD_ROOT"
+    if mkdir -p "$SSD_ROOT"; then
+        PEACHVAULT_AVAILABLE=1
+    else
+        PEACHVAULT_SYNC_FAILED=1
+        echo "ERROR: Cannot prepare PeachVault destination."
+    fi
 else
-    echo "WARNING: PeachVault is not mounted."
-    echo "The core backup will continue to iCloud."
-    echo "PeachVault sync will remain pending."
-    echo
+    PEACHVAULT_SYNC_FAILED=1
+    echo "ERROR: PeachVault is not mounted."
 fi
 
-if [[ ! -d "$ICLOUD_BASE" ]]; then
-    echo "ERROR: The iCloud Drive folder was not found:"
-    echo "$ICLOUD_BASE"
-    exit 1
+if [[ -d "$ICLOUD_BASE" ]]; then
+    if mkdir -p "$ICLOUD_ROOT"; then
+        ICLOUD_AVAILABLE=1
+    else
+        ICLOUD_SYNC_FAILED=1
+        echo "ERROR: Cannot prepare iCloud destination."
+    fi
+else
+    ICLOUD_SYNC_FAILED=1
+    echo "ERROR: iCloud Drive folder was not found."
 fi
-
-mkdir -p "$ICLOUD_ROOT"
 
 # ---------------------------------------------------------
 # CREATE FRESH LOCAL POSTGRESQL BACKUP
@@ -150,26 +158,16 @@ echo
 
 MISSING_COUNT=0
 
-copy_folder() {
+copy_to_destination() {
     local source="$1"
-    local destination_name="$2"
+    local destination="$2"
 
-    if [[ ! -d "$source" ]]; then
-        echo "WARNING: Source folder was not found:"
-        echo "$source"
-        echo
-
-        MISSING_COUNT=$((MISSING_COUNT + 1))
-        return 0
+    if ! mkdir -p "$destination"; then
+        echo "ERROR: Cannot prepare destination: $destination"
+        return 1
     fi
 
-    echo "Backing up:"
-    echo "$source"
-
-    echo "  → iCloud Drive"
-    mkdir -p "$ICLOUD_ROOT/$destination_name"
-
-    rsync -av \
+    if rsync -av \
         --exclude='.env' \
         --exclude='.env.*' \
         --exclude='.venv/' \
@@ -181,40 +179,48 @@ copy_folder() {
         --exclude='._*' \
         --exclude='.pytest_cache/' \
         --exclude='node_modules/' \
-        "$source/" \
-        "$ICLOUD_ROOT/$destination_name/"
+        "$source/" "$destination/"; then
+        return 0
+    else
+        local copy_status=$?
+        echo "ERROR: rsync failed (exit $copy_status): $destination"
+        return "$copy_status"
+    fi
+}
 
-    if [[ "$PEACHVAULT_AVAILABLE" -eq 1 && "$PEACHVAULT_SYNC_FAILED" -eq 0 ]]; then
+copy_folder() {
+    local source="$1"
+    local destination_name="$2"
+
+    if [[ ! -d "$source" ]]; then
+        echo "ERROR: Required source folder was not found: $source"
+        MISSING_COUNT=$((MISSING_COUNT + 1))
+        return 0
+    fi
+
+    echo "Backing up: $source"
+
+    if [[ "$PEACHVAULT_AVAILABLE" -eq 1 ]]; then
         echo "  → PeachVault"
-
-        if ! mkdir -p "$SSD_ROOT/$destination_name"; then
-            echo "WARNING: PeachVault became unavailable."
-            echo "PeachVault sync will remain pending."
-            PEACHVAULT_SYNC_FAILED=1
-        elif ! rsync -av \
-            --exclude='.env' \
-            --exclude='.env.*' \
-            --exclude='.venv/' \
-            --exclude='venv/' \
-            --exclude='__pycache__/' \
-            --exclude='*.pyc' \
-            --exclude='.git/' \
-            --exclude='.DS_Store' \
-            --exclude='._*' \
-            --exclude='.pytest_cache/' \
-            --exclude='node_modules/' \
-            "$source/" \
-            "$SSD_ROOT/$destination_name/"; then
-            echo "WARNING: PeachVault sync failed or the drive disconnected."
-            echo "The core iCloud backup will continue."
+        if ! copy_to_destination "$source" "$SSD_ROOT/$destination_name"; then
             PEACHVAULT_SYNC_FAILED=1
         fi
     else
-        echo "  → PeachVault skipped (sync pending)"
+        echo "  → PeachVault unavailable"
     fi
-        
-        echo
-    }
+
+    if [[ "$ICLOUD_AVAILABLE" -eq 1 ]]; then
+        echo "  → iCloud Drive"
+        if ! copy_to_destination "$source" "$ICLOUD_ROOT/$destination_name"; then
+            ICLOUD_SYNC_FAILED=1
+        fi
+    else
+        echo "  → iCloud Drive unavailable"
+    fi
+
+    echo
+    return 0
+}
 
 # ---------------------------------------------------------
 # CREATE VERIFIED GIT BUNDLES
@@ -313,78 +319,71 @@ copy_folder \
     "$SCRIPTS" \
     "Scripts"
 
-if [[ "$MISSING_COUNT" -gt 0 ]]; then
-    echo
-    echo "ERROR: $MISSING_COUNT required source folder(s) were missing."
-    echo "Backup completion record will not be written."
-    exit 1
-fi
-
 # ---------------------------------------------------------
-# CREATE COMPLETION RECORD
+# RECORD EACH DESTINATION AND OVERALL RESULT
 # ---------------------------------------------------------
-
-if [[ "$PEACHVAULT_AVAILABLE" -eq 1 && "$PEACHVAULT_SYNC_FAILED" -eq 0 ]]; then
-    PEACHVAULT_STATUS="Synced: $SSD_ROOT"
-elif [[ "$PEACHVAULT_AVAILABLE" -eq 1 ]]; then
-    PEACHVAULT_STATUS="Sync pending: PeachVault disconnected or sync failed"
-else
-    PEACHVAULT_STATUS="Sync pending: PeachVault is not mounted"
-fi
-
-COMPLETION_TEXT="Peach Suite Pro backup completed: $(date)
-Local database backup: $LOCAL_DB_FILE
-Git bundles: $GIT_BUNDLE_DIR
-PeachVault: $PEACHVAULT_STATUS
-iCloud destination: $ICLOUD_ROOT"
-
-printf "%s\n" "$COMPLETION_TEXT" \
-    > "$ICLOUD_ROOT/Last Backup.txt"
-
-mkdir -p "$ICLOUD_ROOT/Backup Logs"
-
-cp -p "$LOG_FILE" \
-    "$ICLOUD_ROOT/Backup Logs/"
-
-if [[ "$PEACHVAULT_AVAILABLE" -eq 1 && "$PEACHVAULT_SYNC_FAILED" -eq 0 ]]; then
-    if printf "%s\n" "$COMPLETION_TEXT" > "$SSD_ROOT/Last Backup.txt" \
-        && mkdir -p "$SSD_ROOT/Backup Logs" \
-        && cp -p "$LOG_FILE" "$SSD_ROOT/Backup Logs/"; then
-        rm -f "$LOG_DIR/peachvault_sync_pending"
-    else
-        PEACHVAULT_SYNC_FAILED=1
-        PEACHVAULT_STATUS="Sync pending: PeachVault disconnected or sync failed"
-
-        COMPLETION_TEXT="Peach Suite Pro backup completed: $(date)
-Local database backup: $LOCAL_DB_FILE
-Git bundles: $GIT_BUNDLE_DIR
-PeachVault: $PEACHVAULT_STATUS
-iCloud destination: $ICLOUD_ROOT"
-
-        printf "%s\n" "$COMPLETION_TEXT" \
-            > "$ICLOUD_ROOT/Last Backup.txt"
-
-        printf "%s\n" "$(date)" \
-            > "$LOG_DIR/peachvault_sync_pending"
-
-        echo "WARNING: PeachVault disconnected while writing completion records."
-    fi
-else
-    printf "%s\n" "$(date)" \
-        > "$LOG_DIR/peachvault_sync_pending"
-fi
 
 CORE_SUCCESS_FILE="$LOG_DIR/last_core_backup_success"
+
+write_destination_record() {
+    local root="$1"
+    if printf "%s\n" "$COMPLETION_TEXT" > "$root/Last Backup.txt" \
+        && mkdir -p "$root/Backup Logs" \
+        && cp -p "$LOG_FILE" "$root/Backup Logs/"; then
+        return 0
+    else
+        echo "ERROR: Could not write completion records: $root"
+        return 1
+    fi
+}
+
+COMPLETION_TEXT="Peach Suite Pro destination copy completed: $(date)
+Local database archive: $LOCAL_DB_FILE
+Git bundles: $GIT_BUNDLE_DIR
+Archive checks: pg_restore listing and git bundle verification
+Required missing sources: $MISSING_COUNT
+Run log: $LOG_FILE"
+
+if [[ "$MISSING_COUNT" -eq 0 && "$PEACHVAULT_SYNC_FAILED" -eq 0 ]]; then
+    if ! write_destination_record "$SSD_ROOT"; then
+        PEACHVAULT_SYNC_FAILED=1
+    fi
+fi
+
+if [[ "$MISSING_COUNT" -eq 0 && "$ICLOUD_SYNC_FAILED" -eq 0 ]]; then
+    if ! write_destination_record "$ICLOUD_ROOT"; then
+        ICLOUD_SYNC_FAILED=1
+    fi
+fi
+
+record_destination_status() {
+    local name="$1"
+    local failed="$2"
+    if [[ "$failed" -eq 0 && "$MISSING_COUNT" -eq 0 ]]; then
+        printf "%s\n" "$(date)" > "$LOG_DIR/last_${name}_backup_success"
+        rm -f "$LOG_DIR/${name}_sync_pending"
+        echo "$name: SUCCESS"
+    else
+        printf "%s\n" "Backup incomplete: $(date); see $LOG_FILE" \
+            > "$LOG_DIR/${name}_sync_pending"
+        echo "$name: FAILED / INCOMPLETE"
+    fi
+}
+
+record_destination_status "peachvault" "$PEACHVAULT_SYNC_FAILED"
+record_destination_status "icloud" "$ICLOUD_SYNC_FAILED"
+
+if [[ "$MISSING_COUNT" -gt 0 || "$PEACHVAULT_SYNC_FAILED" -ne 0 || "$ICLOUD_SYNC_FAILED" -ne 0 ]]; then
+    echo "ERROR: Backup incomplete. Missing required sources: $MISSING_COUNT"
+    echo "Overall success marker was not updated."
+    echo "Log: $LOG_FILE"
+    exit 1
+fi
 
 printf "%s\n" "$(date)" > "$CORE_SUCCESS_FILE"
 
 echo "========================================================="
-echo "Backup completed: $(date)"
-echo "PeachVault: $PEACHVAULT_STATUS"
-echo "iCloud: $ICLOUD_ROOT"
+echo "Backup completed successfully to BOTH destinations: $(date)"
 echo "Core success marker: $CORE_SUCCESS_FILE"
 echo "Log: $LOG_FILE"
 echo "========================================================="
-
-echo
-echo "All Peach Suite Pro backup sources completed successfully."
