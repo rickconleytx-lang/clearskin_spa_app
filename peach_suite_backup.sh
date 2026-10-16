@@ -60,6 +60,67 @@ mkdir -p "$LOG_DIR"
 
 exec > >(tee -a "$LOG_FILE") 2>&1
 
+# Structured monitoring metadata is independent of destination copies.
+BACKUP_STATUS_WRITER="$HOME/clearskin_spa_app/peach_suite_backup_status.py"
+BACKUP_FAILURE_CODE="backup_failed"
+BACKUP_RUN_SUCCESS=0
+COPY_PHASE_COMPLETED=0
+
+finish_backup_status() {
+    local backup_exit=$?
+    trap - EXIT
+    set +e
+
+    local icloud_status="unknown"
+    local peachvault_status="unknown"
+    local failure_code="$BACKUP_FAILURE_CODE"
+
+    if [[ "${ICLOUD_SYNC_FAILED:-0}" -ne 0 ]]; then
+        icloud_status="failed"
+    elif [[ "$COPY_PHASE_COMPLETED" -eq 1 && "${MISSING_COUNT:-0}" -eq 0 ]]; then
+        icloud_status="success"
+    fi
+
+    if [[ "${PEACHVAULT_SYNC_FAILED:-0}" -ne 0 ]]; then
+        peachvault_status="failed"
+    elif [[ "$COPY_PHASE_COMPLETED" -eq 1 && "${MISSING_COUNT:-0}" -eq 0 ]]; then
+        peachvault_status="success"
+    fi
+
+    if [[ "$backup_exit" -eq 0 && "$BACKUP_RUN_SUCCESS" -eq 1 ]]; then
+        if ! /usr/bin/python3 "$BACKUP_STATUS_WRITER" success \
+            --icloud success --peachvault success; then
+            echo "WARNING: Could not record structured backup success."
+        fi
+    else
+        if [[ "${MISSING_COUNT:-0}" -gt 0 ]]; then
+            failure_code="source_missing"
+        elif [[ "$COPY_PHASE_COMPLETED" -eq 1 ]]; then
+            if [[ "$icloud_status" == failed && "$peachvault_status" == failed ]]; then
+                failure_code="both_destinations_failed"
+            elif [[ "$icloud_status" == failed ]]; then
+                failure_code="icloud_failed"
+            elif [[ "$peachvault_status" == failed ]]; then
+                failure_code="peachvault_failed"
+            else
+                failure_code="completion_record_failed"
+            fi
+        fi
+        if ! /usr/bin/python3 "$BACKUP_STATUS_WRITER" failed \
+            --icloud "$icloud_status" --peachvault "$peachvault_status" \
+            --failure-code "$failure_code"; then
+            echo "WARNING: Could not record structured backup failure."
+        fi
+    fi
+    exit "$backup_exit"
+}
+
+trap finish_backup_status EXIT
+if ! /usr/bin/python3 "$BACKUP_STATUS_WRITER" running; then
+    echo "WARNING: Could not record structured backup start."
+fi
+
+
 echo
 echo "========================================================="
 echo "Peach Suite Pro Backup"
@@ -116,6 +177,7 @@ fi
 # CREATE FRESH LOCAL POSTGRESQL BACKUP
 # ---------------------------------------------------------
 
+BACKUP_FAILURE_CODE="local_archive_failed"
 echo "Creating local PostgreSQL backup..."
 echo "$LOCAL_DB_FILE"
 
@@ -145,6 +207,7 @@ echo
 # CREATE VERIFIED RENDER POSTGRESQL BACKUP
 # ---------------------------------------------------------
 
+BACKUP_FAILURE_CODE="render_archive_failed"
 echo "Creating verified Render PostgreSQL backup..."
 
 "$HOME/Scripts/backup_clearskin_render.sh"
@@ -263,6 +326,7 @@ create_git_bundle() {
     echo
 }
 
+BACKUP_FAILURE_CODE="git_bundle_failed"
 create_git_bundle     "$PEACH_SUITE_APP"     "clearskin_spa_app"
 
 create_git_bundle     "$HOME/Developer/PeachSuiteProMasterAdmin"     "PeachSuiteProMasterAdmin"
@@ -275,6 +339,7 @@ create_git_bundle     "$FLASK_INVENTORY"     "flask_inventory"
 # COPY ALL PEACH SUITE PRO FILES
 # ---------------------------------------------------------
 
+BACKUP_FAILURE_CODE="backup_failed"
 copy_folder \
     "$RENDER_DATABASE_EXPORTS" \
     "ClearSkin Database Backups"
@@ -318,6 +383,8 @@ copy_folder \
 copy_folder \
     "$SCRIPTS" \
     "Scripts"
+
+COPY_PHASE_COMPLETED=1
 
 # ---------------------------------------------------------
 # RECORD EACH DESTINATION AND OVERALL RESULT
@@ -381,6 +448,7 @@ if [[ "$MISSING_COUNT" -gt 0 || "$PEACHVAULT_SYNC_FAILED" -ne 0 || "$ICLOUD_SYNC
 fi
 
 printf "%s\n" "$(date)" > "$CORE_SUCCESS_FILE"
+BACKUP_RUN_SUCCESS=1
 
 echo "========================================================="
 echo "Backup completed successfully to BOTH destinations: $(date)"
