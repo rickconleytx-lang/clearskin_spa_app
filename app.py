@@ -39979,6 +39979,16 @@ def _business_onboarding_contact_csrf_purpose(pending):
     )
 
 
+# Backup status ingestion has dedicated machine authentication.
+from services.backup_reporting_api import register_backup_reporting_api
+
+register_backup_reporting_api(
+    app,
+    get_connection=get_db_connection,
+    no_store=_mfa_no_store,
+)
+
+
 @app.before_request
 def load_spa():
 
@@ -39992,6 +40002,7 @@ def load_spa():
         return
 
     if request.endpoint in (
+        "backup_reporting.report",
         "login",
         "business_onboarding_contact_setup",
         "mfa_login",
