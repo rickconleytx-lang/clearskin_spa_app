@@ -572,3 +572,63 @@ def verify_backup_report_signature(
         hashlib.sha256,
     ).hexdigest()
     return hmac.compare_digest(expected, signature)
+
+
+def run_backup_monitoring_cycle(cur, *, now=None):
+    """Stage monitoring state and notification reservations; caller commits."""
+    now = now or datetime.now(timezone.utc)
+    cur.execute(
+        """
+        SELECT source_key FROM master_admin_backup_sources
+        WHERE enabled = TRUE ORDER BY source_key
+        """
+    )
+    sources = [row[0] for row in cur.fetchall()]
+    results = [
+        evaluate_backup_incident(cur, source_key=source, now=now)
+        for source in sources
+    ]
+
+    if not sources:
+        status, text = "gray", "Not Configured"
+        detail = "No backup reporting source is enabled."
+    elif any(result["status"] in {"opened", "ongoing"} for result in results):
+        status, text = "red", "Backup Needs Attention"
+        detail = "An enabled backup source has an unresolved failure or overdue backup."
+    elif any(result["status"] == "due" for result in results):
+        status, text = "yellow", "Backup Due"
+        detail = "A backup is due and remains within its configured grace period."
+    else:
+        status, text = "green", "Healthy"
+        detail = "Enabled sources have current successful backups to both destinations."
+
+    cur.execute(
+        """
+        UPDATE master_admin_monitoring_status
+        SET status = %s, status_text = %s, detail = %s,
+            consecutive_failures = CASE
+                WHEN %s = 'red' THEN consecutive_failures + 1
+                ELSE 0
+            END,
+            last_checked_at = %s,
+            last_success_at = CASE
+                WHEN %s = 'green' THEN %s ELSE last_success_at
+            END,
+            last_failure_at = CASE
+                WHEN %s = 'red' THEN %s ELSE last_failure_at
+            END,
+            updated_at = %s
+        WHERE monitor_key = 'backup'
+        """,
+        (status, text, detail, status, now, status, now, status, now, now),
+    )
+    if cur.rowcount != 1:
+        raise RuntimeError("Backup monitoring registry migration is required.")
+
+    reservation = reserve_backup_notifications(cur)
+    return {
+        "status": status,
+        "source_count": len(sources),
+        "reserved": reservation["reserved"],
+        "reservation_status": reservation["status"],
+    }

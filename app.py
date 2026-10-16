@@ -137616,6 +137616,45 @@ def scheduled_square_health_check():
 
 
 
+def scheduled_backup_monitoring():
+    """Evaluate remotely reported backup health without executing backups."""
+    if not os.environ.get("RENDER"):
+        return
+    if os.environ.get("ENABLE_BACKUP_MONITORING", "").lower() not in {
+        "1", "true", "yes", "on"
+    }:
+        return
+
+    from services.backup_monitoring import run_backup_monitoring_cycle
+
+    conn = None
+    cur = None
+    try:
+        conn = get_db_connection()
+        conn.autocommit = False
+        cur = conn.cursor()
+        result = run_backup_monitoring_cycle(cur)
+        conn.commit()
+        if result["reserved"]:
+            print(
+                "[BACKUP MONITOR] Reserved transitions: "
+                + str(result["reserved"]),
+                flush=True,
+            )
+    except Exception as exc:
+        if conn is not None:
+            conn.rollback()
+        print(
+            "[BACKUP MONITOR] Check failed: " + type(exc).__name__,
+            flush=True,
+        )
+    finally:
+        if cur is not None:
+            cur.close()
+        if conn is not None:
+            conn.close()
+
+
 def scheduled_process_master_admin_alerts():
     """
     Process reserved Master Admin alert deliveries.
@@ -137901,6 +137940,18 @@ def start_scheduler():
         coalesce=True,
         max_instances=1,
         misfire_grace_time=60
+    )
+
+    scheduler.add_job(
+        scheduled_backup_monitoring,
+        "interval",
+        minutes=1,
+        id="backup_monitoring_job",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=60,
+        next_run_time=startup_time + timedelta(seconds=150),
     )
 
     scheduler.add_job(
