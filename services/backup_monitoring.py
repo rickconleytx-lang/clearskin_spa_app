@@ -116,3 +116,58 @@ def validate_backup_report(data, *, now=None):
         raise BackupReportValidationError("Failure code requires failed status.")
 
     return result
+
+
+def backup_schedule_state(
+    *,
+    now,
+    last_success_at,
+    timezone_name="America/Chicago",
+    schedule_hour=22,
+    grace_minutes=60,
+):
+    """Evaluate the latest required daily backup in its configured timezone."""
+    from datetime import time
+    from zoneinfo import ZoneInfo
+
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("Server time requires a timezone.")
+    if type(schedule_hour) is not int or not 0 <= schedule_hour <= 23:
+        raise ValueError("Invalid schedule hour.")
+    if type(grace_minutes) is not int or not 5 <= grace_minutes <= 1440:
+        raise ValueError("Invalid grace period.")
+    if last_success_at is not None and (
+        last_success_at.tzinfo is None
+        or last_success_at.utcoffset() is None
+    ):
+        raise ValueError("Success time requires a timezone.")
+
+    zone = ZoneInfo(timezone_name)
+    local_now = now.astimezone(zone)
+    boundary_date = local_now.date()
+    boundary = datetime.combine(
+        boundary_date, time(hour=schedule_hour), tzinfo=zone
+    )
+    if local_now < boundary:
+        boundary_date -= timedelta(days=1)
+        boundary = datetime.combine(
+            boundary_date, time(hour=schedule_hour), tzinfo=zone
+        )
+
+    boundary_utc = boundary.astimezone(timezone.utc)
+    deadline = boundary_utc + timedelta(minutes=grace_minutes)
+    now_utc = now.astimezone(timezone.utc)
+    success_utc = (
+        last_success_at.astimezone(timezone.utc)
+        if last_success_at is not None else None
+    )
+    if success_utc is not None and success_utc > now_utc:
+        raise ValueError("Success time cannot exceed server time.")
+
+    current = success_utc is not None and success_utc >= boundary_utc
+    return {
+        "latest_required_boundary": boundary_utc,
+        "deadline": deadline,
+        "current": current,
+        "overdue": not current and now_utc >= deadline,
+    }
