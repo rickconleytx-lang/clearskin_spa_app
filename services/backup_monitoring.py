@@ -171,3 +171,103 @@ def backup_schedule_state(
         "current": current,
         "overdue": not current and now_utc >= deadline,
     }
+
+
+def save_backup_report(cur, *, source_key, data, now=None):
+    """Store validated metadata using a standard tuple cursor.
+
+    Caller owns commit/rollback and must process incident transitions
+    in this same transaction before committing an accepted report.
+    Source identity comes from server authentication, never the payload.
+    """
+    now = now or datetime.now(timezone.utc)
+    report = validate_backup_report(data, now=now)
+
+    cur.execute(
+        """
+        SELECT enabled, last_success_at
+        FROM master_admin_backup_sources
+        WHERE source_key = %s
+        FOR UPDATE
+        """,
+        (source_key,),
+    )
+    source = cur.fetchone()
+    if source is None or not source[0]:
+        raise BackupReportValidationError("Backup source is not enabled.")
+
+    cur.execute(
+        """
+        SELECT backup_report_id
+        FROM master_admin_backup_reports
+        WHERE source_key = %s AND report_uuid = %s
+        """,
+        (source_key, report["report_uuid"]),
+    )
+    existing = cur.fetchone()
+    if existing:
+        return {"status": "duplicate", "report_id": existing[0]}
+
+    cur.execute(
+        """
+        SELECT MAX(reported_at)
+        FROM master_admin_backup_reports
+        WHERE source_key = %s
+        """,
+        (source_key,),
+    )
+    latest_reported_at = cur.fetchone()[0]
+    if latest_reported_at and report["reported_at"] <= latest_reported_at:
+        return {"status": "out_of_order", "report_id": None}
+
+    previous_success = source[1]
+    if (
+        report["run_status"] in {"success", "failed"}
+        and previous_success is not None
+        and report["run_finished_at"] < previous_success
+    ):
+        raise BackupReportValidationError("Backup result predates known success.")
+
+    cur.execute(
+        """
+        INSERT INTO master_admin_backup_reports (
+            source_key, report_uuid, reported_at, received_at,
+            run_started_at, run_finished_at, last_success_at,
+            run_status, icloud_status, peachvault_status, failure_code
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING backup_report_id
+        """,
+        (
+            source_key, report["report_uuid"], report["reported_at"], now,
+            report["run_started_at"], report["run_finished_at"],
+            report["last_success_at"], report["run_status"],
+            report["icloud_status"], report["peachvault_status"],
+            report["failure_code"],
+        ),
+    )
+    report_id = cur.fetchone()[0]
+
+    # Only an explicit successful run can advance verified success.
+    success_at = (
+        report["run_finished_at"]
+        if report["run_status"] == "success" else None
+    )
+    cur.execute(
+        """
+        UPDATE master_admin_backup_sources
+        SET last_received_at = %s,
+            last_success_at = CASE
+                WHEN %s::timestamptz IS NULL THEN last_success_at
+                WHEN last_success_at IS NULL THEN %s::timestamptz
+                ELSE GREATEST(last_success_at, %s::timestamptz)
+            END
+        WHERE source_key = %s
+        """,
+        (now, success_at, success_at, success_at, source_key),
+    )
+    return {
+        "status": "accepted",
+        "report_id": report_id,
+        "report": report,
+    }
