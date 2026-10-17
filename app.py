@@ -40012,6 +40012,18 @@ def _business_onboarding_contact_csrf_purpose(pending):
     )
 
 
+# Native feedback access uses the existing Master Admin Bearer session.
+from services.master_admin_feedback_api import register_master_admin_feedback_api
+
+register_master_admin_feedback_api(
+    app,
+    get_connection=get_db_connection,
+    require_admin=master_admin_api_required,
+    no_store=_mfa_no_store,
+    audit=log_audit,
+)
+
+
 # Backup status ingestion has dedicated machine authentication.
 from services.backup_reporting_api import register_backup_reporting_api
 
