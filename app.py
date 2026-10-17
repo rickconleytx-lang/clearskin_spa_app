@@ -11960,6 +11960,39 @@ def _master_admin_backup_health_payload():
 
 
 @app.route(
+    "/api/master-admin/backup-monitoring",
+    methods=["GET"],
+)
+@master_admin_api_required
+def master_admin_api_backup_monitoring():
+    from services.backup_monitoring import read_backup_monitoring_summary
+
+    conn = None
+    cur = None
+    try:
+        conn = get_db_connection()
+        conn.set_session(readonly=True, autocommit=False)
+        cur = conn.cursor()
+        summary = read_backup_monitoring_summary(cur)
+        return _mfa_no_store(jsonify({
+            "success": True,
+            "backup_monitoring": summary,
+        }))
+    except Exception:
+        app.logger.error("Master Admin backup monitoring summary failed.")
+        return _mfa_no_store((jsonify({
+            "success": False,
+            "error": "backup_monitoring_unavailable",
+            "message": "Backup monitoring could not be loaded right now.",
+        }), 503))
+    finally:
+        if cur is not None:
+            cur.close()
+        if conn is not None:
+            conn.close()
+
+
+@app.route(
     "/api/master-admin/backup-health",
     methods=["GET"],
 )

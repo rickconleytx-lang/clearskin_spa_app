@@ -632,3 +632,92 @@ def run_backup_monitoring_cycle(cur, *, now=None):
         "reserved": reservation["reserved"],
         "reservation_status": reservation["status"],
     }
+
+
+def read_backup_monitoring_summary(cur, *, now=None):
+    """Read enabled-source health without changing incidents or alerts."""
+    now = now or datetime.now(timezone.utc)
+    cur.execute("""
+        SELECT s.source_key, s.timezone_name, s.schedule_hour,
+               s.grace_minutes, s.last_received_at, s.last_success_at,
+               r.run_status, r.run_started_at, r.run_finished_at,
+               r.icloud_status, r.peachvault_status, r.failure_code,
+               i.backup_incident_id, i.reason_code
+        FROM master_admin_backup_sources s
+        LEFT JOIN LATERAL (
+            SELECT run_status, run_started_at, run_finished_at,
+                   icloud_status, peachvault_status, failure_code
+            FROM master_admin_backup_reports
+            WHERE source_key = s.source_key
+            ORDER BY reported_at DESC, backup_report_id DESC
+            LIMIT 1
+        ) r ON TRUE
+        LEFT JOIN master_admin_backup_incidents i
+          ON i.source_key = s.source_key AND i.resolved_at IS NULL
+        WHERE s.enabled = TRUE
+        ORDER BY s.source_key
+    """)
+    sources = []
+    for row in cur.fetchall():
+        (key, zone, hour, grace, received, success, run_status,
+         started, finished, icloud, peachvault, failure,
+         incident_id, incident_reason) = row
+        schedule = backup_schedule_state(
+            now=now, last_success_at=success,
+            timezone_name=zone, schedule_hour=hour,
+            grace_minutes=grace,
+        )
+        failed = (
+            run_status == "failed"
+            and finished is not None
+            and (success is None or finished >= success)
+        )
+        if incident_id is not None or failed or schedule["overdue"]:
+            status, text = "red", "Backup Needs Attention"
+        elif not schedule["current"]:
+            status, text = "yellow", "Backup Due"
+        else:
+            status, text = "green", "Healthy"
+
+        def iso(value):
+            return value.isoformat() if value is not None else None
+
+        sources.append({
+            "source_key": key,
+            "status": status,
+            "status_text": text,
+            "timezone_name": zone,
+            "schedule_hour": hour,
+            "grace_minutes": grace,
+            "last_received_at": iso(received),
+            "last_success_at": iso(success),
+            "latest_required_boundary": iso(schedule["latest_required_boundary"]),
+            "deadline": iso(schedule["deadline"]),
+            "core_current": schedule["current"],
+            "run_status": run_status,
+            "run_started_at": iso(started),
+            "run_finished_at": iso(finished),
+            "icloud_status": icloud or "unknown",
+            "peachvault_status": peachvault or "unknown",
+            "failure_code": failure,
+            "open_incident_id": incident_id,
+            "incident_reason": incident_reason,
+        })
+    status = (
+        "gray" if not sources
+        else "red" if any(s["status"] == "red" for s in sources)
+        else "yellow" if any(s["status"] == "yellow" for s in sources)
+        else "green"
+    )
+    labels = {
+        "gray": "Not Configured",
+        "red": "Backup Needs Attention",
+        "yellow": "Backup Due",
+        "green": "Healthy",
+    }
+    return {
+        "status": status,
+        "status_text": labels[status],
+        "checked_at": now.isoformat(),
+        "sources": sources,
+    }
