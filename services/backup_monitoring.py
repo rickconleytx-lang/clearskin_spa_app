@@ -721,3 +721,53 @@ def read_backup_monitoring_summary(cur, *, now=None):
         "checked_at": now.isoformat(),
         "sources": sources,
     }
+
+
+def read_backup_incident_history(cur, *, status="all", limit=25, offset=0):
+    """Read paginated incident history; no monitoring state changes."""
+    if status not in {"all", "open", "resolved"}:
+        raise ValueError("Invalid incident status.")
+    if type(limit) is not int or not 1 <= limit <= 100:
+        raise ValueError("Invalid page size.")
+    if type(offset) is not int or not 0 <= offset <= 1000000:
+        raise ValueError("Invalid page offset.")
+
+    where = ""
+    if status == "open":
+        where = " WHERE i.resolved_at IS NULL"
+    elif status == "resolved":
+        where = " WHERE i.resolved_at IS NOT NULL"
+
+    cur.execute("""
+        SELECT i.backup_incident_id, i.source_key, s.enabled,
+               i.opened_at, i.updated_at, i.resolved_at,
+               i.reason_code, i.icloud_failed, i.peachvault_failed
+        FROM master_admin_backup_incidents i
+        JOIN master_admin_backup_sources s ON s.source_key = i.source_key
+    """ + where + """
+        ORDER BY i.opened_at DESC, i.backup_incident_id DESC
+        LIMIT %s OFFSET %s
+    """, (limit + 1, offset))
+    rows = cur.fetchall()
+    items = []
+    for row in rows[:limit]:
+        (incident_id, source, enabled, opened, updated, resolved,
+         reason, icloud_failed, peachvault_failed) = row
+        items.append({
+            "incident_id": incident_id,
+            "source_key": source,
+            "source_enabled": bool(enabled),
+            "opened_at": opened.isoformat(),
+            "updated_at": updated.isoformat(),
+            "resolved_at": resolved.isoformat() if resolved else None,
+            "status": "resolved" if resolved else "open",
+            "reason_code": reason,
+            "icloud_failed": bool(icloud_failed),
+            "peachvault_failed": bool(peachvault_failed),
+        })
+    return {
+        "items": items,
+        "limit": limit,
+        "offset": offset,
+        "has_more": len(rows) > limit,
+    }

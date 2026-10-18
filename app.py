@@ -12002,6 +12002,62 @@ def master_admin_api_attention():
 
 
 @app.route(
+    "/api/master-admin/backup-incidents",
+    methods=["GET"],
+)
+@master_admin_api_required
+def master_admin_api_backup_incidents():
+    from services.backup_monitoring import read_backup_incident_history
+
+    allowed = {"status", "limit", "offset"}
+    try:
+        if (
+            set(request.args) - allowed
+            or any(len(request.args.getlist(k)) != 1 for k in request.args)
+        ):
+            raise ValueError("Invalid query.")
+        status = request.args.get("status", "all")
+        limit = int(request.args.get("limit", "25"))
+        offset = int(request.args.get("offset", "0"))
+        if status not in {"all", "open", "resolved"}:
+            raise ValueError("Invalid status.")
+        if not 1 <= limit <= 100 or not 0 <= offset <= 1000000:
+            raise ValueError("Invalid pagination.")
+    except ValueError:
+        return _mfa_no_store((jsonify({
+            "success": False,
+            "error": "invalid_incident_query",
+            "message": "Check the incident filters and try again.",
+        }), 400))
+
+    conn = None
+    cur = None
+    try:
+        conn = get_db_connection()
+        conn.set_session(readonly=True, autocommit=False)
+        cur = conn.cursor()
+        history = read_backup_incident_history(
+            cur, status=status, limit=limit, offset=offset
+        )
+        return _mfa_no_store(jsonify({
+            "success": True,
+            "backup_incidents": history,
+        }))
+    except Exception:
+        app.logger.error("Master Admin backup incident history failed.")
+        return _mfa_no_store((jsonify({
+            "success": False,
+            "error": "backup_incidents_unavailable",
+            "message": "Backup incident history could not be loaded right now.",
+        }), 503))
+    finally:
+        if cur is not None:
+            cur.close()
+        if conn is not None:
+            conn.close()
+
+
+@app.route(
     "/api/master-admin/backup-monitoring",
     methods=["GET"],
 )
