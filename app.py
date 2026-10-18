@@ -11960,6 +11960,48 @@ def _master_admin_backup_health_payload():
 
 
 @app.route(
+    "/api/master-admin/attention",
+    methods=["GET"],
+)
+@master_admin_api_required
+def master_admin_api_attention():
+    from services.master_admin_attention import read_attention_summary
+
+    conn = None
+    cur = None
+    try:
+        conn = get_db_connection()
+        conn.set_session(
+            readonly=True,
+            autocommit=False,
+            isolation_level="REPEATABLE READ",
+        )
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cards = _master_admin_system_health_cards(cur)
+        summary = read_attention_summary(
+            cur,
+            user_id=int(g.master_admin_api["master_admin_user_id"]),
+            health_cards=cards,
+        )
+        return _mfa_no_store(jsonify({
+            "success": True,
+            "attention": summary,
+        }))
+    except Exception:
+        app.logger.error("Master Admin attention summary failed.")
+        return _mfa_no_store((jsonify({
+            "success": False,
+            "error": "attention_unavailable",
+            "message": "Attention status could not be loaded right now.",
+        }), 503))
+    finally:
+        if cur is not None:
+            cur.close()
+        if conn is not None:
+            conn.close()
+
+
+@app.route(
     "/api/master-admin/backup-monitoring",
     methods=["GET"],
 )
