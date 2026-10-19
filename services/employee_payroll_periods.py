@@ -126,3 +126,85 @@ def create_draft_period(
         raise PayrollPeriodError("Unable to allocate every selected work entry.")
 
     return period_id
+
+
+def calculate_period_totals(lines, settings):
+    """Calculate from saved earning lines and explicit employee settings."""
+    from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+
+    cent = Decimal("0.01")
+    zero = Decimal("0.00")
+
+    def number(value, field):
+        if value is None or isinstance(value, (bool, float)):
+            raise PayrollPeriodError(f"{field} requires an explicit decimal value.")
+        try:
+            result = Decimal(str(value))
+        except (InvalidOperation, ValueError):
+            raise PayrollPeriodError(f"Invalid {field}.")
+        if not result.is_finite() or result < 0:
+            raise PayrollPeriodError(f"Invalid {field}.")
+        return result
+
+    lines = list(lines)
+    if not lines:
+        raise PayrollPeriodError("Select at least one earning line.")
+
+    result = {
+        "regular_hours_snapshot": zero,
+        "overtime_hours_snapshot": zero,
+        "days_worked_snapshot": zero,
+        "event_count_snapshot": 0,
+        "gross_pay_snapshot": zero,
+    }
+    for line in lines:
+        if line["entry_type_snapshot"] not in {"hourly", "daily", "event"}:
+            raise PayrollPeriodError("Invalid earning type.")
+        for field in (
+            "regular_hours_snapshot", "overtime_hours_snapshot",
+            "days_worked_snapshot",
+        ):
+            result[field] += number(line[field], field)
+        gross = number(line["gross_amount_snapshot"], "Saved gross earnings")
+        if gross != gross.quantize(cent, rounding=ROUND_HALF_UP):
+            raise PayrollPeriodError("Saved earnings must be rounded to cents.")
+        result["gross_pay_snapshot"] += gross
+        result["event_count_snapshot"] += (
+            line["entry_type_snapshot"] == "event"
+        )
+
+    percent = number(
+        settings.get("fica_withholding_percent"), "FICA percentage"
+    )
+    if percent > 100:
+        raise PayrollPeriodError("FICA percentage cannot exceed 100.")
+    result["fica_percent_snapshot"] = percent
+    result["fica_amount_snapshot"] = (
+        result["gross_pay_snapshot"] * percent / Decimal("100")
+    ).quantize(cent, rounding=ROUND_HALF_UP)
+
+    deductions = result["fica_amount_snapshot"]
+    for index in (1, 2):
+        title = settings.get(f"deduction_{index}_title")
+        if title is not None and not isinstance(title, str):
+            raise PayrollPeriodError("Deduction titles must be text.")
+        title = (title or "").strip()
+        if len(title) > 100:
+            raise PayrollPeriodError("Deduction title is too long.")
+        raw = settings.get(f"deduction_{index}_amount")
+        amount = zero if raw is None else number(raw, "Deduction amount")
+        if amount != amount.quantize(cent, rounding=ROUND_HALF_UP):
+            raise PayrollPeriodError("Deductions must use whole cents.")
+        if amount > 0 and not title:
+            raise PayrollPeriodError("Positive deductions require a title.")
+        result[f"deduction_{index}_title_snapshot"] = title or None
+        result[f"deduction_{index}_amount_snapshot"] = amount
+        deductions += amount
+
+    if deductions > result["gross_pay_snapshot"]:
+        raise PayrollPeriodError("Deductions cannot exceed gross earnings.")
+    result["total_deductions_snapshot"] = deductions
+    result["estimated_net_snapshot"] = (
+        result["gross_pay_snapshot"] - deductions
+    )
+    return result
