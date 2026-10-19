@@ -208,3 +208,81 @@ def calculate_period_totals(lines, settings):
         result["gross_pay_snapshot"] - deductions
     )
     return result
+
+
+def recalculate_draft_period(
+    cur, *, spa_id, business_unit_id, employee_id,
+    pay_period_id, actor_user_id,
+):
+    """Save Draft totals using a mapping cursor; caller owns transaction."""
+    from psycopg2 import sql
+
+    for value in (
+        spa_id, business_unit_id, employee_id, pay_period_id, actor_user_id,
+    ):
+        if type(value) is not int or value <= 0:
+            raise PayrollPeriodError("Invalid payroll identity.")
+
+    cur.execute("""
+        SELECT status
+        FROM employee_payroll_periods
+        WHERE spa_id = %s AND business_unit_id = %s
+          AND employee_id = %s AND pay_period_id = %s
+        FOR UPDATE
+    """, (spa_id, business_unit_id, employee_id, pay_period_id))
+    period = cur.fetchone()
+    if period is None:
+        raise PayrollPeriodError("Pay period not found in this workspace.")
+    if period["status"] != "draft":
+        raise PayrollPeriodError("Only Draft payroll can be recalculated.")
+
+    cur.execute("""
+        SELECT fica_withholding_percent,
+               deduction_1_title, deduction_1_amount,
+               deduction_2_title, deduction_2_amount
+        FROM employee_payroll_settings
+        WHERE spa_id = %s AND business_unit_id = %s AND employee_id = %s
+        FOR SHARE
+    """, (spa_id, business_unit_id, employee_id))
+    settings = cur.fetchone()
+    if settings is None:
+        raise PayrollPeriodError("Configure employee payroll deductions first.")
+
+    # The parent lock also serializes allocation changes.
+    cur.execute("""
+        SELECT entry_type_snapshot, regular_hours_snapshot,
+               overtime_hours_snapshot, days_worked_snapshot,
+               gross_amount_snapshot
+        FROM employee_payroll_period_entries
+        WHERE spa_id = %s AND business_unit_id = %s
+          AND employee_id = %s AND pay_period_id = %s
+        ORDER BY period_entry_id
+    """, (spa_id, business_unit_id, employee_id, pay_period_id))
+    totals = calculate_period_totals(cur.fetchall(), settings)
+
+    cur.execute("""
+        SELECT set_config('psp.payroll_draft_update_actor', %s, true)
+    """, (str(actor_user_id),))
+
+    # Column names come only from the calculator's fixed output fields.
+    assignments = sql.SQL(", ").join(
+        sql.SQL("{} = %s").format(sql.Identifier(field))
+        for field in totals
+    )
+    cur.execute(
+        sql.SQL("""
+            UPDATE employee_payroll_periods
+            SET {}, calculated_at = clock_timestamp(),
+                updated_by_user_id = %s, updated_at = clock_timestamp()
+            WHERE spa_id = %s AND business_unit_id = %s
+              AND employee_id = %s AND pay_period_id = %s
+              AND status = 'draft'
+        """).format(assignments),
+        tuple(totals.values()) + (
+            actor_user_id, spa_id, business_unit_id, employee_id, pay_period_id,
+        ),
+    )
+    if cur.rowcount != 1:
+        raise PayrollPeriodError("Draft changed. Refresh before recalculating.")
+
+    return totals
