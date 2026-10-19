@@ -94439,6 +94439,7 @@ def employee_access_verify():
     if not _security_form_csrf_valid(
         submitted_csrf
     ):
+        app.logger.warning("Employee verification rejected: csrf_mismatch")
         abort(400)
 
     page_scope = str(
@@ -94449,6 +94450,7 @@ def employee_access_verify():
     if not _employee_access_sensitive_page_scope_allowed(
         page_scope
     ):
+        app.logger.warning("Employee verification rejected: invalid_page_scope")
         abort(400)
 
     return_path = _employee_access_safe_return_path(
@@ -94477,6 +94479,7 @@ def employee_access_verify():
     )
 
     if not challenge_valid:
+        app.logger.warning("Employee verification rejected: page_challenge_invalid")
         abort(400)
 
     result = _verify_employee_access_submission(
