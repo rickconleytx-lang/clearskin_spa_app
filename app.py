@@ -97368,6 +97368,79 @@ def employee_payroll_record_payment(pay_period_id):
     return redirect(review_url)
 
 
+
+@app.route("/employees/hours-payroll/payment/<int:payment_id>/expense",
+           methods=["POST"])
+@login_required
+@spa_required
+@require_subscription_tier("pos", "team")
+@require_psp_access("hours_payroll", require_employee_verification=True)
+def employee_payroll_post_expense(payment_id):
+    import psycopg2
+    from services.employee_payroll_expenses import post_payment_expense
+    from services.employee_payroll_periods import PayrollPeriodError
+
+    spa_id = current_spa_id()
+    unit_id = current_business_unit_id()
+    actor = session.get("user_id")
+    verification = g.get("psp_employee_access_verification")
+    if spa_id is None or unit_id is None or actor is None or not verification:
+        abort(403)
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token", "")
+    ):
+        abort(400)
+    authorization = _psp_access_authorization(
+        spa_id=spa_id, business_unit_id=unit_id,
+        employee_id=verification["employee_id"], area_key="add_expense",
+    )
+    if not authorization["allowed"]:
+        abort(403)
+
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT pay_period_id FROM employee_payroll_payments
+            WHERE payment_id = %s AND spa_id = %s AND business_unit_id = %s
+        """, (payment_id, spa_id, unit_id))
+        payment = cur.fetchone()
+        if payment is None:
+            abort(404)
+        review_url = url_for(
+            "employee_payroll_period_detail",
+            pay_period_id=payment["pay_period_id"],
+        )
+        if request.form.get("confirm_post_expense") != "1":
+            flash("Confirm posting this net payment to Expenses.", "error")
+            return redirect(review_url)
+        try:
+            post_payment_expense(
+                cur, spa_id=spa_id, business_unit_id=unit_id,
+                payment_id=payment_id, actor_user_id=actor,
+                vendor_name=request.form.get("vendor_name", ""),
+                category=request.form.get("category", ""),
+                payment_method=request.form.get("expense_payment_method", ""),
+            )
+            conn.commit()
+        except PayrollPeriodError as exc:
+            conn.rollback()
+            flash(str(exc), "error")
+        except psycopg2.IntegrityError:
+            conn.rollback()
+            flash("Expense posting conflicts with an existing record. Refresh and review.",
+                  "error")
+        else:
+            flash("Net payroll payment posted to Expenses. Withheld deductions excluded.",
+                  "success")
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return redirect(review_url)
+
+
 @app.route("/employees/hours-payroll/period/<int:pay_period_id>")
 @login_required
 @spa_required
@@ -97381,6 +97454,15 @@ def employee_payroll_period_detail(pay_period_id):
     unit_id = current_business_unit_id()
     if spa_id is None or unit_id is None or session.get("user_id") is None:
         abort(403)
+
+
+    verification = g.get("psp_employee_access_verification")
+    can_post_payroll_expense = bool(
+        verification and _psp_access_authorization(
+            spa_id=spa_id, business_unit_id=unit_id,
+            employee_id=verification["employee_id"], area_key="add_expense",
+        )["allowed"]
+    )
 
     conn = get_db_connection()
     try:
@@ -97412,6 +97494,24 @@ def employee_payroll_period_detail(pay_period_id):
             ORDER BY recorded_at DESC, payment_id DESC
         """, (spa_id, unit_id, period["employee_id"], pay_period_id))
         recorded_payments = cur.fetchall()
+        cur.execute("""
+            SELECT l.payment_id, l.expense_id
+            FROM employee_payroll_expense_links l
+            JOIN employee_payroll_payments p ON p.payment_id = l.payment_id
+            WHERE l.spa_id = %s AND l.business_unit_id = %s
+              AND p.spa_id = l.spa_id
+              AND p.business_unit_id = l.business_unit_id
+              AND p.employee_id = %s AND p.pay_period_id = %s
+        """, (spa_id, unit_id, period["employee_id"], pay_period_id))
+        payroll_expense_links = {
+            row["payment_id"]: row["expense_id"] for row in cur.fetchall()
+        }
+        expense_vendors, expense_categories, expense_methods = [], [], []
+        if can_post_payroll_expense and period["status"] == "paid":
+            expense_vendors, expense_categories, expense_methods = (
+                _load_expense_form_options(cur, spa_id)
+            )
+
         cur.execute("""
             SELECT h.history_id, h.action_type, h.previous_status,
                    h.new_status, h.details_json, h.notes,
@@ -97448,6 +97548,11 @@ def employee_payroll_period_detail(pay_period_id):
             "employee_payroll_period_detail.html",
             period=period, entries=entries,
             recorded_payments=recorded_payments,
+            can_post_payroll_expense=can_post_payroll_expense,
+            payroll_expense_links=payroll_expense_links,
+            expense_vendors=expense_vendors,
+            expense_categories=expense_categories,
+            expense_methods=expense_methods,
             payroll_history=payroll_history,
             approval_review_token=approval_review_token,
             security_csrf_token=_security_form_csrf_token(),

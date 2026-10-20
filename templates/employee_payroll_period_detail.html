@@ -208,6 +208,59 @@
             {% endif %}
             {% if payment.notes %}<p>Notes: {{ payment.notes }}</p>{% endif %}
             <p>Recorded: {{ payment.recorded_at }}</p>
+
+            {% if payment.payment_id in payroll_expense_links %}
+            <p><strong>Posted to Expenses:</strong>
+               Expense #{{ payroll_expense_links[payment.payment_id] }}</p>
+            {% elif period.status == "paid" and not payment.reversed_at
+                    and can_post_payroll_expense %}
+            <details>
+                <summary style="color:#b91c1c;font-weight:700;cursor:pointer;">
+                    Post net payment to Expenses
+                </summary>
+                <p>Post ${{ "%.2f"|format(payment.payment_amount) }}
+                   dated {{ payment.payment_date }}.
+                   Withheld deductions are excluded.</p>
+                <p>If this payment is already in Expenses through a manual entry
+                   or import, review it before posting to avoid counting it twice.</p>
+                {% if expense_vendors and expense_categories and expense_methods %}
+                <form method="POST"
+                      action="{{ url_for('employee_payroll_post_expense',
+                                          payment_id=payment.payment_id) }}">
+                    <input type="hidden" name="security_csrf_token"
+                           value="{{ security_csrf_token }}">
+                    {% for field, label, options, key in [
+                        ("vendor_name", "Vendor / payee", expense_vendors, "vendors_name"),
+                        ("category", "Expense category", expense_categories, "expense_cat_name"),
+                        ("expense_payment_method", "Expense payment method",
+                         expense_methods, "payment_method")
+                    ] %}
+                    <div class="form-group">
+                        <label for="{{ field }}_{{ payment.payment_id }}">{{ label }}</label>
+                        <select id="{{ field }}_{{ payment.payment_id }}"
+                                name="{{ field }}" required>
+                            <option value="">Select…</option>
+                            {% for option in options %}
+                            <option value="{{ option[key] }}">{{ option[key] }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    {% endfor %}
+                    <p><label>
+                        <input type="checkbox" name="confirm_post_expense"
+                               value="1" required>
+                        I confirm this net payment has not already been entered
+                        in Expenses and approve posting it.
+                    </label></p>
+                    <button type="submit" class="btn">Post to Expenses</button>
+                </form>
+                {% else %}
+                <p>Configure an active vendor, expense category and payment method
+                   before posting.</p>
+                {% endif %}
+            </details>
+            {% endif %}
+
         </div>
         {% endfor %}
     </div>
@@ -239,6 +292,7 @@
     "estimated_net": "Estimated net",
     "estimated_net_snapshot": "Estimated net",
     "payment_amount": "Payment amount", "payment_date": "Payment date",
+    "expense_id": "Expense number", "payment_id": "Payment number",
     "payment_method": "Payment method", "payment_reference": "Reference",
     "cancellation_reason": "Cancellation reason", "reversal_reason": "Reversal reason"
 } %}
