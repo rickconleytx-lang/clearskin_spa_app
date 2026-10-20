@@ -354,105 +354,74 @@ def save_employee_pay_rates(
     changes = []
 
     for pay_type, new_rate in pending:
+        identity = (spa_id, business_unit_id, employee_id, pay_type)
 
         cur.execute("""
-            SELECT
-                pay_rate_id,
-                rate,
-                effective_date,
-                end_date
+            SELECT pay_rate_id, rate, effective_date, end_date
             FROM employee_pay_rates
-            WHERE spa_id = %s
-              AND business_unit_id = %s
-              AND employee_id = %s
-              AND pay_type = %s
+            WHERE spa_id = %s AND business_unit_id = %s
+              AND employee_id = %s AND pay_type = %s
+              AND effective_date <= %s
             ORDER BY effective_date DESC
             LIMIT 1
             FOR UPDATE
-        """, (
-            spa_id,
-            business_unit_id,
-            employee_id,
-            pay_type,
-        ))
-
+        """, identity + (effective_date,))
         previous = cur.fetchone()
 
+        if previous and previous[2] == effective_date:
+            if new_rate == previous[1]:
+                continue
+            raise PayrollSettingsValidationError(
+                f"{pay_type.title()} rate already exists for this effective date. "
+                "Choose a different effective date for a rate change."
+            )
+
+        cur.execute("""
+            SELECT effective_date
+            FROM employee_pay_rates
+            WHERE spa_id = %s AND business_unit_id = %s
+              AND employee_id = %s AND pay_type = %s
+              AND effective_date > %s
+            ORDER BY effective_date ASC
+            LIMIT 1
+            FOR UPDATE
+        """, identity + (effective_date,))
+        following = cur.fetchone()
+        new_end = (
+            following[0] - timedelta(days=1)
+            if following else None
+        )
+
         if previous:
-            (
-                previous_id,
-                previous_rate,
-                previous_start,
-                previous_end,
-            ) = previous
-
-            if effective_date < previous_start:
-                raise PayrollSettingsValidationError(
-                    f"{pay_type.title()} rate effective date "
-                    "cannot precede existing rate history."
-                )
-
-            if effective_date == previous_start:
-                if new_rate == previous_rate:
-                    continue
-
-                raise PayrollSettingsValidationError(
-                    f"{pay_type.title()} rate already exists "
-                    "for this effective date. "
-                    "Use a later date for a rate change."
-                )
-
-            if new_rate == previous_rate:
+            previous_id, previous_rate, previous_start, previous_end = previous
+            covers_date = (
+                previous_end is None or previous_end >= effective_date
+            )
+            if new_rate == previous_rate and covers_date:
                 continue
 
-            # Close the preceding rate period if
-            # it would otherwise overlap the new rate.
-            if (
-                previous_end is None
-                or previous_end >= effective_date
-            ):
+            if covers_date:
                 cur.execute("""
                     UPDATE employee_pay_rates
                     SET end_date = %s
-                    WHERE pay_rate_id = %s
-                      AND spa_id = %s
-                      AND business_unit_id = %s
-                      AND employee_id = %s
+                    WHERE pay_rate_id = %s AND spa_id = %s
+                      AND business_unit_id = %s AND employee_id = %s
                 """, (
                     effective_date - timedelta(days=1),
-                    previous_id,
-                    spa_id,
-                    business_unit_id,
-                    employee_id,
+                    previous_id, spa_id, business_unit_id, employee_id,
                 ))
-
                 if cur.rowcount != 1:
-                    raise RuntimeError(
-                        "Unable to close previous pay rate."
-                    )
+                    raise RuntimeError("Unable to close previous pay rate.")
 
         cur.execute("""
             INSERT INTO employee_pay_rates (
-                spa_id,
-                business_unit_id,
-                employee_id,
-                pay_type,
-                rate,
-                effective_date
+                spa_id, business_unit_id, employee_id,
+                pay_type, rate, effective_date, end_date
             )
-            VALUES (%s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             RETURNING pay_rate_id
-        """, (
-            spa_id,
-            business_unit_id,
-            employee_id,
-            pay_type,
-            new_rate,
-            effective_date,
-        ))
-
+        """, identity + (new_rate, effective_date, new_end))
         pay_rate_id = cur.fetchone()[0]
-
         changes.append((pay_type, pay_rate_id))
 
     return changes
