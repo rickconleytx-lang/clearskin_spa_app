@@ -174,7 +174,9 @@ def calculate_period_totals(lines, settings):
         )
 
     percent = number(
-        settings.get("fica_withholding_percent"), "FICA percentage"
+        (settings.get("fica_withholding_percent")
+         if settings.get("fica_withholding_percent") is not None
+         else "0"), "FICA percentage"
     )
     if percent > 100:
         raise PayrollPeriodError("FICA percentage cannot exceed 100.")
@@ -244,9 +246,7 @@ def recalculate_draft_period(
         WHERE spa_id = %s AND business_unit_id = %s AND employee_id = %s
         FOR SHARE
     """, (spa_id, business_unit_id, employee_id))
-    settings = cur.fetchone()
-    if settings is None:
-        raise PayrollPeriodError("Configure employee payroll deductions first.")
+    settings = cur.fetchone() or {}
 
     # The parent lock also serializes allocation changes.
     cur.execute("""
@@ -286,3 +286,92 @@ def recalculate_draft_period(
         raise PayrollPeriodError("Draft changed. Refresh before recalculating.")
 
     return totals
+
+
+def read_draft_candidates(
+    cur, *, spa_id, business_unit_id, employee_id, selected_date,
+):
+    """Read scheduled boundaries and available entries using a mapping cursor."""
+    from services.employee_payroll_company_schedule import (
+        get_company_payroll_schedule,
+    )
+    from services.employee_payroll_employee_schedule import (
+        resolve_employee_schedule,
+    )
+    from services.employee_payroll_employee_schedule_storage import (
+        get_employee_schedule_settings,
+    )
+    from services.employee_payroll_period_navigation import (
+        build_pay_period_navigation,
+    )
+
+    for value in (spa_id, business_unit_id, employee_id):
+        if type(value) is not int or value <= 0:
+            raise PayrollPeriodError("Invalid payroll identity.")
+    if type(selected_date) is not date:
+        raise PayrollPeriodError("Select a valid period date.")
+
+    cur.execute("""
+        SELECT e.employee_id, e.first_name, e.last_name
+        FROM employee_business_unit_memberships m
+        JOIN employees e
+          ON e.spa_id = m.spa_id AND e.employee_id = m.employee_id
+        WHERE m.spa_id = %s AND m.business_unit_id = %s
+          AND m.employee_id = %s AND m.is_active = TRUE
+    """, (spa_id, business_unit_id, employee_id))
+    employee = cur.fetchone()
+    if employee is None:
+        raise PayrollPeriodError("Employee is not active in this workspace.")
+
+    company = get_company_payroll_schedule(
+        cur, spa_id=spa_id, business_unit_id=business_unit_id,
+    )
+    settings = get_employee_schedule_settings(
+        cur, spa_id=spa_id, business_unit_id=business_unit_id,
+        employee_id=employee_id,
+    )
+    source, schedule = resolve_employee_schedule(
+        company_row=company, employee_row=settings,
+    )
+    navigation = build_pay_period_navigation(
+        schedule, as_of=date.today(), selected_date=selected_date,
+    )
+    window = navigation.selected
+
+    cur.execute("""
+        SELECT w.work_entry_id, w.work_date, w.entry_type,
+               w.regular_hours, w.overtime_hours, w.days_worked,
+               w.rate_snapshot, w.overtime_rate_snapshot,
+               w.event_name_snapshot,
+               ROUND(CASE
+                   WHEN w.entry_type = 'hourly' THEN
+                       w.regular_hours * w.rate_snapshot
+                       + w.overtime_hours * COALESCE(w.overtime_rate_snapshot, 0)
+                   WHEN w.entry_type = 'daily' THEN
+                       w.days_worked * w.rate_snapshot
+                   WHEN w.entry_type = 'event' THEN w.rate_snapshot
+                   ELSE 0
+               END, 2) AS gross_amount
+        FROM employee_payroll_work_entries w
+        WHERE w.spa_id = %s AND w.business_unit_id = %s
+          AND w.employee_id = %s
+          AND w.work_date BETWEEN %s AND %s
+          AND w.voided_at IS NULL
+          AND (w.clock_in_at IS NULL OR w.clock_out_at IS NOT NULL)
+          AND NOT EXISTS (
+              SELECT 1 FROM employee_payroll_period_entries pe
+              WHERE pe.work_entry_id = w.work_entry_id
+          )
+        ORDER BY w.work_date, w.work_entry_id
+    """, (
+        spa_id, business_unit_id, employee_id, window.start, window.end,
+    ))
+    return {
+        "employee": employee,
+        "schedule_source": source,
+        "pay_frequency": schedule.pay_frequency,
+        "period_start": window.start,
+        "period_end": window.end,
+        "is_prestart": navigation.selected_is_prestart,
+        "entries": cur.fetchall(),
+    }

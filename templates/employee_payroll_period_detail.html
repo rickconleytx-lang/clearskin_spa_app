@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Saved Pay Period{% endblock %}
+{% block content %}
+<div class="report-page">
+    <a class="btn btn-secondary"
+       href="{{ url_for('employee_hours_payroll',
+                        employee_id=period.employee_id,
+                        period_date=period.period_start) }}">Back to Payroll</a>
+    <h1>Pay Period #{{ period.pay_period_id }}</h1>
+    <h2>{{ period.first_name }} {{ period.last_name }}</h2>
+    <p><strong>{{ period.period_start }} through {{ period.period_end }}</strong>
+       · {{ period.pay_frequency_snapshot|capitalize }}
+       · Status: <strong>{{ period.status|capitalize }}</strong></p>
+
+    {% if period.calculated_at %}
+    <div class="report-section">
+        <h2>Saved Calculation</h2>
+        <p>Regular hours: {{ period.regular_hours_snapshot }}
+           · Overtime hours: {{ period.overtime_hours_snapshot }}</p>
+        <p>Days: {{ period.days_worked_snapshot }}
+           · Events: {{ period.event_count_snapshot }}</p>
+        <p><strong>Gross pay:
+           ${{ "%.2f"|format(period.gross_pay_snapshot) }}</strong></p>
+        <p>FICA estimate ({{ period.fica_percent_snapshot }}%):
+           ${{ "%.2f"|format(period.fica_amount_snapshot) }}</p>
+        {% for number in (1, 2) %}
+        {% set title = period.get('deduction_' ~ number ~ '_title_snapshot') %}
+        {% set amount = period.get('deduction_' ~ number ~ '_amount_snapshot') %}
+        <p>{{ title or ("Deduction " ~ number) }}:
+           ${{ "%.2f"|format(amount or 0) }}</p>
+        {% endfor %}
+        <p>Total deductions:
+           ${{ "%.2f"|format(period.total_deductions_snapshot) }}</p>
+        <h2>Estimated net:
+            ${{ "%.2f"|format(period.estimated_net_snapshot) }}</h2>
+    </div>
+    {% else %}
+    <p>This pay period has not been calculated.</p>
+    {% endif %}
+
+    <div class="report-section">
+        <h2>Saved Earning Lines</h2>
+        {% for entry in entries %}
+        <div style="padding:12px 0;border-bottom:1px solid #ddd;">
+            <strong>{{ entry.work_date_snapshot }} —
+                {{ entry.entry_type_snapshot|capitalize }} —
+                ${{ "%.2f"|format(entry.gross_amount_snapshot) }}</strong>
+            <p>Work entry #{{ entry.work_entry_id }}
+               {% if entry.entry_type_snapshot == "hourly" %}
+               · Regular {{ entry.regular_hours_snapshot }} hours
+               · Overtime {{ entry.overtime_hours_snapshot }} hours
+               {% elif entry.entry_type_snapshot == "daily" %}
+               · {{ entry.days_worked_snapshot }} days
+               {% else %}
+               · {{ entry.event_name_snapshot }}
+               {% endif %}</p>
+        </div>
+        {% else %}
+        <p>No earning lines are currently allocated.</p>
+        {% endfor %}
+    </div>
+    <p>Amounts shown are saved payroll snapshots.
+       A Draft is not approved or recorded as paid.
+       Peach Suite Pro does not transmit payments.</p>
+</div>
+{% endblock %}

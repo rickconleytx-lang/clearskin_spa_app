@@ -474,13 +474,12 @@
             <input type="number"
                    id="fica_withholding_percent"
                    name="fica_withholding_percent"
-                   value="{{ payroll_settings.fica_withholding_percent if payroll_settings and payroll_settings.fica_withholding_percent is not none else '' }}"
+                   value="{{ payroll_settings.fica_withholding_percent if payroll_settings and payroll_settings.fica_withholding_percent is not none else 0 }}"
                    min="0"
                    max="100"
                    step="0.01">
             <small>
-                Enter the employee withholding percentage.
-                PSP does not automatically determine taxes.
+                Optional. Leave at 0% when no FICA deduction is requested. PSP does not automatically determine taxes.
             </small>
         </div>
 

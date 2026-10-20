@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 
-{% block title %}Employee Hours & Payroll{% endblock %}
+{% set payroll_page = employee_reporting_mode != "date_range" %}
+{% set page_name = "Employee Payroll" if payroll_page else "Hours & Pay Summary" %}
+{% block title %}{{ page_name }}{% endblock %}
 
 {% block content %}
 
@@ -20,6 +22,8 @@
             </a>
             {% endif %}
 
+
+
             <a href="{{ url_for('employee_payroll_schedule_settings') }}"
                class="btn btn-secondary">
                 Payroll Schedule Settings
@@ -27,22 +31,19 @@
         </div>
 
         <div>
-            <h1>Employee Hours & Payroll</h1>
+            <h1>{{ page_name }}</h1>
             <p class="report-subtitle">
                 Track employee hours, daily pay, and event earnings.
             </p>
         </div>
     </div>
 
-    <div class="report-filter-card no-print">
-        <form method="GET"
-              action="{{ url_for('employee_hours_payroll') }}"
-              class="report-filter-form">
-
+    <form method="GET"
+          action="{{ url_for('employee_hours_payroll') }}">
+        <div class="report-filter-card no-print">
             <div class="filter-group">
                 <label for="payroll_employee_id">Employee</label>
-                <select id="payroll_employee_id"
-                        name="employee_id">
+                <select id="payroll_employee_id" name="employee_id">
                     <option value=""
                         {% if selected_employee_id is none %}selected{% endif %}>
                         All Employees
@@ -55,61 +56,57 @@
                     {% endfor %}
                 </select>
             </div>
+        </div>
 
-            <div class="filter-buttons">
-                <button type="submit" class="btn">
-                    View Payroll
-                </button>
-                <a href="{{ url_for('employee_hours_payroll') }}"
-                   class="btn btn-secondary">
-                    All Employees
-                </a>
-            </div>
-        </form>
-    </div>
-    {% if employee_reporting_mode != "pay_period" %}
-    <div class="report-filter-card no-print">
-        <form method="GET"
-              action="{{ url_for('employee_hours_payroll') }}"
-              class="report-filter-form">
-            {% if selected_employee_id is not none %}
-            <input type="hidden"
-                   name="employee_id"
-                   value="{{ selected_employee_id }}">
+        <div class="report-filter-card no-print">
+            <h2>{{ "Change Employee" if payroll_page else "Open Employee Payroll" }}</h2>
+            <p>{% if payroll_page %}
+                Select another employee from the dropdown above, then click
+                <strong>Load Employee Payroll</strong> to view their payroll.
+            {% else %}
+                Select an employee from the dropdown above, then click
+                <strong>Load Employee Payroll</strong>.
+            {% endif %}</p>
+            {% if payroll_page %}
+            <a class="btn btn-secondary"
+               href="{{ url_for('employee_hours_payroll', view='summary') }}">
+                Hours &amp; Pay Summary
+            </a>
             {% endif %}
+            <button type="submit" name="view" value="payroll"
+                    class="btn" formnovalidate>
+                Load Employee Payroll
+            </button>
+        </div>
 
-            <div class="filter-group">
-                <label for="start_date">Start Date</label>
-                <input type="date"
-                       id="start_date"
-                       name="start_date"
-                       value="{{ start_date }}"
-                       required>
+        {% if not payroll_page %}
+<div class="report-filter-card no-print">
+            <h2>Pay Summary Date Range</h2>
+            <p>Use this date filter for your requested pay summary date range
+               (Report Below). Please select an employee or All Employees.</p>
+            <div class="report-filter-form">
+                <div class="filter-group">
+                    <label for="start_date">Start Date</label>
+                    <input type="date" id="start_date" name="start_date"
+                           value="{{ start_date }}" required>
+                </div>
+                <div class="filter-group">
+                    <label for="end_date">End Date</label>
+                    <input type="date" id="end_date" name="end_date"
+                           value="{{ end_date }}" required>
+                </div>
+                <div class="filter-buttons">
+                    <button type="submit" name="view" value="summary" class="btn">
+                        View Pay Summary
+                    </button>
+                    <a href="{{ url_for('employee_hours_payroll', view='summary') }}"
+                       class="btn btn-secondary">Reset Summary</a>
+                </div>
             </div>
-
-            <div class="filter-group">
-                <label for="end_date">End Date</label>
-                <input type="date"
-                       id="end_date"
-                       name="end_date"
-                       value="{{ end_date }}"
-                       required>
-            </div>
-
-            <div class="filter-buttons">
-                <button type="submit" class="btn">
-                    View Entries
-                </button>
-
-                <a href="{{ url_for('employee_hours_payroll') }}"
-                   class="btn btn-secondary">
-                    Reset
-                </a>
-            </div>
-        </form>
-    </div>
-
+        </div>
     {% endif %}
+</form>
+
     {% if employee_reporting_mode == "pay_period" %}
     <div class="report-section">
         <h2>
@@ -200,6 +197,21 @@
             or record payment for a payroll period.
         </p>
     </div>
+    <div class="report-filter-card no-print">
+        <h2>Create Draft Pay Period</h2>
+        <p>Review the selected pay period above, then click
+            <strong>Create Draft Pay Period</strong> to select work entries,
+            confirm the dates, and calculate earnings and deductions.</p>
+{% if selected_employee_id is not none and employee_reporting_mode == "pay_period" %}
+            <a href="{{ url_for('employee_payroll_create_draft',
+                                employee_id=selected_employee_id,
+                                period_date=start_date) }}"
+               class="btn">
+                + Create Draft Pay Period
+            </a>
+            {% endif %}
+    </div>
+
 
     {% elif employee_reporting_mode == "unconfigured" %}
     <div class="report-section">
@@ -417,5 +429,7 @@
     </div>
 
 </div>
+
+
 
 {% endblock %}

@@ -96924,6 +96924,217 @@ def toggle_compensation_type(compensation_type_id):
 # Existing Employee Compensation remains separate.
 # ==========================================================
 
+
+@app.route(
+    "/employees/hours-payroll/employee/<int:employee_id>/draft",
+    methods=["GET", "POST"],
+)
+@login_required
+@spa_required
+@require_subscription_tier("pos", "team")
+@require_psp_access(
+    "hours_payroll",
+    require_employee_verification=True,
+)
+def employee_payroll_create_draft(employee_id):
+    import hashlib
+    import json
+    import psycopg2
+    from itsdangerous import URLSafeTimedSerializer, BadSignature
+    from services.employee_payroll_periods import (
+        PayrollPeriodError, read_draft_candidates,
+        create_draft_period, recalculate_draft_period,
+    )
+    from services.employee_payroll_schedule_config import (
+        PayrollScheduleConfigError,
+    )
+
+    spa_id = current_spa_id()
+    unit_id = current_business_unit_id()
+    actor = session.get("user_id")
+    if spa_id is None or unit_id is None or actor is None:
+        abort(403)
+    if request.method == "POST" and not _security_form_csrf_valid(
+        request.form.get("security_csrf_token", "")
+    ):
+        abort(400)
+
+    values = request.form if request.method == "POST" else request.args
+    try:
+        selected_date = date.fromisoformat(
+            values.get("period_date") or date.today().isoformat()
+        )
+    except ValueError:
+        abort(400)
+
+    signer = URLSafeTimedSerializer(
+        app.secret_key, salt="payroll-draft-review-v1"
+    )
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        try:
+            context = read_draft_candidates(
+                cur, spa_id=spa_id, business_unit_id=unit_id,
+                employee_id=employee_id, selected_date=selected_date,
+            )
+        except (PayrollPeriodError, PayrollScheduleConfigError) as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("employee_hours_payroll",
+                                    employee_id=employee_id))
+
+        cur.execute("""
+            SELECT fica_withholding_percent,
+                   deduction_1_title, deduction_1_amount,
+                   deduction_2_title, deduction_2_amount
+            FROM employee_payroll_settings
+            WHERE spa_id = %s AND business_unit_id = %s AND employee_id = %s
+            FOR SHARE
+        """, (spa_id, unit_id, employee_id))
+        deductions = cur.fetchone()
+        review = {
+            "spa_id": spa_id, "unit_id": unit_id,
+            "employee_id": employee_id, "actor": actor,
+            "context": context, "deductions": deductions,
+        }
+        fingerprint = hashlib.sha256(json.dumps(
+            review, sort_keys=True, default=str,
+            separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
+
+        if request.method == "POST":
+            try:
+                reviewed = signer.loads(
+                    request.form.get("review_token", ""), max_age=1800
+                )
+                if reviewed != fingerprint:
+                    raise PayrollPeriodError(
+                        "Payroll data changed. Review the refreshed entries and settings."
+                    )
+                if request.form.get("confirm_boundaries") != "1":
+                    raise PayrollPeriodError("Confirm the displayed pay-period dates.")
+
+                raw_ids = request.form.getlist("work_entry_ids")
+                if not raw_ids or len(raw_ids) > 10000:
+                    raise PayrollPeriodError("Select work entries for this Draft.")
+                if any(
+                    not value.isascii() or not value.isdecimal()
+                    or len(value) > 19
+                    for value in raw_ids
+                ):
+                    raise PayrollPeriodError("Invalid work-entry selection.")
+                ids = [int(value) for value in raw_ids]
+                available = {row["work_entry_id"] for row in context["entries"]}
+                if not set(ids) <= available:
+                    raise PayrollPeriodError("Selected entries are no longer available.")
+
+                period_id = create_draft_period(
+                    cur, spa_id=spa_id, business_unit_id=unit_id,
+                    employee_id=employee_id, actor_user_id=actor,
+                    period_start=context["period_start"],
+                    period_end=context["period_end"],
+                    pay_frequency=context["pay_frequency"],
+                    work_entry_ids=ids, boundaries_confirmed=True,
+                )
+                recalculate_draft_period(
+                    cur, spa_id=spa_id, business_unit_id=unit_id,
+                    employee_id=employee_id, actor_user_id=actor,
+                    pay_period_id=period_id,
+                )
+                verification = g.get("psp_employee_access_verification")
+                log_audit(
+                    cur, spa_id=spa_id, user_id=actor,
+                    action_type="employee_payroll_draft_created",
+                    table_name="employee_payroll_periods",
+                    record_id=period_id,
+                    business_unit_id=unit_id,
+                    verified_employee_id=(
+                        verification["employee_id"] if verification else None
+                    ),
+                    notes="Payroll Draft created with confirmed dates and calculated snapshots.",
+                )
+                conn.commit()
+            except BadSignature:
+                conn.rollback()
+                flash("Draft review expired. Review the entries again.", "error")
+            except PayrollPeriodError as exc:
+                conn.rollback()
+                flash(str(exc), "error")
+            except psycopg2.IntegrityError:
+                conn.rollback()
+                flash(
+                    "A saved period or allocation conflicts with this Draft. "
+                    "Refresh and review existing payroll.",
+                    "error",
+                )
+            else:
+                flash(
+                    "Draft pay period saved. No approval or payment was recorded.",
+                    "success",
+                )
+                return redirect(url_for(
+                    "employee_payroll_period_detail", pay_period_id=period_id,
+                ))
+            return redirect(url_for(
+                "employee_payroll_create_draft", employee_id=employee_id,
+                period_date=selected_date.isoformat(),
+            ))
+
+        return render_template(
+            "employee_payroll_create_draft.html",
+            payroll=context, deductions=deductions,
+            period_date=selected_date.isoformat(),
+            review_token=signer.dumps(fingerprint),
+            security_csrf_token=_security_form_csrf_token(),
+        )
+    finally:
+        conn.close()
+
+
+
+@app.route("/employees/hours-payroll/period/<int:pay_period_id>")
+@login_required
+@spa_required
+@require_subscription_tier("pos", "team")
+@require_psp_access(
+    "hours_payroll",
+    require_employee_verification=True,
+)
+def employee_payroll_period_detail(pay_period_id):
+    spa_id = current_spa_id()
+    unit_id = current_business_unit_id()
+    if spa_id is None or unit_id is None or session.get("user_id") is None:
+        abort(403)
+
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT p.*, e.first_name, e.last_name
+            FROM employee_payroll_periods p
+            JOIN employees e
+              ON e.spa_id = p.spa_id AND e.employee_id = p.employee_id
+            WHERE p.spa_id = %s AND p.business_unit_id = %s
+              AND p.pay_period_id = %s
+        """, (spa_id, unit_id, pay_period_id))
+        period = cur.fetchone()
+        if period is None:
+            abort(404)
+        cur.execute("""
+            SELECT * FROM employee_payroll_period_entries
+            WHERE spa_id = %s AND business_unit_id = %s
+              AND employee_id = %s AND pay_period_id = %s
+            ORDER BY work_date_snapshot, period_entry_id
+        """, (spa_id, unit_id, period["employee_id"], pay_period_id))
+        entries = cur.fetchall()
+        return render_template(
+            "employee_payroll_period_detail.html",
+            period=period, entries=entries,
+        )
+    finally:
+        conn.close()
+
+
 @app.route("/employees/hours-payroll")
 @login_required
 @spa_required
@@ -96959,6 +97170,11 @@ def employee_hours_payroll():
 
     if business_unit_id is None or session.get("user_id") is None:
         abort(403)
+
+    requested_view = request.args.get("view", "payroll")
+    if requested_view not in {"summary", "payroll"}:
+        abort(400)
+    summary_view = requested_view == "summary"
 
     today = date.today()
     first_day = today.replace(day=1)
@@ -97093,7 +97309,7 @@ def employee_hours_payroll():
             except (ValueError, OverflowError):
                 abort(400)
 
-            if employee_period_navigation is not None:
+            if employee_period_navigation is not None and not summary_view:
                 start_date = (
                     employee_period_navigation.selected.start
                 )
@@ -97228,10 +97444,10 @@ def employee_hours_payroll():
         employee_schedule_error=employee_schedule_error,
         employee_reporting_mode=(
             "pay_period"
-            if employee_period_navigation is not None
+            if employee_period_navigation is not None and not summary_view
             else (
                 "unconfigured"
-                if selected_employee_id is not None
+                if selected_employee_id is not None and not summary_view
                 else "date_range"
             )
         ),

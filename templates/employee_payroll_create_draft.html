@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}Draft Pay Period{% endblock %}
+{% block content %}
+<div class="report-page">
+    <a class="btn btn-secondary"
+       href="{{ url_for('employee_hours_payroll',
+                        employee_id=payroll.employee.employee_id,
+                        period_date=period_date) }}">Back to Employee Payroll</a>
+    <h1>Draft Pay Period</h1>
+    <h2>{{ payroll.employee.first_name }} {{ payroll.employee.last_name }}</h2>
+
+    <div class="report-section">
+        <h2>Confirm Pay Period</h2>
+        <p><strong>{{ payroll.period_start }} through {{ payroll.period_end }}</strong></p>
+        <p>Frequency: {{ payroll.pay_frequency|capitalize }}</p>
+        {% if payroll.is_prestart %}
+        <p>This period precedes the configured schedule start.
+           Confirm these historical dates before saving.</p>
+        {% endif %}
+    </div>
+
+    <div class="report-section">
+        <h2>Employee Deduction Settings</h2>
+        {% if deductions and deductions.fica_withholding_percent is not none %}
+        <p>FICA estimate: {{ deductions.fica_withholding_percent }}%</p>
+        {% else %}
+        <p>FICA estimate: 0% — no FICA deduction configured.</p>
+        {% endif %}
+        {% for number in (1, 2) %}
+        {% set title = deductions.get('deduction_' ~ number ~ '_title') if deductions else none %}
+        {% set amount = deductions.get('deduction_' ~ number ~ '_amount') if deductions else none %}
+        <p>Deduction {{ number }}: {{ title or "Not configured" }}
+           {% if amount is not none %} — ${{ "%.2f"|format(amount) }}{% endif %}</p>
+        {% endfor %}
+        <p>Fixed deductions apply once per saved pay period.</p>
+    </div>
+
+    <form method="POST"
+          action="{{ url_for('employee_payroll_create_draft',
+                             employee_id=payroll.employee.employee_id) }}">
+        <input type="hidden" name="security_csrf_token" value="{{ security_csrf_token }}">
+        <input type="hidden" name="review_token" value="{{ review_token }}">
+        <input type="hidden" name="period_date" value="{{ period_date }}">
+
+        <div class="report-section">
+            <h2>Available Work Entries</h2>
+            {% if payroll.entries %}
+            <p>Select the entries to include in this Draft.</p>
+            <button type="button" class="btn btn-secondary"
+                    id="check-all-entries">Check All</button>
+            <button type="button" class="btn btn-secondary"
+                    id="clear-all-entries">Clear All</button>
+            <p id="entry-selection-status" role="status"></p>
+            {% endif %}
+
+            {% for entry in payroll.entries %}
+            <div style="padding:16px 0;border-bottom:1px solid #ddd;">
+                <label>
+                    <input type="checkbox" name="work_entry_ids"
+                           value="{{ entry.work_entry_id }}">
+                    <strong>{{ entry.work_date }} —
+                    {{ entry.entry_type|capitalize }} —
+                    ${{ "%.2f"|format(entry.gross_amount) }}</strong>
+                    (Entry #{{ entry.work_entry_id }})
+                </label>
+                {% if entry.entry_type == "hourly" %}
+                <p>Regular: {{ entry.regular_hours }} hours at
+                   ${{ "%.2f"|format(entry.rate_snapshot) }}
+                   {% if entry.overtime_hours %}
+                   · Overtime: {{ entry.overtime_hours }} hours at
+                   ${{ "%.2f"|format(entry.overtime_rate_snapshot) }}
+                   {% endif %}</p>
+                {% elif entry.entry_type == "daily" %}
+                <p>{{ entry.days_worked }} days at
+                   ${{ "%.2f"|format(entry.rate_snapshot) }}</p>
+                {% else %}
+                <p>{{ entry.event_name_snapshot }}</p>
+                {% endif %}
+            </div>
+            {% else %}
+            <p>No available completed entries for these dates.
+               Entries already assigned to saved payroll are excluded.</p>
+            {% endfor %}
+        </div>
+
+        <div class="report-section">
+            <label>
+                <input type="checkbox" name="confirm_boundaries" value="1" required>
+                I confirm the employee, dates, selected entries,
+                and deduction settings shown above.
+            </label>
+            <p>Saving reserves entries in a Draft and calculates estimated net pay.
+               Review saved totals before approval. No payment is made.</p>
+            <button type="submit" class="btn"
+                {% if not payroll.entries %}disabled{% endif %}>
+                Save and Calculate Draft
+            </button>
+        </div>
+    </form>
+</div>
+
+<script>
+(() => {
+    const checkAll = document.getElementById("check-all-entries");
+    if (!checkAll) return;
+    const form = checkAll.closest("form");
+    const entries = [...form.querySelectorAll('[name="work_entry_ids"]')];
+    const status = document.getElementById("entry-selection-status");
+    const update = () => {
+        status.textContent = entries.filter(e => e.checked).length
+            + " of " + entries.length + " entries selected.";
+    };
+    checkAll.addEventListener("click", () => {
+        entries.forEach(e => e.checked = true);
+        update();
+    });
+    document.getElementById("clear-all-entries").addEventListener("click", () => {
+        entries.forEach(e => e.checked = false);
+        update();
+    });
+    entries.forEach(e => e.addEventListener("change", update));
+    form.addEventListener("submit", event => {
+        if (!entries.some(e => e.checked)) {
+            event.preventDefault();
+            status.textContent = "Select at least one work entry before saving.";
+            status.scrollIntoView({block: "center"});
+        }
+    });
+    update();
+})();
+</script>
+{% endblock %}

@@ -113,7 +113,7 @@ def validate_employee_payroll_settings(form):
 
     result["fica_withholding_percent"] = (
         parse_payroll_decimal(
-            form.get("fica_withholding_percent"),
+            (str(form.get("fica_withholding_percent") or "").strip() or "0"),
             "FICA withholding percentage",
             Decimal("100.00"),
         )
