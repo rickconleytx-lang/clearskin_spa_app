@@ -61,6 +61,28 @@
     </div>
 
     {% if period.status == "draft" %}
+
+    <div class="report-section">
+        <h2>Recalculate Draft</h2>
+        <p>Update this Draft using the employee's current FICA percentage
+           and optional fixed deductions. Its selected work entries,
+           saved pay rates, and period dates stay the same.</p>
+        <form method="POST"
+              action="{{ url_for('employee_payroll_recalculate_draft',
+                                  pay_period_id=period.pay_period_id) }}">
+            <input type="hidden" name="security_csrf_token"
+                   value="{{ security_csrf_token }}">
+            <p><label>
+                <input type="checkbox" name="confirm_recalculate"
+                       value="1" required>
+                I confirm use of the employee's current deduction settings.
+            </label></p>
+            <button type="submit" class="btn">Recalculate Draft</button>
+        </form>
+        <p>Review the updated totals before approval.
+           Recalculating does not approve payroll or record a payment.</p>
+    </div>
+
     <div class="report-section">
         <h2>Cancel Draft</h2>
         <p>Cancel this Draft to release its work entries for replacement payroll.

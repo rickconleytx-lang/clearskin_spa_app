@@ -97155,6 +97155,69 @@ def employee_payroll_cancel_draft(pay_period_id):
     ))
 
 
+
+@app.route("/employees/hours-payroll/period/<int:pay_period_id>/recalculate",
+           methods=["POST"])
+@login_required
+@spa_required
+@require_subscription_tier("pos", "team")
+@require_psp_access("hours_payroll", require_employee_verification=True)
+def employee_payroll_recalculate_draft(pay_period_id):
+    from services.employee_payroll_periods import (
+        recalculate_draft_period, PayrollPeriodError,
+    )
+
+    spa_id = current_spa_id()
+    unit_id = current_business_unit_id()
+    actor = session.get("user_id")
+    if spa_id is None or unit_id is None or actor is None:
+        abort(403)
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token", "")
+    ):
+        abort(400)
+    if request.form.get("confirm_recalculate") != "1":
+        flash("Confirm use of current deduction settings before recalculating.",
+              "error")
+        return redirect(url_for(
+            "employee_payroll_period_detail", pay_period_id=pay_period_id,
+        ))
+
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT employee_id FROM employee_payroll_periods
+            WHERE spa_id = %s AND business_unit_id = %s
+              AND pay_period_id = %s
+            FOR UPDATE
+        """, (spa_id, unit_id, pay_period_id))
+        period = cur.fetchone()
+        if period is None:
+            abort(404)
+        try:
+            recalculate_draft_period(
+                cur, spa_id=spa_id, business_unit_id=unit_id,
+                employee_id=period["employee_id"],
+                pay_period_id=pay_period_id, actor_user_id=actor,
+            )
+            conn.commit()
+        except PayrollPeriodError as exc:
+            conn.rollback()
+            flash(str(exc), "error")
+        else:
+            flash("Draft recalculated. Review the saved totals before approval.",
+                  "success")
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return redirect(url_for(
+        "employee_payroll_period_detail", pay_period_id=pay_period_id,
+    ))
+
+
 @app.route("/employees/hours-payroll/period/<int:pay_period_id>")
 @login_required
 @spa_required
