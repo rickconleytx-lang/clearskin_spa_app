@@ -213,6 +213,101 @@
     </div>
     {% endif %}
 
+
+
+{% set history_labels = {
+    "period_start": "Period start", "period_end": "Period end",
+    "pay_frequency": "Pay frequency",
+    "pay_frequency_snapshot": "Pay frequency",
+    "work_date": "Work date", "entry_type": "Work type",
+    "work_entry_id": "Work entry",
+    "regular_hours": "Regular hours", "overtime_hours": "Overtime hours",
+    "days_worked": "Days worked", "gross_amount": "Gross earnings",
+    "regular_hours_snapshot": "Regular hours",
+    "overtime_hours_snapshot": "Overtime hours",
+    "days_worked_snapshot": "Days worked",
+    "event_count_snapshot": "Events",
+    "gross_pay": "Gross pay", "gross_pay_snapshot": "Gross pay",
+    "fica_percent_snapshot": "FICA percentage",
+    "fica_amount_snapshot": "FICA deduction",
+    "deduction_1_title_snapshot": "Deduction 1 name",
+    "deduction_2_title_snapshot": "Deduction 2 name",
+    "deduction_1_amount_snapshot": "Deduction 1 amount",
+    "deduction_2_amount_snapshot": "Deduction 2 amount",
+    "total_deductions": "Total deductions",
+    "total_deductions_snapshot": "Total deductions",
+    "estimated_net": "Estimated net",
+    "estimated_net_snapshot": "Estimated net",
+    "payment_amount": "Payment amount", "payment_date": "Payment date",
+    "payment_method": "Payment method", "payment_reference": "Reference",
+    "cancellation_reason": "Cancellation reason", "reversal_reason": "Reversal reason"
+} %}
+{% macro history_value(field, value) -%}
+    {% if value is none %}Not set
+    {% elif "title" in field or field in
+        ("payment_method", "payment_reference", "cancellation_reason",
+         "reversal_reason", "period_start", "period_end", "payment_date",
+         "work_date", "entry_type", "pay_frequency", "pay_frequency_snapshot") %}
+        {{ value }}
+    {% elif "percent" in field %}{{ "%.2f"|format(value) }}%
+    {% elif "amount" in field or "gross" in field or "net" in field
+         or "deductions" in field %}${{ "%.2f"|format(value) }}
+    {% else %}{{ value }}{% endif %}
+{%- endmacro %}
+
+    <div class="report-section">
+        <h2>Payroll History</h2>
+        <p>Most recent 100 recorded events, newest first.</p>
+        {% for event in payroll_history %}
+        <div style="padding:12px 0;border-bottom:1px solid #ddd;">
+            <h3>{{ {"draft_allocation_added": "Work entry added",
+           "draft_allocation_removed": "Work entry removed",
+           "draft_allocations_released": "Work entries released",
+           "draft_period_updated": "Draft updated",
+           "period_created": "Pay period created",
+           "period_approved": "Payroll approved",
+           "period_marked_paid": "Payroll marked paid"
+          }.get(event.action_type, event.action_type|replace("_", " ")|title) }}</h3>
+            <p>{{ event.created_at.strftime("%b %d, %Y at %I:%M:%S %p %Z") }}
+               · {{ event.actor_name or ("User #" ~ event.actor_user_id) }}</p>
+            {% if event.previous_status != event.new_status %}
+            <p>Status: {{ (event.previous_status or "New")|capitalize }}
+               → {{ (event.new_status or "Unchanged")|capitalize }}</p>
+            {% endif %}
+            {% if event.notes %}<p>{{ event.notes }}</p>{% endif %}
+
+            {% set data = event.details_json or {} %}
+            {% if data.get("changes") %}
+            <details>
+                <summary>View changes</summary>
+                <dl>
+                {% for field, change in data["changes"].items() %}
+                    {% if field in history_labels and change is mapping %}
+                    <dt><strong>{{ history_labels[field] }}</strong></dt>
+                    <dd>{{ history_value(field, change.get("before")) }}
+                        → {{ history_value(field, change.get("after")) }}</dd>
+                    {% endif %}
+                {% endfor %}
+                </dl>
+            </details>
+            {% else %}
+                {% for field, value in data.items() %}
+                    {% if field in history_labels and value is not none and value != "" %}
+                    <p><strong>{{ history_labels[field] }}:</strong>
+                       {{ history_value(field, value) }}</p>
+                    {% endif %}
+                {% endfor %}
+                {% if data.get("released_entries") %}
+                <p>{{ data["released_entries"]|length }} work entries released.</p>
+                {% endif %}
+            {% endif %}
+
+        </div>
+        {% else %}
+        <p>No payroll history is available.</p>
+        {% endfor %}
+    </div>
+
     <p>Amounts shown are saved payroll snapshots.
        A Draft is not approved or recorded as paid.
        Peach Suite Pro does not transmit payments.</p>

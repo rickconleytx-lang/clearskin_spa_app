@@ -97412,6 +97412,22 @@ def employee_payroll_period_detail(pay_period_id):
             ORDER BY recorded_at DESC, payment_id DESC
         """, (spa_id, unit_id, period["employee_id"], pay_period_id))
         recorded_payments = cur.fetchall()
+        cur.execute("""
+            SELECT h.history_id, h.action_type, h.previous_status,
+                   h.new_status, h.details_json, h.notes,
+                   h.actor_user_id, h.created_at,
+                   NULLIF(BTRIM(CONCAT_WS(' ', u.first_name, u.last_name)), '')
+                       AS actor_name
+            FROM employee_payroll_period_history h
+            LEFT JOIN users u
+              ON u.user_id = h.actor_user_id AND u.spa_id = h.spa_id
+            WHERE h.spa_id = %s AND h.business_unit_id = %s
+              AND h.employee_id = %s AND h.pay_period_id = %s
+            ORDER BY h.created_at DESC, h.history_id DESC
+            LIMIT 100
+        """, (spa_id, unit_id, period["employee_id"], pay_period_id))
+        payroll_history = cur.fetchall()
+
 
         from itsdangerous import URLSafeTimedSerializer
         approval_review_token = None
@@ -97432,6 +97448,7 @@ def employee_payroll_period_detail(pay_period_id):
             "employee_payroll_period_detail.html",
             period=period, entries=entries,
             recorded_payments=recorded_payments,
+            payroll_history=payroll_history,
             approval_review_token=approval_review_token,
             security_csrf_token=_security_form_csrf_token(),
         )
