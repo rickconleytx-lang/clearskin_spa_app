@@ -97218,6 +97218,85 @@ def employee_payroll_recalculate_draft(pay_period_id):
     ))
 
 
+
+@app.route("/employees/hours-payroll/period/<int:pay_period_id>/approve",
+           methods=["POST"])
+@login_required
+@spa_required
+@require_subscription_tier("pos", "team")
+@require_psp_access("hours_payroll", require_employee_verification=True)
+def employee_payroll_approve_draft(pay_period_id):
+    from itsdangerous import URLSafeTimedSerializer, BadSignature
+    from services.employee_payroll_periods import (
+        approve_draft_period, PayrollPeriodError,
+    )
+
+    spa_id = current_spa_id()
+    unit_id = current_business_unit_id()
+    actor = session.get("user_id")
+    if spa_id is None or unit_id is None or actor is None:
+        abort(403)
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token", "")
+    ):
+        abort(400)
+
+    review_url = url_for(
+        "employee_payroll_period_detail", pay_period_id=pay_period_id,
+    )
+    if request.form.get("confirm_approve") != "1":
+        flash("Confirm the saved payroll totals before approval.", "error")
+        return redirect(review_url)
+
+    signer = URLSafeTimedSerializer(
+        app.secret_key, salt="payroll-approval-review-v1"
+    )
+    try:
+        reviewed = signer.loads(
+            request.form.get("approval_review_token", ""), max_age=1800,
+        )
+        if not isinstance(reviewed, dict):
+            raise BadSignature("Invalid review.")
+        expected = {
+            "spa_id": spa_id, "business_unit_id": unit_id,
+            "pay_period_id": pay_period_id, "actor_user_id": actor,
+        }
+        if any(reviewed.get(key) != value for key, value in expected.items()):
+            raise BadSignature("Review identity mismatch.")
+        if type(reviewed.get("employee_id")) is not int:
+            raise BadSignature("Invalid employee.")
+        if not isinstance(reviewed.get("updated_at"), str):
+            raise BadSignature("Invalid Draft version.")
+    except BadSignature:
+        flash("Approval review expired or is invalid. Refresh and review again.",
+              "error")
+        return redirect(review_url)
+
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        try:
+            approve_draft_period(
+                cur, spa_id=spa_id, business_unit_id=unit_id,
+                employee_id=reviewed["employee_id"],
+                pay_period_id=pay_period_id, actor_user_id=actor,
+                reviewed_updated_at=reviewed["updated_at"],
+            )
+            conn.commit()
+        except PayrollPeriodError as exc:
+            conn.rollback()
+            flash(str(exc), "error")
+        else:
+            flash("Payroll approved. Saved totals are locked. No payment recorded.",
+                  "success")
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return redirect(review_url)
+
+
 @app.route("/employees/hours-payroll/period/<int:pay_period_id>")
 @login_required
 @spa_required
@@ -97253,9 +97332,25 @@ def employee_payroll_period_detail(pay_period_id):
             ORDER BY work_date_snapshot, period_entry_id
         """, (spa_id, unit_id, period["employee_id"], pay_period_id))
         entries = cur.fetchall()
+        from itsdangerous import URLSafeTimedSerializer
+        approval_review_token = None
+        if period["status"] == "draft" and period["calculated_at"] is not None:
+            signer = URLSafeTimedSerializer(
+                app.secret_key, salt="payroll-approval-review-v1"
+            )
+            approval_review_token = signer.dumps({
+                "spa_id": spa_id,
+                "business_unit_id": unit_id,
+                "employee_id": period["employee_id"],
+                "pay_period_id": pay_period_id,
+                "actor_user_id": session["user_id"],
+                "updated_at": period["updated_at"].isoformat(),
+            })
+
         return render_template(
             "employee_payroll_period_detail.html",
             period=period, entries=entries,
+            approval_review_token=approval_review_token,
             security_csrf_token=_security_form_csrf_token(),
         )
     finally:

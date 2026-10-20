@@ -424,3 +424,52 @@ def cancel_draft_period(
     ))
     if cur.rowcount != 1:
         raise PayrollPeriodError("Draft changed. Refresh before cancelling.")
+
+
+def approve_draft_period(
+    cur, *, spa_id, business_unit_id, employee_id,
+    pay_period_id, actor_user_id, reviewed_updated_at,
+):
+    """Approve reviewed snapshots; caller owns authorization and transaction."""
+    for value in (
+        spa_id, business_unit_id, employee_id, pay_period_id, actor_user_id,
+    ):
+        if type(value) is not int or value <= 0:
+            raise PayrollPeriodError("Invalid payroll identity.")
+    if not isinstance(reviewed_updated_at, str) or not reviewed_updated_at:
+        raise PayrollPeriodError("Review the saved Draft before approval.")
+
+    cur.execute("""
+        SELECT status, updated_at, calculated_at
+        FROM employee_payroll_periods
+        WHERE spa_id = %s AND business_unit_id = %s
+          AND employee_id = %s AND pay_period_id = %s
+        FOR UPDATE
+    """, (spa_id, business_unit_id, employee_id, pay_period_id))
+    period = cur.fetchone()
+    if period is None:
+        raise PayrollPeriodError("Pay period not found in this workspace.")
+    if period["status"] != "draft":
+        raise PayrollPeriodError("Only Draft payroll can be approved.")
+    if period["calculated_at"] is None:
+        raise PayrollPeriodError("Calculate and review this Draft before approval.")
+    if period["updated_at"].isoformat() != reviewed_updated_at:
+        raise PayrollPeriodError("Draft changed. Refresh and review before approval.")
+
+    cur.execute("""
+        SELECT set_config('psp.payroll_draft_update_actor', %s, true)
+    """, (str(actor_user_id),))
+    cur.execute("""
+        UPDATE employee_payroll_periods
+        SET status = 'approved',
+            approved_by_user_id = %s, approved_at = clock_timestamp(),
+            updated_by_user_id = %s, updated_at = clock_timestamp()
+        WHERE spa_id = %s AND business_unit_id = %s
+          AND employee_id = %s AND pay_period_id = %s
+          AND status = 'draft'
+    """, (
+        actor_user_id, actor_user_id,
+        spa_id, business_unit_id, employee_id, pay_period_id,
+    ))
+    if cur.rowcount != 1:
+        raise PayrollPeriodError("Draft changed. Refresh before approving.")

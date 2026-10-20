@@ -62,6 +62,33 @@
 
     {% if period.status == "draft" %}
 
+    {% if approval_review_token %}
+    <div class="report-section">
+        <h2>Approve Payroll</h2>
+        <p>Approve the saved calculation shown above:
+           gross ${{ "%.2f"|format(period.gross_pay_snapshot) }},
+           deductions ${{ "%.2f"|format(period.total_deductions_snapshot) }},
+           estimated net ${{ "%.2f"|format(period.estimated_net_snapshot) }}.</p>
+        <p>Approval locks this period's entries and financial totals.
+           It cannot then be recalculated or cancelled.
+           Approval does not record or send a payment.</p>
+        <form method="POST"
+              action="{{ url_for('employee_payroll_approve_draft',
+                                  pay_period_id=period.pay_period_id) }}">
+            <input type="hidden" name="security_csrf_token"
+                   value="{{ security_csrf_token }}">
+            <input type="hidden" name="approval_review_token"
+                   value="{{ approval_review_token }}">
+            <p><label>
+                <input type="checkbox" name="confirm_approve" value="1" required>
+                I have reviewed and approve these saved payroll totals.
+            </label></p>
+            <button type="submit" class="btn">Approve Payroll</button>
+        </form>
+    </div>
+    {% endif %}
+
+
     <div class="report-section">
         <h2>Recalculate Draft</h2>
         <p>Update this Draft using the employee's current FICA percentage
@@ -111,6 +138,16 @@
         <p>Cancelled: {{ period.cancelled_at }}</p>
         <p>Work entries were released. Saved calculation totals remain
            as historical information.</p>
+    </div>
+    {% endif %}
+
+
+    {% if period.status == "approved" %}
+    <div class="report-section">
+        <h2>Payroll Approved</h2>
+        <p>Approved: {{ period.approved_at }}</p>
+        <p>Entries and financial totals are locked.
+           Payment has not yet been recorded.</p>
     </div>
     {% endif %}
 
