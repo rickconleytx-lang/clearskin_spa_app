@@ -244,25 +244,50 @@
                    Withheld deductions are excluded.</p>
                 <p>If this payment is already in Expenses through a manual entry
                    or import, review it before posting to avoid counting it twice.</p>
-                {% if expense_vendors and expense_categories and expense_methods %}
+                {% if expense_categories and expense_methods %}
                 <form method="POST"
                       action="{{ url_for('employee_payroll_post_expense',
                                           payment_id=payment.payment_id) }}">
                     <input type="hidden" name="security_csrf_token"
                            value="{{ security_csrf_token }}">
-                    {% for field, label, options, key in [
-                        ("vendor_name", "Vendor / payee", expense_vendors, "vendors_name"),
-                        ("category", "Expense category", expense_categories, "expense_cat_name"),
+                    <div class="form-group">
+                        <label for="vendor_name_{{ payment.payment_id }}">Payee</label>
+                        <input type="text"
+                               id="vendor_name_{{ payment.payment_id }}"
+                               name="vendor_name" maxlength="100" required
+                               value="{{ ((period.first_name or '') ~ ' ' ~ (period.last_name or ''))|trim }}"
+                               list="payroll_payees_{{ payment.payment_id }}">
+                        <datalist id="payroll_payees_{{ payment.payment_id }}">
+                            {% for vendor in expense_vendors %}
+                            <option value="{{ vendor.vendors_name }}">
+                            {% endfor %}
+                        </datalist>
+                    </div>
+                    {% for field, label, options, key, preferred in [
+                        ("category", "Expense category", expense_categories,
+                         "expense_cat_name", "payroll"),
                         ("expense_payment_method", "Expense payment method",
-                         expense_methods, "payment_method")
+                         expense_methods, "payment_method",
+                         (payment.payment_method or "")|trim|lower)
                     ] %}
+                    {% set default = namespace(value=none) %}
+                    {% for option in options %}
+                        {% if default.value is none
+                              and option[key]|trim|lower == preferred %}
+                            {% set default.value = option[key] %}
+                        {% endif %}
+                    {% endfor %}
                     <div class="form-group">
                         <label for="{{ field }}_{{ payment.payment_id }}">{{ label }}</label>
                         <select id="{{ field }}_{{ payment.payment_id }}"
                                 name="{{ field }}" required>
-                            <option value="">Select…</option>
+                            <option value=""
+                                {% if default.value is none %}selected{% endif %}>Select…</option>
                             {% for option in options %}
-                            <option value="{{ option[key] }}">{{ option[key] }}</option>
+                            <option value="{{ option[key] }}"
+                                {% if option[key] == default.value %}selected{% endif %}>
+                                {{ option[key] }}
+                            </option>
                             {% endfor %}
                         </select>
                     </div>
@@ -276,7 +301,7 @@
                     <button type="submit" class="btn">Post to Expenses</button>
                 </form>
                 {% else %}
-                <p>Configure an active vendor, expense category and payment method
+                <p>Configure an active expense category and payment method
                    before posting.</p>
                 {% endif %}
             </details>

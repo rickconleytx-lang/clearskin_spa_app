@@ -55,8 +55,6 @@ def post_payment_expense(
         raise PayrollPeriodError("Payment exceeds the supported expense amount.")
 
     checks = (
-        ("SELECT 1 FROM vendor_name WHERE spa_id = %s AND vendors_name = %s "
-         "AND is_active = TRUE FOR SHARE", vendor_name),
         ("SELECT 1 FROM expense_categories WHERE spa_id = %s AND expense_cat_name = %s "
          "AND is_active = TRUE FOR SHARE", category),
         ("SELECT 1 FROM payment_methods WHERE spa_id = %s AND payment_method = %s "
