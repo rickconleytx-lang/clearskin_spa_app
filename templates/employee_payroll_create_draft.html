@@ -35,7 +35,7 @@
         <p>Fixed deductions apply once per saved pay period.</p>
     </div>
 
-    <form method="POST"
+    <form id="payroll-create-draft-form" method="POST"
           action="{{ url_for('employee_payroll_create_draft',
                              employee_id=payroll.employee.employee_id) }}">
         <input type="hidden" name="security_csrf_token" value="{{ security_csrf_token }}">
@@ -57,7 +57,7 @@
             <div style="padding:16px 0;border-bottom:1px solid #ddd;">
                 <label>
                     <input type="checkbox" name="work_entry_ids"
-                           value="{{ entry.work_entry_id }}">
+                           value="{{ entry.work_entry_id }}" checked>
                     <strong>{{ entry.work_date }} —
                     {{ entry.entry_type|capitalize }} —
                     ${{ "%.2f"|format(entry.gross_amount) }}</strong>
@@ -85,12 +85,19 @@
 
         <div class="report-section">
             <label>
-                <input type="checkbox" name="confirm_boundaries" value="1" required>
+                <input type="checkbox" id="confirm-boundaries" name="confirm_boundaries" value="1">
                 I confirm the employee, dates, selected entries,
                 and deduction settings shown above.
             </label>
             <p>Saving reserves entries in a Draft and calculates estimated net pay.
                Review saved totals before approval. No payment is made.</p>
+            {% if not payroll.entries %}
+            <p>No available work entries. Add completed work
+               entries for this period before creating a Draft.</p>
+            {% endif %}
+            <div id="draft-server-errors"></div>
+            <p id="draft-save-error" role="alert" tabindex="-1"
+               style="color:#a12020;font-weight:600;" hidden></p>
             <button type="submit" class="btn"
                 {% if not payroll.entries %}disabled{% endif %}>
                 Save and Calculate Draft
@@ -101,32 +108,79 @@
 
 <script>
 (() => {
-    const checkAll = document.getElementById("check-all-entries");
-    if (!checkAll) return;
-    const form = checkAll.closest("form");
-    const entries = [...form.querySelectorAll('[name="work_entry_ids"]')];
+    const form = document.getElementById("payroll-create-draft-form");
+    if (!form) return;
+
+    const entries = [...form.querySelectorAll(
+        '[name="work_entry_ids"]'
+    )];
+    const confirmation = document.getElementById("confirm-boundaries");
     const status = document.getElementById("entry-selection-status");
-    const update = () => {
-        status.textContent = entries.filter(e => e.checked).length
-            + " of " + entries.length + " entries selected.";
+    const error = document.getElementById("draft-save-error");
+    const serverErrors = document.getElementById("draft-server-errors");
+
+    document.querySelectorAll(".container > .flash.error").forEach(
+        message => serverErrors.appendChild(message)
+    );
+
+    const clearError = () => {
+        error.hidden = true;
+        error.textContent = "";
     };
-    checkAll.addEventListener("click", () => {
-        entries.forEach(e => e.checked = true);
-        update();
-    });
-    document.getElementById("clear-all-entries").addEventListener("click", () => {
-        entries.forEach(e => e.checked = false);
-        update();
-    });
-    entries.forEach(e => e.addEventListener("change", update));
+
+    const showError = message => {
+        error.textContent = message;
+        error.hidden = false;
+        error.scrollIntoView({block: "center"});
+        error.focus();
+    };
+
+    const updateSelection = () => {
+        if (!status) return;
+        const selected = entries.filter(e => e.checked).length;
+        status.textContent =
+            selected + " of " + entries.length + " entries selected.";
+        clearError();
+    };
+
+    if (entries.length) {
+        document.getElementById("check-all-entries").addEventListener(
+            "click", () => {
+                entries.forEach(e => e.checked = true);
+                updateSelection();
+            }
+        );
+
+        document.getElementById("clear-all-entries").addEventListener(
+            "click", () => {
+                entries.forEach(e => e.checked = false);
+                updateSelection();
+            }
+        );
+
+        entries.forEach(e =>
+            e.addEventListener("change", updateSelection)
+        );
+
+        updateSelection();
+    }
+
+    confirmation.addEventListener("change", clearError);
+
     form.addEventListener("submit", event => {
-        if (!entries.some(e => e.checked)) {
+        if (!entries.length) {
             event.preventDefault();
-            status.textContent = "Select at least one work entry before saving.";
-            status.scrollIntoView({block: "center"});
+            showError("No available completed work entries for this period.");
+        } else if (!entries.some(e => e.checked)) {
+            event.preventDefault();
+            showError("Select at least one work entry before saving.");
+        } else if (!confirmation.checked) {
+            event.preventDefault();
+            showError(
+                "Check the final confirmation before saving this Draft."
+            );
         }
     });
-    update();
 })();
 </script>
 {% endblock %}
