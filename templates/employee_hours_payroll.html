@@ -225,7 +225,61 @@
             does not yet have a complete payroll schedule.
         </p>
 
-        <p>{{ employee_schedule_error }}</p>
+        <p><strong>What needs attention:</strong>
+            {{ employee_schedule_error }}</p>
+
+        <h3>How to Complete Payroll Schedule Setup</h3>
+
+        <ol>
+            <li>
+                Open <strong>Configure Employee Schedule</strong>
+                below.
+            </li>
+            <li>
+                Choose <strong>Use Company Default Schedule</strong>
+                if this employee follows the company's normal
+                payroll calendar.
+            </li>
+            <li>
+                Choose <strong>Use Employee-Specific Schedule</strong>
+                only if this employee follows a different calendar.
+            </li>
+            <li>
+                Confirm the payroll frequency and required dates:
+                <ul>
+                    <li>
+                        Weekly, biweekly, or monthly:
+                        enter a confirmed reference pay-period
+                        starting date.
+                    </li>
+                    <li>
+                        Semimonthly:
+                        enter the two monthly starting days
+                        instead of a reference date.
+                    </li>
+                </ul>
+            </li>
+            <li>
+                Save the configuration, then return to
+                Employee Payroll and review the displayed
+                pay-period boundaries.
+            </li>
+        </ol>
+
+        <p>
+            <strong>Important:</strong>
+            A pay-rate effective date determines when an
+            employee's compensation rate applies.
+            A payroll reference starting date determines
+            the boundaries of the payroll cycle.
+            These dates do not have to match.
+        </p>
+
+        <p>
+            If the company schedule is missing, configure
+            the company default first, or explicitly set
+            a complete employee-specific schedule.
+        </p>
 
         <p>
             Work entries may still be reviewed using the manual
