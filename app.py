@@ -97297,6 +97297,77 @@ def employee_payroll_approve_draft(pay_period_id):
     return redirect(review_url)
 
 
+
+@app.route("/employees/hours-payroll/period/<int:pay_period_id>/payment",
+           methods=["POST"])
+@login_required
+@spa_required
+@require_subscription_tier("pos", "team")
+@require_psp_access("hours_payroll", require_employee_verification=True)
+def employee_payroll_record_payment(pay_period_id):
+    from datetime import date
+    from services.employee_payroll_periods import (
+        record_period_payment, PayrollPeriodError,
+    )
+
+    spa_id = current_spa_id()
+    unit_id = current_business_unit_id()
+    actor = session.get("user_id")
+    if spa_id is None or unit_id is None or actor is None:
+        abort(403)
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token", "")
+    ):
+        abort(400)
+    review_url = url_for(
+        "employee_payroll_period_detail", pay_period_id=pay_period_id,
+    )
+    if request.form.get("confirm_payment") != "1":
+        flash("Confirm the external payment before recording it.", "error")
+        return redirect(review_url)
+    try:
+        payment_date = date.fromisoformat(request.form.get("payment_date", ""))
+    except ValueError:
+        flash("Enter a valid payment date.", "error")
+        return redirect(review_url)
+
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT employee_id FROM employee_payroll_periods
+            WHERE spa_id = %s AND business_unit_id = %s
+              AND pay_period_id = %s
+            FOR UPDATE
+        """, (spa_id, unit_id, pay_period_id))
+        period = cur.fetchone()
+        if period is None:
+            abort(404)
+        try:
+            record_period_payment(
+                cur, spa_id=spa_id, business_unit_id=unit_id,
+                employee_id=period["employee_id"],
+                pay_period_id=pay_period_id, actor_user_id=actor,
+                payment_date=payment_date,
+                payment_method=request.form.get("payment_method", ""),
+                payment_reference=request.form.get("payment_reference", ""),
+                notes=request.form.get("payment_notes", ""),
+            )
+            conn.commit()
+        except PayrollPeriodError as exc:
+            conn.rollback()
+            flash(str(exc), "error")
+        else:
+            flash("External payment recorded. Payroll marked Paid. No funds transmitted.",
+                  "success")
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return redirect(review_url)
+
+
 @app.route("/employees/hours-payroll/period/<int:pay_period_id>")
 @login_required
 @spa_required
@@ -97332,6 +97403,16 @@ def employee_payroll_period_detail(pay_period_id):
             ORDER BY work_date_snapshot, period_entry_id
         """, (spa_id, unit_id, period["employee_id"], pay_period_id))
         entries = cur.fetchall()
+        cur.execute("""
+            SELECT payment_id, payment_date, payment_amount, payment_method,
+                   payment_reference, notes, recorded_at, reversed_at
+            FROM employee_payroll_payments
+            WHERE spa_id = %s AND business_unit_id = %s
+              AND employee_id = %s AND pay_period_id = %s
+            ORDER BY recorded_at DESC, payment_id DESC
+        """, (spa_id, unit_id, period["employee_id"], pay_period_id))
+        recorded_payments = cur.fetchall()
+
         from itsdangerous import URLSafeTimedSerializer
         approval_review_token = None
         if period["status"] == "draft" and period["calculated_at"] is not None:
@@ -97350,6 +97431,7 @@ def employee_payroll_period_detail(pay_period_id):
         return render_template(
             "employee_payroll_period_detail.html",
             period=period, entries=entries,
+            recorded_payments=recorded_payments,
             approval_review_token=approval_review_token,
             security_csrf_token=_security_form_csrf_token(),
         )

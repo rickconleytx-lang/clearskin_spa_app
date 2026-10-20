@@ -151,6 +151,68 @@
     </div>
     {% endif %}
 
+
+    {% if period.status == "approved" %}
+    <div class="report-section">
+        <h2>Record External Payment</h2>
+        <p>Record the full payment of
+           <strong>${{ "%.2f"|format(period.estimated_net_snapshot) }}</strong>
+           made outside Peach Suite Pro.</p>
+        <form method="POST"
+              action="{{ url_for('employee_payroll_record_payment',
+                                  pay_period_id=period.pay_period_id) }}">
+            <input type="hidden" name="security_csrf_token"
+                   value="{{ security_csrf_token }}">
+            <div class="form-group">
+                <label for="payment_date">Payment date</label>
+                <input type="date" id="payment_date"
+                       name="payment_date" required>
+            </div>
+            <div class="form-group">
+                <label for="payment_method">Payment method</label>
+                <input type="text" id="payment_method" name="payment_method"
+                       maxlength="80" placeholder="Check, cash, bank transfer…" required>
+            </div>
+            <div class="form-group">
+                <label for="payment_reference">Reference (optional)</label>
+                <input type="text" id="payment_reference"
+                       name="payment_reference" maxlength="160">
+            </div>
+            <div class="form-group">
+                <label for="payment_notes">Notes (optional)</label>
+                <textarea id="payment_notes" name="payment_notes"
+                          maxlength="2000" rows="3"></textarea>
+            </div>
+            <p><label>
+                <input type="checkbox" name="confirm_payment" value="1" required>
+                I confirm this payment was made outside PSP.
+                Recording it will mark this payroll Paid.
+            </label></p>
+            <button type="submit" class="btn">Record Payment and Mark Paid</button>
+        </form>
+    </div>
+    {% endif %}
+
+    {% if recorded_payments %}
+    <div class="report-section">
+        <h2>Recorded Payments</h2>
+        {% for payment in recorded_payments %}
+        <div style="padding:12px 0;border-bottom:1px solid #ddd;">
+            <p><strong>Payment #{{ payment.payment_id }}:
+               ${{ "%.2f"|format(payment.payment_amount) }}</strong>
+               · {{ "Reversed" if payment.reversed_at else "Recorded" }}</p>
+            <p>Payment date: {{ payment.payment_date }}
+               · Method: {{ payment.payment_method or "Not specified" }}</p>
+            {% if payment.payment_reference %}
+            <p>Reference: {{ payment.payment_reference }}</p>
+            {% endif %}
+            {% if payment.notes %}<p>Notes: {{ payment.notes }}</p>{% endif %}
+            <p>Recorded: {{ payment.recorded_at }}</p>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
     <p>Amounts shown are saved payroll snapshots.
        A Draft is not approved or recorded as paid.
        Peach Suite Pro does not transmit payments.</p>

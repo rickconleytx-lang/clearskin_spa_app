@@ -473,3 +473,84 @@ def approve_draft_period(
     ))
     if cur.rowcount != 1:
         raise PayrollPeriodError("Draft changed. Refresh before approving.")
+
+
+def record_period_payment(
+    cur, *, spa_id, business_unit_id, employee_id, pay_period_id,
+    actor_user_id, payment_date, payment_method, payment_reference="", notes="",
+):
+    """Record an external payment and Paid status atomically; caller owns TX."""
+    for value in (
+        spa_id, business_unit_id, employee_id, pay_period_id, actor_user_id,
+    ):
+        if type(value) is not int or value <= 0:
+            raise PayrollPeriodError("Invalid payroll identity.")
+    if type(payment_date) is not date:
+        raise PayrollPeriodError("A valid payment date is required.")
+
+    fields = {}
+    for name, value, maximum in (
+        ("method", payment_method, 80),
+        ("reference", payment_reference, 160),
+        ("notes", notes, 2000),
+    ):
+        if not isinstance(value, str) or len(value.strip()) > maximum:
+            raise PayrollPeriodError(f"Invalid payment {name}.")
+        fields[name] = value.strip()
+    if not fields["method"]:
+        raise PayrollPeriodError("A payment method is required.")
+
+    cur.execute("""
+        SELECT status, estimated_net_snapshot
+        FROM employee_payroll_periods
+        WHERE spa_id = %s AND business_unit_id = %s
+          AND employee_id = %s AND pay_period_id = %s
+        FOR UPDATE
+    """, (spa_id, business_unit_id, employee_id, pay_period_id))
+    period = cur.fetchone()
+    if period is None:
+        raise PayrollPeriodError("Pay period not found in this workspace.")
+    if period["status"] != "approved":
+        raise PayrollPeriodError("Only Approved payroll can be recorded as Paid.")
+    if period["estimated_net_snapshot"] is None:
+        raise PayrollPeriodError("Approved payroll has no saved net amount.")
+
+    cur.execute("""
+        SELECT payment_id FROM employee_payroll_payments
+        WHERE spa_id = %s AND business_unit_id = %s
+          AND employee_id = %s AND pay_period_id = %s
+          AND reversed_at IS NULL
+    """, (spa_id, business_unit_id, employee_id, pay_period_id))
+    if cur.fetchone() is not None:
+        raise PayrollPeriodError("A payment is already recorded for this period.")
+
+    cur.execute("""
+        INSERT INTO employee_payroll_payments (
+            spa_id, business_unit_id, employee_id, pay_period_id,
+            payment_date, payment_amount, payment_method,
+            payment_reference, notes, recorded_by_user_id
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING payment_id
+    """, (
+        spa_id, business_unit_id, employee_id, pay_period_id,
+        payment_date, period["estimated_net_snapshot"], fields["method"],
+        fields["reference"] or None, fields["notes"] or None, actor_user_id,
+    ))
+    payment_id = cur.fetchone()["payment_id"]
+
+    cur.execute("""
+        UPDATE employee_payroll_periods
+        SET status = 'paid',
+            paid_by_user_id = %s, paid_at = clock_timestamp(),
+            updated_by_user_id = %s, updated_at = clock_timestamp()
+        WHERE spa_id = %s AND business_unit_id = %s
+          AND employee_id = %s AND pay_period_id = %s
+          AND status = 'approved'
+    """, (
+        actor_user_id, actor_user_id,
+        spa_id, business_unit_id, employee_id, pay_period_id,
+    ))
+    if cur.rowcount != 1:
+        raise PayrollPeriodError("Payroll changed. Refresh before recording payment.")
+    return payment_id
