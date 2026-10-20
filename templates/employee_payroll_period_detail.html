@@ -38,27 +38,48 @@
     <p>This pay period has not been calculated.</p>
     {% endif %}
 
-    <div class="report-section">
-        <h2>Saved Earning Lines</h2>
-        {% for entry in entries %}
-        <div style="padding:12px 0;border-bottom:1px solid #ddd;">
-            <strong>{{ entry.work_date_snapshot }} —
-                {{ entry.entry_type_snapshot|capitalize }} —
-                ${{ "%.2f"|format(entry.gross_amount_snapshot) }}</strong>
-            <p>Work entry #{{ entry.work_entry_id }}
-               {% if entry.entry_type_snapshot == "hourly" %}
-               · Regular {{ entry.regular_hours_snapshot }} hours
-               · Overtime {{ entry.overtime_hours_snapshot }} hours
-               {% elif entry.entry_type_snapshot == "daily" %}
-               · {{ entry.days_worked_snapshot }} days
-               {% else %}
-               · {{ entry.event_name_snapshot }}
-               {% endif %}</p>
+
+    <details class="report-section">
+        <summary style="font-weight:700;cursor:pointer;">
+            Work Entries ({{ entries|length }})
+        </summary>
+        <div style="overflow-x:auto;margin-top:12px;">
+            <table style="width:100%;border-collapse:collapse;">
+                <thead>
+                    <tr>
+                        <th scope="col">Date</th>
+                        <th scope="col">Type</th>
+                        <th scope="col">Work details</th>
+                        <th scope="col">Gross</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for entry in entries %}
+                    <tr style="border-bottom:1px solid #ddd;">
+                        <td style="padding:8px;">{{ entry.work_date_snapshot }}</td>
+                        <td style="padding:8px;">{{ entry.entry_type_snapshot|capitalize }}</td>
+                        <td style="padding:8px;">
+                            {% if entry.entry_type_snapshot == "hourly" %}
+                                {{ entry.regular_hours_snapshot }} hours
+                                · {{ entry.overtime_hours_snapshot }} overtime
+                            {% elif entry.entry_type_snapshot == "daily" %}
+                                {{ entry.days_worked_snapshot }} days
+                            {% else %}
+                                {{ entry.event_name_snapshot }}
+                            {% endif %}
+                            <small> · Entry #{{ entry.work_entry_id }}</small>
+                        </td>
+                        <td style="padding:8px;text-align:right;">
+                            ${{ "%.2f"|format(entry.gross_amount_snapshot) }}
+                        </td>
+                    </tr>
+                {% else %}
+                    <tr><td colspan="4">No earning lines are currently allocated.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
         </div>
-        {% else %}
-        <p>No earning lines are currently allocated.</p>
-        {% endfor %}
-    </div>
+    </details>
 
     {% if period.status == "draft" %}
 
@@ -309,19 +330,21 @@
     {% else %}{{ value }}{% endif %}
 {%- endmacro %}
 
-    <div class="report-section">
-        <h2>Payroll History</h2>
+    <details class="report-section">
+        <summary style="font-weight:700;cursor:pointer;">
+            Payroll History ({{ payroll_history|length }} events)
+        </summary>
         <p>Most recent 100 recorded events, newest first.</p>
         {% for event in payroll_history %}
-        <div style="padding:12px 0;border-bottom:1px solid #ddd;">
-            <h3>{{ {"draft_allocation_added": "Work entry added",
+        <details style="padding:10px 0;border-bottom:1px solid #ddd;">
+            <summary style="cursor:pointer;">{{ {"draft_allocation_added": "Work entry added",
            "draft_allocation_removed": "Work entry removed",
            "draft_allocations_released": "Work entries released",
            "draft_period_updated": "Draft updated",
            "period_created": "Pay period created",
            "period_approved": "Payroll approved",
            "period_marked_paid": "Payroll marked paid"
-          }.get(event.action_type, event.action_type|replace("_", " ")|title) }}</h3>
+          }.get(event.action_type, event.action_type|replace("_", " ")|title) }}</summary>
             <p>{{ event.created_at.strftime("%b %d, %Y at %I:%M:%S %p %Z") }}
                · {{ event.actor_name or ("User #" ~ event.actor_user_id) }}</p>
             {% if event.previous_status != event.new_status %}
@@ -356,14 +379,14 @@
                 {% endif %}
             {% endif %}
 
-        </div>
+        </details>
         {% else %}
         <p>No payroll history is available.</p>
         {% endfor %}
-    </div>
+    </details>
 
     <p>Amounts shown are saved payroll snapshots.
-       A Draft is not approved or recorded as paid.
+       Status and recorded payment details are shown above.
        Peach Suite Pro does not transmit payments.</p>
 </div>
 {% endblock %}
