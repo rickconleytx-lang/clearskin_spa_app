@@ -5,7 +5,7 @@
     <a class="btn btn-secondary"
        href="{{ url_for('employee_hours_payroll',
                         employee_id=period.employee_id,
-                        period_date=period.period_start) }}">Back to Payroll</a>
+                        period_date=period.period_start) }}">Back to Employee Payroll</a>
     <h1>Pay Period #{{ period.pay_period_id }}</h1>
     <h2>{{ period.first_name }} {{ period.last_name }}</h2>
     <p><strong>{{ period.period_start }} through {{ period.period_end }}</strong>
@@ -59,6 +59,39 @@
         <p>No earning lines are currently allocated.</p>
         {% endfor %}
     </div>
+
+    {% if period.status == "draft" %}
+    <div class="report-section">
+        <h2>Cancel Draft</h2>
+        <p>Cancel this Draft to release its work entries for replacement payroll.
+           The saved totals and audit history are preserved.</p>
+        <form method="POST"
+              action="{{ url_for('employee_payroll_cancel_draft',
+                                  pay_period_id=period.pay_period_id) }}">
+            <input type="hidden" name="security_csrf_token"
+                   value="{{ security_csrf_token }}">
+            <div class="form-group">
+                <label for="cancellation_reason">Cancellation reason</label>
+                <textarea id="cancellation_reason" name="cancellation_reason"
+                          maxlength="1000" rows="3" required></textarea>
+            </div>
+            <p><label>
+                <input type="checkbox" name="confirm_cancel" value="1" required>
+                I confirm cancellation of Draft #{{ period.pay_period_id }}.
+            </label></p>
+            <button type="submit" class="btn btn-secondary">Cancel Draft</button>
+        </form>
+    </div>
+    {% elif period.status == "cancelled" %}
+    <div class="report-section">
+        <h2>Draft Cancelled</h2>
+        <p>Reason: {{ period.cancellation_reason }}</p>
+        <p>Cancelled: {{ period.cancelled_at }}</p>
+        <p>Work entries were released. Saved calculation totals remain
+           as historical information.</p>
+    </div>
+    {% endif %}
+
     <p>Amounts shown are saved payroll snapshots.
        A Draft is not approved or recorded as paid.
        Peach Suite Pro does not transmit payments.</p>

@@ -375,3 +375,52 @@ def read_draft_candidates(
         "is_prestart": navigation.selected_is_prestart,
         "entries": cur.fetchall(),
     }
+
+
+def cancel_draft_period(
+    cur, *, spa_id, business_unit_id, employee_id,
+    pay_period_id, actor_user_id, reason,
+):
+    """Cancel only Draft payroll; caller commits or rolls back."""
+    for value in (
+        spa_id, business_unit_id, employee_id, pay_period_id, actor_user_id,
+    ):
+        if type(value) is not int or value <= 0:
+            raise PayrollPeriodError("Invalid payroll identity.")
+    if not isinstance(reason, str) or not reason.strip():
+        raise PayrollPeriodError("A cancellation reason is required.")
+    reason = reason.strip()
+    if len(reason) > 1000:
+        raise PayrollPeriodError("Keep the cancellation reason within 1,000 characters.")
+
+    cur.execute("""
+        SELECT status
+        FROM employee_payroll_periods
+        WHERE spa_id = %s AND business_unit_id = %s
+          AND employee_id = %s AND pay_period_id = %s
+        FOR UPDATE
+    """, (spa_id, business_unit_id, employee_id, pay_period_id))
+    period = cur.fetchone()
+    if period is None:
+        raise PayrollPeriodError("Pay period not found in this workspace.")
+    if period["status"] != "draft":
+        raise PayrollPeriodError("Only Draft pay periods can be cancelled.")
+
+    cur.execute("""
+        SELECT set_config('psp.payroll_draft_update_actor', %s, true)
+    """, (str(actor_user_id),))
+    cur.execute("""
+        UPDATE employee_payroll_periods
+        SET status = 'cancelled',
+            cancelled_by_user_id = %s, cancelled_at = clock_timestamp(),
+            cancellation_reason = %s,
+            updated_by_user_id = %s, updated_at = clock_timestamp()
+        WHERE spa_id = %s AND business_unit_id = %s
+          AND employee_id = %s AND pay_period_id = %s
+          AND status = 'draft'
+    """, (
+        actor_user_id, reason, actor_user_id,
+        spa_id, business_unit_id, employee_id, pay_period_id,
+    ))
+    if cur.rowcount != 1:
+        raise PayrollPeriodError("Draft changed. Refresh before cancelling.")
