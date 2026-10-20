@@ -98696,6 +98696,13 @@ def employee_payroll_add_work_entry():
     except (ValueError, TypeError, AttributeError):
         retained_request_id = str(uuid4())
 
+    prefill_employee_id = str(request.args.get("employee_id", ""))
+    if not any(
+        str(employee["employee_id"]) == prefill_employee_id
+        for employee in employees
+    ):
+        prefill_employee_id = ""
+
     return render_template(
         "employee_payroll_add_work_entry.html",
         employees=employees,
@@ -98703,7 +98710,7 @@ def employee_payroll_add_work_entry():
         form_values=(
             request.form.to_dict()
             if request.method == "POST"
-            else {}
+            else {"employee_id": prefill_employee_id}
         ),
         work_date_default=date.today().isoformat(),
         entry_request_id=retained_request_id,

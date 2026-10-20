@@ -5,7 +5,12 @@
     <a class="btn btn-secondary"
        href="{{ url_for('employee_hours_payroll',
                         employee_id=period.employee_id,
-                        period_date=period.period_start) }}">Back to Employee Payroll</a>
+                        period_date=period.period_start) }}">Employee Payroll</a>
+    <a class="btn"
+       href="{{ url_for('employee_payroll_add_work_entry',
+                        employee_id=period.employee_id) }}">
+        + Add Work Entry
+    </a>
     <h1>Pay Period #{{ period.pay_period_id }}</h1>
     <h2>{{ period.first_name }} {{ period.last_name }}</h2>
     <p><strong>{{ period.period_start }} through {{ period.period_end }}</strong>
