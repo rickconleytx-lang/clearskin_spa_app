@@ -243,6 +243,47 @@
     </div>
     {% endif %}
 
+
+    {% if payroll_page and selected_employee_id is not none %}
+    <div class="report-section">
+        <h2>Saved Pay Periods</h2>
+        <p>Open a saved period to review its recorded earnings and deductions.
+           Showing up to 100 recent periods across all dates.</p>
+
+        {% for period in saved_pay_periods %}
+        <div style="padding:16px 0;border-bottom:1px solid #ddd;">
+            <h3>
+                {{ period.period_start.strftime("%b %d, %Y") }} through
+                {{ period.period_end.strftime("%b %d, %Y") }}
+            </h3>
+            <p>Period #{{ period.pay_period_id }} ·
+               <strong>{{ period.status|capitalize }}</strong></p>
+            <p>
+                Gross:
+                {% if period.gross_pay_snapshot is not none %}
+                    ${{ "%.2f"|format(period.gross_pay_snapshot) }}
+                {% else %}
+                    Not calculated
+                {% endif %}
+                · Estimated net:
+                {% if period.estimated_net_snapshot is not none %}
+                    ${{ "%.2f"|format(period.estimated_net_snapshot) }}
+                {% else %}
+                    Not calculated
+                {% endif %}
+            </p>
+            <a class="btn btn-secondary"
+               href="{{ url_for('employee_payroll_period_detail',
+                                pay_period_id=period.pay_period_id) }}">
+                Open Period #{{ period.pay_period_id }}
+            </a>
+        </div>
+        {% else %}
+        <p>No saved pay periods for this employee.</p>
+        {% endfor %}
+    </div>
+    {% endif %}
+
     <div class="report-period"
          {% if employee_reporting_mode == "pay_period" %}
          style="border-left: 6px solid #b91c1c;

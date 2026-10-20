@@ -97418,6 +97418,20 @@ def employee_hours_payroll():
 
         ledger_rows = cur.fetchall()
 
+        saved_pay_periods = []
+        if selected_employee_id is not None and not summary_view:
+            cur.execute("""
+                SELECT pay_period_id, period_start, period_end,
+                       status, gross_pay_snapshot, estimated_net_snapshot
+                FROM employee_payroll_periods
+                WHERE spa_id = %s AND business_unit_id = %s
+                  AND employee_id = %s
+                ORDER BY period_start DESC, pay_period_id DESC
+                LIMIT 100
+            """, (spa_id, business_unit_id, selected_employee_id))
+            saved_pay_periods = cur.fetchall()
+
+
     finally:
         conn.close()
 
@@ -97453,6 +97467,7 @@ def employee_hours_payroll():
         ),
         summary_rows=summary_rows,
         ledger_rows=ledger_rows,
+        saved_pay_periods=saved_pay_periods,
         gross_total=gross_total,
         entry_total=entry_total,
         can_add_work_entry=True,
