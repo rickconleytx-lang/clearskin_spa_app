@@ -2896,6 +2896,197 @@ def help_topics_api():
 # HELP ARTICLE API
 # =========================================================
 
+# =========================================================
+# COACH PEACH AI HELP - AUTHENTICATED BUSINESS API
+# Disabled unless explicitly enabled in configuration.
+# =========================================================
+
+def _coach_peach_help_identity():
+    """Derive AI spending identity from the authenticated session."""
+
+    if session.get("user_id") is None or is_master_admin():
+        return None
+
+    spa_id = current_spa_id()
+    business_unit_id = current_business_unit_id()
+
+    if current_business_access_status() not in ("active", "grace"):
+        return None
+
+    try:
+        user_id = int(session["user_id"])
+    except (TypeError, ValueError, KeyError):
+        return None
+
+    if any(
+        type(value) is not int or value <= 0
+        for value in (spa_id, business_unit_id, user_id)
+    ):
+        return None
+
+    return spa_id, business_unit_id, user_id
+
+
+def _coach_peach_help_settings():
+    """Fail closed until all AI Help configuration is present."""
+
+    import os
+    import re
+
+    if os.getenv("PSP_AI_HELP_ENABLED", "") != "1":
+        return None
+
+    model = os.getenv("PSP_AI_HELP_MODEL", "").strip()
+    pricing = os.getenv("PSP_AI_HELP_PRICING_ID", "").strip()
+
+    if not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}",
+        model,
+    ):
+        return None
+
+    if not pricing.isdigit() or int(pricing) <= 0:
+        return None
+
+    if not os.getenv("OPENAI_API_KEY"):
+        return None
+
+    return model, int(pricing)
+
+
+@app.route("/api/coach-peach/help/session", methods=["GET"])
+@login_required
+def coach_peach_help_session_api():
+    """Provide a session-bound CSRF token to the Help modal."""
+
+    if _coach_peach_help_identity() is None:
+        return jsonify({
+            "success": False,
+            "message": "AI Help is unavailable for this session.",
+        }), 403
+
+    response = jsonify({
+        "success": True,
+        "enabled": _coach_peach_help_settings() is not None,
+        "csrf_token": _security_form_csrf_token(),
+    })
+
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/api/coach-peach/help", methods=["POST"])
+@login_required
+def coach_peach_help_api():
+    """Answer an approved Help question within PSP spending limits."""
+
+    from services.psp_ai_budget_gateway import AIBudgetError
+    from services.psp_ai_help_context import AIHelpContextError
+    from services.psp_ai_help_request import AIHelpRequestError
+    from services.psp_ai_help_execution import (
+        AIHelpExecutionError,
+        execute_ai_help,
+    )
+    from services.psp_ai_help_provider import request_openai_help
+
+    identity = _coach_peach_help_identity()
+
+    if identity is None:
+        return jsonify({
+            "success": False,
+            "message": "AI Help access denied.",
+        }), 403
+
+    if not _security_form_csrf_valid(
+        request.headers.get("X-CSRF-Token")
+    ):
+        return jsonify({
+            "success": False,
+            "message": "Security verification failed.",
+        }), 403
+
+    settings = _coach_peach_help_settings()
+
+    if settings is None:
+        return jsonify({
+            "success": False,
+            "message": "Coach Peach AI Help is not enabled.",
+        }), 503
+
+    if (
+        not request.is_json
+        or request.content_length is None
+        or request.content_length > 4096
+    ):
+        return jsonify({
+            "success": False,
+            "message": "Invalid Help request size or format.",
+        }), 400
+
+    payload = request.get_json(silent=True)
+
+    if not isinstance(payload, dict):
+        return jsonify({
+            "success": False,
+            "message": "Invalid Help request.",
+        }), 400
+
+    spa_id, business_unit_id, user_id = identity
+    model, pricing_id = settings
+
+    try:
+        result = execute_ai_help(
+            connection_factory=get_db_connection,
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            actor_user_id=user_id,
+            page_key=payload.get("page_key"),
+            language=get_current_language(),
+            question=payload.get("question"),
+            pricing_id=pricing_id,
+            model=model,
+            provider_call=request_openai_help,
+        )
+
+    except (AIHelpContextError, AIHelpRequestError) as exc:
+        return jsonify({
+            "success": False,
+            "message": str(exc),
+        }), 400
+
+    except AIBudgetError:
+        return jsonify({
+            "success": False,
+            "message": (
+                "AI Help is unavailable or its spending "
+                "allowance has been reached."
+            ),
+        }), 503
+
+    except AIHelpExecutionError:
+        return jsonify({
+            "success": False,
+            "message": (
+                "Coach Peach could not complete the request. "
+                "Please contact support if this continues."
+            ),
+        }), 503
+
+    except Exception:
+        return jsonify({
+            "success": False,
+            "message": "AI Help is temporarily unavailable.",
+        }), 503
+
+    response = jsonify({
+        "success": True,
+        "answer": result["answer"],
+    })
+
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.route("/api/help-page/<page_key>")
 @login_required
 def help_page_api(page_key):
