@@ -53,6 +53,7 @@ def request_openai_help(*, prepared, model, client=None):
         tools=[],
         truncation="disabled",
         reasoning={"effort": "none"},
+        service_tier="default",
     )
 
     usage = getattr(response, "usage", None)
