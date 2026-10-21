@@ -27,7 +27,12 @@
 <br>     <!-- 🔹 HEADER 2 -->
         <h2 style="margin-top: 25px;">Row 2</h2>
         <div class="narrow-cards">
-            {{ section_card("System Activity", "", url_for('system_activity')) }} 
+            {{ section_card("System Activity", "", url_for('system_activity')) }}
+            {{ section_card(
+                "AI Usage & Costs",
+                "Monitor Coach Peach Assist spending, budgets, and reservations",
+                url_for('master_admin_ai_financial')
+            ) }}
             {{ section_card("SMS & Email Footers", "Edit Email & SMS Footers", url_for('master_messaging_footers')) }}
             {{ section_card("Create New Help Page", "Create a New Help Page", url_for('edit_help_page')) }}
             {{ section_card(

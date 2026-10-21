@@ -62858,6 +62858,63 @@ def reports_all():
 #   MASTER ADMIN HOME
 #########################################
 
+@app.route(
+    "/master-admin/ai-financial",
+    methods=["GET"],
+)
+@login_required
+@master_admin_required
+def master_admin_ai_financial():
+    """Read-only Master Admin AI financial dashboard."""
+
+    from services.psp_ai_financial_reporting import (
+        get_platform_ai_financial_summary,
+        get_business_ai_financial_summaries,
+    )
+
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    try:
+        cur.execute("SET TRANSACTION READ ONLY")
+        cur.execute("SET LOCAL statement_timeout = '30s'")
+
+        platform = get_platform_ai_financial_summary(cur)
+        business_report = get_business_ai_financial_summaries(cur)
+
+        if (
+            platform["billing_month"]
+            != business_report["billing_month"]
+        ):
+            raise RuntimeError(
+                "AI financial report billing months differ."
+            )
+
+        response = app.make_response(
+            render_template(
+                "master_admin_ai_financial.html",
+                platform=platform,
+                business_report=business_report,
+            )
+        )
+
+        response.headers["Cache-Control"] = (
+            "private, no-store"
+        )
+
+        return response
+
+    except Exception:
+        app.logger.exception(
+            "Master Admin AI financial dashboard failed."
+        )
+        abort(503)
+
+    finally:
+        cur.close()
+        conn.close()
+
+
 @app.route("/master-admin")
 @login_required
 @master_admin_required
