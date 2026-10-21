@@ -1,0 +1,228 @@
+"""Coach Peach AI Help - financial gateway orchestration.
+
+The caller MUST obtain user, spa and business-unit identity from
+authenticated PSP server-side authorization.
+
+The caller also supplies the approved model/pricing configuration.
+
+The provider callback is required and is never called on import.
+No automatic provider retries.
+"""
+
+from uuid import uuid4
+
+from psycopg2.extras import RealDictCursor
+
+from services.psp_ai_budget_gateway import reserve_ai_request
+from services.psp_ai_request_lifecycle import (
+    mark_ai_request_submitted,
+    mark_ai_request_uncertain,
+)
+from services.psp_ai_usage_settlement import settle_ai_request
+from services.psp_ai_help_context import get_ai_help_article
+from services.psp_ai_help_request import prepare_ai_help_request
+
+
+class AIHelpExecutionError(RuntimeError):
+    pass
+
+
+def _retain_uncertain(conn, usage_id):
+    """Keep a possible provider charge in the budget ledger."""
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            mark_ai_request_uncertain(
+                cur,
+                ai_usage_id=usage_id,
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise AIHelpExecutionError(
+            "AI financial reconciliation requires administrator review."
+        ) from None
+
+
+def execute_ai_help(
+    *,
+    connection_factory,
+    spa_id,
+    business_unit_id,
+    actor_user_id,
+    page_key,
+    language,
+    question,
+    pricing_id,
+    model,
+    provider_call,
+):
+    """Execute one budget-controlled Help request.
+
+    Caller is responsible for authentication, workspace membership,
+    CSRF validation, and access-policy enforcement.
+
+    No provider request occurs unless reservation and submission
+    transactions both commit successfully.
+    """
+
+    for value in (
+        spa_id,
+        business_unit_id,
+        actor_user_id,
+        pricing_id,
+    ):
+        if type(value) is not int or value <= 0:
+            raise AIHelpExecutionError(
+                "Invalid authenticated AI request context."
+            )
+
+    if not isinstance(model, str) or not model:
+        raise AIHelpExecutionError("AI model is not configured.")
+
+    if not callable(connection_factory):
+        raise AIHelpExecutionError("Database is not configured.")
+
+    if not callable(provider_call):
+        raise AIHelpExecutionError("AI provider is not configured.")
+
+    conn = connection_factory()
+
+    try:
+        # STAGE 1: Validate article, question and model pricing.
+        # Reserve funds atomically against both spending budgets.
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                article = get_ai_help_article(
+                    cur,
+                    page_key=page_key,
+                    language=language,
+                )
+
+                prepared = prepare_ai_help_request(
+                    question=question,
+                    article=article,
+                )
+
+                cur.execute("""
+                    SELECT ai_model_pricing_id
+                    FROM psp_ai_model_pricing
+                    WHERE ai_model_pricing_id = %s
+                      AND provider = 'openai'
+                      AND model_name = %s
+                      AND effective_from <= clock_timestamp()
+                      AND (
+                          effective_to IS NULL
+                          OR effective_to > clock_timestamp()
+                      )
+                """, (pricing_id, model))
+
+                if not cur.fetchone():
+                    raise AIHelpExecutionError(
+                        "Approved AI model pricing unavailable."
+                    )
+
+                # Conservative reservation based on the bounded
+                # UTF-8 request size, including extra overhead.
+                # The provider adapter separately enforces request
+                # size and max_output_tokens.
+                input_limit = (
+                    len(prepared["instructions"].encode("utf-8"))
+                    + len(prepared["input"].encode("utf-8"))
+                    + 4096
+                )
+
+                if input_limit > 1000000:
+                    raise AIHelpExecutionError(
+                        "AI Help request exceeds input allowance."
+                    )
+
+                reservation = reserve_ai_request(
+                    cur,
+                    spa_id=spa_id,
+                    business_unit_id=business_unit_id,
+                    actor_user_id=actor_user_id,
+                    request_key=str(uuid4()),
+                    feature_key="help_assist",
+                    pricing_id=pricing_id,
+                    max_input_tokens=input_limit,
+                    max_output_tokens=prepared["max_output_tokens"],
+                )
+
+            conn.commit()
+
+        except Exception:
+            conn.rollback()
+            raise
+
+        usage_id = reservation["ai_usage_id"]
+
+        # STAGE 2: Persist submission intent before network access.
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                mark_ai_request_submitted(
+                    cur,
+                    ai_usage_id=usage_id,
+                )
+
+            conn.commit()
+
+        except Exception:
+            conn.rollback()
+            # Do not contact OpenAI or assume an uncertain
+            # database commit can be safely reversed.
+            raise AIHelpExecutionError(
+                "AI submission was not confirmed."
+            ) from None
+
+        # STAGE 3: One provider call; never retry automatically.
+        try:
+            result = provider_call(
+                prepared=prepared,
+                model=model,
+            )
+        except Exception:
+            conn.rollback()
+            _retain_uncertain(conn, usage_id)
+            raise AIHelpExecutionError(
+                "Coach Peach could not complete the request. "
+                "The spending reservation is retained for review."
+            ) from None
+
+        # STAGE 4: Record actual provider usage.
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                settlement = settle_ai_request(
+                    cur,
+                    ai_usage_id=usage_id,
+                    input_tokens=result["input_tokens"],
+                    cached_input_tokens=result[
+                        "cached_input_tokens"
+                    ],
+                    output_tokens=result["output_tokens"],
+                    provider_request_id=result[
+                        "provider_request_id"
+                    ],
+                )
+
+            conn.commit()
+
+        except Exception:
+            conn.rollback()
+
+            # A valid provider response may have been billed.
+            # Never release this reservation on settlement failure.
+            _retain_uncertain(conn, usage_id)
+
+            raise AIHelpExecutionError(
+                "AI financial settlement requires review."
+            ) from None
+
+        return {
+            "answer": result["answer"],
+            "ai_usage_id": usage_id,
+            "actual_cost_usd": settlement["actual_cost_usd"],
+            "over_reservation": settlement["over_reservation"],
+        }
+
+    finally:
+        conn.close()
