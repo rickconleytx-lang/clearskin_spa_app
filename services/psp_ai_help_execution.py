@@ -27,20 +27,49 @@ class AIHelpExecutionError(RuntimeError):
     pass
 
 
-def _retain_uncertain(conn, usage_id):
-    """Keep a possible provider charge in the budget ledger."""
+def _rollback_if_possible(conn):
+    """Best-effort cleanup without hiding the original failure."""
     try:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        conn.rollback()
+    except Exception:
+        pass
+
+
+def _retain_uncertain(connection_factory, usage_id):
+    """Recover financial state using a fresh database connection.
+
+    The original connection may be broken. A submitted/held request
+    remains financially reserved even if this update cannot commit.
+    """
+    recovery_conn = None
+
+    try:
+        recovery_conn = connection_factory()
+
+        with recovery_conn.cursor(
+            cursor_factory=RealDictCursor
+        ) as cur:
             mark_ai_request_uncertain(
                 cur,
                 ai_usage_id=usage_id,
             )
-        conn.commit()
+
+        recovery_conn.commit()
+
     except Exception:
-        conn.rollback()
+        if recovery_conn is not None:
+            _rollback_if_possible(recovery_conn)
+
         raise AIHelpExecutionError(
             "AI financial reconciliation requires administrator review."
         ) from None
+
+    finally:
+        if recovery_conn is not None:
+            try:
+                recovery_conn.close()
+            except Exception:
+                pass
 
 
 def execute_ai_help(
@@ -151,7 +180,7 @@ def execute_ai_help(
             conn.commit()
 
         except Exception:
-            conn.rollback()
+            _rollback_if_possible(conn)
             raise
 
         usage_id = reservation["ai_usage_id"]
@@ -167,7 +196,7 @@ def execute_ai_help(
             conn.commit()
 
         except Exception:
-            conn.rollback()
+            _rollback_if_possible(conn)
             # Do not contact OpenAI or assume an uncertain
             # database commit can be safely reversed.
             raise AIHelpExecutionError(
@@ -181,8 +210,8 @@ def execute_ai_help(
                 model=model,
             )
         except Exception:
-            conn.rollback()
-            _retain_uncertain(conn, usage_id)
+            _rollback_if_possible(conn)
+            _retain_uncertain(connection_factory, usage_id)
             raise AIHelpExecutionError(
                 "Coach Peach could not complete the request. "
                 "The spending reservation is retained for review."
@@ -207,11 +236,11 @@ def execute_ai_help(
             conn.commit()
 
         except Exception:
-            conn.rollback()
+            _rollback_if_possible(conn)
 
             # A valid provider response may have been billed.
             # Never release this reservation on settlement failure.
-            _retain_uncertain(conn, usage_id)
+            _retain_uncertain(connection_factory, usage_id)
 
             raise AIHelpExecutionError(
                 "AI financial settlement requires review."
