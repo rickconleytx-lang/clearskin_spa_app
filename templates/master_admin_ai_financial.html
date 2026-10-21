@@ -16,7 +16,7 @@
 </div>
 
 <p>
-    Read-only financial monitoring for Coach Peach Assist.
+    Financial monitoring and global AI controls for Coach Peach Assist.
     Amounts reflect PSP-calculated costs and reservations,
     not reconciled OpenAI billing.
 </p>
@@ -91,6 +91,145 @@
 
 </div>
 
+
+<div class="command-card" id="aiGlobalControl">
+
+    <h2>Global AI Control</h2>
+
+    <p>
+        Platform AI Status:
+        <strong>
+            {{ "Enabled" if platform.ai_enabled else "Disabled" }}
+        </strong>
+    </p>
+
+    <p>
+        {% if platform.ai_enabled %}
+            Emergency Disable All AI blocks new spending
+            reservations across Peach Suite Pro immediately.
+            Already-submitted requests may still finish
+            and be recorded.
+        {% else %}
+            Platform AI is currently disabled.
+            Enabling it permits new requests only for
+            businesses with their own AI allowance enabled
+            and available.
+        {% endif %}
+    </p>
+
+    {% if not platform.ai_enabled
+          and platform.monthly_limit_usd is none %}
+
+        <p>
+            A platform monthly spending limit must be
+            configured before AI can be enabled.
+        </p>
+
+    {% else %}
+
+        <form
+            id="aiGlobalControlForm"
+            method="POST"
+            action="{{ url_for('master_admin_ai_platform_control') }}"
+            autocomplete="off"
+        >
+
+            <input
+                type="hidden"
+                name="security_csrf_token"
+                value="{{ ai_control_csrf_token }}"
+            >
+
+            <input
+                type="hidden"
+                name="expected_enabled"
+                value="{{ '1' if platform.ai_enabled else '0' }}"
+            >
+
+            <input
+                type="hidden"
+                name="action"
+                value="{{ 'disable' if platform.ai_enabled else 'enable' }}"
+            >
+
+            <p>
+                <label for="aiGlobalControlReason">
+                    <strong>Reason for change</strong>
+                </label>
+            </p>
+
+            <textarea
+                id="aiGlobalControlReason"
+                name="reason"
+                rows="3"
+                minlength="10"
+                maxlength="500"
+                required
+                style="
+                    display: block;
+                    width: 100%;
+                    max-width: 650px;
+                    box-sizing: border-box;
+                    padding: 10px;
+                    border-radius: 8px;
+                    margin-bottom: 14px;
+                "
+            ></textarea>
+
+            <p>
+                Type exactly
+                <strong>
+                    {% if platform.ai_enabled %}
+                        DISABLE PLATFORM AI
+                    {% else %}
+                        ENABLE PLATFORM AI
+                    {% endif %}
+                </strong>
+                to confirm:
+            </p>
+
+            <input
+                type="text"
+                id="aiGlobalControlConfirmation"
+                name="confirmation"
+                maxlength="30"
+                required
+                autocomplete="off"
+                aria-label="AI control confirmation phrase"
+                style="
+                    display: block;
+                    width: 100%;
+                    max-width: 350px;
+                    box-sizing: border-box;
+                    padding: 10px;
+                    border-radius: 8px;
+                    margin-bottom: 16px;
+                "
+            >
+
+            <button
+                type="submit"
+                class="tool-pill tool-pill-small"
+                {% if platform.ai_enabled %}
+                style="
+                    background: #a12727;
+                    border-color: #a12727;
+                    color: white;
+                "
+                {% endif %}
+            >
+                {% if platform.ai_enabled %}
+                    Emergency Disable All AI
+                {% else %}
+                    Enable Platform AI
+                {% endif %}
+            </button>
+
+        </form>
+
+    {% endif %}
+
+</div>
 
 <div class="command-card">
     <h2>Platform Monitoring</h2>

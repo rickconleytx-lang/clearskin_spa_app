@@ -63049,6 +63049,136 @@ def reports_all():
 #   MASTER ADMIN HOME
 #########################################
 
+# =========================================================
+# MASTER ADMIN - GLOBAL AI PLATFORM CONTROL
+# =========================================================
+
+@app.route(
+    "/master-admin/ai-financial/platform-control",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_ai_platform_control():
+    """Audited platform-wide AI ON/OFF control."""
+
+    from services.psp_ai_platform_control import (
+        set_platform_ai_enabled,
+        AIPlatformControlError,
+    )
+
+    destination = url_for("master_admin_ai_financial")
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token", "")
+    ):
+        flash(
+            "Security verification failed. Please try again.",
+            "error",
+        )
+        return redirect(destination)
+
+    action = request.form.get("action", "")
+    expected_state = request.form.get(
+        "expected_enabled", ""
+    )
+    confirmation = request.form.get("confirmation", "")
+    reason = request.form.get("reason", "")
+
+    if action not in ("enable", "disable"):
+        flash("Invalid AI control action.", "error")
+        return redirect(destination)
+
+    if expected_state not in ("0", "1"):
+        flash(
+            "Invalid previous AI status. Refresh the page.",
+            "error",
+        )
+        return redirect(destination)
+
+    required_confirmation = (
+        "ENABLE PLATFORM AI"
+        if action == "enable"
+        else "DISABLE PLATFORM AI"
+    )
+
+    if confirmation != required_confirmation:
+        flash(
+            "AI control confirmation did not match.",
+            "error",
+        )
+        return redirect(destination)
+
+    try:
+        actor_user_id = int(session.get("user_id"))
+    except (TypeError, ValueError):
+        flash("Administrator identity unavailable.", "error")
+        return redirect(destination)
+
+    if actor_user_id <= 0:
+        flash("Administrator identity unavailable.", "error")
+        return redirect(destination)
+
+    enabled = action == "enable"
+    previous_enabled = expected_state == "1"
+
+    conn = None
+
+    try:
+        conn = get_db_connection()
+
+        with conn.cursor(
+            cursor_factory=RealDictCursor
+        ) as cur:
+            set_platform_ai_enabled(
+                cur,
+                enabled=enabled,
+                expected_enabled=previous_enabled,
+                actor_user_id=actor_user_id,
+                reason=reason,
+            )
+
+        # Budget update and audit must commit together.
+        conn.commit()
+
+        flash(
+            (
+                "Platform AI enabled successfully."
+                if enabled
+                else "Platform AI disabled successfully."
+            ),
+            "success",
+        )
+
+    except AIPlatformControlError as exc:
+        if conn is not None:
+            conn.rollback()
+
+        flash(str(exc), "error")
+
+    except Exception:
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+
+        app.logger.exception(
+            "Master Admin global AI control failed."
+        )
+
+        flash(
+            "AI control change failed. No success confirmed.",
+            "error",
+        )
+
+    finally:
+        if conn is not None:
+            conn.close()
+
+    return redirect(destination)
+
+
 @app.route(
     "/master-admin/ai-financial",
     methods=["GET"],
@@ -63086,6 +63216,9 @@ def master_admin_ai_financial():
                 "master_admin_ai_financial.html",
                 platform=platform,
                 business_report=business_report,
+                ai_control_csrf_token=(
+                    _security_form_csrf_token()
+                ),
             )
         )
 
