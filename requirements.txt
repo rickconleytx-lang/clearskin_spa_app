@@ -14,7 +14,7 @@ Flask-SQLAlchemy==3.1.1
 frozenlist==1.8.0
 greenlet==3.3.2
 gunicorn==25.3.0
-idna==3.11
+idna==3.20
 itsdangerous==2.2.0
 Jinja2==3.1.6
 MarkupSafe==3.0.3
@@ -32,7 +32,7 @@ python-dotenv==1.2.2
 pyzbar==0.1.9
 requests==2.33.1
 SQLAlchemy==2.0.47
-typing_extensions==4.15.0
+typing_extensions==4.16.0
 tzlocal==5.3.1
 urllib3==2.6.3
 Werkzeug==3.1.6
