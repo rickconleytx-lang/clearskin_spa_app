@@ -154,9 +154,26 @@ def execute_ai_help(
                 # UTF-8 request size, including extra overhead.
                 # The provider adapter separately enforces request
                 # size and max_output_tokens.
+                instructions_bytes = len(
+                    prepared["instructions"].encode("utf-8")
+                )
+                input_bytes = len(
+                    prepared["input"].encode("utf-8")
+                )
+
+                # Match the provider adapter's byte limits
+                # BEFORE creating a financial reservation.
+                if (
+                    instructions_bytes > 6000
+                    or input_bytes > 48000
+                ):
+                    raise AIHelpExecutionError(
+                        "AI Help request exceeds provider limits."
+                    )
+
                 input_limit = (
-                    len(prepared["instructions"].encode("utf-8"))
-                    + len(prepared["input"].encode("utf-8"))
+                    instructions_bytes
+                    + input_bytes
                     + 4096
                 )
 
