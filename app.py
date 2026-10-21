@@ -11421,6 +11421,68 @@ def master_admin_api_system_health_detail(health_key):
 
 
 @app.route(
+    "/api/master-admin/ai-financial-summary",
+    methods=["GET"],
+)
+@master_admin_api_required
+def master_admin_api_ai_financial_summary():
+    """Read-only Coach Peach Assist financial reporting."""
+
+    from services.psp_ai_financial_reporting import (
+        get_platform_ai_financial_summary,
+        get_business_ai_financial_summaries,
+    )
+
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    try:
+        cur.execute("SET TRANSACTION READ ONLY")
+        cur.execute("SET LOCAL statement_timeout = '30s'")
+
+        platform = get_platform_ai_financial_summary(cur)
+        businesses = get_business_ai_financial_summaries(cur)
+
+        if platform["billing_month"] != businesses["billing_month"]:
+            raise RuntimeError(
+                "AI financial reporting month changed during request."
+            )
+
+        return _mfa_no_store(
+            jsonify({
+                "success": True,
+                "ai_financial": {
+                    "platform": platform,
+                    "businesses": businesses,
+                },
+            })
+        )
+
+    except Exception:
+        app.logger.exception(
+            "Master Admin AI financial summary request failed."
+        )
+
+        return _mfa_no_store(
+            (
+                jsonify({
+                    "success": False,
+                    "error": "ai_financial_summary_unavailable",
+                    "message": (
+                        "AI financial reporting could not be "
+                        "loaded right now."
+                    ),
+                }),
+                503,
+            )
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route(
     "/api/master-admin/system-health",
     methods=["GET"],
 )
