@@ -63053,6 +63053,118 @@ def reports_all():
 # MASTER ADMIN - GLOBAL AI PLATFORM CONTROL
 # =========================================================
 
+# =========================================================
+# MASTER ADMIN - GLOBAL AI MONTHLY SPENDING LIMIT
+# =========================================================
+
+@app.route(
+    "/master-admin/ai-financial/monthly-limit",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_ai_monthly_limit():
+    """Save the audited platform AI spending limit."""
+
+    from services.psp_ai_platform_control import (
+        AIPlatformControlError,
+        set_platform_ai_monthly_limit,
+    )
+
+    destination = url_for("master_admin_ai_financial")
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token", "")
+    ):
+        flash(
+            "Security verification failed. Please try again.",
+            "error",
+        )
+        return redirect(destination)
+
+    if request.form.get("confirmation", "") != (
+        "SAVE AI MONTHLY LIMIT"
+    ):
+        flash(
+            "Monthly limit confirmation did not match.",
+            "error",
+        )
+        return redirect(destination)
+
+    try:
+        actor_user_id = int(session.get("user_id"))
+    except (TypeError, ValueError):
+        flash("Administrator identity unavailable.", "error")
+        return redirect(destination)
+
+    if actor_user_id <= 0:
+        flash("Administrator identity unavailable.", "error")
+        return redirect(destination)
+
+    requested_limit = request.form.get(
+        "monthly_limit_usd", ""
+    )
+    expected_limit = request.form.get(
+        "expected_limit_usd", ""
+    )
+    reason = request.form.get("reason", "")
+
+    conn = None
+
+    try:
+        conn = get_db_connection()
+
+        with conn.cursor(
+            cursor_factory=RealDictCursor
+        ) as cur:
+            set_platform_ai_monthly_limit(
+                cur,
+                monthly_limit_usd=requested_limit,
+                expected_limit_usd=expected_limit,
+                actor_user_id=actor_user_id,
+                reason=reason,
+            )
+
+        # Both the budget update and audit must succeed.
+        conn.commit()
+
+        flash(
+            (
+                "Platform AI monthly spending limit "
+                "saved successfully. AI status was not changed."
+            ),
+            "success",
+        )
+
+    except AIPlatformControlError as exc:
+        if conn is not None:
+            conn.rollback()
+
+        flash(str(exc), "error")
+
+    except Exception:
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+
+        app.logger.exception(
+            "Master Admin AI monthly limit update failed."
+        )
+
+        flash(
+            "Monthly AI limit change failed. No success confirmed.",
+            "error",
+        )
+
+    finally:
+        if conn is not None:
+            conn.close()
+
+    return redirect(destination)
+
+
 @app.route(
     "/master-admin/ai-financial/platform-control",
     methods=["POST"],
@@ -63211,10 +63323,23 @@ def master_admin_ai_financial():
                 "AI financial report billing months differ."
             )
 
+        from decimal import Decimal
+
+        raw_limit = platform["monthly_limit_usd"]
+
+        platform_monthly_limit_display = (
+            format(Decimal(str(raw_limit)), ".2f")
+            if raw_limit is not None
+            else None
+        )
+
         response = app.make_response(
             render_template(
                 "master_admin_ai_financial.html",
                 platform=platform,
+                platform_monthly_limit_display=(
+                    platform_monthly_limit_display
+                ),
                 business_report=business_report,
                 ai_control_csrf_token=(
                     _security_form_csrf_token()

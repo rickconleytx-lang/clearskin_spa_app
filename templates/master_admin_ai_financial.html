@@ -117,12 +117,171 @@
         {% endif %}
     </p>
 
+    {% if not platform.ai_enabled %}
+
+    <div id="aiPlatformMonthlyLimitEditor"
+         style="margin: 22px 0;">
+
+        <h3>Monthly AI Spending Limit</h3>
+
+        <p>
+            Current monthly limit:
+            <strong>
+                {% if platform.monthly_limit_usd is none %}
+                    Not Configured
+                {% else %}
+                    ${{ platform_monthly_limit_display }}
+                {% endif %}
+            </strong>
+        </p>
+
+        <p>
+            Configure the maximum monthly platform AI
+            allowance. Saving a spending limit does not
+            enable AI or authorize individual businesses.
+        </p>
+
+        <form
+            id="aiPlatformMonthlyLimitForm"
+            method="POST"
+            action="{{ url_for('master_admin_ai_monthly_limit') }}"
+            autocomplete="off"
+        >
+
+            <input
+                type="hidden"
+                name="security_csrf_token"
+                value="{{ ai_control_csrf_token }}"
+            >
+
+            <input
+                type="hidden"
+                name="expected_limit_usd"
+                value="{{ platform.monthly_limit_usd if platform.monthly_limit_usd is not none else 'unconfigured' }}"
+            >
+
+            <p>
+                <label for="aiPlatformMonthlyLimitAmount">
+                    <strong>New monthly limit (USD)</strong>
+                </label>
+            </p>
+
+            <input
+                id="aiPlatformMonthlyLimitAmount"
+                type="text"
+                name="monthly_limit_usd"
+                inputmode="decimal"
+                maxlength="13"
+                value="{{ platform_monthly_limit_display if platform.monthly_limit_usd is not none else '' }}"
+                placeholder="5.00"
+                required
+                aria-describedby="aiLimitHelp"
+                style="
+                    display: block;
+                    width: 100%;
+                    max-width: 220px;
+                    box-sizing: border-box;
+                    padding: 10px;
+                    border-radius: 8px;
+                    margin-bottom: 12px;
+                "
+            >
+
+            <p id="aiLimitHelp">
+                Enter a positive dollar amount with
+                up to two decimal places.
+            </p>
+
+            <p>
+                <label for="aiPlatformMonthlyLimitReason">
+                    <strong>Reason for change</strong>
+                </label>
+            </p>
+
+            <textarea
+                id="aiPlatformMonthlyLimitReason"
+                name="reason"
+                rows="3"
+                minlength="10"
+                maxlength="500"
+                required
+                style="
+                    display: block;
+                    width: 100%;
+                    max-width: 650px;
+                    box-sizing: border-box;
+                    padding: 10px;
+                    border-radius: 8px;
+                    margin-bottom: 14px;
+                "
+            ></textarea>
+
+            <p>
+                Type exactly
+                <strong>SAVE AI MONTHLY LIMIT</strong>
+                to confirm:
+            </p>
+
+            <input
+                type="text"
+                name="confirmation"
+                id="aiPlatformMonthlyLimitConfirmation"
+                maxlength="30"
+                autocomplete="off"
+                required
+                aria-label="Monthly AI limit confirmation phrase"
+                style="
+                    display: block;
+                    width: 100%;
+                    max-width: 350px;
+                    box-sizing: border-box;
+                    padding: 10px;
+                    border-radius: 8px;
+                    margin-bottom: 16px;
+                "
+            >
+
+            <button
+                type="submit"
+                class="tool-pill tool-pill-small"
+            >
+                Save Monthly AI Limit
+            </button>
+
+        </form>
+
+    </div>
+
+    {% else %}
+
+    <p>
+        To change the monthly spending limit,
+        first disable Global AI.
+    </p>
+
+    {% endif %}
+
     {% if not platform.ai_enabled
           and platform.monthly_limit_usd is none %}
 
         <p>
             A platform monthly spending limit must be
             configured before AI can be enabled.
+        </p>
+
+        <button
+            type="button"
+            class="tool-pill tool-pill-small"
+            disabled
+            aria-disabled="true"
+            title="Configure and save a monthly limit first"
+        >
+            Enable Platform AI
+        </button>
+
+        <p>
+            Save a monthly spending limit above to
+            make the Enable control available.
         </p>
 
     {% else %}
