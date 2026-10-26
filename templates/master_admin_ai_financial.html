@@ -465,7 +465,7 @@
                     </td>
                     <td>
                         {% if business.monthly_limit_usd is not none %}
-                            ${{ business.monthly_limit_usd }}
+                            ${{ "%.2f"|format(business.monthly_limit_usd|float) }}
                         {% else %}
                             —
                         {% endif %}
