@@ -63292,6 +63292,138 @@ def master_admin_ai_platform_control():
 
 
 @app.route(
+    "/master-admin/ai-financial/business-control",
+    methods=["POST"],
+)
+@login_required
+@master_admin_required
+def master_admin_ai_business_control():
+    """Audited Master Admin control for one business AI budget."""
+
+    from services.psp_ai_business_control import (
+        BusinessAIControlError,
+        set_business_ai_monthly_limit,
+        set_business_ai_enabled,
+    )
+
+    destination = url_for("master_admin_ai_financial")
+
+    if not _security_form_csrf_valid(
+        request.form.get("security_csrf_token", "")
+    ):
+        flash("Security verification failed.", "error")
+        return redirect(destination)
+
+    action = request.form.get("action", "")
+
+    if action not in ("set_limit", "enable", "disable"):
+        flash("Invalid business AI action.", "error")
+        return redirect(destination)
+
+    try:
+        spa_id = int(request.form.get("spa_id", ""))
+        actor_user_id = int(session.get("user_id"))
+    except (TypeError, ValueError):
+        flash("Business or administrator identity invalid.", "error")
+        return redirect(destination)
+
+    if spa_id <= 0 or actor_user_id <= 0:
+        flash("Business or administrator identity invalid.", "error")
+        return redirect(destination)
+
+    required_confirmation = {
+        "set_limit": f"SET BUSINESS AI LIMIT {spa_id}",
+        "enable": f"ENABLE BUSINESS AI {spa_id}",
+        "disable": f"DISABLE BUSINESS AI {spa_id}",
+    }[action]
+
+    if request.form.get("confirmation", "") != required_confirmation:
+        flash("Business AI confirmation did not match.", "error")
+        return redirect(destination)
+
+    expected_enabled = request.form.get("expected_enabled", "")
+
+    if action != "set_limit" and expected_enabled not in ("0", "1"):
+        flash("Invalid previous AI status. Refresh the page.", "error")
+        return redirect(destination)
+
+    reason = request.form.get("reason", "")
+    conn = None
+
+    try:
+        conn = get_db_connection()
+
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SET LOCAL lock_timeout = '5s'")
+
+            if action == "set_limit":
+                set_business_ai_monthly_limit(
+                    cur,
+                    spa_id=spa_id,
+                    monthly_limit_usd=request.form.get(
+                        "monthly_limit_usd", ""
+                    ),
+                    expected_limit_usd=request.form.get(
+                        "expected_limit_usd", ""
+                    ),
+                    actor_user_id=actor_user_id,
+                    reason=reason,
+                )
+            else:
+                set_business_ai_enabled(
+                    cur,
+                    spa_id=spa_id,
+                    enabled=(action == "enable"),
+                    expected_enabled=(expected_enabled == "1"),
+                    actor_user_id=actor_user_id,
+                    reason=reason,
+                )
+
+        # The budget change and audit must commit together.
+        conn.commit()
+
+        if action == "set_limit":
+            message = (
+                f"Business {spa_id} AI monthly limit saved. "
+                "AI status was not changed."
+            )
+        elif action == "enable":
+            message = f"Business {spa_id} AI enabled successfully."
+        else:
+            message = f"Business {spa_id} AI disabled successfully."
+
+        flash(message, "success")
+
+    except BusinessAIControlError as exc:
+        if conn is not None:
+            conn.rollback()
+
+        flash(str(exc), "error")
+
+    except Exception:
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+
+        app.logger.exception(
+            "Master Admin business AI control failed."
+        )
+
+        flash(
+            "Business AI change failed. No success confirmed.",
+            "error",
+        )
+
+    finally:
+        if conn is not None:
+            conn.close()
+
+    return redirect(destination)
+
+
+@app.route(
     "/master-admin/ai-financial",
     methods=["GET"],
 )

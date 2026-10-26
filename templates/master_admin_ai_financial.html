@@ -98,7 +98,7 @@
 
     <p>
         Platform AI Status:
-        <strong>
+        <strong style="color: {{ '#187347' if platform.ai_enabled else '#b42318' }};">
             {{ "Enabled" if platform.ai_enabled else "Disabled" }}
         </strong>
     </p>
@@ -261,6 +261,18 @@
 
     {% endif %}
 
+</div>
+
+<div class="command-card" id="aiGlobalToggleControl">
+
+    <h2>Platform AI Enable / Disable</h2>
+
+    <p>
+        Manage platform-wide AI access independently
+        of monthly spending limits.
+        Global AI OFF overrides all business AI settings.
+    </p>
+
     {% if not platform.ai_enabled
           and platform.monthly_limit_usd is none %}
 
@@ -394,7 +406,7 @@
     <h2>Platform Monitoring</h2>
     <p>
         AI Status:
-        <strong>
+        <strong style="color: {{ '#187347' if platform.ai_enabled else '#b42318' }};">
             {{ "Enabled" if platform.ai_enabled else "Disabled" }}
         </strong>
     </p>
@@ -429,6 +441,7 @@
                     <th>Uncertain</th>
                     <th>Remaining</th>
                     <th>Overruns</th>
+                    <th>Actions</th>
                 </tr>
             </thead>
 
@@ -445,9 +458,9 @@
                         {% if not business.budget_configured %}
                             Not Configured
                         {% elif business.ai_enabled %}
-                            Enabled
+                            <strong style="color: #187347;">Enabled</strong>
                         {% else %}
-                            Disabled
+                            <strong style="color: #b42318;">Disabled</strong>
                         {% endif %}
                     </td>
                     <td>
@@ -474,10 +487,171 @@
                             0
                         {% endif %}
                     </td>
+                    <td class="business-ai-actions">
+
+                        {% if not business.ai_enabled %}
+                        <details style="margin-bottom: 0.6rem;">
+                            <summary style="cursor: pointer;">
+                                {{ 'Edit Monthly Limit' if business.monthly_limit_usd is not none else 'Set Monthly Limit' }}
+                            </summary>
+
+                            <form
+                                method="POST"
+                                action="{{ url_for('master_admin_ai_business_control') }}"
+                                autocomplete="off"
+                                style="display: grid; gap: 0.5rem; padding: 0.75rem 0;"
+                            >
+                                <input
+                                    type="hidden"
+                                    name="security_csrf_token"
+                                    value="{{ ai_control_csrf_token }}"
+                                >
+                                <input
+                                    type="hidden"
+                                    name="action"
+                                    value="set_limit"
+                                >
+                                <input
+                                    type="hidden"
+                                    name="spa_id"
+                                    value="{{ business.spa_id }}"
+                                >
+                                <input
+                                    type="hidden"
+                                    name="expected_limit_usd"
+                                    value="{{ business.monthly_limit_usd if business.monthly_limit_usd is not none else 'unconfigured' }}"
+                                >
+
+                                <label for="businessAILimit{{ business.spa_id }}">
+                                    Monthly limit (USD)
+                                </label>
+                                <input
+                                    id="businessAILimit{{ business.spa_id }}"
+                                    type="text"
+                                    name="monthly_limit_usd"
+                                    value="{{ business.monthly_limit_usd if business.monthly_limit_usd is not none else '' }}"
+                                    inputmode="decimal"
+                                    required
+                                    style="max-width: 18rem;"
+                                >
+
+                                <label for="businessAILimitReason{{ business.spa_id }}">
+                                    Reason (10–500 characters)
+                                </label>
+                                <textarea
+                                    id="businessAILimitReason{{ business.spa_id }}"
+                                    name="reason"
+                                    minlength="10"
+                                    maxlength="500"
+                                    rows="2"
+                                    required
+                                ></textarea>
+
+                                <label for="businessAILimitConfirm{{ business.spa_id }}">
+                                    Type this exact confirmation:
+                                    <code>SET BUSINESS AI LIMIT {{ business.spa_id }}</code>
+                                </label>
+                                <input
+                                    id="businessAILimitConfirm{{ business.spa_id }}"
+                                    type="text"
+                                    name="confirmation"
+                                    required
+                                    spellcheck="false"
+                                >
+
+                                <button type="submit">
+                                    Save Monthly Limit
+                                </button>
+                            </form>
+                        </details>
+                        {% endif %}
+
+                        {% if business.budget_configured
+                              and business.monthly_limit_usd is not none
+                              and (business.ai_enabled or business.business_active) %}
+
+                        <details style="margin-bottom: 0.6rem;">
+                            <summary style="cursor: pointer;">
+                                {{ 'Emergency Disable AI' if business.ai_enabled else 'Enable Business AI' }}
+                            </summary>
+
+                            <form
+                                method="POST"
+                                action="{{ url_for('master_admin_ai_business_control') }}"
+                                autocomplete="off"
+                                style="display: grid; gap: 0.5rem; padding: 0.75rem 0;"
+                            >
+                                <input
+                                    type="hidden"
+                                    name="security_csrf_token"
+                                    value="{{ ai_control_csrf_token }}"
+                                >
+                                <input
+                                    type="hidden"
+                                    name="spa_id"
+                                    value="{{ business.spa_id }}"
+                                >
+                                <input
+                                    type="hidden"
+                                    name="action"
+                                    value="{{ 'disable' if business.ai_enabled else 'enable' }}"
+                                >
+                                <input
+                                    type="hidden"
+                                    name="expected_enabled"
+                                    value="{{ '1' if business.ai_enabled else '0' }}"
+                                >
+
+                                <label for="businessAIStatusReason{{ business.spa_id }}">
+                                    Reason (10–500 characters)
+                                </label>
+                                <textarea
+                                    id="businessAIStatusReason{{ business.spa_id }}"
+                                    name="reason"
+                                    minlength="10"
+                                    maxlength="500"
+                                    rows="2"
+                                    required
+                                ></textarea>
+
+                                <label for="businessAIStatusConfirm{{ business.spa_id }}">
+                                    Type this exact confirmation:
+                                    <code>{{ 'DISABLE' if business.ai_enabled else 'ENABLE' }} BUSINESS AI {{ business.spa_id }}</code>
+                                </label>
+                                <input
+                                    id="businessAIStatusConfirm{{ business.spa_id }}"
+                                    type="text"
+                                    name="confirmation"
+                                    required
+                                    spellcheck="false"
+                                >
+
+                                <button type="submit">
+                                    {{ 'Disable Business AI' if business.ai_enabled else 'Enable Business AI' }}
+                                </button>
+                            </form>
+                        </details>
+
+                        {% elif not business.ai_enabled
+                                and not business.business_active %}
+
+                        <small>
+                            Inactive business: AI cannot be enabled.
+                        </small>
+
+                        {% elif not business.ai_enabled %}
+
+                        <small>
+                            Configure a monthly limit before enabling AI.
+                        </small>
+
+                        {% endif %}
+
+                    </td>
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="8">
+                    <td colspan="9">
                         No businesses available.
                     </td>
                 </tr>
