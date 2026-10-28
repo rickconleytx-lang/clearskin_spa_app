@@ -19,9 +19,15 @@ from services.psp_ai_request_lifecycle import (
     mark_ai_request_uncertain,
 )
 from services.psp_ai_usage_settlement import settle_ai_request
-from services.psp_ai_help_context import get_ai_help_article
 from services.psp_ai_help_request import prepare_ai_help_request
 
+from services.psp_ai_help_bundle import (
+    get_ai_help_bundle,
+)
+
+from services.psp_ai_help_context import (
+    AIHelpContextError,
+)
 
 class AIHelpExecutionError(RuntimeError):
     pass
@@ -121,11 +127,38 @@ def execute_ai_help(
         # Reserve funds atomically against both spending budgets.
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                article = get_ai_help_article(
+                # Find relevant approved Help articles across the
+                # entire Knowledge Base. The current article, if any,
+                # is only a relevance hint.
+
+                bundle = get_ai_help_bundle(
                     cur,
-                    page_key=page_key,
+                    question=question,
                     language=language,
+                    current_page_key=page_key,
                 )
+
+                # Never ask OpenAI to invent an answer when no
+                # supporting approved Help articles were found.
+                if (
+                    not bundle["articles"]
+                    or not bundle["context_text"].strip()
+                ):
+                    raise AIHelpContextError(
+                        "No matching Help articles were found. "
+                        "Try describing what you want to do."
+                    )
+
+                # Reuse the existing bounded request preparation.
+                # The financial gateway and provider execution
+                # remain unchanged.
+                article = {
+                    "title": "Peach Suite Pro Knowledge Base",
+                    "article_text": bundle["context_text"],
+                    "language_code": (
+                        "ES" if language == "ES" else "EN"
+                    ),
+                }
 
                 prepared = prepare_ai_help_request(
                     question=question,
@@ -268,6 +301,14 @@ def execute_ai_help(
             "ai_usage_id": usage_id,
             "actual_cost_usd": settlement["actual_cost_usd"],
             "over_reservation": settlement["over_reservation"],
+            "articles": [
+                {
+                    "page_key": article["page_key"],
+                    "title": article["title"],
+
+                }
+                for article in bundle["articles"]
+            ],
         }
 
     finally:

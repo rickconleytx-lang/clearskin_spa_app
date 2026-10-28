@@ -2883,6 +2883,104 @@ document.addEventListener(
              TOPIC SEARCH VIEW
         ================================================== -->
 
+
+        <!-- HELP CENTER TOP NAVIGATION -->
+        <nav
+            class="peach-help-top-actions"
+            aria-label="Help Center navigation"
+        >
+            <button
+                type="button"
+                class="tool-pill tool-pill-small"
+                onclick="showAllPeachHelpTopics(event)"
+            >
+                Browse All Topics
+            </button>
+
+            <a
+                id="peachHelpWebSupportLink"
+                class="tool-pill tool-pill-small"
+                href="https://support.peachsuitepro.com/"
+                target="_blank"
+                rel="noopener noreferrer"
+            >
+                🌐 Open on Web Support Center
+            </a>
+        </nav>
+
+        <section
+            id="peachHelpCoachPanel"
+            aria-label="Coach Peach AI Help"
+            hidden
+            style="
+                margin: 12px 24px;
+                max-height: 38vh;
+                overflow-y: auto;
+                padding: 14px;
+                border: 1px solid #c5d1db;
+                border-radius: 10px;
+            "
+        >
+            <label for="peachHelpCoachQuestion">
+                How Do I...?
+            </label>
+
+            <p class="peach-help-coach-intro">
+                Ask Coach Peach how to use any Peach Suite Pro
+                feature. You don't need to select a Help article.
+            </p>
+
+            <textarea
+                id="peachHelpCoachQuestion"
+                rows="3"
+                maxlength="800"
+                placeholder="Example: How do I reconcile my Square payments?"
+                disabled
+                style="
+                    width: 100%;
+                    box-sizing: border-box;
+                    margin-top: 8px;
+                "
+            ></textarea>
+
+            <div style="margin-top: 10px;">
+                <button
+                    type="button"
+                    id="peachHelpCoachSubmit"
+                    class="tool-pill tool-pill-small"
+                    disabled
+                >
+                    Ask Coach Peach
+                </button>
+            </div>
+
+            <p
+                id="peachHelpCoachStatus"
+                role="status"
+                aria-live="polite"
+            ></p>
+
+            <div
+                id="peachHelpCoachAnswer"
+                role="region"
+                aria-label="Coach Peach answer"
+                hidden
+                style="
+                    white-space: pre-wrap;
+                    overflow-wrap: anywhere;
+                    margin-top: 10px;
+                "
+            ></div>
+
+            <div
+                id="peachHelpCoachSources"
+                class="peach-help-coach-sources"
+                aria-label="Related Help articles"
+                hidden
+            >
+            </div>
+        </section>
+
         <div id="peachHelpTopicView">
 
             <div
@@ -3087,99 +3185,13 @@ document.addEventListener(
              FOOTER
         ================================================== -->
 
-        <section
-            id="peachHelpCoachPanel"
-            aria-label="Coach Peach AI Help"
-            hidden
-            style="
-                margin: 12px 24px;
-                max-height: 38vh;
-                overflow-y: auto;
-                padding: 14px;
-                border: 1px solid #c5d1db;
-                border-radius: 10px;
-            "
-        >
-            <label for="peachHelpCoachQuestion">
-                Ask Coach Peach about this article
-            </label>
 
-            <textarea
-                id="peachHelpCoachQuestion"
-                rows="3"
-                maxlength="800"
-                placeholder="Type your question..."
-                disabled
-                style="
-                    width: 100%;
-                    box-sizing: border-box;
-                    margin-top: 8px;
-                "
-            ></textarea>
-
-            <div style="margin-top: 10px;">
-                <button
-                    type="button"
-                    id="peachHelpCoachSubmit"
-                    class="tool-pill tool-pill-small"
-                    disabled
-                >
-                    Ask Question
-                </button>
-            </div>
-
-            <p
-                id="peachHelpCoachStatus"
-                role="status"
-                aria-live="polite"
-            ></p>
-
-            <div
-                id="peachHelpCoachAnswer"
-                role="region"
-                aria-label="Coach Peach answer"
-                hidden
-                style="
-                    white-space: pre-wrap;
-                    overflow-wrap: anywhere;
-                    margin-top: 10px;
-                "
-            ></div>
-        </section>
 
         <div class="peach-help-modal-footer">
 
-            <button
-                type="button"
-                class="tool-pill tool-pill-small"
-                onclick="showAllPeachHelpTopics(event)"
-            >
-                Browse All Topics
-            </button>
 
 
             <div class="peach-help-footer-actions">
-
-                <a
-                    id="peachHelpWebSupportLink"
-                    class="tool-pill tool-pill-small"
-                    href="#"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    hidden
-                >
-                    🌐 Open on Web Support Center
-                </a>
-
-                <button
-                    type="button"
-                    id="peachHelpAskCoachButton"
-                    class="tool-pill tool-pill-small"
-                    title="Available with Coach Peach AI"
-                    disabled
-                >
-                    Ask Coach Peach
-                </button>
 
                 <form method="dialog">
                     <button
@@ -3199,43 +3211,25 @@ document.addEventListener(
 
 
 <script>
-const peachHelpApiUrl = "{{
-    url_for('help_topics_api')
-}}";
+const peachHelpApiUrl = "{{ url_for('help_topics_api') }}";
 
-const peachHelpPageTemplate = "{{
-    url_for(
-        'view_help_page',
-        page_key='__HELP_PAGE_KEY__'
-    )
-}}";
+const peachHelpPageTemplate = "{{ url_for('view_help_page', page_key='__HELP_PAGE_KEY__') }}";
 
 let peachHelpSearchTimer = null;
 
-
-const peachHelpArticleApiTemplate = "{{
-    url_for(
-        'help_page_api',
-        page_key='__HELP_PAGE_KEY__'
-    )
-}}";
+const peachHelpArticleApiTemplate = "{{ url_for('help_page_api', page_key='__HELP_PAGE_KEY__') }}";
 
 let peachHelpCurrentArticle = null;
 
 let peachHelpCoachSequence = 0;
 
 function resetPeachHelpCoachPanel() {
+    // Invalidate answers from the previous Help view.
     peachHelpCoachSequence += 1;
 
     const panel = document.getElementById(
         "peachHelpCoachPanel"
     );
-    const question = document.getElementById(
-        "peachHelpCoachQuestion"
-    );
-    const submit = document.getElementById(
-        "peachHelpCoachSubmit"
-    );
     const status = document.getElementById(
         "peachHelpCoachStatus"
     );
@@ -3243,26 +3237,37 @@ function resetPeachHelpCoachPanel() {
         "peachHelpCoachAnswer"
     );
 
-    if (panel) panel.hidden = true;
+    const sources = document.getElementById(
+        "peachHelpCoachSources"
+    );
 
-    if (question) {
-        question.value = "";
-        question.disabled = true;
+    // How Do I...? remains visible across Help views.
+    if (panel) {
+        panel.hidden = false;
     }
-
-    if (submit) submit.disabled = true;
-
-    if (status) status.textContent = "";
 
     if (answer) {
         answer.textContent = "";
         answer.hidden = true;
     }
+
+    if (sources) {
+        sources.replaceChildren();
+        sources.hidden = true;
+    }
+
+    // Let the session controller restore the correct
+    // enabled/disabled state after navigation.
+    if (panel) {
+        panel.dispatchEvent(
+            new Event("peach-coach-reset")
+        );
+    }
 }
 
 document.addEventListener("DOMContentLoaded", function () {
-    const button = document.getElementById(
-        "peachHelpAskCoachButton"
+    const modal = document.getElementById(
+        "peachHelpModal"
     );
     const panel = document.getElementById(
         "peachHelpCoachPanel"
@@ -3280,33 +3285,39 @@ document.addEventListener("DOMContentLoaded", function () {
         "peachHelpCoachAnswer"
     );
 
+    const sources = document.getElementById(
+        "peachHelpCoachSources"
+    );
+
     if (
-        !button || !panel || !question ||
-        !submit || !status || !answer
+        !modal || !panel || !question ||
+        !submit || !status || !answer ||
+        !sources
     ) {
         return;
     }
 
     let csrfToken = null;
-    let authorizedArticleKey = null;
+    let sessionReady = false;
+    let sessionGeneration = 0;
     let submitting = false;
 
-    button.addEventListener("click", async function () {
-        const article = peachHelpCurrentArticle;
+    function updateControls() {
+        const disabled = !sessionReady || submitting;
 
-        if (!article || !article.page_key) {
-            return;
-        }
+        question.disabled = disabled;
+        submit.disabled = disabled;
+    }
 
-        resetPeachHelpCoachPanel();
+    async function initializeCoachPeach() {
+        const generation = ++sessionGeneration;
 
         csrfToken = null;
-        authorizedArticleKey = null;
-
-        const articleKey = article.page_key;
-        const sequence = peachHelpCoachSequence;
+        sessionReady = false;
 
         panel.hidden = false;
+        updateControls();
+
         status.textContent =
             "Checking Coach Peach availability...";
 
@@ -3325,9 +3336,10 @@ document.addEventListener("DOMContentLoaded", function () {
 
             const data = await response.json();
 
+            // Ignore a response from an older modal session.
             if (
-                sequence !== peachHelpCoachSequence ||
-                peachHelpCurrentArticle?.page_key !== articleKey
+                generation !== sessionGeneration ||
+                !modal.open
             ) {
                 return;
             }
@@ -3335,13 +3347,13 @@ document.addEventListener("DOMContentLoaded", function () {
             if (!response.ok || !data.success) {
                 status.textContent =
                     data.message ||
-                    "Coach Peach AI Help is unavailable.";
+                    "Coach Peach is unavailable.";
                 return;
             }
 
             if (!data.enabled) {
                 status.textContent =
-                    "Coach Peach AI Help is not enabled yet.";
+                    "Coach Peach AI Help is not enabled.";
                 return;
             }
 
@@ -3355,35 +3367,50 @@ document.addEventListener("DOMContentLoaded", function () {
             }
 
             csrfToken = data.csrf_token;
-            authorizedArticleKey = articleKey;
+            sessionReady = true;
 
-            question.disabled = false;
-            submit.disabled = false;
+            updateControls();
 
             status.textContent =
-                "Ask a question about this Help article.";
-
-            question.focus();
+                "Ask Coach Peach about any Peach Suite Pro feature.";
 
         } catch (error) {
-            if (sequence === peachHelpCoachSequence) {
+            if (
+                generation === sessionGeneration &&
+                modal.open
+            ) {
                 status.textContent =
                     "Unable to check Coach Peach availability.";
             }
         }
-    });
+    }
+
+    // Navigation clears an old answer but keeps
+    // the universal assistant available.
+    panel.addEventListener(
+        "peach-coach-reset",
+        function () {
+            if (!modal.open) return;
+
+            updateControls();
+
+            if (submitting) {
+                status.textContent =
+                    "Finishing the previous request...";
+            } else if (sessionReady) {
+                status.textContent =
+                    "Ask Coach Peach about any Peach Suite Pro feature.";
+            }
+            // Otherwise preserve the current availability or error message.
+        }
+    );
 
     submit.addEventListener("click", async function () {
         if (submitting) return;
 
-        if (
-            !csrfToken ||
-            !authorizedArticleKey ||
-            peachHelpCurrentArticle?.page_key !==
-                authorizedArticleKey
-        ) {
+        if (!sessionReady || !csrfToken) {
             status.textContent =
-                "Please reopen Coach Peach for this article.";
+                "Coach Peach is not ready yet.";
             return;
         }
 
@@ -3397,11 +3424,16 @@ document.addEventListener("DOMContentLoaded", function () {
             return;
         }
 
-        const sequence = peachHelpCoachSequence;
-        submitting = true;
+        // The open article is optional.
+        // It is used only as a relevance hint.
+        const pageKey =
+            peachHelpCurrentArticle?.page_key || null;
 
-        submit.disabled = true;
-        question.disabled = true;
+        const sequence = peachHelpCoachSequence;
+
+        submitting = true;
+        updateControls();
+
         answer.hidden = true;
         answer.textContent = "";
 
@@ -3421,7 +3453,7 @@ document.addEventListener("DOMContentLoaded", function () {
                         "X-CSRF-Token": csrfToken
                     },
                     body: JSON.stringify({
-                        page_key: authorizedArticleKey,
+                        page_key: pageKey,
                         question: text
                     })
                 }
@@ -3429,10 +3461,11 @@ document.addEventListener("DOMContentLoaded", function () {
 
             const data = await response.json();
 
+            // Never display a stale answer after
+            // changing Help views or closing the modal.
             if (
                 sequence !== peachHelpCoachSequence ||
-                peachHelpCurrentArticle?.page_key !==
-                    authorizedArticleKey
+                !modal.open
             ) {
                 return;
             }
@@ -3450,31 +3483,106 @@ document.addEventListener("DOMContentLoaded", function () {
                 return;
             }
 
-            // Plain text only: never execute AI-generated HTML.
+            // Safe plain-text rendering.
+            // Never execute AI-generated HTML.
             answer.textContent = data.answer;
             answer.hidden = false;
+
+            // Clear previous article references.
+            sources.replaceChildren();
+            sources.hidden = true;
+
+            if (
+                Array.isArray(data.articles) &&
+                data.articles.length > 0
+            ) {
+                const heading = document.createElement("p");
+                heading.textContent = "Related Help Articles";
+                heading.style.fontWeight = "bold";
+
+                sources.appendChild(heading);
+
+                for (const article of data.articles.slice(0, 3)) {
+                    if (
+                        !article ||
+                        typeof article.page_key !== "string" ||
+                        typeof article.title !== "string"
+                    ) {
+                        continue;
+                    }
+
+                    const button = document.createElement("button");
+
+                    button.type = "button";
+                    button.className = "tool-pill tool-pill-small";
+                    button.dataset.pageKey = article.page_key;
+                    button.textContent = article.title;
+                    button.style.margin = "4px";
+
+                    button.addEventListener("click", function (event) {
+                        openPeachHelpArticleFromButton(event, button);
+                    });
+
+                    sources.appendChild(button);
+                }
+
+                sources.hidden = sources.children.length <= 1;
+            }
 
             status.textContent =
                 "Coach Peach answered your question.";
 
         } catch (error) {
-            if (sequence === peachHelpCoachSequence) {
+            if (
+                sequence === peachHelpCoachSequence &&
+                modal.open
+            ) {
                 status.textContent =
                     "Coach Peach could not complete the request.";
             }
 
         } finally {
             submitting = false;
+            updateControls();
 
-            if (sequence === peachHelpCoachSequence) {
-                question.disabled = false;
-                submit.disabled = false;
+            if (
+                sequence !== peachHelpCoachSequence &&
+                modal.open
+            ) {
+                status.textContent =
+                    "Ask Coach Peach about any Peach Suite Pro feature.";
             }
         }
     });
+
+    // Initialize automatically whenever the
+    // existing Help dialog opens.
+    const observer = new MutationObserver(function () {
+        if (modal.open) {
+            initializeCoachPeach();
+        }
+    });
+
+    observer.observe(modal, {
+        attributes: true,
+        attributeFilter: ["open"]
+    });
+
+    modal.addEventListener("close", function () {
+        sessionGeneration += 1;
+        csrfToken = null;
+        sessionReady = false;
+
+        question.value = "";
+
+        resetPeachHelpCoachPanel();
+        updateControls();
+    });
+
+    if (modal.open) {
+        initializeCoachPeach();
+    }
 });
-
-
 
 function normalizeHelpText(value) {
 
@@ -3721,7 +3829,7 @@ function buildPeachHelpArticleApiUrl(pageKey) {
 }
 
 
-function openPeachHelpModal() {
+async function openPeachHelpModal() {
 
     const modal = document.getElementById(
         "peachHelpModal"
@@ -3762,9 +3870,11 @@ function openPeachHelpModal() {
     }
 
 
-    modal.showModal();
+    // Finish loading Knowledge Base topics
+    // before initializing Coach Peach's CSRF session.
+    await loadPeachHelpTopics("");
 
-    loadPeachHelpTopics("");
+    modal.showModal();
 
     window.setTimeout(
         function () {
@@ -3815,6 +3925,17 @@ function showAllPeachHelpTopics(event = null) {
 
     peachHelpCurrentArticle = null;
     resetPeachHelpCoachPanel();
+
+    const supportLink = document.getElementById(
+        "peachHelpWebSupportLink"
+    );
+
+    if (supportLink) {
+        supportLink.href =
+            "https://support.peachsuitepro.com/";
+
+        supportLink.hidden = false;
+    }
 
     if (topicView) {
         topicView.hidden = false;
@@ -4101,9 +4222,6 @@ async function loadPeachHelpArticle(pageKey) {
         "peachHelpModalSubtitle"
     );
 
-    const coachButton = document.getElementById(
-        "peachHelpAskCoachButton"
-    );
 
     const webSupportLink = document.getElementById(
         "peachHelpWebSupportLink"
@@ -4123,8 +4241,11 @@ async function loadPeachHelpArticle(pageKey) {
     resetPeachHelpCoachPanel();
 
     if (webSupportLink) {
-        webSupportLink.hidden = true;
-        webSupportLink.removeAttribute("href");
+        webSupportLink.href = 
+            "https://support.peachsuitepro.com/";
+
+        webSupportLink.hidden = false;
+        
     }
 
     topicView.hidden = true;
@@ -4141,11 +4262,6 @@ async function loadPeachHelpArticle(pageKey) {
             "Loading help article...";
     }
 
-    if (coachButton) {
-        coachButton.disabled = true;
-        coachButton.title =
-            "Available with Coach Peach AI";
-    }
 
     try {
 
@@ -4209,11 +4325,6 @@ async function loadPeachHelpArticle(pageKey) {
         loadingElement.hidden = true;
         articleElement.hidden = false;
 
-        if (coachButton) {
-            coachButton.disabled = false;
-            coachButton.title =
-                "Ask Coach Peach about this article";
-        }
 
     } catch (error) {
 
@@ -4253,12 +4364,20 @@ function showPeachHelpTopics(event = null) {
         "peachHelpModalSubtitle"
     );
 
-    const coachButton = document.getElementById(
-        "peachHelpAskCoachButton"
-    );
 
     peachHelpCurrentArticle = null;
     resetPeachHelpCoachPanel();
+
+    const supportLink = document.getElementById(
+        "peachHelpWebSupportLink"
+    );
+
+    if (supportLink) {
+        supportLink.href =
+            "https://support.peachsuitepro.com/";
+
+        supportLink.hidden = false;
+    }
 
     if (topicView) {
         topicView.hidden = false;
@@ -4272,14 +4391,6 @@ function showPeachHelpTopics(event = null) {
         subtitleElement.textContent =
             "Peach Suite Pro assistance";
     }
-
-    if (coachButton) {
-        coachButton.disabled = true;
-
-        coachButton.title =
-            "Open a help article before asking Coach Peach";
-    }
-
 
     const searchInput = document.getElementById(
         "peachHelpSearch"

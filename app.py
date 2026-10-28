@@ -2996,7 +2996,7 @@ def coach_peach_help_api():
             "success": False,
             "message": "AI Help access denied.",
         }), 403
-
+    
     if not _security_form_csrf_valid(
         request.headers.get("X-CSRF-Token")
     ):
@@ -3031,6 +3031,20 @@ def coach_peach_help_api():
             "message": "Invalid Help request.",
         }), 400
 
+    question = payload.get("question")
+
+    if (
+        not isinstance(question, str)
+        or not 3 <= len(" ".join(question.split())) <= 800
+    ):
+        return jsonify({
+            "success": False,
+            "message": (
+                "Please enter a Help question "
+                "between 3 and 800 characters."
+            ),
+        }), 400
+
     spa_id, business_unit_id, user_id = identity
     model, pricing_id = settings
 
@@ -3042,7 +3056,7 @@ def coach_peach_help_api():
             actor_user_id=user_id,
             page_key=payload.get("page_key"),
             language=get_current_language(),
-            question=payload.get("question"),
+            question=question,
             pricing_id=pricing_id,
             model=model,
             provider_call=request_openai_help,
@@ -3081,6 +3095,7 @@ def coach_peach_help_api():
     response = jsonify({
         "success": True,
         "answer": result["answer"],
+        "articles": result.get("articles", []),
     })
 
     response.headers["Cache-Control"] = "no-store"

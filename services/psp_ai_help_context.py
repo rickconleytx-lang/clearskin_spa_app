@@ -8,6 +8,12 @@ import re
 from html.parser import HTMLParser
 
 
+# The multi-article bundle chooses short, question-focused excerpts from
+# this approved source text. Keep enough text to include later sections;
+# the bundle independently limits what is sent to the AI provider.
+MAX_SEARCHABLE_ARTICLE_CHARS = 50000
+
+
 class AIHelpContextError(ValueError):
     pass
 
@@ -78,5 +84,5 @@ def get_ai_help_article(cur, *, page_key, language):
         "page_key": row["page_key"],
         "title": str(row["title"] or "")[:200],
         "language_code": row["language_code"],
-        "article_text": text[:10000],
+        "article_text": text[:MAX_SEARCHABLE_ARTICLE_CHARS],
     }
