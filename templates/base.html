@@ -2960,6 +2960,18 @@ document.addEventListener(
                 aria-live="polite"
             ></p>
 
+            <div class="peach-help-article-toolbar">
+
+                <button
+                    type="button"
+                    class="tool-pill tool-pill-small"
+                    onclick="showPeachHelpTopics(event)"
+                >
+                    ← Back to Topics
+                </button>
+
+            </div>
+
             <div
                 id="peachHelpCoachAnswer"
                 role="region"
@@ -3129,17 +3141,7 @@ document.addEventListener(
             class="peach-help-article-view"
             hidden
         >
-            <div class="peach-help-article-toolbar">
 
-                <button
-                    type="button"
-                    class="tool-pill tool-pill-small"
-                    onclick="showPeachHelpTopics(event)"
-                >
-                    ← Back to Topics
-                </button>
-
-            </div>
 
             <div
                 id="peachHelpArticleLoading"
@@ -3177,6 +3179,8 @@ document.addEventListener(
                 ></div>
 
             </article>
+
+
 
         </div>
 
