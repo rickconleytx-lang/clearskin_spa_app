@@ -37251,9 +37251,25 @@ def send_compliant_sms(
             "send_compliant_sms requires business_unit_id."
         )
 
+    # Enforce the current version of business messaging terms
+    # at the transmission boundary, not only in UI routes.
+    if not sms_email_terms_accepted(spa_id):
+        raise PermissionError(
+            "The current SMS and Email Terms and Conditions "
+            "must be accepted before sending customer SMS."
+        )
+
     sms_permissions = get_sms_business_permissions(
         spa_id
     )
+
+    # Every customer SMS requires active service approval,
+    # including messages classified as marketing.
+    if not sms_permissions.get("service_sms_enabled", False):
+        raise PermissionError(
+            sms_permissions.get("reason")
+            or "SMS service is currently unavailable."
+        )
 
     print(
         "[SMS COMPLIANCE CHECK]",
@@ -83293,6 +83309,48 @@ def sms_home():
         )
         return redirect(url_for("sms_email_terms"))
 
+    # Do not expose the active composer until business SMS
+    # compliance and sender assignment are approved.
+    sms_permissions = get_sms_business_permissions(spa_id)
+
+    if not sms_permissions.get("service_sms_enabled", False):
+        workspace_access = current_workspace_access() or {}
+        return render_template(
+            "sms_restricted.html",
+            reason=(
+                sms_permissions.get("reason")
+                or "SMS sending is unavailable for this business."
+            ),
+            can_manage_compliance=bool(
+                workspace_access.get(
+                    "can_manage_messaging_compliance", False
+                )
+            ),
+        ), 403
+
+    # An approved status is not enough: the active workspace
+    # must also have an actual assigned sending number.
+    try:
+        resolve_sms_phone_number(
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            provider="telnyx"
+        )
+    except (PermissionError, ValueError):
+        workspace_access = current_workspace_access() or {}
+        return render_template(
+            "sms_restricted.html",
+            reason=(
+                "An active SMS sending number is not assigned "
+                "to this workspace."
+            ),
+            can_manage_compliance=bool(
+                workspace_access.get(
+                    "can_manage_messaging_compliance", False
+                )
+            ),
+        ), 403
+
     selected_template_type = request.args.get("template_type", "").strip()
     selected_template_id = request.args.get("template_id", "").strip()
     search = request.args.get("search", "").strip()
@@ -83636,6 +83694,24 @@ def sms_group_preview():
         )
         return redirect(url_for("sms_email_terms"))
 
+    # Block unapproved businesses before processing SMS recipients
+    # or generating an active group messaging preview.
+    sms_permissions = get_sms_business_permissions(spa_id)
+
+    if not sms_permissions.get("service_sms_enabled", False):
+        abort(403)
+
+    # Deny previews when no active sender resolves for this
+    # business and workspace.
+    try:
+        resolve_sms_phone_number(
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            provider="telnyx"
+        )
+    except (PermissionError, ValueError):
+        abort(403)
+
     template_type = request.form.get("template_type")
     client_ids = [int(x) for x in request.form.getlist("client_ids")]
 
@@ -83762,6 +83838,23 @@ def sms_group_send():
             "warning"
         )
         return redirect(url_for("sms_email_terms"))
+
+    # Fail closed before processing SMS recipients.
+    # The central sender independently checks compliance.
+    sms_permissions = get_sms_business_permissions(spa_id)
+    if not sms_permissions.get("service_sms_enabled", False):
+        abort(403)
+
+    # Require an active sender assigned to this business
+    # and workspace before processing group recipients.
+    try:
+        resolve_sms_phone_number(
+            spa_id=spa_id,
+            business_unit_id=business_unit_id,
+            provider="telnyx"
+        )
+    except (PermissionError, ValueError):
+        abort(403)
 
     template_type = request.form.get("template_type")
     template_id_raw = request.form.get("template_id")

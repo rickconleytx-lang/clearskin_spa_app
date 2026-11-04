@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}SMS Sending Unavailable | Peach Suite Pro{% endblock %}
+
+{% block content %}
+<div style="max-width:760px; margin:36px auto; padding:24px;">
+    <h1>SMS Sending Unavailable</h1>
+
+    <p>
+        Customer SMS messaging is currently disabled for this
+        business.
+    </p>
+
+    <p>
+        SMS sending requires acceptance of the current SMS and
+        Email Terms, approved A2P 10DLC registration, an assigned
+        sending number, and an active SMS service.
+    </p>
+
+    <p>
+        <strong>Current SMS &amp; Email Terms:</strong>
+        Accepted for this business.
+    </p>
+
+    <p>
+        <strong>Current restriction:</strong>
+        {{ reason }}
+    </p>
+
+    <p>
+        Accepting the current Terms does not constitute
+        acceptance of the separate SMS Agreement or
+        approval of A2P 10DLC registration.
+    </p>
+
+    {% if can_manage_compliance %}
+    <p>
+        <a href="{{ url_for('messaging_compliance_dashboard') }}">
+            View Messaging Compliance
+        </a>
+    </p>
+    {% else %}
+    <p>
+        Contact your business administrator about completing
+        SMS registration and approval.
+    </p>
+    {% endif %}
+
+    <p>
+        No customer SMS can be composed or submitted from this page.
+    </p>
+</div>
+{% endblock %}
