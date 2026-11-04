@@ -83302,13 +83302,6 @@ def sms_home():
     template_type = request.args.get("template_type")
 
 
-    if not sms_email_terms_accepted(spa_id):
-        flash(
-            "You must accept the SMS and Email Terms and Conditions before using messaging features",
-            "warning"
-        )
-        return redirect(url_for("sms_email_terms"))
-
     # Do not expose the active composer until business SMS
     # compliance and sender assignment are approved.
     sms_permissions = get_sms_business_permissions(spa_id)
@@ -83350,6 +83343,13 @@ def sms_home():
                 )
             ),
         ), 403
+
+    if not sms_email_terms_accepted(spa_id):
+        flash(
+            "You must accept the SMS and Email Terms and Conditions before using messaging features",
+            "warning"
+        )
+        return redirect(url_for("sms_email_terms"))
 
     selected_template_type = request.args.get("template_type", "").strip()
     selected_template_id = request.args.get("template_id", "").strip()
@@ -83687,13 +83687,6 @@ def sms_group_preview():
     show_all = request.form.get("show_all", "").strip()
     client_status = request.form.get("client_status", "").strip()
 
-    if not sms_email_terms_accepted(spa_id):
-        flash(
-            "You must accept the SMS and Email Terms and Conditions before using messaging features.",
-            "warning"
-        )
-        return redirect(url_for("sms_email_terms"))
-
     # Block unapproved businesses before processing SMS recipients
     # or generating an active group messaging preview.
     sms_permissions = get_sms_business_permissions(spa_id)
@@ -83711,6 +83704,13 @@ def sms_group_preview():
         )
     except (PermissionError, ValueError):
         abort(403)
+
+    if not sms_email_terms_accepted(spa_id):
+        flash(
+            "You must accept the SMS and Email Terms and Conditions before using messaging features.",
+            "warning"
+        )
+        return redirect(url_for("sms_email_terms"))
 
     template_type = request.form.get("template_type")
     client_ids = [int(x) for x in request.form.getlist("client_ids")]
@@ -83832,13 +83832,6 @@ def sms_group_send():
     business_unit_id = current_business_unit_id()
     language_code = get_request_language()
 
-    if not sms_email_terms_accepted(spa_id):
-        flash(
-            "You must accept the SMS and Email Terms and Conditions before using messaging features.",
-            "warning"
-        )
-        return redirect(url_for("sms_email_terms"))
-
     # Fail closed before processing SMS recipients.
     # The central sender independently checks compliance.
     sms_permissions = get_sms_business_permissions(spa_id)
@@ -83855,6 +83848,13 @@ def sms_group_send():
         )
     except (PermissionError, ValueError):
         abort(403)
+
+    if not sms_email_terms_accepted(spa_id):
+        flash(
+            "You must accept the SMS and Email Terms and Conditions before using messaging features.",
+            "warning"
+        )
+        return redirect(url_for("sms_email_terms"))
 
     template_type = request.form.get("template_type")
     template_id_raw = request.form.get("template_id")
